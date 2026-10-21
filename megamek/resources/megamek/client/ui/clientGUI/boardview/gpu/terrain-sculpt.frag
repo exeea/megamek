@@ -204,8 +204,9 @@ void main() {
     vec3 normal = face;
     float cavity = 1.0;
     float materialHeight = .5;
-    vec3 emission = vec3(0.0);
-    float roughness = .9, volcanic = 0.0;
+    // Each material path sets its finish; covers, wear, damage and scorch change it after.
+    Finish finish = Finish(.9, 0.0, 0.0, vec3(0.0));
+    float volcanic = 0.0;
 #ifdef terrainBlendFlag
     vec4 materialCoverage = vec4(1.0, 0.0, 0.0, 0.0);
 #endif
@@ -270,8 +271,7 @@ void main() {
                 normal = material.normal;
                 cavity = material.cavity;
                 materialHeight = material.height;
-                emission = material.emission;
-                roughness = material.roughness;
+                finish = material.finish;
                 volcanic = material.volcanic;
             }
             // Match a top to its slope at the same height; tactical level grading remains continuous.
@@ -309,10 +309,10 @@ void main() {
             float w = heightBlend(top.a, rubble.a, want);
             albedo = mix(top.rgb, rubble.rgb, w);
             materialHeight = mix(top.a, rubble.a, w);
-            float topRoughness = family(4.0)
-                  ? translatedRoughness(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation)
-                  : planarRoughness(u_sculptLayers.x, q, qGradient, u_sculptTiles.x, broad);
-            roughness = mix(topRoughness, planarRoughness(u_sculptLayers.y, q, qGradient, u_sculptTiles.y, fine), w);
+            Finish topFinish = family(4.0)
+                  ? translatedFinish(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation)
+                  : planarFinish(u_sculptLayers.x, q, qGradient, u_sculptTiles.x, broad);
+            finish = mixFinish(topFinish, planarFinish(u_sculptLayers.y, q, qGradient, u_sculptTiles.y, fine), w);
             // In patches only: most of a bank's lip keeps its turf.
             if (family(0.0)) {
                 float wear = max(rim * .55, foot * .75) * (1.0 - rock) * smoothstep(.35, .7, fine);
@@ -338,12 +338,12 @@ void main() {
             // A tree pit in the pavement: authored bark mulch inside a concrete kerb.
             if (v_color.a > .5) {
                 albedo = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad).rgb;
-                roughness = planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad);
+                finish = planarFinish(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad);
             } else {
                 vec4 mulch = planar(u_treePitMaterial.x, p, u_treePitMaterial.y, fine);
                 albedo = mulch.rgb;
                 materialHeight = mulch.a;
-                roughness = planarRoughness(u_treePitMaterial.x, p, groundGradient, u_treePitMaterial.y, fine);
+                finish = planarFinish(u_treePitMaterial.x, p, groundGradient, u_treePitMaterial.y, fine);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     vec4 detail = planarNormal(u_treePitMaterial.x + 1.0, p, u_treePitMaterial.y, fine);
                     normal = upNormal(detail.rgb, face);
@@ -352,7 +352,7 @@ void main() {
             }
         } else if (cliff && family(4.0)) {
             concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
-                  albedo, normal, occlusion, cavity, roughness);
+                  albedo, normal, occlusion, cavity, finish);
         } else {
             // Rocks: the two vertical projections, V running down the face, never mirrored from outside.
             // Where a rounded corner turns between them, the projection whose relief stands higher shows through.
@@ -373,11 +373,10 @@ void main() {
                     cavity = mix(cavity, top.a * .5 + .5, crown);
                 }
             }
-            roughness = wallRoughness(u_sculptLayers.z, uvx, uvy,
+            finish = wallFinish(u_sculptLayers.z, uvx, uvy,
                   wallXGradient / u_sculptTiles.z, wallYGradient / u_sculptTiles.z, side);
             if (crown > 0.0) {
-                roughness = mix(roughness,
-                      planarRoughness(u_sculptLayers.z, p, groundGradient, u_sculptTiles.z, fine), crown);
+                finish = mixFinish(finish, planarFinish(u_sculptLayers.z, p, groundGradient, u_sculptTiles.z, fine), crown);
             }
             float h = surfaceUV.x;
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
@@ -392,7 +391,7 @@ void main() {
                 vec4 top = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad);
                 float w = heightBlend(wall.a, top.a, ledge);
                 albedo = mix(albedo, groundTone(top.rgb, world, broad, fine, region, 0.0, 0.0), w);
-                roughness = mix(roughness, planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad), w);
+                finish = mixFinish(finish, planarFinish(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad), w);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     normal = normalize(mix(normal, upNormal(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad).rgb, face), w));
                 }
@@ -413,7 +412,7 @@ void main() {
         }
         if (shore && !natural && family(4.0) && face.z < .6) {
             concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
-                  albedo, normal, occlusion, cavity, roughness);
+                  albedo, normal, occlusion, cavity, finish);
         }
         // Natural materials fade within rockNormal (materialNormal in volcanic programs); slab and rock kit paths share
         // this final fade.
@@ -430,7 +429,7 @@ void main() {
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
             blendCovers(world, face, foot, rim, rock, ground ? .5 : hardness, sediment,
                   broad, fine, region, albedo, normal, cavity, materialHeight, grass, sand, bounce, response, rainCover,
-                  emission, roughness, volcanic, materialCoverage);
+                  finish, volcanic, materialCoverage);
         }
 #endif
         // biomeMaskFlag: the board has biomes or liquids of two palettes (GpuBiomeSurface); without them this stage
@@ -439,7 +438,7 @@ void main() {
         if (ground || cliff || bedrock) {
             biomeSurface(world, face, shore, above, cliff || bedrock ? surfaceUV.x : 0.0,
                   cliff || bedrock ? surfaceUV.y : surfaceUV.x, materialHeight, sand, deckMud, region,
-                  albedo, normal, cavity, roughness, grass, bounce, biomePool, biomeDamp);
+                  albedo, normal, cavity, finish, grass, bounce, biomePool, biomeDamp);
         }
 #endif
         if (ground && grass > 0.0 && !shore && u_wind.z > 0.0) {
@@ -498,11 +497,11 @@ void main() {
             float wearStrength = u_terrainWear * exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65);
             pigment *= wearStrength;
             albedo *= authoredPigmentGain(vec3(1.0) + colorPigment * wearStrength);
-            roughness = mix(roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
+            finish.roughness = mix(finish.roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
         }
-        groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, roughness);
+        groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, finish);
     }
-    if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
+    if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, finish);
     // Scorch replaces material before rain, grid and elevation grade. Severity zero takes no material samples.
     if (u_clay < .5 && u_groundScorch.x > 0.0 && volcanic < 1.0) {
         vec2 scorch = groundScorches(v_cloudPosition.xy) * exposed * (1.0 - volcanic);
@@ -524,7 +523,11 @@ void main() {
             }
             Scorched deposit = scorched(severity, sites, referenceRoughness, height);
             albedo = mix(albedo, deposit.albedo, deposit.coverage);
-            roughness = sqrt(mix(roughness * roughness, deposit.roughness * deposit.roughness, deposit.coverage));
+            float roughness = sqrt(mix(finish.roughness * finish.roughness, deposit.roughness * deposit.roughness,
+                  deposit.coverage));
+            // The deposit buries the material: none of its metallic, scattering or glow shows through.
+            coverFinish(finish, deposit.coverage);
+            finish.roughness = roughness;
             cavity = mix(cavity, ao, deposit.coverage);
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && top > 0.0) {
                 detail = normalize(vec3(detail.xy * deposit.detail, detail.z));
@@ -533,7 +536,7 @@ void main() {
             }
             // Only a nuclear blast heats the sparse fused fissures. Painted glass is always cold.
             float heat = u_groundScorch.y;
-            emission += deposit.coverage * smoothstep(.78, .97, scorch.x) * top
+            finish.emission += deposit.coverage * smoothstep(.78, .97, scorch.x) * top
                   * (1.0 - smoothstep(.04, .12, height)) * heat * heat * 1.1 * vec3(1.0, .12, .01);
         }
     }
@@ -582,18 +585,21 @@ void main() {
     // Natural cliffs approximate a curved surface with shared vertex normals. Use that unmapped surface for
     // incident sidedness: a triangle cutoff exposes their tessellation at the light horizon. Planar panels and
     // other geometry retain triangle support; normal-map detail cannot move this incident hemisphere.
-    Surface surface = opaqueSurface(albedo, normal, cliff && !panel ? face : geometric, roughness, film,
+    Surface surface = opaqueSurface(albedo, normal, cliff && !panel ? face : geometric, finish.roughness, film,
           sculptShadow(receiver, light));
+    // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.
+    metallicShare(surface, clamp(finish.metallic, 0.0, 1.0));
+    surface.scatter = clamp(finish.scatter, 0.0, 1.0);
     surface.occlusion = surface.specularOcclusion = occlusion;
     surface.cavity = cavity;
     // Match the leaves in terrain-foliage: they pass .35 of their colour from the other side, never a wrap lobe.
     if (leaf) surface.back = thinTransmission(albedo, .35);
     surface.heat = volcanic;
     surface.bounce = bounce;
-    surface.emission = emission;
+    surface.emission = finish.emission;
     vec3 result = shadeSurface(surface, caustic, submerged);
 #else
-    vec3 result = albedo + emission;
+    vec3 result = albedo + finish.emission;
 #endif
     // Fade through the final level above the black cap. All walls around one pit share this height reference,
     // even where their rims stand at different levels, so the fade cannot break into wedges at their corners.

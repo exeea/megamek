@@ -21,7 +21,8 @@ final class ModelTextures {
 
     static Model create(ModelData data, Map<String, Texture> cache, BiFunction<String, Boolean, Texture> external) {
         File textures = GpuMaterialMaps.boardTextures();
-        // A glTF role (a ModelTexture usage, or GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE) decides a board material map's layout.
+        // A glTF role (a ModelTexture usage, or GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE or HEIGHT_USAGE) decides a board
+        // material map's layout.
         BiFunction<String, Integer, Texture> load = (key, usage) -> {
             boolean color = color(usage);
             var image = data instanceof RigidGlb.Data glb ? glb.images.get(key) : null;
@@ -56,6 +57,8 @@ final class ModelTextures {
         if (data instanceof RigidGlb.Data glb) {
             glb.surfaces.values().stream().map(RigidGlb.Surface::map).filter(java.util.Objects::nonNull)
                   .forEach(key -> load.apply(key, GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE));
+            glb.surfaces.values().stream().map(RigidGlb.Surface::relief).filter(java.util.Objects::nonNull)
+                  .forEach(relief -> load.apply(relief.map(), GpuMaterialMaps.HEIGHT_USAGE));
         }
         Model model = new Model(data, key -> load.apply(key, usages.getOrDefault(key, ModelTexture.USAGE_UNKNOWN)));
         // glTF permits one source image in both a color and a data role. Each role needs its own GPU storage.
@@ -79,9 +82,18 @@ final class ModelTextures {
         }
         if (data instanceof RigidGlb.Data glb) {
             model.materials.forEach(material -> material.set(new GpuLinearColors()));
-            glb.surfaces.forEach((id, surface) -> model.getMaterial(id).set(new GpuModelMaterial(
-                  surface.roughness(), surface.metallic(), surface.map() == null ? null
-                        : load.apply(surface.map(), GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE))));
+            glb.surfaces.forEach((id, surface) -> {
+                var material = model.getMaterial(id);
+                var relief = surface.relief();
+                material.set(new GpuModelMaterial(surface.roughness(), surface.metallic(), surface.scatter(),
+                      surface.map() == null ? null : load.apply(surface.map(), GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE),
+                      surface.tint(), surface.glow(), surface.board(), relief == null ? new float[4]
+                            : new float[] { relief.depthU(), relief.depthV(), relief.minimumLayers(), relief.maximumLayers() }));
+                // The heightmap is the material's bump texture (GpuModelMaterial).
+                if (relief != null) {
+                    material.set(TextureAttribute.createBump(load.apply(relief.map(), GpuMaterialMaps.HEIGHT_USAGE)));
+                }
+            });
             glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
                   new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
                   new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));

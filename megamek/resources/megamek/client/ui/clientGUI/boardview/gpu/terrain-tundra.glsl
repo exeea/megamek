@@ -30,15 +30,24 @@ vec4 tundraTexel(sampler2DArray maps, float layer, float tile, MaterialProjectio
     return top;
 }
 
-// A mat's authored roughness from its colour's reads; its grain fades out with the normal detail, to the map's mean.
-float tundraRoughness(float layer, float tile, MaterialProjection p, float variation) {
-    vec2 authored = u_sculptRoughness[int(layer * .5)];
-    if (authored.y < 0.0 || terrainNormalDetail <= 0.0) return authored.x;
-    return mix(authored.x, tundraTexel(u_roughnessLayers, authored.y, tile, p, variation).r, terrainNormalDetail);
+// A mat's authored finish from its colour's reads. Roughness, metallic and scattering fade out with the normal detail,
+// to the map's means; emission keeps its map at every distance.
+Finish tundraFinish(float layer, float tile, MaterialProjection p, float variation) {
+    int material = int(layer * .5);
+    vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
+    Finish texel = meanFinish(material);
+    if (surface.a >= 0.0 && terrainNormalDetail > 0.0) {
+        vec3 mapped = tundraTexel(u_surfaceLayers, surface.a, tile, p, variation).rgb;
+        texel = finishOf(mix(surface.rgb, mapped, terrainNormalDetail), texel.emission);
+    }
+    if (emission.a >= 0.0) {
+        texel.emission += emission.rgb * tundraTexel(u_emissionLayers, emission.a, tile, p, variation).rgb;
+    }
+    return texel;
 }
 
 void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout vec3 normal,
-      inout float cavity, inout float roughness, inout float grass, inout vec3 bounce) {
+      inout float cavity, inout Finish finish, inout float grass, inout vec3 bounce) {
     MaterialProjection projection = materialProjection(world, face);
     amount *= smoothstep(.08, .65, face.z);
     if (amount < .0001) return;
@@ -65,7 +74,8 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     // Keep source colonies intact over broad regions; colour and relief use the same slow translation field.
     float variation = biomeNoise(world.xy / 80.0 + 29.0);
     vec3 treated = vec3(0.0), mappedNormal = vec3(0.0);
-    float mappedCavity = 0.0, mappedRoughness = 0.0;
+    float mappedCavity = 0.0;
+    Finish mappedFinish = Finish(0.0, 0.0, 0.0, vec3(0.0));
     float concreteLichen = 0.0;
     for (int i = 0; i < 4; i++) {
         if (kinds[i] < .0001) continue;
@@ -92,7 +102,8 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
             pigment = mix(color, source.rgb * mineralTint * 1.12, .75);
         }
         treated += pigment * kinds[i];
-        mappedRoughness += tundraRoughness(u_tundraLayers[i], u_tundraTiles[i], projection, variation) * kinds[i];
+        mappedFinish = addFinish(mappedFinish,
+              tundraFinish(u_tundraLayers[i], u_tundraTiles[i], projection, variation), kinds[i]);
         if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
             vec4 n = tundraTexel(u_terrainData, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, variation);
             vec3 relief = upNormal(mix(n.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail), face);
@@ -110,7 +121,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     float remnant = smoothstep(.55, .72, biomeNoise(world.xy / 8.0 + 29.0)) * snow;
     amount *= 1.0 - remnant;
     color = mix(color, treated, amount);
-    roughness = mix(roughness, mappedRoughness, amount);
+    finish = mixFinish(finish, mappedFinish, amount);
     if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
         normal = normalize(mix(normal, normalize(mappedNormal), amount));
         cavity = mix(cavity, mappedCavity, amount);

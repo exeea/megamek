@@ -259,20 +259,21 @@ class GpuMagmaSmokeTest {
                       terrainMaterialLod(world, face);
                       pixelMetres = max(length(dFdx(world)), length(dFdy(world)));
                       farDetail = 0.0;
-                      vec3 color = vec3(.2), normal = face, bounce = vec3(0.0), emission;
+                      vec3 color = vec3(.2), normal = face, bounce = vec3(0.0);
                       float cavity = 1.0, height = .5, grass = 0.0, sand = 0.0;
-                      float response = 0.0, rainCover = 0.0, roughness, volcanic;
+                      float response = 0.0, rainCover = 0.0, volcanic;
+                      Finish finish = Finish(.9, 0.0, 0.0, vec3(0.0));
                       vec4 weights;
                       // The substrate case deliberately includes zero transfer and the actual exposed-sand field.
                       float sediment = any(lessThan(abs(u_coverFamilies - 2.0), vec4(.5)))
                             && u_sculptFamily != 2.0 && world.x < 0.0 ? 1.0 : 0.0;
                       blendCovers(world, face, v_diffuseUV.x, v_diffuseUV.y, .6, .5, sediment, .4, .6, .5,
                             color, normal, cavity, height, grass, sand, bounce, response, rainCover,
-                            emission, roughness, volcanic, weights);
+                            finish, volcanic, weights);
                       int channel = int(gl_FragCoord.y) % 5;
                       if (channel == 0) fragColor = vec4(color, height);
                       else if (channel == 1) fragColor = vec4(normal * .5 + .5, cavity);
-                      else if (channel == 2) fragColor = vec4(emission, roughness);
+                      else if (channel == 2) fragColor = vec4(finish.emission, finish.roughness);
                       else if (channel == 3) fragColor = weights;
                       else fragColor = vec4(volcanic, grass, sand, rainCover);
                   }

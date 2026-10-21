@@ -27,6 +27,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
@@ -62,7 +63,7 @@ final class GpuAssets implements Disposable {
     private LavaEmission lavaEmission;
     private final Map<String, Sculpt> sculpts = new HashMap<>();
     private MaterialArrays sculptArray;
-    private SculptRoughness sculptRoughness;
+    private FinishArrays finishArrays;
     private MaterialArrays roadArray;
     private Ice ice;
     private final Map<BoardLiquid.Textures, Animation<Texture>> liquids = new HashMap<>();
@@ -194,139 +195,154 @@ final class GpuAssets implements Disposable {
 
     private static String sculptName(String name) { return "terrain/surfaces/" + name; }
 
-    /** Each material's uniform value or map mean, then its map layer or -1, in the sculpt array's stable order. */
-    record SculptRoughness(TextureArray maps, float[] metadata) { }
+    /**
+     * The finish ({@link #authoredFinish}) of every board material the terrain draws from arrays (sculpted surfaces and
+     * road coats), in the given stable order of material names: the surface maps (roughness, metallic and scattering in
+     * R, G and B) of the materials whose finish varies, and the emission maps; per material its surface values or means
+     * and surface layer (-1 if uniform), its emission tint and emission layer (-1 without a map), and its constant glow.
+     * Either array holds one black texel when no material has a map for it.
+     */
+    record FinishArrays(TextureArray surfaces, TextureArray emission, float[] surface, float[] tint, float[] glow)
+          implements Disposable {
+        @Override public void dispose() { surfaces.dispose(); emission.dispose(); }
+    }
+
+    FinishArrays finishArrays(List<String> materials) {
+        if (finishArrays != null) { return finishArrays; }
+        var surfaces = new ArrayList<Supplier<Pixmap>>();
+        var emissions = new ArrayList<Supplier<Pixmap>>();
+        int surfaceWidth = 1, surfaceHeight = 1, emissionWidth = 1, emissionHeight = 1;
+        int count = materials.size();
+        float[] surface = new float[count * 4], tint = new float[count * 4], glow = new float[count * 3];
+        for (int index = 0; index < count; index++) {
+            var finish = authoredFinish(definition(materials.get(index)));
+            System.arraycopy(finish.surface(), 0, surface, index * 4, 3);
+            System.arraycopy(finish.tint(), 0, tint, index * 4, 3);
+            System.arraycopy(finish.glow(), 0, glow, index * 3, 3);
+            surface[index * 4 + 3] = finish.map() == null ? -1 : surfaces.size();
+            if (finish.map() != null) {
+                surfaces.add(() -> rgbaPixmap(finish.map(), finish.width(), finish.height()));
+                surfaceWidth = Math.max(surfaceWidth, finish.width());
+                surfaceHeight = Math.max(surfaceHeight, finish.height());
+            }
+            tint[index * 4 + 3] = finish.emission() == null ? -1 : emissions.size();
+            if (finish.emission() != null) {
+                FileHandle map = new FileHandle(finish.emission());
+                emissions.add(() -> GpuColorTexture.decode(map));
+                int[] size = GpuMaterialMaps.size(finish.emission());
+                emissionWidth = Math.max(emissionWidth, size[0]);
+                emissionHeight = Math.max(emissionHeight, size[1]);
+            }
+        }
+        // Smaller maps take the largest grid, as in the colour arrays, so each still spans its material's repeat.
+        if (surfaces.isEmpty()) { surfaces.add(() -> rgbaPixmap(new byte[4], 1, 1)); }
+        if (emissions.isEmpty()) { emissions.add(() -> rgbaPixmap(new byte[4], 1, 1)); }
+        TextureArray surfaceMaps = null;
+        try {
+            surfaceMaps = repeatingArray(new MaterialArrayData(surfaces, surfaceWidth, surfaceHeight, false));
+            TextureArray emissionMaps = repeatingArray(new MaterialArrayData(emissions, emissionWidth, emissionHeight, true));
+            finishArrays = new FinishArrays(surfaceMaps, emissionMaps, surface, tint, glow);
+            return finishArrays;
+        } catch (RuntimeException failure) {
+            if (surfaceMaps != null) { surfaceMaps.dispose(); }
+            throw failure;
+        }
+    }
+
+    private static Pixmap rgbaPixmap(byte[] rgba, int width, int height) {
+        var pixels = new Pixmap(width, height, Pixmap.Format.RGBA8888);
+        pixels.getPixels().put(rgba).position(0);
+        return pixels;
+    }
 
     /**
-     * Every sculpted material's roughness, as Godot reads it: the ORM map's roughness channel times the
-     * {@code roughness} factor, or the factor alone without a map. A uniform map is sent as its value; a map that varies
-     * becomes a layer, beside its mean, which distant terrain uses instead of reading the map.
+     * A material's finish as Godot's StandardMaterial3D reads it. Roughness, metallic and subsurface scattering: each its
+     * map's channel times its factor ({@code roughness}, {@code metallic}, {@code subsurf_scatter_strength}), or the
+     * factor alone without a map (Godot's maps default to white); scattering only where it is enabled. Where all three
+     * are uniform they are {@code surface}; otherwise {@code map} holds them in R, G and B at the largest of their grids,
+     * and {@code surface} their means, which distant terrain uses instead of reading the map. Emission: its map, the
+     * map's tint and a constant glow ({@link GpuMaterialMaps#emission}).
      */
-    SculptRoughness sculptRoughness(List<String> names) {
-        if (sculptRoughness != null) { return sculptRoughness; }
-        var authored = new ArrayList<AuthoredRoughness>();
+    record AuthoredFinish(float[] surface, byte[] map, int width, int height, float[] tint, File emission, float[] glow) { }
+
+    /** {@link #finishArrays}' rule for one material, without a graphics context. */
+    static AuthoredFinish authoredFinish(GodotMaterial material) {
+        boolean scatters = material.subsurfaceEnabled();
+        var channels = new FinishChannel[] {
+              finishChannel(material, "roughness", material.roughness(), material.roughnessMap(),
+                    material.roughnessChannel()),
+              finishChannel(material, "metallic", material.metallic(), material.metallicMap(), material.metallicChannel()),
+              finishChannel(material, "subsurf_scatter_strength", scatters ? material.subsurfaceStrength() : 0,
+                    scatters ? material.subsurface() : null, GodotMaterial.RED) };
+        float[] surface = new float[3];
         int width = 1, height = 1;
-        float[] metadata = new float[names.size() * 2];
-        for (int index = 0; index < names.size(); index++) {
-            var roughness = authoredRoughness(definition(sculptName(names.get(index))));
-            metadata[index * 2] = roughness.value();
-            metadata[index * 2 + 1] = -1;
-            if (roughness.map() == null) { continue; }
-            metadata[index * 2 + 1] = authored.size();
-            authored.add(roughness);
-            width = Math.max(width, roughness.width());
-            height = Math.max(height, roughness.height());
+        for (var channel : channels) {
+            if (channel.map() == null) { continue; }
+            width = Math.max(width, channel.map().width());
+            height = Math.max(height, channel.map().height());
         }
-        // Validate every supplied map before allocating GL storage. Smaller maps take the largest grid, as in the
-        // colour arrays, so each still spans its material's repeat.
-        var layers = new ArrayList<byte[]>();
-        for (var roughness : authored) { layers.add(onGrid(roughness, width, height)); }
-        var data = new RoughnessArrayData(layers, width, height);
-        TextureArray maps = null;
-        try {
-            maps = new TextureArray(data);
-            maps.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            maps.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-            float anisotropy = Math.min(8, GLTexture.getMaxAnisotropicFilterLevel());
-            if (anisotropy > 1) {
-                maps.bind();
-                Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+        byte[] map = null;
+        for (int index = 0; index < 3; index++) {
+            var channel = channels[index];
+            surface[index] = channel.value();
+            if (channel.map() == null) { continue; }
+            if (map == null) {
+                map = new byte[width * height * 4];
+                for (int texel = 0; texel < width * height; texel++) {
+                    for (int other = 0; other < 3; other++) {
+                        map[texel * 4 + other] = (byte) Math.round(channels[other].value() * 255);
+                    }
+                    map[texel * 4 + 3] = (byte) 255;
+                }
             }
-            sculptRoughness = new SculptRoughness(maps, metadata);
-            return sculptRoughness;
-        } catch (RuntimeException exception) {
-            if (maps != null) { maps.dispose(); }
-            throw exception;
-        } finally { data.disposeSources(); }
+            byte[] values = onGrid(channel.map(), width, height);
+            for (int texel = 0; texel < values.length; texel++) { map[texel * 4 + index] = values[texel]; }
+        }
+        var emission = GpuMaterialMaps.emission(material);
+        if (emission.map() != null) { requireFiles(List.of(new FileHandle(emission.map()))); }
+        return new AuthoredFinish(surface, map, width, height, emission.tint(), emission.map(), emission.glow());
     }
 
-    /** A sculpted material's roughness: a uniform value (no map), or an R8 map and its mean. */
-    record AuthoredRoughness(float value, byte[] map, int width, int height) { }
+    /** One finish channel: its value (a map's mean), and the map times its factor where it varies. */
+    private record FinishChannel(float value, GpuMaterialMaps.Channel map) { }
 
-    /** A roughness map resampled to the array's grid, as {@link GpuColorTexture#arrayPixels} resamples a colour map. */
-    static byte[] onGrid(AuthoredRoughness roughness, int width, int height) {
-        if (roughness.width() == width && roughness.height() == height) { return roughness.map(); }
-        var source = new Pixmap(roughness.width(), roughness.height(), Pixmap.Format.RGBA8888);
-        try {
-            var pixels = source.getPixels();
-            for (byte value : roughness.map()) { pixels.put(value).put(value).put(value).put((byte) 255); }
-            pixels.position(0);
-            var resized = GpuColorTexture.arrayPixels(source, width, height, false);
-            byte[] values = new byte[width * height];
-            for (int texel = 0; texel < values.length; texel++) { values[texel] = resized.get(texel * 4); }
-            return values;
-        } finally { source.dispose(); }
-    }
-
-    /** {@link #sculptRoughness}'s rule for one material, without a graphics context. */
-    static AuthoredRoughness authoredRoughness(GodotMaterial material) {
-        float factor = material.roughness();
-        if (factor < 0 || factor > 1) { throw new IllegalArgumentException("Invalid sculpt roughness: " + material.file); }
-        File file = material.roughnessMap();
-        if (file == null) { return new AuthoredRoughness(factor, null, 0, 0); }
-        requireFiles(List.of(new FileHandle(file)));
-        var channel = GpuMaterialMaps.channel(file, material.roughnessChannel());
-        byte[] values = channel.values();
+    private static FinishChannel finishChannel(GodotMaterial material, String property, float factor, File map,
+          int channel) {
+        if (factor < 0 || factor > 1) { throw new IllegalArgumentException("Invalid " + property + ": " + material.file); }
+        if (map == null || factor == 0) { return new FinishChannel(factor, null); }
+        requireFiles(List.of(new FileHandle(map)));
+        var read = GpuMaterialMaps.channel(map, channel);
+        byte[] values = read.values();
         boolean uniform = true;
         for (byte value : values) { uniform &= value == values[0]; }
-        if (uniform) { return new AuthoredRoughness((values[0] & 255) / 255f * factor, null, 0, 0); }
+        if (uniform) { return new FinishChannel((values[0] & 255) / 255f * factor, null); }
         long sum = 0;
         for (int texel = 0; texel < values.length; texel++) {
             if (factor != 1) { values[texel] = (byte) Math.round((values[texel] & 255) * factor); }
             sum += values[texel] & 255;
         }
-        return new AuthoredRoughness(sum / 255f / values.length, values, channel.width(), channel.height());
+        return new FinishChannel(sum / 255f / values.length, read);
     }
 
-    /** R8 is independent of the albedo/normal pair; all supplied maps retain their exact declared resolution. */
-    private static final class RoughnessArrayData implements TextureArrayData {
-        private final List<byte[]> sources;
-        private final int depth;
-        private boolean prepared;
-        private final int width, height;
-
-        RoughnessArrayData(List<byte[]> sources, int width, int height) {
-            this.sources = new ArrayList<>(sources);
-            depth = Math.max(1, sources.size());
-            this.width = width;
-            this.height = height;
+    /** A channel on a grid, as {@link GpuColorTexture#arrayPixels} resamples a colour map; a uniform one fills it. */
+    static byte[] onGrid(GpuMaterialMaps.Channel channel, int width, int height) {
+        width = Math.max(width, 1);
+        height = Math.max(height, 1);
+        if (channel.width() == width && channel.height() == height) { return channel.values(); }
+        byte[] values = new byte[width * height];
+        if (channel.values().length == 1) {
+            Arrays.fill(values, channel.values()[0]);
+            return values;
         }
-
-        void disposeSources() { sources.clear(); }
-        @Override public boolean isPrepared() { return prepared; }
-        @Override public void prepare() { prepared = true; }
-        @Override public int getWidth() { return width; }
-        @Override public int getHeight() { return height; }
-        @Override public int getDepth() { return depth; }
-        @Override public boolean isManaged() { return false; }
-        @Override public int getInternalFormat() { return GL30.GL_RED; }
-        @Override public int getGLType() { return GL20.GL_UNSIGNED_BYTE; }
-
-        @Override
-        public void consumeTextureArrayData() {
-            Gdx.gl30.glTexImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, GL30.GL_R8, width, height, getDepth(), 0,
-                  GL30.GL_RED, GL20.GL_UNSIGNED_BYTE, (java.nio.Buffer) null);
-            var upload = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(width * height);
-            var oldAlignment = com.badlogic.gdx.utils.BufferUtils.newIntBuffer(1);
-            Gdx.gl.glGetIntegerv(GL20.GL_UNPACK_ALIGNMENT, oldAlignment);
-            int alignment = oldAlignment.get(0);
-            Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
-            try {
-                for (int layer = 0; layer < getDepth(); layer++) {
-                    upload.clear();
-                    if (sources.isEmpty()) { upload.put((byte) 0); }
-                    else { upload.put(sources.get(layer)); }
-                    upload.flip();
-                    Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
-                          GL30.GL_RED, GL20.GL_UNSIGNED_BYTE, upload);
-                }
-            } finally {
-                Reference.reachabilityFence(upload);
-                Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, alignment);
-            }
-            Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);
-            prepared = false;
-        }
+        var source = new Pixmap(channel.width(), channel.height(), Pixmap.Format.RGBA8888);
+        try {
+            var pixels = source.getPixels();
+            for (byte value : channel.values()) { pixels.put(value).put(value).put(value).put((byte) 255); }
+            pixels.position(0);
+            var resized = GpuColorTexture.arrayPixels(source, width, height, false);
+            for (int texel = 0; texel < values.length; texel++) { values[texel] = resized.get(texel * 4); }
+            return values;
+        } finally { source.dispose(); }
     }
 
     /**
@@ -703,16 +719,12 @@ final class GpuAssets implements Disposable {
             Texture fan = data.materials.size > 2 ? material("structures/industrial/fan") : null;
             Model model = new Model(data);
             for (var surface : model.materials) {
-                if (surface.id.equals("fan")) {
-                    // Shared opaque diffuse material stays eligible for the existing prop batch.
-                    surface.set(TextureAttribute.createDiffuse(fan));
-                    continue;
-                }
-                boolean painted = surface.id.equals("paint");
-                surface.set(TextureAttribute.createDiffuse(painted ? paint : steel));
-                float shine = painted ? .12f : .3f;
-                surface.set(ColorAttribute.createSpecular(shine, shine, shine, 1),
-                      FloatAttribute.createShininess(painted ? 20 : 45));
+                // An opaque diffuse material with its finish stays eligible for the existing prop batch.
+                String name = surface.id.equals("fan") ? "structures/industrial/fan"
+                      : surface.id.equals("paint") ? "structures/industrial/paint" : "structures/industrial/steel";
+                surface.set(TextureAttribute.createDiffuse(surface.id.equals("fan") ? fan
+                      : surface.id.equals("paint") ? paint : steel));
+                finish(name, surface);
             }
             return model;
         });
@@ -763,6 +775,27 @@ final class GpuAssets implements Disposable {
         return texture(name, GpuMaterialMaps.normalLayout(name), false);
     }
 
+    /**
+     * Gives a draw of a board material's own (a road, a tile, an industrial or decoration material) the material's whole
+     * finish, as a GLB material whose base colour is its albedo has it (RigidGlb): GpuModelMaterial, the emission map as
+     * the emissive texture and the heightmap as the bump texture.
+     */
+    Material finish(String name, Material material) {
+        var finish = GpuMaterialMaps.modelFinish(definition(name));
+        material.set(new GpuModelMaterial(finish.roughness(), finish.metallic(), finish.scatter(),
+              finish.map() == null ? null : texture(name, GpuMaterialMaps.Layout.METALLIC_ROUGHNESS, false), finish.tint(),
+              finish.glow(), true, new float[] { finish.depthU(), finish.depthV(), finish.minimumLayers(),
+                    finish.maximumLayers() }));
+        if (finish.emission() != null) {
+            material.set(TextureAttribute.createEmissive(texture(new FileHandle(finish.emission()), true)));
+        }
+        // The heightmap is the material's bump texture (GpuModelMaterial).
+        if (finish.heightmap() != null) {
+            material.set(TextureAttribute.createBump(texture(name, GpuMaterialMaps.Layout.HEIGHT, false)));
+        }
+        return material;
+    }
+
     /** The albedo image of a board material, for code that composes its own textures from it. */
     FileHandle albedo(String name) {
         FileHandle file = new FileHandle(definition(name).albedo());
@@ -777,6 +810,23 @@ final class GpuAssets implements Disposable {
     Cliff road(String name) {
         return cliffs.computeIfAbsent("roads/" + name, key -> new Cliff(texture(key, GpuMaterialMaps.Layout.COLOR, true),
               texture(key, GpuMaterialMaps.Layout.NORMAL, false), texture(key, GpuMaterialMaps.Layout.RELIEF, false)));
+    }
+
+    /**
+     * Each road material's heightmap parallax in {@link GpuRoads#MATERIALS} order (GpuMaterialMaps.ModelFinish): depth
+     * along U and V, and the deep parallax's minimum and maximum layers; zero depth without a heightmap.
+     */
+    float[] roadRelief() {
+        float[] relief = new float[GpuRoads.MATERIALS.size() * 4];
+        for (int index = 0; index < GpuRoads.MATERIALS.size(); index++) {
+            var finish = GpuMaterialMaps.modelFinish(definition("roads/" + GpuRoads.MATERIALS.get(index)));
+            if (finish.heightmap() == null) { continue; }
+            relief[index * 4] = finish.depthU();
+            relief[index * 4 + 1] = finish.depthV();
+            relief[index * 4 + 2] = finish.minimumLayers();
+            relief[index * 4 + 3] = finish.maximumLayers();
+        }
+        return relief;
     }
 
     Ice ice() {
@@ -1060,7 +1110,7 @@ final class GpuAssets implements Disposable {
         coverages.clear();
         catalog = null;
         if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
-        if (sculptRoughness != null) { sculptRoughness.maps().dispose(); sculptRoughness = null; }
+        if (finishArrays != null) { finishArrays.dispose(); finishArrays = null; }
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }
         if (ice != null) { ice.maps().dispose(); ice = null; }
         liquids.clear();

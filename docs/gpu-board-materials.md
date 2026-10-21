@@ -19,8 +19,8 @@ A material named `terrain/surfaces/grass` is
 | `<name>_orm.png` | Linear R ambient occlusion, G roughness, B metallic. |
 | `<name>_normal.png` | Tangent-space normal, OpenGL convention (+Y up the image), as Godot and glTF store it. |
 | `<name>_heightmap.png` | Grey height, white highest (Godot's `heightmap_texture`). |
-| `<name>_emission.png` | Emission colour. |
-| `<name>_sss.png` | Subsurface scattering strength. |
+| `<name>_emission.png` | Emission colour (sRGB). |
+| `<name>_sss.png` | Subsurface scattering strength (R). |
 
 A material uses only the maps its resource names. `GodotMaterial` reads the resource:
 Material Maker's `format=2` text and the Godot 4 editor's `format=3` text (quoted ids,
@@ -35,11 +35,71 @@ textures folder. The game reads these `StandardMaterial3D` properties and ignore
 | `normal_enabled`, `normal_texture`, `normal_scale` | Normal; a scale other than 1 scales its slope. |
 | `ao_enabled`, `ao_texture`, `ao_texture_channel` | Ambient occlusion. |
 | `roughness`, `roughness_texture`, `roughness_texture_channel` | Roughness: the factor times the channel. |
-| `metallic`, `metallic_texture`, `metallic_texture_channel` | Metallic, for models' metallic-roughness maps. |
-| `heightmap_enabled`, `heightmap_texture` (or `depth_texture`), `heightmap_flip_texture` | Height. |
-| `heightmap_scale` | Relief range of roads and magma (below). |
-| `emission_enabled`, `emission_texture`, `emission_energy` (or `emission_energy_multiplier`) | Lava heat. |
-| `subsurf_scatter_enabled`, `subsurf_scatter_texture`, `subsurf_scatter_strength` | Ice cloudiness, foliage transmission. |
+| `metallic`, `metallic_texture`, `metallic_texture_channel` | Metallic: the factor times the channel. |
+| `heightmap_enabled`, `heightmap_texture` (or `depth_texture`), `heightmap_flip_texture` | Height, white highest. |
+| `heightmap_scale`, `heightmap_deep_parallax`, `heightmap_min_layers`, `heightmap_max_layers`, `heightmap_flip_tangent`, `heightmap_flip_binormal` | Parallax ([below](#parallax)); for magma the relief range too. |
+| `emission_enabled`, `emission`, `emission_operator`, `emission_texture`, `emission_energy` (or `emission_energy_multiplier`) | Emission. |
+| `subsurf_scatter_enabled`, `subsurf_scatter_texture`, `subsurf_scatter_strength` | Subsurface scattering. |
+
+## Finish: one meaning on every surface
+
+Whatever draws a material (the sculpted terrain and its covers, turf and meadow blades, roads,
+buildings, props and scenery, classic tiles, industrial plants, trees, shrubs and fungus), it
+reads the same channels from the material's `.tres`, with Godot's meaning, so a new export is
+all a change needs: grass that glows, metallic sand or shrubs that scatter light.
+
+| Channel | Godot's rule, as the game reads it |
+| --- | --- |
+| Roughness | `roughness` times the roughness map's channel; the factor alone without a map. |
+| Metallic | `metallic` times the metallic map's channel; the factor alone without a map. The metal share reflects the albedo and diffuses none. |
+| Subsurface scattering | Only where enabled: `subsurf_scatter_strength` times the scattering map's red. Thick bodies wrap the light past the terminator by that share; leaves, which are thin tissue, pass it through to their far side. |
+| Emission | Only where enabled: (`emission` + map) × energy under the add operator (Godot's default), `emission` × map × energy under multiply. `emission` is an sRGB colour, black by default. A uniform map counts as a constant. |
+| Ambient occlusion | The occlusion map's channel. |
+| Normal | The normal map, scaled by `normal_scale`. |
+| Height | Parallax where the surface draws one material through its own UVs ([below](#parallax)). |
+
+Covers that bury a material keep none of its metal, scattering or glow: churned and charred
+ground, scorch deposits, mud, marsh peat and tundra mats (which bring their own finish). A
+material's own wear, wetness and the distance fade of its grain (to the map's means, which costs
+no texture read) change its roughness only.
+
+`material-finish.glsl` holds the shared record (`Finish`) and its blending;
+`surface-shading.glsl` lights it (`metallicShare`, `Surface.scatter`, `Surface.emission`).
+Two contracts carry it to the shaders:
+
+- Array-drawn materials, the sculpted surfaces and the road materials, have their finish in the
+  terrain's finish arrays (`finish-arrays.glsl`, `GpuAssets.finishArrays`): an RGBA8 layer of
+  roughness, metallic and scattering for each material whose finish varies, an sRGB layer for each
+  emission map, and per material its values or means, emission tint and constant glow. Sculpt
+  materials sit at their sculpt layer's index, road materials from `ROAD_FINISH`.
+- A draw of one material, a model's or the board's own (`GpuModelMaterial`, `GpuModelRelief`):
+  roughness, metallic and scattering factors over a `METALLIC_ROUGHNESS` map, which carries the
+  factors itself, the emission map as the emissive texture times its tint, plus the glow, and the
+  heightmap parallax. A GLB material whose base colour is a board material's `_albedo.png` *is*
+  that board material: its `.tres` replaces the GLB's own metallic-roughness and adds every map
+  the GLB leaves out (normal, occlusion, emission, height). `GpuAssets.finish` gives the board's
+  own single-material draws (classic tiles, industrial plants) the same.
+
+What keeps its own shading:
+
+- Lava, crust and ice are `ShaderMaterial`s with shaders of their own ([above](#shadermaterials)).
+- A GLB material with no board texture is the GLB's own glTF material: its roughness, metallic and
+  emissive factors. On a plant it keeps its role's response (bark .90, snow .95, leaves passing
+  .35 of their light), and untextured mycelium glows its own vertex colour.
+- Impostor cards draw their plant's baked look; fungal glow breathes slowly across a colony.
+- Crop rows and marsh sedge, composited at run time from their artwork, keep their blades'
+  shared response.
+
+### Parallax
+
+Godot's heightmap parallax, where a surface draws one material through its own UVs: models
+(`model-surface.glsl`) and roads (`terrain-road.frag`). The view, in the UV frame, moves every map
+read of the material by up to `heightmap_scale` / 100 in UV, white high; with
+`heightmap_deep_parallax` it marches from `heightmap_max_layers` at grazing views to
+`heightmap_min_layers` head-on and interpolates the crossing, as Godot does, otherwise it takes
+one step. A relief shallower than half a pixel moves nothing visible, so its reads are skipped:
+parallax costs nothing at board distances. The sculpted terrain blends several materials by their
+heights in one pixel and keeps their relief in its normals and height blending.
 
 ### ShaderMaterials
 
@@ -91,12 +151,13 @@ the previous bytes exactly.
 | `RELIEF` | Height, roughness, occlusion, `heightmap_scale` × 25.5 | Roads and magma |
 | `ICE` | Height, roughness, cracks, cloudiness | Ice |
 | `OCCLUSION` | Occlusion, roughness, transmission | Models' glTF occlusion map |
-| `METALLIC_ROUGHNESS` | –, roughness, metallic | Models' glTF metallic-roughness map |
+| `METALLIC_ROUGHNESS` | Scattering, roughness, metallic | A model's or single draw's finish map |
+| `HEIGHT` | Height, white high | A model's parallax |
 | `MOLTEN_HEAT` | Emission RGB, coverage | Molten lava |
 | `CRUST_HEAT` | Heat, –, –, glow | Solid crust |
 
-For roads and magma, `heightmap_scale` is the relief depth in texture coordinates
-times 100: 10 is the full range, 0.1 of a repeat. For sculpted terrain it is
+`heightmap_scale` is Godot's parallax depth in texture coordinates times 100: 10 is the
+full range, 0.1 of a repeat. Magma's relief takes it too. For sculpted terrain it is
 informational (100 × relief metres ÷ repeat metres): their relief comes from the
 shared terrain shading.
 
@@ -105,21 +166,20 @@ Models (`.glb`) name these maps directly: a base colour `<name>_albedo.png`, a n
 `ModelTextures` recognises a board material's map by its `.tres` beside it. The model
 then draws it in the layout its glTF role takes, sharing the board's own texture.
 
-### Sculpted terrain roughness
+### Sculpted terrain finish
 
-Sculpted terrain takes each material's own roughness, with Godot's meaning: the ORM
-map's G channel times `roughness`, or `roughness` alone without a map. A uniform map
-is sent as its one value; a map that varies is a layer of the terrain's roughness
-array, resampled to the largest map there, as the colour arrays are. Roughness 1 is
-fully rough: the game estimates no roughness of its own for any material.
+Sculpted terrain takes each material's whole finish from the finish arrays. A uniform
+finish is sent as its values; one that varies is a layer, resampled to the largest map
+there, as the colour arrays are. Roughness 1 is fully rough: the game estimates no
+roughness of its own for any material.
 
 Every role of a natural surface (cover, mantle, debris and rock, on tops and walls)
-reads its material's map with the same projection as its colour, and so do tundra
-mats, turf, road coats, pavement, tree pits and rock kits. On natural surfaces and
-tundra mats, where the normal detail fades out with distance, the map's grain fades to
-its mean, which costs no texture read. Mud and scorch also keep their roughness in
-their own normal maps, which their shaders read. Effects on top of a material keep
-their own values: wet ground, marsh peat and moss, scorch deposits and ground damage.
+reads its material's finish with the same projection as its colour, and so do tundra
+mats, turf and meadow blades (their ground's or their grass's), road coats, pavement,
+tree pits and rock kits. On natural surfaces and tundra mats, where the normal detail
+fades out with distance, roughness, metallic and scattering fade to their means, which
+costs no texture read; emission keeps its map at every distance. Mud and scorch also
+keep their roughness in their own normal maps, which their shaders read.
 
 ## Loose and constrained materials
 

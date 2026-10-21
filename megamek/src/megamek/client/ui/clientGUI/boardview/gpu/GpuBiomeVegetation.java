@@ -44,12 +44,45 @@ import megamek.common.board.Coords;
  * with each chunk's finished support ({@link BoardPlants}); this class only shapes, batches and draws them.
  */
 final class GpuBiomeVegetation implements Disposable {
+    /**
+     * Crops or sedge, with their finish: their material's (GpuAssets.authoredFinish) as the means of its maps, since their
+     * artwork is composited at run time; the emission is the constant glow plus the map's mean times its tint.
+     */
     static final class Kind extends FloatAttribute {
         static final long TYPE = register("boardBiomeVegetation");
         static final long LOD = register("boardBiomeVegetationLod");
-        Kind(boolean crop) { super(TYPE, crop ? 1 : 2); }
+        final float[] surface, glow;
+
+        Kind(boolean crop) {
+            super(TYPE, crop ? 1 : 2);
+            var finish = GpuAssets.authoredFinish(GpuMaterialMaps.board(crop ? "vegetation/crop-row-side" : "vegetation/marsh-sedge"));
+            surface = finish.surface().clone();
+            glow = finish.glow().clone();
+            if (finish.emission() != null) {
+                float[] mean = GpuMaterialMaps.meanColor(finish.emission());
+                for (int channel = 0; channel < 3; channel++) { glow[channel] += finish.tint()[channel] * mean[channel]; }
+            }
+        }
+
+        private Kind(float value, float[] surface, float[] glow) {
+            super(TYPE, value);
+            this.surface = surface;
+            this.glow = glow;
+        }
+
         @Override
-        public Kind copy() { return new Kind(value == 1); }
+        public Kind copy() { return new Kind(value, surface, glow); }
+
+        @Override
+        public int hashCode() { return 31 * (31 * super.hashCode() + Arrays.hashCode(surface)) + Arrays.hashCode(glow); }
+
+        @Override
+        public int compareTo(com.badlogic.gdx.graphics.g3d.Attribute other) {
+            int order = super.compareTo(other);
+            if (order != 0 || type != other.type) { return order; }
+            order = Arrays.compare(surface, ((Kind) other).surface);
+            return order != 0 ? order : Arrays.compare(glow, ((Kind) other).glow);
+        }
     }
 
     private static final float[] DENSITY = { 1, .35f, .08f };

@@ -304,30 +304,88 @@ class GpuBoardMaterialsTest {
         GdxNativesLoader.load();
         Path folder = textures.resolve("terrain/surfaces");
         // As in Godot, a white channel at factor 1 is fully rough; nothing falls back to an estimate.
-        var rough = roughness(folder, 255, 255, 1);
-        assertEquals(1, rough.value());
+        var rough = finish(folder, new int[] { 255, 255 }, new int[] { 0, 0 });
+        assertArrayEquals(new float[] { 1, 0, 0 }, rough.surface());
         assertNull(rough.map());
-        assertEquals(.92f, roughness(folder, 255, 255, .92f).value(), "A factor over a white map is a scalar");
-        assertEquals(128 / 255f, roughness(folder, 128, 128, 1).value(), 1e-6, "A uniform map is a scalar");
-        var map = roughness(folder, 40, 200, 1);
-        assertEquals(120 / 255f, map.value(), 1e-6, "A map carries its mean");
-        assertArrayEquals(new byte[] { 40, (byte) 200 }, map.map());
+        assertEquals(.92f, finish(folder, new int[] { 255, 255 }, new int[] { 0, 0 }, "roughness=0.92").surface()[0],
+              1e-6, "A factor over a white map is a scalar");
+        assertEquals(128 / 255f, finish(folder, new int[] { 128, 128 }, new int[] { 0, 0 }).surface()[0], 1e-6,
+              "A uniform map is a scalar");
+        var map = finish(folder, new int[] { 40, 200 }, new int[] { 0, 0 });
+        assertEquals(120 / 255f, map.surface()[0], 1e-6, "A map carries its mean");
+        assertArrayEquals(new byte[] { 40, 0, 0, (byte) 255, (byte) 200, 0, 0, (byte) 255 }, map.map());
         assertEquals(2, map.width());
-        var scaled = roughness(folder, 40, 200, .5f);
-        assertArrayEquals(new byte[] { 20, 100 }, scaled.map(), "The factor scales the map");
-        assertEquals(60 / 255f, scaled.value(), 1e-6);
+        var scaled = finish(folder, new int[] { 40, 200 }, new int[] { 0, 0 }, "roughness=0.5");
+        assertEquals(20, scaled.map()[0], "The factor scales the map");
+        assertEquals(100, scaled.map()[4]);
+        assertEquals(60 / 255f, scaled.surface()[0], 1e-6);
     }
 
     @Test
-    void roughnessMapsTakeTheLargestGrid() {
+    void authoredMetallicAndScatteringFollowGodotsFactorsAndMaps() throws Exception {
         GdxNativesLoader.load();
-        var map = new GpuAssets.AuthoredRoughness(.5f, new byte[] { 90, 90, 90, 90 }, 2, 2);
-        assertSame(map.map(), GpuAssets.onGrid(map, 2, 2), "A map on the grid is used as it is");
+        Path folder = textures.resolve("terrain/surfaces");
+        int[] uniform = { 255, 255 }, metal = { 0, 200 };
+        assertEquals(.6f, finish(folder, uniform, metal, "metallic=0.6").surface()[1], 1e-6,
+              "Without a map Godot multiplies white: the factor alone");
+        var mapped = finish(folder, uniform, metal, "metallic=0.5", "metallic_texture=ExtResource( 2 )",
+              "metallic_texture_channel=2");
+        assertEquals(0, mapped.map()[1], "The factor scales the ORM's blue channel");
+        assertEquals(100, mapped.map()[5]);
+        assertEquals(50 / 255f, mapped.surface()[1], 1e-6);
+        var dielectric = finish(folder, uniform, metal, "metallic_texture=ExtResource( 2 )", "metallic_texture_channel=2");
+        assertNull(dielectric.map(), "A zero factor leaves no metal, whatever the map holds");
+        assertEquals(0, dielectric.surface()[1]);
+        var scattering = finish(folder, uniform, new int[] { 0, 0 }, "subsurf_scatter_enabled=true",
+              "subsurf_scatter_strength=0.5", "subsurf_scatter_texture=ExtResource( 2 )");
+        // The scattering map's red channel is the ORM's occlusion here: 255 everywhere, so only the strength remains.
+        assertNull(scattering.map());
+        assertEquals(.5f, scattering.surface()[2], 1e-6);
+        assertEquals(0, finish(folder, uniform, new int[] { 0, 0 }, "subsurf_scatter_strength=0.5").surface()[2],
+              "Scattering is off unless it is enabled");
+    }
+
+    @Test
+    void authoredEmissionFollowsGodotsOperators() throws Exception {
+        GdxNativesLoader.load();
+        Path folder = textures.resolve("terrain/surfaces");
+        int[] uniform = { 255, 255 };
+        var glowing = new BufferedImage(2, 1, BufferedImage.TYPE_INT_RGB);
+        glowing.setRGB(0, 0, 0xff8000);
+        glowing.setRGB(1, 0, 0x000000);
+        BoardMaterialFiles.write(folder, "test_emission.png", glowing);
+        String[] enabled = { "emission_enabled=true", "emission=Color(1, 0.5, 0, 1)", "emission_energy_multiplier=2.0",
+              "emission_texture=ExtResource( 5 )" };
+        float half = GpuColor.linear(.5f);
+        var added = finish(folder, uniform, uniform, enabled);
+        assertArrayEquals(new float[] { 2, 2 * half, 0 }, added.glow(), 1e-6f, "Add: the colour times the energy glows");
+        assertArrayEquals(new float[] { 2, 2, 2 }, added.tint(), "Add: the map times the energy adds to it");
+        assertEquals(folder.resolve("test_emission.png").toFile(), added.emission());
+        var multiplied = finish(folder, uniform, uniform, append(enabled, "emission_operator=1"));
+        assertArrayEquals(new float[] { 0, 0, 0 }, multiplied.glow(), "Multiply: nothing glows without the map");
+        assertArrayEquals(new float[] { 2, 2 * half, 0 }, multiplied.tint(), 1e-6f, "Multiply: the colour tints the map");
+        assertArrayEquals(new float[3], finish(folder, uniform, uniform, enabled[1], enabled[2], enabled[3]).glow(),
+              "Emission is off unless it is enabled");
+        assertNull(finish(folder, uniform, uniform, enabled[1], enabled[2], enabled[3]).emission());
+        glowing.setRGB(1, 0, 0xff8000);
+        BoardMaterialFiles.write(folder, "test_emission.png", glowing);
+        var flat = finish(folder, uniform, uniform, enabled);
+        assertNull(flat.emission(), "A uniform map is a constant glow");
+        assertArrayEquals(new float[] { 4, 2 * half + 2 * GpuColor.linear(128 / 255f), 0 }, flat.glow(), 1e-5f);
+    }
+
+    @Test
+    void finishMapsTakeTheLargestGrid() {
+        GdxNativesLoader.load();
+        var map = new GpuMaterialMaps.Channel(new byte[] { 90, 90, 90, 90 }, 2, 2);
+        assertSame(map.values(), GpuAssets.onGrid(map, 2, 2), "A map on the grid is used as it is");
         byte[] resized = GpuAssets.onGrid(map, 4, 4);
         assertEquals(16, resized.length);
         for (byte value : resized) { assertEquals(90, value, "Resampling keeps a uniform map's value"); }
+        byte[] filled = GpuAssets.onGrid(new GpuMaterialMaps.Channel(new byte[] { 7 }, 1, 1), 3, 2);
+        assertArrayEquals(new byte[] { 7, 7, 7, 7, 7, 7 }, filled, "A uniform channel fills the grid");
         // A ramp along X stays along X: rows agree, and each row rises from the dark texel to the bright one.
-        var ramp = new GpuAssets.AuthoredRoughness(.5f, new byte[] { 0, (byte) 255 }, 2, 1);
+        var ramp = new GpuMaterialMaps.Channel(new byte[] { 0, (byte) 255 }, 2, 1);
         byte[] wide = GpuAssets.onGrid(ramp, 4, 2);
         assertEquals(8, wide.length);
         for (int x = 0; x < 4; x++) { assertEquals(wide[x], wide[4 + x], "Column " + x + " is the same in each row"); }
@@ -337,18 +395,28 @@ class GpuBoardMaterialsTest {
         assertTrue((wide[0] & 255) < 128 && (wide[3] & 255) > 128, "The ends keep their texels' sides");
     }
 
-    private GpuAssets.AuthoredRoughness roughness(Path folder, int first, int second, float factor) throws Exception {
+    /** A 2x1 sculpt material whose ORM holds the given roughness (G) and metal (B) texels; features are tres lines. */
+    private GpuAssets.AuthoredFinish finish(Path folder, int[] roughness, int[] metal, String... features)
+          throws Exception {
         var normal = new BufferedImage(2, 1, BufferedImage.TYPE_INT_ARGB);
         normal.setRGB(0, 0, 0xff8080ff);
         normal.setRGB(1, 0, 0xff8080ff);
         BoardMaterialFiles.sculpt(textures, "test", image(2, 1, 1), normal, 1);
         var orm = new BufferedImage(2, 1, BufferedImage.TYPE_INT_RGB);
-        orm.setRGB(0, 0, 0xff0000 | first << 8);
-        orm.setRGB(1, 0, 0xff0000 | second << 8);
+        orm.setRGB(0, 0, 0xff0000 | roughness[0] << 8 | metal[0]);
+        orm.setRGB(1, 0, 0xff0000 | roughness[1] << 8 | metal[1]);
         BoardMaterialFiles.write(folder, "test_orm.png", orm);
-        String tres = Files.readString(folder.resolve("test.tres"));
-        Files.writeString(folder.resolve("test.tres"), tres.replace("roughness = 1.0", "roughness = " + factor));
-        return GpuAssets.authoredRoughness(new GpuAssets().definition("terrain/surfaces/test"));
+        var tres = new StringBuilder(Files.readString(folder.resolve("test.tres")));
+        tres.insert(tres.indexOf("[resource]"), "[ext_resource path=\"test_emission.png\" type=\"Texture\" id=5]\n");
+        for (String feature : features) { tres.append(feature.replaceFirst("=", " = ")).append('\n'); }
+        Files.writeString(folder.resolve("test.tres"), tres);
+        return GpuAssets.authoredFinish(new GpuAssets().definition("terrain/surfaces/test"));
+    }
+
+    private static String[] append(String[] lines, String line) {
+        String[] result = java.util.Arrays.copyOf(lines, lines.length + 1);
+        result[lines.length] = line;
+        return result;
     }
 
     @Test

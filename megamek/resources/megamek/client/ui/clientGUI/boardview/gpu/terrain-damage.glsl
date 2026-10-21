@@ -1,7 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Authored luminance and transparency survive into the material; the source is not reduced to a soot silhouette.
 void groundDamage(vec3 world, vec3 face, float grass, float sand, float exposed,
-      inout vec3 albedo, inout vec3 normal, inout float cavity, inout float roughness) {
+      inout vec3 albedo, inout vec3 normal, inout float cavity, inout Finish finish) {
     // A scar patch's draw takes its own image (scar-material.glsl); the receiver's own draw the ground's.
     vec4 scar = (u_surfaceScar > .5 ? surfaceScarMask : groundDamageAt(v_cloudPosition.xy)) * exposed;
     float coverage = scar.r;
@@ -13,5 +13,7 @@ void groundDamage(vec3 world, vec3 face, float grass, float sand, float exposed,
     vec3 substrate = albedo;
     if (grass > .5) substrate = materialTexel(u_sculptLayers.w, soilUV, soilGradient).rgb;
     // The authored broad char/debris pattern darkens that material; alpha supplies the irregular fade.
-    scarMaterial(scar, face, substrate, u_normalMaps, albedo, normal, cavity, roughness);
+    scarMaterial(scar, face, substrate, u_normalMaps, albedo, normal, cavity, finish.roughness);
+    // Churned soil and char keep none of the receiver's metallic, scattering or glow.
+    coverFinish(finish, coverage);
 }

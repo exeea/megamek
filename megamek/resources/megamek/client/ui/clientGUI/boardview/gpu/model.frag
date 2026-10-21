@@ -36,6 +36,8 @@ uniform sampler2D u_normalTexture;
 // Enabled, emission multiplier, diffuse multiplier. Zero leaves authored materials unchanged, including in renderers
 // that do not register this control. Light timing and intensity belong to the material's draw setter.
 uniform vec3 u_modelLight;
+// The heightmap parallax's shift of every map read (model-surface.glsl), zero without one.
+vec2 modelShift = vec2(0.0);
 
 void main() {
 #ifdef lightingFlag
@@ -46,13 +48,13 @@ void main() {
 #endif
     // surface-frame-ready
 #if defined(diffuseTextureFlag) && defined(diffuseColorFlag) && defined(colorFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV) * u_diffuseColor * v_color;
+    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * u_diffuseColor * v_color;
 #elif defined(diffuseTextureFlag) && defined(diffuseColorFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV) * u_diffuseColor;
+    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * u_diffuseColor;
 #elif defined(diffuseTextureFlag) && defined(colorFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV) * v_color;
+    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * v_color;
 #elif defined(diffuseTextureFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV);
+    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift);
 #elif defined(diffuseColorFlag) && defined(colorFlag)
     vec4 diffuse = u_diffuseColor * v_color;
 #elif defined(diffuseColorFlag)
@@ -64,9 +66,9 @@ void main() {
 #endif
     // unit-overlays
 #if defined(emissiveTextureFlag) && defined(emissiveColorFlag)
-    vec4 emissive = texture(u_emissiveTexture, v_emissiveUV) * u_emissiveColor;
+    vec4 emissive = texture(u_emissiveTexture, v_emissiveUV + modelShift) * u_emissiveColor;
 #elif defined(emissiveTextureFlag)
-    vec4 emissive = texture(u_emissiveTexture, v_emissiveUV);
+    vec4 emissive = texture(u_emissiveTexture, v_emissiveUV + modelShift);
 #elif defined(emissiveColorFlag)
     vec4 emissive = u_emissiveColor;
 #else

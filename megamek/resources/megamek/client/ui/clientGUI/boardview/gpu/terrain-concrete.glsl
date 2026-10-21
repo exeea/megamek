@@ -33,7 +33,7 @@ vec2 slab(float u, float z, float h, float d, out float shade) {
 }
 
 void concreteSlab(vec3 world, vec3 worldDx, vec3 worldDy, vec3 face, vec3 projection, float h, float d,
-      inout vec3 albedo, inout vec3 normal, inout float occlusion, inout float cavity, inout float roughness) {
+      inout vec3 albedo, inout vec3 normal, inout float occlusion, inout float cavity, inout Finish finish) {
     // Evaluate contact shading per fragment so it stays at the foot and rim of a large planar panel.
     float shelterDistance = (d - 2.2) / 1.6;
     float shelter = max(0.0, 1.0 - shelterDistance * shelterDistance);
@@ -46,7 +46,7 @@ void concreteSlab(vec3 world, vec3 worldDx, vec3 worldDy, vec3 face, vec3 projec
     albedo = mapTexel(u_sculptLayers.w, uv).rgb * shade;
     // Slab windows translate the map; their discrete changes do not enlarge its physical footprint.
     mat2 gradient = mat2(vec2(dot(worldDx, tangent), -worldDx.z), vec2(dot(worldDy, tangent), -worldDy.z)) / u_sculptTiles.w;
-    roughness = authoredRoughness(u_sculptLayers.w, uv, gradient);
+    finish = finishTexel(u_sculptLayers.w, uv, gradient);
     if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
         vec4 texel = normalTexel(u_sculptLayers.w + 1.0, uv);
         vec3 detail = texel.rgb * 2.0 - 1.0;

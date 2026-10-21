@@ -123,7 +123,7 @@ class GpuAssetReloadSmokeTest {
                             originalSculpt = assets().sculptArray(sculptLayers);
                             originalMagma = assets().magma(true);
                             originalEmission = assets().lavaEmission();
-                            originalRoughness = assets().sculptRoughness(sculptLayers).maps();
+                            originalRoughness = assets().finishArrays(surfaces(sculptLayers)).surfaces();
                             sculptTile = assets().sculptTile("grass");
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
@@ -226,16 +226,16 @@ class GpuAssetReloadSmokeTest {
                             assertArrayEquals(new float[] { 64f / 255f, 192f / 255f, 240f / 255f, 96f / 255f },
                                   arrayPixel(sculpt.data(), grassLayer / 2), .0006f);
                             assertEquals(0, originalRoughness.getTextureObjectHandle(), "Old roughness arrays must be released");
-                            var authored = assets().sculptRoughness(sculptLayers);
-                            assertNotSame(originalRoughness, authored.maps());
+                            var authored = assets().finishArrays(surfaces(sculptLayers));
+                            assertNotSame(originalRoughness, authored.surfaces());
                             // Rows of 639 texels at 128 and one at 255, times the 0.5 factor: 64 and 128, sent with their mean.
-                            assertEquals((639 * 64 + 128) / 640f / 255, authored.metadata()[grassLayer], .00001f,
+                            assertEquals((639 * 64 + 128) / 640f / 255, authored.surface()[grassLayer * 2], .00001f,
                                   "A varying roughness map is authored as a map, beside its mean");
-                            int roughnessLayer = (int) authored.metadata()[grassLayer + 1];
+                            int roughnessLayer = (int) authored.surface()[grassLayer * 2 + 3];
                             assertTrue(roughnessLayer >= 0, "Reload must retain the authored map binding");
                             assertArrayEquals(new float[] { 64f / 255, 0, 0, 1 },
-                                  arrayPixel(authored.maps(), roughnessLayer), .0006f,
-                                  "The new raw R8 data must reach GPU memory after the actual Reload assets action");
+                                  arrayPixel(authored.surfaces(), roughnessLayer), .0006f,
+                                  "The new raw surface data must reach GPU memory after the actual Reload assets action");
                             assertEquals(0, originalMagma.color().getTextureObjectHandle());
                             assertEquals(0, originalMagma.data().getTextureObjectHandle());
                             var magma = assets().magma(true);
@@ -316,7 +316,7 @@ class GpuAssetReloadSmokeTest {
                             else {
                                 originalTerrain = terrain();
                                 originalSculpt = assets().sculptArray(sculptLayers);
-                                originalRoughness = assets().sculptRoughness(sculptLayers).maps();
+                                originalRoughness = assets().finishArrays(surfaces(sculptLayers)).surfaces();
                                 originalMagma = assets().magma(true);
                                 originalEmission = assets().lavaEmission();
                                 copyNativeBatch(Path.of(nativePlan), directory);
@@ -418,9 +418,14 @@ class GpuAssetReloadSmokeTest {
     }
 
     /** Compare actual completed uploads with the packed native maps, retaining the RGB/data domain boundary. */
+    /** The sculpt layers as the board material names the finish arrays take. */
+    private static List<String> surfaces(List<String> layers) {
+        return layers.stream().map(name -> "terrain/surfaces/" + name).toList();
+    }
+
     private static void checkNativeBatch(GpuAssets assets, List<String> layers, Path data) throws Exception {
         var arrays = assets.sculptArray(layers);
-        var authored = assets.sculptRoughness(layers);
+        var authored = assets.finishArrays(surfaces(layers));
         Path textures = data.resolve("models/board/textures");
         var catalog = GpuMaterialCatalog.read(textures.resolve("materials.json").toFile());
         assertEquals(34, layers.size(), "Current main terrain roles; granite scatter and sand verge are separate");
@@ -442,10 +447,15 @@ class GpuAssetReloadSmokeTest {
                 } finally { packed.dispose(); }
             }
             assertEquals(catalogued(catalog, material, definition), assets.sculptTile(name), .000001f, name);
-            var roughness = GpuAssets.authoredRoughness(definition);
-            assertEquals(roughness.value(), authored.metadata()[index * 2], .000001f, name + " sends its authored roughness");
-            assertEquals(roughness.map() != null, authored.metadata()[index * 2 + 1] >= 0,
-                  name + " has a roughness layer exactly when its map varies");
+            var finish = GpuAssets.authoredFinish(definition);
+            for (int channel = 0; channel < 3; channel++) {
+                assertEquals(finish.surface()[channel], authored.surface()[index * 4 + channel], .000001f,
+                      name + " sends its authored finish");
+            }
+            assertEquals(finish.map() != null, authored.surface()[index * 4 + 3] >= 0,
+                  name + " has a surface layer exactly when its finish varies");
+            assertEquals(finish.emission() != null, authored.tint()[index * 4 + 3] >= 0,
+                  name + " has an emission layer exactly when its emission map varies");
         }
         for (String name : List.of("granite", "sand")) {
             String material = "terrain/surfaces/" + name;
@@ -485,7 +495,7 @@ class GpuAssetReloadSmokeTest {
         } finally { heat.dispose(); }
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Actual native batch after Reload");
         System.out.println("Native batch Reload: 34 current color/data array layers; 36 catalogued repeats and "
-              + "4 square vegetation images verified; every layer sends its authored roughness.");
+              + "4 square vegetation images verified; every layer sends its authored finish.");
     }
 
     /** A sculpted material's repeat: its catalogued metres, widened with its albedo (GpuMaterialCatalog). */

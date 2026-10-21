@@ -121,9 +121,12 @@ final class GpuShaderSource {
               Map.of("MAGMA_CONDITION", flowing ? "magma-flow.glsl" : "magma-solid.glsl"));
     }
 
-    /** The light model, rain field, local lights, ambient occlusion and geometry shadows of every lit surface. */
+    /**
+     * The material finish, light model, rain field, local lights, ambient occlusion and geometry shadows of every lit
+     * surface.
+     */
     private static String sharedLighting() {
-        return read("light-model.glsl") + read("environment-lighting.glsl") + read("rain-surface.glsl")
+        return read("material-finish.glsl") + read("light-model.glsl") + read("environment-lighting.glsl") + read("rain-surface.glsl")
               + read("lava-lighting.glsl") + read("ambient-occlusion.glsl") + read("surface-lighting.glsl");
     }
 
@@ -142,10 +145,13 @@ final class GpuShaderSource {
               .replace("v_color = a_color;", "v_color = coverColor;");
     }
 
-    /** Size only programs whose assembled stages reference the authored material metadata array. */
-    static String sculptMaterialPrefix(int count, String vertex, String fragment) {
-        return vertex.contains("SCULPT_MATERIAL_COUNT") || fragment.contains("SCULPT_MATERIAL_COUNT")
-              ? "#define SCULPT_MATERIAL_COUNT " + count + "\n" : "";
+    /**
+     * Size only programs whose assembled stages reference the finish arrays (finish-arrays.glsl): {@code count} board
+     * materials, the road materials from {@code roads} on.
+     */
+    static String finishPrefix(int count, int roads, String vertex, String fragment) {
+        return vertex.contains("FINISH_COUNT") || fragment.contains("FINISH_COUNT")
+              ? "#define FINISH_COUNT " + count + "\n#define ROAD_FINISH " + roads + "\n" : "";
     }
 
     /** Structural edits retain their caller's ordering, with one shared exact-anchor check. */
@@ -173,13 +179,14 @@ final class GpuShaderSource {
             functions += read("surface-shading.glsl");
         }
         if (source.contains("// sculpt-material-functions")) {
-            functions += read("terrain-roughness.glsl");
+            functions += read("finish-arrays.glsl");
         } else if (source.contains("roadCoatFlag")) {
-            functions += "\n#ifdef roadCoatFlag\n" + read("terrain-roughness.glsl") + "\n#endif\n";
+            functions += "\n#if defined(roadCoatFlag) || defined(roadMapsFlag)\n" + read("finish-arrays.glsl") + "\n#endif\n";
         }
         if (source.contains("bankTurfFlag")) {
-            functions += "\n#ifdef bankTurfFlag\n" + read("terrain-roughness.glsl")
-                  + read("terrain-ground-color.glsl")
+            // Turf and meadow blades take their ground's finish; crops and sedge their own.
+            functions += "\n#ifndef biomeVegetationFlag\n" + read("finish-arrays.glsl") + "\n#endif\n"
+                  + "\n#ifdef bankTurfFlag\n" + read("terrain-ground-color.glsl")
                   + read("terrain-bank-color.glsl") + "\n#endif\n";
         }
         if (source.contains("// sculpt-material-functions") || source.contains("// biome-water-functions")) {

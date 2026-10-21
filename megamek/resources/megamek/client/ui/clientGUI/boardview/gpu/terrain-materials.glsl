@@ -12,8 +12,7 @@ struct TerrainMaterial {
     vec3 normal;
     float cavity;
     float height;
-    vec3 emission;
-    float roughness;
+    Finish finish;
     float volcanic;
 };
 
@@ -206,32 +205,51 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
 
 // Base surface authority is independent of optional normal detail and its distance fade. A role without weight
 // contributes nothing.
-float materialRoughness(float colorMap, float tile, float weight, MaterialProjection p,
+Finish materialFinish(float colorMap, float tile, float weight, MaterialProjection p,
       float variation, bool fungus, bool singleScale) {
-    if (weight <= 0.0) return 0.0;
-    vec2 authored = u_sculptRoughness[int(colorMap * .5)];
-    if (authored.y < 0.0) return authored.x;
-    return sampleMaterialMap(u_roughnessLayers, authored.y, tile, p, variation, fungus, singleScale).r;
+    if (weight <= 0.0) return Finish(0.0, 0.0, 0.0, vec3(0.0));
+    int material = int(colorMap * .5);
+    vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
+    Finish texel = meanFinish(material);
+    if (surface.a >= 0.0) {
+        texel = finishOf(sampleMaterialMap(u_surfaceLayers, surface.a, tile, p, variation, fungus, singleScale).rgb,
+              texel.emission);
+    }
+    if (emission.a >= 0.0) {
+        texel.emission += emission.rgb
+              * sampleMaterialMap(u_emissionLayers, emission.a, tile, p, variation, fungus, singleScale).rgb;
+    }
+    return texel;
 }
 #endif
 
-// Legacy planar/slab/rock paths retain their own colour-map projection.
-float planarRoughness(float layer, vec2 p, mat2 gradient, float tile, float mixer) {
-    vec2 authored = u_sculptRoughness[int(layer * .5)];
-    if (authored.y < 0.0) return authored.x;
-    float value = mix(authoredRoughness(layer, p / tile, gradient / tile),
-          authoredRoughness(layer, TURN * p / (tile * 2.37) + .31, TURN * gradient / (tile * 2.37)), mixer);
-    return farDetail > 0.0 ? mix(value, authored.x, farDetail) : value;
+// Legacy planar/slab/rock paths retain their own colour-map projection. Far away the surface settles to its means.
+Finish planarFinish(float layer, vec2 p, mat2 gradient, float tile, float mixer) {
+    Finish value = mixFinish(finishTexel(layer, p / tile, gradient / tile),
+          finishTexel(layer, TURN * p / (tile * 2.37) + .31, TURN * gradient / (tile * 2.37)), mixer);
+    if (farDetail > 0.0) {
+        Finish mean = meanFinish(int(layer * .5));
+        mean.emission = value.emission;
+        value = mixFinish(value, mean, farDetail);
+    }
+    return value;
 }
 
-float translatedRoughness(float layer, vec2 uv, mat2 gradient, float variation) {
-    vec2 authored = u_sculptRoughness[int(layer * .5)];
-    if (authored.y < 0.0) return authored.x;
-    return translatedTexel(u_roughnessLayers, authored.y, uv, gradient, variation).r;
+Finish translatedFinish(float layer, vec2 uv, mat2 gradient, float variation) {
+    int material = int(layer * .5);
+    vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
+    Finish texel = meanFinish(material);
+    if (surface.a >= 0.0) {
+        texel = finishOf(translatedTexel(u_surfaceLayers, surface.a, uv, gradient, variation).rgb, texel.emission);
+    }
+    if (emission.a >= 0.0) {
+        texel.emission += emission.rgb * translatedTexel(u_emissionLayers, emission.a, uv, gradient, variation).rgb;
+    }
+    return texel;
 }
 
-float wallRoughness(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side) {
-    return mix(authoredRoughness(layer, y, dy), authoredRoughness(layer, x, dx), side);
+Finish wallFinish(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side) {
+    return mixFinish(finishTexel(layer, y, dy), finishTexel(layer, x, dx), side);
 }
 
 #ifdef volcanicFlag
@@ -271,7 +289,7 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
 
 TerrainMaterial volcanicMaterial(Volcanic material, float strength) {
     return TerrainMaterial(material.albedo, material.normal, material.surface.b, material.surface.r,
-          magmaEmission(material.heat, strength), material.surface.g, 1.0);
+          Finish(material.surface.g, 0.0, 0.0, magmaEmission(material.heat, strength)), 1.0);
 }
 
 TerrainMaterial volcanicMaterial(Volcanic material, float familyId, float bankHeat) {
@@ -456,12 +474,10 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);
     result.cavity = dot(vec4(na.a, nb.a, nc.a, nd.a), weights);
     result.height = dot(vec4(a.a, b.a, c.a, d.a), weights);
-    result.emission = vec3(0.0);
-    vec4 roughness = vec4(materialRoughness(layers.x, tiles.x, weights.x, projection, broad, fungus, sand),
-          materialRoughness(layers.w, tiles.w, weights.y, projection, mantleVariation, fungus, plates),
-          materialRoughness(layers.y, tiles.y, weights.z, projection, fine, fungus, false),
-          materialRoughness(layers.z, tiles.z, weights.w, projection, broad, fungus, false));
-    result.roughness = dot(roughness, weights);
+    result.finish = weighFinish(materialFinish(layers.x, tiles.x, weights.x, projection, broad, fungus, sand),
+          materialFinish(layers.w, tiles.w, weights.y, projection, mantleVariation, fungus, plates),
+          materialFinish(layers.y, tiles.y, weights.z, projection, fine, fungus, false),
+          materialFinish(layers.z, tiles.z, weights.w, projection, broad, fungus, false), weights);
     result.volcanic = 0.0;
     return result;
 }
@@ -501,7 +517,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
       float broad, float fine, float region,
       inout vec3 color, inout vec3 normal, inout float cavity, inout float height, inout float grass, inout float sand,
       inout vec3 bounce, inout float response, inout float rainCover,
-      out vec3 emission, inout float roughness, out float volcanic, out vec4 weights) {
+      inout Finish finish, out float volcanic, out vec4 weights) {
     vec4 raw = max(v_coverWeights, vec4(0.0));
 #ifndef volcanicFlag
     // A slot under 2 % coverage is left out; the remaining weights renormalize below.
@@ -554,7 +570,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     ordinaryNeeded = max(raw, vec4(lessThan(abs(coverFamilies - sculptFamily), vec4(.5))));
     ordinaryNeeded.x = 1.0;
 #endif
-    TerrainMaterial ordinary = TerrainMaterial(vec3(0.0), face, 1.0, 0.0, vec3(0.0), 1.0, 0.0);
+    TerrainMaterial ordinary = TerrainMaterial(vec3(0.0), face, 1.0, 0.0, Finish(1.0, 0.0, 0.0, vec3(0.0)), 0.0);
     if (dot(ordinaryNeeded, vec4(equal(coverFamilies, vec4(float(VOLCANIC_ORDINARY_FAMILY))))) > 0.0) {
         ordinary = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine,
               region, float(VOLCANIC_ORDINARY_FAMILY), ordinaryTiles, ordinaryLayers, sediment);
@@ -565,7 +581,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     a = volcanicMaterial(magmaMaterial, coverFamilies.x, bankHeat);
 #else
     if (abs(coverFamilies.x - 4.0) < .5) {
-        a = TerrainMaterial(color, normal, cavity, height, vec3(0.0), roughness, 0.0);
+        a = TerrainMaterial(color, normal, cavity, height, finish, 0.0);
 #ifdef volcanicFlag
     } else if (coverFamilies.x > VOLCANIC_CRUST_FAMILY - .5) {
         a = volcanicMaterial(magmaMaterial, coverFamilies.x, bankHeat);
@@ -719,8 +735,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z + d.normal * weights.w);
     cavity = dot(vec4(a.cavity, b.cavity, c.cavity, d.cavity), weights);
     height = dot(vec4(a.height, b.height, c.height, d.height), weights);
-    emission = a.emission * weights.x + b.emission * weights.y + c.emission * weights.z + d.emission * weights.w;
-    roughness = dot(vec4(a.roughness, b.roughness, c.roughness, d.roughness), weights);
+    finish = weighFinish(a.finish, b.finish, c.finish, d.finish, weights);
     volcanic = dot(vec4(a.volcanic, b.volcanic, c.volcanic, d.volcanic), weights);
     coverEffects(weights, sediment, grass, sand, bounce, response, rainCover);
 }
@@ -790,6 +805,11 @@ vec4 packedTopColor(float layer, PackedTopCoordinates uv) {
           materialTexel(u_terrainLayers, layer * .5, uv.b, uv.gradient), uv.blend);
 }
 
+// The packed layer's finish from its colour's reads.
+Finish packedTopFinish(float layer, PackedTopCoordinates uv) {
+    return mixFinish(finishTexel(layer, uv.a, uv.gradient), finishTexel(layer, uv.b, uv.gradient), uv.blend);
+}
+
 // Returns RMS roughness and AO. Numeric maps remain necessary when normal detail is disabled or distant.
 vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
     vec4 a = materialTexel(u_terrainData, layer * .5, uv.a, uv.gradient);
@@ -806,13 +826,16 @@ vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
 
 // Sides: one read per projection, the two side projections always and the top only where the face lies back.
 // Tops (no sides): the top projection's two reads; far away two repeats settle to the map's average.
-// The role's authored roughness comes from the same coordinates: its map while the normal detail lasts, as the relief
-// that carries its grain does, and beyond that the map's mean, which costs no read.
+// The role's authored surface comes from the same coordinates: roughness, metallic and scattering from its map while
+// the normal detail lasts, as the relief that carries their grain does, and beyond that the map's means, which cost no
+// read; emission from its map at every distance. One call reads them all with the colour.
 vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated,
-      out float roughness) {
-    vec2 authored = u_sculptRoughness[int(layer + .5)];
-    float grain = authored.y >= 0.0 ? terrainNormalDetail : 0.0;
-    float mapped = authored.x;
+      out Finish surface) {
+    int material = int(layer + .5);
+    vec4 authored = u_finishSurface[material], glow = u_finishEmission[material];
+    float grain = authored.a >= 0.0 ? terrainNormalDetail : 0.0;
+    bool emits = glow.a >= 0.0;
+    vec3 mapped = authored.rgb, emitted = vec3(0.0);
     vec4 pigment;
     if (!sides) {
         vec2 a, b;
@@ -822,30 +845,42 @@ vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float 
         pigment = mix(materialTexel(u_terrainLayers, layer, a, p.topGradient / tile),
               materialTexel(u_terrainLayers, layer, b, gradientB), t);
         if (grain > 0.0) {
-            mapped = mix(materialTexel(u_roughnessLayers, authored.y, a, p.topGradient / tile).r,
-                  materialTexel(u_roughnessLayers, authored.y, b, gradientB).r, t);
+            mapped = mix(materialTexel(u_surfaceLayers, authored.a, a, p.topGradient / tile).rgb,
+                  materialTexel(u_surfaceLayers, authored.a, b, gradientB).rgb, t);
+        }
+        if (emits) {
+            emitted = mix(materialTexel(u_emissionLayers, glow.a, a, p.topGradient / tile).rgb,
+                  materialTexel(u_emissionLayers, glow.a, b, gradientB).rgb, t);
         }
         if (farDetail > 0.0 && !translated) {
             pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient * (4096.0 / tile)),
                   farDetail);
-            mapped = mix(mapped, authored.x, farDetail);
+            mapped = mix(mapped, authored.rgb, farDetail);
         }
     } else {
         pigment = mix(materialTexel(u_terrainLayers, layer, p.y / tile + .37, p.yGradient / tile),
               materialTexel(u_terrainLayers, layer, p.x / tile, p.xGradient / tile), p.side);
         if (grain > 0.0) {
-            mapped = mix(materialTexel(u_roughnessLayers, authored.y, p.y / tile + .37, p.yGradient / tile).r,
-                  materialTexel(u_roughnessLayers, authored.y, p.x / tile, p.xGradient / tile).r, p.side);
+            mapped = mix(materialTexel(u_surfaceLayers, authored.a, p.y / tile + .37, p.yGradient / tile).rgb,
+                  materialTexel(u_surfaceLayers, authored.a, p.x / tile, p.xGradient / tile).rgb, p.side);
+        }
+        if (emits) {
+            emitted = mix(materialTexel(u_emissionLayers, glow.a, p.y / tile + .37, p.yGradient / tile).rgb,
+                  materialTexel(u_emissionLayers, glow.a, p.x / tile, p.xGradient / tile).rgb, p.side);
         }
         if (p.lying > 0.0) {
             pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient / tile), p.lying);
             if (grain > 0.0) {
-                mapped = mix(mapped, materialTexel(u_roughnessLayers, authored.y, p.top / tile, p.topGradient / tile).r,
+                mapped = mix(mapped, materialTexel(u_surfaceLayers, authored.a, p.top / tile, p.topGradient / tile).rgb,
+                      p.lying);
+            }
+            if (emits) {
+                emitted = mix(emitted, materialTexel(u_emissionLayers, glow.a, p.top / tile, p.topGradient / tile).rgb,
                       p.lying);
             }
         }
     }
-    roughness = mix(authored.x, mapped, grain);
+    surface = finishOf(mix(authored.rgb, mapped, grain), u_finishGlow[material] + glow.rgb * emitted);
     return pigment;
 }
 
@@ -1022,10 +1057,10 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     float tileA = dot(isFirst, vec4(tiles.x, tiles.w, tiles.y, tiles.z));
     float variationA = dot(isFirst, variations);
     bool translatedA = dot(isFirst, translated) > .5;
-    float roughnessA, roughnessB;
-    vec4 a = rockTexel(layerA, tileA, p, sides, variationA, translatedA, roughnessA);
+    Finish surfaceA, surfaceB;
+    vec4 a = rockTexel(layerA, tileA, p, sides, variationA, translatedA, surfaceA);
     vec4 b = a;
-    roughnessB = roughnessA;
+    surfaceB = surfaceA;
     float share = 0.0;
     float layerB = layerA, tileB = tileA, variationB = variationA;
     bool translatedB = translatedA;
@@ -1034,7 +1069,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         tileB = dot(isSecond, vec4(tiles.x, tiles.w, tiles.y, tiles.z));
         variationB = dot(isSecond, variations);
         translatedB = dot(isSecond, translated) > .5;
-        b = rockTexel(layerB, tileB, p, sides, variationB, translatedB, roughnessB);
+        b = rockTexel(layerB, tileB, p, sides, variationB, translatedB, surfaceB);
         // Height blend (materialWeights): where both are wanted, the layer whose relief stands higher shows.
         float wa = first + a.a * .38 * 4.0 * first * (1.0 - first);
         float wb = second + b.a * .38 * 4.0 * second * (1.0 - second);
@@ -1077,8 +1112,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     result.normal = normalize(mix(na.rgb, nb.rgb, share));
     result.cavity = mix(na.a, nb.a, share);
     result.height = mix(a.a, b.a, share);
-    result.emission = vec3(0.0);
-    result.roughness = mix(roughnessA, roughnessB, share);
+    result.finish = mixFinish(surfaceA, surfaceB, share);
     result.volcanic = 0.0;
     return result;
 }
@@ -1116,7 +1150,7 @@ TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float ab
     a.normal = normalize(mix(a.normal, b.normal, t));
     a.cavity = mix(a.cavity, b.cavity, t);
     a.height = mix(a.height, b.height, t);
-    a.roughness = mix(a.roughness, b.roughness, t);
+    a.finish = mixFinish(a.finish, b.finish, t);
     return a;
 }
 #endif

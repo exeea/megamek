@@ -29,6 +29,13 @@ uniform float u_bridgeDeckCoverage; // GpuAssets.coverage of the deck's road tex
 #ifdef roadMapsFlag
 uniform sampler2D u_roadSurface;
 uniform float u_roadTransition;
+uniform float u_roadFinish; // the material's place in GpuRoads.MATERIALS
+#endif
+#if defined(roadMapsFlag) || defined(roadCoatFlag)
+// Per road material, its heightmap parallax as Godot draws it: the depth along U and V in UV units (heightmap_scale /
+// 100, negative where Godot flips the tangent or binormal); the deep parallax's minimum and maximum layers, 0 for one
+// step.
+uniform vec4 u_roadRelief[3];
 #endif
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
 uniform vec4 u_roadProfile;
@@ -104,6 +111,56 @@ vec3 roadNormal(RoadMaps m, vec2 uv, float strength) {
 #endif
 }
 
+#if defined(roadMapsFlag) || defined(roadCoatFlag)
+// The material's place in the board's finish arrays (finish-arrays.glsl).
+int roadFinish(RoadMaps m) {
+#ifdef roadCoatFlag
+    return m.mapped ? ROAD_FINISH + m.maps : m.maps - 3;
+#else
+    return ROAD_FINISH + int(u_roadFinish + .5);
+#endif
+}
+
+// Godot's heightmap parallax over a mapped road material's relief (its surface map's R, white high): the view, in the
+// UV frame, moves its colour, normal, surface and finish reads. Deep parallax marches from the maximum layers at grazing
+// views to the minimum head-on, then interpolates the crossing.
+// A mapped material's height (its surface map's R) with explicit gradients: the march below diverges per pixel.
+float roadHeight(RoadMaps m, vec2 uv, mat2 gradient) {
+#ifdef roadCoatFlag
+    return textureGrad(u_roadData, vec3(uv, float(m.maps * 2 + 1)), gradient[0], gradient[1]).r;
+#else
+    return textureGrad(u_roadSurface, uv, gradient[0], gradient[1]).r;
+#endif
+}
+
+// dx and dy are the surface position's derivatives; view points from it to the eye.
+vec2 roadParallax(RoadMaps m, vec2 uv, mat2 gradient, vec3 face, vec3 dx, vec3 dy, vec3 view) {
+    vec4 relief = u_roadRelief[clamp(roadFinish(m) - ROAD_FINISH, 0, 2)];
+    float determinant = gradient[0].x * gradient[1].y - gradient[0].y * gradient[1].x;
+    if (!m.mapped || abs(determinant) < 1e-12) return vec2(0.0);
+    vec3 tangent = (dx * gradient[1].y - dy * gradient[0].y) / determinant;
+    vec3 bitangent = (dy * gradient[0].x - dx * gradient[1].x) / determinant;
+    vec3 v = normalize(vec3(dot(view, normalize(tangent)), dot(view, normalize(bitangent)), dot(view, face)));
+    vec2 reach = v.xy * relief.xy;
+    // A relief shallower than half a pixel moves nothing visible: skip its reads.
+    if (dot(reach, reach) < .25 * max(dot(gradient[0], gradient[0]), dot(gradient[1], gradient[1]))) return vec2(0.0);
+    float depth = 1.0 - roadHeight(m, uv, gradient);
+    if (relief.w < 1.0) return -reach * depth;
+    float layers = mix(relief.w, relief.z, abs(v.z));
+    vec2 delta = reach / layers;
+    vec2 shift = vec2(0.0);
+    float current = 0.0;
+    for (int layer = 0; layer < 128 && current < depth; layer++) {
+        shift -= delta;
+        depth = 1.0 - roadHeight(m, uv + shift, gradient);
+        current += 1.0 / layers;
+    }
+    float after = depth - current;
+    float before = 1.0 - roadHeight(m, uv + shift + delta, gradient) - current + 1.0 / layers;
+    return after - before < -1e-6 ? mix(shift, shift + delta, after / (after - before)) : shift;
+}
+#endif
+
 vec4 roadProfile() {
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
     return u_roadProfile;
@@ -122,10 +179,13 @@ void main() {
     // A rotated bridge shares the adjacent road's scale, orientation and texture phase, widened with its texture.
     uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / (u_worldMetre * u_bridgeDeckCoverage);
 #endif
-#ifdef roadCoatFlag
     mat2 roadGradient = mat2(dFdx(uv), dFdy(uv));
-#endif
     RoadMaps m = roadMaps();
+    // The material's own reads take its parallax; world-anchored patterns and its other grain scales do not.
+    vec2 materialUV = uv;
+#if defined(roadMapsFlag) || defined(roadCoatFlag)
+    materialUV += roadParallax(m, uv, roadGradient, face, dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+#endif
     vec4 roadColor = v_color;
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
@@ -141,8 +201,8 @@ void main() {
     // change it. Their shared atlas also holds join coordinates and wheel directions, which must remain data.
     else { tint = toLinear(tint); }
 #endif
-    vec3 albedo = roadAlbedo(m, uv).rgb * tint;
-    vec4 properties = m.mapped ? roadSurface(m, uv) : vec4(.5);
+    vec3 albedo = roadAlbedo(m, materialUV).rgb * tint;
+    vec4 properties = m.mapped ? roadSurface(m, materialUV) : vec4(.5);
     float roadCoverage = 1.0;
     bool wheelWear = m.mapped && m.transition < -1.5 && m.transition > -2.5;
     // Reuse the shared, stable noise field. These masks describe use and loose material, not road width.
@@ -194,12 +254,12 @@ void main() {
     }
     float normalStrength = 1.0;
     if (wheelWear) { normalStrength = mix(1.2, .35, compaction); }
-    vec3 normal = roadNormal(m, uv, normalStrength);
+    vec3 normal = roadNormal(m, materialUV, normalStrength);
     // Only exposed, upward-facing ground receives liquid water. No accumulation or terrain-rule changes.
     float wet = u_wetness * step(0.0, m.response) * smoothstep(0.2, 0.8, v_normal.z);
     float response = max(0.0, m.response);
     float absorption = groundAbsorption(wet, response);
-    float soilBasins = 0.0;
+    float soilBasins = 0.0, soilMud = 0.0;
     if (m.soil) {
         // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
         soilBasins = texture(u_rainNoise, uv / 22.0).r * .7
@@ -207,6 +267,7 @@ void main() {
         float mud = wet * smoothstep(.24, .68, soilBasins);
         absorption = max(absorption, .7 * mud);
         properties.g = mix(properties.g, .55, mud);
+        soilMud = mud;
     }
     float puddle = groundPuddle(wet, response);
     if (wet * u_rainDetail > 0.0 && m.mapped) {
@@ -219,11 +280,15 @@ void main() {
     }
     albedo = wetAlbedo(albedo, absorption);
     groundFilm(normal, puddle);
-    float roughness = m.mapped ? properties.g : -1.0;
-#ifdef roadCoatFlag
-    if (!m.mapped) roughness = authoredRoughness(float((m.maps - 3) * 2), uv, roadGradient);
+    // The material's finish; a mapped material's roughness is its surface map's, with the wear and mud above.
+    Finish finish = Finish(m.mapped ? properties.g : -1.0, 0.0, 0.0, vec3(0.0));
+#if defined(roadMapsFlag) || defined(roadCoatFlag)
+    Finish authored = finishTexel(roadFinish(m), materialUV, roadGradient);
+    finish = Finish(m.mapped ? properties.g : authored.roughness, authored.metallic, authored.scatter, authored.emission);
+    // Mud buries the soil's own finish.
+    coverFinish(finish, soilMud);
 #endif
-    albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, roughness,
+    albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, finish,
           m.mapped ? mix(1.0, properties.b, .7) : 1.0);
 #ifdef roadFlag
     // The road's outer strip carries coverage. World-anchored grain breaks up its dusty verge.

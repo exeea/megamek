@@ -308,7 +308,7 @@ final class GpuTerrain implements Disposable {
                   + (GpuTreeInstances.instanced(renderable) ? " instanced" : "")
                   + GpuFamilyPrograms.name(renderable.material, Sculpt.TYPE);
             // From the colour program's stages: the prefix is also the vertex stage's, which a twin shares.
-            prefix += GpuShaderSource.sculptMaterialPrefix(SCULPT_LAYERS.size(), chosen.vertexShader, fragment);
+            prefix += GpuShaderSource.finishPrefix(FINISHES.size(), SCULPT_LAYERS.size(), chosen.vertexShader, fragment);
             if (depthOnly) {
                 // A cutout's twin returns after its alpha test (GpuGlsl.source moves the version line above the define);
                 // a solid surface's twin has an empty fragment stage.
@@ -378,14 +378,16 @@ final class GpuTerrain implements Disposable {
                 private final int biomeBoardUniform = register("u_biomeBoard");
                 private final int iceBoardUniform = register("u_iceBoard");
                 private final int biomeSoilUniform = register("u_biomeSoilLayer");
+                private final int meadowFinishUniform = register("u_meadowFinish");
                 private final int biomeSoilTileUniform = register("u_biomeSoilTile");
                 private final int mudMaterialUniform = register("u_mudMaterial");
                 private final int bankMaterialsUniform = register("u_bankMaterials");
-                private final int roughnessLayersUniform = register("u_roughnessLayers");
+                private final int surfaceLayersUniform = register("u_surfaceLayers");
+                private final int emissionLayersUniform = register("u_emissionLayers");
                 // Upload before render-time texture-unit assignment, like the other shared maps.
-                private final GpuAssets.SculptRoughness sculptRoughness = program.hasUniform("u_sculptRoughness[0]")
-                      ? assets.sculptRoughness(SCULPT_LAYERS) : null;
-                private int roughnessLayersUnit = -1;
+                private final GpuAssets.FinishArrays finishArrays = program.hasUniform("u_finishSurface[0]")
+                      ? assets.finishArrays(FINISHES) : null;
+                private int surfaceLayersUnit = -1, emissionLayersUnit = -1;
                 private final int tundraLayersUniform = register("u_tundraLayers");
                 private final int tundraTilesUniform = register("u_tundraTiles");
                 private final int treePitMaterialUniform = register("u_treePitMaterial");
@@ -508,6 +510,9 @@ final class GpuTerrain implements Disposable {
                         set(biomeSoilUniform, 2f * SCULPT_LAYERS.indexOf("earth"));
                         set(biomeSoilTileUniform, assets.sculptTile("earth") * .45f);
                     }
+                    if (has(meadowFinishUniform)) {
+                        set(meadowFinishUniform, SCULPT_LAYERS.indexOf("grass"), assets.sculptTile("grass"));
+                    }
                     if (has(mudMaterialUniform)) {
                         set(mudMaterialUniform, 2f * SCULPT_LAYERS.indexOf("mud"), assets.sculptTile("mud"));
                     }
@@ -515,9 +520,17 @@ final class GpuTerrain implements Disposable {
                         set(bankMaterialsUniform, 2f * SCULPT_LAYERS.indexOf("soil-contact"), assets.sculptTile("soil-contact"),
                               2f * SCULPT_LAYERS.indexOf("gravel"), assets.sculptTile("gravel"));
                     }
-                    if (sculptRoughness != null) {
-                        float[] metadata = sculptRoughness.metadata();
-                        program.setUniform2fv("u_sculptRoughness[0]", metadata, 0, metadata.length);
+                    if (finishArrays != null) {
+                        float[] surface = finishArrays.surface(), tint = finishArrays.tint(), glow = finishArrays.glow();
+                        program.setUniform4fv("u_finishSurface[0]", surface, 0, surface.length);
+                        if (program.hasUniform("u_finishEmission[0]")) {
+                            program.setUniform4fv("u_finishEmission[0]", tint, 0, tint.length);
+                        }
+                        if (program.hasUniform("u_finishGlow[0]")) { program.setUniform3fv("u_finishGlow[0]", glow, 0, glow.length); }
+                    }
+                    if (program.hasUniform("u_roadRelief[0]")) {
+                        float[] relief = assets.roadRelief();
+                        program.setUniform4fv("u_roadRelief[0]", relief, 0, relief.length);
                     }
                     if (has(tundraLayersUniform)) {
                         set(tundraLayersUniform, (float) SCULPT_LAYERS.indexOf("tundra-earth") * 2,
@@ -578,8 +591,9 @@ final class GpuTerrain implements Disposable {
                     // Chunk/material textures can evict these shared textures from the binder's LRU slots.
                     // Touch them for each draw so their sampler uniforms never point at another chunk's field.
                     // BaseShader.set skips uniforms absent from this shader; resident textures are reused.
-                    if (sculptRoughness != null) {
-                        roughnessLayersUnit = bindShared(roughnessLayersUniform, sculptRoughness.maps(), roughnessLayersUnit);
+                    if (finishArrays != null) {
+                        surfaceLayersUnit = bindShared(surfaceLayersUniform, finishArrays.surfaces(), surfaceLayersUnit);
+                        emissionLayersUnit = bindShared(emissionLayersUniform, finishArrays.emission(), emissionLayersUnit);
                     }
                     rainNoiseUnit = bindShared(rainNoiseUniform, rainNoise, rainNoiseUnit);
                     if (has(groundDamageUniform)) {
@@ -673,6 +687,17 @@ final class GpuTerrain implements Disposable {
                     if (kind != null) { target.set(id, kind.value); }
                 }
             });
+            for (boolean glow : new boolean[] { false, true }) {
+                result.register(glow ? "u_biomeGlow" : "u_biomeFinish", new BaseShader.LocalSetter() {
+                    @Override
+                    public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                        var kind = attributes.get(GpuBiomeVegetation.Kind.class, GpuBiomeVegetation.Kind.TYPE);
+                        if (kind == null) { return; }
+                        float[] values = glow ? kind.glow : kind.surface;
+                        target.set(id, values[0], values[1], values[2]);
+                    }
+                });
+            }
             result.register("u_biomeLod", new BaseShader.LocalSetter() {
                 @Override
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -685,6 +710,13 @@ final class GpuTerrain implements Disposable {
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                     Ground ground = attributes.get(Ground.class, Ground.TYPE);
                     if (ground != null) { target.set(id, ground.value); }
+                }
+            });
+            result.register("u_roadFinish", new BaseShader.LocalSetter() {
+                @Override
+                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                    GpuRoads.Maps maps = attributes.get(GpuRoads.Maps.class, GpuRoads.Maps.TYPE);
+                    if (maps != null) { target.set(id, (float) maps.material); }
                 }
             });
             result.register("u_roadSurface", new BaseShader.LocalSetter() {
@@ -1622,6 +1654,13 @@ final class GpuTerrain implements Disposable {
           java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus", "earth", "tundra-earth-variant",
                 "tree-pit-mulch", "scorched", "mud"))
           .distinct().toList();
+    /**
+     * The board materials whose finish the terrain reads from arrays (finish-arrays.glsl): the sculpt layers, at their
+     * index, then the road materials, at ROAD_FINISH plus theirs.
+     */
+    private static final List<String> FINISHES = java.util.stream.Stream.concat(
+          SCULPT_LAYERS.stream().map(name -> "terrain/surfaces/" + name), GpuRoads.MATERIALS.stream().map(name -> "roads/" + name))
+          .toList();
 
     /**
      * Every family's colour/height and normal/AO arrays. Stable semantic layer IDs retain the existing
@@ -5300,7 +5339,7 @@ final class GpuTerrain implements Disposable {
         var maps = assets.road(name);
         Material material = material(maps.color(), blended);
         if (maps.normal() != null) { material.set(TextureAttribute.createNormal(maps.normal())); }
-        if (maps.surface() != null) { material.set(new GpuRoads.Maps(maps.surface())); }
+        if (maps.surface() != null) { material.set(new GpuRoads.Maps(maps.surface(), GpuRoads.MATERIALS.indexOf(name))); }
         material.set(new Ground(name.equals("dirt") ? .15f : .65f));
         if (name.equals("dirt")) { material.set(new GpuRoads.Soil()); }
         return material;

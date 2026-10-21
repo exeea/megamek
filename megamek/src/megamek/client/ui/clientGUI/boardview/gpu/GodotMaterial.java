@@ -30,6 +30,8 @@ import java.util.regex.Pattern;
 final class GodotMaterial {
     /** Godot's BaseMaterial3D.TextureChannel order. */
     static final int RED = 0, GREEN = 1, BLUE = 2, ALPHA = 3, GRAYSCALE = 4;
+    /** Godot's BaseMaterial3D.EmissionOperator order. */
+    static final int EMISSION_ADD = 0, EMISSION_MULTIPLY = 1;
     private static final String PARAMETER = "shader_parameter/";
     private static final Pattern COMMENT = Pattern.compile("//[^\\n]*|/\\*.*?\\*/", Pattern.DOTALL);
     // A material parameter: neither a global nor an instance uniform. Hints and the default follow the name.
@@ -350,6 +352,21 @@ final class GodotMaterial {
         return flag("emission_enabled", false) ? texture("emission_texture") : null;
     }
 
+    /** A board shader's emission is its own; it declares no StandardMaterial3D emission. */
+    boolean emissionEnabled() { return kind == Kind.STANDARD && flag("emission_enabled", false); }
+
+    /** The emission colour as Godot stores it, sRGB; black by default. */
+    float[] emissionColor() { return color("emission", 0, 0, 0, 1); }
+
+    /** How the emission colour combines with its map: {@link #EMISSION_ADD} (Godot's default) or multiply. */
+    int emissionOperator() {
+        int operator = integer("emission_operator", EMISSION_ADD);
+        if (operator != EMISSION_ADD && operator != EMISSION_MULTIPLY) {
+            throw new IllegalArgumentException("emission_operator must be 0 (add) or 1 (multiply): " + file);
+        }
+        return operator;
+    }
+
     /** Godot 4 renamed emission_energy to emission_energy_multiplier; Material Maker writes the former. */
     float emissionEnergy() {
         if (kind == Kind.SHADER) { return parameterNumber("emission_energy", 1); }
@@ -359,6 +376,11 @@ final class GodotMaterial {
     File subsurface() {
         if (kind == Kind.SHADER) { return parameterTexture("texture_subsurface_scattering"); }
         return flag("subsurf_scatter_enabled", false) ? texture("subsurf_scatter_texture") : null;
+    }
+
+    /** Whether the material scatters at all: a StandardMaterial3D enables it, a board shader declares its strength. */
+    boolean subsurfaceEnabled() {
+        return kind == Kind.SHADER ? declares("subsurface_scattering_strength") : flag("subsurf_scatter_enabled", false);
     }
 
     float subsurfaceStrength() {

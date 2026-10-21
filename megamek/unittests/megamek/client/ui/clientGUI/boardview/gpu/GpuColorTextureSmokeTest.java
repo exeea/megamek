@@ -751,8 +751,11 @@ class GpuColorTextureSmokeTest {
         });
     }
 
+    private static final List<String> SURFACES = List.of("terrain/surfaces/mapped", "terrain/surfaces/scalar",
+          "terrain/surfaces/rough");
+
     @Test
-    void sculptRoughnessKeepsRawValuesMetadataAndOwnership() {
+    void finishArraysKeepRawValuesMetadataAndOwnership() {
         nativeCheck(() -> {
             var previous = megamek.common.Configuration.dataDir();
             megamek.common.Configuration.setDataDir(directory.toFile());
@@ -761,40 +764,57 @@ class GpuColorTextureSmokeTest {
             try (var sample = new Sampler(true)) {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
                 for (String name : List.of("mapped", "scalar", "rough")) { sculptPair(sculpt, name); }
-                // Godot's rule: a varying roughness map is a map (sent with its mean), the factor alone without a map
-                // is a scalar, and the default (factor 1 over white) is fully rough.
+                // Godot's rule: a varying map is a map (sent with its mean), the factor alone without a map is a scalar,
+                // and the default (roughness 1 over white, metallic 0) is fully rough and dielectric.
                 int[] values = { 17, 61, 103, 149, 193, 239 };
                 roughnessMap(sculpt.resolve("mapped_orm.png"), 3, 2, values);
+                Path mapped = sculpt.resolve("mapped.tres");
+                Files.writeString(mapped, Files.readString(mapped)
+                      + "metallic = 0.5\nmetallic_texture = ExtResource( 2 )\nmetallic_texture_channel = 2\n");
                 Path scalar = sculpt.resolve("scalar.tres");
                 Files.writeString(scalar, Files.readString(scalar).replace("roughness = 1.0", "roughness = 0.27")
-                      .replace("roughness_texture = ExtResource( 2 )\n", ""));
+                      .replace("roughness_texture = ExtResource( 2 )\n", "")
+                      .replace("[resource]", "[ext_resource path=\"scalar_emission.png\" type=\"Texture\" id=5]\n[resource]")
+                      + "emission_enabled = true\nemission_energy_multiplier = 2.0\nemission_texture = ExtResource( 5 )\n");
+                var glow = new BufferedImage(3, 2, BufferedImage.TYPE_INT_RGB);
+                glow.setRGB(0, 0, 0xff8000);
+                javax.imageio.ImageIO.write(glow, "png", sculpt.resolve("scalar_emission.png").toFile());
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 8);
-                var material = assets.sculptRoughness(List.of("mapped", "scalar", "rough"));
+                var material = assets.finishArrays(SURFACES);
                 assertEquals(8, GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT), "Odd rows must restore unpack state");
-                assertSame(material, assets.sculptRoughness(List.of("mapped", "scalar", "rough")));
+                assertSame(material, assets.finishArrays(SURFACES));
+                // The ORM's blue channel is 0 in the mapped material: its metal is uniform, the factor times black.
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
-                      new float[] { 127 / 255f, 0, .27f, -1, 1, -1 }, material.metadata(), 1e-6f);
-                material.maps().bind();
-                assertEquals(GL30.GL_R8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
-                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "Roughness must use compact numerical storage");
-                assertEquals(3, material.maps().getWidth());
-                assertEquals(2, material.maps().getHeight());
+                      new float[] { 127 / 255f, 0, 0, 0, .27f, 0, 0, -1, 1, 0, 0, -1 }, material.surface(), 1e-6f);
+                org.junit.jupiter.api.Assertions.assertArrayEquals(
+                      new float[] { 0, 0, 0, -1, 2, 2, 2, 0, 0, 0, 0, -1 }, material.tint(), 1e-6f);
+                org.junit.jupiter.api.Assertions.assertArrayEquals(new float[9], material.glow(), 1e-6f,
+                      "Godot's default emission colour is black");
+                material.surfaces().bind();
+                assertEquals(GL30.GL_RGBA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
+                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "The finish is raw numerical data");
+                material.emission().bind();
+                assertEquals(GL30.GL_SRGB8_ALPHA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
+                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "Emission is a colour, as Godot reads it");
+                assertEquals(3, material.surfaces().getWidth());
+                assertEquals(2, material.surfaces().getHeight());
                 for (int y = 0; y < 2; y++) {
                     for (int x = 0; x < 3; x++) {
                         assertEquals(values[y * 3 + x] / 255.0,
-                              sample.read(material.maps(), (x + .5f) / 3, (y + .5f) / 2, 0, 0)[0], .0006,
+                              sample.read(material.surfaces(), (x + .5f) / 3, (y + .5f) / 2, 0, 0)[0], .0006,
                               "Raw roughness must not be sRGB-decoded, resized or row-padded");
                     }
                 }
-                assertAuthoredRoughness(material);
-                int handle = material.maps().getTextureObjectHandle();
-                assertTrue(GL11.glIsTexture(handle));
+                assertAuthoredFinish(material);
+                int surfaces = material.surfaces().getTextureObjectHandle();
+                int emission = material.emission().getTextureObjectHandle();
+                assertTrue(GL11.glIsTexture(surfaces) && GL11.glIsTexture(emission));
                 assets.dispose();
-                assertEquals(0, material.maps().getTextureObjectHandle());
-                assertFalse(GL11.glIsTexture(handle), "The asset owner releases the array");
-                var reloaded = assets.sculptRoughness(List.of("mapped", "scalar", "rough"));
+                assertEquals(0, material.surfaces().getTextureObjectHandle());
+                assertFalse(GL11.glIsTexture(surfaces) || GL11.glIsTexture(emission), "The asset owner releases the arrays");
+                var reloaded = assets.finishArrays(SURFACES);
                 org.junit.jupiter.api.Assertions.assertNotSame(material, reloaded);
-                assertEquals(103 / 255.0, sample.read(reloaded.maps(), 2.5f / 3, .25f, 0, 0)[0], .0006);
+                assertEquals(103 / 255.0, sample.read(reloaded.surfaces(), 2.5f / 3, .25f, 0, 0)[0], .0006);
             } finally {
                 assets.dispose();
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, unpack);
@@ -804,40 +824,45 @@ class GpuColorTextureSmokeTest {
     }
 
     /** Use the actual shared shader with provider metadata: an authored map, a scalar and a fully rough default. */
-    private static void assertAuthoredRoughness(GpuAssets.SculptRoughness material) {
+    private static void assertAuthoredFinish(GpuAssets.FinishArrays material) {
         var quad = GpuAtmosphere.screenQuad();
-        var shader = GpuGlsl.compile("Authored roughness contract", GpuShaderSource.read("atmosphere.vert"),
-              "#version 330 core\n#define SCULPT_MATERIAL_COUNT 3\n"
-                    + GpuShaderSource.read("terrain-roughness.glsl") + """
+        var shader = GpuGlsl.compile("Authored finish contract", GpuShaderSource.read("atmosphere.vert"),
+              "#version 330 core\n#define FINISH_COUNT 3\n" + GpuShaderSource.read("material-finish.glsl")
+                    + GpuShaderSource.read("finish-arrays.glsl") + """
                     out vec4 fragColor;
                     uniform float u_material;
                     void main() {
-                        float roughness = authoredRoughness(u_material, vec2(.5 / 3.0, .25), mat2(0.0));
-                        fragColor = vec4(vec3(roughness), 1.0);
+                        Finish finish = finishTexel(u_material, vec2(.5 / 3.0, .25), mat2(0.0));
+                        fragColor = vec4(finish.roughness, finish.emission.r / 4.0, finish.emission.g / 4.0, 1.0);
                     }
                     """);
         try {
             GpuAtmosphere.screenState();
-            material.maps().bind(0);
+            material.surfaces().bind(0);
+            material.emission().bind(1);
             shader.bind();
-            shader.setUniformi("u_roughnessLayers", 0);
-            shader.setUniform2fv("u_sculptRoughness[0]", material.metadata(), 0, material.metadata().length);
-            float[] expected = { 17 / 255f, .27f, 1 };
+            shader.setUniformi("u_surfaceLayers", 0);
+            shader.setUniformi("u_emissionLayers", 1);
+            shader.setUniform4fv("u_finishSurface[0]", material.surface(), 0, material.surface().length);
+            shader.setUniform4fv("u_finishEmission[0]", material.tint(), 0, material.tint().length);
+            shader.setUniform3fv("u_finishGlow[0]", material.glow(), 0, material.glow().length);
+            // The scalar's emission map is black but for its first texel: orange, decoded, times the energy 2.
+            float[][] expected = { { 17 / 255f, 0, 0 }, { .27f, .5f, GpuColor.linear(128 / 255f) * .5f }, { 1, 0, 0 } };
             for (int i = 0; i < expected.length; i++) {
                 shader.setUniformf("u_material", i * 2f);
                 quad.render(shader, GL20.GL_TRIANGLES);
                 var actual = BufferUtils.newByteBuffer(4);
                 Gdx.gl.glReadPixels(1, 1, 1, 1, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, actual);
                 for (int channel = 0; channel < 3; channel++) {
-                    assertEquals(expected[i] * 255, Byte.toUnsignedInt(actual.get(channel)), 1,
-                          "Actual shader: the authored map, else the scalar");
+                    assertEquals(expected[i][channel] * 255, Byte.toUnsignedInt(actual.get(channel)), 1,
+                          "Actual shader: the authored map, else the scalar; emission its map times its tint");
                 }
             }
         } finally { shader.dispose(); quad.dispose(); }
     }
 
     @Test
-    void sculptRoughnessResamplesAndRejectsIncompleteAuthoring() {
+    void finishArraysResampleAndRejectIncompleteAuthoring() {
         nativeCheck(() -> {
             var previous = megamek.common.Configuration.dataDir();
             megamek.common.Configuration.setDataDir(directory.toFile());
@@ -850,28 +875,29 @@ class GpuColorTextureSmokeTest {
                 // A smaller map takes the largest grid, as the colour arrays resample theirs.
                 var assets = new GpuAssets();
                 try {
-                    var mixed = assets.sculptRoughness(List.of("first", "second"));
-                    assertEquals(3, mixed.maps().getWidth());
-                    assertEquals(2, mixed.maps().getHeight());
-                    assertEquals(2, mixed.maps().getDepth());
+                    var mixed = assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second"));
+                    assertEquals(3, mixed.surfaces().getWidth());
+                    assertEquals(2, mixed.surfaces().getHeight());
+                    assertEquals(2, mixed.surfaces().getDepth());
+                    assertEquals(1, mixed.emission().getDepth(), "Without emission maps, one black placeholder");
                 } finally { assets.dispose(); }
                 Files.delete(sculpt.resolve("second_orm.png"));
-                assertRoughnessRejected("second_orm.png");
+                assertFinishRejected("second_orm.png");
                 roughnessMap(sculpt.resolve("second_orm.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
                 Path first = sculpt.resolve("first.tres");
                 Files.writeString(first, Files.readString(first).replace("roughness = 1.0", "roughness = 1.5"));
-                assertRoughnessRejected("Invalid sculpt roughness");
+                assertFinishRejected("Invalid roughness");
                 Files.delete(first);
-                assertRoughnessRejected("first.tres");
+                assertFinishRejected("first.tres");
             } finally { megamek.common.Configuration.setDataDir(previous); }
         });
     }
 
-    private static void assertRoughnessRejected(String message) {
+    private static void assertFinishRejected(String message) {
         var assets = new GpuAssets();
         try {
             var error = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                  () -> assets.sculptRoughness(List.of("first", "second")));
+                  () -> assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second")));
             assertTrue(error.getMessage().contains(message), error.getMessage());
         } finally { assets.dispose(); }
     }

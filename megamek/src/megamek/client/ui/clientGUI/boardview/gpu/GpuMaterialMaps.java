@@ -39,8 +39,10 @@ final class GpuMaterialMaps {
         ICE,
         /** Ambient occlusion, roughness, thin-tissue transmission (subsurface scattering): a glTF occlusion map. */
         OCCLUSION,
-        /** glTF metallic-roughness: G roughness, B metallic. */
+        /** A model's finish: subsurface scattering in R, then roughness and metallic in G and B, as glTF packs them. */
         METALLIC_ROUGHNESS,
+        /** Godot's heightmap in R, white high (heightmap_flip_texture inverts the image): a model's parallax. */
+        HEIGHT,
         /** Linear emission RGB with exposed-melt coverage ({@code texture_coverage}) in A: molten lava. */
         MOLTEN_HEAT,
         /** Heat (emission) in R, crack glow ({@code texture_glow}) in A: solid crust. */
@@ -49,8 +51,8 @@ final class GpuMaterialMaps {
 
     /** Mud and scorch keep roughness in their normal map's blue channel; their shaders rebuild the normal's Z. */
     static final Set<String> PACKED_ROUGHNESS = Set.of("terrain/surfaces/mud", "terrain/surfaces/scorched");
-    /** The glTF metallic-roughness role, which libGDX's ModelTexture usages lack. */
-    static final int METALLIC_ROUGHNESS_USAGE = -1;
+    /** The glTF metallic-roughness role and the heightmap's, which libGDX's ModelTexture usages lack. */
+    static final int METALLIC_ROUGHNESS_USAGE = -1, HEIGHT_USAGE = -2;
 
     private GpuMaterialMaps() { }
 
@@ -83,6 +85,92 @@ final class GpuMaterialMaps {
         return relative.endsWith(".tres") ? relative.substring(0, relative.length() - ".tres".length()) : relative;
     }
 
+    /** The map a model's finish (roughness, metallic, scattering) takes its grid from, or null when all are uniform. */
+    static File finishMap(GodotMaterial material) {
+        if (material.roughnessMap() != null) { return material.roughnessMap(); }
+        if (material.metallicMap() != null) { return material.metallicMap(); }
+        return material.subsurface();
+    }
+
+    /**
+     * The board material a model's base colour image is the albedo of ({@code <name>_albedo.png} beside
+     * {@code <name>.tres} in {@code textures}), or null.
+     */
+    static GodotMaterial boardMaterial(File image, File textures) {
+        File path = image.getAbsoluteFile();
+        if (!path.toPath().normalize().startsWith(textures.toPath().toAbsolutePath().normalize())) { return null; }
+        String file = path.getName();
+        int split = file.lastIndexOf('_');
+        if (split <= 0 || !file.endsWith(".png")) { return null; }
+        File resource = new File(path.getParentFile(), file.substring(0, split) + ".tres");
+        if (!resource.isFile()) { return null; }
+        GodotMaterial material = GodotMaterial.read(resource, textures);
+        return same(path, material.albedo()) ? material : null;
+    }
+
+    /**
+     * A material's emission as Godot's StandardMaterial3D reads it, where it is enabled: (colour + map) times energy
+     * under the add operator, colour times map times energy under multiply, the colour decoded from sRGB. {@code glow}
+     * is the constant part and {@code tint} the map's factor; a uniform map joins the glow, leaving {@code map} null.
+     */
+    record Emission(float[] tint, float[] glow, File map) {
+        static final Emission NONE = new Emission(new float[3], new float[3], null);
+
+        boolean glows() { return map != null || glow[0] > 0 || glow[1] > 0 || glow[2] > 0; }
+    }
+
+    static Emission emission(GodotMaterial material) {
+        if (!material.emissionEnabled()) { return Emission.NONE; }
+        float energy = material.emissionEnergy();
+        if (energy < 0) { throw new IllegalArgumentException("Emission energy must be nonnegative: " + material.file); }
+        float[] color = material.emissionColor(), tint = new float[3], glow = new float[3];
+        boolean add = material.emissionOperator() == GodotMaterial.EMISSION_ADD;
+        for (int index = 0; index < 3; index++) {
+            float linear = GpuColor.linear(color[index]);
+            glow[index] = add ? linear * energy : 0;
+            tint[index] = add ? energy : linear * energy;
+        }
+        File map = material.emission();
+        if (map != null) {
+            int[] uniform = uniformColor(map);
+            if (uniform != null) {
+                for (int index = 0; index < 3; index++) { glow[index] += tint[index] * GpuColor.linear(uniform[index] / 255f); }
+                map = null;
+            }
+        }
+        return new Emission(tint, glow, map);
+    }
+
+    /**
+     * A board material's finish for a draw of its own (a model's, a road's, a tile's), as Godot's StandardMaterial3D
+     * reads it: roughness, metallic and subsurface scattering factors over the finish map ({@link Layout#METALLIC_ROUGHNESS},
+     * which carries the factors itself, so they are 1 where it exists), the emission map's tint and constant glow
+     * ({@link #emission}; without emission of its own, a tint of 1 and no glow leave a model's glTF emission as it is),
+     * and the heightmap's parallax: its depth along U and V in UV units (Godot's heightmap_scale / 100, negative where
+     * Godot flips the tangent or binormal) and the deep parallax's layer range, 0 to 0 for a single step.
+     */
+    record ModelFinish(float roughness, float metallic, float scatter, File map, float[] tint, float[] glow, File emission,
+          File heightmap, float depthU, float depthV, int minimumLayers, int maximumLayers) { }
+
+    static ModelFinish modelFinish(GodotMaterial material) {
+        float scatter = material.subsurfaceEnabled() ? material.subsurfaceStrength() : 0;
+        if (scatter < 0 || scatter > 1) {
+            throw new IllegalArgumentException("Invalid subsurface scattering strength: " + material.file);
+        }
+        File map = finishMap(material);
+        boolean mapped = map != null;
+        var emission = emission(material);
+        boolean glows = material.emissionEnabled();
+        File heightmap = material.kind == GodotMaterial.Kind.STANDARD ? material.heightmap() : null;
+        float depth = material.heightmapScale() / 100;
+        boolean deep = material.flag("heightmap_deep_parallax", false);
+        return new ModelFinish(mapped ? 1 : material.roughness(), mapped ? 1 : material.metallic(), mapped ? 1 : scatter, map,
+              glows ? emission.tint() : new float[] { 1, 1, 1 }, glows ? emission.glow() : new float[3], emission.map(),
+              heightmap, material.flag("heightmap_flip_tangent", false) ? -depth : depth,
+              material.flag("heightmap_flip_binormal", false) ? -depth : depth,
+              deep ? material.integer("heightmap_min_layers", 8) : 0, deep ? material.integer("heightmap_max_layers", 32) : 0);
+    }
+
     /** A model's image as one of a board material's maps: the pixels of its GPU layout, and its cache key suffix. */
     record ModelMap(Supplier<Pixmap> pixels, String suffix) { }
 
@@ -106,8 +194,8 @@ final class GpuMaterialMaps {
             case ModelTexture.USAGE_NORMAL -> same(path, material.normal()) ? normalLayout(name) : null;
             case ModelTexture.USAGE_AMBIENT -> same(path, material.occlusion()) || same(path, material.roughnessMap())
                   ? Layout.OCCLUSION : null;
-            case METALLIC_ROUGHNESS_USAGE -> same(path, material.roughnessMap()) || same(path, material.metallicMap())
-                  ? Layout.METALLIC_ROUGHNESS : null;
+            case METALLIC_ROUGHNESS_USAGE -> same(path, finishMap(material)) ? Layout.METALLIC_ROUGHNESS : null;
+            case HEIGHT_USAGE -> same(path, material.heightmap()) ? Layout.HEIGHT : null;
             default -> null;
         };
         if (layout == null) { return null; }
@@ -143,9 +231,10 @@ final class GpuMaterialMaps {
         return switch (layout) {
             case COLOR, COLOR_HEIGHT -> material.albedo();
             case NORMAL, NORMAL_OCCLUSION, NORMAL_ROUGHNESS -> required(material, material.normal(), "normal map");
-            case RELIEF, ICE -> required(material, material.heightmap(), "heightmap");
-            case OCCLUSION, METALLIC_ROUGHNESS -> material.occlusion() != null ? material.occlusion()
+            case RELIEF, ICE, HEIGHT -> required(material, material.heightmap(), "heightmap");
+            case OCCLUSION -> material.occlusion() != null ? material.occlusion()
                   : required(material, material.roughnessMap(), "ORM map");
+            case METALLIC_ROUGHNESS -> required(material, finishMap(material), "roughness, metallic or scattering map");
             case MOLTEN_HEAT, CRUST_HEAT -> required(material, material.emission(), "emission map");
         };
     }
@@ -161,9 +250,14 @@ final class GpuMaterialMaps {
             case NORMAL_OCCLUSION -> maps.add(material.occlusion());
             case NORMAL_ROUGHNESS -> { maps.add(material.occlusion()); maps.add(material.roughnessMap()); }
             case RELIEF -> { maps.add(material.roughnessMap()); maps.add(material.occlusion()); }
+            case HEIGHT -> { }
             case ICE -> { maps.add(material.roughnessMap()); maps.add(material.subsurface()); maps.add(material.extra("cracks")); }
             case OCCLUSION -> { maps.add(material.roughnessMap()); maps.add(material.subsurface()); }
-            case METALLIC_ROUGHNESS -> { maps.add(material.roughnessMap()); maps.add(material.metallicMap()); }
+            case METALLIC_ROUGHNESS -> {
+                maps.add(material.roughnessMap());
+                maps.add(material.metallicMap());
+                maps.add(material.subsurface());
+            }
             case MOLTEN_HEAT -> maps.add(material.extra("coverage"));
             case CRUST_HEAT -> maps.add(material.extra("glow"));
         }
@@ -179,6 +273,27 @@ final class GpuMaterialMaps {
         byte[] values = new byte[decoded.width * decoded.height];
         for (int pixel = 0; pixel < values.length; pixel++) { values[pixel] = (byte) decoded.value(pixel, channel); }
         return new Channel(values, decoded.width, decoded.height);
+    }
+
+    /** A colour map's mean, decoded from sRGB: the linear RGB it averages to. */
+    static float[] meanColor(File map) {
+        Map8 decoded = Map8.decode(map);
+        double[] sum = new double[3];
+        for (int at = 0; at < decoded.rgba.length; at += 4) {
+            for (int channel = 0; channel < 3; channel++) { sum[channel] += GpuColor.linear((decoded.rgba[at + channel] & 255) / 255f); }
+        }
+        int texels = decoded.rgba.length / 4;
+        return new float[] { (float) (sum[0] / texels), (float) (sum[1] / texels), (float) (sum[2] / texels) };
+    }
+
+    /** A map's RGB where every texel shares it, or null where the map varies. */
+    static int[] uniformColor(File map) {
+        Map8 decoded = Map8.decode(map);
+        byte[] rgba = decoded.rgba;
+        for (int at = 4; at < rgba.length; at += 4) {
+            if (rgba[at] != rgba[0] || rgba[at + 1] != rgba[1] || rgba[at + 2] != rgba[2]) { return null; }
+        }
+        return new int[] { rgba[0] & 255, rgba[1] & 255, rgba[2] & 255 };
     }
 
     private static File required(GodotMaterial material, File map, String what) {
@@ -287,6 +402,13 @@ final class GpuMaterialMaps {
                               : tinted ? Math.round(primary.value(pixel, 3) * tint[3]) : primary.value(pixel, 3));
                     }
                 }
+                case HEIGHT -> {
+                    for (int pixel = 0, at = 0; pixel < width * height; pixel++, at += 4) {
+                        byte value = (byte) height(primary, pixel);
+                        out[at] = out[at + 1] = out[at + 2] = value;
+                        out[at + 3] = (byte) 255;
+                    }
+                }
                 case NORMAL, NORMAL_OCCLUSION, NORMAL_ROUGHNESS -> {
                     Surface surface = new Surface(this);
                     float scale = material.normalScale();
@@ -321,7 +443,7 @@ final class GpuMaterialMaps {
                     Surface surface = new Surface(this);
                     boolean occlusion = layout == Layout.OCCLUSION;
                     for (int pixel = 0, at = 0; pixel < width * height; pixel++, at += 4) {
-                        out[at] = (byte) (occlusion ? surface.occlusion(pixel) : 255);
+                        out[at] = (byte) (occlusion ? surface.occlusion(pixel) : surface.subsurface(pixel));
                         out[at + 1] = (byte) surface.roughness(pixel);
                         out[at + 2] = (byte) (occlusion ? surface.subsurface(pixel) : surface.metallic(pixel));
                         out[at + 3] = (byte) 255;
@@ -368,7 +490,7 @@ final class GpuMaterialMaps {
             metallicChannel = material.metallicChannel();
             roughnessFactor = material.roughness();
             metallicFactor = material.metallic();
-            subsurfaceStrength = material.subsurfaceStrength();
+            subsurfaceStrength = material.subsurfaceEnabled() ? material.subsurfaceStrength() : 0;
         }
 
         int occlusion(int pixel) {

@@ -11,6 +11,22 @@ uniform sampler2D u_diffuseTexture;
 uniform sampler2D u_normalTexture;
 uniform float u_normalMaps;
 #endif
+#ifdef ambientTextureFlag
+uniform sampler2D u_ambientTexture;
+#endif
+#ifdef modelSurfaceFlag
+// The GLB material's finish (GpuModelMaterial): a board material's .tres, or the GLB's own glTF material.
+uniform vec4 u_modelSurface;
+uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
+uniform vec3 u_modelEmission, u_modelGlow;
+uniform float u_modelBoard;
+#endif
+#ifdef emissiveTextureFlag
+uniform sampler2D u_emissiveTexture;
+#endif
+#ifdef emissiveColorFlag
+uniform vec4 u_emissiveColor;
+#endif
 uniform float u_groundResponse;
 // ground-surface-functions
 
@@ -25,5 +41,25 @@ void main() {
     albedo = wetAlbedo(albedo, groundAbsorption(wet, response));
     float puddle = groundPuddle(wet, response);
     groundFilm(normal, puddle);
-    fragColor = vec4(groundLighting(albedo, normal, geometric, wet, response, puddle, -1.0, 1.0), 1.0);
+    // A board material's finish; the GLB's own material keeps the ground's matte response, as it is ground.
+    Finish finish = Finish(-1.0, 0.0, 0.0, vec3(0.0));
+#if defined(emissiveTextureFlag) && defined(emissiveColorFlag)
+    finish.emission = texture(u_emissiveTexture, v_diffuseUV).rgb * u_emissiveColor.rgb;
+#elif defined(emissiveTextureFlag)
+    finish.emission = texture(u_emissiveTexture, v_diffuseUV).rgb;
+#elif defined(emissiveColorFlag)
+    finish.emission = u_emissiveColor.rgb;
+#endif
+#ifdef modelSurfaceFlag
+    if (u_modelBoard > .5) {
+        vec3 map = u_modelSurface.w > .5 ? texture(u_modelSurfaceMap, v_diffuseUV).rgb : vec3(1.0);
+        finish = Finish(u_modelSurface.x * map.g, u_modelSurface.y * map.b, u_modelSurface.z * map.r, finish.emission);
+    }
+    finish.emission = finish.emission * u_modelEmission + u_modelGlow;
+#endif
+    float occlusion = 1.0;
+#ifdef ambientTextureFlag
+    occlusion = texture(u_ambientTexture, v_diffuseUV).r;
+#endif
+    fragColor = vec4(groundLighting(albedo, normal, geometric, wet, response, puddle, finish, occlusion), 1.0);
 }

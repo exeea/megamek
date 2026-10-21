@@ -135,7 +135,7 @@ class GpuMaterialLodSmokeTest {
                   "The probe must read the actual completed ordinary material: " + anchor);
         }
         sculpt = sculpt.replace(begin, begin + "\n    vec3 reviewBase = vec3(0.0);\n")
-              .replace(boundary, "        reviewBase = vec3(roughness, materialHeight, grass);\n" + boundary)
+              .replace(boundary, "        reviewBase = vec3(finish.roughness, materialHeight, grass);\n" + boundary)
               .replace(output, "fragColor = natural && (ground || cliff)"
                     + " ? vec4(reviewBase, ground ? .25 : .5) : vec4(0.0, 0.0, 0.0, 1.0);");
         var changed = manager.apply(Map.of("terrain-sculpt.frag", sculpt));

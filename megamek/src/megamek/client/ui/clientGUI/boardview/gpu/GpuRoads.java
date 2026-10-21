@@ -81,12 +81,23 @@ final class GpuRoads {
             return transition != 0 ? transition : Float.compare(lift, ((Surface) other).lift);
         }
     }
+    /** A road material's own draw: its surface map, and its place in {@link #MATERIALS}, which finds its finish. */
     static final class Maps extends TextureAttribute {
         static final long TYPE = register("roadMaterialMaps");
         static { TextureAttribute.Mask |= TYPE; }
-        Maps(Texture texture) { super(TYPE, texture); }
+        final int material;
+        Maps(Texture texture, int material) {
+            super(TYPE, texture);
+            this.material = material;
+        }
         @Override
-        public Maps copy() { return new Maps(textureDescription.texture); }
+        public Maps copy() { return new Maps(textureDescription.texture, material); }
+        @Override public int hashCode() { return 31 * super.hashCode() + material; }
+        @Override
+        public int compareTo(Attribute other) {
+            int order = super.compareTo(other);
+            return order != 0 || type != other.type ? order : Integer.compare(material, ((Maps) other).material);
+        }
     }
     static final class Soil extends FloatAttribute {
         static final long TYPE = register("roadSoil");
