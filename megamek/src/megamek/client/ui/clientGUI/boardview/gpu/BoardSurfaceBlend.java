@@ -169,17 +169,18 @@ public final class BoardSurfaceBlend {
               && !tile.building();
     }
 
+    /** Land ice is a coat over its ground (GpuIceShader), so that ground blends like any other. */
     private static boolean blendable(BoardScene.Tile tile) {
         return tile != null && !tile.ultraSublevel() && !tile.backdrop().present() && tile.detailedGround()
-              && (!tile.liquid().present() || tile.liquid().volcanic())
-              && !tile.frozen() && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && !tile.building();
+              && (!tile.liquid().present() || tile.liquid().volcanic() && !tile.frozen())
+              && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && !tile.building();
     }
 
     /** Uniform interiors retain the ordinary family material and incur no extra maps or vertex attributes. */
     static boolean boundary(BoardScene scene, BoardScene.Tile tile) {
         if (tile == null || tile.ultraSublevel() || tile.backdrop().present() || !tile.detailedGround()) { return false; }
         Cover own = cover(tile);
-        // A building or ice sheet blocks neighbouring cover, but cannot erase its own authored ground treatment.
+        // A building or lake ice blocks neighbouring cover, but cannot erase its own authored ground treatment.
         if (!own.equals(solid(family(tile)))) { return true; }
         if (!blendable(tile)) { return false; }
         for (int direction = 0; direction < 6; direction++) {
