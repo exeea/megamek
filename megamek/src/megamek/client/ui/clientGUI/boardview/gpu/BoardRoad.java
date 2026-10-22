@@ -202,7 +202,8 @@ final class BoardRoad {
         List<BoardRoad> result = new ArrayList<>();
         for (int direction = -1; direction < 6; direction++) {
             var source = direction < 0 ? tile : scene.neighbor(tile, direction);
-            if (source == null || source.elevation() != tile.elevation()
+            // A graded road's ramp and corridor reach a neighbour of another level too; drawn roads keep to their level.
+            if (source == null || !clearance && source.elevation() != tile.elevation()
                   || !(clearance ? carriageway(source) : rendered(source))) { continue; }
             // Only an actual apron entrance ends at concrete. Through-roads and roundabouts keep their full width
             // where their sides cross a fitted concrete edge, including concrete carrying another road.

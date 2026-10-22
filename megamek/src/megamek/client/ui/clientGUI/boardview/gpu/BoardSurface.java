@@ -2314,15 +2314,20 @@ final class BoardSurface {
 
     /** The carriageways that may reserve ground here: this hex's own, then its neighbours'. */
     private List<BoardRoadGrade> grades(boolean corners) {
+        return grades(scene, tile, corners, !columns);
+    }
+
+    private static List<BoardRoadGrade> grades(BoardScene scene, BoardScene.Tile tile, boolean corners, boolean eased) {
         List<BoardRoadGrade> grades = new ArrayList<>();
-        var own = BoardRoadGrade.of(scene, tile, !columns);
+        var own = BoardRoadGrade.of(scene, tile, eased);
         if (own != null) { grades.add(own); }
         for (int d = 0; d < 6; d++) {
             var next = scene.neighbor(tile, d);
-            // Only arms along an edge that ends at one of this hex's corners can reach past it into this hex.
-            int arms = corners ? 1 << (d + 2) % 6 | 1 << (d + 4) % 6 : 63;
-            if (next == null || (next.wayExits() & arms) == 0) { continue; }
-            var grade = BoardRoadGrade.of(scene, next, !columns);
+            // Only arms along an edge that ends at one of this hex's corners can reach past it into this hex. Any other
+            // reserved ground beside this hex counts, a roadless apron's too, where this hex's steps reach into it.
+            int arms = 1 << (d + 2) % 6 | 1 << (d + 4) % 6;
+            if (next == null || corners && (next.wayExits() & arms) == 0) { continue; }
+            var grade = BoardRoadGrade.of(scene, next, eased);
             if (grade != null) { grades.add(grade); }
         }
         // One order on every hex, so overlapping reserved ground takes the same grade on both sides of an edge.
@@ -2331,11 +2336,12 @@ final class BoardSurface {
         return grades;
     }
 
-    /** The ground this hex owns: its lattice outline. */
-    private Area cell() {
+    /** The ground a hex owns: its lattice outline. */
+    private static Area cell(Coords coords) {
         Path2D.Float outline = new Path2D.Float();
         for (int k = 0; k < 6; k++) {
-            if (k == 0) { outline.moveTo(corners[k].x, corners[k].y); } else { outline.lineTo(corners[k].x, corners[k].y); }
+            Vector3 corner = BoardGeometry.corner(coords, 0, k);
+            if (k == 0) { outline.moveTo(corner.x, corner.y); } else { outline.lineTo(corner.x, corner.y); }
         }
         outline.closePath();
         return new Area(outline);
@@ -2361,24 +2367,26 @@ final class BoardSurface {
         }
         if (tile.liquid().present()) {
             bank = null;
+            // Its shore can reach into a road's reserved ground beside it, and gives way there as any natural top does;
+            // its bed and water stay as they are.
+            var grades = grades(false);
+            if (!grades.isEmpty() && natural()) {
+                var cut = new BoardRoadCut(new Area(), cell(tile.coords()), center.z, grades, boardEdges(scene, tile));
+                List<Face> shore = faces.stream().filter(face -> face.finish() == Finish.TOP).toList();
+                List<Face> kept = cut.clip(shore, relief, cutFaces(retainingWalls), cutFaces(pouredWalls), roadAround(),
+                      null, true);
+                faces.removeIf(face -> face.finish() == Finish.TOP);
+                faces.addAll(kept);
+            }
             return;
         }
-        var grades = grades(false);
-        if (grades.isEmpty()) { return; }
-        boolean level = grades.stream().noneMatch(grade -> grade.graded()
-              || grade.tile().elevation() != tile.elevation());
-        for (int d = 0; level && d < 6; d++) {
-            var next = scene.neighbor(tile, d);
-            level = next == null || next.elevation() == tile.elevation() && !next.liquid().present();
-        }
-        if (level) { return; }
-        var cut = new BoardRoadCut(new Area(), cell(), center.z, grades, boardEdges());
+        var cut = roadCut(scene, tile);
+        if (cut == null) { return; }
         BoardRoadCut.WallBuilder wall = cutFaces(retainingWalls);
         List<Face> road = new ArrayList<>();
         cut.mesh(road, wall);
-        if (natural()) { cut.meet(road, faces.stream().filter(face -> face.finish() == Finish.TOP).toList(), List.of(), cell()); }
         reservedRoad = List.copyOf(road);
-        List<Face> kept = cut.clip(faces, relief, wall, cutFaces(pouredWalls), road, bank, natural());
+        List<Face> kept = cut.clip(faces, relief, wall, cutFaces(pouredWalls), roadAround(), bank, natural());
         pouredTop = pouredWalls.size();
         faces.clear();
         faces.addAll(kept);
@@ -2389,8 +2397,49 @@ final class BoardSurface {
         }
     }
 
-    /** The edges of this hex that are the board's, as a bit mask by edge: the board's cut stands under them. */
-    private int boardEdges() {
+    /**
+     * The cut reserving a dry Enhanced hex's road ground (#reserveRoads); null where none leaves the top's level, which
+     * level roads on level ground keep.
+     */
+    private static BoardRoadCut roadCut(BoardScene scene, BoardScene.Tile tile) {
+        if (tile.liquid().present() || tile.ultraSublevel() || tile.backdrop().present()) { return null; }
+        var grades = grades(scene, tile, false, true);
+        if (grades.isEmpty()) { return null; }
+        boolean level = grades.stream().noneMatch(grade -> grade.graded()
+              || grade.tile().elevation() != tile.elevation());
+        for (int d = 0; level && d < 6; d++) {
+            var next = scene.neighbor(tile, d);
+            level = next == null || next.elevation() == tile.elevation() && !next.liquid().present();
+        }
+        if (level) { return null; }
+        return new BoardRoadCut(new Area(), cell(tile.coords()), BoardGeometry.center(tile.coords(), tile.groundLevel()).z,
+              grades, boardEdges(scene, tile));
+    }
+
+    /**
+     * The road surfaces this hex's ground meets: its own and its neighbours', as they emit them, so the ground is cut
+     * exactly where it meets them. Each is meshed once per scene snapshot (BoardRoadGrade#roads).
+     */
+    private List<Face> roadAround() {
+        List<Face> around = new ArrayList<>(road(scene, tile));
+        for (int d = 0; d < 6; d++) { around.addAll(road(scene, scene.neighbor(tile, d))); }
+        return around;
+    }
+
+    /** The road surface a dry hex emits (#reserveRoads), for sampling only; empty where it emits none. */
+    static List<Face> road(BoardScene scene, BoardScene.Tile tile) {
+        if (tile == null) { return List.of(); }
+        return BoardRoadGrade.roads(scene).computeIfAbsent(tile.coords(), coords -> {
+            var cut = roadCut(scene, tile);
+            if (cut == null) { return List.of(); }
+            List<Face> road = new ArrayList<>();
+            cut.mesh(road, (topA, lowA, topB, lowB, fx, fy) -> { });
+            return List.copyOf(road);
+        });
+    }
+
+    /** The edges of a hex that are the board's, as a bit mask by edge: the board's cut stands under them. */
+    private static int boardEdges(BoardScene scene, BoardScene.Tile tile) {
         int edges = 0;
         for (int e = 0; e < 6; e++) {
             if (scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(e))) == null) { edges |= 1 << e; }
@@ -2411,17 +2460,11 @@ final class BoardSurface {
         if (bank != null && natural()) { walls = bank.conform(walls, floor); }
         var grades = grades(false);
         if (grades.isEmpty()) { return walls; }
-        var cut = new BoardRoadCut(new Area(), cell(), center.z, grades, boardEdges());
-        // The road's edge meets the slopes beside it too, where no top was cut against it already.
-        if (natural()) {
-            var road = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Face, Boolean>());
-            road.addAll(reservedRoad);
-            cut.meet(reservedRoad, walls, groundFaces().stream().filter(face -> !road.contains(face)).toList(), cell());
-        }
+        var cut = new BoardRoadCut(new Area(), cell(tile.coords()), center.z, grades, boardEdges(scene, tile));
         List<Face> curtains = new ArrayList<>();
         pouredWalls.subList(pouredTop, pouredWalls.size()).clear();
         List<Face> result = new ArrayList<>(cut.clip(walls, relief, cutFaces(curtains), cutFaces(pouredWalls),
-              reservedRoad, bank, natural()));
+              roadAround(), bank, natural()));
         result.addAll(curtains);
         containmentWalls.clear();
         if (natural() && BoardRelief.tuning().containmentWalls()) {
@@ -2440,8 +2483,8 @@ final class BoardSurface {
     private boolean reservedTop() {
         var grades = grades(true);
         if (grades.isEmpty()) { return false; }
-        Area cell = cell();
-        var cut = new BoardRoadCut(cell, cell, center.z, grades, boardEdges());
+        Area cell = cell(tile.coords());
+        var cut = new BoardRoadCut(cell, cell, center.z, grades, boardEdges(scene, tile));
         if (!cut.reserves() || !cut.graded()) { return false; }
         cut.mesh(faces, (topA, lowA, topB, lowB, fx, fy) -> relief.cutWall(topA, lowA, topB, lowB, fx, fy, retainingWalls));
         roadCut = true;

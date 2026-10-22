@@ -418,7 +418,7 @@ class BoardRoadSlopeTest {
         assertClosed(scene, at);
     }
 
-    private record Segment(Vector3 a, Vector3 b, Coords owner, BoardSurface.Finish finish, int side) { }
+    private record Segment(Vector3 a, Vector3 b, Coords owner, BoardSurface.Face face) { }
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2 })
@@ -468,12 +468,16 @@ class BoardRoadSlopeTest {
         for (var tile : scene.tiles()) {
             if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
         }
+        float level = BoardGeometry.level();
         Map<String, List<Segment>> edges = new HashMap<>();
+        List<BoardSurface.Face> all = new ArrayList<>(), road = new ArrayList<>();
         for (var surface : surfaces.values()) {
+            road.addAll(BoardSurface.road(scene, surface.tile));
             var faces = new ArrayList<>(surface.groundFaces());
             faces.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
             for (var face : faces) {
                 if (face.finish() == BoardSurface.Finish.DRESSING || face.finish() == BoardSurface.Finish.OUTCROP) { continue; }
+                all.add(face);
                 var points = List.of(face.a(), face.b(), face.c());
                 for (int i = 0; i < 3; i++) {
                     var a = points.get(i);
@@ -482,8 +486,7 @@ class BoardRoadSlopeTest {
                     // Retain short T-junction segments for coverage, excluding only a keyed vertex's self-edge.
                     if (first.equals(second)) { continue; }
                     String key = first.compareTo(second) < 0 ? first + "/" + second : second + "/" + first;
-                    edges.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Segment(a, b, surface.tile.coords(),
-                          face.finish(), face.landEdge()));
+                    edges.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Segment(a, b, surface.tile.coords(), face));
                 }
             }
         }
@@ -501,10 +504,47 @@ class BoardRoadSlopeTest {
                     float u = Math.clamp(new Vector3(p).sub(other.a()).dot(delta) / delta.len2(), 0, 1);
                     if (p.dst2(new Vector3(other.a()).mulAdd(delta, u)) < .0001f) { covered = true; break; }
                 }
+                // An edge lying on another face is closed by it (a T junction with its interior); one under a road's
+                // surface is covered by the road, whose edge is closed down to the ground.
+                for (var face : all) {
+                    if (covered) { break; }
+                    covered = face != edge.face() && onFace(p, face) < .01f;
+                }
+                covered |= p.z <= over(road, p) + .01f * level;
                 if (!covered && gaps.size() < 12) { gaps.add(p + " on " + edge); }
             }
         }
         assertTrue(gaps.isEmpty(), lod + " open terrain boundaries near " + at + ": " + gaps);
+    }
+
+    /** Distance from a point to a face along its normal, or infinity where the point lies outside the face. */
+    private static float onFace(Vector3 p, BoardSurface.Face face) {
+        var ab = new Vector3(face.b()).sub(face.a());
+        var ac = new Vector3(face.c()).sub(face.a());
+        var normal = new Vector3(ab).crs(ac);
+        if (normal.len2() < 1e-12f) { return Float.POSITIVE_INFINITY; }
+        normal.nor();
+        float distance = new Vector3(p).sub(face.a()).dot(normal);
+        var aq = new Vector3(p).mulAdd(normal, -distance).sub(face.a());
+        float d00 = ab.dot(ab), d01 = ab.dot(ac), d11 = ac.dot(ac), d20 = aq.dot(ab), d21 = aq.dot(ac);
+        float den = d00 * d11 - d01 * d01;
+        float v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den;
+        return v >= -1e-4f && w >= -1e-4f && v + w <= 1 + 1e-4f ? Math.abs(distance) : Float.POSITIVE_INFINITY;
+    }
+
+    /** The road's height over a point inside its plan, a little away from its edge; NaN elsewhere. */
+    private static float over(List<BoardSurface.Face> road, Vector3 p) {
+        float margin = .05f * BoardGeometry.hexScale(), height = Float.NaN;
+        for (float[] offset : new float[][] { { 0, 0 }, { margin, 0 }, { -margin, 0 }, { 0, margin }, { 0, -margin } }) {
+            float highest = Float.NaN;
+            for (var face : road) {
+                float h = face.height(p.x + offset[0], p.y + offset[1]);
+                if (Float.isFinite(h) && !(h <= highest)) { highest = h; }
+            }
+            if (Float.isNaN(highest)) { return Float.NaN; }
+            if (offset[0] == 0 && offset[1] == 0) { height = highest; }
+        }
+        return height;
     }
 
     private static String key(Vector3 p) {

@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,7 +43,13 @@ final class BoardRoadCut {
     private interface Triangles { void triangle(Point a, Point b, Point c, int source); }
 
     /** The sweep's segments, split at every crossing, and the rows they leave. */
-    private record Sweep(List<Segment> segments, List<Float> rows) { }
+    private record Sweep(List<Segment> segments, List<Float> rows, List<Part> parts) { }
+
+    /** A part of a sweep row between two segments, all of one source, as classified at its middle. */
+    private record Part(float bottom, float top, Segment left, Segment right, int source) {
+        float x() { return (left.x(y()) + right.x(y())) / 2; }
+        float y() { return (bottom + top) / 2; }
+    }
 
     private static final int OUTSIDE = -2, TOP = -1;
 
@@ -56,6 +63,8 @@ final class BoardRoadCut {
     private final List<Piece> pieces = new ArrayList<>();
     private final List<Segment> segments = new ArrayList<>();
     private final Area reserved = new Area();
+    /** The outline of all the ground the grades reserve: the road's edge, where natural ground meets it. */
+    private final List<Segment> edge = new ArrayList<>();
     private final List<BoardRoadGrade> grades;
     /** Snapping and probing tolerance: well above the float spacing of the board's coordinates here. */
     private final float epsilon;
@@ -94,12 +103,83 @@ final class BoardRoadCut {
             claimed.add(region);
             pieces.add(new Piece(region, grade));
         }
+        // A hex owning no reserved piece still meets the road's edge, where its slopes reach into the neighbours'.
+        outline(reserved, edge, epsilon);
         if (pieces.isEmpty()) { return; }
         outline(top, segments, epsilon);
         for (Piece piece : pieces) {
-            outline(piece.area(), segments, epsilon);
+            // The road's edge has a vertex where it crosses the world's grid, as the ground cut along it does
+            // (BoardRoadBank splits the ground there), so the two meet vertex for vertex.
+            List<Segment> sides = new ArrayList<>();
+            outline(piece.area(), sides, epsilon);
+            for (Segment side : sides) { stations(side, segments); }
             for (float[] line : piece.grade().creases()) { crease(piece.area(), line); }
         }
+    }
+
+    /** A segment split where it crosses the world's grid (BoardRoadBank#GRID), into {@code into}. */
+    private void stations(Segment s, List<Segment> into) {
+        List<Float> cuts = crossings(s.ax(), s.ay(), s.bx(), s.by());
+        float px = s.ax(), py = s.ay();
+        for (float t : cuts) {
+            float qx = s.ax() + (s.bx() - s.ax()) * t, qy = s.ay() + (s.by() - s.ay()) * t;
+            if (Math.hypot(qx - px, qy - py) > epsilon && Math.hypot(s.bx() - qx, s.by() - qy) > epsilon) {
+                into.add(new Segment(px, py, qx, qy));
+                px = qx;
+                py = qy;
+            }
+        }
+        into.add(new Segment(px, py, s.bx(), s.by()));
+    }
+
+    /**
+     * The road's height at a point of its edge, the outline of all reserved ground: that of the first grade, in the order
+     * every hex sorts them, whose own outline passes there, as the first claims the ground where grades overlap; so every
+     * hex finds the same. NaN off the edge.
+     */
+    private float edgeHeight(float x, float y) {
+        for (BoardRoadGrade grade : grades) {
+            if (onOutline(grade, x, y)) { return grade.height(x, y); }
+        }
+        return Float.NaN;
+    }
+
+    private boolean onOutline(BoardRoadGrade grade, float x, float y) {
+        float[] o = grade.outline();
+        for (int i = 0; i < o.length; i += 4) {
+            if (BoardRelief.distance(x, y, o[i], o[i + 1], o[i + 2], o[i + 3]) < 4 * epsilon) { return true; }
+        }
+        return false;
+    }
+
+    /** Whether a straight run from p to q lies along the road's edge. */
+    private boolean alongEdge(Vector3 p, Vector3 q) {
+        return onEdge(p.x, p.y) && onEdge(q.x, q.y) && onEdge((p.x + q.x) / 2, (p.y + q.y) / 2);
+    }
+
+    /** Whether a point lies on the road's edge. */
+    private boolean onEdge(float x, float y) {
+        float tolerance = 2 * epsilon;
+        for (Segment s : edge) {
+            if (BoardRelief.distance(x, y, s.ax(), s.ay(), s.bx(), s.by()) < tolerance) { return true; }
+        }
+        return false;
+    }
+
+    /** Where a straight run from a to b crosses the world's grid planes, as sorted parameters inside it. */
+    private static List<Float> crossings(float ax, float ay, float bx, float by) {
+        float grid = BoardRoadBank.GRID * BoardGeometry.hexScale();
+        List<Float> cuts = new ArrayList<>();
+        for (int axis = 0; axis < 2; axis++) {
+            float a = axis == 0 ? ax : ay, b = axis == 0 ? bx : by;
+            if (a == b) { continue; }
+            for (long k = (long) Math.ceil(Math.min(a, b) / grid); k * grid <= Math.max(a, b); k++) {
+                float t = (k * grid - a) / (b - a);
+                if (t > 0 && t < 1) { cuts.add(t); }
+            }
+        }
+        cuts.sort(null);
+        return cuts;
     }
 
     /** Whether any carriageway reserves ground in this hex. */
@@ -250,8 +330,6 @@ final class BoardRoadCut {
           WallBuilder concrete, List<BoardSurface.Face> road, BoardRoadBank bank, boolean natural) {
         Area region = region();
         Rectangle2D bounds = region.getBounds2D();
-        List<Segment> boundary = new ArrayList<>();
-        outline(region, boundary, epsilon);
         List<BoardSurface.Face> result = new ArrayList<>();
         // Cut points are computed in each face's own frame; weld the copies two neighbouring faces make of one point.
         Map<List<Long>, Vector3> welded = new HashMap<>();
@@ -267,7 +345,7 @@ final class BoardRoadCut {
             Set<Vector3> seen = Collections.newSetFromMap(new IdentityHashMap<>());
             for (BoardSurface.Face face : faces) {
                 for (Vector3 v : List.of(face.a(), face.b(), face.c())) {
-                    if (seen.add(v)) { snap(v, boundary, road, bank); }
+                    if (seen.add(v)) { snap(v); }
                 }
             }
         }
@@ -291,9 +369,10 @@ final class BoardRoadCut {
             float[] under = new float[3], over = new float[3];
             Vector3[] corners = { a, b, c };
             boolean top = face.finish() == BoardSurface.Finish.TOP, pouredTop = !natural && top;
-            // The board's cut has no ground beyond it: it reaches the road's own edge, without a band beneath.
+            // Natural slopes are cut at the road's surface itself, where it covers their cut edge; so is the board's cut,
+            // which has no ground beyond it. Poured ground keeps a band beneath the road.
             boolean boardCut = !top && face.landEdge() >= 0 && (boardEdges & 1 << face.landEdge()) != 0;
-            float band = boardCut ? 0 : ON_SURFACE;
+            float band = natural || boardCut ? 0 : ON_SURFACE;
             for (int i = 0; i < 3; i++) {
                 if (pouredTop) {
                     under[i] = Float.MAX_VALUE;
@@ -307,16 +386,22 @@ final class BoardRoadCut {
                 over[i] = !natural ? -Float.MAX_VALUE
                       : corners[i].z - (bed + BoardRoadGrade.CLEARANCE * BoardGeometry.level());
             }
+            float lift = -band * BoardGeometry.level(), headroom = BoardRoadGrade.CLEARANCE * BoardGeometry.level();
             Reserved reserved = (s, t) -> {
                 float x = a.x + s * (b.x - a.x) + t * (c.x - a.x) + ox;
                 float y = a.y + s * (b.y - a.y) + t * (c.y - a.y) + oy;
                 if (!region.contains(x, y)) { return false; }
-                boolean above = under[0] + s * (under[1] - under[0]) + t * (under[2] - under[0]) >= 0;
+                // Against the emitted road where it lies, which the cut follows exactly; else as its corners have it.
+                float z = a.z + s * (b.z - a.z) + t * (c.z - a.z), surface = roadHeight(road, x, y, Float.NaN);
+                boolean exactly = !pouredTop && !Float.isNaN(surface);
+                boolean above = exactly ? z >= surface + lift : under[0] + s * (under[1] - under[0]) + t * (under[2] - under[0]) >= 0;
                 BoardRoadGrade grade = natural ? grade(x, y) : null;
                 if (grade != null && grade.poured()) { return top || above; }
                 // A natural top gives way to the road wholly below its headroom: it would only lie hidden under it. A
                 // slope or cliff keeps what passes under the road, so its face runs on beneath the road's edge.
-                return (natural && top || above) && over[0] + s * (over[1] - over[0]) + t * (over[2] - over[0]) <= 0;
+                boolean clear = exactly && natural ? z > surface + headroom
+                      : over[0] + s * (over[1] - over[0]) + t * (over[2] - over[0]) > 0;
+                return (natural && top || above) && !clear;
             };
             boolean ground = face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.WALL
                   || face.finish() == BoardSurface.Finish.RIM || face.finish() == BoardSurface.Finish.CAP;
@@ -325,19 +410,38 @@ final class BoardRoadCut {
                 continue;
             }
             List<Segment> chords = new ArrayList<>();
-            for (Segment s : boundary) {
+            for (Segment s : edge) {
                 if (Math.max(s.ax(), s.bx()) < minX - epsilon || Math.min(s.ax(), s.bx()) > maxX + epsilon
                       || s.high() < minY - epsilon || s.low() > maxY + epsilon) { continue; }
                 Segment chord = chord(face, s);
                 if (chord != null) { chords.add(chord); }
             }
             if (!chords.isEmpty() || region.contains(mx + ox, my + oy)) {
-                for (float[] values : natural && top && !pouredHere ? List.of(over) : List.of(under, over)) {
-                    Segment chord = zero(values);
-                    if (chord != null) { chords.add(chord); }
+                // A natural top is cut only at the headroom (see reserved).
+                boolean surfaceCut = !(natural && top && !pouredHere);
+                List<BoardSurface.Face> planes = nudge > 0 || pouredTop ? List.of() : near(road, minX, minY, maxX, maxY);
+                if (planes.isEmpty()) {
+                    for (float[] values : surfaceCut ? List.of(under, over) : List.of(over)) {
+                        Segment chord = zero(values);
+                        if (chord != null) { chords.add(chord); }
+                    }
+                } else {
+                    // Where the face meets the road's surface or headroom over each of the road's faces.
+                    List<Float> offsets = new ArrayList<>();
+                    if (surfaceCut) { offsets.add(lift); }
+                    if (natural) { offsets.add(headroom); }
+                    for (BoardSurface.Face piece : planes) {
+                        for (float offset : offsets) {
+                            Segment chord = zero(new float[] { a.z - plane(piece, a.x, a.y) - offset,
+                                  b.z - plane(piece, b.x, b.y) - offset, c.z - plane(piece, c.x, c.y) - offset });
+                            chord = chord == null ? null : within(chord, face, piece);
+                            if (chord != null) { chords.add(chord); }
+                        }
+                    }
                 }
             }
-            if (chords.isEmpty()) {
+            // A face ending on the road's edge, as the world's grid can split it there, is not cut but still closes against it.
+            if (chords.isEmpty() && !alongEdge(a, b) && !alongEdge(b, c) && !alongEdge(c, a)) {
                 if (!reserved.at(1 / 3f, 1 / 3f)) { result.add(face); }
                 continue;
             }
@@ -346,55 +450,53 @@ final class BoardRoadCut {
         return result;
     }
 
-    /** The largest height, in levels, by which a road's edge moves onto the ground beside it instead of being cut. */
-    private static final float MEET = .1f;
-
-    /**
-     * The road's edge meets the {@code ground} beside it where the two miss each other only by the road's straight rows:
-     * a hairline cut face would show as a dark seam. Ground is linear within each face, so what remains between the
-     * road's vertices is far below a pixel. A vertex on the hex's outline stays, as the neighbour's road shares it, and
-     * so does one where {@code other} ground also lies, which was cut against the road as it was.
-     */
-    void meet(List<BoardSurface.Face> road, List<BoardSurface.Face> ground, List<BoardSurface.Face> other, Area cell) {
-        List<Segment> boundary = new ArrayList<>(), outline = new ArrayList<>();
-        outline(region(), boundary, epsilon);
-        outline(cell, outline, epsilon);
-        List<BoardSurface.Face> surface = ground.stream().filter(face -> !face.scatter()
-              && face.finish() != BoardSurface.Finish.OUTCROP && face.finish() != BoardSurface.Finish.DRESSING).toList();
-        Set<Vector3> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        float tolerance = 4 * epsilon, margin = .5f * BoardGeometry.hexScale(), reach = MEET * BoardGeometry.level();
-        for (BoardSurface.Face face : road) {
-            for (Vector3 v : List.of(face.a(), face.b(), face.c())) {
-                if (!seen.add(v) || nearest(v, boundary) > tolerance || nearest(v, outline) < margin
-                      || Float.isFinite(BoardSurface.sampleHeight(other, v.x, v.y, Float.NaN))) { continue; }
-                float h = BoardSurface.sampleHeight(surface, v.x, v.y, Float.NaN);
-                if (Math.abs(h - v.z) < reach) { v.z = h; }
-            }
-        }
-    }
-
-    /** Distance from a point to the nearest of the segments. */
-    private static float nearest(Vector3 p, List<Segment> segments) {
-        float nearest = Float.POSITIVE_INFINITY;
-        for (Segment s : segments) {
-            nearest = Math.min(nearest, BoardRelief.distance(p.x, p.y, s.ax(), s.ay(), s.bx(), s.by()));
-        }
-        return nearest;
-    }
-
-    /** The largest height, in levels, by which natural ground on a road's edge moves onto the road instead of being cut. */
+    /** The largest height, in levels, by which natural ground on the road's edge moves onto the road instead of being cut. */
     private static final float SNAP = .05f;
 
     /**
-     * Natural ground on the reserved ground's edge that misses the emitted road only by its rows' straight steps meets
-     * it exactly, so no hairline cut face shows as a dark seam along the road. Only vertices every face through them
-     * shares move, before any face is cut: a point a cut creates is one hex's alone, and moving it would part it from
-     * the neighbour's same point.
+     * Natural ground on the road's edge that misses the road only by a hair meets it exactly, so no hairline cut face
+     * shows as a dark seam along the road. The height depends only on where the point lies (#edgeHeight), so every hex
+     * moves it alike; only vertices the relief and bank made are moved, before any face is cut: a point a cut creates
+     * may be shared with a hex too far from the road to cut it, which would keep it where it was.
      */
-    private void snap(Vector3 v, List<Segment> boundary, List<BoardSurface.Face> road, BoardRoadBank bank) {
-        if (boundary.isEmpty() || nearest(v, boundary) > 4 * epsilon) { return; }
-        float r = bed(v.x, v.y, road, bank);
-        if (Math.abs(v.z - r) < SNAP * BoardGeometry.level()) { v.z = r; }
+    private void snap(Vector3 v) {
+        if (!onEdge(v.x, v.y)) { return; }
+        float h = edgeHeight(v.x, v.y);
+        if (Math.abs(v.z - h) < SNAP * BoardGeometry.level()) { v.z = h; }
+    }
+
+    /** The height of a face's plane over a point, continued past its edges. */
+    private static float plane(BoardSurface.Face face, float x, float y) {
+        Vector3 a = face.a(), b = face.b(), c = face.c();
+        float bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y, det = bx * cy - by * cx;
+        float s = ((x - a.x) * cy - (y - a.y) * cx) / det, t = (bx * (y - a.y) - by * (x - a.x)) / det;
+        return a.z + s * (b.z - a.z) + t * (c.z - a.z);
+    }
+
+    /** The part of a chord of a face, in its (s, t) coordinates, that lies over another face's plan; null if none. */
+    private static Segment within(Segment chord, BoardSurface.Face face, BoardSurface.Face other) {
+        Vector3 a = face.a(), b = face.b(), c = face.c();
+        float bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y, det = bx * cy - by * cx;
+        float[] s = new float[3], t = new float[3];
+        Vector3[] corners = { other.a(), other.b(), other.c() };
+        for (int i = 0; i < 3; i++) {
+            s[i] = ((corners[i].x - a.x) * cy - (corners[i].y - a.y) * cx) / det;
+            t[i] = (bx * (corners[i].y - a.y) - by * (corners[i].x - a.x)) / det;
+        }
+        float orient = Math.signum((s[1] - s[0]) * (t[2] - t[0]) - (t[1] - t[0]) * (s[2] - s[0]));
+        if (orient == 0) { return null; }
+        float ds = chord.bx() - chord.ax(), dt = chord.by() - chord.ay();
+        float[] range = { 0, 1 };
+        for (int i = 0; i < 3; i++) {
+            int j = (i + 1) % 3;
+            float es = s[j] - s[i], et = t[j] - t[i];
+            if (!limit(range, orient * (es * (chord.ay() - t[i]) - et * (chord.ax() - s[i])), orient * (es * dt - et * ds))) {
+                return null;
+            }
+        }
+        if (range[1] - range[0] < 1e-6f) { return null; }
+        return new Segment(chord.ax() + ds * range[0], chord.ay() + dt * range[0], chord.ax() + ds * range[1],
+              chord.ay() + dt * range[1]);
     }
 
     /** Whether the point at (s, t) of a face is reserved. */
@@ -439,6 +541,12 @@ final class BoardRoadCut {
 
     /** The road's emitted surface at a point, as BoardSurface#sampleHeight finds it, from the faces whose cell holds it. */
     private float roadHeight(List<BoardSurface.Face> road, float x, float y, float fallback) {
+        List<BoardSurface.Face> near = near(road, x, y, x, y);
+        return near.isEmpty() ? fallback : BoardSurface.sampleHeight(near, x, y, fallback);
+    }
+
+    /** The road faces whose cells hold any of the given bounds. */
+    private List<BoardSurface.Face> near(List<BoardSurface.Face> road, float minX, float minY, float maxX, float maxY) {
         float cell = ROAD_CELL * BoardGeometry.hexScale();
         if (road != indexed) {
             indexed = road;
@@ -456,8 +564,14 @@ final class BoardRoadCut {
                 }
             }
         }
-        List<BoardSurface.Face> near = roadCells.get(cellKey((int) Math.floor(x / cell), (int) Math.floor(y / cell)));
-        return near == null ? fallback : BoardSurface.sampleHeight(near, x, y, fallback);
+        int x0 = (int) Math.floor(minX / cell), x1 = (int) Math.floor(maxX / cell);
+        int y0 = (int) Math.floor(minY / cell), y1 = (int) Math.floor(maxY / cell);
+        if (x0 == x1 && y0 == y1) { return roadCells.getOrDefault(cellKey(x0, y0), List.of()); }
+        Set<BoardSurface.Face> near = new LinkedHashSet<>();
+        for (int i = x0; i <= x1; i++) {
+            for (int j = y0; j <= y1; j++) { near.addAll(roadCells.getOrDefault(cellKey(i, j), List.of())); }
+        }
+        return new ArrayList<>(near);
     }
 
     private static long cellKey(int i, int j) { return (long) i << 32 ^ (j & 0xffffffffL); }
@@ -521,6 +635,9 @@ final class BoardRoadCut {
             welded.put(weld, v);
             return v;
         });
+        // Twice the face's area in plan; an upright face has none (see #clip).
+        float plan = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        boolean upright = Math.abs(plan) < 1e-4f * Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)));
         Sweep sweep = sweep(segments, e, classifier, (p, q, r, source) -> {
             if (source != KEPT) { return; }
             // The sweep emits counter-clockwise in (s, t); keep the face's own winding in space.
@@ -537,11 +654,24 @@ final class BoardRoadCut {
             float ms = (s.ax() + s.bx()) / 2, mt = (s.ay() + s.by()) / 2;
             float ns = -(s.by() - s.ay()), nt = s.bx() - s.ax(), norm = (float) Math.hypot(ns, nt);
             if (norm < 1e-9f) { continue; }
-            ns *= 1e-4f / norm;
-            nt *= 1e-4f / norm;
-            int left = classifier.source(ms + ns, mt + nt), right = classifier.source(ms - ns, mt - nt);
+            // Either side takes the part the sweep classified beside it, however thin, and the reserved ground where that
+            // part's middle lies; past the face, a point as far off in plan as the outline is resolved.
+            Part leftPart = beside(sweep, s, true), rightPart = beside(sweep, s, false);
+            int left = leftPart == null ? OUTSIDE : leftPart.source(), right = rightPart == null ? OUTSIDE : rightPart.source();
             if (left == RESERVED && right == RESERVED || left == OUTSIDE && right == OUTSIDE) { continue; }
-            float ls = ms + ns, lt = mt + nt, rs = ms - ns, rt = mt - nt;
+            float offset = 1e-4f;
+            float sx = (s.bx() - s.ax()) * (b.x - a.x) + (s.by() - s.ay()) * (c.x - a.x);
+            float sy = (s.bx() - s.ax()) * (b.y - a.y) + (s.by() - s.ay()) * (c.y - a.y), length = (float) Math.hypot(sx, sy);
+            if (!upright && length > 1e-9f) {
+                // Only the share along the normal of a plan offset across the segment moves off its line.
+                float px = -sy / length * 4 * epsilon, py = sx / length * 4 * epsilon;
+                float ds = ((c.y - a.y) * px - (c.x - a.x) * py) / plan, dt = ((b.x - a.x) * py - (b.y - a.y) * px) / plan;
+                offset = Math.max(offset, Math.abs(ds * ns + dt * nt) / norm);
+            }
+            float ls = leftPart == null ? ms + ns / norm * offset : leftPart.x();
+            float lt = leftPart == null ? mt + nt / norm * offset : leftPart.y();
+            float rs = rightPart == null ? ms - ns / norm * offset : rightPart.x();
+            float rt = rightPart == null ? mt - nt / norm * offset : rightPart.y();
             boolean leftReserved = region.contains(a.x + ls * (b.x - a.x) + lt * (c.x - a.x), a.y + ls * (b.y - a.y) + lt * (c.y - a.y));
             boolean rightReserved = region.contains(a.x + rs * (b.x - a.x) + rt * (c.x - a.x), a.y + rs * (b.y - a.y) + rt * (c.y - a.y));
             if (leftReserved == rightReserved) { continue; }
@@ -558,8 +688,8 @@ final class BoardRoadCut {
 
     /**
      * The vertical face between a cut terrain edge and the road beside it, split where the two cross; with
-     * {@code fill}, only where the ground lies under the road, at most {@link BoardRoadGrade#FILL} below it. Beside a
-     * road built in concrete or a bridge's ramp it is {@code concrete}'s.
+     * {@code fill}, only where the ground lies under the road, however deep, so nothing shows through under its edge.
+     * Beside a road built in concrete or a bridge's ramp it is {@code concrete}'s.
      */
     private void curtain(Vector3 p, Vector3 q, Area region, WallBuilder wall, WallBuilder concrete,
           List<BoardSurface.Face> road, boolean fill) {
@@ -573,29 +703,26 @@ final class BoardRoadCut {
         if (grade == null) { return; }
         // Beside a road built in concrete, or a bridge's ramp, which has no natural bank, the cut is cast as well.
         if (grade.poured() || grade.bridgeRamp()) { wall = concrete; }
-        // The road's edge is straight only between its own vertices: the face meets it at each of them here.
+        // The road's edge bends only at its stations and the emitted road's own vertices: the face meets it at each.
         List<Float> stations = new ArrayList<>(List.of(0f, 1f));
-        float cell = ROAD_CELL * BoardGeometry.hexScale();
-        roadHeight(road, p.x, p.y, 0);
-        for (int i = (int) Math.floor((Math.min(p.x, q.x) - probe) / cell); i <= (int) Math.floor((Math.max(p.x, q.x) + probe) / cell); i++) {
-            for (int j = (int) Math.floor((Math.min(p.y, q.y) - probe) / cell); j <= (int) Math.floor((Math.max(p.y, q.y) + probe) / cell); j++) {
-                for (BoardSurface.Face face : roadCells.getOrDefault(cellKey(i, j), List.of())) {
-                    for (Vector3 v : List.of(face.a(), face.b(), face.c())) {
-                        float t = ((v.x - p.x) * dx + (v.y - p.y) * dy) / (length * length);
-                        if (t * length > epsilon && (1 - t) * length > epsilon
-                              && Math.abs((v.x - p.x) * dy - (v.y - p.y) * dx) < probe * length) { stations.add(t); }
-                    }
-                }
-            }
+        stations.addAll(crossings(p.x, p.y, q.x, q.y));
+        List<Vector3> corners = new ArrayList<>();
+        for (Segment s : edge) { corners.add(new Vector3(s.ax(), s.ay(), 0)); }
+        for (BoardSurface.Face face : near(road, Math.min(p.x, q.x), Math.min(p.y, q.y), Math.max(p.x, q.x), Math.max(p.y, q.y))) {
+            corners.addAll(List.of(face.a(), face.b(), face.c()));
+        }
+        for (Vector3 v : corners) {
+            float t = ((v.x - p.x) * dx + (v.y - p.y) * dy) / (length * length);
+            if (t * length > epsilon && (1 - t) * length > epsilon
+                  && Math.abs((v.x - p.x) * dy - (v.y - p.y) * dx) < probe * length) { stations.add(t); }
         }
         stations.sort(null);
         for (int i = 1; i < stations.size(); i++) {
-            if (stations.get(i).equals(stations.get(i - 1))) { continue; }
+            if (stations.get(i) - stations.get(i - 1) < 1e-6f) { continue; }
             Vector3 a = i == 1 ? p : new Vector3(p).lerp(q, stations.get(i - 1));
             Vector3 b = i == stations.size() - 1 ? q : new Vector3(p).lerp(q, stations.get(i));
-            // The emitted road surface, which is linear between its rows, not the analytic grade between them.
-            float ra = roadHeight(road, a.x, a.y, grade.height(a.x, a.y));
-            float rb = roadHeight(road, b.x, b.y, grade.height(b.x, b.y));
+            // The emitted road's own surface, so the face's top runs along the road's edge between its vertices.
+            float ra = roadHeight(road, a.x, a.y, edge(grade, a.x, a.y)), rb = roadHeight(road, b.x, b.y, edge(grade, b.x, b.y));
             float da = a.z - ra, db = b.z - rb;
             if (da * db < 0) {
                 float u = da / (da - db);
@@ -607,11 +734,17 @@ final class BoardRoadCut {
         }
     }
 
+    /** The road's edge height at a point (#edgeHeight), or the grade's own surface where the point is off the edge. */
+    private float edge(BoardRoadGrade grade, float x, float y) {
+        float h = edgeHeight(x, y);
+        return Float.isNaN(h) ? grade.height(x, y) : h;
+    }
+
     private void curtain(Vector3 p, float rp, Vector3 q, float rq, float nx, float ny, WallBuilder wall, boolean fill) {
         float tolerance = .001f * BoardGeometry.hexScale();
         if (Math.abs(p.z - rp) < tolerance && Math.abs(q.z - rq) < tolerance) { return; }
         boolean cut = p.z + q.z > rp + rq;
-        if (fill && (cut || Math.max(rp - p.z, rq - q.z) > BoardRoadGrade.FILL * BoardGeometry.level())) { return; }
+        if (fill && cut) { return; }
         // A cut faces the road; terrain below a raised road faces away from it.
         wall.wall(new Vector3(p.x, p.y, Math.max(p.z, rp)), new Vector3(p.x, p.y, Math.min(p.z, rp)),
               new Vector3(q.x, q.y, Math.max(q.z, rq)), new Vector3(q.x, q.y, Math.min(q.z, rq)),
@@ -826,6 +959,7 @@ final class BoardRoadCut {
         }
         for (var xs : levels.values()) { xs.sort(null); }
         List<Float> rows = new ArrayList<>(levels.keySet());
+        List<Part> parts = new ArrayList<>();
         for (int row = 1; row < rows.size(); row++) {
             float bottom = rows.get(row - 1), top = rows.get(row), middle = (bottom + top) / 2;
             if (top - bottom < epsilon * .01f) { continue; }
@@ -837,6 +971,7 @@ final class BoardRoadCut {
             for (int i = 1; i < crossing.size(); i++) {
                 Segment left = crossing.get(i - 1), right = crossing.get(i);
                 int source = classifier.source((left.x(middle) + right.x(middle)) / 2, middle);
+                parts.add(new Part(bottom, top, left, right, source));
                 if (source == OUTSIDE) { continue; }
                 List<Point> low = chain(left.x(bottom), right.x(bottom), bottom, levels, epsilon);
                 List<Point> high = chain(left.x(top), right.x(top), top, levels, epsilon);
@@ -853,7 +988,37 @@ final class BoardRoadCut {
                 }
             }
         }
-        return new Sweep(split, rows);
+        return new Sweep(split, rows, parts);
+    }
+
+    /**
+     * The part of a sweep beside the middle of one of its segments, on its left as it runs or on its right; null where
+     * nothing was swept there, outside every segment.
+     */
+    private static Part beside(Sweep sweep, Segment s, boolean left) {
+        float ms = (s.ax() + s.bx()) / 2, mt = (s.ay() + s.by()) / 2;
+        if (s.ay() == s.by()) {
+            // A level segment bounds the rows above and below it.
+            boolean above = left == s.bx() > s.ax();
+            for (Part part : sweep.parts()) {
+                if ((above ? part.bottom() : part.top()) == s.ay() && ms >= part.left().x(s.ay())
+                      && ms <= part.right().x(s.ay())) { return part; }
+            }
+            return null;
+        }
+        // Running up, its left lies towards lower x; of its rows, the one nearest its middle.
+        boolean lower = left == s.by() > s.ay();
+        Part nearest = null;
+        float distance = Float.POSITIVE_INFINITY;
+        for (Part part : sweep.parts()) {
+            if ((lower ? part.right() : part.left()) != s) { continue; }
+            float d = Math.max(0, Math.max(part.bottom() - mt, mt - part.top()));
+            if (d < distance) {
+                distance = d;
+                nearest = part;
+            }
+        }
+        return nearest;
     }
 
     private static List<Point> chain(float from, float to, float y, TreeMap<Float, List<Float>> levels, float epsilon) {
@@ -882,9 +1047,9 @@ final class BoardRoadCut {
                 if (hit != null) {
                     cuts.get(i).add(hit[0]);
                     cuts.get(j).add(hit[1]);
-                    continue;
                 }
-                // Collinear overlapping outlines (a piece along the hex's own edge) split at each other's ends.
+                // Overlapping outlines (a piece along the hex's own edge, or a cut along a face's edge) split at each
+                // other's ends, even where, not quite parallel, they also cross at a shared end.
                 overlap(s, o, cuts.get(i), epsilon);
                 overlap(o, s, cuts.get(j), epsilon);
             }

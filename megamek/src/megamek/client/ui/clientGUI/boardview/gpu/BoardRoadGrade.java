@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
+import megamek.common.board.Coords;
 import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
 
@@ -189,7 +190,7 @@ final class BoardRoadGrade {
      */
     static BoardRoadGrade of(BoardScene scene, BoardScene.Tile tile, boolean eased) {
         if (tile == null) { return null; }
-        var grades = Cache.of(scene);
+        var grades = Cache.of(scene).grades;
         long key = (long) tile.coords().getX() << 33 | (long) tile.coords().getY() << 1 | (eased ? 1 : 0);
         Optional<BoardRoadGrade> known = grades.get(key);
         if (known == null) {
@@ -201,28 +202,34 @@ final class BoardRoadGrade {
         return known.orElse(null);
     }
 
+    /** Each dry hex's emitted road surface by its coordinates, per scene snapshot as the grades (BoardSurface#road). */
+    static Map<Coords, List<BoardSurface.Face>> roads(BoardScene scene) {
+        return Cache.of(scene).roads;
+    }
+
     /**
      * Grades are immutable and each hex builds its own and its neighbours': share them per scene snapshot, as the
-     * concrete fit is shared. Two snapshots stay cached while workers move from one to the next.
+     * concrete fit is shared; so are the road surfaces they mesh, which neighbours sample. Two snapshots stay cached
+     * while workers move from one to the next.
      */
     private record Cache(WeakReference<List<BoardScene.Tile>> tiles, float scale, float level,
-          Map<Long, Optional<BoardRoadGrade>> grades) {
+          Map<Long, Optional<BoardRoadGrade>> grades, Map<Coords, List<BoardSurface.Face>> roads) {
         private static volatile Cache current, previous;
 
         boolean matches(BoardScene scene) {
             return tiles.get() == scene.tiles() && scale == BoardGeometry.hexScale() && level == BoardGeometry.level();
         }
 
-        static Map<Long, Optional<BoardRoadGrade>> of(BoardScene scene) {
+        static Cache of(BoardScene scene) {
             Cache first = current, second = previous;
-            if (first != null && first.matches(scene)) { return first.grades; }
-            if (second != null && second.matches(scene)) { return second.grades; }
+            if (first != null && first.matches(scene)) { return first; }
+            if (second != null && second.matches(scene)) { return second; }
             synchronized (Cache.class) {
-                if (current != null && current.matches(scene)) { return current.grades; }
+                if (current != null && current.matches(scene)) { return current; }
                 previous = current;
                 current = new Cache(new WeakReference<>(scene.tiles()), BoardGeometry.hexScale(), BoardGeometry.level(),
-                      new ConcurrentHashMap<>());
-                return current.grades;
+                      new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
+                return current;
             }
         }
     }
@@ -335,6 +342,7 @@ final class BoardRoadGrade {
 
     /** The region's outline as segments, {ax, ay, bx, by} after each other, in world coordinates; do not modify. */
     float[] outline() { return outline; }
+
 
     /** Lowest world height of the surface. */
     float low() { return low; }

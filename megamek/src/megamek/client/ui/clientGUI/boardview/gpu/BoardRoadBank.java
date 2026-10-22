@@ -42,7 +42,7 @@ final class BoardRoadBank {
     /** Height, in levels, past a road's range over which ground fades back to its own shape. */
     private static final float RELEASE = .5f;
     /** Spacing of the world-aligned planes ground near a road is split on, in tile pixels. */
-    private static final float GRID = 3;
+    static final float GRID = 3;
     /** How far from a poured or wet hex natural ground fades into its bank, in tile pixels. */
     private static final float FADE = 12;
     /** How far, in hexes, a grade's reserved ground and bank can reach. */
@@ -68,7 +68,7 @@ final class BoardRoadBank {
     /** Every grade within reach, in one order on every hex. */
     private final List<BoardRoadGrade> grades = new ArrayList<>();
     private final List<Bank> banks = new ArrayList<>();
-    /** Centres of the poured and wet hexes within reach, whose ground keeps its shape. */
+    /** Centres of the poured and wet hexes within reach, whose ground keeps its shape, and the room it keeps past them. */
     private final List<float[]> kept = new ArrayList<>();
     private final float level = BoardGeometry.level(), scale = BoardGeometry.hexScale();
     /** The hex's relief, which decides where containment walls retain the slopes beside a road. */
@@ -83,8 +83,11 @@ final class BoardRoadBank {
                 if (other == null || at.distance(other.coords()) > REACH) { continue; }
                 var grade = BoardRoadGrade.of(scene, other, true);
                 if (grade != null) { grades.add(grade); }
-                if (other.surface() == BoardScene.Surface.CONCRETE || other.liquid().present()) {
-                    kept.add(new float[] { BoardGeometry.centerX(other.coords()), BoardGeometry.centerY(other.coords()) });
+                // A poured hex never eases its own faces, its cast steps included, which reach past its edge into the
+                // natural ground beside it; a wet hex's shore eases as that ground does.
+                if (other.liquid().present() || other.surface() == BoardScene.Surface.CONCRETE) {
+                    kept.add(new float[] { BoardGeometry.centerX(other.coords()), BoardGeometry.centerY(other.coords()),
+                          other.liquid().present() ? 0 : BoardRelief.stepRoom() });
                 }
             }
         }
@@ -183,14 +186,15 @@ final class BoardRoadBank {
     }
 
     /**
-     * One away from poured or wet hexes, fading to none on their outlines: on reserved ground too, whose top gives way to
-     * the road anyway (BoardRoadCut#clip), so a step down to the water under a bridge's landing keeps its face.
+     * One away from poured or wet hexes, fading to none on a wet hex's outline and at the foot of a poured hex's steps:
+     * on reserved ground too, whose top gives way to the road anyway (BoardRoadCut#clip), so a step down to the water
+     * under a bridge's landing keeps its face.
      */
     private float weight(float x, float y) {
         float nearest = Float.POSITIVE_INFINITY, fade = FADE * scale;
         for (float[] center : kept) {
-            if (Math.hypot(x - center[0], y - center[1]) < BoardGeometry.width() / 2 + fade) {
-                nearest = Math.min(nearest, cellDistance(center, x, y));
+            if (Math.hypot(x - center[0], y - center[1]) < BoardGeometry.width() / 2 + center[2] + fade) {
+                nearest = Math.min(nearest, Math.max(0, cellDistance(center, x, y) - center[2]));
             }
         }
         return nearest >= fade ? 1 : smooth(nearest / fade);
