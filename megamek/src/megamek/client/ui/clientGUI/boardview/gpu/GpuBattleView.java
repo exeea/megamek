@@ -743,6 +743,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
         }
         if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
+        if (ui instanceof GpuMapHud map) { map.print(boardPrint == null ? null : boardPrint.progress()); }
         scene = terrain.presentation(scene);
         tilesChangedThisFrame = scene.tiles() != lastFrameTiles;
         lastFrameTiles = scene.tiles();

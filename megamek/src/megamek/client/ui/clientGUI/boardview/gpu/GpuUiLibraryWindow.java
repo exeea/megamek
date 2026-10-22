@@ -412,7 +412,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         meters.defaults().growX().uniformX().padRight(12);
         meters.add(kit.meter(text("UiLibrary.gdx.armor"), false).set("91%", .91f, UiTheme.MINT));
         meters.add(kit.meter(text("UiLibrary.gdx.structure"), false).set("40%", .4f, UiTheme.AMBER));
-        meters.add(kit.meter(text("UiLibrary.gdx.heat"), false).set("12", .4f, UiTheme.CORAL));
+        meters.add(kit.meter(text("UiLibrary.gdx.heat"), false).set("12", .4f, UiTheme.CORAL)).row();
+        meters.add(kit.progress(text("UiLibrary.gdx.progress")).set(.62f)).colspan(3).padTop(14);
         controls.add(meters).width(460).row();
 
         Table panels = new Table();

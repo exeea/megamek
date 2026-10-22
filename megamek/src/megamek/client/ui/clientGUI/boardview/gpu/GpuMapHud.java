@@ -60,6 +60,9 @@ final class GpuMapHud implements GpuBoardHud {
     private final Container<Table> menuSlot;
     private final GpuCommandTree tree;
     private final Table bottom = new Table();
+    /** The running print's card at the bottom centre, hidden while nothing prints. */
+    private final Table printSlot = new Table();
+    private final UiKit.Progress printProgress;
     private final GpuLosPanel losPanel;
     private final UiPopover contextMenu;
     private long boardGeneration;
@@ -111,6 +114,16 @@ final class GpuMapHud implements GpuBoardHud {
         bottom.setTouchable(Touchable.disabled);
         bottom.bottom().right();
         stage.addActor(bottom);
+        printProgress = ui.progress(Messages.getString("GpuBoard.print.preparing"));
+        Table printCard = ui.panel();
+        printSlot.setName("map-print-progress");
+        printCard.add(ui.header(Messages.getString("CommonMenuBar.PrintMenu"), null)).growX().row();
+        printCard.add(printProgress).growX().pad(0, 14, 14, 14);
+        printSlot.setFillParent(true);
+        printSlot.setTouchable(Touchable.disabled);
+        printSlot.bottom().add(printCard).width(CARD_WIDTH);
+        printSlot.setVisible(false);
+        stage.addActor(printSlot);
         losPanel = new GpuLosPanel(ui, stage, source, camera);
         stage.addActor(losPanel.actor());
         contextMenu = new UiPopover(ui);
@@ -220,6 +233,16 @@ final class GpuMapHud implements GpuBoardHud {
     }
 
     boolean prepare() { return editor == null || editor.prepare(scene); }
+
+    /** Shows the running print's step and share done; {@code null} hides the card. */
+    void print(GpuBoardPrint.Progress progress) {
+        printSlot.setVisible(progress != null);
+        if (progress == null) { return; }
+        printProgress.caption(progress.step()).set(progress.done());
+        // Centred in the board area the editor's panels leave free, above its corner panels, as Fit board frames it.
+        float left = framingLeft() / scale;
+        printSlot.pad(0, left, framingBottom() / scale + metrics.gap(), metrics.width() - left - framingWidth() / scale);
+    }
 
     boolean measuring() { return losPanel.pending(); }
 

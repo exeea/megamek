@@ -260,13 +260,27 @@ class GpuBoardPrintSmokeTest {
             printed.set(true);
         }, failed::set));
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
+        var card = GpuBoardTestUi.stage().getRoot().findActor("map-print-progress");
+        java.util.Set<String> steps = new java.util.HashSet<>();
+        boolean captured = false;
         while (!printed.get() && failed.get() == null) {
             assertTrue(System.nanoTime() < deadline, "Printing must complete while the view continues to render");
             view.render();
             eachFrame.run();
+            if (field(view, "boardPrint") instanceof GpuBoardPrint print) {
+                assertTrue(card.isVisible(), "The progress card shows while the board prints");
+                steps.add(print.progress().step());
+                if (!captured && print.progress().done() > 0 && print.progress().done() < 1) {
+                    GpuBoardTestUi.capture(new File(reviewDirectory(), name + "-progress.png"));
+                    captured = true;
+                }
+            }
             SwingUtilities.invokeAndWait(() -> { });
         }
         if (failed.get() != null) { throw new AssertionError("Print rendering failed", failed.get()); }
+        assertTrue(steps.contains(Messages.getString("GpuBoard.print.rendering")), "The card names its steps: " + steps);
+        view.render();
+        assertFalse(card.isVisible(), "The progress card leaves with the finished print");
         BufferedImage image = ImageIO.read(target);
         assertNotNull(image, "The print wrote a readable JPEG");
         return image;

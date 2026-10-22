@@ -42,6 +42,9 @@ final class GpuBoardPrint implements Disposable {
     /** Captured on the EDT. Only the render thread consumes the scene; callbacks marshal their own results. */
     record Request(BoardScene scene, Path target, Runnable completed, Consumer<Exception> failed) { }
 
+    /** The step the print runs, as its progress bar names it, and that step's share done. */
+    record Progress(String step, float done) { }
+
     private final Request request;
     private final GpuTerrain lender;
     private final BitmapFont font, outline;
@@ -62,7 +65,8 @@ final class GpuBoardPrint implements Disposable {
     private Future<?> encoding;
     private BufferedImage band, finishedBand;
     private int printWidth, printHeight;
-    private int x, y;
+    private int x, y, tiles;
+    private Progress progress = new Progress(Messages.getString("GpuBoard.print.preparing"), 0);
     private float zoomX, zoomY;
     private boolean finished;
 
@@ -93,7 +97,11 @@ final class GpuBoardPrint implements Disposable {
         try {
             if (terrain == null) { initialize(); }
             terrain.refine(camera.camera);
-            if (terrain.busy() || !terrain.ready(request.scene())) { return false; }
+            if (terrain.busy() || !terrain.ready(request.scene())) {
+                int built = terrain.buildProgress();
+                progress = new Progress(Messages.getString("GpuBoard.print.preparing"), built < 0 ? 1 : built / 100f);
+                return false;
+            }
             if (finishedBand != null) {
                 if (encoding != null) {
                     if (!encoding.isDone()) { return false; }
@@ -108,8 +116,11 @@ final class GpuBoardPrint implements Disposable {
                 try (TerrainSettings.Scope ignored = TerrainSettings.use(terrain.settings())) {
                     renderTile();
                 }
+                int total = ((printWidth + TILE_SIZE - 1) / TILE_SIZE) * ((printHeight + TILE_SIZE - 1) / TILE_SIZE);
+                progress = new Progress(Messages.getString("GpuBoard.print.rendering"), tiles / (float) total);
                 return false;
             }
+            progress = new Progress(Messages.getString("GpuBoard.print.writing"), 1);
             if (!encoding.isDone()) { return false; }
             encoded();
             jpeg.close();
@@ -244,6 +255,7 @@ final class GpuBoardPrint implements Disposable {
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         }
         x += width;
+        tiles++;
         if (x == printWidth) {
             x = 0;
             y += height;
@@ -251,6 +263,9 @@ final class GpuBoardPrint implements Disposable {
             band = null;
         }
     }
+
+    /** The running step and its share done, for the view's progress bar. */
+    Progress progress() { return progress; }
 
     private static byte paper(byte channel, int alpha) {
         return (byte) (((channel & 0xFF) * alpha + 255 * (255 - alpha) + 127) / 255);
