@@ -245,7 +245,10 @@ and `GpuAssets.roadCoverage` in road repeats of 6 m, `BoardRelief.detailMetres(1
 1024 pixels over 12 m, so their stones and patches do not line up into a lattice along the road;
 a road without `metres` would span one road repeat at its catalogued width. The road shader's own
 patterns (wear, mud, loose clumps) are anchored to the ground in metres (`u_worldMetre`), whatever
-ground a road texture covers. A material's Material Maker project must agree with its catalogue:
+ground a road texture covers. Road paint that lays a sculpted material takes that material's
+catalogued metres too (`GpuAssets.sculptCoverage`), times the paint's own factor
+(`GpuRoads.Patch.repeat`): a sandy or snowy verge meets the sand or snow beside it at the same
+scale; markings take concrete at 1.5 times, a metal deposit's halo earth at 0.3 times. A material's Material Maker project must agree with its catalogue:
 its *RepeatMetres* is the ground its exported tile covers, or its normals are too steep or too
 flat (mm-data's `tools/materials/README.md`, which also says how to edit these values safely).
 

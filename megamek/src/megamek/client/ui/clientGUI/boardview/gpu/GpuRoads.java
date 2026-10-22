@@ -150,6 +150,7 @@ final class GpuRoads {
             this(outer, inner, end, wheels, join, 0, false);
         }
     }
+    /** {@code repeat} is a multiple of its material's own repeat (GpuAssets.roadCoverage, GpuAssets.sculptCoverage). */
     record Patch(Area shape, String texture, Color tint, float repeat, float lift, Fade fade) {
         boolean blended() { return fade != null; }
         float endFade() { return fade == null ? 0 : fade.end(); }
@@ -304,8 +305,9 @@ final class GpuRoads {
         if (paved && !deck) {
             Area verge = road.footprint(BoardRoad.SHOULDER);
             verge.subtract(road.footprint(-FEATHER));
+            // Snow and sand verges fade into the same ground beside the road, so they keep its scale.
             patches.add(new Patch(verge, snow ? "snow" : sand ? "sand" : "roads/gravel", Color.WHITE,
-                  snow ? 3 : sand ? 1.4f : 1, .025f, new Fade(BoardRoad.SHOULDER, -.2f, endFade)));
+                  1, .025f, new Fade(BoardRoad.SHOULDER, -.2f, endFade)));
         }
         patches.add(new Patch(core, texture, tint, repeat, SURFACE_LIFT, null));
         if (!tail.isEmpty()) {

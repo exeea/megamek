@@ -5475,9 +5475,9 @@ final class GpuTerrain implements Disposable {
             material.set(mask);
             material = GpuIceShader.road(material, scene, tile);
             float vertexCoat = coat;
-            // The coat's own texture sets its repeat: a road's material, or the sculpted material it paints.
-            float coverage = road != null ? assets.roadCoverage("roads/" + road)
-                  : assets.coverage("terrain/surfaces/" + patch.texture());
+            // The coat's own material sets its repeat, as the catalogue gives it: a road's, or the sculpted material
+            // it paints, which so meets its own ground at the same scale.
+            float coverage = road != null ? assets.roadCoverage("roads/" + road) : assets.sculptCoverage(patch.texture());
             overlay.addTriangles(material, meshes -> GpuRoads.write(meshes, preparedPatch.triangles(), patch, mask, surface,
                   preparedPatch.flat(), vertexCoat, coverage));
         }

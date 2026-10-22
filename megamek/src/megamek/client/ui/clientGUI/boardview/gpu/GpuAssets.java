@@ -121,6 +121,12 @@ final class GpuAssets implements Disposable {
         return coverage(name) * (Float.isNaN(metres) ? 1 : metres / ROAD_REPEAT_METRES);
     }
 
+    /**
+     * How many road repeats one repeat of a sculpted material covers ({@link #sculptTile}, its catalogued metres), for
+     * the road paint that lays it beside its own ground (a sandy verge) or on its own.
+     */
+    float sculptCoverage(String name) { return sculptTile(name) / ROAD_REPEAT_METRES; }
+
     /** One packed layout of a board material, made when its texture is uploaded. */
     private Supplier<Pixmap> packed(String name, GpuMaterialMaps.Layout layout) {
         GodotMaterial material = definition(name);
