@@ -824,6 +824,13 @@ vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
     return vec2(sqrt(mix(a.b * a.b, b.b * b.b, uv.blend)), mix(a.a, b.a, uv.blend));
 }
 
+// The repeat a role's maps are read at. A pixel that skips a read (a role or cover it does not show) still computes the
+// read's coordinates beside the quad's pixels that take it, from a repeat that is 0 when chosen in a branch the pixel
+// skipped. That result is discarded, but llvmpipe's anisotropic filtering differences all four quad pixels'
+// coordinates, even for textureGrad, so the infinite one turns its neighbours' samples into NaN: dotted black lines
+// along the roles' boundaries. Authored repeats are metres; only such skipped pixels change.
+float sampledTile(float tile) { return max(tile, 1e-4); }
+
 // Sides: one read per projection, the two side projections always and the top only where the face lies back.
 // Tops (no sides): the top projection's two reads; far away two repeats settle to the map's average.
 // The role's authored surface comes from the same coordinates: roughness, metallic and scattering from its map while
@@ -831,6 +838,7 @@ vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
 // read; emission from its map at every distance. One call reads them all with the colour.
 vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated,
       out Finish surface) {
+    tile = sampledTile(tile);
     int material = int(layer + .5);
     vec4 authored = u_finishSurface[material], glow = u_finishEmission[material];
     float grain = authored.a >= 0.0 ? terrainNormalDetail : 0.0;
@@ -888,6 +896,7 @@ vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float 
 // The matching world normal and cavity from the normal/AO array; a top uses the same two reads as its colour.
 vec4 rockNormal(float layer, float tile, MaterialProjection p, vec3 face, bool sides, float variation,
       bool translated) {
+    tile = sampledTile(tile);
     if (u_normalMaps <= .5) return vec4(face, 1.0);
     if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
     vec3 normal;
