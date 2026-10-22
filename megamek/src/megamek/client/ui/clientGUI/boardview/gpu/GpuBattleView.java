@@ -760,6 +760,7 @@ class GpuBattleView extends ApplicationAdapter {
         // The board's pressure already reads as vacuum in space or at zero gravity.
         attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
         terrain.setNormalMaps(tuning.normalMaps());
+        terrain.setTerrainParallax(tuning.terrainParallax());
         // The Tactical View hides what has no gameplay value, by one draw rule and without a rebuild.
         terrain.setFluffHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());

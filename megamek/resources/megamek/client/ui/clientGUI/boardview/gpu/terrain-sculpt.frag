@@ -31,6 +31,7 @@ uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per re
 uniform vec2 u_scorchedMaterial; // colour/height layer and metres per repeat; data packs normal XY, roughness, AO
 uniform float u_metre;      // world units per metre
 uniform float u_normalMaps;
+uniform float u_terrainParallax; // the GPU tuning panel's Terrain Parallax switch (terrain-materials.glsl)
 uniform float u_groundResponse;
 uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5, LUNAR 6
 // A draw's families are compile-time constants in its family program (GpuFamilyPrograms), so the compiler

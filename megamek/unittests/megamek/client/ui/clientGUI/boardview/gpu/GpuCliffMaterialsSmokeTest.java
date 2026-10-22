@@ -128,6 +128,19 @@ class GpuCliffMaterialsSmokeTest {
                     }
                     assertTrue(difference > .5, family + " edge " + edge + " must respond to mapped relief: " + difference
                           + "; mean display channels flat=" + meanChannel(flat) + ", mapped=" + meanChannel(relief));
+                    if (edge == 4 && family == BoardScene.Surface.ROCK && !road) {
+                        // Terrain Parallax moves the sculpted rock's maps, whether or not the normal maps shade them.
+                        for (boolean normals : new boolean[] { true, false }) {
+                            terrain.setNormalMaps(normals);
+                            int[] moved = samples(surface, terrain, camera, a, b);
+                            terrain.setTerrainParallax(false);
+                            int[] still = samples(surface, terrain, camera, a, b);
+                            terrain.setTerrainParallax(true);
+                            double parallax = difference(moved, still);
+                            assertTrue(parallax > .5, "Terrain Parallax with normal maps " + normals + ": " + parallax);
+                        }
+                        terrain.setNormalMaps(true);
+                    }
                     if (edge == 4) {
                         GpuBoardTestUi.capture(new File(output, "cliff-" + family + "-relief.png"));
                         terrain.setWetness(1);

@@ -328,6 +328,7 @@ final class GpuTerrain implements Disposable {
                 private final float[] families = GpuFamilyPrograms.constants(renderable.material, Sculpt.TYPE);
                 private final int baseAliases = families == null ? 0 : GpuFamilyPrograms.baseAliases(renderable.material);
                 private final int normalMapsUniform = register("u_normalMaps");
+                private final int terrainParallaxUniform = register("u_terrainParallax");
                 private final int iceNormalsUniform = register("u_iceNormals");
                 private final int magmaTimeUniform = register("u_magmaTime");
                 private final int magmaOceanUniform = register("u_magmaOcean");
@@ -460,6 +461,7 @@ final class GpuTerrain implements Disposable {
                     if (globalsPass == shadingPass) { return; }
                     globalsPass = shadingPass;
                     set(normalMapsUniform, normalMaps ? 1f : 0f);
+                    set(terrainParallaxUniform, terrainParallax ? 1f : 0f);
                     set(iceNormalsUniform, normalMaps ? 1f : 0f);
                     set(magmaTimeUniform, magmaClock);
                     set(magmaOceanScaleUniform, lavaOcean.texture() == null ? 0f : GpuOcean.lavaScale());
@@ -1128,6 +1130,7 @@ final class GpuTerrain implements Disposable {
     private int chunkRows;
     private float buildingOpacity = DEFAULT_BUILDING_OPACITY;
     private boolean normalMaps = true;
+    private boolean terrainParallax = true;
     private boolean grass = true;
     /** Neutral material view: sculpted terrain drops its textures so only geometry, light and occlusion remain. */
     private boolean clay;
@@ -7423,6 +7426,11 @@ final class GpuTerrain implements Disposable {
     /** Live shading preview; changing it needs no geometry, atlas or shadow rebuild. */
     void setNormalMaps(boolean enabled) {
         normalMaps = enabled;
+    }
+
+    /** The sculpted terrain's heightmap parallax (terrain-materials.glsl), apart from the normal maps. */
+    void setTerrainParallax(boolean enabled) {
+        terrainParallax = enabled;
     }
 
     /** Live grass visibility; disabled cover skips root preparation and drawing without rebuilding the terrain. */

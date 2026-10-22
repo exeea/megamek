@@ -115,7 +115,8 @@ MaterialProjection materialProjection(vec3 world, vec3 face) {
 // the view, in its projection's frame, by the role's depth below the heightmap's white at its unmoved reads. Each
 // projection is the plane it is read in (a top the ground's, a side the wall's); the depth is the heightmap's
 // (u_finishRelief, in repeats) in metres. A relief that would move less than half a pixel moves nothing visible and
-// costs no read. The parallax fades with the normal detail, and the Normal maps switch turns both off.
+// costs no read. The parallax fades with the normal detail; the Terrain Parallax switch turns it off, apart from the
+// normal maps.
 vec3 terrainView = vec3(0.0); // from the surface to the eye, which lit programs' main sets; zero moves nothing
 
 // A projection's move at the full depth, in its coordinates: the view along its U and V axes times the depth. Zero
@@ -128,7 +129,7 @@ vec2 projectedReach(vec2 view, vec2 depth, mat2 gradient) {
 // A role's move at the full depth in one projection, at a repeat of tile metres, given the view along its U and V axes
 // and the projection's gradient in metres.
 vec2 planeReach(float layer, float tile, vec2 view, mat2 gradient) {
-    if (u_normalMaps <= .5 || terrainNormalDetail <= 0.0) return vec2(0.0);
+    if (u_terrainParallax <= .5 || terrainNormalDetail <= 0.0) return vec2(0.0);
     return projectedReach(view, u_finishRelief[int(layer + .5)] * tile * terrainNormalDetail, gradient);
 }
 

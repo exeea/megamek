@@ -107,6 +107,7 @@ final class GpuBoardTuning {
     private final CheckBox wireframe;
     private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
+    private final CheckBox terrainParallax;
     private final SelectBox<UnitDisplayMode> unitDisplayMode;
     private final CheckBox vsync;
     /** Windowed or Fullscreen; the view switches the window and shows its state here every frame. */
@@ -281,13 +282,28 @@ final class GpuBoardTuning {
         normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
         // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
         normalMaps.setChecked(GUIPreferences.getInstance().getBoardNormalMaps());
-        normalMaps.addListener(new TextTooltip("Shades surfaces with their materials' fine relief. Off is flatter and a"
-              + " little faster. The choice is saved for the next session.", skin, "menu"));
+        normalMaps.addListener(new TextTooltip("Shades surfaces with their materials' fine relief, and gives buildings,"
+              + " props and roads their parallax. Off is flatter and a little faster. The choice is saved for the next"
+              + " session.", skin, "menu"));
         normalMaps.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 boolean enabled = normalMaps.isChecked();
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardNormalMaps(enabled));
+            }
+        });
+        terrainParallax = checkbox(skin, "Terrain Parallax", "tuning-terrain-parallax");
+        // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
+        terrainParallax.setChecked(GUIPreferences.getInstance().getBoardTerrainParallax());
+        terrainParallax.addListener(new TextTooltip("Moves the sculpted terrain's materials with the view by their"
+              + " heightmaps, so stones, cracks and joints stand out of the ground as the camera turns. Independent of"
+              + " Normal maps; off is a little faster on rocky ground and cliffs. The choice is saved for the next"
+              + " session.", skin, "menu"));
+        terrainParallax.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = terrainParallax.isChecked();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardTerrainParallax(enabled));
             }
         });
         ambientOcclusion = checkbox(skin, "Ambient occlusion", "tuning-ambient-occlusion");
@@ -1002,6 +1018,10 @@ final class GpuBoardTuning {
 
     boolean normalMaps() {
         return normalMaps.isChecked();
+    }
+
+    boolean terrainParallax() {
+        return terrainParallax.isChecked();
     }
 
     /** The view switches the window when the user picks a display mode: true for Fullscreen. */

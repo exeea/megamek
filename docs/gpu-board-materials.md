@@ -100,7 +100,9 @@ surface had that relief. `heightmap_flip_tangent` and `heightmap_flip_binormal` 
 and V, and `heightmap_flip_texture` inverts the map. A relief that would move less than half a
 pixel moves nothing visible, so its reads are skipped: at board distances most ground costs
 nothing, and only deep reliefs (rock and granite cliffs, scree, caps) still move. The GPU tuning
-panel's **Normal maps** switch turns it off with the normal maps.
+panel's **Normal maps** switch turns models' and roads' parallax off with the normal maps;
+**Terrain Parallax**, a switch of its own, turns the sculpted terrain's off, so it can be compared
+on its own.
 
 - Models (`model-surface.glsl`) and roads (`terrain-road.frag`) draw one material through its own
   UVs and take Godot's whole algorithm: with `heightmap_deep_parallax` it marches from
