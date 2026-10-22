@@ -308,12 +308,12 @@ Finish materialFinish(float colorMap, float tile, float weight, MaterialProjecti
     vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
     Finish texel = meanFinish(material);
     if (surface.a >= 0.0 && terrainNormalDetail > 0.0) {
-        vec3 mapped = sampleMaterialMap(u_surfaceLayers, surface.a, tile, p, variation, fungus, singleScale).rgb;
+        vec3 mapped = sampleMaterialMap(FINISH_LAYERS, surface.a, tile, p, variation, fungus, singleScale).rgb;
         texel = finishOf(mix(surface.rgb, mapped, terrainNormalDetail), texel.emission);
     }
     if (emission.a >= 0.0) {
         texel.emission += emission.rgb
-              * toLinear(sampleMaterialMap(u_surfaceLayers, emission.a, tile, p, variation, fungus, singleScale).rgb);
+              * toLinear(sampleMaterialMap(FINISH_LAYERS, emission.a, tile, p, variation, fungus, singleScale).rgb);
     }
     return texel;
 }
@@ -336,10 +336,10 @@ Finish translatedFinish(float layer, vec2 uv, mat2 gradient, float variation) {
     vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
     Finish texel = meanFinish(material);
     if (surface.a >= 0.0) {
-        texel = finishOf(translatedTexel(u_surfaceLayers, surface.a, uv, gradient, variation).rgb, texel.emission);
+        texel = finishOf(translatedTexel(FINISH_LAYERS, surface.a, uv, gradient, variation).rgb, texel.emission);
     }
     if (emission.a >= 0.0) {
-        texel.emission += emission.rgb * toLinear(translatedTexel(u_surfaceLayers, emission.a, uv, gradient, variation).rgb);
+        texel.emission += emission.rgb * toLinear(translatedTexel(FINISH_LAYERS, emission.a, uv, gradient, variation).rgb);
     }
     return texel;
 }
@@ -978,12 +978,12 @@ vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float 
         pigment = mix(materialTexel(u_terrainLayers, layer, a, p.topGradient / tile),
               materialTexel(u_terrainLayers, layer, b, gradientB), t);
         if (grain > 0.0) {
-            mapped = mix(materialTexel(u_surfaceLayers, authored.a, a, p.topGradient / tile).rgb,
-                  materialTexel(u_surfaceLayers, authored.a, b, gradientB).rgb, t);
+            mapped = mix(materialTexel(FINISH_LAYERS, authored.a, a, p.topGradient / tile).rgb,
+                  materialTexel(FINISH_LAYERS, authored.a, b, gradientB).rgb, t);
         }
         if (emits) {
-            emitted = mix(materialTexel(u_surfaceLayers, glow.a, a, p.topGradient / tile).rgb,
-                  materialTexel(u_surfaceLayers, glow.a, b, gradientB).rgb, t);
+            emitted = mix(materialTexel(FINISH_LAYERS, glow.a, a, p.topGradient / tile).rgb,
+                  materialTexel(FINISH_LAYERS, glow.a, b, gradientB).rgb, t);
         }
         if (farDetail > 0.0 && !translated) {
             pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient * (4096.0 / tile)),
@@ -994,21 +994,21 @@ vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float 
         pigment = mix(materialTexel(u_terrainLayers, layer, p.y / tile + .37, p.yGradient / tile),
               materialTexel(u_terrainLayers, layer, p.x / tile, p.xGradient / tile), p.side);
         if (grain > 0.0) {
-            mapped = mix(materialTexel(u_surfaceLayers, authored.a, p.y / tile + .37, p.yGradient / tile).rgb,
-                  materialTexel(u_surfaceLayers, authored.a, p.x / tile, p.xGradient / tile).rgb, p.side);
+            mapped = mix(materialTexel(FINISH_LAYERS, authored.a, p.y / tile + .37, p.yGradient / tile).rgb,
+                  materialTexel(FINISH_LAYERS, authored.a, p.x / tile, p.xGradient / tile).rgb, p.side);
         }
         if (emits) {
-            emitted = mix(materialTexel(u_surfaceLayers, glow.a, p.y / tile + .37, p.yGradient / tile).rgb,
-                  materialTexel(u_surfaceLayers, glow.a, p.x / tile, p.xGradient / tile).rgb, p.side);
+            emitted = mix(materialTexel(FINISH_LAYERS, glow.a, p.y / tile + .37, p.yGradient / tile).rgb,
+                  materialTexel(FINISH_LAYERS, glow.a, p.x / tile, p.xGradient / tile).rgb, p.side);
         }
         if (p.lying > 0.0) {
             pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient / tile), p.lying);
             if (grain > 0.0) {
-                mapped = mix(mapped, materialTexel(u_surfaceLayers, authored.a, p.top / tile, p.topGradient / tile).rgb,
+                mapped = mix(mapped, materialTexel(FINISH_LAYERS, authored.a, p.top / tile, p.topGradient / tile).rgb,
                       p.lying);
             }
             if (emits) {
-                emitted = mix(emitted, materialTexel(u_surfaceLayers, glow.a, p.top / tile, p.topGradient / tile).rgb,
+                emitted = mix(emitted, materialTexel(FINISH_LAYERS, glow.a, p.top / tile, p.topGradient / tile).rgb,
                       p.lying);
             }
         }

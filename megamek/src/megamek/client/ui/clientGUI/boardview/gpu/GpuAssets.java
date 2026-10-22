@@ -62,8 +62,7 @@ final class GpuAssets implements Disposable {
     private final Map<Boolean, MaterialArrays> magmas = new HashMap<>();
     private LavaEmission lavaEmission;
     private final Map<String, Sculpt> sculpts = new HashMap<>();
-    private MaterialArrays sculptArray;
-    private FinishArrays finishArrays;
+    private TerrainArrays terrainArrays;
     private float[] roadRelief;
     private MaterialArrays roadArray;
     private Ice ice;
@@ -179,50 +178,76 @@ final class GpuAssets implements Disposable {
      */
     record Sculpt(Texture color, Texture normal, float tile) { }
 
-    /** Aligned colour/height and normal/AO arrays in the supplied stable material order. */
+    /**
+     * Aligned colour/height and normal/AO arrays in the supplied stable material order; the data array also carries the
+     * finish layers ({@link #finishArrays}) of these materials and of the road materials the data has.
+     */
     MaterialArrays sculptArray(List<String> names) {
-        if (sculptArray == null) {
-            var layers = new ArrayList<Layer>();
-            for (String name : names) {
-                String material = sculptName(name);
-                sculptTile(name);
-                layers.add(layer(material, GpuMaterialMaps.colorLayout(material)));
-                layers.add(layer(material, GpuMaterialMaps.normalLayout(material)));
+        if (terrainArrays == null) {
+            var finishes = new ArrayList<String>();
+            names.forEach(name -> finishes.add(sculptName(name)));
+            for (String road : GpuRoads.MATERIALS) {
+                if (hasMaterial("roads/" + road)) { finishes.add("roads/" + road); }
             }
-            sculptArray = repeatingArray(layers, 2);
+            terrainArrays = terrainArrays(names, finishes);
         }
-        return sculptArray;
+        return terrainArrays.arrays();
     }
 
     private static String sculptName(String name) { return "terrain/surfaces/" + name; }
 
     /**
-     * The finish ({@link #authoredFinish}) of every board material the terrain draws from arrays (sculpted surfaces, then
-     * from {@code firstRoad} on the road materials), in the given stable order of material names. One raw RGBA8 array holds
-     * the surface layer (roughness, metallic and scattering in R, G and B) of each material whose finish varies and,
-     * after them, each emission map's sRGB bytes, which the shader decodes: one sampler for both, as the terrain's
-     * programs are at their texture units' limit. Per material: its surface values or means and surface layer (-1 if
-     * uniform), its emission tint and emission layer (-1 without a map), and its constant glow. The sculpt maps set the
-     * grid, which the road materials' maps take; road materials keep their roughness in their own surface map, so theirs
-     * is sent as its mean alone. The array holds one black texel when no material has a map. {@code relief} is each
-     * sculpted surface's heightmap parallax (GpuMaterialMaps.ModelFinish): its depth along U and V in UV units, zero
-     * without a heightmap; the road materials take theirs from {@link #roadRelief}.
+     * The finish ({@link #authoredFinish}) of every board material the terrain draws from arrays: sculpted surfaces, then
+     * from {@code firstRoad} on the road materials, in the given stable order of material names. Its layers follow the
+     * sculpt normal/AO layers in the sculpt data array ({@link #sculptArray}), raw RGBA8, so the terrain's programs read
+     * them through a sampler they already have: the surface layer (roughness, metallic and scattering in R, G and B) of
+     * each material whose finish varies and, after them, each emission map's sRGB bytes, which the shader decodes. Per
+     * material: its surface values or means and surface layer (-1 if uniform), its emission tint and emission layer (-1
+     * without a map), and its constant glow. The sculpt maps set the array's grid, which the road materials' maps take;
+     * road materials keep their roughness in their own surface map, so theirs is sent as its mean alone. {@code relief}
+     * is each sculpted surface's heightmap parallax (GpuMaterialMaps.ModelFinish): its depth along U and V in UV units,
+     * zero without a heightmap; the road materials take theirs from {@link #roadRelief}. {@code maps} is the sculpt data
+     * array, which the asset owner disposes with the sculpt arrays.
      */
-    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow, float[] relief)
-          implements Disposable {
-        @Override public void dispose() { maps.dispose(); }
-    }
+    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow, float[] relief) { }
 
     FinishArrays finishArrays(List<String> materials, int firstRoad) {
-        if (finishArrays != null) { return finishArrays; }
-        int count = materials.size();
+        if (terrainArrays == null) {
+            var names = new ArrayList<String>();
+            for (String material : materials.subList(0, firstRoad)) {
+                if (!material.startsWith(sculptName(""))) {
+                    throw new IllegalArgumentException("The finish arrays begin with sculpted surfaces: " + material);
+                }
+                names.add(material.substring(sculptName("").length()));
+            }
+            terrainArrays = terrainArrays(names, materials);
+        }
+        // Built by sculptArray, they hold the road materials it found; the indices must still be these materials'.
+        List<String> built = terrainArrays.materials();
+        if (materials.size() > built.size() || !built.subList(0, materials.size()).equals(materials)) {
+            throw new IllegalArgumentException("The terrain arrays hold the finish of " + built + ", not " + materials);
+        }
+        return terrainArrays.finish();
+    }
+
+    /** The sculpt arrays and the finish read from their data array, built together, with the finish's materials. */
+    private record TerrainArrays(List<String> materials, MaterialArrays arrays, FinishArrays finish) { }
+
+    private TerrainArrays terrainArrays(List<String> names, List<String> materials) {
+        var layers = new ArrayList<Layer>();
+        for (String name : names) {
+            String material = sculptName(name);
+            sculptTile(name);
+            layers.add(layer(material, GpuMaterialMaps.colorLayout(material)));
+            layers.add(layer(material, GpuMaterialMaps.normalLayout(material)));
+        }
+        int firstRoad = names.size(), count = materials.size();
         float[] surface = new float[count * 4], tint = new float[count * 4], glow = new float[count * 3];
         float[] relief = new float[firstRoad * 2];
-        var surfaces = new ArrayList<Supplier<Pixmap>>();
-        var emissions = new ArrayList<Supplier<Pixmap>>();
+        var surfaces = new ArrayList<Layer>();
+        var emissions = new ArrayList<Layer>();
         var surfaceLayers = new int[count];
         var emissionLayers = new int[count];
-        int width = 0, height = 0, roadWidth = 1, roadHeight = 1;
         for (int index = 0; index < count; index++) {
             var finish = authoredFinish(definition(materials.get(index)), index < firstRoad);
             System.arraycopy(finish.surface(), 0, surface, index * 4, 3);
@@ -230,39 +255,35 @@ final class GpuAssets implements Disposable {
             System.arraycopy(finish.glow(), 0, glow, index * 3, 3);
             surfaceLayers[index] = finish.map() == null ? -1 : surfaces.size();
             emissionLayers[index] = finish.emission() == null ? -1 : emissions.size();
-            int[] emissionSize = finish.emission() == null ? new int[] { 1, 1 } : GpuMaterialMaps.size(finish.emission());
-            int layerWidth = Math.max(finish.map() == null ? 1 : finish.width(), emissionSize[0]);
-            int layerHeight = Math.max(finish.map() == null ? 1 : finish.height(), emissionSize[1]);
-            if (index < firstRoad) {
-                width = Math.max(width, layerWidth);
-                height = Math.max(height, layerHeight);
+            // A road material's maps take the sculpt grid; only the sculpted surfaces' maps may widen it.
+            boolean sculpted = index < firstRoad;
+            if (sculpted) {
                 var parallax = GpuMaterialMaps.modelFinish(definition(materials.get(index)));
                 if (parallax.heightmap() != null) {
                     relief[index * 2] = parallax.depthU();
                     relief[index * 2 + 1] = parallax.depthV();
                 }
-            } else {
-                roadWidth = Math.max(roadWidth, layerWidth);
-                roadHeight = Math.max(roadHeight, layerHeight);
             }
-            if (finish.map() != null) { surfaces.add(() -> rgbaPixmap(finish.map(), finish.width(), finish.height())); }
+            if (finish.map() != null) {
+                surfaces.add(new Layer(sculpted ? finish.width() : 1, sculpted ? finish.height() : 1,
+                      () -> rgbaPixmap(finish.map(), finish.width(), finish.height())));
+            }
             if (finish.emission() != null) {
                 FileHandle map = new FileHandle(finish.emission());
-                emissions.add(() -> GpuColorTexture.decode(map));
+                int[] size = sculpted ? GpuMaterialMaps.size(finish.emission()) : new int[] { 1, 1 };
+                emissions.add(new Layer(size[0], size[1], () -> GpuColorTexture.decode(map)));
             }
         }
-        if (width == 0) { width = roadWidth; height = roadHeight; }
+        // The finish layers follow one normal/AO layer per sculpted surface in the data array.
         for (int index = 0; index < count; index++) {
-            surface[index * 4 + 3] = surfaceLayers[index];
-            tint[index * 4 + 3] = emissionLayers[index] < 0 ? -1 : surfaces.size() + emissionLayers[index];
+            surface[index * 4 + 3] = surfaceLayers[index] < 0 ? -1 : firstRoad + surfaceLayers[index];
+            tint[index * 4 + 3] = emissionLayers[index] < 0 ? -1 : firstRoad + surfaces.size() + emissionLayers[index];
         }
-        // Every layer takes the grid, resampled as the colour arrays resample theirs, so each still spans its repeat.
-        var layers = new ArrayList<>(surfaces);
-        layers.addAll(emissions);
-        if (layers.isEmpty()) { layers.add(() -> rgbaPixmap(new byte[4], 1, 1)); }
-        finishArrays = new FinishArrays(repeatingArray(new MaterialArrayData(layers, Math.max(width, 1), Math.max(height, 1),
-              false)), surface, tint, glow, relief);
-        return finishArrays;
+        var finishes = new ArrayList<>(surfaces);
+        finishes.addAll(emissions);
+        MaterialArrays arrays = repeatingArray(layers, 2, finishes);
+        return new TerrainArrays(List.copyOf(materials), arrays,
+              new FinishArrays(arrays.data(), surface, tint, glow, relief));
     }
 
     private static Pixmap rgbaPixmap(byte[] rgba, int width, int height) {
@@ -404,6 +425,11 @@ final class GpuAssets implements Disposable {
      * largest layer's grid, so a material exported larger keeps its detail; smaller layers are resampled to it.
      */
     private static MaterialArrays repeatingArray(List<Layer> layers, int maps) {
+        return repeatingArray(layers, maps, List.of());
+    }
+
+    /** As {@link #repeatingArray(List, int)}, with {@code extra} data layers after the sets' own. */
+    private static MaterialArrays repeatingArray(List<Layer> layers, int maps, List<Layer> extra) {
         if (layers.isEmpty() || maps < 2 || layers.size() % maps != 0) {
             throw new IllegalArgumentException("Incomplete repeating material arrays");
         }
@@ -413,6 +439,11 @@ final class GpuAssets implements Disposable {
         for (int index = 0; index < layers.size(); index++) {
             Layer layer = layers.get(index);
             (index % maps == 0 ? colors : data).add(layer.pixels());
+            width = Math.max(width, layer.width());
+            height = Math.max(height, layer.height());
+        }
+        for (Layer layer : extra) {
+            data.add(layer.pixels());
             width = Math.max(width, layer.width());
             height = Math.max(height, layer.height());
         }
@@ -1166,8 +1197,7 @@ final class GpuAssets implements Disposable {
         definitions.clear();
         coverages.clear();
         catalog = null;
-        if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
-        if (finishArrays != null) { finishArrays.dispose(); finishArrays = null; }
+        if (terrainArrays != null) { terrainArrays.arrays().dispose(); terrainArrays = null; }
         roadRelief = null;
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }
         if (ice != null) { ice.maps().dispose(); ice = null; }

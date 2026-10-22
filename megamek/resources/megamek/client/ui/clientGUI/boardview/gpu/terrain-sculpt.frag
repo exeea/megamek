@@ -25,6 +25,8 @@ in vec4 v_color;       // r: occlusion (mud-draining shell: local drop / 8 m). g
 #define TERRAIN_LAYERS_DECLARED
 uniform sampler2DArray u_terrainLayers;
 uniform sampler2DArray u_terrainData;
+// The finish layers follow its normal/AO layers (finish-arrays.glsl).
+#define FINISH_LAYERS u_terrainData
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
 uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
 uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per repeat

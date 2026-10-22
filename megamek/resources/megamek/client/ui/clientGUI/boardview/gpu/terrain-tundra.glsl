@@ -37,11 +37,11 @@ Finish tundraFinish(float layer, float tile, MaterialProjection p, float variati
     vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
     Finish texel = meanFinish(material);
     if (surface.a >= 0.0 && terrainNormalDetail > 0.0) {
-        vec3 mapped = tundraTexel(u_surfaceLayers, surface.a, tile, p, variation).rgb;
+        vec3 mapped = tundraTexel(FINISH_LAYERS, surface.a, tile, p, variation).rgb;
         texel = finishOf(mix(surface.rgb, mapped, terrainNormalDetail), texel.emission);
     }
     if (emission.a >= 0.0) {
-        texel.emission += emission.rgb * toLinear(tundraTexel(u_surfaceLayers, emission.a, tile, p, variation).rgb);
+        texel.emission += emission.rgb * toLinear(tundraTexel(FINISH_LAYERS, emission.a, tile, p, variation).rgb);
     }
     return texel;
 }

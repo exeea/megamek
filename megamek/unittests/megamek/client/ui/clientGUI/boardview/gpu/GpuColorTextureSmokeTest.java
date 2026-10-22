@@ -763,11 +763,12 @@ class GpuColorTextureSmokeTest {
             int unpack = GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT);
             try (var sample = new Sampler(true)) {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
-                for (String name : List.of("mapped", "scalar", "rough")) { sculptPair(sculpt, name); }
+                // The finish layers share the sculpt data array's grid: these (square) sculpt maps take the ORM's 3 x 3.
+                for (String name : List.of("mapped", "scalar", "rough")) { sculptPair(sculpt, name, 3, 3); }
                 // Godot's rule: a varying map is a map (sent with its mean), the factor alone without a map is a scalar,
                 // and the default (roughness 1 over white, metallic 0) is fully rough and dielectric.
-                int[] values = { 17, 61, 103, 149, 193, 239 };
-                roughnessMap(sculpt.resolve("mapped_orm.png"), 3, 2, values);
+                int[] values = { 17, 61, 103, 149, 193, 239, 127, 0, 254 };
+                roughnessMap(sculpt.resolve("mapped_orm.png"), 3, 3, values);
                 Path mapped = sculpt.resolve("mapped.tres");
                 Files.writeString(mapped, Files.readString(mapped)
                       + "metallic = 0.5\nmetallic_texture = ExtResource( 2 )\nmetallic_texture_channel = 2\n");
@@ -776,7 +777,7 @@ class GpuColorTextureSmokeTest {
                       .replace("roughness_texture = ExtResource( 2 )\n", "")
                       .replace("[resource]", "[ext_resource path=\"scalar_emission.png\" type=\"Texture\" id=5]\n[resource]")
                       + "emission_enabled = true\nemission_energy_multiplier = 2.0\nemission_texture = ExtResource( 5 )\n");
-                var glow = new BufferedImage(3, 2, BufferedImage.TYPE_INT_RGB);
+                var glow = new BufferedImage(3, 3, BufferedImage.TYPE_INT_RGB);
                 glow.setRGB(0, 0, 0xff8000);
                 javax.imageio.ImageIO.write(glow, "png", sculpt.resolve("scalar_emission.png").toFile());
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 8);
@@ -784,10 +785,11 @@ class GpuColorTextureSmokeTest {
                 assertEquals(8, GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT), "Odd rows must restore unpack state");
                 assertSame(material, assets.finishArrays(SURFACES, SURFACES.size()));
                 // The ORM's blue channel is 0 in the mapped material: its metal is uniform, the factor times black.
+                // The finish layers follow the three normal/AO layers in the sculpt data array.
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
-                      new float[] { 127 / 255f, 0, 0, 0, .27f, 0, 0, -1, 1, 0, 0, -1 }, material.surface(), 1e-6f);
+                      new float[] { 127 / 255f, 0, 0, 3, .27f, 0, 0, -1, 1, 0, 0, -1 }, material.surface(), 1e-6f);
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
-                      new float[] { 0, 0, 0, -1, 2, 2, 2, 1, 0, 0, 0, -1 }, material.tint(), 1e-6f,
+                      new float[] { 0, 0, 0, -1, 2, 2, 2, 4, 0, 0, 0, -1 }, material.tint(), 1e-6f,
                       "The emission layer follows the surface layers in the one array");
                 org.junit.jupiter.api.Assertions.assertArrayEquals(new float[9], material.glow(), 1e-6f,
                       "Godot's default emission colour is black");
@@ -795,12 +797,14 @@ class GpuColorTextureSmokeTest {
                 assertEquals(GL30.GL_RGBA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
                       GL11.GL_TEXTURE_INTERNAL_FORMAT), "The finish is raw data; emission's sRGB bytes decode in the shader");
                 assertEquals(3, material.maps().getWidth());
-                assertEquals(2, material.maps().getHeight());
-                assertEquals(2, material.maps().getDepth(), "One surface layer and one emission layer, one sampler");
-                for (int y = 0; y < 2; y++) {
+                assertEquals(3, material.maps().getHeight());
+                assertSame(assets.sculptArray(List.of("mapped", "scalar", "rough")).data(), material.maps(),
+                      "The finish rides the sculpt data array: no texture unit of its own");
+                assertEquals(5, material.maps().getDepth(), "Three normal/AO layers, one surface and one emission layer");
+                for (int y = 0; y < 3; y++) {
                     for (int x = 0; x < 3; x++) {
                         assertEquals(values[y * 3 + x] / 255.0,
-                              sample.read(material.maps(), (x + .5f) / 3, (y + .5f) / 2, 0, 0)[0], .0006,
+                              sample.read(material.maps(), (x + .5f) / 3, (y + .5f) / 3, 3, 0)[0], .0006,
                               "Raw roughness must not be sRGB-decoded, resized or row-padded");
                     }
                 }
@@ -812,7 +816,7 @@ class GpuColorTextureSmokeTest {
                 assertFalse(GL11.glIsTexture(maps), "The asset owner releases the array");
                 var reloaded = assets.finishArrays(SURFACES, SURFACES.size());
                 org.junit.jupiter.api.Assertions.assertNotSame(material, reloaded);
-                assertEquals(103 / 255.0, sample.read(reloaded.maps(), 2.5f / 3, .25f, 0, 0)[0], .0006);
+                assertEquals(103 / 255.0, sample.read(reloaded.maps(), 2.5f / 3, .5f / 3, 3, 0)[0], .0006);
             } finally {
                 assets.dispose();
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, unpack);
@@ -830,7 +834,7 @@ class GpuColorTextureSmokeTest {
                     out vec4 fragColor;
                     uniform float u_material;
                     void main() {
-                        Finish finish = finishTexel(u_material, vec2(.5 / 3.0, .25), mat2(0.0));
+                        Finish finish = finishTexel(u_material, vec2(.5 / 3.0, .5 / 3.0), mat2(0.0));
                         fragColor = vec4(finish.roughness, finish.emission.r / 4.0, finish.emission.g / 4.0, 1.0);
                     }
                     """);
@@ -864,21 +868,30 @@ class GpuColorTextureSmokeTest {
             megamek.common.Configuration.setDataDir(directory.toFile());
             try {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
-                sculptPair(sculpt, "first");
-                sculptPair(sculpt, "second");
-                roughnessMap(sculpt.resolve("first_orm.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
+                sculptPair(sculpt, "first", 3, 3);
+                sculptPair(sculpt, "second", 2, 2);
+                roughnessMap(sculpt.resolve("first_orm.png"), 3, 3, new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 });
                 roughnessMap(sculpt.resolve("second_orm.png"), 2, 2, new int[] { 1, 2, 3, 4 });
                 // A smaller map takes the largest grid, as the colour arrays resample theirs.
                 var assets = new GpuAssets();
                 try {
                     var mixed = assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second"), 2);
                     assertEquals(3, mixed.maps().getWidth());
-                    assertEquals(2, mixed.maps().getHeight());
-                    assertEquals(2, mixed.maps().getDepth(), "Two surface layers and no emission layer");
+                    assertEquals(3, mixed.maps().getHeight());
+                    assertEquals(4, mixed.maps().getDepth(), "Two normal/AO layers, two surface layers, no emission layer");
                 } finally { assets.dispose(); }
+                // Built first by the sculpt arrays, without a road material they could not find: no shifted indices.
+                var built = new GpuAssets();
+                try {
+                    built.sculptArray(List.of("first", "second"));
+                    var error = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                          () -> built.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second",
+                                "roads/asphalt"), 2));
+                    assertTrue(error.getMessage().contains("roads/asphalt"), error.getMessage());
+                } finally { built.dispose(); }
                 Files.delete(sculpt.resolve("second_orm.png"));
                 assertFinishRejected("second_orm.png");
-                roughnessMap(sculpt.resolve("second_orm.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
+                roughnessMap(sculpt.resolve("second_orm.png"), 3, 3, new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 });
                 Path first = sculpt.resolve("first.tres");
                 Files.writeString(first, Files.readString(first).replace("roughness = 1.0", "roughness = 1.5"));
                 assertFinishRejected("Invalid roughness");
@@ -933,13 +946,16 @@ class GpuColorTextureSmokeTest {
     }
 
     /** A sculpted material repeating every 3 m: colour 0x1080e0 at height 0x40, the board's normal 0x40c0f0 with AO 0x60. */
-    private static void sculptPair(Path sculpt, String name) throws Exception {
-        BoardMaterialFiles.sculpt(sculpt.getParent().getParent(), name, filled(0x401080e0), filled(0x6040c0f0), 3);
+    private static void sculptPair(Path sculpt, String name) throws Exception { sculptPair(sculpt, name, 64, 64); }
+
+    private static void sculptPair(Path sculpt, String name, int width, int height) throws Exception {
+        BoardMaterialFiles.sculpt(sculpt.getParent().getParent(), name, filled(0x401080e0, width, height),
+              filled(0x6040c0f0, width, height), 3);
     }
 
-    private static BufferedImage filled(int argb) {
-        var image = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) { image.setRGB(x, y, argb); }
+    private static BufferedImage filled(int argb, int width, int height) {
+        var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) { image.setRGB(x, y, argb); }
         return image;
     }
 

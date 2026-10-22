@@ -43,6 +43,8 @@ uniform vec4 u_roadProfile;
 // normal per material. Each coat's own choice, finish and wet response come from its vertices (GpuRoads#coat).
 uniform sampler2DArray u_roadColors, u_roadData;
 uniform sampler2DArray u_sculptColors, u_sculptData;
+// The finish layers follow the sculpt normal/AO layers (finish-arrays.glsl).
+#define FINISH_LAYERS u_sculptData
 flat in vec4 v_roadCoat;
 #endif
 

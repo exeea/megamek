@@ -72,7 +72,10 @@ Two contracts carry it to the shaders:
   terrain's finish arrays (`finish-arrays.glsl`, `GpuAssets.finishArrays`): an RGBA8 layer of
   roughness, metallic and scattering for each material whose finish varies, an sRGB layer for each
   emission map, and per material its values or means, emission tint and constant glow. Sculpt
-  materials sit at their sculpt layer's index, road materials from `ROAD_FINISH`.
+  materials sit at their sculpt layer's index, road materials from `ROAD_FINISH`. The layers follow
+  the sculpt normal/AO layers in the sculpt data array, which the sculpt programs (`u_terrainData`)
+  and road coats (`u_sculptData`) already sample, so the finish takes no texture unit of its own
+  there; other programs bind the same array as `u_surfaceLayers`.
 - A draw of one material, a model's or the board's own (`GpuModelMaterial`): roughness, metallic
   and scattering factors over a `METALLIC_ROUGHNESS` map, which carries the factors itself, the
   emission map as the emissive texture times its tint, plus the glow, and the heightmap parallax
