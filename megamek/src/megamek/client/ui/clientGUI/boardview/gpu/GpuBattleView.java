@@ -108,7 +108,7 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuLoadingGrid loadingGrid;
     private Label loadingWaiting, loadingActive, loadingReady;
     /** The shader bar (showShaders), under the section legend. */
-    private UiKit.Meter loadingShaders;
+    private UiKit.Progress loadingShaders;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
@@ -327,7 +327,7 @@ class GpuBattleView extends ApplicationAdapter {
             legend.add(entry).padLeft(12).padRight(12);
         }
         // Hidden while no program is left to link; a hidden bar keeps its row, so the tasks below never move.
-        loadingShaders = new UiKit(skin).meter(Messages.getString("GpuBoard.loadingShaders"), false);
+        loadingShaders = new UiKit(skin).progress(Messages.getString("GpuBoard.loadingShaders"));
         loadingShaders.setName("board-loading-shaders");
         loadingShaders.setVisible(false);
         content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
@@ -343,13 +343,10 @@ class GpuBattleView extends ApplicationAdapter {
         loadingStage.addActor(content);
     }
 
-    /** The shader bar shows the programs linked of those the load needs while any is left to link. */
-    static void showShaders(UiKit.Meter bar, TerrainLoadProgress.Shaders shaders) {
+    /** The shader bar shows the share of the programs the load needs that have linked, while any is left to link. */
+    static void showShaders(UiKit.Progress bar, TerrainLoadProgress.Shaders shaders) {
         bar.setVisible(shaders.linked() < shaders.total());
-        if (bar.isVisible()) {
-            bar.set(shaders.linked() + " / " + shaders.total(), (float) shaders.linked() / shaders.total(),
-                  GpuLoadingGrid.READY);
-        }
+        if (bar.isVisible()) { bar.set((float) shaders.linked() / shaders.total()); }
     }
 
     /** The loading screen at the HUD's display scale, read each frame since a monitor change keeps the window size. */
