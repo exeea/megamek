@@ -80,6 +80,48 @@ class GpuNaturalBridgeSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Lava tube arch contacts", failure.get()); }
     }
 
+    /** The spans 1010 and 1011 raised onto their banks: one flat joint at 4 and 4, a smooth step at 4 and 3. */
+    @Test
+    void raisedLavaTubeJointsCloseOntoTheirBanks() throws Exception {
+        File output = new File(System.getProperty("megamek.gpu.screenshots"), "natural-bridges");
+        Files.createDirectories(output.toPath());
+        var scenes = List.of(BoardNaturalBridgeTest.raisedLavaTubes(4, 4), BoardNaturalBridgeTest.raisedLavaTubes(4, 3));
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 1024);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    var joint = BoardGeometry.center(new Coords(9, 9), 2).lerp(BoardGeometry.center(new Coords(9, 10), 2), .5f);
+                    for (var scene : scenes) {
+                        frame.prepare(terrain, camera, scene);
+                        terrain.update(scene);
+                        terrain.animate(0, List.of());
+                        String name = "raised-lava-tubes-" + (scene == scenes.getFirst() ? "4-4" : "4-3");
+                        for (float rotation : new float[] { 60, 240, 330 }) {
+                            camera.camera.zoom = .12f;
+                            camera.setIsometric(false);
+                            camera.orbit(rotation, 55);
+                            camera.center(joint);
+                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, name + "-" + (int) rotation + ".png"));
+                        }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Raised lava tube joints", failure.get()); }
+    }
+
     @Test
     void naturalSpansRespectTheLowerTerrainAndChangeWithTheirApproaches() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "natural-bridges");
