@@ -12,6 +12,9 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
@@ -21,12 +24,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Predicate;
+import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
+import javax.swing.ButtonModel;
 import javax.swing.Icon;
-import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -82,6 +87,7 @@ public final class SwingUiLibrary extends JFrame {
     private static final int ICON_CHECK_CIRCLE = 0xE86C;
     private static final int ICON_INFO = 0xE88E;
     private static final int ICON_RADIO_CHECKED = 0xE837;
+    private static final int ICON_SEARCH = 0xE8B6;
 
     private final DesignTokens tokens = DesignTokens.shipped();
     private final VisionLayerUI visionLayer = new VisionLayerUI();
@@ -273,25 +279,15 @@ public final class SwingUiLibrary extends JFrame {
               mode == Mode.DARK ? MegaMekDarkLaf.NAME : MegaMekLightLaf.NAME), "small", "text.muted"));
 
         page.add(heading(Messages.getString("UiLibrary.controls.buttons")));
-        JPanel buttons = row(color("surface.base"));
-        JButton primary = new JButton(Messages.getString("UiLibrary.controls.primary"));
-        primary.putClientProperty(FlatClientProperties.STYLE_CLASS, "primary");
-        primary.setToolTipText(Messages.getString("UiLibrary.controls.tooltip"));
-        buttons.add(primary);
-        JButton secondary = new JButton(Messages.getString("UiLibrary.controls.secondary"));
-        secondary.setToolTipText(Messages.getString("UiLibrary.controls.tooltip"));
-        buttons.add(secondary);
-        JToggleButton toggle = new JToggleButton(Messages.getString("UiLibrary.controls.toggle"), true);
-        buttons.add(toggle);
-        buttons.add(new JToggleButton(Messages.getString("UiLibrary.controls.toggle")));
-        JButton disabledPrimary = new JButton(Messages.getString("UiLibrary.controls.primary"));
-        disabledPrimary.putClientProperty(FlatClientProperties.STYLE_CLASS, "primary");
-        disabledPrimary.setEnabled(false);
-        buttons.add(disabledPrimary);
-        JButton disabled = new JButton(Messages.getString("UiLibrary.controls.disabled"));
-        disabled.setEnabled(false);
-        buttons.add(disabled);
-        page.add(buttons);
+        page.add(paragraph(Messages.getString("UiLibrary.buttons.note"), "small", "text.muted"));
+        for (TokenButtons.Size size : TokenButtons.Size.values()) {
+            JComponent gap = (JComponent) Box.createVerticalStrut(scaleForGUI(12));
+            gap.setAlignmentX(LEFT_ALIGNMENT);
+            page.add(gap);
+            page.add(text(Messages.getString("UiLibrary.buttons." + size.name().toLowerCase(Locale.ROOT)), "label",
+                  "text.secondary"));
+            page.add(buttonMatrix(size));
+        }
 
         page.add(heading(Messages.getString("UiLibrary.controls.choices")));
         JPanel choices = row(color("surface.base"));
@@ -367,6 +363,64 @@ public final class SwingUiLibrary extends JFrame {
         field.putClientProperty(FlatClientProperties.OUTLINE, outline);
         field.setEnabled(enabled);
         return field;
+    }
+
+    /** Every button kind at {@code size} in every state, the transient states frozen through the button model. */
+    private JComponent buttonMatrix(TokenButtons.Size size) {
+        List<String> states = List.of("rest", "hover", "pressed", "focus", "selected", "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(8), scaleForGUI(4), scaleForGUI(8));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.buttons.state." + state), "caption", "text.muted"), cell);
+        }
+        for (TokenButtons.Kind kind : TokenButtons.Kind.values()) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.buttons.kind." + kind.name()), "label", "text.primary"),
+                  cell);
+            boolean selectable = kind == TokenButtons.Kind.TOGGLE || kind == TokenButtons.Kind.ICON
+                  || kind == TokenButtons.Kind.SPECIAL;
+            for (String state : states) {
+                if (state.equals("selected") && !selectable) {
+                    matrix.add(Box.createHorizontalStrut(0), cell);
+                    continue;
+                }
+                AbstractButton button = sampleButton(kind, size);
+                ButtonModel model = button.getModel();
+                switch (state) {
+                    case "hover" -> model.setRollover(true);
+                    case "pressed" -> {
+                        model.setArmed(true);
+                        model.setPressed(true);
+                    }
+                    case "focus" -> button.putClientProperty(FlatClientProperties.COMPONENT_FOCUS_OWNER,
+                          (Predicate<JComponent>) component -> true);
+                    case "selected" -> button.setSelected(true);
+                    case "disabled" -> button.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(button, cell);
+            }
+        }
+        cell.gridx = states.size() + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    private static AbstractButton sampleButton(TokenButtons.Kind kind, TokenButtons.Size size) {
+        String label = Messages.getString("UiLibrary.buttons.label." + kind.name());
+        return switch (kind) {
+            case TOGGLE -> TokenButtons.toggle(label, size);
+            case ICON -> TokenButtons.icon(ICON_SEARCH, label, true, size);
+            case SPECIAL -> TokenButtons.special(label, size);
+            default -> TokenButtons.button(kind, label, size);
+        };
     }
     private JComponent statusStrip() {
         JPanel strip = row(color("surface.panel"));

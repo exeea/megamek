@@ -58,6 +58,7 @@ public final class DesignTokens {
     private final Map<String, Float> space;
     private final Map<String, Float> radius;
     private final Map<String, Float> size;
+    private final Map<String, Float> opacity;
     private final Map<String, Float> motion;
     private final List<ContrastCheck> contrastChecks;
     private final List<DistinctCheck> distinctChecks;
@@ -91,6 +92,7 @@ public final class DesignTokens {
         space = numbers(root.path("space"));
         radius = numbers(root.path("radius"));
         size = numbers(root.path("size"));
+        opacity = numbers(root.path("opacity"));
         motion = numbers(root.path("motion"));
 
         List<ContrastCheck> contrast = new ArrayList<>();
@@ -192,6 +194,20 @@ public final class DesignTokens {
 
     public Map<String, Float> size() {
         return size;
+    }
+
+    /** Alphas from 0 to 1, such as the tint of a status color laid over a hovered or pressed face. */
+    public Map<String, Float> opacity() {
+        return opacity;
+    }
+
+    /** The alpha {@code opacity.name} as a 0-255 channel. */
+    public int alpha(String name) {
+        Float value = opacity.get(name);
+        if (value == null) {
+            throw new IllegalArgumentException("Unknown opacity " + name);
+        }
+        return Math.round(value * 255);
     }
 
     /** Durations in milliseconds. */

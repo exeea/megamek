@@ -37,6 +37,9 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.client.ui.design.ColorMath;
+import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.design.DesignTokens.Mode;
 
 /**
  * Theme for every native view: its color tokens, the Roboto type scale, the icon sheet
@@ -294,6 +297,7 @@ public final class UiTheme implements Disposable {
         hudField.messageFontColor = DISABLED;
         skin.add("hud", hudField);
         kitStyles(hud);
+        tokenButtons();
         // Hover tooltips: hud-small text on the panel surface, wrapped at 340 units.
         TextTooltip.TextTooltipStyle tooltip = new TextTooltip.TextTooltipStyle(
               skin.get("hud-small", Label.LabelStyle.class), skin.getDrawable("panel"));
@@ -403,6 +407,189 @@ public final class UiTheme implements Disposable {
         };
         divider.setMinHeight(9);
         skin.add("hud-split", new com.badlogic.gdx.scenes.scene2d.ui.SplitPane.SplitPaneStyle(divider));
+    }
+
+    /**
+     * The button set's kinds (docs/design-system/tokens.md, Buttons). Each is a {@link TokenButtonStyle} named
+     * {@code button-<kind>}, and {@code button-<kind>-compact} at the compact size.
+     */
+    public static final List<String> BUTTON_KINDS = List.of("primary", "secondary", "quiet", "danger", "toggle",
+          "icon", "special");
+    /** The suffix of a button style's compact size. */
+    public static final String COMPACT = "-compact";
+
+    /** A button style built from the design tokens, with the focus ring its button draws over its face. */
+    public static final class TokenButtonStyle extends TextButton.TextButtonStyle {
+        /** The focus ring's outer and inner one-unit lines; the inner one is drawn one unit inside the outer. */
+        public Drawable focusOuter;
+        public Drawable focusInner;
+    }
+
+    /** The token button set in dark mode, the only mode native views have for now. */
+    private void tokenButtons() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        int raised = tokens.color("surface.raised", mode);
+        int hover = tokens.color("surface.hover", mode);
+        int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
+        int selected = tokens.color("selected.background", mode);
+        int accent = tokens.color("accent.primary", mode);
+        int danger = tokens.color("status.danger", mode);
+        int selectedFace = ColorMath.over(selected, raised);
+        Color control = token(tokens.color("border.control", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color strong = token(tokens.color("border.strong", mode));
+        Color violet = token(tokens.color("selected.primary", mode));
+        Color ring = token(tokens.color("focus.ring", mode));
+        float radius = tokens.radius().get("md");
+        float border = tokens.size().get("border");
+
+        box("tb-secondary", token(raised), control, border, radius, null, 0, 0, 0);
+        box("tb-secondary-over", token(ColorMath.over(hover, raised)), strong, border, radius, null, 0, 0, 0);
+        box("tb-secondary-down", token(ColorMath.over(pressed, raised)), strong, border, radius, null, 0, 0, 0);
+        box("tb-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
+        // A surface wash is invisible on the accent: hover leans toward the label color, press away from it
+        int accentHover = ColorMath.over(ColorMath.withAlpha(tokens.color("text.onAccent", mode),
+              tokens.alpha("tint.hover")), accent);
+        int accentPressed = ColorMath.over(ColorMath.withAlpha(tokens.color("text.primary", mode),
+              tokens.alpha("tint.pressed")), accent);
+        box("tb-primary", token(accent), token(accent), border, radius, null, 0, 0, 0);
+        box("tb-primary-over", token(accentHover), strong, border, radius, null, 0, 0, 0);
+        box("tb-primary-down", token(accentPressed), strong, border, radius, null, 0, 0, 0);
+        box("tb-danger", token(raised), token(danger), border, radius, null, 0, 0, 0);
+        box("tb-danger-over", token(ColorMath.over(ColorMath.withAlpha(danger, tokens.alpha("tint.hover")), raised)),
+              token(danger), border, radius, null, 0, 0, 0);
+        box("tb-danger-down",
+              token(ColorMath.over(ColorMath.withAlpha(danger, tokens.alpha("tint.pressed")), raised)),
+              token(danger), border, radius, null, 0, 0, 0);
+        box("tb-toggle-checked", token(selectedFace), violet, border, radius, null, 0, 0, 0);
+        box("tb-toggle-checked-over", token(ColorMath.over(hover, selectedFace)), violet, border, radius, null, 0, 0,
+              0);
+        box("tb-quiet-over", token(hover), null, 0, radius, null, 0, 0, 0);
+        box("tb-quiet-down", token(pressed), null, 0, radius, null, 0, 0, 0);
+        box("tb-quiet-checked", token(selected), null, 0, radius, null, 0, 0, 0);
+        box("tb-focus", Color.CLEAR, ring, border, radius, null, 0, 0, 0);
+        box("tb-focus-inner", Color.CLEAR, ring, border, Math.max(radius - border, 0), null, 0, 0, 0);
+        box("tb-focus-accent", Color.CLEAR, token(tokens.color("text.primary", mode)), border, radius, null, 0, 0, 0);
+        box("tb-focus-accent-inner", Color.CLEAR, token(tokens.color("text.onAccent", mode)), border,
+              Math.max(radius - border, 0), null, 0, 0, 0);
+
+        Color text = token(tokens.color("text.primary", mode));
+        Color secondaryText = token(tokens.color("text.secondary", mode));
+        Color onAccent = token(tokens.color("text.onAccent", mode));
+        Color disabledText = token(tokens.color("text.disabled", mode));
+        float vertical = tokens.space().get("xxs");
+        for (boolean compact : new boolean[] { false, true }) {
+            float height = tokens.size().get(compact ? "control.sm" : "control.md");
+            float side = tokens.space().get(compact ? "md" : "lg");
+            String suffix = compact ? COMPACT : "";
+            for (String kind : BUTTON_KINDS) {
+                boolean square = kind.equals("icon");
+                float horizontal = square ? 0 : side;
+                TokenButtonStyle style = new TokenButtonStyle();
+                style.font = skin.getFont("hud-medium");
+                style.fontColor = secondaryText;
+                style.overFontColor = text;
+                style.downFontColor = text;
+                style.checkedFontColor = text;
+                style.checkedOverFontColor = text;
+                style.checkedDownFontColor = text;
+                style.disabledFontColor = disabledText;
+                style.focusOuter = skin.getDrawable("tb-focus");
+                style.focusInner = skin.getDrawable("tb-focus-inner");
+                String face = switch (kind) {
+                    case "primary", "danger", "quiet" -> kind;
+                    default -> "secondary";
+                };
+                if (kind.equals("special")) {
+                    special(style, tokens, mode, vertical, side, height);
+                } else if (square || kind.equals("quiet")) {
+                    style.up = sized(flat(Color.CLEAR, 0, 0), vertical, horizontal, height, square);
+                    style.over = sized(resized("tb-quiet-over", 0, 0, 0), vertical, horizontal, height, square);
+                    style.down = sized(resized("tb-quiet-down", 0, 0, 0), vertical, horizontal, height, square);
+                    style.disabled = style.up;
+                } else {
+                    style.up = sized(resized("tb-" + face, 0, 0, 0), vertical, horizontal, height, false);
+                    style.over = sized(resized("tb-" + face + "-over", 0, 0, 0), vertical, horizontal, height, false);
+                    style.down = sized(resized("tb-" + face + "-down", 0, 0, 0), vertical, horizontal, height, false);
+                    style.disabled = sized(resized("tb-disabled", 0, 0, 0), vertical, horizontal, height, false);
+                }
+                switch (kind) {
+                    case "primary" -> {
+                        style.fontColor = onAccent;
+                        style.overFontColor = onAccent;
+                        style.downFontColor = onAccent;
+                        style.focusOuter = skin.getDrawable("tb-focus-accent");
+                        style.focusInner = skin.getDrawable("tb-focus-accent-inner");
+                    }
+                    case "danger" -> {
+                        style.fontColor = token(danger);
+                        style.overFontColor = token(danger);
+                        style.downFontColor = token(danger);
+                    }
+                    case "toggle" -> {
+                        style.checked = sized(resized("tb-toggle-checked", 0, 0, 0), vertical, side, height, false);
+                        style.checkedOver = sized(resized("tb-toggle-checked-over", 0, 0, 0), vertical, side, height,
+                              false);
+                        style.checkedDown = style.checkedOver;
+                    }
+                    case "icon" -> {
+                        style.checked = sized(resized("tb-quiet-checked", 0, 0, 0), vertical, 0, height, true);
+                        style.checkedOver = style.checked;
+                        style.checkedDown = style.checked;
+                        style.checkedFontColor = violet;
+                        style.checkedOverFontColor = violet;
+                        style.checkedDownFontColor = violet;
+                    }
+                    default -> { }
+                }
+                skin.add("button-" + kind + suffix, style, TextButton.TextButtonStyle.class);
+            }
+        }
+    }
+
+    /** The special button's faces: corner ticks at rest, a full frame under the pointer, violet when selected. */
+    private void special(TokenButtonStyle style, DesignTokens tokens, Mode mode, float vertical, float side,
+          float height) {
+        Texture white = skin.get("white", Texture.class);
+        int raised = tokens.color("surface.raised", mode);
+        int hover = tokens.color("surface.hover", mode);
+        int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
+        int selectedFace = ColorMath.over(tokens.color("selected.background", mode), raised);
+        float tick = tokens.size().get("tick.control");
+        Color strong = token(tokens.color("border.strong", mode));
+        Color violet = token(tokens.color("selected.primary", mode));
+        style.up = sized(new HudFrame(white, token(raised), null, token(tokens.color("border.control", mode)), tick,
+              null), vertical, side, height, false);
+        style.over = sized(new HudFrame(white, token(ColorMath.over(hover, raised)), null, null, 0, strong), vertical,
+              side, height, false);
+        style.down = sized(new HudFrame(white, token(ColorMath.over(pressed, raised)), null, null, 0, strong),
+              vertical, side, height, false);
+        style.checked = sized(new HudFrame(white, token(selectedFace), null, null, 0, violet), vertical, side, height,
+              false);
+        style.checkedOver = sized(new HudFrame(white, token(ColorMath.over(hover, selectedFace)), null, null, 0,
+              violet), vertical, side, height, false);
+        style.checkedDown = style.checkedOver;
+        style.disabled = sized(new HudFrame(white, token(raised), null, token(tokens.color("border.subtle", mode)),
+              tick, null), vertical, side, height, false);
+        Color ring = token(tokens.color("focus.ring", mode));
+        style.focusOuter = new HudFrame(white, Color.CLEAR, null, null, 0, ring);
+        style.focusInner = null;
+    }
+
+    /** Pads {@code drawable} and gives it the control height; a square one is as wide as it is high. */
+    private static Drawable sized(Drawable drawable, float vertical, float horizontal, float height, boolean square) {
+        pad(drawable, vertical, horizontal);
+        drawable.setMinHeight(height);
+        drawable.setMinWidth(square ? height : 0);
+        return drawable;
+    }
+
+    /** A libGDX color from a token's ARGB value. */
+    private static Color token(int argb) {
+        Color color = new Color();
+        Color.argb8888ToColor(color, argb);
+        return color;
     }
 
     /** Pads a drawable: {@code vertical} units above and below its content, {@code horizontal} beside it. */

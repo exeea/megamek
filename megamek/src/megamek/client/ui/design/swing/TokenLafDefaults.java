@@ -96,28 +96,51 @@ public final class TokenLafDefaults {
         put("Component.success.borderColor", color("status.success"));
         put("Component.success.focusedBorderColor", color("status.success"));
 
-        // Secondary (default) button: raised face, control edge, hover wash and a strong edge on hover
-        put("Button.background", raised);
-        put("Button.foreground", color("text.primary"));
-        put("Button.hoverBackground", over(hover, raised));
-        put("Button.pressedBackground", over(pressed, raised));
+        // Secondary (default) button: raised face, control edge; hover adds a wash, a strong edge and brighter text.
+        // Every kind is disabled the same way: raised face, subtle edge, disabled text.
+        for (String prefix : new String[] { "Button.", "ToggleButton." }) {
+            put(prefix + "background", raised);
+            put(prefix + "foreground", color("text.secondary"));
+            put(prefix + "hoverForeground", color("text.primary"));
+            put(prefix + "pressedForeground", color("text.primary"));
+            put(prefix + "hoverBackground", over(hover, raised));
+            put(prefix + "pressedBackground", over(pressed, raised));
+            put(prefix + "focusedBackground", raised);
+            put(prefix + "disabledBackground", raised);
+            put(prefix + "disabledText", color("text.disabled"));
+            put(prefix + "selectedBackground", over(selected, raised));
+            put(prefix + "selectedForeground", color("text.primary"));
+            put(prefix + "toolbar.hoverBackground", over(hover, base));
+            put(prefix + "toolbar.hoverForeground", color("text.primary"));
+            put(prefix + "toolbar.pressedBackground", over(pressed, base));
+            put(prefix + "toolbar.pressedForeground", color("text.primary"));
+            put(prefix + "toolbar.selectedBackground", over(selected, base));
+            put(prefix + "toolbar.selectedForeground", color("selected.primary"));
+        }
+        // Edges are shared by plain and toggle buttons; a selected toggle keeps a violet edge in every state
         put("Button.borderColor", color("border.control"));
         put("Button.disabledBorderColor", color("border.subtle"));
         put("Button.hoverBorderColor", color("border.strong"));
+        put("Button.pressedBorderColor", color("border.strong"));
         put("Button.focusedBorderColor", color("focus.ring"));
-        put("Button.disabledText", color("text.disabled"));
-        put("Button.selectedBackground", over(selected, raised));
-        put("Button.selectedForeground", color("text.primary"));
-        put("Button.toolbar.hoverBackground", over(hover, base));
-        put("Button.toolbar.pressedBackground", over(pressed, base));
-        put("Button.toolbar.selectedBackground", over(selected, base));
+        put("Button.selectedBorderColor", color("selected.primary"));
+        put("Button.hoverSelectedBorderColor", color("selected.primary"));
+        put("Button.pressedSelectedBorderColor", color("selected.primary"));
+        put("Button.focusedSelectedBorderColor", color("focus.ring"));
+        put("Button.disabledSelectedBorderColor", color("border.subtle"));
 
-        // Primary (default) button: accent fill; its focus shows as an inner line in the on-accent color
+        // Primary (default) button: accent fill; its focus shows as an inner line in the on-accent color. A wash of the
+        // surface color is invisible on the accent, so hover leans toward the label color and press away from it.
         int accent = color("accent.primary");
+        int accentHover = over(ColorMath.withAlpha(color("text.onAccent"), tokens.alpha("tint.hover")), accent);
+        int accentPressed = over(ColorMath.withAlpha(color("text.primary"), tokens.alpha("tint.pressed")), accent);
         put("Button.default.background", accent);
         put("Button.default.foreground", color("text.onAccent"));
-        put("Button.default.hoverBackground", over(hover, accent));
-        put("Button.default.pressedBackground", over(pressed, accent));
+        put("Button.default.hoverForeground", color("text.onAccent"));
+        put("Button.default.pressedForeground", color("text.onAccent"));
+        put("Button.default.hoverBackground", accentHover);
+        put("Button.default.pressedBackground", accentPressed);
+        put("Button.default.focusedBackground", accent);
         put("Button.default.borderColor", accent);
         put("Button.default.hoverBorderColor", color("border.strong"));
         put("Button.default.focusedBorderColor", color("text.primary"));
@@ -126,20 +149,40 @@ public final class TokenLafDefaults {
         values.put("[style]Button.primary", style(
               "background", accent,
               "foreground", color("text.onAccent"),
-              "hoverBackground", over(hover, accent),
-              "pressedBackground", over(pressed, accent),
+              "hoverForeground", color("text.onAccent"),
+              "pressedForeground", color("text.onAccent"),
+              "hoverBackground", accentHover,
+              "pressedBackground", accentPressed,
+              "focusedBackground", accent,
               "borderColor", accent,
               "hoverBorderColor", color("border.strong"),
+              "pressedBorderColor", color("border.strong"),
               "focusedBorderColor", color("text.primary"),
               "focusColor", color("text.onAccent")));
 
-        // Toggle: selection is violet, never only a lighter face
-        put("ToggleButton.background", raised);
-        put("ToggleButton.selectedBackground", over(selected, raised));
-        put("ToggleButton.selectedForeground", color("text.primary"));
+        // Danger: the danger color on text and edge; hover and press tint the face with it
+        int danger = color("status.danger");
+        values.put("[style]Button.danger", style(
+              "foreground", danger,
+              "hoverForeground", danger,
+              "pressedForeground", danger,
+              "borderColor", danger,
+              "hoverBorderColor", danger,
+              "pressedBorderColor", danger,
+              "hoverBackground", over(ColorMath.withAlpha(danger, tokens.alpha("tint.hover")), raised),
+              "pressedBackground", over(ColorMath.withAlpha(danger, tokens.alpha("tint.pressed")), raised)));
+
+        // Quiet and icon buttons have no face or edge until hovered; a selected icon toggle is a violet wash and glyph
+        for (String type : new String[] { "Button", "ToggleButton" }) {
+            values.put("[style]" + type + ".quiet", "buttonType: borderless");
+            values.put("[style]" + type + ".icon", "buttonType: borderless; squareSize: true");
+            values.put("[style]" + type + ".regular", padding("lg"));
+            values.put("[style]" + type + ".compact", padding("md"));
+        }
+
+        // Toggle: selection is a violet wash and edge, never only a lighter face
         put("ToggleButton.disabledSelectedBackground",
               over(ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2), raised));
-        put("ToggleButton.toolbar.selectedBackground", over(selected, base));
 
         // Check boxes and radio buttons: accent fill when selected
         put("CheckBox.icon.borderColor", color("border.control"));
@@ -210,6 +253,9 @@ public final class TokenLafDefaults {
             values.put(platform + "semibold.font", medium);
             values.put(platform + "light.font", "+0");
         }
+        // Button captions use the label style's medium weight
+        values.put("Button.font", medium);
+        values.put("ToggleButton.font", medium);
         return values;
     }
 
@@ -219,6 +265,15 @@ public final class TokenLafDefaults {
 
     private void put(String key, int argb) {
         values.put(key, hex(argb));
+    }
+
+    /**
+     * A size style class: the side padding, a space token. The height comes from {@link TokenButtons}, because FlatLaf
+     * ignores minimumHeight on buttons whose margin is not the default one.
+     */
+    private String padding(String side) {
+        int padding = Math.round(tokens.space().get(side));
+        return "margin: 0," + padding + ",0," + padding;
     }
 
     /** A FlatLaf style string from alternating property names and colors. */

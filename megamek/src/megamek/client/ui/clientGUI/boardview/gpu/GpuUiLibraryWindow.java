@@ -202,6 +202,15 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         content.add(currentSwatches()).row();
         section(content, "UiLibrary.gdx.fonts");
         content.add(fonts()).row();
+        section(content, "UiLibrary.controls.buttons");
+        Label buttonNote = kit.label(text("UiLibrary.buttons.note"), "hud-small", 11.5f, UiTheme.MUTED);
+        buttonNote.setWrap(true);
+        content.add(buttonNote).width(1100).padBottom(8).row();
+        for (boolean compact : new boolean[] { false, true }) {
+            content.add(kit.label(text(compact ? "UiLibrary.buttons.compact" : "UiLibrary.buttons.regular"),
+                  "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6).padBottom(6).row();
+            content.add(buttonMatrix(compact)).row();
+        }
         section(content, "UiLibrary.gdx.buttons");
         content.add(buttons()).row();
         section(content, "UiLibrary.gdx.controls");
@@ -289,6 +298,44 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return fonts;
     }
 
+    /** Every token button kind at one size in every state; transient states are frozen through UiButton. */
+    private Table buttonMatrix(boolean compact) {
+        List<String> states = List.of("rest", "hover", "pressed", "focus", "selected", "disabled");
+        Table matrix = new Table();
+        matrix.defaults().left().padRight(16).padBottom(8);
+        matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(110);
+        for (String state : states) {
+            matrix.add(kit.label(text("UiLibrary.buttons.state." + state), "hud-small", 11, UiTheme.MUTED));
+        }
+        matrix.row();
+        for (String kind : UiTheme.BUTTON_KINDS) {
+            String upper = kind.toUpperCase(Locale.ROOT);
+            matrix.add(kit.label(text("UiLibrary.buttons.kind." + upper), "hud-medium", 12.5f, UiTheme.TEXT));
+            boolean selectable = kind.equals("toggle") || kind.equals("icon") || kind.equals("special");
+            String style = "button-" + kind + (compact ? UiTheme.COMPACT : "");
+            for (String state : states) {
+                if (state.equals("selected") && !selectable) {
+                    matrix.add();
+                    continue;
+                }
+                UiButton button = kind.equals("icon")
+                      ? kit.button(style, "search", null, null)
+                      : kit.button(style, null, text("UiLibrary.buttons.label." + upper), null);
+                switch (state) {
+                    case "hover" -> button.hovered(true);
+                    case "pressed" -> button.held(true);
+                    case "focus" -> button.focused(true);
+                    case "selected" -> button.pressed(true);
+                    case "disabled" -> button.setDisabled(true);
+                    default -> { }
+                }
+                matrix.add(button);
+            }
+            matrix.row();
+        }
+        return matrix;
+    }
+
     private Table buttons() {
         Table buttons = new Table();
         buttons.defaults().left().padBottom(8);
@@ -297,7 +344,11 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         buttons.add(kit.label(text("UiLibrary.gdx.pressed"), "hud-small", 11, UiTheme.MUTED)).width(200);
         buttons.add(kit.label(text("UiLibrary.gdx.disabled"), "hud-small", 11, UiTheme.MUTED)).width(200).row();
         List<String> styles = new ArrayList<>();
-        theme.skin.getAll(TextButton.TextButtonStyle.class).keys().forEach(styles::add);
+        theme.skin.getAll(TextButton.TextButtonStyle.class).keys().forEach(style -> {
+            if (style.startsWith("hud")) {
+                styles.add(style);
+            }
+        });
         styles.sort(String::compareTo);
         for (String style : styles) {
             buttons.add(kit.label(style, "hud-medium", 12, UiTheme.TEXT));

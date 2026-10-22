@@ -282,5 +282,7 @@ work for Swing, and item 11 is under investigation.
 - ~~FlatLaf theme~~: MegaMek Dark and MegaMek Light are built from the tokens and selectable; see
   [tokens.md](tokens.md#swing-themes). Making them the default and hiding the stock themes behind a classic option
   comes after the controls are settled.
-- Button spec: Primary, Secondary, Quiet, Danger, Toggle, Icon and Special (animated), in regular and compact sizes,
-  with every state (including focus), in Swing and libGDX.
+- ~~Button spec~~: Primary, Secondary, Quiet, Danger, Toggle, Icon and Special in regular and compact sizes, with
+  every state including focus, in Swing and libGDX; see [tokens.md](tokens.md#buttons). The Special reveal animation
+  comes with the motion work.
+- Focus design for every control, then inputs, checkbox / radio / switch, tabs, segmented control and select.

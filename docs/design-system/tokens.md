@@ -42,9 +42,8 @@ copy.
 - Translucent tokens (hover, selection) are composited over their surface, because opaque Swing components must paint
   opaque colors.
 - Selection uses `selected.background` and keeps full strength when the control is not focused.
-- The primary button is the FlatLaf style class `primary`
-  (`putClientProperty(FlatClientProperties.STYLE_CLASS, "primary")`), and the window's default button looks the same.
-  The other button types will be style classes too.
+- The button kinds are FlatLaf style classes, see [Buttons](#buttons); the window's default button looks like the
+  primary one.
 - The default font is Roboto at the `body` size, and FlatLaf's semibold (the `h1` to `h3` headings) is Roboto Medium.
 - Keyboard focus is drawn inside the control edge (a 1-wide inner line plus the focus-colored border, 2 wide in total)
   instead of 2 wide with a 2 offset outside it. A focus ring outside the edge would make every Swing control 4 pixels
@@ -142,11 +141,72 @@ variable font. Both platforms therefore draw the same outlines from one source.
 | Icon | sm 16, md 20, lg 24 |
 | Border | 1 |
 | Focus ring | 2 wide, 2 offset, `focus.ring` |
-| Corner ticks | 8 on controls, 13 on panels |
+| Corner ticks | 8 on controls, 13 on panels; 2 wide |
+| Opacity | tint.hover 0.16, tint.pressed 0.28 (a status color washed over a face) |
 | Motion | fast 120 ms, medium 200 ms, slow 320 ms; easing cubic-bezier(0.2, 0, 0, 1) |
 
 Regular frames use corner ticks. The framed button (ticks that grow into a full frame on hover) is a special
 variant for emphasis moments, not the default button.
+
+## Buttons
+
+Seven kinds in two sizes replace the 19 hud-v3 styles and the Swing button families. Both galleries show every kind in
+every state.
+
+| Kind | Use | Rest | Hover / pressed | Selected |
+| --- | --- | --- | --- | --- |
+| Primary | The one main action of a view | `accent.primary` face, `text.onAccent` label | Face leans toward the label color (hover) or `text.primary` (pressed), strong edge | — |
+| Secondary | Every other action (the default) | `surface.raised` face, `border.control` edge, `text.secondary` label | `surface.hover` wash (twice for pressed), `border.strong` edge, `text.primary` label | — |
+| Quiet | Low-emphasis actions in toolbars and rows | No face, no edge | As secondary, without the edge | — |
+| Danger | Destructive actions | As secondary, `status.danger` label and edge | Danger wash at `tint.hover` / `tint.pressed` | — |
+| Toggle | An on/off choice | As secondary | As secondary | `selected.background` wash, `selected.primary` edge |
+| Icon | A Material Symbols glyph, square; needs a tooltip | As quiet | As quiet | Violet wash and violet glyph |
+| Special | Emphasis moments (the HUD utility look) | Raised face, `border.control` corner ticks | Full `border.strong` frame | Violet wash and frame |
+
+- **Sizes.** Regular is `control.md` (36) high with `lg` side padding, for dialogs and forms; compact is `control.sm`
+  (28) with `md` padding, for dense tables and toolbars. Icon glyphs are `icon.md` / `icon.sm`.
+- **Labels** are sentence case in Roboto Medium. Rest text is `text.secondary` and brightens to `text.primary` under
+  the pointer, so the hover reads on every kind.
+- **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label.
+- **Focus** is drawn inside the edge so no button changes size: a 1-wide `focus.ring` border plus a 1-wide inner line.
+  On primary the border is `text.primary` and the inner line `text.onAccent`, so it shows on the accent face. The
+  final focus design across all controls is the next step.
+- **Selection** is always violet with an edge or glyph change, never a lighter face alone, so it does not depend on
+  telling two greys apart.
+- The primary label keeps at least 4.5:1 against its hover and pressed faces in both modes (tested).
+
+### Using them
+
+**Swing.** [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java) builds them:
+`TokenButtons.button(Kind.DANGER, text, Size.COMPACT)`, `primary(text)`, `toggle(text, size)`,
+`icon(codePoint, tooltip, toggle, size)`, `special(text, size)`. The look comes from FlatLaf style classes in the
+MegaMek themes (`primary`, `danger`, `quiet`, `icon`, plus `regular` or `compact`), so under another theme they are
+plain Swing buttons. `TokenButtons.style(button, kind, size)` restyles an existing button while migrating a view; it
+sets the look and padding but keeps the button's natural height, because FlatLaf only applies a minimum height to
+buttons with the default margin. Buttons from the factories grow to the size's height themselves.
+[`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) paints itself from the tokens.
+
+**libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `TextButtonStyle`s
+`button-<kind>` and `button-<kind>-compact` (`button-primary`, `button-secondary`, `button-quiet`, `button-danger`,
+`button-toggle`, `button-icon`, `button-special`), built from the tokens. `UiKit.button(style, icon, text, sub)` makes one.
+libGDX gives hover priority over focus, so [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) draws
+the focus ring as an overlay when it has keyboard focus; `focused(true)` and `held(true)` freeze those states for the
+gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; aligning them is part of the type pass.
+
+### Migrating hud-v3 styles
+
+| hud-v3 style | New kind |
+| --- | --- |
+| `hud`, `hud-plain` | secondary |
+| `hud-main` | primary |
+| `hud-danger` | danger |
+| `hud-delete-icon`, `hud-icon` | icon |
+| `hud-mini`, `hud-utility-small` | secondary, compact |
+| `hud-utility`, `hud-utility-narrow`, `hud-utility-row` | special (the icon-above-label layout stays a HUD composition) |
+| `hud-seg`, `hud-pill`, `hud-tab`, `hud-tab-caps`, `hud-row`, `hud-menu-row`, `hud-select`, `hud-select-inline` | Not buttons: segmented control, tabs, list row, menu item and select come later |
+
+The hud-v3 styles stay until their views move; the libGDX gallery lists them under "hud-v3 button styles (to
+migrate)".
 
 ## Code
 
@@ -159,9 +219,11 @@ variant for emphasis moments, not the default button.
 | [`SwingUiLibrary`](../../megamek/src/megamek/client/ui/design/swing/SwingUiLibrary.java) | The Swing gallery |
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
+| [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
+| [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
-Outside the galleries, only the two Swing themes read the tokens. They are selectable but not the default. Next come
-the button types (as FlatLaf style classes and libGDX styles), and a `UiTheme` rename pass so hud-v3 reads the same
-roles.
+Outside the galleries, only the two Swing themes and the libGDX button styles read the tokens. The Swing themes are
+selectable but not the default, and no view uses the new buttons yet. Next comes the focus design for every control,
+then inputs, choices and tabs, and a `UiTheme` rename pass so hud-v3 reads the same roles.

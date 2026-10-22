@@ -3,6 +3,7 @@ package megamek.client.ui.design;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -22,6 +23,14 @@ class DesignTokensTest {
         assertEquals(21, ColorMath.contrast(0xFF000000, 0xFFFFFFFF), 1e-9);
         assertEquals(1, ColorMath.contrast(0xFF777777, 0xFF777777), 1e-9);
         assertEquals(4.48, ColorMath.contrast(0xFF777777, 0xFFFFFFFF), 0.01);
+    }
+
+    @Test
+    void opacityTokensBecomeAlphaBytes() {
+        DesignTokens tokens = DesignTokens.shipped();
+        assertEquals(Math.round(tokens.opacity().get("tint.hover") * 255), tokens.alpha("tint.hover"));
+        assertTrue(tokens.alpha("tint.pressed") > tokens.alpha("tint.hover"));
+        assertThrows(IllegalArgumentException.class, () -> tokens.alpha("no.such"));
     }
 
     @Test
