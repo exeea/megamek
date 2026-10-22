@@ -279,4 +279,8 @@ work for Swing, and item 11 is under investigation.
 
 - ~~Token v0~~: done, see [tokens.md](tokens.md).
 - ~~Shared assets~~: static Roboto Medium for Swing is in `mm-data`.
-- Button spec: variants, sizes, states (including focus) for the pilot.
+- ~~FlatLaf theme~~: MegaMek Dark and MegaMek Light are built from the tokens and selectable; see
+  [tokens.md](tokens.md#swing-themes). Making them the default and hiding the stock themes behind a classic option
+  comes after the controls are settled.
+- Button spec: Primary, Secondary, Quiet, Danger, Toggle, Icon and Special (animated), in regular and compact sizes,
+  with every state (including focus), in Swing and libGDX.

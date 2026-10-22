@@ -57,6 +57,8 @@ import javax.swing.UIManager;
 import io.sentry.Sentry;
 import megamek.client.ui.clientGUI.ButtonOrderPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
+import megamek.client.ui.design.swing.MegaMekDarkLaf;
+import megamek.client.ui.design.swing.MegaMekLightLaf;
 import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.preferences.SuitePreferences;
 import megamek.client.ui.util.FontHandler;
@@ -450,6 +452,8 @@ public class MegaMek {
         UIManager.installLookAndFeel("Flat IntelliJ", "com.formdev.flatlaf.FlatIntelliJLaf");
         UIManager.installLookAndFeel("Flat Dark", "com.formdev.flatlaf.FlatDarkLaf");
         UIManager.installLookAndFeel("Flat Darcula", "com.formdev.flatlaf.FlatDarculaLaf");
+        UIManager.installLookAndFeel(MegaMekDarkLaf.NAME, MegaMekDarkLaf.class.getName());
+        UIManager.installLookAndFeel(MegaMekLightLaf.NAME, MegaMekLightLaf.class.getName());
 
         // Set a couple of things to make the Swing GUI look more "Mac-like" on Macs
         // Taken from:

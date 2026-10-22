@@ -14,6 +14,8 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.font.TextAttribute;
 import java.util.HashMap;
 import java.util.List;
@@ -22,22 +24,36 @@ import java.util.Map;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.Icon;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayer;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
+import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
+import javax.swing.JSlider;
+import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
+import javax.swing.JTable;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.JViewport;
 import javax.swing.Scrollable;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
+import javax.swing.UIManager;
+import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
+import javax.swing.text.PlainDocument;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
@@ -47,15 +63,19 @@ import megamek.client.ui.design.DesignTokens.TypeStyle;
 import megamek.client.ui.design.TokenChecks;
 import megamek.client.ui.design.Vision;
 import megamek.client.ui.util.FontHandler;
+import megamek.client.ui.util.UIUtil;
+import megamek.logging.MMLogger;
 
 /**
  * The developer gallery of the Swing side of the design system, opened from Help in the lobby: every color role in
  * both modes, the accessibility checks, the text styles, spacing and shape, all painted from {@link DesignTokens}
- * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The Swing
- * control library grows here, control by control.
+ * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The Controls tab
+ * shows real Swing controls drawn by {@link MegaMekDarkLaf} or {@link MegaMekLightLaf}, which the gallery applies to
+ * the app while it is open. The Swing control library grows here, control by control.
  */
 public final class SwingUiLibrary extends JFrame {
     private static SwingUiLibrary open;
+    private static final MMLogger LOGGER = MMLogger.create(SwingUiLibrary.class);
 
     private static final int ICON_ERROR = 0xE000;
     private static final int ICON_WARNING = 0xE002;
@@ -70,6 +90,7 @@ public final class SwingUiLibrary extends JFrame {
     private final Map<String, Font> fonts = new HashMap<>();
     private Mode mode = Mode.DARK;
     private int selectedTab;
+    private final String previousLookAndFeel;
 
     /** Shows the gallery, or brings the open one to the front. */
     public static void showLibrary(Component owner) {
@@ -85,11 +106,19 @@ public final class SwingUiLibrary extends JFrame {
         super(Messages.getString("UiLibrary.swing.title"));
         FontHandler.initialize();
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        previousLookAndFeel = UIManager.getLookAndFeel() == null ? null
+              : UIManager.getLookAndFeel().getClass().getName();
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent event) {
+                restoreLookAndFeel();
+            }
+        });
 
         JToggleButton light = new JToggleButton(Messages.getString("UiLibrary.mode.light"));
         light.addActionListener(event -> {
             mode = light.isSelected() ? Mode.LIGHT : Mode.DARK;
-            rebuild();
+            applyLookAndFeel();
         });
         JComboBox<Vision> vision = new JComboBox<>(Vision.values());
         vision.setRenderer((list, value, index, selected, focused) -> new JLabel(
@@ -104,8 +133,35 @@ public final class SwingUiLibrary extends JFrame {
 
         getContentPane().add(toolbar, BorderLayout.NORTH);
         getContentPane().add(layer, BorderLayout.CENTER);
-        rebuild();
+        applyLookAndFeel();
         setSize(scaleForGUI(1100), scaleForGUI(820));
+    }
+
+    /**
+     * The controls are real Swing components, so they need the MegaMek look and feel of the current mode. A look and
+     * feel is global: the whole app uses it while the gallery is open, and closing the gallery puts the previous one
+     * back.
+     */
+    private void applyLookAndFeel() {
+        try {
+            UIManager.setLookAndFeel(mode == Mode.DARK ? new MegaMekDarkLaf() : new MegaMekLightLaf());
+        } catch (UnsupportedLookAndFeelException ex) {
+            LOGGER.error("Could not apply the MegaMek look and feel", ex);
+        }
+        rebuild();
+        UIUtil.updateAfterUiChange();
+    }
+
+    private void restoreLookAndFeel() {
+        if (previousLookAndFeel == null || previousLookAndFeel.equals(UIManager.getLookAndFeel().getClass().getName())) {
+            return;
+        }
+        try {
+            UIManager.setLookAndFeel(previousLookAndFeel);
+            UIUtil.updateAfterUiChange();
+        } catch (ReflectiveOperationException | UnsupportedLookAndFeelException ex) {
+            LOGGER.error("Could not restore the look and feel {}", previousLookAndFeel, ex);
+        }
     }
 
     private void rebuild() {
@@ -119,6 +175,7 @@ public final class SwingUiLibrary extends JFrame {
         tabs.addTab(Messages.getString("UiLibrary.tab.checks"), page(checksPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.type"), page(typePage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.shape"), page(shapePage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.controls"), page(controlsPage()));
         tabs.setSelectedIndex(Math.min(selectedTab, tabs.getTabCount() - 1));
         content.add(tabs, BorderLayout.CENTER);
         content.revalidate();
@@ -210,6 +267,107 @@ public final class SwingUiLibrary extends JFrame {
 
     // ---- Samples
 
+    private JComponent controlsPage() {
+        JPanel page = column(color("surface.base"));
+        page.add(paragraph(Messages.getString("UiLibrary.controls.intro",
+              mode == Mode.DARK ? MegaMekDarkLaf.NAME : MegaMekLightLaf.NAME), "small", "text.muted"));
+
+        page.add(heading(Messages.getString("UiLibrary.controls.buttons")));
+        JPanel buttons = row(color("surface.base"));
+        JButton primary = new JButton(Messages.getString("UiLibrary.controls.primary"));
+        primary.putClientProperty(FlatClientProperties.STYLE_CLASS, "primary");
+        primary.setToolTipText(Messages.getString("UiLibrary.controls.tooltip"));
+        buttons.add(primary);
+        JButton secondary = new JButton(Messages.getString("UiLibrary.controls.secondary"));
+        secondary.setToolTipText(Messages.getString("UiLibrary.controls.tooltip"));
+        buttons.add(secondary);
+        JToggleButton toggle = new JToggleButton(Messages.getString("UiLibrary.controls.toggle"), true);
+        buttons.add(toggle);
+        buttons.add(new JToggleButton(Messages.getString("UiLibrary.controls.toggle")));
+        JButton disabledPrimary = new JButton(Messages.getString("UiLibrary.controls.primary"));
+        disabledPrimary.putClientProperty(FlatClientProperties.STYLE_CLASS, "primary");
+        disabledPrimary.setEnabled(false);
+        buttons.add(disabledPrimary);
+        JButton disabled = new JButton(Messages.getString("UiLibrary.controls.disabled"));
+        disabled.setEnabled(false);
+        buttons.add(disabled);
+        page.add(buttons);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.choices")));
+        JPanel choices = row(color("surface.base"));
+        choices.add(new JCheckBox(Messages.getString("UiLibrary.controls.checked"), true));
+        choices.add(new JCheckBox(Messages.getString("UiLibrary.controls.unchecked")));
+        JCheckBox disabledCheck = new JCheckBox(Messages.getString("UiLibrary.controls.disabled"), true);
+        disabledCheck.setEnabled(false);
+        choices.add(disabledCheck);
+        ButtonGroup group = new ButtonGroup();
+        for (String key : List.of("UiLibrary.controls.optionA", "UiLibrary.controls.optionB")) {
+            JRadioButton radio = new JRadioButton(Messages.getString(key), group.getButtonCount() == 0);
+            group.add(radio);
+            choices.add(radio);
+        }
+        choices.add(new JComboBox<>(new String[] { Messages.getString("UiLibrary.controls.optionA"),
+              Messages.getString("UiLibrary.controls.optionB") }));
+        choices.add(new JSpinner(new SpinnerNumberModel(4, 0, 12, 1)));
+        page.add(choices);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.text")));
+        JPanel fields = row(color("surface.base"));
+        fields.add(field(Messages.getString("UiLibrary.controls.value"), null, true));
+        JTextField placeholder = field("", null, true);
+        placeholder.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT,
+              Messages.getString("UiLibrary.controls.placeholder"));
+        fields.add(placeholder);
+        fields.add(field(Messages.getString("UiLibrary.controls.error"), FlatClientProperties.OUTLINE_ERROR, true));
+        fields.add(field(Messages.getString("UiLibrary.controls.warning"), FlatClientProperties.OUTLINE_WARNING,
+              true));
+        fields.add(field(Messages.getString("UiLibrary.controls.disabled"), null, false));
+        page.add(fields);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.ranges")));
+        JPanel ranges = row(color("surface.base"));
+        ranges.add(new JSlider(0, 100, 60));
+        JProgressBar progress = new JProgressBar(0, 100);
+        progress.setValue(60);
+        progress.setStringPainted(true);
+        ranges.add(progress);
+        page.add(ranges);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.tabs")));
+        JTabbedPane sampleTabs = new JTabbedPane();
+        for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB", "UiLibrary.controls.tabC")) {
+            JPanel tabBody = new JPanel(new BorderLayout());
+            tabBody.add(new JLabel(Messages.getString(key)), BorderLayout.CENTER);
+            tabBody.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(8), scaleForGUI(8),
+                  scaleForGUI(8)));
+            sampleTabs.addTab(Messages.getString(key), tabBody);
+        }
+        sampleTabs.setAlignmentX(LEFT_ALIGNMENT);
+        page.add(sampleTabs);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.table")));
+        JTable table = new JTable(new Object[][] {
+              { "Atlas AS7-D", "100", "3/5/0", "54" },
+              { "Marauder MAD-3R", "75", "4/6/0", "42" },
+              { "Phoenix Hawk PXH-1", "45", "6/9/6", "38" },
+              { "Locust LCT-1V", "20", "8/12/0", "21" },
+        }, new Object[] { Messages.getString("UiLibrary.controls.unit"),
+              Messages.getString("UiLibrary.controls.tons"), Messages.getString("UiLibrary.controls.movement"),
+              Messages.getString("UiLibrary.controls.armor") });
+        table.setRowSelectionInterval(1, 1);
+        table.setPreferredScrollableViewportSize(new Dimension(scaleForGUI(520), table.getRowHeight() * 4));
+        JScrollPane tableScroll = new JScrollPane(table);
+        tableScroll.setAlignmentX(LEFT_ALIGNMENT);
+        page.add(tableScroll);
+        return page;
+    }
+
+    private JTextField field(String value, String outline, boolean enabled) {
+        JTextField field = new JTextField(value, 14);
+        field.putClientProperty(FlatClientProperties.OUTLINE, outline);
+        field.setEnabled(enabled);
+        return field;
+    }
     private JComponent statusStrip() {
         JPanel strip = row(color("surface.panel"));
         strip.add(chip(ICON_ERROR, "status.danger", "UiLibrary.status.danger"));
@@ -351,7 +509,10 @@ public final class SwingUiLibrary extends JFrame {
 
     /** Text that wraps at the page width instead of widening the page. */
     private JTextArea paragraph(String value, String style, String role) {
-        JTextArea area = new JTextArea(value);
+        // The i18n views measure fractional glyph advances; the plain ones round them and wrap too late.
+        PlainDocument document = new PlainDocument();
+        document.putProperty("i18n", Boolean.TRUE);
+        JTextArea area = new JTextArea(document, value, 0, 0);
         area.setLineWrap(true);
         area.setWrapStyleWord(true);
         area.setEditable(false);

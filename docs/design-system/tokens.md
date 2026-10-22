@@ -12,18 +12,44 @@ both platforms (and the launcher, later) can share it.
 In a dev build, open the lobby and use **Help > UI library (developer)**. The submenu only shows in the lobby.
 
 - **Swing controls...** opens the Swing gallery: every color role in both modes, the accessibility checks, the text
-  styles, spacing and shape. A toolbar toggles light mode and simulates deuteranopia, protanopia and tritanopia over
-  the whole window. This is the complete library; Swing controls are added here as they are built.
+  styles, spacing and shape, and a **Controls** tab of real Swing controls drawn by the MegaMek look and feel. A
+  toolbar toggles light mode and simulates deuteranopia, protanopia and tritanopia over the whole window. While the
+  gallery is open the whole app uses MegaMek Dark or Light, and closing it restores the previous theme. This is the
+  complete library; Swing controls are added here as they are built.
 - **libGDX controls...** opens the native gallery: the Token v0 dark colors beside the hud-v3 colors in use today,
   the hud fonts, all 19 current button styles in rest, pressed and disabled states, and the other toolkit controls. It
   is a subset of the Swing library and grows only when the game needs a control. Only one native window can run at a
   time, so it closes before a board or the board editor opens, and it will not open next to one.
 
-The same checks run as a unit test:
+The same checks run as a unit test, along with a test that the Swing themes pick the tokens up:
 
 ```
-./gradlew :megamek:test --tests megamek.client.ui.design.DesignTokensTest
+./gradlew :megamek:test --tests megamek.client.ui.design.DesignTokensTest --tests megamek.client.ui.design.swing.TokenLafDefaultsTest
 ```
+
+## Swing themes
+
+**MegaMek Dark** and **MegaMek Light** are FlatLaf look and feels
+([`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java),
+[`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java)). They are registered next
+to the four stock themes, so any suite app can pick them in its settings; the stock themes and the current default are
+unchanged for now. They have no properties file: [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java)
+builds the FlatLaf values from the token file when the theme loads, so a token change reaches Swing with no second
+copy.
+
+- FlatLaf derives most keys from a few variables (`@background`, `@foreground`, `@accentColor`, `@selectionBackground`
+  and so on). These are set from the tokens, and then the keys whose derived value would not match a token.
+- Translucent tokens (hover, selection) are composited over their surface, because opaque Swing components must paint
+  opaque colors.
+- Selection uses `selected.background` and keeps full strength when the control is not focused.
+- The primary button is the FlatLaf style class `primary`
+  (`putClientProperty(FlatClientProperties.STYLE_CLASS, "primary")`), and the window's default button looks the same.
+  The other button types will be style classes too.
+- The default font is Roboto at the `body` size, and FlatLaf's semibold (the `h1` to `h3` headings) is Roboto Medium.
+- Keyboard focus is drawn inside the control edge (a 1-wide inner line plus the focus-colored border, 2 wide in total)
+  instead of 2 wide with a 2 offset outside it. A focus ring outside the edge would make every Swing control 4 pixels
+  larger and move every layout. On the primary button the inner line uses `text.onAccent`, so it shows against the
+  accent fill. The final focus design is the next control to settle.
 
 ## Color roles
 
@@ -131,8 +157,11 @@ variant for emphasis moments, not the default button.
 | [`Vision`](../../megamek/src/megamek/client/ui/design/Vision.java) | Typical vision and the three simulated deficiencies |
 | [`TokenChecks`](../../megamek/src/megamek/client/ui/design/TokenChecks.java) | Runs the JSON `checks` |
 | [`SwingUiLibrary`](../../megamek/src/megamek/client/ui/design/swing/SwingUiLibrary.java) | The Swing gallery |
+| [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
+| [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
-Nothing outside the galleries reads the tokens yet. The next steps are the FlatLaf theme generated from them, and a
-`UiTheme` rename pass so hud-v3 reads the same roles.
+Outside the galleries, only the two Swing themes read the tokens. They are selectable but not the default. Next come
+the button types (as FlatLaf style classes and libGDX styles), and a `UiTheme` rename pass so hud-v3 reads the same
+roles.
