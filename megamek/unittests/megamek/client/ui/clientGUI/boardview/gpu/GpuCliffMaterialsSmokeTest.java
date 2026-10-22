@@ -75,7 +75,7 @@ class GpuCliffMaterialsSmokeTest {
             }
             var missing = assertThrows(IllegalArgumentException.class, () -> assets.sculpt("missing-material"));
             assertTrue(missing.getMessage().contains("Missing required Enhanced terrain asset"), missing.getMessage());
-            assertTrue(missing.getMessage().contains("missing-material.json"), missing.getMessage());
+            assertTrue(missing.getMessage().contains("missing-material.tres"), missing.getMessage());
         } finally {
             assets.dispose();
         }

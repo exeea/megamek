@@ -204,9 +204,12 @@ final class GpuAssets implements Disposable {
      * programs are at their texture units' limit. Per material: its surface values or means and surface layer (-1 if
      * uniform), its emission tint and emission layer (-1 without a map), and its constant glow. The sculpt maps set the
      * grid, which the road materials' maps take; road materials keep their roughness in their own surface map, so theirs
-     * is sent as its mean alone. The array holds one black texel when no material has a map.
+     * is sent as its mean alone. The array holds one black texel when no material has a map. {@code relief} is each
+     * sculpted surface's heightmap parallax (GpuMaterialMaps.ModelFinish): its depth along U and V in UV units, zero
+     * without a heightmap; the road materials take theirs from {@link #roadRelief}.
      */
-    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow) implements Disposable {
+    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow, float[] relief)
+          implements Disposable {
         @Override public void dispose() { maps.dispose(); }
     }
 
@@ -214,6 +217,7 @@ final class GpuAssets implements Disposable {
         if (finishArrays != null) { return finishArrays; }
         int count = materials.size();
         float[] surface = new float[count * 4], tint = new float[count * 4], glow = new float[count * 3];
+        float[] relief = new float[roads * 2];
         var surfaces = new ArrayList<Supplier<Pixmap>>();
         var emissions = new ArrayList<Supplier<Pixmap>>();
         var surfaceLayers = new int[count];
@@ -232,6 +236,11 @@ final class GpuAssets implements Disposable {
             if (index < roads) {
                 width = Math.max(width, layerWidth);
                 height = Math.max(height, layerHeight);
+                var parallax = GpuMaterialMaps.modelFinish(definition(materials.get(index)));
+                if (parallax.heightmap() != null) {
+                    relief[index * 2] = parallax.depthU();
+                    relief[index * 2 + 1] = parallax.depthV();
+                }
             } else {
                 roadWidth = Math.max(roadWidth, layerWidth);
                 roadHeight = Math.max(roadHeight, layerHeight);
@@ -252,7 +261,7 @@ final class GpuAssets implements Disposable {
         layers.addAll(emissions);
         if (layers.isEmpty()) { layers.add(() -> rgbaPixmap(new byte[4], 1, 1)); }
         finishArrays = new FinishArrays(repeatingArray(new MaterialArrayData(layers, Math.max(width, 1), Math.max(height, 1),
-              false)), surface, tint, glow);
+              false)), surface, tint, glow, relief);
         return finishArrays;
     }
 

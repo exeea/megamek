@@ -11,8 +11,8 @@ in vec2 v_modelUV;
 uniform sampler2D u_modelHeight; // white high
 uniform vec4 u_modelRelief; // depth along U and V in UV units; deep parallax's minimum and maximum layers, 0 for one step
 #endif
-#if defined(modelSurfaceFlag) && defined(normalTextureFlag)
-uniform float u_normalMaps;
+#if defined(modelSurfaceFlag) && (defined(normalTextureFlag) || defined(modelReliefFlag))
+uniform float u_normalMaps; // the board's normal maps and parallax, as one switch
 #endif
 #if defined(modelSurfaceFlag) && defined(ambientTextureFlag)
 uniform sampler2D u_ambientTexture;
@@ -70,7 +70,7 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
             vec3 uvBitangent = (dy * ux.x - dx * uy.x) / determinant;
             bitangent *= dot(bitangent, uvBitangent) < 0.0 ? -1.0 : 1.0;
 #ifdef modelReliefFlag
-            modelShift = modelParallax(view, tangent, bitangent, normal, ux, uy);
+            if (u_normalMaps > .5) modelShift = modelParallax(view, tangent, bitangent, normal, ux, uy);
 #endif
 #ifdef normalTextureFlag
             if (u_normalMaps > .5) {

@@ -54,7 +54,7 @@ class GpuConcreteProjectionSmokeTest {
         String source = System.getProperty("megamek.gpu.concreteProjectionSource", "");
         String concrete = source.isBlank() ? GpuShaderSource.read("terrain-concrete.glsl") : Files.readString(Path.of(source))
               .replace("mapTexel(u_sculptLayers.w + 1.0,", "normalTexel(u_sculptLayers.w + 1.0,");
-        String roughness = source.isBlank() ? "#define FINISH_COUNT 1\n"
+        String roughness = source.isBlank() ? "#define FINISH_COUNT 1\n#define ROAD_FINISH 1\n"
               + GpuShaderSource.read("material-finish.glsl") + GpuShaderSource.read("finish-arrays.glsl") : "";
         String call = source.isBlank()
               ? "concreteSlab(world, dFdx(world), dFdy(world), face, vec3(u_direction, 0.0), local.y, 12.0 - local.y, "

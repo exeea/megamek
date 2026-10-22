@@ -825,7 +825,7 @@ class GpuColorTextureSmokeTest {
     private static void assertAuthoredFinish(GpuAssets.FinishArrays material) {
         var quad = GpuAtmosphere.screenQuad();
         var shader = GpuGlsl.compile("Authored finish contract", GpuShaderSource.read("atmosphere.vert"),
-              "#version 330 core\n#define FINISH_COUNT 3\n" + GpuShaderSource.read("material-finish.glsl")
+              "#version 330 core\n#define FINISH_COUNT 3\n#define ROAD_FINISH 3\n" + GpuShaderSource.read("material-finish.glsl")
                     + GpuShaderSource.read("finish-arrays.glsl") + """
                     out vec4 fragColor;
                     uniform float u_material;

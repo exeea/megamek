@@ -37,6 +37,20 @@ vec4 planar(float map, vec2 p, float tile, float mixer) {
     return farDetail > 0.0 ? mix(near, mapAverage(map, p / tile), farDetail) : near;
 }
 
+// A height for the parallax (terrain-materials.glsl, relieved): one trilinear read at the level an isotropic filter
+// picks for the footprint's longer axis. The displacement needs neither anisotropic probes nor the finest grain.
+float heightTexel(float layer, vec2 uv, mat2 gradient) {
+    vec2 size = vec2(textureSize(u_terrainLayers, 0).xy);
+    vec2 dx = gradient[0] * size, dy = gradient[1] * size;
+    return textureLod(u_terrainLayers, vec3(uv, layer), .5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1.0))).a;
+}
+
+// planar's height at its near reads (gradient in metres), for the parallax.
+float planarHeight(float map, vec2 p, mat2 gradient, float tile, float mixer) {
+    return mix(heightTexel(map * .5, p / tile, gradient / tile),
+          heightTexel(map * .5, TURN * p / (tile * 2.37) + .31, TURN * gradient / (tile * 2.37)), mixer);
+}
+
 // The matching tangent-space normal (x along +U, y along +V) from the two repeats' texels. An enlarged sample has
 // the same relief over a longer distance: rotate its gradient back and divide its slope by the enlargement.
 vec4 planarNormal(vec4 near, vec4 far, float mixer) {

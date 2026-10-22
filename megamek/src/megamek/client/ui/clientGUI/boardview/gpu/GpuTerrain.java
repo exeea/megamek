@@ -531,6 +531,10 @@ final class GpuTerrain implements Disposable {
                             program.setUniform4fv("u_finishEmission[0]", tint, 0, tint.length);
                         }
                         if (program.hasUniform("u_finishGlow[0]")) { program.setUniform3fv("u_finishGlow[0]", glow, 0, glow.length); }
+                        float[] relief = finishArrays.relief();
+                        if (relief.length > 0 && program.hasUniform("u_finishRelief[0]")) {
+                            program.setUniform2fv("u_finishRelief[0]", relief, 0, relief.length);
+                        }
                     }
                     if (program.hasUniform("u_roadRelief[0]")) {
                         float[] relief = assets.roadRelief();

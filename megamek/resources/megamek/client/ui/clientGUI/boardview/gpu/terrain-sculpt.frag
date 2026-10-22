@@ -173,6 +173,7 @@ void main() {
     vec3 worldDx = dFdx(world), worldDy = dFdy(world);
 #ifdef lightingFlag
     vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
+    terrainView = -viewDirection();
 #endif
     // A scar patch's draw shades only where its image covers the receiver (scar-material.glsl).
     if (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }
@@ -289,10 +290,24 @@ void main() {
                   ? mat2(vec2(worldDx.y * sign(face.x), -worldDx.z), vec2(worldDy.y * sign(face.x), -worldDy.z))
                   : mat2(vec2(-worldDx.x * sign(face.y), -worldDx.z), vec2(-worldDy.x * sign(face.y), -worldDy.z));
             mat2 concreteGradient = qGradient / u_sculptTiles.x;
+            // The pavement and its rubble take the terrain's parallax (terrain-materials.glsl) on their one projection.
+            vec2 qView = !steep ? vec2(terrainView.x, -terrainView.y) : abs(face.x) > abs(face.y)
+                  ? vec2(terrainView.y * sign(face.x), -terrainView.z) : vec2(-terrainView.x * sign(face.y), -terrainView.z);
+            vec2 topReach = planeReach(u_sculptLayers.x * .5, u_sculptTiles.x, qView, qGradient);
+            vec2 rubbleReach = planeReach(u_sculptLayers.y * .5, u_sculptTiles.y, qView, qGradient);
+            vec2 qTop = q, qRubble = q;
+            if (dot(topReach, topReach) > 0.0) {
+                qTop -= topReach * (1.0 - (family(4.0)
+                      ? translatedHeight(u_sculptLayers.x * .5, q / u_sculptTiles.x, concreteGradient, concreteVariation)
+                      : planarHeight(u_sculptLayers.x, q, qGradient, u_sculptTiles.x, broad)));
+            }
+            if (dot(rubbleReach, rubbleReach) > 0.0) {
+                qRubble -= rubbleReach * (1.0 - planarHeight(u_sculptLayers.y, q, qGradient, u_sculptTiles.y, fine));
+            }
             vec4 top = family(4.0)
-                  ? translatedTexel(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation)
-                  : planar(u_sculptLayers.x, q, u_sculptTiles.x, broad);
-            vec4 rubble = planar(u_sculptLayers.y, q, u_sculptTiles.y, fine);
+                  ? translatedTexel(u_sculptLayers.x, qTop / u_sculptTiles.x, concreteGradient, concreteVariation)
+                  : planar(u_sculptLayers.x, qTop, u_sculptTiles.x, broad);
+            vec4 rubble = planar(u_sculptLayers.y, qRubble, u_sculptTiles.y, fine);
             vec4 weights = debrisWeights();
             float rim = 1.0 - smoothstep(.3, 2.2 + 1.5 * fine, surfaceUV.x);
             float foot = 1.0 - smoothstep(.4, 3.0 + 2.0 * broad, surfaceUV.y);
@@ -310,9 +325,9 @@ void main() {
             albedo = mix(top.rgb, rubble.rgb, w);
             materialHeight = mix(top.a, rubble.a, w);
             Finish topFinish = family(4.0)
-                  ? translatedFinish(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation)
-                  : planarFinish(u_sculptLayers.x, q, qGradient, u_sculptTiles.x, broad);
-            finish = mixFinish(topFinish, planarFinish(u_sculptLayers.y, q, qGradient, u_sculptTiles.y, fine), w);
+                  ? translatedFinish(u_sculptLayers.x, qTop / u_sculptTiles.x, concreteGradient, concreteVariation)
+                  : planarFinish(u_sculptLayers.x, qTop, qGradient, u_sculptTiles.x, broad);
+            finish = mixFinish(topFinish, planarFinish(u_sculptLayers.y, qRubble, qGradient, u_sculptTiles.y, fine), w);
             // In patches only: most of a bank's lip keeps its turf.
             if (family(0.0)) {
                 float wear = max(rim * .55, foot * .75) * (1.0 - rock) * smoothstep(.35, .7, fine);
@@ -320,11 +335,11 @@ void main() {
             }
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && !steep) {
                 vec4 topNormal = family(4.0)
-                      ? translatedTexel(u_terrainData, u_sculptLayers.x * .5, q / u_sculptTiles.x, concreteGradient, concreteVariation)
-                      : planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad);
+                      ? translatedTexel(u_terrainData, u_sculptLayers.x * .5, qTop / u_sculptTiles.x, concreteGradient, concreteVariation)
+                      : planarNormal(u_sculptLayers.x + 1.0, qTop, u_sculptTiles.x, broad);
                 if (family(4.0)) topNormal.rgb = mix(topNormal.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail);
                 detail = mix(topNormal,
-                      planarNormal(u_sculptLayers.y + 1.0, p, u_sculptTiles.y, fine), w);
+                      planarNormal(u_sculptLayers.y + 1.0, qRubble, u_sculptTiles.y, fine), w);
             }
             albedo = groundTone(albedo, world, broad, fine, region, rim, foot);
         } else if (plant) {
@@ -359,6 +374,17 @@ void main() {
             vec2 uvx, uvy;
             float side;
             vec4 wall = wallSample(world, projection, uvx, uvy, side);
+            // Its two wall projections take the terrain's parallax (terrain-materials.glsl), from the wall's height.
+            vec2 reachX = planeReach(u_sculptLayers.z * .5, u_sculptTiles.z,
+                  vec2(terrainView.y * sign(projection.x), -terrainView.z), wallXGradient);
+            vec2 reachY = planeReach(u_sculptLayers.z * .5, u_sculptTiles.z,
+                  vec2(-terrainView.x * sign(projection.y), -terrainView.z), wallYGradient);
+            if (dot(reachX, reachX) + dot(reachY, reachY) > 0.0) {
+                uvx -= reachX / u_sculptTiles.z * (1.0 - wall.a);
+                uvy -= reachY / u_sculptTiles.z * (1.0 - wall.a);
+                wall = mix(materialTexel(u_sculptLayers.z, uvy, wallYGradient / u_sculptTiles.z),
+                      materialTexel(u_sculptLayers.z, uvx, wallXGradient / u_sculptTiles.z), side);
+            }
             // A boulder's crown needs a horizontal stone projection: the two wall projections collapse on a
             // flat top, otherwise leaving a single colour or stretched stripes under the moss/snow treatment.
             float crown = smoothstep(.45, .85, face.z);

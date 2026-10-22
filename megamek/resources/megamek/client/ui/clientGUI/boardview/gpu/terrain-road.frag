@@ -8,7 +8,7 @@ in vec2 v_diffuseUV;
 in vec3 v_normal;
 in vec4 v_color;
 uniform sampler2D u_diffuseTexture;
-#if defined(normalTextureFlag) || defined(roadCoatFlag)
+#if defined(normalTextureFlag) || defined(roadCoatFlag) || defined(roadMapsFlag)
 uniform float u_normalMaps;
 #endif
 #ifdef normalTextureFlag
@@ -137,7 +137,8 @@ float roadHeight(RoadMaps m, vec2 uv, mat2 gradient) {
 vec2 roadParallax(RoadMaps m, vec2 uv, mat2 gradient, vec3 face, vec3 dx, vec3 dy, vec3 view) {
     int material = roadFinish(m) - ROAD_FINISH;
     float determinant = gradient[0].x * gradient[1].y - gradient[0].y * gradient[1].x;
-    if (!m.mapped || material < 0 || abs(determinant) < 1e-12) return vec2(0.0);
+    // The Normal maps switch takes the parallax with the normal maps.
+    if (u_normalMaps <= .5 || !m.mapped || material < 0 || abs(determinant) < 1e-12) return vec2(0.0);
     vec4 relief = u_roadRelief[material];
     vec3 tangent = (dx * gradient[1].y - dy * gradient[0].y) / determinant;
     vec3 bitangent = (dy * gradient[0].x - dx * gradient[1].x) / determinant;

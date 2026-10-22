@@ -11,6 +11,9 @@ uniform sampler2DArray u_surfaceLayers;
 uniform vec4 u_finishSurface[FINISH_COUNT]; // roughness, metallic, scattering (or means); layer, -1 if uniform
 uniform vec4 u_finishEmission[FINISH_COUNT]; // map tint; layer, -1 without an emission map
 uniform vec3 u_finishGlow[FINISH_COUNT];     // emission without a map
+// Each sculpted surface's heightmap parallax (terrain-materials.glsl, relievedProjection): its depth along U and V in
+// repeats (Godot's heightmap_scale / 100, negative where it flips the tangent or binormal), 0 without a heightmap.
+uniform vec2 u_finishRelief[ROAD_FINISH];
 
 // A material's finish without its maps: the uniform values (or the map's means) and the constant glow.
 Finish meanFinish(int material) { return finishOf(u_finishSurface[material].rgb, u_finishGlow[material]); }

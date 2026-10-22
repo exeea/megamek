@@ -89,6 +89,7 @@ struct MaterialProjection {
     vec2 top, x, y;
     mat2 topGradient, xGradient, yGradient;
     float side, lying;
+    vec2 facing; // the side projections' signs along X and Y
 };
 
 // Cut walls keep one texture frame across their facets; zero leaves natural landforms unchanged.
@@ -106,6 +107,52 @@ MaterialProjection materialProjection(vec3 world, vec3 face) {
     vec2 axes = pow(abs(basis.xy), vec2(4.0));
     p.side = axes.x / max(axes.x + axes.y, .00001);
     p.lying = smoothstep(.25, .87, basis.z);
+    p.facing = sign(basis.xy);
+    return p;
+}
+
+// Godot's heightmap parallax as StandardMaterial3D draws it without deep parallax: every read of a role moves against
+// the view, in its projection's frame, by the role's depth below the heightmap's white at its unmoved reads. Each
+// projection is the plane it is read in (a top the ground's, a side the wall's); the depth is the heightmap's
+// (u_finishRelief, in repeats) in metres. A relief that would move less than half a pixel moves nothing visible and
+// costs no read. The parallax fades with the normal detail, and the Normal maps switch turns both off.
+vec3 terrainView = vec3(0.0); // from the surface to the eye, which lit programs' main sets; zero moves nothing
+
+// A projection's move at the full depth, in its coordinates: the view along its U and V axes times the depth. Zero
+// where that is under half a pixel.
+vec2 projectedReach(vec2 view, vec2 depth, mat2 gradient) {
+    vec2 reach = view * depth;
+    return dot(reach, reach) < .25 * max(dot(gradient[0], gradient[0]), dot(gradient[1], gradient[1])) ? vec2(0.0) : reach;
+}
+
+// A role's move at the full depth in one projection, at a repeat of tile metres, given the view along its U and V axes
+// and the projection's gradient in metres.
+vec2 planeReach(float layer, float tile, vec2 view, mat2 gradient) {
+    if (u_normalMaps <= .5 || terrainNormalDetail <= 0.0) return vec2(0.0);
+    return projectedReach(view, u_finishRelief[int(layer + .5)] * tile * terrainNormalDetail, gradient);
+}
+
+// A role's moves at the full depth in the projections it reads (tops, sides) at a repeat of tile metres; false where
+// none moves visibly. A top's U runs along X and its V down Y; a side's U across the wall and its V down it.
+bool reliefReach(float layer, float tile, MaterialProjection p, bool tops, bool sides, out vec2 top, out vec2 x,
+      out vec2 y) {
+    top = vec2(0.0);
+    x = vec2(0.0);
+    y = vec2(0.0);
+    if (tops) top = planeReach(layer, tile, vec2(terrainView.x, -terrainView.y), p.topGradient);
+    if (sides) {
+        x = planeReach(layer, tile, vec2(terrainView.y * p.facing.x, -terrainView.z), p.xGradient);
+        y = planeReach(layer, tile, vec2(-terrainView.x * p.facing.y, -terrainView.z), p.yGradient);
+    }
+    return dot(top, top) + dot(x, x) + dot(y, y) > 0.0;
+}
+
+// The projection moved by a role's moves, sunk by its depth below white.
+MaterialProjection relieved(MaterialProjection p, vec2 top, vec2 x, vec2 y, float height) {
+    float sink = 1.0 - height;
+    p.top -= top * sink;
+    p.x -= x * sink;
+    p.y -= y * sink;
     return p;
 }
 
@@ -129,6 +176,16 @@ vec4 fungusTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient) {
     return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
 }
 
+// fungusTexel's height, for the parallax.
+float fungusHeight(float layer, vec2 uv, mat2 gradient) {
+    vec2 cell = floor(uv), blend = smoothstep(.15, .85, fract(uv));
+    float a = heightTexel(layer, uv + materialOffset(cell), gradient);
+    float b = heightTexel(layer, uv + materialOffset(cell + vec2(1.0, 0.0)), gradient);
+    float c = heightTexel(layer, uv + materialOffset(cell + vec2(0.0, 1.0)), gradient);
+    float d = heightTexel(layer, uv + materialOffset(cell + vec2(1.0, 1.0)), gradient);
+    return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
+}
+
 // Select neighbouring source offsets from a continuous world field, not the UV tile or hex ID. Two reads keep the
 // original feature size and wind/bedding direction without the recognisable motif repeating on a square grid.
 // Color/height and normal/AO must use the same selector; a translation does not rotate or resize their normals.
@@ -137,6 +194,13 @@ vec4 translatedTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient, f
     vec4 a = materialTexel(maps, layer, uv + materialOffset(vec2(index, 0.0)), gradient);
     vec4 b = materialTexel(maps, layer, uv + materialOffset(vec2(index + 1.0, 0.0)), gradient);
     return mix(a, b, smoothstep(.2, .8, fract(choice)));
+}
+
+// translatedTexel's height, for the parallax.
+float translatedHeight(float layer, vec2 uv, mat2 gradient, float variation) {
+    float choice = variation * 8.0, index = floor(choice);
+    return mix(heightTexel(layer, uv + materialOffset(vec2(index, 0.0)), gradient),
+          heightTexel(layer, uv + materialOffset(vec2(index + 1.0, 0.0)), gradient), smoothstep(.2, .8, fract(choice)));
 }
 
 // The ground's variation field is constant down a vertical face. Advance the source selection with projected
@@ -186,6 +250,36 @@ vec4 sampleMaterialMap(sampler2DArray maps, float layer, float tile, MaterialPro
         pigment = mix(steep, pigment, p.lying);
     }
     return pigment;
+}
+
+// sampleMaterialMap's height at its near reads, for the parallax.
+float sampledHeight(float layer, float tile, MaterialProjection p, float variation, bool fungus, bool singleScale) {
+    float height = 0.0;
+    if (p.lying > 0.0) {
+        vec2 uv = p.top / tile;
+        mat2 gradient = p.topGradient / tile;
+        height = fungus ? fungusHeight(layer, uv, gradient)
+              : singleScale ? translatedHeight(layer, uv, gradient, variation)
+              : mix(heightTexel(layer, uv, gradient),
+                    heightTexel(layer, TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37)), variation);
+    }
+    if (p.lying < 1.0) {
+        vec2 y = p.y / tile + .37, x = p.x / tile;
+        float steep = fungus
+              ? mix(fungusHeight(layer, y, p.yGradient / tile), fungusHeight(layer, x, p.xGradient / tile), p.side)
+              : mix(translatedHeight(layer, y, p.yGradient / tile, variation + y.y * .173),
+                    translatedHeight(layer, x, p.xGradient / tile, variation + x.y * .173), p.side);
+        height = mix(steep, height, p.lying);
+    }
+    return height;
+}
+
+// A volcanic role's projection, moved by its parallax (relievedProjection).
+MaterialProjection relievedMaterial(float colorMap, float tile, float amount, MaterialProjection p, float variation,
+      bool fungus, bool singleScale) {
+    vec2 top, x, y;
+    if (amount < .0001 || !reliefReach(colorMap * .5, tile, p, p.lying > 0.0, p.lying < 1.0, top, x, y)) return p;
+    return relieved(p, top, x, y, sampledHeight(colorMap * .5, tile, p, variation, fungus, singleScale));
 }
 
 vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection p,
@@ -444,14 +538,20 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
     // These authored plates have one physical size. Reuse sand's translated sampling for color and normals;
     // mixing an enlarged copy makes overlapping fractures look like faint stains. Select across broad regions.
     float mantleVariation = plates ? broad : fine;
-    vec4 a = sampleMaterial(layers.x, tiles.x, roles.x * candidates.x, projection,
-          world, broad, fine, region, true, sand, familyId, vec2(rim, foot));
+    bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
     float capAmount = plates ? roles.w * candidates.w * capShare : roles.y * candidates.y;
-    vec4 b = sampleMaterial(layers.w, tiles.w, capAmount, projection,
+    float rockAmount = roles.w * candidates.w * (1.0 - capShare);
+    MaterialProjection pa = relievedMaterial(layers.x, tiles.x, roles.x * candidates.x, projection, broad, fungus, sand);
+    MaterialProjection pb = relievedMaterial(layers.w, tiles.w, capAmount, projection, mantleVariation, fungus, plates);
+    MaterialProjection pc = relievedMaterial(layers.y, tiles.y, roles.z * candidates.z, projection, fine, fungus, false);
+    MaterialProjection pd = relievedMaterial(layers.z, tiles.z, rockAmount, projection, broad, fungus, false);
+    vec4 a = sampleMaterial(layers.x, tiles.x, roles.x * candidates.x, pa,
+          world, broad, fine, region, true, sand, familyId, vec2(rim, foot));
+    vec4 b = sampleMaterial(layers.w, tiles.w, capAmount, pb,
           world, mantleVariation, fine, region, false, plates, familyId, vec2(0.0));
-    vec4 c = sampleMaterial(layers.y, tiles.y, roles.z * candidates.z, projection,
+    vec4 c = sampleMaterial(layers.y, tiles.y, roles.z * candidates.z, pc,
           world, fine, fine, region, false, false, familyId, vec2(0.0));
-    vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w * (1.0 - capShare), projection,
+    vec4 d = sampleMaterial(layers.z, tiles.z, rockAmount, pd,
           world, broad, fine, region, false, false, familyId, vec2(0.0));
     if (desert) {
         // Pale abraded sandstone at the actual rim reads from above; deeper faces retain their warm brown.
@@ -464,20 +564,19 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
     if (plates) weights.yw = weights.w * vec2(capShare, 1.0 - capShare);
     vec2 coating = weights.yw * dust;
     weights += vec4(coating.x + coating.y, -coating.x, 0.0, -coating.y);
-    bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
-    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad, fungus, sand);
-    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, projection, face, mantleVariation, fungus, plates);
-    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine, fungus, false);
-    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad, fungus, false);
+    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, pa, face, broad, fungus, sand);
+    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, pb, face, mantleVariation, fungus, plates);
+    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, pc, face, fine, fungus, false);
+    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, pd, face, broad, fungus, false);
     TerrainMaterial result;
     result.color = a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w;
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);
     result.cavity = dot(vec4(na.a, nb.a, nc.a, nd.a), weights);
     result.height = dot(vec4(a.a, b.a, c.a, d.a), weights);
-    result.finish = weighFinish(materialFinish(layers.x, tiles.x, weights.x, projection, broad, fungus, sand),
-          materialFinish(layers.w, tiles.w, weights.y, projection, mantleVariation, fungus, plates),
-          materialFinish(layers.y, tiles.y, weights.z, projection, fine, fungus, false),
-          materialFinish(layers.z, tiles.z, weights.w, projection, broad, fungus, false), weights);
+    result.finish = weighFinish(materialFinish(layers.x, tiles.x, weights.x, pa, broad, fungus, sand),
+          materialFinish(layers.w, tiles.w, weights.y, pb, mantleVariation, fungus, plates),
+          materialFinish(layers.y, tiles.y, weights.z, pc, fine, fungus, false),
+          materialFinish(layers.z, tiles.z, weights.w, pd, broad, fungus, false), weights);
     result.volcanic = 0.0;
     return result;
 }
@@ -831,6 +930,30 @@ vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
 // along the roles' boundaries. Authored repeats are metres; only such skipped pixels change.
 float sampledTile(float tile) { return max(tile, 1e-4); }
 
+// The role's height at its colour's coordinates (rockTexel), without the far reads, which are flat.
+float rockHeight(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {
+    if (!sides) {
+        vec2 a, b;
+        mat2 gradientB;
+        float t;
+        topCoordinates(p, tile, variation, translated, a, b, gradientB, t);
+        return mix(heightTexel(layer, a, p.topGradient / tile), heightTexel(layer, b, gradientB), t);
+    }
+    float height = mix(heightTexel(layer, p.y / tile + .37, p.yGradient / tile),
+          heightTexel(layer, p.x / tile, p.xGradient / tile), p.side);
+    if (p.lying > 0.0) height = mix(height, heightTexel(layer, p.top / tile, p.topGradient / tile), p.lying);
+    return height;
+}
+
+// The projection a role's reads take (rockTexel, rockNormal): moved by its parallax (relieved).
+MaterialProjection relievedProjection(float layer, float tile, MaterialProjection p, bool sides, float variation,
+      bool translated) {
+    tile = sampledTile(tile);
+    vec2 top, x, y;
+    if (!reliefReach(layer, tile, p, !sides || p.lying > 0.0, sides, top, x, y)) return p;
+    return relieved(p, top, x, y, rockHeight(layer, tile, p, sides, variation, translated));
+}
+
 // Sides: one read per projection, the two side projections always and the top only where the face lies back.
 // Tops (no sides): the top projection's two reads; far away two repeats settle to the map's average.
 // The role's authored surface comes from the same coordinates: roughness, metallic and scattering from its map while
@@ -1073,7 +1196,8 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     float variationA = dot(isFirst, variations);
     bool translatedA = dot(isFirst, translated) > .5;
     Finish surfaceA, surfaceB;
-    vec4 a = rockTexel(layerA, tileA, p, sides, variationA, translatedA, surfaceA);
+    MaterialProjection pa = relievedProjection(layerA, tileA, p, sides, variationA, translatedA), pb = pa;
+    vec4 a = rockTexel(layerA, tileA, pa, sides, variationA, translatedA, surfaceA);
     vec4 b = a;
     surfaceB = surfaceA;
     float share = 0.0;
@@ -1084,7 +1208,8 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         tileB = dot(isSecond, vec4(tiles.x, tiles.w, tiles.y, tiles.z));
         variationB = dot(isSecond, variations);
         translatedB = dot(isSecond, translated) > .5;
-        b = rockTexel(layerB, tileB, p, sides, variationB, translatedB, surfaceB);
+        pb = relievedProjection(layerB, tileB, p, sides, variationB, translatedB);
+        b = rockTexel(layerB, tileB, pb, sides, variationB, translatedB, surfaceB);
         // Height blend (materialWeights): where both are wanted, the layer whose relief stands higher shows.
         float wa = first + a.a * .38 * 4.0 * first * (1.0 - first);
         float wb = second + b.a * .38 * 4.0 * second * (1.0 - second);
@@ -1100,8 +1225,8 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         // The film: a share of the stone's weight goes to the cover, after the height blend.
         if (dust > 0.0) share = isFirst.x > .5 ? share * (1.0 - dust) : share + dust * (1.0 - share);
     }
-    vec4 na = rockNormal(layerA, tileA, p, face, sides, variationA, translatedA);
-    vec4 nb = share > 0.0 ? rockNormal(layerB, tileB, p, face, sides, variationB, translatedB) : na;
+    vec4 na = rockNormal(layerA, tileA, pa, face, sides, variationA, translatedA);
+    vec4 nb = share > 0.0 ? rockNormal(layerB, tileB, pb, face, sides, variationB, translatedB) : na;
     vec4 roleShare = isFirst * (1.0 - share) + isSecond * share;
     TerrainMaterial result;
     result.color = mix(a.rgb, b.rgb, share);

@@ -56,7 +56,7 @@ all a change needs: grass that glows, metallic sand or shrubs that scatter light
 | Emission | Only where enabled: (`emission` + map) × energy under the add operator (Godot's default), `emission` × map × energy under multiply. `emission` is an sRGB colour, black by default. A uniform map counts as a constant. |
 | Ambient occlusion | The occlusion map's channel. |
 | Normal | The normal map, scaled by `normal_scale`. |
-| Height | Parallax where the surface draws one material through its own UVs ([below](#parallax)). |
+| Height | Parallax ([below](#parallax)): Godot's whole algorithm on models and roads, one step on the sculpted terrain. |
 
 Covers that bury a material keep none of its metal, scattering or glow: churned and charred
 ground, scorch deposits, mud, marsh peat and tundra mats (which bring their own finish). A
@@ -94,14 +94,27 @@ What keeps its own shading:
 
 ### Parallax
 
-Godot's heightmap parallax, where a surface draws one material through its own UVs: models
-(`model-surface.glsl`) and roads (`terrain-road.frag`). The view, in the UV frame, moves every map
-read of the material by up to `heightmap_scale` / 100 in UV, white high; with
-`heightmap_deep_parallax` it marches from `heightmap_max_layers` at grazing views to
-`heightmap_min_layers` head-on and interpolates the crossing, as Godot does, otherwise it takes
-one step. A relief shallower than half a pixel moves nothing visible, so its reads are skipped:
-parallax costs nothing at board distances. The sculpted terrain blends several materials by their
-heights in one pixel and keeps their relief in its normals and height blending.
+Godot's heightmap parallax: the view moves every map read of a material by up to
+`heightmap_scale` / 100 of a repeat, by the material's depth below the heightmap's white, as if the
+surface had that relief. `heightmap_flip_tangent` and `heightmap_flip_binormal` reverse it along U
+and V, and `heightmap_flip_texture` inverts the map. A relief that would move less than half a
+pixel moves nothing visible, so its reads are skipped: at board distances most ground costs
+nothing, and only deep reliefs (rock and granite cliffs, scree, caps) still move. The GPU tuning
+panel's **Normal maps** switch turns it off with the normal maps.
+
+- Models (`model-surface.glsl`) and roads (`terrain-road.frag`) draw one material through its own
+  UVs and take Godot's whole algorithm: with `heightmap_deep_parallax` it marches from
+  `heightmap_max_layers` at grazing views to `heightmap_min_layers` head-on and interpolates the
+  crossing, otherwise it takes one step.
+- The sculpted terrain blends up to four materials in a pixel, each read in several projections,
+  so it takes one step per material, whatever the deep settings say (`relievedProjection` in
+  `terrain-materials.glsl`): each projection is the plane it is read in, a top the ground's and a
+  side the wall's, and the height is the colour map's, read once more at the unmoved coordinates.
+  Natural ground, banks and cliffs of every family, volcanic ground, pavement and its rubble, and
+  the rock kit's walls take it; tundra mats, mud, scorch, field earth, tree pits and concrete
+  slabs keep their maps in place. It fades out with the normal detail. Its height read is one
+  trilinear sample, without the colour's anisotropic filtering. On llvmpipe it adds about 1% to a
+  grass board's frame at tactical zoom and 6% to a rock board's, 2–20% close up.
 
 ### ShaderMaterials
 
@@ -160,8 +173,7 @@ the previous bytes exactly.
 
 `heightmap_scale` is Godot's parallax depth in texture coordinates times 100: 10 is the
 full range, 0.1 of a repeat. Magma's relief takes it too. For sculpted terrain it is
-informational (100 × relief metres ÷ repeat metres): their relief comes from the
-shared terrain shading.
+100 × relief metres ÷ repeat metres: a 2 m repeat at 2.5 lifts its white 5 cm above its black.
 
 Models (`.glb`) name these maps directly: a base colour `<name>_albedo.png`, a normal
 `<name>_normal.png`, and an occlusion or metallic-roughness `<name>_orm.png`.
