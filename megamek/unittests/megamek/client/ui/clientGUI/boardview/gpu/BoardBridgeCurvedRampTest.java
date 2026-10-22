@@ -60,6 +60,7 @@ class BoardBridgeCurvedRampTest {
                     var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.values()[direction % 4], new HashMap<>());
                     var shape = BoardBridgeSlope.build(tile, deck, footing);
                     var profile = BoardBridgeSlope.profile(tile, deck);
+                    float drop = BoardBridgeSlope.easedRise(deck, footing.easedExits());
                     var center = BoardGeometry.center(at, 0);
                     var road = deck.road(at);
                     var lane = road.footprint(-2);
@@ -71,7 +72,8 @@ class BoardBridgeCurvedRampTest {
                             if (!lane.contains(px, py) || !BoardGeometry.contains(at, wx, wy)) { continue; }
                             float rise = BoardSurface.sampleHeight(profile, wx, wy, Float.NaN);
                             assertTrue(Float.isFinite(rise), "The entire curved lane has a grade: " + context);
-                            assertEquals(BoardBridge.deckZ(tile) + rise, BoardBridge.top(shape, wx, wy), .01f,
+                            assertEquals(BoardBridge.deckZ(tile) + BoardBridgeSlope.eased(rise, drop),
+                                  BoardBridge.top(shape, wx, wy), BoardBridgeSlopeTest.EASED,
                                   "The curved lane cannot acquire a hole or a straight ramp ledge: " + context
                                         + " local=" + px + "," + py);
                             sampled++;
@@ -93,9 +95,10 @@ class BoardBridgeCurvedRampTest {
                             var point = new Vector3(deckCenter).lerp(bank, t).mulAdd(across, lateral * scale);
                             float distance = ((point.x - deckCenter.x) * normal.x
                                   + (point.y - deckCenter.y) * normal.y) / span;
-                            float expected = deckCenter.z + (bank.z - deckCenter.z) * (2 * distance - .5f)
+                            float expected = deckCenter.z
+                                  + (bank.z - deckCenter.z) * BoardBridgeSlopeTest.eased(distance)
                                   + GpuRoads.SURFACE_LIFT * scale;
-                            assertEquals(expected, BoardBridge.top(shape, point.x, point.y), .015f,
+                            assertEquals(expected, BoardBridge.top(shape, point.x, point.y), BoardBridgeSlopeTest.EASED,
                                   "The slab and solid bank half meet without a gap or height step: " + context);
                         }
                     }
@@ -107,7 +110,8 @@ class BoardBridgeCurvedRampTest {
                                   || !BoardGeometry.contains(at, point.x, point.y)) { continue; }
                             float rise = BoardSurface.sampleHeight(profile, point.x, point.y, Float.NaN);
                             float coat = (patch.lift() + .01f - GpuRoads.SURFACE_LIFT) * scale;
-                            assertEquals(BoardBridge.deckZ(tile) + rise + coat, point.z, .01f,
+                            assertEquals(BoardBridge.deckZ(tile) + BoardBridgeSlope.eased(rise, drop) + coat, point.z,
+                                  BoardBridgeSlopeTest.EASED,
                                   "Road paint follows the curved physical grade: " + context);
                         }
                     }

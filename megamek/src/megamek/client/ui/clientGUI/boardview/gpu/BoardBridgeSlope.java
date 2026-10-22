@@ -3,16 +3,39 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.math.Vector3;
 
 /** Grade the generated slab and rails together; the installed facets serve drawing, road paint and picking. */
 final class BoardBridgeSlope {
+    /** Rows across each half of an eased approach, so the mesh follows its curve. */
+    static final int EASED_ROWS = 8;
+
     private BoardBridgeSlope() { }
+
+    /**
+     * Share of its rise an eased approach has made at the share u of its run from a hex's level inset to its edge. The
+     * deck's half and the bank's mirror each other about their edge: the whole approach is one ease, level at the deck
+     * and on the bank, with one slope at the edge.
+     */
+    static float ease(float u) { return u * u * (3 - u) / 2; }
+
+    /** The rise the {@code eased} exits' solid ramps drop by to their edges, the same for all of them; 0 for none. */
+    static float easedRise(BoardBridge.Deck deck, int eased) {
+        return eased == 0 ? 0 : deck.rises().get(Integer.numberOfTrailingZeros(eased)) * BoardGeometry.level();
+    }
+
+    /** A height of the planar grade above the deck, eased where its approaches drop by {@code rise} ({@link #ease}). */
+    static float eased(float height, float rise) {
+        float u = height / rise;
+        return u > 0 && u < 1 ? rise * ease(u) : height;
+    }
 
     /** Install one generated deck, including its actual end or joint trusses, onto the shared grade profile. */
     static BoardBridge.Shape build(BoardScene.Tile tile, BoardBridge.Deck deck, BoardBridgeFooting footing) {
         var profile = deck.sloped() || footing.solidExits() != 0 ? profile(tile, deck) : List.<BoardSurface.Face>of();
+        float rise = easedRise(deck, footing.easedExits());
         var faces = new ArrayList<>(footing.shape().facets());
         var clipper = new BoardTacticalGeometry.Clipper();
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
@@ -49,7 +72,8 @@ final class BoardBridgeSlope {
                         // The solid support owns that boundary; its neighbour must not restore buried fascia.
                         if (vertical && !ownsBoundary(profile, patch, footing.solidExits(),
                               triangle)) { return; }
-                        BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(), face.part(), face.colour());
+                        ease(triangle, patch, rise, eased -> BoardBridge.triangle(faces, eased.a(), eased.b(),
+                              eased.c(), face.part(), face.colour()));
                     });
                 }
             }
@@ -93,7 +117,8 @@ final class BoardBridgeSlope {
 
     /**
      * A level central hub and broad planar approaches. Adjacent mouths blend through their shared corner height;
-     * inactive sides retain the full deck overhang. The slab and pier caps use this same grade (world XY).
+     * inactive sides retain the full deck overhang. The slab and pier caps use this same grade (world XY), eased where
+     * a deck's solid ramps ease (see {@link #ease}).
      */
     static List<BoardSurface.Face> profile(BoardScene.Tile tile, BoardBridge.Deck deck) {
         var result = new ArrayList<BoardSurface.Face>();
@@ -163,6 +188,70 @@ final class BoardBridgeSlope {
             result.add(face(innerA, mouthB, innerB, edge));
             result.add(face(innerB, mouthB, b, edge));
         }
+        return result;
+    }
+
+    /**
+     * Passes on a triangle displaced onto {@code patch} of the planar grade, eased where its approaches drop by
+     * {@code rise} (none at 0): cut along the patch's rows of equal height, each point raised by the difference between
+     * the eased and the planar grade there, so whatever lies on the grade keeps its thickness.
+     */
+    static void ease(BoardTacticalGeometry.Triangle triangle, BoardSurface.Face patch, float rise,
+          Consumer<BoardTacticalGeometry.Triangle> destination) {
+        var a = patch.a();
+        var b = patch.b();
+        var c = patch.c();
+        if (rise == 0 || Math.min(a.z, Math.min(b.z, c.z)) >= Math.max(0, rise)
+              || Math.max(a.z, Math.max(b.z, c.z)) <= Math.min(0, rise)) {
+            destination.accept(triangle);
+            return;
+        }
+        float bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y, area = bx * cy - by * cx;
+        // The patch's height gradient in XY.
+        float gx = ((b.z - a.z) * cy - (c.z - a.z) * by) / area, gy = ((c.z - a.z) * bx - (b.z - a.z) * cx) / area;
+        float slope = (float) Math.hypot(gx, gy);
+        List<Vector3> polygon = List.of(triangle.a(), triangle.b(), triangle.c());
+        var pieces = List.of(polygon);
+        if (slope > 1e-6f) {
+            var axis = new Vector3(gx / slope, gy / slope, 0);
+            // Lines of equal height, a row apart from the level deck.
+            pieces = BoardBridgeFooting.slice(polygon, new Vector3(a).mulAdd(axis, -a.z / slope), axis,
+                  Math.abs(rise) / EASED_ROWS / slope);
+        }
+        for (var piece : pieces) {
+            var points = piece.stream().map(p -> {
+                float height = a.z + gx * (p.x - a.x) + gy * (p.y - a.y);
+                return new Vector3(p.x, p.y, p.z + eased(height, rise) - height);
+            }).toList();
+            for (int i = 2; i < points.size(); i++) {
+                var u = new Vector3(points.get(i - 1)).sub(points.getFirst());
+                var v = new Vector3(points.get(i)).sub(points.getFirst());
+                // Cutting can leave nearly collinear slivers; their unstable plane can give a distant picking hit.
+                if (u.crs(v).len2() > 1e-10f * u.len2() * v.len2()) {
+                    destination.accept(new BoardTacticalGeometry.Triangle(points.getFirst(), points.get(i - 1),
+                          points.get(i), triangle.argb()));
+                }
+            }
+        }
+    }
+
+    /**
+     * The edge pq of the planar grade (heights above the deck), eased where its approaches drop by {@code rise} (none
+     * at 0): cut where it crosses the rows, in order from p.
+     */
+    static List<Vector3> easeEdge(Vector3 p, Vector3 q, float rise) {
+        if (rise == 0) { return List.of(p, q); }
+        List<Vector3> result = new ArrayList<>(List.of(new Vector3(p.x, p.y, eased(p.z, rise))));
+        float step = Math.abs(rise) / EASED_ROWS;
+        for (int k = 1; k < EASED_ROWS; k++) {
+            float height = Math.min(0, rise) + (q.z > p.z ? k : EASED_ROWS - k) * step;
+            if ((p.z - height) * (q.z - height) < 0) {
+                var cut = new Vector3(p).lerp(q, (height - p.z) / (q.z - p.z));
+                cut.z = eased(height, rise);
+                result.add(cut);
+            }
+        }
+        result.add(new Vector3(q.x, q.y, eased(q.z, rise)));
         return result;
     }
 

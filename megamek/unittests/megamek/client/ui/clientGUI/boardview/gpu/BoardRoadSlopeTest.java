@@ -77,8 +77,6 @@ class BoardRoadSlopeTest {
               "data/boards/unofficial/SimonLandmine/64x68/64x68 Motorway-M1-2.board"));
         var tile = scene.tile(new Coords(27, 25));
         assertEquals(-3, tile.elevation(), "Exercise the reported road bend below elevation zero");
-        var surface = new BoardSurface(scene, tile, lod);
-        assertTrue(surface.retainingPanelFaces().isEmpty(), "A road cut keeps its natural bank below zero too");
         assertClosed(scene, tile.coords(), lod);
     }
 
@@ -87,12 +85,7 @@ class BoardRoadSlopeTest {
         var scene = BoardCliffSeamTest.scene(new File(
               "data/boards/unofficial/Lanceman/16x17 City Hills Residential 2 (with Structures).board"));
         for (var lod : TerrainLod.values()) {
-            for (var at : List.of(new Coords(13, 8), new Coords(14, 9))) {
-                var surface = new BoardSurface(scene, scene.tile(at), lod);
-                assertTrue(surface.retainingPanelFaces().isEmpty(),
-                      "The natural City roadside must not acquire freestanding concrete panels: " + at + "/" + lod);
-                assertClosed(scene, at, lod);
-            }
+            for (var at : List.of(new Coords(13, 8), new Coords(14, 9))) { assertClosed(scene, at, lod); }
         }
     }
 
@@ -100,16 +93,8 @@ class BoardRoadSlopeTest {
     void plaineGradedApproachDoesNotKeepTheOldFlatToePanel() throws Exception {
         var scene = GpuRoadSourceTest.scene("unofficial/Cartes/16x17 Plaine 1.board");
         for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
-            var approach = new BoardSurface(scene, scene.tile(new Coords(10, 12)), lod);
-            // The old level-zero toe put an 18-unit panel in open air ahead of the graded bank at 1113.
-            var acrossOldPanel = new Ray(new Vector3(649, -895, 15), new Vector3(-5, -8.6f, 0));
-            assertFalse(approach.retainingPanelFaces().stream().anyMatch(face -> Intersector.intersectRayTriangle(
-                        acrossOldPanel, face.a(), face.b(), face.c(), new Vector3())),
-                  "A graded earthwork must not retain a freestanding panel at its former level toe: " + lod);
-            var junction = new BoardSurface(scene, scene.tile(new Coords(9, 11)), lod);
             var acrossLevelCut = new Ray(new Vector3(629.236f, -883.532f, 17.5f),
                   new Vector3(-.3368f, -.9415f, 0));
-            assertTrue(junction.retainingPanelFaces().isEmpty(), "The adjoining natural cut needs no concrete panel");
             var terrain = new ArrayList<BoardSurface.Face>();
             var near = new HashMap<Coords, BoardSurface>();
             for (var tile : scene.tiles()) {
@@ -267,16 +252,23 @@ class BoardRoadSlopeTest {
             assertEquals(walls.stream().filter(face -> face.landEdge() == edge).toList(), rendered.entrySet().stream()
                   .filter(entry -> entry.getKey().edge() == edge).flatMap(entry -> entry.getValue().stream()).toList(),
                   "Rendering must reuse the completed cliff, without rebuilding overlapping walls per road segment");
+            // The cliff below the road recedes from its verge as one band (BoardRelief#roadPush): the shared relief keeps
+            // its native shape, moved alike at every height, and the emitted walls keep that relief.
+            Vector3 shift = null;
             for (int level : new int[] { 2, 3, 4 }) {
                 var nativePoint = nativeSurface.relief.wetCliffContact(edge, .5f, level * BoardGeometry.level());
+                var point = surface.relief.wetCliffContact(edge, .5f, level * BoardGeometry.level());
+                var moved = new Vector3(point).sub(nativePoint);
+                if (shift == null) { shift = moved; }
+                assertTrue(moved.dst(shift) < .01f, lod + " graded cliff lost its native shape by " + moved.dst(shift));
                 float nearest = Float.POSITIVE_INFINITY;
                 for (var face : walls) {
                     if (face.landEdge() != edge) { continue; }
                     for (var p : List.of(face.a(), face.b(), face.c())) {
-                        nearest = Math.min(nearest, nativePoint.dst(p));
+                        nearest = Math.min(nearest, point.dst(p));
                     }
                 }
-                assertTrue(nearest < .01f, lod + " graded cliff lost its native relief by " + nearest);
+                assertTrue(nearest < .01f, lod + " graded cliff departed from the shared relief by " + nearest);
             }
         }
     }
@@ -434,7 +426,36 @@ class BoardRoadSlopeTest {
         var at = BoardRoadTest.CENTER;
         int[] rises = layout == 0 ? new int[] { 2, 2, 2, 2, 2, 2 }
               : layout == 1 ? new int[] { -2, -2, -2, -2, -2, -2 } : new int[] { -2, 1, 2, -1, 0, 2 };
-        assertClosed(BoardRoadRampTest.junction(at, rises), at);
+        assertClosed(junction(at, rises), at);
+    }
+
+    /** Six roads of the given rises meeting a six-way junction at level 2 on sand. */
+    static BoardScene junction(Coords at, int[] rises) {
+        return BoardSurfaceBlendTest.scene(c -> {
+            for (int d = 0; d < 6; d++) {
+                if (c.equals(at.translated(d))) {
+                    return BoardRoadTest.tile(c, BoardRoad.Kind.PAVED, 1 << ((d + 3) % 6), 2 + rises[d], BoardScene.Surface.SAND);
+                }
+            }
+            return BoardRoadTest.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                  c.equals(at) ? 63 : 0, 2, BoardScene.Surface.SAND);
+        });
+    }
+
+    /** A concrete junction with the given exits among neighbours of mixed rises. */
+    static BoardScene concreteJunction(int exits) {
+        var at = BoardRoadTest.CENTER;
+        int[] rises = { -2, 1, 2, -1, 0, 2 };
+        return BoardSurfaceBlendTest.scene(c -> {
+            for (int d = 0; d < 6; d++) {
+                if (c.equals(at.translated(d))) {
+                    return BoardRoadTest.tile(c, BoardRoad.Kind.PAVED, (exits & 1 << d) == 0 ? 0 : 1 << ((d + 3) % 6),
+                          2 + rises[d], BoardScene.Surface.CONCRETE);
+                }
+            }
+            return BoardRoadTest.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                  c.equals(at) ? exits : 0, 2, BoardScene.Surface.CONCRETE);
+        });
     }
 
     /** Check the emitted mesh, including T junctions, rather than just comparing the boundary helper to itself. */

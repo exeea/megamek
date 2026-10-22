@@ -19,9 +19,10 @@ import megamek.common.board.HexAppearance;
 
 /**
  * Concrete ramp blocks and bank landings, with authored entrance wedges seated on the road or actual bank, and the
- * concrete piers under the joints between a deck's hexes.
+ * concrete piers under the joints between a deck's hexes. {@code easedExits}: the solid ramps whose grade eases in and
+ * out (Enhanced, {@link BoardBridgeSlope#ease}); Classic's stay straight.
  */
-record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bareExits, int solidExits,
+record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bareExits, int solidExits, int easedExits,
       Map<Integer, BoardRoad> bankCurves) {
     static final float APRON_METRES = 7;
     /** The kit was authored for a 1.5px shoulder; only its outward reach follows the widened deck. */
@@ -213,11 +214,11 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
      */
     static BoardBridge.Shape withPiers(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck, BoardBridge.Shape shape,
           TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
-        return withPiers(scene, tile, deck, shape, lod, surfaces, false);
+        return withPiers(scene, tile, deck, shape, lod, surfaces, false, 0);
     }
 
     private static BoardBridge.Shape withPiers(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck,
-          BoardBridge.Shape shape, TerrainLod lod, Map<Coords, BoardSurface> surfaces, boolean columns) {
+          BoardBridge.Shape shape, TerrainLod lod, Map<Coords, BoardSurface> surfaces, boolean columns, int eased) {
         List<BoardBridge.Facet> faces = null;
         List<BoardSurface.Face> under = List.of();
         for (int d = 0; d < 6; d++) {
@@ -241,7 +242,9 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             // The underside at the joint, the same from both hexes.
             float atJoint = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d)) - BoardBridge.SLAB * BoardGeometry.hexScale();
             var grade = under;
-            pier(faces, PIER.get(), scene, tile, d, atJoint, p -> underside(tile, grade, p), lod, surfaces, columns);
+            float rise = BoardBridgeSlope.easedRise(deck, eased);
+            pier(faces, PIER.get(), scene, tile, d, atJoint, p -> underside(tile, grade, rise, p), lod, surfaces,
+                  columns);
         }
         return faces == null ? shape : BoardBridge.shape(shape.surface(), shape.level(), faces);
     }
@@ -313,9 +316,13 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         }
     }
 
-    /** The drawn underside of the tile's own deck above {@code p}: its slab on its grade ({@code under}, relative to the deck plane). */
-    private static float underside(BoardScene.Tile tile, List<BoardSurface.Face> under, Vector3 p) {
-        return BoardBridge.deckZ(tile) + BoardSurface.sampleHeight(under, p.x, p.y, 0) - BoardBridge.SLAB * BoardGeometry.hexScale();
+    /**
+     * The drawn underside of the tile's own deck above {@code p}: its slab on its grade ({@code under}, relative to the
+     * deck plane, eased by {@code rise}, see {@link BoardBridgeSlope#eased}).
+     */
+    private static float underside(BoardScene.Tile tile, List<BoardSurface.Face> under, float rise, Vector3 p) {
+        return BoardBridge.deckZ(tile) + BoardBridgeSlope.eased(BoardSurface.sampleHeight(under, p.x, p.y, 0), rise)
+              - BoardBridge.SLAB * BoardGeometry.hexScale();
     }
 
     /**
@@ -340,7 +347,8 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     /** The footing as the deck road's paint sees it: a bare bank's apron only on the road's own sides. */
     BoardBridgeFooting paint(BoardBridge.Deck deck) {
         int bare = bareExits & deck.roadExits();
-        return bare == bareExits ? this : new BoardBridgeFooting(shape, lengths, bare, solidExits, bankCurves);
+        return bare == bareExits ? this
+              : new BoardBridgeFooting(shape, lengths, bare, solidExits, easedExits, bankCurves);
     }
 
     /** Paint extends onto the existing bank after the structural footing has ended. */
@@ -355,27 +363,6 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
 
     static float apronLength() { return BoardRelief.metres(APRON_METRES) / BoardGeometry.hexScale(); }
 
-    /** A supported bridge landing already contains the bank; retain taller walls and walls beneath raised spans. */
-    static List<BoardSurface.Face> exposedPanels(BoardScene scene, BoardSurface surface,
-          Map<Coords, BoardBridge.Shape> bridges) {
-        List<BoardSurface.Face> result = new ArrayList<>();
-        for (var panel : surface.retainingPanels) {
-            var bounds = new BoundingBox().inf();
-            for (var face : panel) { bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
-            var center = bounds.getCenter(new Vector3());
-            boolean contained = false;
-            for (var entry : bridges.entrySet()) {
-                if (BoardBridge.family(scene.tile(entry.getKey())) == BoardBridge.Family.NATURAL) { continue; }
-                float top = BoardBridge.top(entry.getValue(), center.x, center.y);
-                contained |= Float.isFinite(top) && top >= bounds.min.z + BoardRelief.metres(.4f)
-                      && top <= bounds.max.z + BoardRelief.metres(.5f)
-                      && bounds.max.z <= top + BoardRelief.metres(1);
-            }
-            if (!contained) { result.addAll(panel); }
-        }
-        return result;
-    }
-
     /** The built deck's complete support, shared by its drawing and neighboring rail or object placement. */
     BoardBridge.Shape withDeck(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck,
           TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
@@ -385,7 +372,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     BoardBridge.Shape withDeck(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck,
           TerrainLod lod, Map<Coords, BoardSurface> surfaces, boolean columns) {
         var support = BoardBridge.guideway(tile) ? BoardRail.guideway(scene, tile) : BoardBridgeSlope.build(tile, deck, this);
-        return withPiers(scene, tile, deck, support, lod, surfaces, columns);
+        return withPiers(scene, tile, deck, support, lod, surfaces, columns, easedExits);
     }
 
     static BoardBridgeFooting build(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
@@ -404,7 +391,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
         if (BoardBridge.guideway(tile)) {
             return new BoardBridgeFooting(BoardBridge.shape(BoardScene.Surface.CONCRETE, level, List.of()),
-                  List.of(0f, 0f, 0f, 0f, 0f, 0f), 0, 0, Map.of());
+                  List.of(0f, 0f, 0f, 0f, 0f, 0f), 0, 0, 0, Map.of());
         }
         float scale = BoardGeometry.hexScale();
         var block = KIT.get().get(lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 0 : 1);
@@ -439,7 +426,8 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 solidExits |= 1 << d;
                 lengths.add((half * .5f + block.size().y * scale) / scale);
                 var below = ground(scene, tile, lod, surfaces, columns);
-                ramp(faces, scene, tile, next, d, center, gate, along, across, half, block, ground, below.groundFaces(), curve);
+                ramp(faces, scene, tile, next, d, center, gate, along, across, half, block, ground, below.groundFaces(),
+                      curve, !columns);
                 continue;
             }
             float reach = BoardRelief.metres(1);
@@ -454,11 +442,26 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 }
                 if (supported) { break; }
             }
-            float supportedAt = reach;
+            float length = block.size().y * scale;
+            // Each rail and its terminal block stop short of the bank road's carriageway beyond the deck's lane: a
+            // junction's other arms and corners. A bent bank road has none, and its frame is not this straight one.
+            float[] stops = { reach, reach };
+            if (!bare && curve == null) {
+                var carriageway = BoardRoad.way(scene, next).footprint(0);
+                carriageway.transform(new AffineTransform(scale, 0, 0, scale, BoardGeometry.centerX(next.coords()),
+                      BoardGeometry.centerY(next.coords())));
+                for (int i = 0; i < 2; i++) {
+                    float clear = clear(carriageway, gate, along, across, lane, lane + terminalWidth() * scale,
+                          reach + length, 2 * i - 1);
+                    stops[i] = MathUtils.clamp(clear - length, 0, reach);
+                }
+            }
             boolean ramp = !bare && next.elevation() != level;
             boolean concreteGrade = !bare && bank.ramps != 0 && next.surface() == BoardScene.Surface.CONCRETE;
-            reach += block.size().y * scale;
+            reach = Math.max(stops[0], stops[1]) + length;
             lengths.add(reach / scale);
+            // A ramp's road climbs over the bank's inset half (BoardRoadGrade#BRIDGE_START), then runs level.
+            float climb = ramp ? Math.min(1, (1 - BoardRoadGrade.BRIDGE_START) * half / reach) : 1;
             int edge = Math.floorMod(1 - d, 6);
             var corner = BoardGeometry.corner(tile.coords(), level, edge);
             var edgeVector = BoardGeometry.corner(tile.coords(), level, edge + 1).sub(corner);
@@ -485,83 +488,124 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 left.mulAdd(along, new Vector3(inner).sub(left).dot(normal) / along.dot(normal));
                 right.mulAdd(along, new Vector3(inner).sub(right).dot(normal) / along.dot(normal));
                 left.z = right.z = center.z;
-                support(faces, left, start[0], start[3], right, bottom, -BoardBridge.SLAB * scale);
+                support(faces, List.of(left, start[0], start[3], right), bottom, -BoardBridge.SLAB * scale);
             }
             int steps = lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 4 : 2;
             var runs = new TreeSet<Float>();
             for (int step = 1; step <= steps; step++) { runs.add(step / (float) steps); }
             // Keep the full-height rail across the void, then replace its end with a separate concrete block.
-            float terminal = supportedAt / reach;
-            runs.add(terminal);
+            float[] terminals = { stops[0] / reach, stops[1] / reach };
+            for (float terminal : terminals) {
+                if (terminal > 0) { runs.add(terminal); }
+            }
+            runs.add(climb);
             var previous = start;
             for (float t : runs) {
-                var row = row(start, end, t, !bare);
+                var row = row(start, end, t, !bare, climb);
                 // A ramp or graded concrete junction already owns this road surface. A second slab would
                 // intersect that grade. Natural level landings still bridge the gap to their receding bank.
+                // Past the rails the terminal blocks cover the shoulders. The slab keeps to the lane there: a block
+                // stays rigid while the slab bends, so outside a turn the slab's shoulder would outrun it.
                 if (!ramp && !concreteGrade) {
-                    prism(faces, previous[0], row[0], row[3], previous[3], -BoardBridge.SLAB * scale, 0, BoardBridge.Part.TOP);
+                    int low = t <= terminals[0] ? 0 : 1, high = t <= terminals[1] ? 3 : 2;
+                    prism(faces, previous[low], row[low], row[high], previous[high],
+                          -BoardBridge.SLAB * scale, 0, BoardBridge.Part.TOP);
                 }
-                if (t <= terminal) {
-                    float rail = 2.5f * scale;
+                float rail = 2.5f * scale;
+                if (t <= terminals[0]) {
                     prism(faces, previous[0], row[0], row[1], previous[1], 0, rail, BoardBridge.Part.STRUCTURE);
+                }
+                if (t <= terminals[1]) {
                     prism(faces, previous[2], row[2], row[3], previous[3], 0, rail, BoardBridge.Part.STRUCTURE);
                 }
                 previous = row;
             }
             bend(faces, firstFace, tile.coords(), d, curve, gate, along);
             for (int side : new int[] { -1, 1 }) {
-                terminal(faces, block.shape(), start, end, supportedAt, reach, side, ground, !bare,
+                terminal(faces, block.shape(), start, end, stops[(side + 1) / 2], reach, side, ground, !bare, climb,
                       curve, tile.coords(), d);
             }
         }
         return new BoardBridgeFooting(BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces),
-              List.copyOf(lengths), bareExits, solidExits, Map.copyOf(bankCurves));
+              List.copyOf(lengths), bareExits, solidExits, columns ? 0 : solidExits, Map.copyOf(bankCurves));
     }
 
-    /** Subdivide before bending so the slab and parapets follow the same bank road. */
+    /**
+     * How far past the gate the landing's rail and terminal block on {@code side} (-1 or 1), between {@code lane} and
+     * {@code outer} across it, run clear of {@code carriageway}; {@code limit} where they do throughout.
+     */
+    private static float clear(Area carriageway, Vector3 gate, Vector3 along, Vector3 across, float lane, float outer,
+          float limit, int side) {
+        float step = BoardRelief.metres(.25f);
+        for (float at = 0; at < limit; at += step) {
+            for (float lateral : new float[] { lane + step, (lane + outer) / 2, outer }) {
+                var p = new Vector3(gate).mulAdd(along, at).mulAdd(across, side * lateral);
+                if (carriageway.contains(p.x, p.y)) { return at; }
+            }
+        }
+        return limit;
+    }
+
+    /**
+     * Subdivide before bending so the slab and parapets follow the same bank road. The bend steepens a ramp's inner
+     * side, so the carriageway is cut across its width too: a strip spanning it would split into long slivers that
+     * alternate between the inner and outer slope and shade as streaks.
+     */
     private static void bend(List<BoardBridge.Facet> faces, int first, Coords owner, int direction, BoardRoad road,
           Vector3 gate, Vector3 along) {
         if (road == null) { return; }
         float scale = BoardGeometry.hexScale(), step = 2 * scale;
         var center = BoardGeometry.center(owner, 0);
+        var across = new Vector3(-along.y, along.x, 0);
         var source = new ArrayList<>(faces.subList(first, faces.size()));
         faces.subList(first, faces.size()).clear();
         var placed = new HashMap<Vector3, Vector3>();
         for (var face : source) {
-            var vertices = List.of(face.a(), face.b(), face.c());
-            float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
-            for (var point : vertices) {
-                float distance = (point.x - gate.x) * along.x + (point.y - gate.y) * along.y;
-                low = Math.min(low, distance);
-                high = Math.max(high, distance);
-            }
-            int firstStrip = (int) Math.floor(low / step), lastStrip = Math.max(firstStrip, (int) Math.ceil(high / step) - 1);
-            for (int sample = firstStrip; sample <= lastStrip; sample++) {
-                float from = sample * step, to = (sample + 1) * step;
-                var a = new Vector3(gate).mulAdd(along, from);
-                var b = new Vector3(gate).mulAdd(along, to);
-                var polygon = firstStrip == lastStrip ? vertices : BoardTacticalGeometry.clip(
-                      BoardTacticalGeometry.clip(vertices, a, new Vector3(a).add(along.y, -along.x, 0)),
-                      b, new Vector3(b).add(-along.y, along.x, 0));
-                List<Vector3> bent = new ArrayList<>();
-                for (var point : polygon) {
-                    bent.add(placed.computeIfAbsent(point, p -> {
-                        var xy = road.bendFrom(owner, (direction + 3) % 6,
-                              (p.x - center.x) / scale, (p.y - center.y) / scale);
-                        return new Vector3(center.x + xy.x * scale, center.y + xy.y * scale, p.z);
-                    }));
-                }
-                for (int i = 1; i + 1 < bent.size(); i++) {
-                    BoardBridge.triangle(faces, bent.getFirst(), bent.get(i), bent.get(i + 1), face.part(), face.colour());
+            for (var strip : slice(List.of(face.a(), face.b(), face.c()), gate, along, step)) {
+                for (var polygon : face.part() == BoardBridge.Part.TOP ? slice(strip, gate, across, step) : List.of(strip)) {
+                    List<Vector3> bent = new ArrayList<>();
+                    for (var point : polygon) {
+                        bent.add(placed.computeIfAbsent(point, p -> {
+                            var xy = road.bendFrom(owner, (direction + 3) % 6,
+                                  (p.x - center.x) / scale, (p.y - center.y) / scale);
+                            return new Vector3(center.x + xy.x * scale, center.y + xy.y * scale, p.z);
+                        }));
+                    }
+                    for (int i = 1; i + 1 < bent.size(); i++) {
+                        BoardBridge.triangle(faces, bent.getFirst(), bent.get(i), bent.get(i + 1), face.part(), face.colour());
+                    }
                 }
             }
         }
     }
 
-    /** The bank half meets a support following the actual deck outline, including a turn above the ramp. */
+    /** A polygon's pieces between lines across {@code axis} (unit, XY) every {@code step} from {@code origin}. */
+    static List<List<Vector3>> slice(List<Vector3> polygon, Vector3 origin, Vector3 axis, float step) {
+        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+        for (var point : polygon) {
+            float distance = (point.x - origin.x) * axis.x + (point.y - origin.y) * axis.y;
+            low = Math.min(low, distance);
+            high = Math.max(high, distance);
+        }
+        int first = (int) Math.floor(low / step), last = Math.max(first, (int) Math.ceil(high / step) - 1);
+        if (first == last) { return List.of(polygon); }
+        List<List<Vector3>> pieces = new ArrayList<>();
+        for (int k = first; k <= last; k++) {
+            var a = new Vector3(origin).mulAdd(axis, k * step);
+            var b = new Vector3(origin).mulAdd(axis, (k + 1) * step);
+            pieces.add(BoardTacticalGeometry.clip(BoardTacticalGeometry.clip(polygon, a, new Vector3(a).add(axis.y, -axis.x, 0)),
+                  b, new Vector3(b).add(-axis.y, axis.x, 0)));
+        }
+        return pieces;
+    }
+
+    /**
+     * The bank half meets a support following the actual deck outline, including a turn above the ramp; an
+     * {@code eased} ramp eases off the deck and onto the bank.
+     */
     private static void ramp(List<BoardBridge.Facet> faces, BoardScene scene, BoardScene.Tile tile, BoardScene.Tile bank, int direction,
           Vector3 center, Vector3 gate, Vector3 along, Vector3 across, float half, Block block,
-          List<BoardSurface.Face> ground, List<BoardSurface.Face> below, BoardRoad curve) {
+          List<BoardSurface.Face> ground, List<BoardSurface.Face> below, BoardRoad curve, boolean eased) {
         int firstFace = faces.size();
         float scale = BoardGeometry.hexScale();
         int edge = Math.floorMod(1 - direction, 6);
@@ -589,19 +633,41 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             for (var face : surface) { bottom = Math.min(bottom, Math.min(face.a().z, Math.min(face.b().z, face.c().z))); }
         }
         bottom -= BoardRelief.metres(.05f);
-        deckRamp(faces, tile, BoardBridge.deck(scene, tile), direction, bottom);
+        deckRamp(faces, tile, BoardBridge.deck(scene, tile), direction, bottom, eased);
         // Only the bank half is straight. The deck half must follow its generated curve and grade.
-        top = row(top, base, .5f, true);
-        // The slab and retaining sides share the same four corners, with no terrain faces forming the support.
-        for (int i = 0; i < 3; i++) {
-            quad(faces, top[i], base[i], base[i + 1], top[i + 1], i == 1 ? BoardBridge.Part.TOP : BoardBridge.Part.RIM);
+        top = row(top, base, .5f, true, 1);
+        // Rows from the edge to the foot; eased, the grade meets the deck half's slope at the edge and levels out.
+        int count = eased ? BoardBridgeSlope.EASED_ROWS : 1;
+        List<Vector3[]> rows = new ArrayList<>(List.<Vector3[]>of(top));
+        for (int k = 1; k < count; k++) {
+            float t = k / (float) count;
+            var row = row(top, base, t, true, 1);
+            for (int i = 0; i < row.length; i++) {
+                row[i].z = base[i].z + (top[i].z - base[i].z) * BoardBridgeSlope.ease(1 - t);
+            }
+            rows.add(row);
         }
-        support(faces, top[0], base[0], base[3], top[3], bottom, 0);
+        rows.add(base);
+        // The slab and retaining sides share the same corners, with no terrain faces forming the support.
+        List<Vector3> sides = new ArrayList<>();
+        for (int k = 0; k < count; k++) {
+            for (int i = 0; i < 3; i++) {
+                quad(faces, rows.get(k)[i], rows.get(k + 1)[i], rows.get(k + 1)[i + 1], rows.get(k)[i + 1],
+                      i == 1 ? BoardBridge.Part.TOP : BoardBridge.Part.RIM);
+            }
+        }
+        rows.forEach(row -> sides.add(row[0]));
+        rows.reversed().forEach(row -> sides.add(row[3]));
+        support(faces, sides, bottom, 0);
         quad(faces, new Vector3(top[3].x, top[3].y, bottom), new Vector3(base[3].x, base[3].y, bottom),
               new Vector3(base[0].x, base[0].y, bottom), new Vector3(top[0].x, top[0].y, bottom), BoardBridge.Part.STRUCTURE);
-        // Only the bank half needs new rails; the bridge half retains its authored rails on the same plane.
-        prism(faces, top[0], base[0], base[1], top[1], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);
-        prism(faces, top[2], base[2], base[3], top[3], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);
+        // Only the bank half needs new rails; the bridge half retains its authored rails on the same grade.
+        for (int k = 0; k < count; k++) {
+            var upper = rows.get(k);
+            var lower = rows.get(k + 1);
+            prism(faces, upper[0], lower[0], lower[1], upper[1], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);
+            prism(faces, upper[2], lower[2], lower[3], upper[3], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);
+        }
         // The connected bank already owns the level road beneath the terminal blocks. Extending
         // another asphalt slab across it lets the bank's paint and tyre wear show through the slab.
         if (curve == null) {
@@ -609,19 +675,20 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         }
         bend(faces, firstFace, tile.coords(), direction, curve, gate, along);
         for (int side : new int[] { -1, 1 }) {
-            terminal(faces, block.shape(), base, end, 0, length, side, ground, true,
+            terminal(faces, block.shape(), base, end, 0, length, side, ground, true, 1,
                   curve, tile.coords(), direction);
         }
     }
 
-    /** Extrude the solid part of the curved slab down to its foundation, on the deck's shared grade. */
+    /** Extrude the solid part of the curved slab down to its foundation, on the deck's shared grade, {@code eased}. */
     private static void deckRamp(List<BoardBridge.Facet> faces, BoardScene.Tile tile, BoardBridge.Deck deck,
-          int direction, float bottom) {
+          int direction, float bottom, boolean eased) {
         var profile = BoardBridgeSlope.profile(tile, deck).stream()
               .filter(face -> face.landEdge() >= 0 && BoardGeometry.edgeDirection(face.landEdge()) == direction)
               // A wide mouth can consume an entire corner triangle; it has no plane to grade a wall against.
               .filter(face -> Math.abs((face.b().x - face.a().x) * (face.c().y - face.a().y)
                     - (face.b().y - face.a().y) * (face.c().x - face.a().x)) > .00001f).toList();
+        float rise = BoardBridgeSlope.easedRise(deck, eased ? 1 << direction : 0);
         var region = new Area();
         for (var face : profile) {
             var path = new Path2D.Float();
@@ -649,10 +716,11 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         for (var face : top) {
             for (var patch : profile) {
                 clipper.prepare(new BoardTacticalGeometry.Triangle(face.a(), face.b(), face.c(), -1));
-                clipper.displace(patch, triangle -> BoardBridge.triangle(faces,
-                      new Vector3(triangle.a()).add(0, 0, deckHeight),
-                      new Vector3(triangle.b()).add(0, 0, deckHeight),
-                      new Vector3(triangle.c()).add(0, 0, deckHeight), face.part()));
+                clipper.displace(patch, displaced -> BoardBridgeSlope.ease(displaced, patch, rise, triangle ->
+                      BoardBridge.triangle(faces,
+                            new Vector3(triangle.a()).add(0, 0, deckHeight),
+                            new Vector3(triangle.b()).add(0, 0, deckHeight),
+                            new Vector3(triangle.c()).add(0, 0, deckHeight), face.part())));
             }
         }
         // Split the boundary on each grade patch before closing it; no straight wall cuts across the bend.
@@ -683,33 +751,39 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                     var p = new Vector3(a).mulAdd(along, from);
                     var q = new Vector3(a).mulAdd(along, to);
                     if (p.dst2(q) < 1e-8f) { continue; }
-                    p.z = deckHeight + patch.height(p.x, p.y);
-                    q.z = deckHeight + patch.height(q.x, q.y);
-                    quad(faces, new Vector3(p.x, p.y, bottom), p, q, new Vector3(q.x, q.y, bottom),
-                          BoardBridge.Part.STRUCTURE);
+                    p.z = patch.height(p.x, p.y);
+                    q.z = patch.height(q.x, q.y);
+                    var wall = BoardBridgeSlope.easeEdge(p, q, rise);
+                    for (int k = 0; k + 1 < wall.size(); k++) {
+                        var s = new Vector3(wall.get(k)).add(0, 0, deckHeight);
+                        var t = new Vector3(wall.get(k + 1)).add(0, 0, deckHeight);
+                        quad(faces, new Vector3(s.x, s.y, bottom), s, t, new Vector3(t.x, t.y, bottom),
+                              BoardBridge.Part.STRUCTURE);
+                    }
                 }
             }
         }
         BoardBridgeMesh.cap(faces, slab, bottom, false, BoardBridge.Part.STRUCTURE, null);
     }
 
-    private static Vector3[] row(Vector3[] start, Vector3[] end, float t, boolean road) {
+    private static Vector3[] row(Vector3[] start, Vector3[] end, float t, boolean road, float climb) {
         var row = new Vector3[start.length];
         for (int i = 0; i < row.length; i++) {
-            row[i] = point(start[i], end[i], t, road);
+            row[i] = point(start[i], end[i], t, road, climb);
         }
         return row;
     }
 
-    private static Vector3 point(Vector3 start, Vector3 end, float t, boolean road) {
+    /** A road climbs straight over the share {@code climb} of the run, then runs level; bare ground eases. */
+    private static Vector3 point(Vector3 start, Vector3 end, float t, boolean road, float climb) {
         var point = new Vector3(start).lerp(end, t);
-        if (!road) { point.z = start.z + (end.z - start.z) * t * t * (3 - 2 * t); }
+        point.z = start.z + (end.z - start.z) * (road ? Math.min(1, t / climb) : t * t * (3 - 2 * t));
         return point;
     }
 
     /** Place the authored block outside the lane, grade it with the slab, and seat only its bottom on the bank. */
     private static void terminal(List<BoardBridge.Facet> faces, BoardShape block, Vector3[] start, Vector3[] end,
-          float supportedAt, float reach, int side, List<BoardSurface.Face> ground, boolean road,
+          float supportedAt, float reach, int side, List<BoardSurface.Face> ground, boolean road, float climb,
           BoardRoad curve, Coords owner, int direction) {
         float scale = BoardGeometry.hexScale();
         int inner = side < 0 ? 1 : 2, outer = side < 0 ? 0 : 3;
@@ -717,7 +791,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         outward.z = 0;
         float railWidth = outward.len();
         outward.nor();
-        var pivot = point(start[inner], end[inner], supportedAt / reach, road);
+        var pivot = point(start[inner], end[inner], supportedAt / reach, road, climb);
         var movedPivot = new Vector3(pivot);
         var forward = new Vector3(end[inner]).sub(start[inner]);
         forward.z = 0;
@@ -740,7 +814,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             for (int i = 0; i < 3; i++) {
                 points[i] = placed.computeIfAbsent(face.points()[i], source -> {
                     float at = (supportedAt + source.y * scale) / reach;
-                    var p = point(start[inner], end[inner], at, road)
+                    var p = point(start[inner], end[inner], at, road, climb)
                           .mulAdd(outward, source.x * TERMINAL_WIDTH_SCALE * scale);
                     if (curve != null) {
                         p.x = pivot.x + forward.x * source.y * scale + outward.x * source.x * TERMINAL_WIDTH_SCALE * scale;
@@ -751,7 +825,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                     p.y = movedPivot.y + sine * px + cosine * py;
                     // Continue the rail's lateral plane through the wider block, then add its authored profile.
                     // Grading only the bottom leaves a raised wedge where the cap top meets a falling rail.
-                    var rail = point(start[outer], end[outer], at, road);
+                    var rail = point(start[outer], end[outer], at, road, climb);
                     p.z += (rail.z - p.z) * source.x * TERMINAL_WIDTH_SCALE * scale / railWidth;
                     if (Math.abs(source.z) < .001f) {
                         p.z = Math.min(p.z, BoardSurface.sampleHeight(ground, p.x, p.y, p.z)) - BoardRelief.metres(.025f);
@@ -764,14 +838,15 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         }
     }
 
-    /** Solid concrete beneath a sloping bridge end, seated below its ground and capped by the existing deck. */
-    private static void support(List<BoardBridge.Facet> faces, Vector3 a, Vector3 b, Vector3 c, Vector3 d,
-          float bottom, float underside) {
-        var top = List.of(new Vector3(a).add(0, 0, underside), new Vector3(b).add(0, 0, underside),
-              new Vector3(c).add(0, 0, underside), new Vector3(d).add(0, 0, underside));
-        for (int i = 0; i < 4; i++) {
+    /**
+     * Solid concrete beneath a sloping bridge end, around its outline {@code ring}, seated below its ground and capped
+     * by the existing deck.
+     */
+    private static void support(List<BoardBridge.Facet> faces, List<Vector3> ring, float bottom, float underside) {
+        var top = ring.stream().map(p -> new Vector3(p).add(0, 0, underside)).toList();
+        for (int i = 0; i < top.size(); i++) {
             var p = top.get(i);
-            var q = top.get((i + 1) % 4);
+            var q = top.get((i + 1) % top.size());
             quad(faces, p, new Vector3(p.x, p.y, Math.min(bottom, p.z)),
                   new Vector3(q.x, q.y, Math.min(bottom, q.z)), q, BoardBridge.Part.STRUCTURE);
         }

@@ -142,7 +142,7 @@ final class RoadGradeFixture {
         return board;
     }
 
-    private static Board blank(boolean concrete, int width, int height) {
+    static Board blank(boolean concrete, int width, int height) {
         Board board = Board.createEmptyBoard(width, height);
         board.setNativeFormat(true);
         board.setRoadsAutoExit(false);
@@ -202,7 +202,8 @@ final class RoadGradeFixture {
                 int[] arms = sample.id().equals("t-mixed") ? new int[] { 0, 1, 3 } : new int[] { 0, 1, 3, 4 };
                 int[] levels = { 4, 2, 3, 5 };
                 for (int i = 0; i < arms.length; i++) {
-                    var arm = List.of(at, at.translated(arms[i]), at.translated(arms[i], 2));
+                    int direction = Math.floorMod(d + arms[i], 6);
+                    var arm = List.of(at, at.translated(direction), at.translated(direction, 2));
                     for (Coords member : arm.subList(1, arm.size())) { board.getHex(member).setLevel(levels[i]); }
                     ways(board, arm, Set.of(), rail);
                 }
@@ -266,7 +267,7 @@ final class RoadGradeFixture {
         }
     }
 
-    private static List<Coords> through(Coords at, int first, int second, int length) {
+    static List<Coords> through(Coords at, int first, int second, int length) {
         List<Coords> result = new ArrayList<>();
         for (int i = length; i > 0; i--) { result.add(at.translated(first, i)); }
         result.add(at);
@@ -274,7 +275,7 @@ final class RoadGradeFixture {
         return result;
     }
 
-    private static void bridge(Board board, Coords at, int deckLevel, boolean water) {
+    static void bridge(Board board, Coords at, int deckLevel, boolean water) {
         Hex hex = board.getHex(at);
         hex.setLevel(0);
         if (water) {
@@ -287,7 +288,7 @@ final class RoadGradeFixture {
         hex.setAppearance(Map.of("bridge", HexAppearance.BUILT_BRIDGE));
     }
 
-    private static void road(Board board, Coords at, int sides, boolean deck) {
+    static void road(Board board, Coords at, int sides, boolean deck) {
         Hex hex = board.getHex(at);
         int type = deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD;
         int previous = hex.containsTerrain(type) ? hex.getTerrain(type).getExits() : 0;
@@ -295,7 +296,7 @@ final class RoadGradeFixture {
         if (deck) { hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, previous | sides)); }
     }
 
-    private static void ways(Board board, List<Coords> path, Set<Coords> decks, boolean rail) {
+    static void ways(Board board, List<Coords> path, Set<Coords> decks, boolean rail) {
         for (int i = 1; i < path.size(); i++) {
             Coords a = path.get(i - 1), b = path.get(i);
             int d = direction(a, b);
@@ -305,7 +306,7 @@ final class RoadGradeFixture {
         if (rail) { tracks(board, path, decks); }
     }
 
-    private static void tracks(Board board, List<Coords> path, Set<Coords> decks) {
+    static void tracks(Board board, List<Coords> path, Set<Coords> decks) {
         for (int i = 0; i < path.size(); i++) {
             Coords at = path.get(i);
             int sides = (i == 0 ? 0 : 1 << direction(at, path.get(i - 1)))
@@ -317,7 +318,7 @@ final class RoadGradeFixture {
         }
     }
 
-    private static int direction(Coords a, Coords b) {
+    static int direction(Coords a, Coords b) {
         for (int d = 0; d < 6; d++) { if (a.translated(d).equals(b)) { return d; } }
         throw new IllegalArgumentException("Nonadjacent fixture route: " + a + " to " + b);
     }
@@ -412,9 +413,9 @@ final class RoadGradeFixture {
 
     private static String csv(String text) { return '"' + text.replace("\"", "\"\"") + '"'; }
 
-    private static void validate(Board board) {
-        for (int y = 0; y < HEIGHT; y++) {
-            for (int x = 0; x < WIDTH; x++) {
+    static void validate(Board board) {
+        for (int y = 0; y < board.getHeight(); y++) {
+            for (int x = 0; x < board.getWidth(); x++) {
                 Coords at = new Coords(x, y);
                 Hex hex = board.getHex(at);
                 for (var marker : RailRoute.markers(hex, RailRoute.Kind.RAIL)) {

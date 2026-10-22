@@ -182,7 +182,7 @@ class GpuRoadSmokeTest {
                         }
                     }
                     for (int exits : new int[] { 31, 63 }) {
-                        var scene = BoardRoadRampTest.concreteJunction(exits);
+                        var scene = BoardRoadSlopeTest.concreteJunction(exits);
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         assertTrue(terrain.ready(scene), "Retaining-wall captures require the prepared material families");
@@ -356,7 +356,7 @@ class GpuRoadSmokeTest {
                     for (int layout = 0; layout < 3; layout++) {
                         int[] rises = layout == 0 ? new int[] { 2, 2, 2, 2, 2, 2 }
                               : layout == 1 ? new int[] { -2, -2, -2, -2, -2, -2 } : new int[] { -2, 1, 2, -1, 0, 2 };
-                        var junction = BoardRoadRampTest.junction(BoardRoadTest.CENTER, rises);
+                        var junction = BoardRoadSlopeTest.junction(BoardRoadTest.CENTER, rises);
                         terrain.update(junction);
                         terrain.animate(.5f, List.of());
                         camera.camera.zoom = .2f;

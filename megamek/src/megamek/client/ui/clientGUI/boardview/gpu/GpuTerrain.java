@@ -3573,6 +3573,20 @@ final class GpuTerrain implements Disposable {
               infrastructure.bridges(), infrastructure.bridgeShapes(), walls, reused, paint, false);
     }
 
+    /**
+     * The roads painting a hex's ground: those nearby at its level ({@link BoardRoad#nearby}) and, in Enhanced, a
+     * neighbour's at another level whose carriageway reserves part of this hex.
+     */
+    private static List<BoardRoad> painting(BoardScene scene, BoardScene.Tile tile, boolean columns) {
+        var result = new ArrayList<>(BoardRoad.nearby(scene, tile));
+        for (int d = 0; d < 6 && !columns && !tile.liquid().present(); d++) {
+            var source = scene.neighbor(tile, d);
+            if (source != null && source.elevation() != tile.elevation() && BoardRoad.rendered(source)
+                  && BoardRoadGrade.reaches(scene, source, tile)) { result.add(BoardRoad.of(scene, source)); }
+        }
+        return result;
+    }
+
     /** Shared carriageways, paint and rail supports; Classic natural decks use a full hex cap. */
     private record Infrastructure(Map<Coords, List<RoadPatch>> roads, Map<Coords, BoardBridge.Deck> bridges,
           Map<Coords, BoardBridge.Shape> bridgeShapes) { }
@@ -3593,7 +3607,7 @@ final class GpuTerrain implements Disposable {
                 patches.add(new RoadPatch(mineralGround.patch(), masks.share(mineralGround.mask()),
                       mineralGround.triangles(), false, tile));
             }
-            for (BoardRoad road : surface == null ? List.<BoardRoad>of() : BoardRoad.nearby(scene, surface.tile)) {
+            for (BoardRoad road : surface == null ? List.<BoardRoad>of() : painting(scene, surface.tile, columns)) {
                 var source = scene.tile(road.coords());
                 for (var patch : GpuRoads.patches(source, road)) {
                     check.run();
@@ -3833,10 +3847,9 @@ final class GpuTerrain implements Disposable {
         }
         if (!sculpted && !smoothTop.isEmpty()) {
             Map<Vector3, Vector3> normals = wallNormals(smoothTop);
-            float earthwork = surface.ramps == 0 ? 1 : .3f + .1f * Math.min(surface.roadLevels(), 7);
             blended(solid, GpuSurfaceBlend.prepare(scene, tile, smoothTop,
-                  p -> vertex(p, surface.roadNormal(p, normals.get(p)), 99, 99,
-                        new Color(1, (tile.elevation() + 64) / 255f, 0, earthwork))), scene, tile, chunk.lavaField);
+                  p -> vertex(p, normals.get(p), 99, 99,
+                        new Color(1, (tile.elevation() + 64) / 255f, 0, 1))), scene, tile, chunk.lavaField);
         }
         if (!sculpted && !surface.retainingWalls.isEmpty()) {
             var walls = collectBridgeSupports(surface, surface.retainingWalls, bridgeSupports);
@@ -3844,13 +3857,20 @@ final class GpuTerrain implements Disposable {
                   p -> sculptVertex(p, surface.relief.shade(p), Float.NaN, surface)), null, null, chunk.lavaField);
             for (var face : surface.retainingWalls) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
         }
-        if (!surface.retainingPanels.isEmpty()) {
-            var panels = BoardBridgeFooting.exposedPanels(scene, surface, prepared.bridgeShapes());
+        if (!surface.containmentWalls.isEmpty()) {
+            var panels = surface.containmentWalls;
             // Precast retaining walls share the tunnel portals' concrete.
             solid.add(material(assets.material("scenery/tunnel-concrete"), false), mesh -> {
                 for (var face : panels) { panel(mesh, face); }
             });
             for (var face : panels) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
+        }
+        if (!surface.pouredWalls.isEmpty()) {
+            var poured = surface.pouredWalls;
+            // A road built in concrete is walled in natural ground as in the concrete hex it ramps from.
+            solid.addTriangles(sculptMaterial(BoardScene.Surface.CONCRETE),
+                  mesh -> sculptedFaces(mesh, surface, poured, Float.NaN, scene, surfaces));
+            for (var face : poured) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
         }
         roads(overlay, prepared.roads().getOrDefault(tile.coords(), List.of()), surface, chunk.roadMasks, scene, tile);
         if (!tile.ultraSublevel() && !tile.detailedGround() && !tile.liquid().present() && tile.wayExits() == 0

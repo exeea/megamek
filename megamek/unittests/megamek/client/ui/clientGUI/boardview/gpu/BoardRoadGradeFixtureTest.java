@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,8 @@ class BoardRoadGradeFixtureTest {
     private static BoardScene mixedScene;
     // Below one hundredth of a model pixel, including float rounding at the matrix's farthest coordinates.
     private static final float EPSILON = .006f;
+    /** Inset from the hex edges, in tile pixels, beyond which a junction's arms may ramp (BoardRoad.CORRIDOR). */
+    private static final float CORE = (1 - BoardRoad.CORRIDOR) * 36.3f + .1f;
 
     @BeforeAll
     static void scenes() {
@@ -95,6 +98,92 @@ class BoardRoadGradeFixtureTest {
         // The hub's fixed heights admit a 1:1 grade. Its approaches also retain a longitudinal vertical curve,
         // so check their transverse grade separately rather than treating that required climb as a lateral bank.
         assertSupportedGradesAndMouths(SCENES.get(concrete), panel, 19, "x-mixed", true);
+    }
+
+    static Stream<Arguments> flatJunctions() {
+        var result = new ArrayList<Arguments>();
+        for (String id : List.of("t-mixed", "x-mixed")) {
+            for (boolean concrete : new boolean[] { false, true }) {
+                for (var panel : RoadGradeFixture.Panel.values()) {
+                    for (int direction : new int[] { 0, 1, 2 }) {
+                        for (int parity = 0; parity < 2; parity++) {
+                            result.add(Arguments.of(id, concrete, panel, direction, parity));
+                        }
+                    }
+                }
+            }
+        }
+        return result.stream();
+    }
+
+    @ParameterizedTest(name = "flat {0}, concrete={1}, {2}, rotation={3}, parity={4}")
+    @MethodSource("flatJunctions")
+    void mixedJunctionInteriorsStayAtTheirAuthoredLevel(String id, boolean concrete,
+          RoadGradeFixture.Panel panel, int direction, int parity) {
+        var scene = RoadGradeFixture.scene(RoadGradeFixture.focused(concrete, panel, id, direction, parity));
+        var at = RoadGradeFixture.focusedCenter(parity);
+        var tile = scene.tile(at);
+        var center = BoardGeometry.center(at, tile.elevation());
+        var way = BoardRoad.way(scene, tile);
+        float scale = BoardGeometry.hexScale();
+        for (boolean classic : new boolean[] { false, true }) {
+            var source = classic ? BoardSurface.columns(scene, tile, TerrainLod.FULL)
+                  : new BoardSurface(scene, tile, TerrainLod.FULL);
+            String label = id + " " + (classic ? "Classic" : "Enhanced");
+            int samples = 0;
+            for (int x = -36; x <= 36; x += 4) {
+                for (int y = -36; y <= 36; y += 4) {
+                    if (way.distance(x, y) > -.5f) { continue; }
+                    var p = new Vector3(center.x + x * scale, center.y + y * scale, center.z);
+                    // Only the arms beyond the core may join another elevation. Check the emitted surface across
+                    // the whole road/rail footprint, including the crossing between arms.
+                    if (!insideJunctionCore(at, p, CORE * scale)) { continue; }
+                    assertEquals(center.z, BoardSurface.sampleHeight(source.groundFaces(), p.x, p.y, Float.NaN),
+                          EPSILON, label + " must be level inside its border transition at " + p);
+                    samples++;
+                }
+            }
+            assertTrue(samples > 30, label + " must exercise the crossing's width, not only its center");
+            for (var feature : tile.features()) {
+                if (!BoardRail.route(feature)) { continue; }
+                var layout = BoardRail.layout(scene, tile, feature, source, ignored -> null);
+                for (var path : layout.paths()) {
+                    for (var point : path) {
+                        var p = new Vector3(center.x + point.x * scale, center.y + point.y * scale, center.z);
+                        if (!insideJunctionCore(at, p, CORE * scale)) { continue; }
+                        assertEquals(0, point.z, EPSILON / scale,
+                              label + " rail must remain level through the crossing at " + point);
+                    }
+                }
+            }
+        }
+        assertSupportedGradesAndMouths(scene, at, id);
+    }
+
+    /**
+     * Whether a point of the ground lies below another emitted surface. Natural ground a road passes over stays beneath
+     * the road's surface (BoardRoadCut#clip reserves only what stands above it): it is not the driving surface.
+     */
+    static boolean hidden(Collection<BoardSurface> owners, Vector3 point) {
+        for (var owner : owners) {
+            float top = BoardSurface.sampleHeight(owner.groundFaces(), point.x, point.y, Float.NEGATIVE_INFINITY);
+            if (top > point.z + EPSILON) { return true; }
+        }
+        return false;
+    }
+
+    private static boolean insideJunctionCore(Coords at, Vector3 point, float inset) {
+        var center = BoardGeometry.center(at, 0);
+        for (int edge = 0; edge < 6; edge++) {
+            var a = BoardGeometry.corner(at, 0, edge);
+            var b = BoardGeometry.corner(at, 0, edge + 1);
+            float dx = b.x - a.x, dy = b.y - a.y;
+            float side = Math.signum(dx * (center.y - a.y) - dy * (center.x - a.x));
+            float distance = side * (dx * (point.y - a.y) - dy * (point.x - a.x))
+                  / (float) Math.hypot(dx, dy);
+            if (distance < inset) { return false; }
+        }
+        return true;
     }
 
     private static void assertSupportedGradesAndMouths(BoardScene scene, RoadGradeFixture.Panel panel,
@@ -174,12 +263,9 @@ class BoardRoadGradeFixtureTest {
                     var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
                     if (normal.len2() < .000001f) { continue; }
                     normal.nor();
-                    assertTrue(normal.z > .2f,
+                    assertTrue(normal.z > .2f || hidden(sources.values(), p),
                           name + " excessive road face grade at " + member + ": " + face);
                     if (junctionGrade) {
-                        if (member.equals(at)) {
-                            assertTrue(normal.z >= Math.sqrt(.5), "The X hub must spread its grade: " + face);
-                        }
                         var along = road.wheelDirection((p.x - center.x) / BoardGeometry.hexScale(),
                               (p.y - center.y) / BoardGeometry.hexScale());
                         float across = Math.abs(-normal.x * along.y + normal.y * along.x) / normal.z;
@@ -199,16 +285,15 @@ class BoardRoadGradeFixtureTest {
                 var next = scene.tile(member.translated(d));
                 if (!sources.containsKey(next.coords()) || (tile.wayExits() & 1 << d) == 0
                       || (next.wayExits() & 1 << ((d + 3) % 6)) == 0
-                      || !BoardSurface.hasRoadApproach(tile, next, d)) { continue; }
+                      || !BoardRoadGrade.graded(tile, next, d)) { continue; }
                 int edge = Math.floorMod(1 - d, 6);
                 var left = BoardGeometry.corner(member, 0, edge);
                 var right = BoardGeometry.corner(member, 0, edge + 1);
                 float mouth = BoardSurface.roadMouth(tile, next, d) * BoardGeometry.hexScale();
                 for (float fraction : new float[] { -.65f, 0, .65f }) {
-                    // Relief may move a level gate beside a graded third hex. Check its actual shared rim,
-                    // not the nominal edge which can legitimately lie inside only one of the two owners.
-                    var p = rimPoint(source, edge, .5f + fraction * mouth / left.dst(right));
-                    float expected = (tile.elevation() + next.elevation()) * BoardGeometry.level() / 2;
+                    // The reserved carriageway keeps the nominal edge, where both owners meet.
+                    var p = new Vector3(left).lerp(right, .5f + fraction * mouth / left.dst(right));
+                    float expected = BoardRoadGrade.edgeLevel(tile, next, d) * BoardGeometry.level();
                     float first = BoardSurface.sampleHeight(source.groundFaces(), p.x, p.y, Float.NaN);
                     assertTrue(Float.isFinite(first), name + " missing shared-rim support at " + p);
                     if (fraction == 0) {
@@ -284,20 +369,5 @@ class BoardRoadGradeFixtureTest {
             samples++;
         }
         assertTrue(samples > 0, "Exercise actual road or deck geometry");
-    }
-
-    private static Vector3 rimPoint(BoardSurface surface, int edge, float t) {
-        var rim = surface.relief.rim(edge);
-        if (rim.isEmpty()) {
-            return BoardGeometry.corner(surface.tile.coords(), surface.tile.elevation(), edge)
-                  .lerp(BoardGeometry.corner(surface.tile.coords(), surface.tile.elevation(), edge + 1), t);
-        }
-        for (int i = 1; i < rim.size(); i++) {
-            var a = rim.get(i - 1); var b = rim.get(i);
-            if (t <= b.t() || i == rim.size() - 1) {
-                return new Vector3(a.point()).lerp(b.point(), Math.clamp((t - a.t()) / (b.t() - a.t()), 0, 1));
-            }
-        }
-        return new Vector3(rim.getFirst().point());
     }
 }

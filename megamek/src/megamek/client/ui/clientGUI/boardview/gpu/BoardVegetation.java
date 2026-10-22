@@ -128,10 +128,10 @@ final class BoardVegetation {
             var shade = source.relief.shade(vertex);
             if (shade != null) { normals.put(vertex, shade.normal()); }
             else if (face.finish() == BoardSurface.Finish.TOP && !source.relief.sculpted()) {
-                // The ordinary top renderer uses area-weighted carrier normals, then applies the road grade.
+                // The ordinary top renderer uses area-weighted carrier normals.
                 var carrier = topNormals.computeIfAbsent(source, key -> BoardSurface.vertexNormals(key.faces.stream()
                       .filter(top -> top.finish() == BoardSurface.Finish.TOP).toList()));
-                normals.put(vertex, source.roadNormal(vertex, carrier.get(vertex)));
+                normals.put(vertex, carrier.getOrDefault(vertex, Vector3.Z));
             } else {
                 // Unshaded sculpt vertices use the same upward normal in GpuTerrain.sculptVertex.
                 normals.put(vertex, Vector3.Z);

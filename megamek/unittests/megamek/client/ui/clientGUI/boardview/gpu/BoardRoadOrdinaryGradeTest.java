@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -46,13 +47,15 @@ class BoardRoadOrdinaryGradeTest {
         var at = RoadGradeFixture.focusedCenter(parity);
         BoardRoadGradeFixtureTest.assertSupportedGradesAndMouths(scene, at, id);
 
-        var near = new ArrayList<Coords>();
-        near.add(at);
-        for (int d = 0; d < 6; d++) { near.add(at.translated(d)); }
-        for (var member : near) {
+        var surfaces = new LinkedHashMap<Coords, BoardSurface>();
+        for (int d = -1; d < 6; d++) {
+            var member = d < 0 ? at : at.translated(d);
+            surfaces.put(member, new BoardSurface(scene, scene.tile(member)));
+        }
+        for (var member : surfaces.keySet()) {
             var tile = scene.tile(member);
             if (!BoardRoad.rendered(tile) || tile.liquid().present()) { continue; }
-            var surface = new BoardSurface(scene, tile);
+            var surface = surfaces.get(member);
             var course = BoardRoad.way(scene, tile);
             var center = BoardGeometry.center(member, tile.elevation());
             for (var face : surface.groundFaces()) {
@@ -67,37 +70,47 @@ class BoardRoadOrdinaryGradeTest {
                 if (normal.len2() < .000001f) { continue; }
                 // A one-level route has ample run for a 1:1 grade. Its bank must not pinch through the
                 // pavement. Extreme authored stress cases intentionally have a different bound.
-                assertTrue(normal.nor().z >= Math.sqrt(.5),
+                assertTrue(normal.nor().z >= Math.sqrt(.5) || BoardRoadGradeFixtureTest.hidden(surfaces.values(), p),
                       "An ordinary incline must not put a cliff through the corridor at " + member + " / " + p);
             }
         }
 
         if (id.equals("grade-straight") || id.equals("grade-transition")) {
-            // Equal one-level steps allow one line through each interior center. A flat hub followed by a
-            // steeper ramp satisfies endpoint/monotonic checks but produces the unwanted repeated landings.
+            // Equal one-level steps share each ramp between both hexes over their outer SHARED_RAMP, so every interior
+            // hex keeps its middle at its own level and climbs only towards its edges. The emitted road follows that
+            // grade, except that its edge meets the natural ground beside it where the two miss by under a tenth of a
+            // level (BoardRoadCut#meet).
             var along = BoardGeometry.center(at.translated((direction + 3) % 6), 0)
-                  .sub(BoardGeometry.center(at, 0));
-            float grade = BoardGeometry.level() / along.len();
-            along.nor();
+                  .sub(BoardGeometry.center(at, 0)).nor();
             for (var member : List.of(at.translated(direction), at, at.translated((direction + 3) % 6))) {
-                var surface = new BoardSurface(scene, scene.tile(member));
+                var surface = surfaces.get(member);
+                var grade = BoardRoadGrade.of(scene, scene.tile(member), true);
                 var center = BoardGeometry.center(member, scene.tile(member).elevation());
                 for (int offset = -8; offset <= 8; offset += 4) {
-                    float distance = offset * BoardGeometry.hexScale();
-                    var p = new Vector3(center).mulAdd(along, distance);
-                    assertEquals(center.z + distance * grade,
-                          BoardSurface.sampleHeight(surface.groundFaces(), p.x, p.y, Float.NaN), .006f,
-                          "A continuous climb must not acquire a landing at " + member + " / " + offset);
+                    var p = new Vector3(center).mulAdd(along, offset * BoardGeometry.hexScale());
+                    assertEquals(center.z, grade.height(p.x, p.y), .006f,
+                          "A shared ramp keeps the hex's middle level at " + member + " / " + offset);
+                    assertEquals(center.z, BoardSurface.sampleHeight(surface.groundFaces(), p.x, p.y, Float.NaN),
+                          .1f * BoardGeometry.level(),
+                          "The emitted road follows its grade at " + member + " / " + offset);
                 }
             }
         }
         if (id.equals("grade-high-bank") || id.equals("grade-low-bank")) {
-            // Corner cut/fill must join the corridor without leveling the whole adjacent hex.
+            // Corner cut/fill must join the corridor without leveling the whole adjacent hex. Its bank may reach into
+            // the middle, as a drop of up to BoardRoadGrade.FILL below a road fills up as an embankment; beyond the
+            // bank's toe, away from the corridor, the plateau keeps its authored elevation.
             var bank = at.translated((direction + 1) % 6);
-            var surface = new BoardSurface(scene, scene.tile(bank));
+            var surface = surfaces.get(bank);
             var center = BoardGeometry.center(bank, board.getHex(bank).getLevel());
-            assertEquals(center.z, BoardSurface.sampleHeight(surface.groundFaces(), center.x, center.y, Float.NaN),
-                  .006f, "The neighboring plateau keeps its authored elevation");
+            var away = BoardGeometry.center(bank.translated((direction + 1) % 6), board.getHex(bank).getLevel());
+            boolean kept = false;
+            for (int step = 0; step <= 5 && !kept; step++) {
+                var p = new Vector3(center).lerp(away, step * .05f);
+                float height = BoardSurface.sampleHeight(surface.groundFaces(), p.x, p.y, Float.NaN);
+                kept = Math.abs(height - center.z) <= .006f;
+            }
+            assertTrue(kept, "The neighboring plateau keeps its authored elevation beyond its bank");
         }
     }
 }

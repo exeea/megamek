@@ -176,7 +176,7 @@ final class GpuTilesetTerrain {
     static boolean infrastructure(BoardScene scene, BoardScene.Tile tile) {
         return tile.wayExits() != 0 || BoardBridge.feature(tile) != null
               || tile.features().stream().anyMatch(BoardRail::route)
-              || !BoardRoad.nearby(scene, tile).isEmpty() || BoardSurface.columnRamps(scene, tile) != 0
+              || !BoardRoad.nearby(scene, tile).isEmpty() || BoardSurface.ramps(scene, tile) != 0
               || !BoardBridge.approaches(scene, tile).isEmpty();
     }
 
