@@ -63,6 +63,7 @@ final class GpuMapHud implements GpuBoardHud {
     /** The running print's card at the bottom centre, hidden while nothing prints. */
     private final Table printSlot = new Table();
     private final UiKit.Progress printProgress;
+    private GpuBoardPrint shownPrint;
     private final GpuLosPanel losPanel;
     private final UiPopover contextMenu;
     private long boardGeneration;
@@ -115,12 +116,16 @@ final class GpuMapHud implements GpuBoardHud {
         bottom.bottom().right();
         stage.addActor(bottom);
         printProgress = ui.progress(Messages.getString("GpuBoard.print.preparing"));
+        UiButton cancelPrint = ui.button("hud-mini", null, UiKit.text("Cancel"), null);
+        cancelPrint.setName("map-print-cancel");
+        onChange(cancelPrint, () -> { if (shownPrint != null) { shownPrint.cancel(); } });
         Table printCard = ui.panel();
+        printCard.setTouchable(Touchable.enabled);
         printSlot.setName("map-print-progress");
-        printCard.add(ui.header(Messages.getString("CommonMenuBar.PrintMenu"), null)).growX().row();
+        printCard.add(ui.header(Messages.getString("CommonMenuBar.PrintMenu"), null, cancelPrint)).growX().row();
         printCard.add(printProgress).growX().pad(0, 14, 14, 14);
         printSlot.setFillParent(true);
-        printSlot.setTouchable(Touchable.disabled);
+        printSlot.setTouchable(Touchable.childrenOnly);
         printSlot.bottom().add(printCard).width(CARD_WIDTH);
         printSlot.setVisible(false);
         stage.addActor(printSlot);
@@ -234,11 +239,12 @@ final class GpuMapHud implements GpuBoardHud {
 
     boolean prepare() { return editor == null || editor.prepare(scene); }
 
-    /** Shows the running print's step and share done; {@code null} hides the card. */
-    void print(GpuBoardPrint.Progress progress) {
-        printSlot.setVisible(progress != null);
-        if (progress == null) { return; }
-        printProgress.caption(progress.step()).set(progress.done());
+    /** Shows the running print's step and share done, and Cancel for it; {@code null} hides the card. */
+    void print(GpuBoardPrint print) {
+        shownPrint = print;
+        printSlot.setVisible(print != null);
+        if (print == null) { return; }
+        printProgress.caption(print.progress().step()).set(print.progress().done());
         // Centred in the board area the editor's panels leave free, above its corner panels, as Fit board frames it.
         float left = framingLeft() / scale;
         printSlot.pad(0, left, framingBottom() / scale + metrics.gap(), metrics.width() - left - framingWidth() / scale);

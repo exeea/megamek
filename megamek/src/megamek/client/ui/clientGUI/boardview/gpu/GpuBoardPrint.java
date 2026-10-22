@@ -68,7 +68,7 @@ final class GpuBoardPrint implements Disposable {
     private int x, y, tiles;
     private Progress progress = new Progress(Messages.getString("GpuBoard.print.preparing"), 0);
     private float zoomX, zoomY;
-    private boolean finished;
+    private boolean finished, cancelled;
 
     GpuBoardPrint(Request request, GpuTerrain lender, BitmapFont font, BitmapFont outline,
           BoardAtmosphere.Settings conditions, GpuAtmosphere.Options lightingOptions) {
@@ -94,6 +94,10 @@ final class GpuBoardPrint implements Disposable {
      */
     boolean update() {
         if (finished) { return true; }
+        if (cancelled) {
+            dispose();
+            return true;
+        }
         try {
             if (terrain == null) { initialize(); }
             terrain.refine(camera.camera);
@@ -266,6 +270,9 @@ final class GpuBoardPrint implements Disposable {
 
     /** The running step and its share done, for the view's progress bar. */
     Progress progress() { return progress; }
+
+    /** Stops the print at its next update: its unfinished file is deleted and the request fails as cancelled. */
+    void cancel() { cancelled = true; }
 
     private static byte paper(byte channel, int alpha) {
         return (byte) (((channel & 0xFF) * alpha + 255 * (255 - alpha) + 127) / 255);

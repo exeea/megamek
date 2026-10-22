@@ -432,7 +432,10 @@ final class GpuMapSource implements BoardSource {
             Path target = choosePrintFile(owner, near == null ? new File(".") : near.toFile().getParentFile(),
                   near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString()), "-3d");
             if (target == null || closed) { return; }
-            requestPrint(target, () -> { }, this::printFailed);
+            // The print card's Cancel ends a print without an error to report.
+            requestPrint(target, () -> { }, failure -> {
+                if (!(failure instanceof java.util.concurrent.CancellationException)) { printFailed(failure); }
+            });
         } catch (RuntimeException failure) { printFailed(failure); }
         finally { choosingPrint = false; refresh(); }
     }

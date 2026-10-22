@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
@@ -69,6 +70,7 @@ class GpuBoardPrintSmokeTest {
                         for (boolean editor : List.of(false, true)) { checkPrint(editor, BoardGraphics.ENHANCED); }
                         checkPrint(false, BoardGraphics.CLASSIC);
                         for (var graphics : BoardGraphics.values()) { checkSpacePrint(graphics); }
+                        checkCancel();
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
@@ -238,6 +240,54 @@ class GpuBoardPrintSmokeTest {
             assertTrue(stars > 0, "The space sky has its stars");
             assertTrue(repeated < stars / 2, "The sky spans the whole print instead of repeating in each tile: "
                   + repeated + " of " + stars + " star pixels repeat");
+        } finally {
+            view.dispose();
+            SwingUtilities.invokeAndWait(source::close);
+        }
+    }
+
+    /** The print card's Cancel ends a running print: no file stays, the card goes, and Print is offered again. */
+    private static void checkCancel() throws Exception {
+        AtomicReference<GpuMapSource> captured = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            GUIPreferences.getInstance().setBoardGraphics(BoardGraphics.ENHANCED);
+            Game game = new Game();
+            game.setBoard(Board.createEmptyBoard(12, 9));
+            captured.set(new GpuMapSource(game, null, null));
+        });
+        GpuMapSource source = captured.get();
+        GpuBattleView view = new GpuBattleView(source);
+        File target = new File(reviewDirectory(), "board-print-cancelled.jpg");
+        try {
+            view.create();
+            GpuBoardTestUi.present(view);
+            java.nio.file.Files.deleteIfExists(target.toPath());
+            AtomicBoolean printed = new AtomicBoolean();
+            AtomicReference<Exception> failed = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> source.requestPrint(target.toPath(), () -> printed.set(true), failed::set));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
+            while (!(field(view, "boardPrint") instanceof GpuBoardPrint print)
+                  || !print.progress().step().equals(Messages.getString("GpuBoard.print.rendering"))) {
+                assertTrue(System.nanoTime() < deadline, "The print reaches its rendering");
+                view.render();
+            }
+            assertTrue(target.exists(), "The print writes its file as it renders");
+            GpuBoardTestUi.click("map-print-cancel");
+            view.render();
+            assertNull(field(view, "boardPrint"), "Cancel stops the print at its next frame");
+            assertFalse(GpuBoardTestUi.stage().getRoot().findActor("map-print-progress").isVisible(),
+                  "The progress card leaves with the cancelled print");
+            SwingUtilities.invokeAndWait(() -> { });
+            assertTrue(failed.get() instanceof java.util.concurrent.CancellationException, "The print ends as cancelled");
+            assertFalse(printed.get());
+            // The encoder thread closes the file after any band it still encodes, then deletes it.
+            long removal = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (target.exists()) {
+                assertTrue(System.nanoTime() < removal, "A cancelled print leaves no file");
+                Thread.sleep(10);
+            }
+            assertTrue(source.takeFrame().globalCommands().stream()
+                  .anyMatch(command -> command.id().equals("fileBoardPrint") && command.enabled()), "Print is offered again");
         } finally {
             view.dispose();
             SwingUtilities.invokeAndWait(source::close);
