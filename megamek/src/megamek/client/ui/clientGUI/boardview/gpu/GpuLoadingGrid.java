@@ -15,7 +15,7 @@ import megamek.client.ui.gdx.UiTheme;
 /** One hex per terrain section. Borrows the loading skin's font and white texture; owns no GL resources. */
 final class GpuLoadingGrid extends Widget {
     static final Color WAITING = Color.valueOf("34464D");
-    static final Color LOADING = Color.valueOf("E5B768");
+    static final Color LOADING = UiTheme.AMBER;
     static final Color READY = UiTheme.MINT;
     private static final Color EMPTY = Color.valueOf("111E23");
     private static final Color INK = Color.valueOf("102923");

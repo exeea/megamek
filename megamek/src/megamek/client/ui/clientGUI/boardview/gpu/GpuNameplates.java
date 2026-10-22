@@ -98,8 +98,8 @@ final class GpuNameplates implements GpuHud.Component {
     private enum Look {
         FRIEND(UiTheme.MINT, UiTheme.alpha(UiTheme.MINT, .45f), FILL, false),
         FOCUS(SELECTED_TEXT, UiTheme.MINT, FILL, false),
-        ENEMY(UiTheme.CORAL, rgba(237, 152, 148, .5f), FILL, false),
-        CONTACT(UiTheme.BLIP, rgba(255, 174, 102, .8f), rgba(40, 28, 20, .85f), true);
+        ENEMY(UiTheme.CORAL, UiTheme.alpha(UiTheme.CORAL, .5f), FILL, false),
+        CONTACT(UiTheme.BLIP, UiTheme.alpha(UiTheme.BLIP, .8f), rgba(40, 28, 20, .85f), true);
 
         final Color text;
         final Color sub;
