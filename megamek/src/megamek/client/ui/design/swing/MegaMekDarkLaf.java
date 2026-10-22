@@ -16,4 +16,16 @@ public class MegaMekDarkLaf extends FlatDarkLaf {
     public String getName() {
         return NAME;
     }
+
+    @Override
+    public void initialize() {
+        super.initialize();
+        FocusVisibility.install();
+    }
+
+    @Override
+    public void uninitialize() {
+        FocusVisibility.uninstall();
+        super.uninitialize();
+    }
 }

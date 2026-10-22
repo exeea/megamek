@@ -73,7 +73,9 @@ public final class TokenLafDefaults {
         put("@buttonHoverArrowColor", color("text.primary"));
         put("@buttonPressedArrowColor", color("text.primary"));
 
-        // Shape and focus: arcs are diameters; the ring is drawn inside the edge so no control changes size
+        // Shape and focus: arcs are diameters. The focus ring is drawn inside the edge so no control changes size;
+        // small indicators (check box, radio, slider thumb) get it around them, a gap away. Status edges give way to
+        // the ring while focused: the field's icon or message keeps the status.
         String arc = number(tokens.radius().get("md") * 2);
         values.put("Component.arc", arc);
         values.put("Button.arc", arc);
@@ -90,11 +92,11 @@ public final class TokenLafDefaults {
         put("Component.focusedBorderColor", color("focus.ring"));
         put("Component.linkColor", color("accent.primary"));
         put("Component.error.borderColor", color("status.danger"));
-        put("Component.error.focusedBorderColor", color("status.danger"));
+        put("Component.error.focusedBorderColor", color("focus.ring"));
         put("Component.warning.borderColor", color("status.warning"));
-        put("Component.warning.focusedBorderColor", color("status.warning"));
+        put("Component.warning.focusedBorderColor", color("focus.ring"));
         put("Component.success.borderColor", color("status.success"));
-        put("Component.success.focusedBorderColor", color("status.success"));
+        put("Component.success.focusedBorderColor", color("focus.ring"));
 
         // Secondary (default) button: raised face, control edge; hover adds a wash, a strong edge and brighter text.
         // Every kind is disabled the same way: raised face, subtle edge, disabled text.
@@ -184,7 +186,16 @@ public final class TokenLafDefaults {
         put("ToggleButton.disabledSelectedBackground",
               over(ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2), raised));
 
-        // Check boxes and radio buttons: accent fill when selected
+        // Check boxes and radio buttons: accent fill when selected. Focus never changes the box, it adds a ring around
+        // it a gap away, so a checked box still looks checked.
+        float ringAround = tokens.size().get("focus.width") + tokens.size().get("focus.gap");
+        values.put("CheckBox.icon", TokenCheckBoxIcon.class.getName());
+        values.put("RadioButton.icon", TokenRadioButtonIcon.class.getName());
+        values.put("CheckBox.icon.focusWidth", number(ringAround));
+        // The ring sits around the icon, so the label moves out of its way
+        values.put("CheckBox.iconTextGap", number(4 + ringAround));
+        values.put("RadioButton.iconTextGap", number(4 + ringAround));
+        put("CheckBox.icon.focusColor", color("focus.ring"));
         put("CheckBox.icon.borderColor", color("border.control"));
         put("CheckBox.icon.background", input);
         put("CheckBox.icon.selectedBorderColor", accent);
@@ -192,7 +203,11 @@ public final class TokenLafDefaults {
         put("CheckBox.icon.checkmarkColor", color("text.onAccent"));
         put("CheckBox.icon.disabledBorderColor", color("border.subtle"));
         put("CheckBox.icon.disabledCheckmarkColor", color("text.disabled"));
-        put("CheckBox.icon.focusedBorderColor", color("focus.ring"));
+        put("CheckBox.icon.focusedBorderColor", color("border.control"));
+        put("CheckBox.icon.focusedBackground", input);
+        put("CheckBox.icon.focusedSelectedBorderColor", accent);
+        put("CheckBox.icon.focusedSelectedBackground", accent);
+        put("CheckBox.icon.focusedCheckmarkColor", color("text.onAccent"));
         put("CheckBox.icon.hoverBorderColor", color("border.strong"));
         put("CheckBox.icon.hoverBackground", over(hover, input));
         put("CheckBox.icon.pressedBackground", over(pressed, input));
@@ -214,7 +229,9 @@ public final class TokenLafDefaults {
         put("Panel.background", base);
         put("TabbedPane.background", base);
         put("TabbedPane.hoverColor", over(hover, base));
-        put("TabbedPane.focusColor", over(hover, base));
+        // Focus is a ring inside the selected tab (TokenTabbedPaneUI), not a tint that reads like hover
+        put("TabbedPane.focusColor", base);
+        values.put("TabbedPaneUI", TokenTabbedPaneUI.class.getName());
         put("TabbedPane.contentAreaColor", color("border.subtle"));
         put("TabbedPane.inactiveUnderlineColor", color("border.control"));
         put("TabbedPane.disabledUnderlineColor", color("border.subtle"));
@@ -239,6 +256,14 @@ public final class TokenLafDefaults {
         put("Slider.thumbColor", accent);
         put("Slider.disabledTrackColor", color("border.subtle"));
         put("Slider.disabledThumbColor", color("text.disabled"));
+        // A focused thumb gets the ring around it: FlatLaf fills a focusWidth disc behind the thumb, and the thumb's
+        // border turns the window color while focused to leave the gap. At rest the border matches the thumb.
+        values.put("Slider.focusWidth", number(tokens.size().get("focus.width")));
+        values.put("Slider.thumbBorderWidth", number(tokens.size().get("focus.gap")));
+        put("Slider.focusedColor", color("focus.ring"));
+        put("Slider.thumbBorderColor", accent);
+        put("Slider.focusedThumbBorderColor", base);
+        put("Slider.disabledThumbBorderColor", color("text.disabled"));
         put("ScrollBar.track", base);
         put("ScrollBar.thumb", color("border.control"));
         put("ScrollBar.hoverTrackColor", over(hover, base));

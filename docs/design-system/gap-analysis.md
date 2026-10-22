@@ -285,4 +285,6 @@ work for Swing, and item 11 is under investigation.
 - ~~Button spec~~: Primary, Secondary, Quiet, Danger, Toggle, Icon and Special in regular and compact sizes, with
   every state including focus, in Swing and libGDX; see [tokens.md](tokens.md#buttons). The Special reveal animation
   comes with the motion work.
-- Focus design for every control, then inputs, checkbox / radio / switch, tabs, segmented control and select.
+- ~~Focus~~: one keyboard-only ring inside the edge for every Swing control, and on libGDX buttons; see
+  [tokens.md](tokens.md#focus).
+- Inputs, checkbox / radio / switch, tabs, segmented control and select.

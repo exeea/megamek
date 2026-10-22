@@ -45,10 +45,7 @@ copy.
 - The button kinds are FlatLaf style classes, see [Buttons](#buttons); the window's default button looks like the
   primary one.
 - The default font is Roboto at the `body` size, and FlatLaf's semibold (the `h1` to `h3` headings) is Roboto Medium.
-- Keyboard focus is drawn inside the control edge (a 1-wide inner line plus the focus-colored border, 2 wide in total)
-  instead of 2 wide with a 2 offset outside it. A focus ring outside the edge would make every Swing control 4 pixels
-  larger and move every layout. On the primary button the inner line uses `text.onAccent`, so it shows against the
-  accent fill. The final focus design is the next control to settle.
+- Keyboard focus follows [Focus](#focus): a 2-wide ring inside the edge, shown only after keyboard use.
 
 ## Color roles
 
@@ -140,13 +137,40 @@ variable font. Both platforms therefore draw the same outlines from one source.
 | Control height | sm 28, md 36, lg 46 |
 | Icon | sm 16, md 20, lg 24 |
 | Border | 1 |
-| Focus ring | 2 wide, 2 offset, `focus.ring` |
+| Focus ring | 2 wide inside the edge; 1 gap around small indicators; `focus.ring` |
 | Corner ticks | 8 on controls, 13 on panels; 2 wide |
 | Opacity | tint.hover 0.16, tint.pressed 0.28 (a status color washed over a face) |
 | Motion | fast 120 ms, medium 200 ms, slow 320 ms; easing cubic-bezier(0.2, 0, 0, 1) |
 
 Regular frames use corner ticks. The framed button (ticks that grow into a full frame on hover) is a special
 variant for emphasis moments, not the default button.
+
+## Focus
+
+One focus look for every control, so keyboard users always find the same thing.
+
+- **Keyboard only.** The ring shows after a key press and hides again on a mouse press, like the web's
+  `:focus-visible`. Editable text always shows it, because the caret alone is easy to lose.
+- **Inside the edge.** The ring is `focus.width` (2) wide and drawn inside the control edge, so focus never changes a
+  control's size or moves a layout.
+- **Focus wins.** The ring replaces the edge, whatever the control's state. Meaning stays in the text, fill and icons:
+  a checked box stays checked, and error and warning fields carry a status icon as well as their colored edge.
+- **Primary buttons** use a `text.primary` outer line and a `text.onAccent` inner line, so the ring shows on the
+  accent face.
+- **Small indicators** (check box, radio, slider thumb) get the ring around them, `focus.gap` (1) away, so the
+  indicator keeps its look. Their label sits far enough away for the ring.
+- **Tabs** get the ring inside the selected tab. **Lists and tables** show it on their scroll pane edge.
+
+**Swing.** [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java) tracks keyboard
+use for the MegaMek themes; `FocusVisibility.shows(component)` tells custom painters whether to draw the ring.
+[`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java),
+[`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java) and
+[`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) draw the rings FlatLaf
+does not. The gallery's "Keyboard focus" section shows each control frozen in focus.
+
+**libGDX.** Buttons draw the ring now (see [Buttons](#buttons)); scene2d gives buttons keyboard focus only from the
+keyboard, so it is keyboard-only already. The other token controls get the ring as they are built. Keyboard
+navigation between libGDX controls comes later.
 
 ## Buttons
 
@@ -168,9 +192,8 @@ every state.
 - **Labels** are sentence case in Roboto Medium. Rest text is `text.secondary` and brightens to `text.primary` under
   the pointer, so the hover reads on every kind.
 - **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label.
-- **Focus** is drawn inside the edge so no button changes size: a 1-wide `focus.ring` border plus a 1-wide inner line.
-  On primary the border is `text.primary` and the inner line `text.onAccent`, so it shows on the accent face. The
-  final focus design across all controls is the next step.
+- **Focus** follows [Focus](#focus): a 1-wide `focus.ring` border plus a 1-wide inner line, inside the edge. On
+  primary the border is `text.primary` and the inner line `text.onAccent`, so it shows on the accent face.
 - **Selection** is always violet with an edge or glyph change, never a lighter face alone, so it does not depend on
   telling two greys apart.
 - The primary label keeps at least 4.5:1 against its hover and pressed faces in both modes (tested).
@@ -220,10 +243,11 @@ migrate)".
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
+| [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java), [`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java), [`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), [`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) | Swing keyboard focus |
 | [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button styles read the tokens. The Swing themes are
-selectable but not the default, and no view uses the new buttons yet. Next comes the focus design for every control,
-then inputs, choices and tabs, and a `UiTheme` rename pass so hud-v3 reads the same roles.
+selectable but not the default, and no view uses the new buttons yet. Next come inputs, choices and tabs, and a
+`UiTheme` rename pass so hud-v3 reads the same roles.

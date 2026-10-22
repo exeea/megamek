@@ -101,6 +101,16 @@ class TokenLafDefaultsTest {
         assertColor(defaults, "Button.default.foreground", "text.onAccent", mode);
         assertColor(defaults, "ProgressBar.foreground", "accent.primary", mode);
         assertColor(defaults, "Component.error.borderColor", "status.danger", mode);
+        // Focus wins: one ring for every state, while a focused checked box keeps its checked look
+        assertColor(defaults, "Component.error.focusedBorderColor", "focus.ring", mode);
+        assertColor(defaults, "Component.warning.focusedBorderColor", "focus.ring", mode);
+        assertColor(defaults, "CheckBox.icon.focusColor", "focus.ring", mode);
+        assertColor(defaults, "CheckBox.icon.focusedSelectedBackground", "accent.primary", mode);
+        assertColor(defaults, "CheckBox.icon.focusedBackground", "surface.input", mode);
+        assertColor(defaults, "Slider.focusedColor", "focus.ring", mode);
+        assertTrue(defaults.getIcon("CheckBox.icon") instanceof TokenCheckBoxIcon, "CheckBox.icon");
+        assertTrue(defaults.getIcon("RadioButton.icon") instanceof TokenRadioButtonIcon, "RadioButton.icon");
+        assertEquals(TokenTabbedPaneUI.class.getName(), defaults.getString("TabbedPaneUI"));
         int selection = ColorMath.over(tokens.color("selected.background", mode), tokens.color("surface.input", mode));
         assertEquals(new Color(selection), new Color(defaults.getColor("Table.selectionBackground").getRGB()));
         assertNotNull(defaults.get("[style]Button.primary"), "primary button style class");

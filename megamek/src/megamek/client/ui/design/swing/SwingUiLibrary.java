@@ -20,6 +20,7 @@ import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.font.TextAttribute;
+import java.awt.geom.RoundRectangle2D;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -355,14 +356,67 @@ public final class SwingUiLibrary extends JFrame {
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setAlignmentX(LEFT_ALIGNMENT);
         page.add(tableScroll);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.focus")));
+        page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
+        page.add(focusSamples());
         return page;
     }
 
     private JTextField field(String value, String outline, boolean enabled) {
         JTextField field = new JTextField(value, 14);
         field.putClientProperty(FlatClientProperties.OUTLINE, outline);
+        // Status shows as an icon as well as the edge, because the focus ring replaces the edge
+        if (FlatClientProperties.OUTLINE_ERROR.equals(outline)) {
+            field.putClientProperty(FlatClientProperties.TEXT_FIELD_TRAILING_ICON,
+                  FontHandler.symbolIcon(ICON_ERROR, scaleForGUI(16), color("status.danger")));
+        } else if (FlatClientProperties.OUTLINE_WARNING.equals(outline)) {
+            field.putClientProperty(FlatClientProperties.TEXT_FIELD_TRAILING_ICON,
+                  FontHandler.symbolIcon(ICON_WARNING, scaleForGUI(16), color("status.warning")));
+        }
         field.setEnabled(enabled);
         return field;
+    }
+
+    /** Controls frozen in keyboard focus, which the live samples above only show after Tab. */
+    private JComponent focusSamples() {
+        JPanel samples = column(color("surface.base"));
+        JPanel controls = row(color("surface.base"));
+        samples.add(controls);
+        controls.add(focused(field(Messages.getString("UiLibrary.controls.value"), null, true)));
+        controls.add(focused(field(Messages.getString("UiLibrary.controls.error"), FlatClientProperties.OUTLINE_ERROR,
+              true)));
+        controls.add(focused(new JComboBox<>(new String[] { Messages.getString("UiLibrary.controls.optionA") })));
+        JSpinner spinner = new JSpinner(new SpinnerNumberModel(4, 0, 12, 1));
+        if (spinner.getEditor() instanceof JSpinner.DefaultEditor editor) {
+            focused(editor.getTextField());
+        }
+        controls.add(focused(spinner));
+        JPanel indicators = row(color("surface.base"));
+        samples.add(indicators);
+        JCheckBox checked = new JCheckBox(Messages.getString("UiLibrary.controls.checked"));
+        checked.setModel(new FrozenModel(false, false, true));
+        indicators.add(focused(checked));
+        indicators.add(focused(new JCheckBox(Messages.getString("UiLibrary.controls.unchecked"))));
+        JRadioButton radio = new JRadioButton(Messages.getString("UiLibrary.controls.optionA"));
+        radio.setModel(new FrozenModel(false, false, true));
+        indicators.add(focused(radio));
+        indicators.add(focused(new JSlider(0, 100, 60)));
+        JTabbedPane tabs = new JTabbedPane();
+        for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB", "UiLibrary.controls.tabC")) {
+            tabs.addTab(Messages.getString(key), Box.createVerticalStrut(scaleForGUI(4)));
+        }
+        tabs.setAlignmentX(LEFT_ALIGNMENT);
+        samples.add(focused(tabs));
+        return samples;
+    }
+
+    /** Freezes {@code component} in the keyboard-focused look; it can't take real focus. */
+    private static <T extends JComponent> T focused(T component) {
+        component.setFocusable(false);
+        component.putClientProperty(FlatClientProperties.COMPONENT_FOCUS_OWNER,
+              (Predicate<JComponent>) c -> true);
+        return component;
     }
 
     /** Every button kind at {@code size} in every state, the transient states frozen through the button model. */
@@ -738,16 +792,13 @@ public final class SwingUiLibrary extends JFrame {
                         g.drawRoundRect(0, 0, width, height, Math.round(2 * radius), Math.round(2 * radius));
                     }
                     case FOCUS -> {
-                        g.setColor(color("border.control"));
-                        g.drawRoundRect(0, 0, width, height, Math.round(2 * radius), Math.round(2 * radius));
+                        // The ring replaces the edge, drawn inside it
                         float ring = scaleForGUI(tokens.size().get("focus.width"));
-                        float offset = scaleForGUI(tokens.size().get("focus.offset"));
                         g.setColor(color("focus.ring"));
                         g.setStroke(new BasicStroke(ring));
-                        float grow = offset + ring / 2;
-                        g.drawRoundRect(Math.round(-grow), Math.round(-grow), Math.round(width + 2 * grow),
-                              Math.round(height + 2 * grow), Math.round(2 * (radius + grow)),
-                              Math.round(2 * (radius + grow)));
+                        float half = ring / 2;
+                        g.draw(new RoundRectangle2D.Float(half, half, width - ring + 1, height - ring + 1,
+                              2 * radius - half, 2 * radius - half));
                     }
                     case TICKS -> ticks(g, width, height, color("border.control"));
                     case FRAME -> {
