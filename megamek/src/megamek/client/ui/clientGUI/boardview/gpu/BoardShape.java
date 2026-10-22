@@ -49,8 +49,8 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
         return shapes(data, false);
     }
 
-    /** Modular structures use their geometry bounds as origins, even when authored below Z=0. */
-    static Map<String, BoardShape> shapes(ModelData data, boolean centered) {
+    /** Ground modular structures vertically, even below Z=0, while preserving their authored XY coordinates. */
+    static Map<String, BoardShape> shapes(ModelData data, boolean modular) {
         var mesh = data.meshes.first();
         Map<String, short[]> indices = new HashMap<>();
         for (var part : mesh.parts) { indices.put(part.id, part.indices); }
@@ -86,7 +86,7 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
                     polygons.add(new Polygon(points, normal, color, part.materialId));
                 }
             }
-            if (centered && !polygons.isEmpty()) {
+            if (modular && !polygons.isEmpty()) {
                 BoundingBox bounds = new BoundingBox().inf();
                 corners.values().forEach(bounds::ext);
                 Vector3 offset = GpuBuilding.moduleOffset(bounds);

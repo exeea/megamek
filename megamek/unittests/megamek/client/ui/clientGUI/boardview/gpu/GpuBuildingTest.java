@@ -106,7 +106,7 @@ class GpuBuildingTest {
     }
 
     @Test
-    void shippedGlbOpensAsStackedBuildingsWithMatchingLodVariants() {
+    void shippedGlbHasSuperimposedLodsWithStackedModulesAndMatchingVariants() {
         var lods = RigidGlb.loadLods(file()).stream().distinct().toList();
         assertEquals(2, lods.size());
         for (int lod = 0; lod < lods.size(); lod++) {
@@ -119,7 +119,8 @@ class GpuBuildingTest {
                       .findFirst().orElseThrow().getKey();
                 assertEquals(Map.of("base0", 0f, "floor0", 18f, "floor1", 36f, "roof0", 54f).get(role),
                       node.translation.z, .001f);
-                assertEquals(current * 110, node.translation.x, .001f, "Viewer LODs stand beside one another");
+                assertEquals(0, node.translation.x, .001f, "Both LODs share the authored XY origin");
+                assertEquals(0, node.translation.y, .001f, "Both LODs share the authored XY origin");
             });
         }
     }

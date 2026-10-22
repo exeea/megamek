@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuModularBuildingSmokeTest {
     @Test
-    void assembledBuildingsSurviveOriginOffsetsEditsAndCameraChanges() {
+    void assembledBuildingsPreserveXyOriginsThroughEditsAndCameraChanges() {
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 960);
@@ -60,9 +60,10 @@ class GpuModularBuildingSmokeTest {
 
     private static void checkKit() {
         var textures = new HashMap<String, Texture>();
+        var authoredBounds = new java.util.ArrayList<Map<String, BoundingBox>>();
         var file = GpuBuildingTest.file();
         GpuBuilding kit = new GpuBuilding(file, file.parent().file().toPath(), data -> {
-            // Also move vertices, so deriving placement cannot accidentally depend on object origins alone.
+            // Preserve both baked and node XY offsets, including the modules' asymmetric details.
             for (var mesh : data.meshes) {
                 for (int i = 0; i < mesh.vertices.length; i += RigidGlb.STRIDE) {
                     mesh.vertices[i] += 71;
@@ -71,7 +72,13 @@ class GpuModularBuildingSmokeTest {
                 }
             }
             for (var node : data.nodes) { node.translation.add(900, -400, 257); }
-            return ModelTextures.create(data, textures, (path, color) -> { throw new AssertionError("Expected embedded textures"); });
+            Model model = ModelTextures.create(data, textures,
+                  (path, color) -> { throw new AssertionError("Expected embedded textures"); });
+            Map<String, BoundingBox> bounds = new HashMap<>();
+            GpuBuilding.parts(data).forEach((role, name) ->
+                  bounds.put(role, model.getNode(name).calculateBoundingBox(new BoundingBox())));
+            authoredBounds.add(bounds);
+            return model;
         });
         try {
             var five = kit.assemble(5, 7);
@@ -91,10 +98,14 @@ class GpuModularBuildingSmokeTest {
                     assertSame(assembly.model(lod), instance.model, "No expanded model per combination");
                     assertEquals(count + 1, instance.nodes.size);
                     for (int level = 0; level <= count; level++) {
-                        var bounds = instance.nodes.get(level).calculateBoundingBox(new BoundingBox());
-                        assertEquals(level * 18, bounds.min.z, .001f, "Saved display offsets must be discarded");
-                        assertEquals(0, bounds.getCenter(new Vector3()).x, .001f);
-                        assertEquals(0, bounds.getCenter(new Vector3()).y, .001f);
+                        var node = instance.nodes.get(level);
+                        var bounds = node.calculateBoundingBox(new BoundingBox());
+                        var authored = authoredBounds.get(lod).get(node.id.substring(0, node.id.indexOf("-at-")));
+                        assertEquals(level * 18, bounds.min.z, .001f, "Saved vertical offsets must be discarded");
+                        assertEquals(authored.min.x, bounds.min.x, .001f);
+                        assertEquals(authored.max.x, bounds.max.x, .001f);
+                        assertEquals(authored.min.y, bounds.min.y, .001f);
+                        assertEquals(authored.max.y, bounds.max.y, .001f);
                         if (level < count) { assertEquals(18, bounds.getDepth(), .001f); }
                     }
                     for (var node : instance.nodes) {
@@ -108,12 +119,14 @@ class GpuModularBuildingSmokeTest {
                 var struts = new ModelInstance(assembly.interior(), "struts").calculateBoundingBox(new BoundingBox());
                 assertEquals(count * 18, struts.getDepth(), .001f);
                 var triangles = GpuTerrain.triangles(assembly.interior());
-                assertFalse(Intersector.intersectRayTriangles(new Ray(new Vector3(1, -33, 250), new Vector3(0, 0, -1)),
+                assertFalse(Intersector.intersectRayTriangles(new Ray(new Vector3(972, -456, 250), new Vector3(0, 0, -1)),
                       triangles, new Vector3()), "The front notch remains empty at every floor");
-                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(-12, 0, 250), new Vector3(0, 0, -1)),
+                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(959, -423, 250), new Vector3(0, 0, -1)),
                       triangles, new Vector3()));
                 Vector3 hit = new Vector3();
-                assertTrue(assembly.hit(new Ray(new Vector3(0, 0, 250), new Vector3(0, 0, -1)), hit));
+                assertFalse(assembly.hit(new Ray(new Vector3(0, 0, 250), new Vector3(0, 0, -1)), hit),
+                      "Picking must not recenter the building");
+                assertTrue(assembly.hit(new Ray(new Vector3(971, -423, 250), new Vector3(0, 0, -1)), hit));
                 assertEquals(count * 18 + .65f, hit.z, .002f, "LOD0 roof picking follows the translated stack");
             }
             var mesh = five.model(0).meshes.first();
