@@ -17,14 +17,15 @@ import com.badlogic.gdx.utils.JsonValue;
  * <li>A <b>loose</b> material repeats across the ground in world space, over many hexes. Its texel density is fixed:
  * {@code pixels} is the texture width its repeat was authored for, so a wider texture covers proportionally more ground
  * before it repeats (twice the width, twice the repeat), at unchanged detail. {@code metres}, given for sculpted
- * terrain, is the ground one repeat covers at that width; other loose materials keep their renderer's own repeat.</li>
+ * terrain and roads, is the ground one repeat covers at that width; other loose materials, and roads without it, keep
+ * their renderer's own repeat.</li>
  * <li>A <b>constrained</b> material is fitted to a fixed footprint: a model's UVs, an atlas cell, a decal's size or the
  * hex artwork's density. A larger texture adds detail there and never changes what it covers.</li>
  * </ul>
  * Read once per asset owner; asset reload creates a fresh owner.
  */
 final class GpuMaterialCatalog {
-    /** {@code metres} is NaN where the renderer owns the repeat (roads, ice, magma, industrial plants). */
+    /** {@code metres} is NaN where the renderer owns the repeat (ice, magma, industrial plants; roads without it). */
     record Loose(int pixels, float metres) { }
 
     private final File file;

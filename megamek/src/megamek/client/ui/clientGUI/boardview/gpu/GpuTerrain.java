@@ -4068,7 +4068,7 @@ final class GpuTerrain implements Disposable {
             Material tunnelFloor = instance.getMaterial("tunnel-floor");
             String road = GpuRoads.texture(tunnel.kind());
             tunnelFloor.set(roadMaterial(road.substring("roads/".length()), false));
-            tunnelFloor.set(new BridgeDeck(assets.coverage(road)));
+            tunnelFloor.set(new BridgeDeck(assets.roadCoverage(road)));
             instance.transform.set(tunnel.transform());
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
             // The road's portal stays in the Tactical View, as the road does.
@@ -5372,7 +5372,7 @@ final class GpuTerrain implements Disposable {
             String road = GpuRoads.material(tile, true, GpuRoads.texture(bridge.kind()));
             deck = roadMaterial(road, false);
             deck.set(GpuIceShader.road(deck, scene, tile));
-            deck.set(new BridgeDeck(assets.coverage("roads/" + road)));
+            deck.set(new BridgeDeck(assets.roadCoverage("roads/" + road)));
         }
         Material steel = bridge.truss() ? new Material(ColorAttribute.createDiffuse(Color.WHITE), new GpuLinearColors()) : null;
         bridgeFooting(solid, shape, deck, concrete, steel);
@@ -5476,7 +5476,8 @@ final class GpuTerrain implements Disposable {
             material = GpuIceShader.road(material, scene, tile);
             float vertexCoat = coat;
             // The coat's own texture sets its repeat: a road's material, or the sculpted material it paints.
-            float coverage = assets.coverage(road != null ? "roads/" + road : "terrain/surfaces/" + patch.texture());
+            float coverage = road != null ? assets.roadCoverage("roads/" + road)
+                  : assets.coverage("terrain/surfaces/" + patch.texture());
             overlay.addTriangles(material, meshes -> GpuRoads.write(meshes, preparedPatch.triangles(), patch, mask, surface,
                   preparedPatch.flat(), vertexCoat, coverage));
         }

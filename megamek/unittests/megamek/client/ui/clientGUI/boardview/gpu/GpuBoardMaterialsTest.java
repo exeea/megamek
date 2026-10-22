@@ -218,6 +218,19 @@ class GpuBoardMaterialsTest {
     }
 
     @Test
+    void roadsCoverTheirCataloguedMetres() throws Exception {
+        BoardMaterialFiles.plain(textures, "roads/test", image(8, 8, 1));
+        // Without metres, a road texture at its catalogued width spans the road repeat (6 m).
+        BoardMaterialFiles.loose(textures, "roads/test", 8, Float.NaN);
+        assertEquals(1, new GpuAssets().roadCoverage("roads/test"));
+        // Twelve metres at its width: two road repeats. Catalogued at half its width, it covers twice that.
+        BoardMaterialFiles.loose(textures, "roads/test", 8, 12);
+        assertEquals(2, new GpuAssets().roadCoverage("roads/test"));
+        BoardMaterialFiles.loose(textures, "roads/test", 4, 12);
+        assertEquals(4, new GpuAssets().roadCoverage("roads/test"));
+    }
+
+    @Test
     void incompleteMaterialsReportTheMissingFileBeforeAnyUpload() throws Exception {
         missing("absent.tres", () -> new GpuAssets().sculptTile("absent"));
         for (String file : List.of("test_normal.png", "test_heightmap.png", "test.tres")) {
@@ -500,7 +513,9 @@ class GpuBoardMaterialsTest {
                     int[] size = GpuMaterialMaps.size(material.albedo());
                     // Any width is valid (a wider export covers more ground); the maps must be square.
                     assertTrue(catalog.coverage(name, size[0], size[1]) > 0, name);
-                    assertEquals(GpuMaterialMaps.sculpted(name), !Float.isNaN(catalog.loose(name).metres()), name);
+                    // Sculpted surfaces and roads give the ground they cover; the other renderers own their repeat.
+                    assertEquals(GpuMaterialMaps.sculpted(name) || name.startsWith("roads/"),
+                          !Float.isNaN(catalog.loose(name).metres()), name);
                 }
             }
         }

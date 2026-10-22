@@ -20,8 +20,9 @@ uniform sampler2D u_roadMask;
 flat in vec4 v_roadMaskRegion;
 in vec2 v_roadMaskUV;
 #endif
-#ifdef bridgeDeckFlag
+// A road material's repeat at the width it is catalogued for (BoardRelief.detailMetres(1)).
 uniform float u_worldMetre;
+#ifdef bridgeDeckFlag
 uniform float u_bridgeDeckCoverage; // GpuAssets.coverage of the deck's road texture
 #endif
 #ifdef roadMapsFlag
@@ -182,6 +183,9 @@ void main() {
     uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / (u_worldMetre * u_bridgeDeckCoverage);
 #endif
     mat2 roadGradient = mat2(dFdx(uv), dFdy(uv));
+    // Use, mud and loose clumps are anchored to the ground: they keep their size in metres whatever ground a material's
+    // texture covers. The material's own maps, magnified or not, take uv, so its grain keeps its size too.
+    vec2 groundUV = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
     RoadMaps m = roadMaps();
     // The material's own reads take its parallax; world-anchored patterns and its other grain scales do not.
     vec2 materialUV = uv;
@@ -210,12 +214,12 @@ void main() {
     // Reuse the shared, stable noise field. These masks describe use and loose material, not road width.
     float wearPatches = 0.0, loosePatches = 0.0, compaction = 0.0;
     if (m.mapped && abs(m.transition) > .5) {
-        wearPatches = texture(u_rainNoise, uv / 18.0).g;
-        loosePatches = texture(u_rainNoise, uv / 5.0 + .37).b;
+        wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
+        loosePatches = texture(u_rainNoise, groundUV / 5.0 + .37).b;
         albedo *= mix(.95, 1.05, wearPatches);
         if (wheelWear) {
             vec2 heading = normalize((roadColor.rg * 255.0 - 128.0) / 127.0);
-            vec2 scuff = vec2(dot(uv, heading), dot(uv, vec2(-heading.y, heading.x)))
+            vec2 scuff = vec2(dot(groundUV, heading), dot(groundUV, vec2(-heading.y, heading.x)))
                   * vec2(1.0 / 36.0, 1.0 / 3.0);
             // Averaging both directions gives neighbouring hexes identical wear even when their paths run
             // opposite ways. The pair's geometry fixes axle spacing; this only varies compaction within it.
@@ -264,8 +268,8 @@ void main() {
     float soilBasins = 0.0, soilMud = 0.0;
     if (m.soil) {
         // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
-        soilBasins = texture(u_rainNoise, uv / 22.0).r * .7
-              + texture(u_rainNoise, uv / 7.0 + .37).g * .3;
+        soilBasins = texture(u_rainNoise, groundUV / 22.0).r * .7
+              + texture(u_rainNoise, groundUV / 7.0 + .37).g * .3;
         float mud = wet * smoothstep(.24, .68, soilBasins);
         absorption = max(absorption, .7 * mud);
         properties.g = mix(properties.g, .55, mud);
@@ -314,7 +318,7 @@ void main() {
     } else if (m.mapped && abs(m.transition) > .5) {
         // The wide loose margin has no opaque shoulder underneath it. Clumps give way to isolated grains
         // and exposed ground; the compacted core remains continuous and at the authored road width.
-        float clumps = texture(u_rainNoise, uv / 32.0 + .19).r;
+        float clumps = texture(u_rainNoise, groundUV / 32.0 + .19).r;
         float threshold = .05 + .8 * clumps + .12 * loosePatches;
         float broken = smoothstep(threshold - .12, threshold + .12, roadColor.a + (grain - .5) * .32);
         alpha = mix(roadColor.a, broken, 4.0 * roadColor.a * (1.0 - roadColor.a));

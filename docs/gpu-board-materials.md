@@ -220,8 +220,8 @@ keep their roughness in their own normal maps, which their shaders read.
 
 - **Loose** materials repeat across the board in world space: terrain surfaces, roads,
   lava, ice and industrial plating. Each entry gives the width (`pixels`) of the texture
-  it was catalogued at. Terrain surfaces also give the metres one repeat spans at that
-  width (`metres`); for the others, the renderer fixes the repeat.
+  it was catalogued at. Terrain surfaces and roads also give the metres one repeat spans at
+  that width (`metres`); for the others, the renderer fixes the repeat.
 - **Constrained** materials fit a footprint: facades, classic tiles, scars, scenery and
   plant cutouts. Their size never changes what they cover.
 
@@ -235,11 +235,25 @@ smaller materials are resampled up to it. To change a density instead, change
 `metres` (or `pixels`) in the catalogue. *Reload assets* in the Tuning panel re-reads the
 catalogue with the maps and rebuilds the board, so the new density shows at once.
 
+| Value | What it is | What changing it does |
+| --- | --- | --- |
+| `pixels` | The texture width the entry describes; with `metres`, the texel density (`metres` ÷ `pixels` per texel). | No pattern size by itself: a texture exported wider covers proportionally more ground at the same density, narrower less. |
+| `metres` | The ground one repeat covers at `pixels` wide (terrain surfaces and roads). | Stretches or shrinks the material on the ground: its features grow or shrink with its repeat. |
+
+A texture covers `metres` × (its width ÷ `pixels`) before it repeats (`GpuAssets.sculptTile`,
+and `GpuAssets.roadCoverage` in road repeats of 6 m, `BoardRelief.detailMetres(1)`). Roads are
+1024 pixels over 12 m, so their stones and patches do not line up into a lattice along the road;
+a road without `metres` would span one road repeat at its catalogued width. The road shader's own
+patterns (wear, mud, loose clumps) are anchored to the ground in metres (`u_worldMetre`), whatever
+ground a road texture covers. A material's Material Maker project must agree with its catalogue:
+its *RepeatMetres* is the ground its exported tile covers, or its normals are too steep or too
+flat (mm-data's `tools/materials/README.md`, which also says how to edit these values safely).
+
 ### Loose (47)
 
 | Material | Catalogued pixels | Metres |
 | --- | --- | --- |
-| `roads/asphalt`, `roads/dirt`, `roads/gravel` | 1024 | – |
+| `roads/asphalt`, `roads/dirt`, `roads/gravel` | 1024 | 12 |
 | `structures/industrial/paint`, `structures/industrial/steel` | 1024 | – |
 | `terrain/ice/sheet` | 1024 | – |
 | `terrain/lava/crust`, `terrain/lava/lava` | 1024 | – |

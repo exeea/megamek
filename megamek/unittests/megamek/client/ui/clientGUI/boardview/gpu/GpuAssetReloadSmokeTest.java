@@ -84,7 +84,7 @@ class GpuAssetReloadSmokeTest {
                 GpuAssets.LavaEmission originalEmission;
                 TextureArray originalRoughness;
                 List<String> sculptLayers;
-                float sculptTile;
+                float sculptTile, asphaltCoverage;
                 GpuUnitModels.ModularAsset originalUnit;
                 ModelInstance originalInstance;
                 float treeHeight, rockHeight, scatterHeight, otherScatterHeight, unitHeight;
@@ -125,6 +125,7 @@ class GpuAssetReloadSmokeTest {
                             originalEmission = assets().lavaEmission();
                             originalRoughness = assets().finishArrays(surfaces(sculptLayers), sculptLayers.size()).maps();
                             sculptTile = assets().sculptTile("grass");
+                            asphaltCoverage = assets().coverage("roads/asphalt");
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
                             scatterHeight = BoardScatter.bush(BoardScene.Surface.SAND, 0).height();
@@ -182,9 +183,11 @@ class GpuAssetReloadSmokeTest {
                             var loose = (ObjectNode) entries.get("loose");
                             var grassEntry = (ObjectNode) loose.get("terrain/surfaces/grass");
                             grassEntry.put("metres", grassEntry.get("metres").floatValue() * 2);
-                            ((ObjectNode) loose.get("roads/asphalt")).put("pixels", 512);
+                            var asphaltEntry = (ObjectNode) loose.get("roads/asphalt");
+                            asphaltEntry.put("pixels", asphaltEntry.get("pixels").intValue() / 2);
                             catalogMapper.writerWithDefaultPrettyPrinter().writeValue(catalog.toFile(), entries);
-                            assertEquals(1, assets().coverage("roads/asphalt"), "Edits wait for the actual Reload action");
+                            assertEquals(asphaltCoverage, assets().coverage("roads/asphalt"),
+                                  "Edits wait for the actual Reload action");
                             assertSame(originalEmission, assets().lavaEmission(), "Edits wait for the actual Reload action");
                             scaleMesh(directory.resolve("models/board/tree.glb"));
                             scaleMesh(directory.resolve("models/board/rocks/block-0.glb"));
@@ -216,7 +219,7 @@ class GpuAssetReloadSmokeTest {
                             assertNotSame(originalSculpt, sculpt);
                             assertEquals(sculptTile * 2 * 1.25f, assets().sculptTile("grass"), .0001f,
                                   "Reload must re-read the catalogue and the material's width as well as its maps");
-                            assertEquals(2, assets().coverage("roads/asphalt"),
+                            assertEquals(asphaltCoverage * 2, assets().coverage("roads/asphalt"),
                                   "A catalogue edit reaches the road's repeat after Reload assets");
                             int grassLayer = sculptLayers.indexOf("grass") * 2;
                             assertTrue(grassLayer >= 0);

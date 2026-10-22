@@ -108,6 +108,19 @@ final class GpuAssets implements Disposable {
         });
     }
 
+    /** The road repeat in metres: {@link BoardRelief#detailMetres}(1), one hex width (30 m) over 5. */
+    private static final float ROAD_REPEAT_METRES = 30f / 5;
+
+    /**
+     * How many road repeats one repeat of a road material covers: its catalogued {@code metres} in road repeats, or
+     * one without them, widened with its texture ({@link #coverage}). Its road, bridge deck and tunnel floor multiply
+     * the road repeat by this.
+     */
+    float roadCoverage(String name) {
+        float metres = catalog().loose(name).metres();
+        return coverage(name) * (Float.isNaN(metres) ? 1 : metres / ROAD_REPEAT_METRES);
+    }
+
     /** One packed layout of a board material, made when its texture is uploaded. */
     private Supplier<Pixmap> packed(String name, GpuMaterialMaps.Layout layout) {
         GodotMaterial material = definition(name);
