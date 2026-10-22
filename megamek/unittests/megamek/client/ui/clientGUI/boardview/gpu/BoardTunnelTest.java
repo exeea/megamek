@@ -40,7 +40,7 @@ class BoardTunnelTest {
                 for (short index : part.indices) {
                     int i = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
                     float x = mesh.vertices[i], y = mesh.vertices[i + 1], z = mesh.vertices[i + 2];
-                    assertEquals(BoardRoad.Kind.PAVED.halfWidth, Math.abs(x), .001f, "The road must not narrow inside");
+                    assertEquals(BoardTunnel.ASSET_ROAD_HALF, Math.abs(x), .001f, "The authored floor is stretched with the route");
                     assertEquals(y < 3 ? -.02f : 0, z, .001f, "Only the hidden underlap is recessed below the approach");
                     if (y <= 6) { assertEquals(1, mesh.vertices[i + 6], .001f, "No dark threshold at the mouth"); }
                     start = Math.min(start, y);
@@ -55,6 +55,22 @@ class BoardTunnelTest {
         boolean wings = false;
         for (var material : model.materials) { wings |= material.id.equals("tunnel-wings"); }
         assertEquals(asset.equals(BoardTunnel.ASSET), wings);
+    }
+
+    @Test
+    void centeredAndBesideRailsHaveAFullCarrierInsideThePortal() throws Exception {
+        var board = RoadJunctionFixture.create();
+        var scene = GpuLegacyImportSmokeTest.scene(board);
+        for (var sample : RoadJunctionFixture.widthCases()) {
+            if (!sample.id().startsWith("tunnel-")) { continue; }
+            var entrance = BoardTunnel.entrances(scene, scene.tile(sample.at())).getFirst();
+            Vector3 left = new Vector3(-BoardTunnel.ASSET_ROAD_HALF, 4, 0).mul(entrance.transform());
+            Vector3 right = new Vector3(BoardTunnel.ASSET_ROAD_HALF, 4, 0).mul(entrance.transform());
+            assertEquals(2 * BoardRoad.CORRIDOR_HALF * BoardGeometry.hexScale(), left.dst(right), .001f);
+            assertEquals(BoardTunnel.SPRING + BoardTunnel.HALF_WIDTH,
+                  (new Vector3(0, 0, BoardTunnel.SPRING + BoardTunnel.HALF_WIDTH).mul(entrance.transform()).z
+                        - entrance.origin().z) / BoardGeometry.hexScale(), .001f, "Wider tunnels retain their height");
+        }
     }
 
     @Test
@@ -94,16 +110,21 @@ class BoardTunnelTest {
                 assertEquals(GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale(), tunnel.origin().z, .0001f);
                 var upper = new BoardSurface(scene, scene.tile(at.translated(d)));
                 var walls = upper.walls(scene, BoardGeometry.floor(scene));
+                var classic = GpuTilesetTerrain.column(scene, scene.tile(at.translated(d)), BoardGeometry.floor(scene));
                 float scale = BoardGeometry.hexScale();
                 for (float across : new float[] { -7, 0, 7 }) {
                     Vector3 eye = new Vector3(across, -5, 4).mul(tunnel.transform());
                     assertFalse(hit(walls, new Ray(eye, tunnel.along()), 22 * scale),
                           "Cliff still blocks the carriageway: " + family + " exit " + d + " bridge=" + bridge);
+                    assertFalse(hit(classic.walls(), new Ray(eye, tunnel.along()), 22 * scale),
+                          "Classic closes the tunnel mouth: " + family + " exit " + d + " bridge=" + bridge);
                 }
                 Vector3 above = new Vector3(0, -5, 25).mul(tunnel.transform());
                 Ray roof = new Ray(above, tunnel.along());
                 assertTrue(hit(walls, roof, BoardGeometry.width()) || hit(upper.groundFaces(), roof, BoardGeometry.width()),
                       "Natural cliff/cap above the arch remains: " + family + " exit " + d + " bridge=" + bridge);
+                assertTrue(hit(classic.walls(), roof, BoardGeometry.width()) || hit(classic.faces(), roof, BoardGeometry.width()),
+                      "Classic retains the cliff/cap above the arch: " + family + " exit " + d + " bridge=" + bridge);
             }
         }
     }
@@ -181,11 +202,20 @@ class BoardTunnelTest {
         var entrances = BoardTunnel.entrances(scene, scene.tile(at));
         assertEquals(1, entrances.size());
         var tunnel = entrances.getFirst();
+        Vector3 floorLeft = new Vector3(-BoardTunnel.ASSET_ROAD_HALF, 4, 0).mul(tunnel.transform());
+        Vector3 floorRight = new Vector3(BoardTunnel.ASSET_ROAD_HALF, 4, 0).mul(tunnel.transform());
+        assertEquals(2 * BoardRoad.Kind.PAVED.halfWidth * BoardGeometry.hexScale(), floorLeft.dst(floorRight), .001f,
+              "The portal floor carries the entire doubled carriageway");
         var upper = new BoardSurface(scene, scene.tile(at.translated(direction)));
         var walls = upper.walls(scene, BoardGeometry.floor(scene));
         float scale = BoardGeometry.hexScale();
         Vector3 rayStart = new Vector3(tunnel.origin()).mulAdd(tunnel.along(), -5 * scale).add(0, 0, 5 * scale);
         assertFalse(hit(walls, new Ray(rayStart, tunnel.along()), 24 * scale), "The entrance is an actual hole in the wall");
+        Vector3 lateral = new Vector3(tunnel.along().y, -tunnel.along().x, 0);
+        for (int side : new int[] { -1, 1 }) {
+            assertFalse(hit(walls, new Ray(new Vector3(rayStart).mulAdd(lateral, side * 14 * scale), tunnel.along()), 24 * scale),
+                  "Both widened lanes enter the actual cliff opening");
+        }
         rayStart.z += 20 * scale;
         assertTrue(hit(walls, new Ray(rayStart, tunnel.along()), 30 * scale), "The cliff above the opening remains");
         assertEquals(1 << direction, scene.tile(at).roadExits(), "Portals never invent another road exit");

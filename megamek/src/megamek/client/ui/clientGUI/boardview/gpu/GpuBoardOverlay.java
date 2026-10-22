@@ -130,6 +130,7 @@ final class GpuBoardOverlay implements Disposable {
     private int hoveredUnit = Entity.NONE;
     private int inspected = Entity.NONE;
     private boolean tactical;
+    private boolean columns;
     private int revision = -1;
     /** The enemy the shown overlay focuses (its coral glow), or {@code Entity.NONE}. */
     private int focused = Entity.NONE;
@@ -158,6 +159,11 @@ final class GpuBoardOverlay implements Disposable {
     GpuBoardOverlay() {
         ghostLight.set(new ColorAttribute(ColorAttribute.AmbientLight, .6f, .6f, .6f, 1));
         ghostLight.add(new DirectionalLight().set(.5f, .5f, .5f, -.4f, .3f, -1));
+    }
+
+    /** Switch ground-contact sampling with the installed terrain mode and rebuild draped marks once. */
+    void columns(boolean value) {
+        if (columns != value) { columns = value; surfaces.columns(value); revision = -1; }
     }
 
     /**

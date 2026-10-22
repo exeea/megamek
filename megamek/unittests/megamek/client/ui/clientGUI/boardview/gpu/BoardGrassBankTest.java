@@ -6,13 +6,20 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
+import megamek.common.Configuration;
 import megamek.common.Hex;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,6 +27,100 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 /** The same finished shoulder supports turf, blade roots and surface queries at both planted detail levels. */
 class BoardGrassBankTest {
+    @ParameterizedTest
+    @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
+    void convertedMountainLakeGrowsGrassOnIncomingSlopeToes(TerrainLod lod) throws Exception {
+        var geometry = BoardGeometry.tuning();
+        var relief = BoardRelief.tuning();
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            var board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
+                  "Map Set 2/16x17 Mountain Lake.board"), false, true);
+            var scene = GpuLegacyImportSmokeTest.scene(board);
+            var owners = List.of(new Coords(5, 14), new Coords(5, 15), new Coords(5, 16));
+            var tiles = owners.stream().map(scene::tile).toList();
+            float floor = BoardGeometry.floor(scene), sink = BoardGeometry.width() * .001f;
+            Map<Coords, BoardSurface> sources = new HashMap<>();
+            for (var tile : tiles) { sources.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
+            sources = BoardVegetation.prepare(scene, tiles, lod, floor, sources);
+            Set<List<Float>> positions = new HashSet<>();
+            for (var tile : tiles) {
+                var surface = BoardTacticalGeometry.Surface.of(sources.get(tile.coords()), scene, floor, sources);
+                var planted = GpuGroundCover.plant(scene, tile, surface, null);
+                var rebuilt = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile, lod), scene, floor);
+                assertEquals(planted, GpuGroundCover.plant(scene, tile, rebuilt, null),
+                      "An individual cache miss and shared chunk preparation use the same finished support");
+                var ground = surface.vegetation();
+                assertNotNull(ground);
+                for (var face : ground.faces()) {
+                    for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                        var normal = ground.normals().get(vertex);
+                        assertNotNull(normal, "Every support vertex carries its rendered normal");
+                        assertEquals(1, normal.len(), .002f, "Support normals are finite and normalized");
+                    }
+                }
+                var own = new HashSet<>(surface.top());
+                own.addAll(surface.slopes());
+                var support = new GpuBiomeVegetation.Support(ground.faces());
+                int incoming = 0;
+                for (int i = 0; i < planted.size; i += 4) {
+                    float x = planted.get(i), y = planted.get(i + 1), z = planted.get(i + 2);
+                    assertTrue(BoardGeometry.contains(tile.coords(), x, y), "A blade stays in its owning hex");
+                    assertTrue(positions.add(List.of(x, y)), "Adjacent owners cannot duplicate a blade");
+                    var face = support.face(x, y);
+                    assertNotNull(face);
+                    assertEquals(face.height(x, y), z + sink, .002f,
+                          "The root sits on the installed surface, including a neighbour's slope");
+                    if (!own.contains(face)) { incoming++; }
+                }
+                if (!tile.coords().equals(owners.getFirst())) {
+                    assertTrue(incoming > 20, lod + " restores the incoming green toe at " + tile.coords() + ": " + incoming);
+                }
+            }
+        } finally {
+            BoardRelief.tune(relief);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
+    @Test
+    void grassDensityFollowsInterpolatedSlopeInsteadOfTriangleBoundaries() {
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+        var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
+        var meadow = roots(GpuGroundCover.plant(scene, tile, surface, null));
+        float left = BoardGeometry.centerX(tile.coords()) - BoardGeometry.width() / 2;
+        // Keep the root support fixed while its shading turns gradually from level turf to a steep slope.
+        Map<Vector3, Vector3> normals = new IdentityHashMap<>();
+        for (var face : surface.vegetation().faces()) {
+            for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                float up = 1 - .45f * (vertex.x - left) / BoardGeometry.width();
+                normals.put(vertex, new Vector3((float) Math.sqrt(1 - up * up), 0, up));
+            }
+        }
+        var slope = new BoardTacticalGeometry.Surface(surface.top(), surface.slopes(), surface.faces(), surface.water(),
+              surface.walls(), surface.waterfalls(), surface.frozenFalls(), surface.highestTop(),
+              new BoardVegetation.Ground(surface.vegetation().faces(), normals));
+        var faded = roots(GpuGroundCover.plant(scene, tile, slope, null));
+        assertTrue(meadow.containsAll(faded), "The fade changes density without moving or reranking surviving blades");
+        int[] candidates = new int[3], kept = new int[3];
+        for (var root : meadow) {
+            int band = Math.min(2, (int) (3 * (root.getFirst() - left) / BoardGeometry.width()));
+            candidates[band]++;
+            if (faded.contains(root)) { kept[band]++; }
+        }
+        float previous = 1.2f;
+        for (int band = 0; band < 3; band++) {
+            assertTrue(candidates[band] > 500 && kept[band] > 0, "Each slope band has a populated sample");
+            float retained = kept[band] / (float) candidates[band];
+            assertTrue(previous - retained > .15f, "Density decreases gradually towards steep ground: " + retained);
+            if (band == 0) { assertTrue(retained > .8f, "Level turf retains dense grass"); }
+            if (band == 2) { assertTrue(retained < .3f, "The steep end is sparse instead of a solid blade edge"); }
+            previous = retained;
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
     void grassThinsTowardsOpenWaterWithoutMovingSurvivingBlades(TerrainLod lod) {

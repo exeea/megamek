@@ -837,9 +837,17 @@ vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
     return vec2(sqrt(mix(a.b * a.b, b.b * b.b, uv.blend)), mix(a.a, b.a, uv.blend));
 }
 
+// The repeat a role's maps are read at. A pixel that skips a read (a role or cover it does not show) still computes the
+// read's coordinates beside the quad's pixels that take it, from a repeat that is 0 when chosen in a branch the pixel
+// skipped. That result is discarded, but llvmpipe's anisotropic filtering differences all four quad pixels'
+// coordinates, even for textureGrad, so the infinite one turns its neighbours' samples into NaN: dotted black lines
+// along the roles' boundaries. Authored repeats are metres; only such skipped pixels change.
+float sampledTile(float tile) { return max(tile, 1e-4); }
+
 // Sides: one read per projection, the two side projections always and the top only where the face lies back.
 // Tops (no sides): the top projection's two reads; far away two repeats settle to the map's average.
 vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {
+    tile = sampledTile(tile);
     if (!sides) {
         vec2 a, b;
         mat2 gradientB;
@@ -862,6 +870,7 @@ vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float 
 // The matching world normal and cavity from the normal/AO array; a top uses the same two reads as its colour.
 vec4 rockNormal(float layer, float tile, MaterialProjection p, vec3 face, bool sides, float variation,
       bool translated) {
+    tile = sampledTile(tile);
     if (u_normalMaps <= .5) return vec4(face, 1.0);
     if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
     vec3 normal;
@@ -913,6 +922,11 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     // Desert/Mars depth-zero bars blend the original soft deposit edge halfway toward the broader shore deposit.
     if (shallowSediment >= 0.0 && (abs(familyId - DESERT_FAMILY) < .5 || abs(familyId - MARS_FAMILY) < .5)) {
         sediment = shallowSediment;
+    }
+    // Shallow grassy coasts keep the adjoining turf across more of the exposed bank. The wet toe and submerged
+    // bed still reach full sediment; the existing world-space variation breaks up the advancing green edge.
+    if (shallowSediment >= 0.0 && (abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5)) {
+        sediment = sediment * sediment * sediment;
     }
     vec4 ramp, trim, kind;
     cliffFamily(familyId, ramp, trim, kind);

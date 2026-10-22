@@ -145,7 +145,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hex.getAppearance(), Cover.capture(hex, buildings.apply(pixels.coords()), pixels.coords()), false,
               BoardRoad.deck(hex), hex.containsTerrain(Terrains.BRIDGE_ROAD) ? hex.getTerrain(Terrains.BRIDGE_ROAD).getExits() & 63 : 0,
               hex.deckMud(hex.terrainLevel(Terrains.BRIDGE_ELEV)) != null, RailRoute.groundSides(hex),
-              RailRoute.corridor(hex, pixels.coords(), board), RailRoute.corridor(hex, pixels.coords(), board, true));
+              RailRoute.corridor(hex, pixels.coords(), board), RailRoute.corridor(hex, pixels.coords(), board, true),
+              BoardBackdrop.capture(hex));
     }
 
     /**
@@ -264,7 +265,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    enum FeatureKind { PROP, BUILDING, INDUSTRIAL, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY }
+    enum FeatureKind { PROP, BUILDING, INDUSTRIAL, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY, METAL }
 
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
     enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD, TUNDRA }
@@ -319,7 +320,21 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
           java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren,
           BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
-          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor) {
+          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+              boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
+              boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
+              java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren,
+              BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
+              RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+                  cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
+                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, BoardBackdrop.NONE);
+        }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
@@ -513,7 +528,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, marking, features, labels, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
-                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor);
+                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
         }
 
         /** This tile with other features: the editor preview's tile of a route stroke's next step. */
@@ -521,7 +536,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, tactical, List.copyOf(shown), text, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
-                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor);
+                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
         }
 
         /** Burned presentation only: remove decorative vegetation and prevent field shrubs replacing it. */
@@ -531,14 +546,15 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, tactical, kept, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
-                  cover, true, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor);
+                  cover, true, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
         }
 
         /**
          * Airless presentation only (vacuum, and so zero gravity), without editing the source hex: nothing grows, not
-         * even field shrubs ({@code barren}), and the surface is lunar. In vacuum the water and hazardous liquids
-         * freeze, as ICE does, and magma stays. Without gravity ({@code weightless}) the liquids are gone, their beds
-         * exposed, and nothing lies loose either: scatter and field cover go and rough boulders become bedrock outcrops.
+         * even field shrubs ({@code barren}), and the surface is lunar except for concrete. In vacuum the water and
+         * hazardous liquids freeze, as ICE does, and magma stays. Without gravity ({@code weightless}) the liquids are
+         * gone, their beds exposed, and nothing lies loose either: scatter and field cover go and rough boulders become
+         * bedrock outcrops.
          */
         Tile lunar(boolean weightless) {
             int depth = weightless ? Math.max(0, waterDepth) : 0;
@@ -612,11 +628,12 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 }
             }
             boolean iced = !weightless && (frozen || liquid.present() && !liquid.molten());
-            return new Tile(coords, level, weightless ? -1 : waterDepth, iced, roadExits, Surface.LUNAR, ground, null,
+            Surface airlessSurface = surface == Surface.CONCRETE ? Surface.CONCRETE : Surface.LUNAR;
+            return new Tile(coords, level, weightless ? -1 : waterDepth, iced, roadExits, airlessSurface, ground, null,
                   null, null, tactical, kept, BoardHexText.settled(labels, text),
                   weightless ? BoardLiquid.NONE : liquid, null, true, road, fireSmoke, Biome.NONE, impassable, false,
-                  cliffTopExits, weightless, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(), ultraSublevel, null, null,
-                  appearance, cover, true, deckRoad, deckRoadExits, false, railBed, corridor, deckCorridor);
+                  cliffTopExits, weightless, BoardSurfaceBlend.solid(airlessSurface), bridge(), ultraSublevel, null, null,
+                  appearance, cover, true, deckRoad, deckRoadExits, false, railBed, corridor, deckCorridor, backdrop);
         }
 
         Tile {
@@ -625,6 +642,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             appearance = java.util.Map.copyOf(appearance);
             cover = Objects.requireNonNullElse(cover, Cover.NONE);
             deckRoad = Objects.requireNonNullElse(deckRoad, BoardRoad.Kind.NONE);
+            backdrop = Objects.requireNonNullElse(backdrop, BoardBackdrop.NONE);
         }
 
         boolean water() {
@@ -668,7 +686,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return this == other || coords.equals(other.coords) && elevation == other.elevation
                   && waterDepth == other.waterDepth && frozen == other.frozen && roadExits == other.roadExits
                   && cliffTopExits == other.cliffTopExits && bare == other.bare && barren == other.barren
-                  && ultraSublevel == other.ultraSublevel && deckRoad == other.deckRoad
+                  && ultraSublevel == other.ultraSublevel && backdrop == other.backdrop && deckRoad == other.deckRoad
                   && deckRoadExits == other.deckRoadExits && deckMud == other.deckMud && railBed == other.railBed
                   && corridor.equals(other.corridor) && deckCorridor.equals(other.deckCorridor)
                   && surface == other.surface && detailedGround == other.detailedGround && road == other.road && biome == other.biome

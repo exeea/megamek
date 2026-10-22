@@ -298,7 +298,7 @@ class BoardGroundCaptureTest {
                         assertFalse(pixels.blankTerrains().contains(Terrains.GROUND_FLUFF),
                               "The 3D tileset retains the original overlay definitions");
                         assertTrue(BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains()));
-                        assertTrue(BoardEditorTerrain.types(hex, pixels.blankTerrains()).isEmpty(),
+                        assertTrue(BoardEditorTerrain.badges(hex).isEmpty(),
                               "Cosmetic blends must not fill the editor with hidden-terrain badges");
                         var tile = BoardScene.captureTile(hex, pixels, null, new BoardScene.PixelPool(), neighbour -> null);
                         if (family == 1) {

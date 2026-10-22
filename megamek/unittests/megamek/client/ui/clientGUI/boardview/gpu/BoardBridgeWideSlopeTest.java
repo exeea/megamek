@@ -49,11 +49,12 @@ class BoardBridgeWideSlopeTest {
                         String context = "direction=" + direction + " parity=" + parity + " beside=" + beside
                               + " lod=" + lod + " t=" + t;
                         for (int side : new int[] { -1, 1 }) {
-                            var parapet = new Vector3(point).mulAdd(across, side * 14.65f * scale);
+                            var parapet = new Vector3(point).mulAdd(across,
+                                  side * (BoardRoad.CORRIDOR_HALF + BoardBridge.SHOULDER / 2) * scale);
                             assertEquals(grade(center, bank, parapet, normal) + 2.5f * scale,
                                   BoardBridgeSlopeTest.height(shape, parapet, false), .02f,
                                   "The outer parapet follows the same grade as the center: " + context);
-                            var lane = new Vector3(point).mulAdd(across, side * 11 * scale);
+                            var lane = new Vector3(point).mulAdd(across, side * 19.5f * scale);
                             float grade = grade(center, bank, lane, normal);
                             assertEquals(grade, BoardBridge.top(shape, lane.x, lane.y), .02f,
                                   "The carrier remains planar across its entire width: " + context);
@@ -103,7 +104,7 @@ class BoardBridgeWideSlopeTest {
                         float steelDistance = (float) Math.sqrt(steel.hit(ray));
                         float concreteDistance = (float) Math.sqrt(concrete.hit(ray));
                         assertTrue(Float.isFinite(concreteDistance), "The broad ramp has a real support face");
-                        assertEquals((30 - BoardRoad.CORRIDOR_HALF - BoardRoad.SHOULDER) * scale,
+                        assertEquals((30 - BoardRoad.CORRIDOR_HALF - BoardBridge.SHOULDER) * scale,
                               Math.min(steelDistance, concreteDistance), .02f, "The outside support remains closed");
                         assertFalse(Math.abs(steelDistance - concreteDistance) < .001f,
                               "No coplanar steel and concrete face at direction=" + direction + " t=" + t);

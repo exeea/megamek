@@ -18,6 +18,31 @@ import org.junit.jupiter.api.Test;
 
 class BoardFireSmokeTest {
     @Test
+    void screenPresenceUsesTheChaffVolumeIncludingLegacyZeroWithoutChangingSmokeOrRules() {
+        for (int level : new int[] { 0, 1, 3 }) {
+            Hex hex = new Hex(0);
+            hex.addTerrain(new Terrain(Terrains.SCREEN, level));
+            var screen = BoardFireSmoke.capture(hex);
+            assertTrue(screen.present());
+            assertTrue(screen.screen());
+            assertEquals(3, screen.palette());
+            assertEquals(new BoardFireSmoke(0, SmokeCloud.SMOKE_CHAFF_LIGHT).density(), screen.density());
+            assertEquals(0, screen.flame());
+            assertEquals(level, hex.terrainLevel(Terrains.SCREEN), "Capturing a screen never alters its rules");
+
+            hex.addTerrain(new Terrain(Terrains.SMOKE, SmokeCloud.SMOKE_HEAVY));
+            var combined = BoardFireSmoke.capture(hex);
+            assertTrue(combined.screen());
+            assertEquals(SmokeCloud.SMOKE_HEAVY, combined.smoke());
+            assertEquals(new BoardFireSmoke(0, SmokeCloud.SMOKE_HEAVY).density(), combined.density());
+            hex.removeTerrain(Terrains.SMOKE);
+            assertEquals(screen, BoardFireSmoke.capture(hex));
+            hex.removeTerrain(Terrains.SCREEN);
+            assertEquals(BoardFireSmoke.NONE, BoardFireSmoke.capture(hex));
+        }
+    }
+
+    @Test
     void captureKeepsSpecialSmokeTypesAndAllInfernoTypesDistinctFromNormalFire() {
         assertFalse(BoardFireSmoke.capture(new Hex(0)).present());
         for (int fire = 1; fire <= 4; fire++) {
@@ -74,6 +99,30 @@ class BoardFireSmokeTest {
                     fixture.game.getBoard().setHex(coords, hex);
                     fixture.source.refresh();
                     assertEquals(BoardFireSmoke.NONE, fixture.source.takeFrame().scene().tile(coords).fireSmoke());
+                }
+            });
+        }
+    }
+
+    @Test
+    void nativeScreenCaptureReplacesItsSpriteAndRetainsEnhancedGround() throws Exception {
+        try (var fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                Coords coords = new Coords(0, 16);
+                Hex hex = new Hex(0);
+                fixture.game.getBoard().setHex(coords, hex);
+                fixture.source.refresh();
+                var plain = fixture.source.takeFrame().scene().tile(coords);
+                for (int level : new int[] { 0, 1 }) {
+                    hex.addTerrain(new Terrain(Terrains.SCREEN, level));
+                    fixture.game.getBoard().setHex(coords, hex.duplicate());
+                    fixture.source.refresh();
+                    var screened = fixture.source.takeFrame().scene().tile(coords);
+                    assertTrue(screened.detailedGround());
+                    assertTrue(screened.fireSmoke().screen());
+                    assertTrue(screened.fireSmoke().present());
+                    assertEquals(plain.decals(), screened.decals(), "The chaff volume replaces the old smoke sprite");
+                    assertEquals(level, fixture.game.getBoard().getHex(coords).terrainLevel(Terrains.SCREEN));
                 }
             });
         }

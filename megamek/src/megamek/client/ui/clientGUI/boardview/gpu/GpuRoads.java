@@ -1,8 +1,11 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.BasicStroke;
 import java.awt.RenderingHints;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
+import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.lang.ref.WeakReference;
@@ -26,6 +29,7 @@ import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 
 /** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
 final class GpuRoads {
@@ -205,7 +209,8 @@ final class GpuRoads {
     }
 
     static List<Patch> patches(BoardScene.Tile tile, BoardRoad road) {
-        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false);
+        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false,
+              HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits()), road.crossing(tile, false));
     }
 
     /** The authored material of this road layer's own paint; verges and neighbouring transition coats keep theirs. */
@@ -224,7 +229,8 @@ final class GpuRoads {
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road) {
         // A rock arch carries ordinary ground paint, including loose shoulders and worn ends. Only a built deck
         // clips them to its carriageway; the arch's own top facets already keep the paint off its sides.
-        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, !deck.natural());
+        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, !deck.natural(),
+              HexAppearance.trafficControl(tile.appearance(), "bridgeRoad", deck.roadExits()), road.crossing(tile, true));
     }
 
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
@@ -269,7 +275,7 @@ final class GpuRoads {
     }
 
     private static List<Patch> patches(Coords coords, BoardScene.Surface family, BoardRoad.Kind kind,
-          int exits, BoardRoad road, boolean deck) {
+          int exits, BoardRoad road, boolean deck, HexAppearance.TrafficControl control, BoardRoad.Crossing crossing) {
         boolean sand = family == BoardScene.Surface.SAND;
         boolean snow = family == BoardScene.Surface.SNOW;
         boolean paved = kind == BoardRoad.Kind.PAVED || kind == BoardRoad.Kind.ALLEY;
@@ -323,14 +329,28 @@ final class GpuRoads {
             patches.add(new Patch(baseEdge, cover, tint, repeat, .075f, new Fade(joinOuter, -joinFeather, 0, false, join)));
         }
         if (kind == BoardRoad.Kind.PAVED) {
-            patches.add(markings(road, coords, exits));
-            Area stops = road.stopLines(exits);
+            var approaches = road.stopApproaches(exits, crossing);
+            if (control != HexAppearance.TrafficControl.STOPS) {
+                Area box = keepClear(road, exits, approaches);
+                box.subtract(crossing.clearance());
+                if (!box.isEmpty()) {
+                    patches.add(new Patch(box, "concrete", new Color(1, .78f, .08f, 1), 1.5f, .065f, null));
+                }
+            }
+            var divider = markings(road, coords, exits);
+            divider.shape().add(road.approachLines(exits, crossing.approaches()));
+            divider.shape().subtract(crossing.clearance());
+            patches.add(divider);
+            Area stops = road.stopLines(approaches);
+            stops.add(road.flowMarkings());
+            stops.subtract(crossing.clearance());
             if (!stops.isEmpty()) {
                 patches.add(new Patch(stops, "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
             }
             Area median = road.medianLines();
+            median.subtract(crossing.clearance());
             if (!median.isEmpty()) {
-                patches.add(new Patch(median, "concrete", new Color(.95f, .78f, .25f, 1), 1.5f, .065f, null));
+                patches.add(new Patch(median, "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
             }
         } else if (!paved) {
             Area tracks = road.tracks(exits);
@@ -343,6 +363,12 @@ final class GpuRoads {
                 patches.add(new Patch(worn, texture, wornSoil, repeat, .065f, new Fade(0, 0, 6, true, null)));
             }
         }
+        Area concrete = road.concreteClearance();
+        if (!concrete.isEmpty()) {
+            for (var patch : patches) {
+                if (patch.texture().equals("concrete")) { patch.shape().subtract(concrete); }
+            }
+        }
         // Rails bound a deck: loose margins and wear must never float outside its carriageway.
         if (deck) {
             Area carriageway = road.footprint(0);
@@ -351,8 +377,53 @@ final class GpuRoads {
         return patches;
     }
 
+    /** The chosen box-junction convention: a hollow yellow lattice inside the four controlled stop planes. */
+    static Area keepClear(BoardRoad road, int exits) {
+        return keepClear(road, exits, road.stopApproaches(exits));
+    }
+
+    private static Area keepClear(BoardRoad road, int exits, List<BoardRoad.StopApproach> approaches) {
+        if (Integer.bitCount(exits & 63) != 4) { return new Area(); }
+        if (approaches.size() != 4) { return new Area(); }
+        Area box = road.footprint(-1);
+        for (var approach : approaches) {
+            float x = approach.x() - approach.nx() * 3, y = approach.y() - approach.ny() * 3;
+            Path2D.Float beyond = new Path2D.Float();
+            beyond.moveTo(x - 128 * approach.ny(), y + 128 * approach.nx());
+            beyond.lineTo(x + 128 * approach.ny(), y - 128 * approach.nx());
+            beyond.lineTo(x + 128 * (approach.ny() + approach.nx()), y + 128 * (approach.ny() - approach.nx()));
+            beyond.lineTo(x + 128 * (-approach.ny() + approach.nx()), y + 128 * (approach.nx() + approach.ny()));
+            beyond.closePath();
+            box.subtract(new Area(beyond));
+        }
+        if (box.isEmpty()) { return box; }
+        Area paint = new Area(new BasicStroke(.8f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND).createStrokedShape(box));
+        var first = approaches.getFirst();
+        double angle = Math.atan2(first.ny(), first.nx()) + Math.PI / 4;
+        var bounds = AffineTransform.getRotateInstance(-angle).createTransformedShape(box).getBounds2D();
+        float margin = .65f / 2 + .001f;
+        Path2D.Float grid = new Path2D.Float();
+        // Keep the same lattice phase and endpoints, but omit strokes that cannot reach the box.
+        for (int offset = -128; offset <= 128; offset += 8) {
+            if (offset >= bounds.getMinX() - margin && offset <= bounds.getMaxX() + margin) {
+                grid.moveTo(offset, -128); grid.lineTo(offset, 128);
+            }
+            if (offset >= bounds.getMinY() - margin && offset <= bounds.getMaxY() + margin) {
+                grid.moveTo(-128, offset); grid.lineTo(128, offset);
+            }
+        }
+        grid.transform(AffineTransform.getRotateInstance(angle));
+        paint.add(new Area(new BasicStroke(.65f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER).createStrokedShape(grid)));
+        paint.intersect(box);
+        Area reserve = road.medianBand();
+        // Leave a small paint-free margin so antialiasing cannot bleed yellow onto the ballast edge.
+        reserve.add(new Area(new BasicStroke(.5f).createStrokedShape(reserve)));
+        paint.subtract(reserve);
+        return paint;
+    }
+
     static Patch markings(BoardRoad road, Coords coords, int exits) {
-        return new Patch(road.markings(coords, exits), "concrete", new Color(1, .93f, .70f, 1), 1.5f, .065f, null);
+        return new Patch(road.markings(coords, exits), "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null);
     }
 
     /** Flat carriers clip deck materials at the hex edges without draping them onto the riverbed. */
@@ -430,6 +501,16 @@ final class GpuRoads {
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
     static MaskData mask(BoardRoad road, Patch patch) {
+        return mask(patch, (x, y, scratch) -> color(road, patch, x, y, scratch));
+    }
+
+    @FunctionalInterface
+    interface MaskColor {
+        Color at(float x, float y, Color scratch);
+    }
+
+    /** Ground treatments share the same soft mask carrier and original surface material maps as road coats. */
+    static MaskData mask(Patch patch, MaskColor color) {
         // The supporting terrain already clips the paint. Its fitted edge can extend beyond the original hex box.
         var bounds = patch.shape().getBounds2D();
         int x = (int) Math.floor(bounds.getMinX()) - 1;
@@ -453,7 +534,7 @@ final class GpuRoads {
                 int i = py * image.getWidth() + px;
                 float alpha = (pixels[i] >>> 24) / 255f;
                 Color tint = alpha == 0 ? patch.tint()
-                      : color(road, patch, x + (px + .5f) / density, y + (py + .5f) / density, scratch);
+                      : color.at(x + (px + .5f) / density, y + (py + .5f) / density, scratch);
                 pixels[i] = Math.round(alpha * tint.a * 255) << 24 | Math.round(tint.r * 255) << 16
                       | Math.round(tint.g * 255) << 8 | Math.round(tint.b * 255);
             }

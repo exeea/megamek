@@ -118,7 +118,10 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
     public static List<BoardHexText> capture(Coords coords, Hex hex, Board board, float scale,
           Font font_hexNumber, Font font_elev, boolean coordinates, boolean types, boolean printed) {
         List<BoardHexText> labels = new ArrayList<>();
-        int color = (board.isSpace() ? GUIP.getBoardSpaceTextColor() : GUIP.getBoardTextColor()).getRGB();
+        // Mixed platform maps can contain dark space hexes while their board type remains Ground.
+        // Sky artwork is light, so it retains the ordinary ground text colour.
+        int color = (board.isSpace() || hex.containsTerrain(Terrains.SPACE)
+              ? GUIP.getBoardSpaceTextColor() : GUIP.getBoardTextColor()).getRGB();
         if (coordinates && scale >= 0.5) {
             labels.add(new BoardHexText(coords.getBoardNum(), (int) (HEX_TEXT_MARGIN * scale), font_hexNumber,
                   color, true, 0));

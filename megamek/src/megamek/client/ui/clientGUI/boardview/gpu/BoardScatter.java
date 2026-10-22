@@ -93,7 +93,7 @@ final class BoardScatter {
      * depth-zero shallows can justify liquid-tile dressing; reject deeper beds before loading kits.
      */
     static boolean allowed(BoardScene.Tile tile) {
-        return !tile.ultraSublevel() && !tile.bare() && !tile.liquid().volcanic()
+        return !tile.ultraSublevel() && !tile.backdrop().present() && !tile.bare() && !tile.liquid().volcanic()
               && (!tile.liquid().present() || tile.waterDepth() == 0);
     }
 
@@ -101,7 +101,7 @@ final class BoardScatter {
     static boolean visible(BoardScene scene, BoardScene.Tile owner, Vector3 base, float height) {
         if (!allowed(owner)) { return false; }
         var receiving = BoardGeometry.tile(scene, base.x, base.y);
-        if (receiving != null && receiving.ultraSublevel()) { return false; }
+        if (receiving != null && (receiving.ultraSublevel() || receiving.backdrop().present())) { return false; }
         if (receiving == null || !receiving.liquid().present()) { return true; }
         float water = BoardGeometry.waterZ(receiving);
         if (!owner.liquid().present() && base.z >= water) { return true; }

@@ -4,14 +4,21 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Stream;
 
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -24,45 +31,83 @@ class GpuTilesetTerrainTest {
     }
 
     @Test
-    void fittedConcreteQuaysShareTheirFootprintAndWaterPickingAcrossViews() {
+    void dryClassicColumnsKeepInclineAndAuthoredCliffWallMaterials() {
+        for (int drop : new int[] { 1, 2, 3 }) {
+            for (boolean cliff : new boolean[] { false, true }) {
+                var board = Board.createEmptyBoard(3, 3);
+                board.getHex(CENTER).setLevel(drop);
+                if (cliff) { board.getHex(CENTER).addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, 1)); }
+                var scene = RoadGradeFixture.scene(board);
+                var column = GpuTilesetTerrain.column(scene, scene.tile(CENTER), BoardGeometry.floor(scene));
+                assertEquals(12, column.walls().size(), "All six dry hex edges have a visible drop");
+                for (var face : column.walls()) {
+                    boolean rock = drop > 2 || cliff && BoardGeometry.edgeDirection(face.landEdge()) == 0;
+                    assertEquals(rock ? BoardSurface.Finish.OUTCROP : BoardSurface.Finish.WALL, face.finish(),
+                          "Classic grass uses rock on high/explicit cliffs and soil on ordinary inclines");
+                    assertEquals(0, new Vector3(face.b()).sub(face.a())
+                          .crs(new Vector3(face.c()).sub(face.a())).nor().z, .001f,
+                          "The material cue must not sculpt the vertical column");
+                }
+            }
+        }
+    }
+
+    @Test
+    void gradedClassicArtworkUsesSlopeNormalsWhileFlatTopsStayUpward() {
+        var tile = BoardRoadTest.tile(CENTER, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS);
+        for (float rise : new float[] { 0, 1, 4 }) {
+            var a = new Vector3(0, 0, 0); var b = new Vector3(1, 0, rise);
+            var c = new Vector3(1, 1, rise); var d = new Vector3(0, 1, 0);
+            var top = List.of(new BoardSurface.Face(a, b, c, BoardSurface.Finish.TOP),
+                  new BoardSurface.Face(a, c, d, BoardSurface.Finish.TOP));
+            var surface = new BoardTacticalGeometry.Surface(top, List.of(), top, List.of(), List.of(), List.of());
+            var normals = new ArrayList<Vector3>();
+            var mesh = (MeshPartBuilder) Proxy.newProxyInstance(MeshPartBuilder.class.getClassLoader(),
+                  new Class<?>[] { MeshPartBuilder.class }, (proxy, method, arguments) -> {
+                      if (method.getName().equals("triangle")) {
+                          for (var argument : arguments) {
+                              normals.add(new Vector3(((MeshPartBuilder.VertexInfo) argument).normal));
+                          }
+                      }
+                      return null;
+                  });
+            GpuTilesetTerrain.write(tile, surface, BoardFlow.Current.STILL, at -> null, null, null,
+                  (material, draw) -> draw.accept(mesh), (material, draw) -> { }, new HashMap<>(), new BoundingBox());
+            assertEquals(6, normals.size(), "Exercise the actual Classic artwork mesh emitter");
+            var expected = new Vector3(-rise, 0, 1).nor();
+            for (var normal : normals) {
+                assertEquals(1, normal.len(), .00001f, "Lighting receives a unit normal");
+                assertEquals(1, normal.dot(expected), .00001f,
+                      "The same plane must shade continuously across triangles, including steep road banks");
+            }
+        }
+    }
+
+    @Test
+    void classicQuaysKeepTheirNominalHexFootprintAndPicking() {
         BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
         float floor = BoardGeometry.floor(scene);
         for (int y = 2; y <= 5; y++) {
             Coords at = new Coords(10, y);
             var column = GpuTilesetTerrain.column(scene, scene.tile(at), floor);
-            BoardSurface nativeSurface = new BoardSurface(scene, scene.tile(at));
+            assertEquals(.75 * BoardGeometry.width() * BoardGeometry.height(),
+                  column.top().stream().mapToDouble(GpuTilesetTerrainTest::area).sum(), .05);
             for (var face : column.top()) {
                 for (var p : List.of(face.a(), face.b(), face.c())) {
-                    assertTrue(nativeSurface.faces.stream().flatMap(f -> Stream.of(f.a(), f.b(), f.c()))
-                          .anyMatch(q -> p.epsilonEquals(q, .001f)), "Both views share the pier's fitted vertices");
+                    assertTrue(BoardGeometry.contains(at, p.x, p.y), "A Classic quay keeps its sharp hex boundary");
+                    assertEquals(BoardGeometry.surfaceZ(scene.tile(at)), p.z, .001f);
                 }
             }
             for (var face : column.walls()) {
                 Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
                 assertEquals(0, normal.z, .001f, "The quay wall remains vertical");
             }
-            // This lies inside the old hex's tip, beyond the fitted pier: picking must hit the water now drawn there.
+            // This point is inside the nominal pier tip, which only Enhanced concrete fitting narrows.
             Vector3 point = BoardGeometry.center(at, 0).add(30 * BoardGeometry.hexScale(), 0, 100);
             BoardGeometry.Hit hit = BoardGeometry.hit(scene, new Ray(point, new Vector3(0, 0, -1)), scene.tiles(), floor,
                   coords -> GpuTilesetTerrain.column(scene, scene.tile(coords), floor));
-            assertEquals(100 - BoardGeometry.waterZ(scene.tile(new Coords(11, y))), Math.sqrt(hit.distance()), .002f);
-        }
-    }
-
-    @Test
-    void fittedConcreteKeepsEachHexsArtworkInsideItsHex() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
-        BoardConcrete shape = BoardConcrete.of(scene);
-        for (var tile : scene.tiles()) {
-            Vector3 center = BoardGeometry.center(tile.coords(), 0);
-            for (int edge = 0; edge < 6; edge++) {
-                for (float fraction : new float[] { .5f, 1 }) {
-                    Vector3 rendered = new Vector3(center).lerp(shape.corner(tile.coords(), edge), fraction);
-                    Vector3 source = new Vector3(center).lerp(BoardGeometry.corner(tile.coords(), 0, edge), fraction);
-                    assertTrue(source.epsilonEquals(GpuTilesetTerrain.artPoint(rendered, tile.coords(), shape), .002f),
-                          "Expanded water corners and narrowed concrete retain their own artwork: " + tile.coords());
-                }
-            }
+            assertEquals(at, hit.coords());
+            assertEquals(100 - BoardGeometry.surfaceZ(scene.tile(at)), Math.sqrt(hit.distance()), .002f);
         }
     }
 
@@ -137,6 +182,38 @@ class GpuTilesetTerrainTest {
     }
 
     @Test
+    void threeLevelRoadClimbDoesNotReshapeItsMiddleLevelClassicBank() {
+        var lower = BoardRoadTest.CENTER;
+        var upper = lower.translated(0);
+        var bank = lower.translated(1);
+        for (int level : new int[] { 1, 2 }) {
+            var scene = BoardSurfaceBlendTest.scene(at -> BoardRoadTest.tile(at,
+                  at.equals(lower) || at.equals(upper) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                  at.equals(lower) ? 1 : at.equals(upper) ? 8 : 0,
+                  at.equals(lower) ? 0 : at.equals(upper) ? 3 : level, BoardScene.Surface.GRASS));
+            var tile = scene.tile(bank);
+            assertTrue(BoardRoad.nearbyWays(scene, tile).isEmpty(), "Neither adjoining road has the bank's level");
+            var enhanced = new BoardSurface(scene, tile);
+            assertTrue(enhanced.groundFaces().stream().flatMap(f -> Stream.of(f.a(), f.b(), f.c()))
+                  .anyMatch(p -> Math.abs(p.z - level * BoardGeometry.level()) > .1f),
+                  "The fixture exercises an actual Enhanced cut/fill beside the climb");
+            var classic = GpuTilesetTerrain.column(scene, tile, BoardGeometry.floor(scene));
+            assertEquals(.75 * BoardGeometry.width() * BoardGeometry.height(),
+                  classic.top().stream().mapToDouble(GpuTilesetTerrainTest::area).sum(), .05);
+            for (var face : classic.top()) {
+                for (var point : List.of(face.a(), face.b(), face.c())) {
+                    assertEquals(level * BoardGeometry.level(), point.z, .001f,
+                          "Nearby ramps leave the entire unconnected Classic hex flat");
+                }
+            }
+            for (var wall : classic.walls()) {
+                assertEquals(0, new Vector3(wall.b()).sub(wall.a()).crs(new Vector3(wall.c()).sub(wall.a())).nor().z,
+                      .001f, "The bank retains vertical column walls");
+            }
+        }
+    }
+
+    @Test
     void waterColumnsWallFromTheBedAndDryBanksReachDownToIt() {
         Coords north = CENTER.translated(0), south = CENTER.translated(3);
         List<BoardScene.Tile> tiles = new ArrayList<>();
@@ -200,7 +277,7 @@ class GpuTilesetTerrainTest {
     }
 
     @Test
-    void raisedPoolHasRoundedDryBanksSlopingShallowsAndClosedOutsideWalls() {
+    void raisedClassicPoolKeepsItsSharpWaterOutlineAndVerticalBedWalls() {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             Coords at = new Coords(x, y);
@@ -212,25 +289,23 @@ class GpuTilesetTerrainTest {
         var surface = GpuTilesetTerrain.column(scene, tile, BoardGeometry.floor(scene));
         float water = BoardGeometry.waterZ(tile), level = tile.elevation() * BoardGeometry.level();
         assertTrue(surface.waterfalls().isEmpty(), "A shore above dry land must not create a waterfall");
-        assertTrue(surface.water().size() > 6, "The isolated pool has a curved outline");
-        assertTrue(surface.faces().stream().anyMatch(face -> face.finish() == BoardSurface.Finish.BANK
-              && area(face) > 0), "Shallows slope down to the unchanged bed depth");
-        assertEquals(level, surface.walls().stream().flatMap(f -> Stream.of(f.a(), f.b(), f.c()))
-              .mapToDouble(p -> p.z).max().orElseThrow(), .001f, "The raised shore is supported all the way to its rim");
+        assertEquals(6, surface.water().size(), "Classic water retains its nominal hex outline");
+        assertTrue(surface.faces().stream().allMatch(face -> face.finish() == BoardSurface.Finish.BED),
+              "No sculpted bank or shallow slope enters the Classic lakebed");
+        assertEquals(BoardGeometry.groundZ(tile), surface.walls().stream().flatMap(f -> Stream.of(f.a(), f.b(), f.c()))
+              .mapToDouble(p -> p.z).max().orElseThrow(), .001f);
         assertEquals(BoardGeometry.level(), surface.walls().stream().flatMap(f -> Stream.of(f.a(), f.b(), f.c()))
-              .mapToDouble(p -> p.z).min().orElseThrow(), .001f, "Walls still end on the lower land");
+              .mapToDouble(p -> p.z).min().orElseThrow(), .001f);
         Vector3 middle = BoardGeometry.center(CENTER, 0);
         Vector3 nearBank = new Vector3(middle).lerp(BoardGeometry.corner(CENTER, 0, 1)
               .lerp(BoardGeometry.corner(CENTER, 0, 2), .5f), .92f);
         for (var point : List.of(middle, nearBank)) {
-            float height = surface.top().stream().map(f -> f.height(point.x, point.y)).max(Float::compare).orElseThrow();
-            if (point == middle) { assertEquals(water, height, .001f); }
-            else { assertTrue(height > water && height <= level, "The dry shoreline slopes down to the liquid"); }
+            assertEquals(water, BoardSurface.sampleHeight(surface.top(), point.x, point.y, Float.NaN), .001f);
             var hit = BoardGeometry.hit(scene, new Ray(new Vector3(point.x, point.y, level + 100), new Vector3(0, 0, -1)),
                   scene.tiles(), BoardGeometry.floor(scene), coords -> GpuTilesetTerrain.column(scene, scene.tile(coords),
                         BoardGeometry.floor(scene)));
             assertEquals(CENTER, hit.coords());
-            assertEquals(level + 100 - height, Math.sqrt(hit.distance()), .001f, "Picking follows the finished shore");
+            assertEquals(level + 100 - water, Math.sqrt(hit.distance()), .001f, "Picking uses the full water hex");
         }
     }
 
@@ -251,10 +326,8 @@ class GpuTilesetTerrainTest {
             double footprint = .75 * BoardGeometry.width() * BoardGeometry.height();
             assertEquals(footprint, surface.top().stream().mapToDouble(GpuTilesetTerrainTest::area).sum(), .05,
                   "Dry shore and liquid cover the hex once, mask=" + mask);
-            if (mask != 0) {
-                assertTrue(surface.faces().stream().anyMatch(f -> f.finish() == BoardSurface.Finish.BANK && area(f) > .01),
-                      "Even a lone bank has sloping shallows, mask=" + mask);
-            }
+            assertTrue(surface.faces().stream().noneMatch(f -> f.finish() == BoardSurface.Finish.BANK
+                  || f.finish() == BoardSurface.Finish.SHORE), "Classic coast cues do not reshape terrain");
             for (var face : surface.faces()) {
                 assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z >= -.001f,
                       "Submerged banks never fold back under the dry shore, mask=" + mask);
@@ -283,25 +356,21 @@ class GpuTilesetTerrainTest {
     }
 
     @Test
-    void naturalBanksMeetFittedQuaysWithoutFoldingOrLosingCoverage() {
+    void classicWaterRetainsFullHexCoverageBesideEveryQuayMaterial() {
         for (var scene : List.of(GpuRiverTerrainSmokeTest.dockScene(),
               GpuRiverTerrainSmokeTest.quayScene(BoardScene.Surface.GRASS))) {
-            var concrete = BoardConcrete.of(scene);
             float floor = BoardGeometry.floor(scene);
             for (var tile : scene.tiles()) {
                 if (!tile.liquid().present() || tile.frozen()) { continue; }
                 var surface = GpuTilesetTerrain.column(scene, tile, floor);
-                Vector3 center = BoardGeometry.center(tile.coords(), 0);
-                double footprint = 0;
-                for (int edge = 0; edge < 6; edge++) {
-                    footprint += area(new BoardSurface.Face(center, concrete.corner(tile.coords(), edge),
-                          concrete.corner(tile.coords(), edge + 1), BoardSurface.Finish.TOP));
-                }
-                assertEquals(footprint, surface.top().stream().mapToDouble(GpuTilesetTerrainTest::area).sum(), .08,
-                      "Land and water still cover the fitted footprint: " + tile.coords());
+                assertEquals(.75 * BoardGeometry.width() * BoardGeometry.height(),
+                      surface.top().stream().mapToDouble(GpuTilesetTerrainTest::area).sum(), .08,
+                      "Classic land and water share their nominal hex edges: " + tile.coords());
                 for (var face : surface.top()) {
-                    assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z >= -.001f,
-                          "Natural banks stay unfolded beside a fitted quay: " + tile.coords());
+                    assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z > 0);
+                    for (var point : List.of(face.a(), face.b(), face.c())) {
+                        assertTrue(BoardGeometry.contains(tile.coords(), point.x, point.y));
+                    }
                 }
             }
         }

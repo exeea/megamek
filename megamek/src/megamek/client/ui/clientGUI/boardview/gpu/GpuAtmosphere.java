@@ -172,10 +172,17 @@ final class GpuAtmosphere implements Disposable {
     private BoardAtmosphere.Lighting lighting;
     private BoardAtmosphere.Lighting exposureLighting;
     private BoardAtmosphere.Lighting tacticalLighting;
+    /** Derived together with the rendered light; the space backdrop uses the same camera coupling. */
+    private boolean cameraRelativeLight;
     /** One CPU image per current atmosphere; unrelated exposure/weather/camera changes reuse it. */
     private BoardLightingSky.Source generatedSkySource;
     private GpuLightingEnvironment generatedSky;
     private BoardAtmosphere.SkyPalette backdrop;
+    /** Render-owned derived backdrop, rescanned only when the immutable terrain snapshot changes. */
+    private List<BoardScene.Tile> backdropTiles;
+    private boolean spaceBackdrop;
+    /** Animation seconds, shared by both light modes; shader constants own drift and density. No weather-clock wrap. */
+    private double spaceTime;
     private final Vector3 glareRight = new Vector3();
     private float clock;
     private float stormClock;
@@ -347,8 +354,8 @@ final class GpuAtmosphere implements Disposable {
                   GpuLightingEnvironment.generated(BoardLightingSky.generate(BoardAtmosphere.TACTICAL.skySource())));
         }
         exposureLighting = tactical ? tacticalLighting : worldLighting;
-        lighting = tune(options.fixedSun() && !freeFlight && !tactical
-              ? exposureLighting.relativeTo(camera) : exposureLighting);
+        cameraRelativeLight = options.fixedSun() && !freeFlight && !tactical;
+        lighting = tune(cameraRelativeLight ? exposureLighting.relativeTo(camera) : exposureLighting);
     }
 
     private BoardAtmosphere.Lighting tune(BoardAtmosphere.Lighting base) {
@@ -393,6 +400,14 @@ final class GpuAtmosphere implements Disposable {
     private Color backdropSky() { return options.lightingSky() ? lighting.environmentSky() : lighting.sky(); }
 
     private Color backdropHorizon() { return options.lightingSky() ? lighting.environmentHorizon() : lighting.horizon(); }
+
+    boolean spaceBackdrop(BoardScene scene) {
+        if (backdropTiles != scene.tiles()) {
+            backdropTiles = scene.tiles();
+            spaceBackdrop = backdropTiles.stream().anyMatch(tile -> tile.backdrop() == BoardBackdrop.SPACE);
+        }
+        return spaceBackdrop;
+    }
 
     /** Subtract exactly the half-float clear that was stored, so adaptation cannot reveal rounding residue. */
     private static float clearComponent(float radiance) {
@@ -496,6 +511,7 @@ final class GpuAtmosphere implements Disposable {
             fog.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         }
         clock = (clock + Math.min(delta, 0.1f)) % 3600;
+        spaceTime += Math.min(delta, .1f);
         stormClock = settings.effects().lightning() > 0 ? (stormClock + Math.min(delta, 0.1f)) % 7 : 0;
         groundMotion.advance(settings.effects(), delta, options.fogCalmDrift());
         sceneColor.begin();
@@ -650,6 +666,19 @@ final class GpuAtmosphere implements Disposable {
         if (environment != null) { environment.bindImage(compositeShader, 8); }
         else { compositeShader.setUniformf("u_environmentImage", 0, 1); }
         compositeShader.setUniformf("u_transparentBackground", transparentBackground ? 1 : 0);
+        compositeShader.setUniformf("u_spaceBackdrop", spaceBackdrop(board) ? 1 : 0,
+              camera.viewportWidth / Math.max(1, camera.viewportHeight), cameraRelativeLight ? 1 : 0);
+        // Zero drift or density constants can optimize these uniforms out of an edited shader.
+        compositeShader.setUniformf(compositeShader.fetchUniformLocation("u_spaceTime", false), (float) spaceTime);
+        compositeShader.setUniformMatrix(compositeShader.fetchUniformLocation("u_spaceView", false), camera.view);
+        Color direct = lighting.direct();
+        float lightPeak = Math.max(direct.r, Math.max(direct.g, direct.b));
+        // Lighting.direction is photon travel. The visible source is in the opposite direction, without sky drift.
+        Vector3 lightDirection = lighting.direction();
+        compositeShader.setUniformf("u_spaceLight", -lightDirection.x, -lightDirection.y, -lightDirection.z,
+              Math.min(1, lightPeak));
+        compositeShader.setUniformf("u_spaceLightColor", direct.r / Math.max(lightPeak, 1e-8f),
+              direct.g / Math.max(lightPeak, 1e-8f), direct.b / Math.max(lightPeak, 1e-8f));
         compositeShader.setUniformMatrix("u_inverseView", camera.invProjectionView);
         compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
         bindSand(camera, board);
@@ -748,6 +777,9 @@ final class GpuAtmosphere implements Disposable {
             contrastShader.setUniformf("u_boardSize", board.width(), board.height());
             contrastShader.setUniformf("u_thresholds", contrastThreshold, contrastDark, contrastLight);
             contrastShader.setUniformf("u_exposure", exposure());
+            Color clear = spaceBackdrop(board) && !transparentBackground ? backdropSky() : Color.BLACK;
+            contrastShader.setUniformf("u_spaceClear", clearComponent(clear.r) * GpuSceneRadiance.SCALE,
+                  clearComponent(clear.g) * GpuSceneRadiance.SCALE, clearComponent(clear.b) * GpuSceneRadiance.SCALE);
             contrastPoints.render(contrastShader, GL20.GL_POINTS);
             FrameBuffer previous = contrastRead;
             contrastRead = contrastWrite;

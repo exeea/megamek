@@ -96,14 +96,15 @@ class BoardLegacyRailTest {
     }
 
     @Test
-    void aLevelCrossingAddsItsDecalAndFourSignalsOnTheRoad() throws Exception {
+    void aLevelCrossingKeepsItsRoadAndPlacesFourSignalsBesideIt() throws Exception {
         Board board = board(Map.of(AT, "road:1:18;fluff:10:66"));
         BoardSceneryLayouts.convert(board);
         Hex hex = board.getHex(AT);
         assertTrue(hex.containsTerrain(Terrains.ROAD), "The road stays rule terrain");
         assertEquals(18, rails(hex).getFirst().connections());
         var pieces = hex.getDecorations().stream().filter(object -> !RailRoute.isRoute(object)).toList();
-        assertEquals(1, pieces.stream().filter(object -> object.asset().equals("decal/rail/level-crossing")).count());
+        assertEquals(0, pieces.stream().filter(object -> object.asset().equals("decal/rail/level-crossing")).count(),
+              "The live road and embedded rails replace the old concrete panel");
         assertEquals(4, pieces.stream().filter(object -> object.asset().equals("scenery/rail/crossing-signal")).count());
         assertEquals(1, pieces.stream().map(BoardDecoration::group).distinct().count(), "One group, without the marker");
         assertTrue(pieces.stream().allMatch(object -> object.placement().equals(BoardDecoration.Placement.ground())),

@@ -217,13 +217,13 @@ void main() {
     float shoreAbsorption = 0.0;
     float rainCover = step(0.0, response);
     bool natural = (ground || cliff || bedrock) && !family(4.0);
-    // Natural surfaces take the small cliff material: walls, banks (water banks too) and bedrock its side
+    // Natural surfaces take the small cliff material: walls, steep dry/wet banks and bedrock its side
     // projections (blendCliff when blended), tops its top projection (blendCovers when blended). Volcanic programs
     // keep their natural material on every face.
 #ifdef volcanicFlag
     bool rocky = false;
 #else
-    bool rocky = natural && (cliff || bedrock || (shore && face.z < .6));
+    bool rocky = natural && (cliff || bedrock || (ground && face.z < .6));
 #endif
     // Reuse the material's world fields for a broken soil/gravel margin. Keep it below the dry rim so the
     // neighbouring land agrees at the seam; no new noise reads or shoreline mesh are needed.

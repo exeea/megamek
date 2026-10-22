@@ -214,8 +214,7 @@ class BoardBiomeTest {
                     assertEquals(Math.round(BoardBiome.row(x / metre, y / metre)), BoardBiome.row(x / metre, y / metre), .0001f);
                     assertTrue(BoardBiome.coverage(scene, BoardScene.Biome.FIELD, x, y, floor) >= .599f);
                     if (road) {
-                        float distance = patch.road.distance((x - BoardGeometry.centerX(center)) / BoardGeometry.hexScale(),
-                              (y - BoardGeometry.centerY(center)) / BoardGeometry.hexScale());
+                        float distance = BoardRoad.distance(patch.roads, x, y);
                         assertTrue(distance >= BoardRoad.SHOULDER + GpuBiomeVegetation.ROW_HALF_WIDTH * metre
                               / BoardGeometry.hexScale(), "Even the overhead foliage must clear the road");
                     }

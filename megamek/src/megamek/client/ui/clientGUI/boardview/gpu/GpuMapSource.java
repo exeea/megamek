@@ -74,6 +74,7 @@ final class GpuMapSource implements BoardSource {
     private final BoardEditorSession editor;
     private final Runnable requestClose;
     private final Runnable requestLegacy2D;
+    private final Runnable requestEditor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
     /** Swing queues wheel notches (hex, levels) in arrival order until a capture; releasing Ctrl commits the undo entry. */
@@ -129,9 +130,12 @@ final class GpuMapSource implements BoardSource {
     private List<BoardScene.Tile> tiles = List.of();
     /** EDT-owned derived editor annotations; never supplied to map previews or gameplay. */
     private final Map<Coords, BoardTactical> terrainMarkers = new HashMap<>();
+    private final Map<Coords, List<BoardEditorTerrain.Badge>> badges = new HashMap<>();
+    private Map<Coords, List<BoardEditorTerrain.Badge>> badgeSnapshot = Map.of();
     private BoardTactical editorTerrain = BoardTactical.EMPTY;
     private long boardGeneration;
-    private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview) { }
+    private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview,
+          Map<Coords, List<BoardEditorTerrain.Badge>> badges) { }
     private volatile Publication publication;
     /** Render-thread latch: selection and geometry must describe the same EDT capture for the entire frame. */
     private Publication rendering;
@@ -158,6 +162,11 @@ final class GpuMapSource implements BoardSource {
     }
 
     GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestLegacy2D) {
+        this(game, owner, editor, requestClose, requestLegacy2D, null);
+    }
+
+    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestLegacy2D,
+          Runnable requestEditor) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         if (editor != null && editor.game() != game) { throw new IllegalArgumentException("The editor owns its Game"); }
         this.game = game;
@@ -165,6 +174,7 @@ final class GpuMapSource implements BoardSource {
         this.editor = editor;
         this.requestClose = requestClose;
         this.requestLegacy2D = requestLegacy2D;
+        this.requestEditor = requestEditor;
         atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
         if (editor != null) { trace = GpuTraceOverlay.Settings.capture(); }
         timer = new Timer(33, event -> refresh());
@@ -195,17 +205,23 @@ final class GpuMapSource implements BoardSource {
             contextCoords = null;
             images.clear();
             terrainMarkers.clear();
+            badges.clear();
             dirtyAll();
             atmosphere.reset();
         }
         List<BoardScene.Tile> next = terrain.tiles(board, (coords, pixels) -> {
             if (editor == null) { return; }
-            var markers = BoardEditorTerrain.capture(board.getHex(coords), coords, pixels.blankTerrains());
+            Hex hex = board.getHex(coords);
+            var flags = BoardEditorTerrain.badges(hex);
+            if (flags.isEmpty()) { badges.remove(coords); }
+            else { badges.put(coords, flags); }
+            var markers = BoardEditorTerrain.capture(hex, coords);
             if (markers == BoardTactical.EMPTY) { terrainMarkers.remove(coords); }
             else { terrainMarkers.put(coords, markers); }
         });
         if (next != tiles) {
             tiles = next;
+            badgeSnapshot = Map.copyOf(badges);
             editorTerrain = editor == null ? BoardTactical.EMPTY : new BoardTactical(
                   terrainMarkers.values().stream().flatMap(value -> value.fills().stream()).toList(),
                   terrainMarkers.values().stream().flatMap(value -> value.labels().stream()).toList());
@@ -237,12 +253,16 @@ final class GpuMapSource implements BoardSource {
         if (editor != null && state.activeBrush().way() && editorHover != null) {
             editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover), editor.wayHint(editorHover.coords(), shownPreview));
         }
-        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected);
+        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected,
+              badgeSnapshot);
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
     private List<BoardScene.Command> menuCommands() {
         List<BoardScene.Command> commands = new ArrayList<>();
+        if (editor == null && requestEditor != null) {
+            commands.add(menuCommand("boardEdit3D", "BoardEditor.edit3D", requestEditor));
+        }
         if (editor != null && requestLegacy2D != null) {
             // The editor opens its live Legacy 2D Preview beside itself; a preview switches through View > Renderer.
             commands.add(menuCommand("boardPreview2D", "BoardEditor.preview2D", requestLegacy2D));
@@ -497,7 +517,7 @@ final class GpuMapSource implements BoardSource {
     }
 
     @Override public List<String> editorThemes() { return editorThemes; }
-    private void dirtyAll() { terrainMarkers.clear(); terrain.changed(null); }
+    private void dirtyAll() { terrainMarkers.clear(); badges.clear(); terrain.changed(null); }
     private static void onSwing(Runnable action) {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }
     }
@@ -597,6 +617,10 @@ final class GpuMapSource implements BoardSource {
     private void closeMeasuring() { ruler = null; }
 
     public BoardEditorSession.Snapshot editorState() { return (rendering == null ? publication : rendering).editor(); }
+
+    @Override public Map<Coords, List<BoardEditorTerrain.Badge>> editorBadges() {
+        return (rendering == null ? publication : rendering).badges();
+    }
 
     @Override public GpuEditorPreview.Data editorPreview() { return (rendering == null ? publication : rendering).preview(); }
 

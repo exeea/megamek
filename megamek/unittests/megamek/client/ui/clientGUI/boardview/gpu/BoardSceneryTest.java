@@ -288,14 +288,24 @@ class BoardSceneryTest {
 
     @Test
     void horizontalAndLegacyDirtRoadFluffUsesNativeRoadMaterials() {
+        var bare = BoardScene.Pixels.capture(capture(new Hex(0)).tileset(), null);
         for (String terrain : List.of("road:1:9;road_fluff:2", "road:3:9;road_fluff:2", "road:3:9;road_fluff:100")) {
             var hex = new Hex(0, terrain, "");
             var image = capture(hex);
             var tile = tile(hex, image);
             assertEquals(0, alpha(image.decals()), terrain);
+            assertEquals(0, alpha(image.tilesetDecals()), "Classic uses the shared road material: " + terrain);
+            assertEquals(bare, BoardScene.Pixels.capture(image.tileset(), null), "No duplicate road in the base artwork");
             assertEquals(BoardRoad.capture(hex), tile.road(), terrain);
             assertEquals(9, tile.roadExits());
             assertTrue(BoardRoad.rendered(tile), terrain);
+        }
+        for (String design : List.of("road/rounded", "road/horizontal", "road/legacy-dirt", "road/material/asphalt")) {
+            var hex = new Hex(0, "road:1:27", "");
+            hex.setAppearance(java.util.Map.of("road", new megamek.common.board.HexAppearance(design, null, null, null)));
+            var image = capture(hex);
+            assertEquals(bare, BoardScene.Pixels.capture(image.tileset(), null), design);
+            assertEquals(0, alpha(image.tilesetDecals()), design);
         }
     }
 

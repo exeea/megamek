@@ -41,10 +41,17 @@ final class BoardTacticalGeometry {
     /** Only the finished triangles are retained; none of the terrain builder's scene or shoreline caches. */
     record Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes,
           List<BoardSurface.Face> faces, List<BoardSurface.Face> water, List<BoardSurface.Face> walls,
-          List<BoardSurface.Side> waterfalls, List<GpuFrozenWaterfall.Geometry> frozenFalls, float highestTop) {
+          List<BoardSurface.Side> waterfalls, List<GpuFrozenWaterfall.Geometry> frozenFalls, float highestTop,
+          BoardVegetation.Ground vegetation) {
         Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes, List<BoardSurface.Face> faces,
               List<BoardSurface.Face> water, List<BoardSurface.Face> walls, List<BoardSurface.Side> waterfalls) {
-            this(top, slopes, faces, water, walls, waterfalls, List.of(), highest(top));
+            this(top, slopes, faces, water, walls, waterfalls, List.of(), highest(top), null);
+        }
+
+        Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes, List<BoardSurface.Face> faces,
+              List<BoardSurface.Face> water, List<BoardSurface.Face> walls, List<BoardSurface.Side> waterfalls,
+              List<GpuFrozenWaterfall.Geometry> frozenFalls, float highestTop) {
+            this(top, slopes, faces, water, walls, waterfalls, frozenFalls, highestTop, null);
         }
 
         /** Derived once with this immutable finished-surface snapshot; raised border endpoints reuse it. */
@@ -57,6 +64,12 @@ final class BoardTacticalGeometry {
         }
 
         static Surface of(BoardSurface surface, BoardScene scene, float floor) {
+            var sources = BoardVegetation.prepare(scene, List.of(surface.tile), surface.lod(), floor,
+                  Map.of(surface.tile.coords(), surface));
+            return of(surface, scene, floor, sources);
+        }
+
+        static Surface of(BoardSurface surface, BoardScene scene, float floor, Map<Coords, BoardSurface> sources) {
             List<BoardSurface.Face> top = new ArrayList<>();
             for (BoardSurface.Face face : surface.faces) {
                 if (surface.tile.frozen() && surface.tile.water() ? face.finish() == BoardSurface.Finish.ICE
@@ -65,10 +78,10 @@ final class BoardTacticalGeometry {
                 }
             }
             if (!surface.tile.frozen()) { top.addAll(surface.waterFaces); }
-            List<BoardSurface.Face> walls = List.copyOf(surface.walls(scene, floor));
+            List<BoardSurface.Face> walls = List.copyOf(surface.walls(scene, floor, sources));
             return new Surface(List.copyOf(top), BoardGeometry.tuning().stepsBetweenTops() ? lying(walls) : List.of(),
                   List.copyOf(surface.faces), List.copyOf(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
-                  surface.frozenFalls(), highest(top));
+                  surface.frozenFalls(), highest(top), BoardVegetation.ground(scene, surface, floor, sources));
         }
     }
     private record Edge(float x1, float y1, float x2, float y2) {

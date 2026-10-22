@@ -29,6 +29,11 @@ uniform vec3 u_backdropSky;
 uniform vec3 u_backdropHorizon;
 uniform float u_backdropExposure; // Positive: UI-authored backdrop with user EV only. Zero: incident lighting sky.
 uniform float u_transparentBackground;
+uniform vec3 u_spaceBackdrop; // Enabled, viewing aspect ratio, camera-relative sun/sky.
+uniform float u_spaceTime;
+uniform mat4 u_spaceView;
+uniform vec4 u_spaceLight; // Actual source direction and strength; never rotates with the decorative background.
+uniform vec3 u_spaceLightColor;
 uniform float u_sceneScaled; // 1 at a render resolution below 100%: scale the scene up; 0 reads it 1:1.
 uniform vec4 u_flash; // a nuclear flash (GpuAtmosphere.setFlash): display-linear RGB; a, its glare's falloff
 uniform vec3 u_flashCentre; // the fireball on screen (uv, far off-screen when behind the camera), the view's aspect
@@ -74,6 +79,7 @@ vec4 sceneSample(sampler2D source, vec2 uv) {
 }
 
 // ATMOSPHERE_GLARE
+// SPACE_SKY
 
 void main() {
     float depth = depthAt(v_uv);
@@ -130,6 +136,21 @@ void main() {
         sky = backdropRadiance(authored, u_backdropExposure * (1.0 + u_lightning))
               / max(u_exposure * (1.0 + u_lightning), 1e-8);
     }
+    if (u_spaceBackdrop.x > .5 && u_transparentBackground < .5 && coverage < 1.0) {
+        vec3 direction = normalize(world(1.0) - world(0.0));
+        if (u_projectionDepth.w > .5) {
+            // Parallel cameras need a distant angular field rather than one repeated ray. This is camera-oriented,
+            // independent of its position and zoom: stars never stick to the board or move when it pans.
+            direction = normalize(direction + normalize(u_inverseView[0].xyz) * (v_uv.x * 2.0 - 1.0) * u_spaceBackdrop.y * .85
+                  + normalize(u_inverseView[1].xyz) * (v_uv.y * 2.0 - 1.0) * .85);
+        }
+        vec3 source = spaceLight(direction);
+        if (u_spaceBackdrop.z > .5) direction = mat3(u_spaceView) * direction;
+        float rotation = u_spaceTime * SPACE_DRIFT_SPEED;
+        float c = cos(rotation), s = sin(rotation);
+        direction.xy = mat2(c, s, -s, c) * direction.xy;
+        sky = backdropRadiance(spaceSky(direction) + source, 1.0) / max(u_exposure * (1.0 + u_lightning), 1e-8);
+    }
     vec3 color = scene.rgb + (sky - u_sky) * (1.0 - coverage);
     // Cutouts start at transparent black and keep foreground RGB associated until the PNG boundary.
     if (u_transparentBackground > 0.5) color = scene.rgb;
@@ -144,6 +165,11 @@ void main() {
         linear *= 1.0 - hot;
     }
     vec4 sand = sandLayer(surfaceDepth);
+    if (u_spaceBackdrop.x > .5 && surfaceDepth >= 1.0) {
+        // There is no ground atmosphere behind transparent SPACE. Retain weather on actual platforms and objects.
+        atmosphere = vec4(0, 0, 0, 1);
+        sand = vec4(0, 0, 0, 1);
+    }
     if (u_transparentBackground > 0.5) {
         // Fog and sand belong to the covered foreground, not to an invented opaque background.
         linear = (linear * sand.a + sand.rgb * coverage) * atmosphere.a + atmosphere.rgb * coverage;

@@ -1215,7 +1215,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             row.setName("editor-brush-edges"); controls.add(row);
         }
         if (brush.sampledHex() == null && definition.id().equals("road")) {
-            controls.add(trafficControlChoice(brush.appearance(), "road",
+            controls.add(trafficControlChoice(brush.appearance(), "road", 0,
                   chosen -> send(Action.BRUSH_VALUE, "trafficControl", chosen)));
         }
         var zone = zoneBrush(brush);
@@ -1737,9 +1737,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return "BoardEditor.edges" + name.charAt(0) + name.substring(1).toLowerCase(Locale.ROOT);
     }
 
-    private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner,
+    private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner, int exits,
           Consumer<String> choose) {
-        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner);
+        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits);
         List<Option> options = List.of(new Option(UiKit.text("BoardEditor.trafficStops"), "stops"),
               new Option(UiKit.text("BoardEditor.trafficSignals"), "signals"),
               new Option(UiKit.text("BoardEditor.trafficGantry"), "gantry"));
@@ -1754,7 +1754,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     private void trafficControl(String owner) {
-        detail.add(trafficControlChoice(snapshot.appearance(), owner,
+        var way = snapshot.property(owner.equals("bridgeRoad") ? "bridge_road" : "road");
+        int exits = way == null ? 0 : way.exits();
+        var bridge = snapshot.property("bridge");
+        if (owner.equals("bridgeRoad") && bridge != null) { exits &= bridge.exits(); }
+        detail.add(trafficControlChoice(snapshot.appearance(), owner, exits,
               chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
     }
 

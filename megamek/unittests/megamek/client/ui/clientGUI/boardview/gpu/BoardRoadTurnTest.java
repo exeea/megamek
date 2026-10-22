@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -17,6 +19,80 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class BoardRoadTurnTest {
+    @Test
+    void everyTwoExitBendHasAContinuousDividerWhileStraightRoadsKeepGaps() throws Exception {
+        for (int column : new int[] { 3, 4 }) {
+            var at = new Coords(column, 4);
+            for (int exits = 0; exits < 64; exits++) {
+                if (Integer.bitCount(exits) != 2) { continue; }
+                var road = BoardRoad.layout(at, exits, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED);
+                var paint = road.markings(at, exits);
+                var course = course(road);
+                int painted = 0, gaps = 0;
+                for (int i = 1; i < course.size(); i++) {
+                    var a = course.get(i - 1); var b = course.get(i);
+                    int samples = Math.max(1, (int) Math.ceil(a.dst(b) * 4));
+                    for (int sample = 0; sample < samples; sample++) {
+                        var point = new Vector2(a).lerp(b, (sample + .5f) / samples);
+                        if (paint.contains(point.x, point.y)) { painted++; }
+                        else { gaps++; }
+                    }
+                }
+                assertTrue(painted > 0);
+                if ((exits & (exits >> 3)) == 0) {
+                    assertEquals(0, gaps, "The whole turning centre line is solid, exits=" + exits);
+                } else {
+                    assertTrue(gaps > 0, "A straight two-way road retains its dashed divider");
+                }
+                paint.subtract(road.footprint(0));
+                assertTrue(paint.isEmpty(), "Bend paint follows the actual shared carriageway");
+            }
+        }
+    }
+
+    @Test
+    void solidDividersStartOnBothConnectedApproachesBeforeEveryBend() {
+        var at = BoardRoadTest.CENTER;
+        for (int exits = 0; exits < 64; exits++) {
+            if (Integer.bitCount(exits) != 2 || (exits & (exits >> 3)) != 0) { continue; }
+            Map<Coords, Integer> masks = new HashMap<>();
+            masks.put(at, exits);
+            for (int d = 0; d < 6; d++) {
+                if ((exits & 1 << d) != 0) { masks.put(at.translated(d), (1 << d) | (1 << ((d + 3) % 6))); }
+            }
+            var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+                  masks.containsKey(c) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                  masks.getOrDefault(c, 0), 0, BoardScene.Surface.GRASS));
+            for (int d = 0; d < 6; d++) {
+                if ((exits & 1 << d) == 0) { continue; }
+                var next = scene.tile(at.translated(d));
+                var road = BoardRoad.of(scene, next);
+                var paint = road.markings(next.coords(), next.roadExits());
+                var gate = gate(next.coords(), (d + 3) % 6);
+                float distance = gate.len();
+                var toward = new Vector2(gate).nor();
+                for (float along = distance - 28; along < distance + 1; along += .25f) {
+                    assertTrue(paint.contains(toward.x * along, toward.y * along),
+                          "The divider becomes solid before crossing into the bend, exits=" + exits + " side=" + d);
+                }
+                boolean gap = false;
+                for (float along = -30; along < -5; along += .25f) {
+                    gap |= !paint.contains(toward.x * along, toward.y * along);
+                }
+                assertTrue(gap, "The distant part of the straight approach stays dashed");
+            }
+        }
+        // A nearby turn which does not connect back cannot change the divider of this straight road.
+        var next = at.translated(0);
+        var unjoined = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+              c.equals(at) || c.equals(next) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+              c.equals(at) ? 9 : c.equals(next) ? 5 : 0, 0, BoardScene.Surface.GRASS));
+        var plain = BoardRoad.layout(at, 9, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED).markings(at, 9);
+        var actual = BoardRoad.of(unjoined, unjoined.tile(at)).markings(at, 9);
+        actual.exclusiveOr(plain);
+        assertTrue(actual.isEmpty(), "Only a connected bend changes the upstream divider");
+    }
+
     @Test
     void fireAndIceTightTurnsRetainClearanceAndSharedRoadMouths() throws Exception {
         var file = new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board");
@@ -32,7 +108,7 @@ class BoardRoadTurnTest {
             if (Integer.bitCount(exits) == 2 && (exits & ((exits << 1) | (exits >> 5))) != 0) {
                 float radius = assertBroad(road);
                 if (at.equals(new Coords(5, 7))) {
-                    assertTrue(radius > 2 * (BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER),
+                    assertTrue(radius > BoardGeometry.height() / BoardGeometry.hexScale() / 4,
                           "The reported 0608 kink must turn across the level hex instead of at its edge: " + radius);
                 }
             }
@@ -82,8 +158,12 @@ class BoardRoadTurnTest {
                         var lateral = new Vector2(-gate.y, gate.x).nor();
                         for (int offset : new int[] { -9, -7, 0, 7, 9 }) {
                             var point = new Vector2(gate).mulAdd(lateral, offset);
-                            assertEquals(Math.abs(offset) - 7.5f, road.distance(point.x, point.y), .01f,
+                            assertEquals(Math.abs(offset) - BoardRoad.Kind.PAVED.halfWidth, road.distance(point.x, point.y), .01f,
                                   "A rounded turn retains the entire shared road mouth");
+                        }
+                        for (int offset : new int[] { -14, 14 }) {
+                            var point = new Vector2(gate).mulAdd(lateral, offset);
+                            assertTrue(road.distance(point.x, point.y) < 0, "Both widened lanes reach the neighboring road");
                         }
                     }
                 }
@@ -126,17 +206,7 @@ class BoardRoadTurnTest {
     }
 
     private static float assertBroad(BoardRoad road) throws Exception {
-        var field = BoardRoad.class.getDeclaredField("paths");
-        field.setAccessible(true);
-        var path = (List<?>) ((List<?>) field.get(road)).getFirst();
-        var points = new ArrayList<Vector2>();
-        for (var point : path) {
-            var x = point.getClass().getDeclaredMethod("x");
-            var y = point.getClass().getDeclaredMethod("y");
-            x.setAccessible(true);
-            y.setAccessible(true);
-            points.add(new Vector2((float) x.invoke(point), (float) y.invoke(point)));
-        }
+        var points = course(road);
         float minimum = Float.POSITIVE_INFINITY;
         for (int i = 1; i + 1 < points.size(); i++) {
             var a = points.get(i - 1);
@@ -154,5 +224,20 @@ class BoardRoadTurnTest {
               "The inside shoulder must have a positive turn radius: " + minimum);
         assertTrue(points.size() <= 26, "Roundness does not require denser sampling");
         return minimum;
+    }
+
+    private static List<Vector2> course(BoardRoad road) throws Exception {
+        var field = BoardRoad.class.getDeclaredField("paths");
+        field.setAccessible(true);
+        var path = (List<?>) ((List<?>) field.get(road)).getFirst();
+        var points = new ArrayList<Vector2>();
+        for (var point : path) {
+            var x = point.getClass().getDeclaredMethod("x");
+            var y = point.getClass().getDeclaredMethod("y");
+            x.setAccessible(true);
+            y.setAccessible(true);
+            points.add(new Vector2((float) x.invoke(point), (float) y.invoke(point)));
+        }
+        return points;
     }
 }

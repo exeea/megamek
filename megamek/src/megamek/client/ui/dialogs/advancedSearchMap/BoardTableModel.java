@@ -123,13 +123,14 @@ class BoardTableModel extends AbstractTableModel {
     }
 
     public void setData(BoardClassifier bc) {
-        data = bc.getBoardPaths().values().stream().toList();
+        data = new ArrayList<>();
         tags = new ArrayList<>();
         width = new ArrayList<>();
         height = new ArrayList<>();
 
-        for (String path : data) {
-            String key = Configuration.boardsDir() + path;
+        for (var entry : bc.getBoardPaths().entrySet()) {
+            String key = entry.getKey();
+            data.add(entry.getValue());
             tags.add(bc.getBoardTags().get(key));
             width.add(bc.getBoardWidth().get(key));
             height.add(bc.getBoardHeight().get(key));

@@ -170,6 +170,7 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuUnitVisibility unitVisibility;
     private GpuWireframe wireframe;
     private GpuMarkers markers;
+    private GpuEditorBadges editorBadges;
     private GpuTextures<BoardScene.Pixels> unitTextures;
     private ModelBatch unitBatch;
     private SpriteBatch annotationBatch;
@@ -371,6 +372,7 @@ class GpuBattleView extends ApplicationAdapter {
         };
         boardCamera.terrainHit = ray -> scene == null || terrain == null ? null : terrain.selectionHit(scene, ray);
         markers = new GpuMarkers();
+        if (source.isEditor()) { editorBadges = new GpuEditorBadges(); }
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>(false, true);
         overlay = new GpuBoardOverlay();
@@ -762,26 +764,12 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setFluffHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());
         terrain.setWaterEffects(tuning.waterEffects());
-        if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
+        // Sprite meshes bake their atlas UVs. New artwork is appended, so only the moved slots need new meshes.
+        Set<BoardScene.Pixels> moved = unitTextures.updateRegions(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
-              .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)))) {
-            spriteModels.values().forEach(GpuUnitModel::dispose);
-            spriteModels.clear();
-            unitPicking.clear();
-            attachments.geometryChanged();
-        }
+              .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)), Map.of());
         Set<BoardScene.Pixels> images = scene.units().stream().map(BoardScene.Unit::image).collect(Collectors.toSet());
-        boolean removedSprites = spriteModels.entrySet().removeIf(entry -> {
-            if (images.contains(entry.getKey().pixels())) {
-                return false;
-            }
-            entry.getValue().dispose();
-            return true;
-        });
-        if (removedSprites) {
-            unitPicking.clear();
-            attachments.geometryChanged();
-        }
+        disposeSpriteModels(sprite -> moved.contains(sprite.pixels()) || !images.contains(sprite.pixels()));
         updateCameraFocus(scene, frame.centerRequest(), instantAction);
         // The first visible frame's delta may still include the hidden window's loading time.
         boardCamera.advance(entranceStarting ? 0 : Gdx.graphics.getDeltaTime());
@@ -821,6 +809,7 @@ class GpuBattleView extends ApplicationAdapter {
             boardInput.mouseMoved(Gdx.input.getX(), Gdx.input.getY());
         }
         hoverClock += animationSeconds();
+        groundSurfaces.columns(terrain.columns());
         renderStage("unit poses");
         markers.beginFrame(scene.markers(), Gdx.graphics.getDeltaTime());
         prepareUnits();
@@ -979,7 +968,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (!boardCamera.tactical()) {
             hexGrid.render(boardCamera, scene, terrain.columns(), false, GpuBattleStatus.Arc.NONE, false, atmosphere);
         }
-        renderHexText();
+        renderHexText(wireframeView);
         overlay.renderGhost(boardCamera.camera, shownUnit);
         fireControl.renderLabels(boardCamera.camera);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -1088,6 +1077,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (boardInput.boardGesture) { boardInput.interrupt(); }
         }
         if (ui instanceof GpuHud hud && frame.scene() != null) {
+            overlay.columns(terrain.columns());
             overlay.update(frame.withScene(scene), view, source.uiPreferences(), hud.state);
         }
     }
@@ -2111,6 +2101,10 @@ class GpuBattleView extends ApplicationAdapter {
         annotationBatch.begin();
         markers.renderLabels(annotationBatch, boardCamera.camera, layoutScale,
               markers.labelObstacles(boardCamera.camera));
+        if (editorBadges != null) {
+            editorBadges.render(annotationBatch, boardCamera.camera, layoutScale, scene,
+                  source.editorBadges(), terrain::roofBounds, hovered);
+        }
         if (source.isEditor() && editorPreviewShown()) { renderEditorPreviewLabel(); }
         annotationBatch.end();
     }
@@ -2178,11 +2172,13 @@ class GpuBattleView extends ApplicationAdapter {
         return result;
     }
 
-    private void renderHexText() {
+    private void renderHexText(boolean wireframeView) {
         var overlays = source.uiPreferences().overlays();
         hexText.update(scene, theme.skin.getFont("default-font"), theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
-              terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(), overlays.hexLabelOutline());
-        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0, atmosphere);
+              terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(),
+              overlays.hexLabelOutline() || wireframeView);
+        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0,
+              atmosphere, wireframeView);
     }
 
     /** The camera zoom of {@code notches} of the mouse wheel, on the board and on the minimap. */
@@ -3210,6 +3206,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (annotationBatch != null) {
             annotationBatch.dispose();
         }
+        if (editorBadges != null) { editorBadges.dispose(); }
         if (unitTextures != null) {
             unitTextures.dispose();
         }
@@ -3222,6 +3219,24 @@ class GpuBattleView extends ApplicationAdapter {
         }
         if (source != null) {
             source.close();
+        }
+    }
+
+    /**
+     * Instances borrow a sprite model's mesh, so they leave with it: picking before {@link #prepareUnits} rebuilds them
+     * would otherwise read the freed vertex buffer and crash the JVM.
+     */
+    private void disposeSpriteModels(java.util.function.Predicate<UnitSprite> evicted) {
+        boolean removed = spriteModels.entrySet().removeIf(entry -> {
+            if (!evicted.test(entry.getKey())) { return false; }
+            var model = entry.getValue().instance.model;
+            unitInstances.values().removeIf(instance -> instance.model == model);
+            entry.getValue().dispose();
+            return true;
+        });
+        if (removed) {
+            unitPicking.clear();
+            attachments.geometryChanged();
         }
     }
 

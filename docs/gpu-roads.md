@@ -21,9 +21,10 @@ unit support must continue to agree on the underlying surface.
 ## Footprints and materials
 
 Normal roads use marked asphalt; alleys use unmarked asphalt. Dirt and gravel have
-porous margins exposing the local ground. All use a common carriageway width, so a
-material change must not pinch the route. Two exits form a bend, three/four form a
-junction, and five/six form a roundabout. Dead ends extend through the center but retain
+porous margins exposing the local ground. All use a common 30-pixel carriageway
+(`HexTile.ROAD_HALF_WIDTH` is 15), twice the original width, so a material change
+must not pinch the route. Two exits form a bend, three/four form a
+junction, and five/six form a roundabout unless ground rails require a solid hub. Dead ends extend through the center but retain
 a ground margin before the opposite hex; an exit-free road uses a short isolated stretch.
 
 At a 120-degree connection with square border crossings, roads and bridges use
@@ -35,37 +36,69 @@ at full carriageway width for every legal gentle pair of exits, including pairs 
 only by explicit rail layouts. Their tyre wear retains the radial approach courses.
 Rail and road use that same course before applying an authored beside-corridor offset.
 
-Roundabout approaches use a two-pixel fillet where they meet the circulating road.
-The closing operation erodes only exposed boundaries; internal seams between filled
-`Area` subpaths must not cut into the road and leave pointed kerbs. Generated bridge
-outlines follow this same footprint.
+Single-hex roundabouts have one circulating lane. Eligible level, paved three-hex
+triangles become one shared two-lane roundabout; ground rails, bridges and grade
+changes prevent that conversion. Both circulate counter-clockwise. Entries have
+broken give-way bars following the outside of the ring, clipped to each incoming
+lane, with an inverted triangle aligned to that lane. Oblique entries keep the
+same setback from circulating traffic. Only the
+two-lane ring has a broken lane divider; neither ring has repeated direction arrows.
+Tangent fillets join the approaches to the ring; exits use twice the entry turning
+radius so departing traffic follows a gentler curve.
+All members derive the same world-space circle, and a canonical owner prevents
+duplicate paint. Road paint and clearance may extend into adjoining dry, level
+hexes; the hex grid does not trim the outside of a bend or roundabout.
 
 ### Junction controls
 
 Three/four-way paved junctions use solid crossing hubs and rounded inside corners.
-White stop bars cross each incoming right-hand lane before the shared turning area;
-yellow centre dashes stop before those bars. Unmarked roads and five/six-way
-roundabouts retain their existing marking policy. Road/rail corridors keep the bars
-out of the central railway median.
+Rail-bearing five/six-way junctions also use controlled solid hubs instead of roundabouts.
+White stop bars cross incoming right-hand lanes immediately before their conflict
+with the other approaches. A T junction's opposite pair is the dominant through
+road, with a stop only on the secondary approach; ambiguous crossings use all-way
+controls. Centre dividers stop before the conflict area on every junction arm,
+including the dominant through road, leaving turning movements clear; their final
+carriageway width before that boundary is continuous. Unmarked roads omit
+these markings. Road/rail corridors keep the bars out of the central railway median.
+
+Ordinary two-exit bends use continuous white centre lines through the bend and for
+one carriageway width on their connected approaches. Remote straights retain dashed
+dividers, and shared-rail medians retain their boundary lines. Roundabout entry and
+circulation markings keep their own geometry. These are conservative visual choices;
+real-world bend markings also depend on visibility and the country's conventions.
+
+Signal-controlled four-arm junctions use a yellow keep-clear box: an outline and
+open diagonal lattice fitted inside the four stop planes, clipped to the actual
+carriageway and clear of railway reservations. Stop-only junctions and roundabouts
+omit the box. This is the project's selected box-junction convention, not a universal
+US/EU requirement at every traffic light. Geometry and paint are shared in Classic,
+Enhanced and either tactical view.
 
 The road brush and the ground/deck road inspector offer **Junction controls: Stops**,
 **Stops + traffic lights**, or **Stops + overhead traffic lights**. Stops uses an
 octagonal roadside STOP sign; traffic lights replace the sign with a three-aspect
 signal. The overhead option uses a curved metal mast arm carrying two overhead
 heads and a lower roadside repeater. All modes keep the stop bars.
-The choice belongs to the `road` or `bridgeRoad` appearance. Overhead traffic lights
-are the default and need no stored field; explicit alternatives store
-`trafficControl: stops` or `trafficControl: signals`. Material
+The choice belongs to the `road` or `bridgeRoad` appearance. With no stored choice,
+three-arm junctions use STOP signs and larger junctions use overhead traffic lights.
+An explicitly signalled T controls every approach. Explicit choices store
+`trafficControl: stops`, `signals`, or `gantry`, including a gantry override at a T. Material
 changes, copy/paste, layer moves, save/load and undo preserve that choice.
 
-Legacy `.board` crossings use the same gantry default. Native boards retain explicit
+Legacy `.board` X crossings use the same gantry default. Native boards retain explicit
 authored choices; roads without one inherit the default. Controls are derived from the same
 approach geometry as the paint, use the existing ground/deck support and GLB prop
 pipeline, and disappear when a junction is removed. They are cosmetic terrain
 decorations, not stored or independently selectable objects.
-At a crowded road/rail junction, a pole is omitted if its roadside position has
-no room inside the owning hex; the stop bar remains. This prevents controls from
-standing beyond a bridge deck or on an unrelated neighbour's terrain.
+Controls may extend into a dry, level neighbour when their whole footing is
+supported. Ground poles and gantry footings also clear the neighbouring road and
+rail courses, including overlapping junction pavement. Bridge controls must fit
+the actual deck shoulder. A crowded approach falls back to a roadside signal only
+where that pole also fits; an unsupported pole is omitted while its stop bar remains.
+If a sideways search crosses another branch, placement retries from the incoming
+lane edge to find the small island it skipped. Gantries and single poles may move
+up to two pixels upstream and 1.5 pixels outward there, with the same road clearance
+and ground support checks. Existing valid placements are kept.
 
 The Blender-authored assets are `scenery/road/traffic-signal.glb` and
 `scenery/road/stop-sign.glb` in mm-data. Each contains the existing `-lod0` and
@@ -92,22 +125,30 @@ all three signal heads. The existing prop system owns placement, LOD and blinkin
 Placement keeps the authored proportions wherever both overhead heads fit the
 incoming lane. Limited horizontal fitting preserves the vertical vehicle clearance;
 if the lane or shoulder cannot accommodate the complete assembly, that approach
-uses the ordinary roadside light. Gantry footings must fit wholly on the owning
-hex's road shoulder, including on bridge decks.
+uses the ordinary roadside light. The mast may move up to two pixels toward waiting
+traffic to clear an acute junction without moving its stop bar. The four-metre arm
+and both LODs share the same lamp positions and supported roadside origin.
 
 Rails share the carriageway (batch 10, docs/3d-board-editor.md): every shape and
 clearance site reads `wayExits` and `BoardRoad.carriageway` (a drawn road or a ground
-rail on detailed, dry ground), so a rail-only hex is shaped exactly as the road hex
+rail on dry ground), so a rail-only hex is shaped exactly as the road hex
 with the same exits (hub, ramps of one or two levels, concrete cuts, retaining walls,
 the ramp onto a deck), and the rail's track is draped on the faces road paint lies on.
-Paint, the natural blend gate, tunnels and the tactical art stay road-only, and only a
-road votes a bridge deck's material. A board without rails renders unchanged
-(`wayExits == roadExits`).
+Only roads receive carriageway paint and vote a bridge deck's road material.
+Classic, Enhanced and either Tactical View share the infrastructure preparation,
+road paint, rail meshes, built bridge decks, tunnel openings and supported controls.
+Classic natural bridges use a normal full hex cap over the hollow arch; Enhanced
+retains its eroded span outline. Both use the same road and rail courses, and each
+mode draws and picks its installed shell. Classic tileset art omits baked roads
+and flat bridge sprites.
 
 `BoardRoad` is also the clearance source for boulders, trees and vegetation. The
 relief's own rim, talus and field rocks and shrubs may stand beside a road but never
 on its carriageway or shoulder (`BoardRelief.place`).
 Changing width or a junction therefore affects more than its rendered mask.
+Authored roadside tree rows sit near the plain-road verge with canopy clearance.
+Only hexes carrying conventional railway tracks receive the additional rail clearance,
+using their existing rail courses and the chosen trees' model footprints.
 Markings follow the main paved route through unmarked branches. Wheel wear follows
 the lane centres through bends, endings and material changes.
 
@@ -120,27 +161,49 @@ the candidates are the intersection of `bridge_road`, `bridge_rail:1` and bridge
 exits. Deck type and distant bank connectivity do not gate a corridor. Ground and
 deck values are captured independently, and off-board shared exits retain full width.
 
-The default **Middle** layout has a central ballast strip and a 2.8-metre lane on
-either side: road half-width 13.4 model pixels, ballast half-width 5.6, and lane-centre
-wear at ±9.5. Yellow median lines border the ballast; centre dashes stop on the shared
-arms. Ordinary side roads keep their 7.5-pixel half-width. Where one crosses the track,
-the rails are set into the carriageway, the median lines stop and the existing
-level-crossing decal marks the crossing. Crossings are derived terrain decorations,
-never separate stored or pickable objects.
+The default **Middle** layout has a central ballast strip and a full-width traffic
+lane on either side. Its half-width derives from the ordinary road half-width,
+`RailRoute.BALLAST_HALF_WIDTH` and a small median margin. White median lines border
+the ballast; centre dashes stop on shared arms. Ordinary side roads keep their
+15-pixel half-width. Where one crosses the track, the rails are set into dark,
+track-aligned infill with recessed flangeways, and the median lines stop. No automatic
+concrete diamond decal is placed. This crossing is derived from the live road and
+rail geometry, never a separate stored or pickable object.
 
-**Beside** keeps the ordinary road width and centre dashes, nudges its centre 6.35 pixels
-to one side, and puts the rail centre 8.25 pixels to the other. Its side is stored in
+Transverse, same-level conventional tracks also derive crossing-signal poles, incoming
+stop bars and continuous approach dividers from one shared crossing description.
+Road paint clears the track band. A lane approaching both a road junction and a railway
+uses one stop bar before the first conflict. Parallel corridors, diverging turnouts,
+maglev and separate ground/deck levels do not acquire level-crossing controls.
+Existing authored crossing poles suppress nearby generated duplicates; generated
+deck poles must fit the deck shoulder. The signals remain cosmetic, like the road lights.
+
+**Beside** keeps the ordinary road width and centre dashes. The shared road and
+ballast widths plus `RailRoute.CORRIDOR_GAP` determine their opposite offsets. Its side is stored in
 the `rail` or `bridgeRail` appearance's `beside` bits. The editor changes a connected
 corridor run together; Swap side reverses it, and Middle clears it. The one shared
 `RailRoute` course drives track meshes, buffer stops, train snapping/following and
 clearance. Authored junction layouts also determine the median rather than inventing
 a different crossing underneath the rails.
 
-The conservative clearance half-width is 13.9 pixels on shared exits. Road masks,
-scatter, bridge slabs, bridge mouths and terminal support consume that corridor.
-Sloped ground retains the existing 9-pixel ramp mouth, so the widened road accepts
-the adjoining cross-slope. These are CPU footprint and mesh changes using the existing
-road material and rail vertex colours; there is no new shader program or per-hex variant.
+At a shared terminal, the rail course, ballast and median continue to the road's
+end plane (`HexTile.ROAD_END_REACH`). Buffer stops and train snapping read that same
+extended course. Middle keeps its full width to the end; Beside keeps its lateral
+offset there. Standalone rail endings retain their existing reach.
+
+Road masks, scatter, bridge slabs, bridge mouths, tunnel floors and terminal support
+consume the same corridor width. Ramp grading spans the carried width while retaining
+shared edge heights. Conventional railway cross-sections and conventional trains are
+scaled by 1.3; route centre paths, maglev guideways and maglev vehicles are unchanged.
+These changes use the existing road material and rail vertex colours.
+
+The editable `data/boards/examples/Road and Rail Junctions.board2` fixture contains
+all 64 exit masks for roads, rails, Middle and Beside corridors, plus mixed crossings,
+triangle layouts, rotated Seaport junctions, parking, trees, bridges and tunnels.
+`GpuRoadJunctionFixtureSmokeTest` captures each group and the original Seaport board;
+`BoardInfrastructureModeTest` checks shared geometry across graphics modes.
+For a focused native review, `-Dmegamek.gpu.fixtureGroups=seaport-board,width-oblique`
+selects capture groups; omitting it renders the complete fixture.
 
 `RailCorridorTest` covers layer matching, persistence, flips, run propagation, stops
 and riders. `BoardRoadRailTest` covers widths, markings, crossings, wheel wear and
@@ -170,6 +233,19 @@ At fitted concrete edges, level approaches extend to the actual boundary across 
 full width; the existing ground triangles trim the paint into the diagonal join. Road
 masks cover their complete footprint instead of cropping to the original hex box, so
 shifted terrain boundaries cannot leave strips of bare ground between connected roads.
+Roads entering a roadless concrete apron end flush at its fitted edge. Through-roads
+and roundabouts retain their full width when their sides cross a neighbouring concrete
+edge, and explicitly authored roads on concrete keep their paint. Road clearance
+preserves the fitted boundary shared by both surfaces.
+At a roadless concrete entrance, markings stop one lane width plus the shoulder
+before that boundary. A stop bar intersecting this clearance is omitted whole rather
+than leaving a short fragment. This also applies to graded concrete entrances.
+Apron entrances do not count as road junction arms for either markings or physical
+stop signs and signals; a genuine junction of three remaining roads keeps its controls.
+Connected bridge decks above concrete remain road continuations. Once the scene's
+concrete fit is available, generated ground controls use the same final stop approaches
+as the paint, including skewed entrances and rail crossings. Authored objects and deck
+controls keep their existing ownership.
 
 Centre-line dashes are anchored at the borders: every border a road crosses sits in the
 middle of a gap, seen from both hexes, and a road between two borders fits whole dashes.
@@ -263,18 +339,22 @@ approach uses its deck height and the existing connection checks. Unconnected ro
 retain the cliff instead of inventing movement connections.
 
 Natural cut/fill uses the shared cliff profile and lateral shoulders. Concrete keeps
-engineered slabs and retaining walls. `BoardRampMesh` can remove redundant interior
+engineered slabs and retaining walls. A roadless concrete apron receives each incline
+directly, without inventing connecting bends that could put a retaining wall across
+an approach. `BoardRampMesh` can remove redundant interior
 samples, but must retain shared boundaries, the center and the curved carriageway.
 Contact queries choose a containing triangle before using an edge-tolerance fallback.
-Raised bridge approaches are one closed concrete block spanning both insets, built by
+Raised bridge approaches form a closed concrete support spanning both insets, built by
 `BoardBridgeFooting`. The underlying road bank and shoreline retain their own geometry.
-The block owns the ramp's carriageway and straight retaining sides, and the bridge
-retains its authored rails above it. Those rails continue to the road inset, with the
+The deck half uses `BoardBridgeMesh`'s actual carriageway and slab outlines, clipped
+to its approach grade. Its retaining walls follow the curve, so the ramp cannot
+cut across the road or protrude beyond the parapets. The bank half meets the same
+mouth and the bridge retains its generated rails above the support. Those rails continue to the road inset, with the
 existing `bridge-terminal` GLB wedges on the flat road beyond the base. The level centre
 of the bridge remains open below. The block's faces serve both road paint and picking;
 `BoardBridgeSlope` omits the generated slab inside that block to avoid overlapping faces.
-Descending approaches still cut the road bank, with concrete on the cut faces and
-ground cover excluded from those faces.
+Descending approaches cut the natural road bank. Their exposed terrain keeps its
+native material; the bridge footing owns the actual concrete structure.
 
 At shifted shorelines, walls compare road and bank heights at corresponding edge
 parameters in each surface's original profile. The wall then joins the ramp's emitted
@@ -308,7 +388,8 @@ The stored type selects manufactured, natural or implicit geometry; natural span
 `BoardBridgeMesh` generates the built slab and kerbs from the road footprint and the
 actual on-deck rail courses, including explicit junction choices and unfinished tracks.
 `BoardBridgeTruss` follows that boundary with continuous chords and fitted support panels.
-Members stop at the exact local hex boundary, with caps closing any cuts. Steel fascia
+Members meet at connected exit planes, with caps closing cuts; outside shoulders may
+extend across inactive hex edges instead of pinching the deck. Steel fascia
 replaces the concrete side faces it covers so the two materials do not fight at one plane.
 Road-only five/six-way spans keep their raised roundabout island; a span carrying rail has
 an open center. The rail curves themselves remain the `RailRoute` courses.
@@ -317,7 +398,7 @@ Middle and beside road/rail corridors share one centered, wide structural footpr
 Moving the track beside the road changes the surface courses, not the position of the
 slab or its outside barriers. Ending a track beside a continuing road retains its buffer
 stop without building a separate enclosure. Wide ramp profiles include the outer
-shoulders; road paint, central ballast and yellow separators continue onto the bank ramp.
+shoulders; road paint, central ballast and white separators continue onto the bank ramp.
 At a taper, truss chords and braces follow the exposed boundary while posts retain
 structural panel spacing. Curvature subdivisions must not each add a full-height post:
 that closes the open truss into a dense red wall.
@@ -346,6 +427,13 @@ ends retain the ordinary material transition. At a bare bank, rails taper after 
 are supported and the material apron blends into the existing bank triangles, except on
 a bank drawn as pavement.
 The physical span remains opaque.
+
+At a curved road connection, the landing, parapets and extended paint follow the
+bank road's existing course. Parapet offsets interpolate the course tangents, while
+the terminal GLBs rotate as rigid blocks instead of bending with the slab. The
+level road beyond a curved ramp remains its sole asphalt carrier; adding another
+flat slab there would overlap its markings and tyre wear. A built parapet also
+replaces an ordinary retaining panel when both occupy the same landing.
 
 A built bridge meeting a dry bank one level below its deck uses the same full solid
 ramp with or without a road or rail. The slope spans both hex insets; adding or

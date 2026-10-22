@@ -43,7 +43,15 @@ rebuilds the affected span and its adjoining banks, including across chunk bound
 
 ## Geometry and existing terrain
 
-`BoardNaturalBridge` builds a separate hollow shell with curved, uneven outlines, broad bank shoulders,
+In Classic graphics, `BoardNaturalBridge` uses a normal six-corner hex cap whose centre
+stays at deck height and whose exit sectors slope to the adjoining banks, including
+banks without roads. Connected caps derive the same shared corner heights. The cap
+uses ordinary dry tileset artwork matching the span's surface. The arch remains hollow,
+so an angled view reveals the passage beneath. The installed shell supplies drawing,
+picking and road support in both normal and Tactical View. Road and rail courses are
+shared with Enhanced; the natural terrain envelope is the deliberate visual difference.
+
+In Enhanced graphics, `BoardNaturalBridge` builds a separate hollow shell with curved, uneven outlines, broad bank shoulders,
 an eroded cap and a thick, asymmetric arch underneath. Rounded side strata bulge between the chipped
 top and recessed underside. Shared terrain normal smoothing joins the broad rock facets; the surface
 engine supplies photographic albedo, normal maps, geology, weather response and material batches.
@@ -62,16 +70,16 @@ through the whole bank. Walkable banks also fit the finished top, ignoring decor
 and underside inside the cliff rather than fitting only its upper rim. Connected sections share mouth
 corners, underside clearance and arch support influence, and omit internal end walls across mixed LODs.
 
-Where both exits around a hex corner rest on ground (an abutment) or on a joined natural span, and so do
+In Enhanced graphics, where both exits around a hex corner rest on ground (an abutment) or on a joined natural span, and so do
 those of every span joined there, the rock closes that corner instead of curving away from it
-(`BoardNaturalBridge.closes`). Every span at the corner then decides alike, so their outlines meet: a joint
-spans its whole shared edge out to the lattice corner, which all of them build at one height (the bank's top
-beside a bank both rest on, else the joint's; three joined spans take their mean). Beside ground, the joint's
-edge runs on along its line into that ground's rounded-off corner, whose cliff recedes up to about eight metres
-there, as a small tongue built apart from the centre's fan; a bank mouth reaching across that line is cut
-where it crosses it, so the spans never overlap. Between two grounds, a lone span seats the corner as deep in
-them as its mouths. Shared edges have no internal walls. An open corner keeps its curved, eroded rim, and at a
-joint that rim leaves square to the shared edge, so joined silhouettes continue into each other without a notch.
+(`BoardNaturalBridge.closes`). Every span at the corner then decides alike, so their outlines meet: the lattice
+corner replaces a joint mouth's corner that would overshoot it, and all of them build it at one height (the
+bank's top beside a bank both rest on, else the joint's; three joined spans take their mean). Beside ground,
+the joint's edge runs on along its line into that ground's rounded-off corner, whose cliff recedes up to about
+eight metres there: a bank mouth reaching across that line is cut where it crosses it, so the spans never
+overlap, and a shallower mouth gets a small tongue out to the line, built apart from the centre's fan. Between
+two grounds, a lone span ends both wide mouths on the corner's ray and seats the corner there as deep as they
+reach. Shared edges have no internal walls. An open corner keeps its curved, eroded rim.
 
 Only the exposed rim erodes. Mouths, joints and closed corners keep the plane they share, and the erosion
 fades in over the first few metres of exposed rim. The top's spokes carry the rim heights inwards blended

@@ -105,6 +105,35 @@ class RailCorridorTest {
     }
 
     @Test
+    void sharedTerminiKeepTheirRoadEndPlaneForTracksStopsAndSnappingInEveryDirection() {
+        for (int d = 0; d < 6; d++) {
+            int side = 1 << d;
+            Hex hex = new Hex(0, "road:1:" + side + ";rail:1:" + side, "");
+            var marker = RailRoute.find(hex, RailRoute.Kind.RAIL);
+            float[] edge = RailRoute.border(d);
+            float length = (float) Math.hypot(edge[0], edge[1]);
+            for (int offset : new int[] { -1, 0, 1 }) {
+                var corridor = new RailRoute.Corridor(side, offset == 0 ? 0 : side, offset > 0 ? side : 0);
+                var line = RailRoute.lines(side, 0, corridor).getFirst();
+                float[] end = line.at(0), border = line.at(1);
+                assertEquals(-.8f * length, (end[0] * edge[0] + end[1] * edge[1]) / length, .001f,
+                      "The road and railway close on the same plane, direction " + d);
+                var snapped = RailRoute.snap(hex, marker, end[0], end[1], 0, corridor);
+                assertEquals(end[0], snapped.x(), .001f);
+                assertEquals(end[1], snapped.y(), .001f);
+                var stop = RailRoute.stops(side, corridor).getFirst();
+                assertEquals(RailRoute.STOP_DEPTH, Math.hypot(stop.x() - end[0], stop.y() - end[1]), .001f);
+                assertEquals(0, (stop.x() - end[0]) * (border[1] - end[1])
+                      - (stop.y() - end[1]) * (border[0] - end[0]), .001f,
+                      "The stop stands on the same rendered and snappable course");
+            }
+            assertEquals(0, RailRoute.lines(side, 0).getFirst().at(0)[0], .001f);
+            assertEquals(0, RailRoute.lines(side, 0).getFirst().at(0)[1], .001f,
+                  "Routes without a road corridor, including maglev, retain their authored endpoints");
+        }
+    }
+
+    @Test
     void disagreementFallsBackToMiddleAndFlipRetainsPhysicalPlacement() {
         Board board = line(false);
         RailRoute.beside(board.getHex(AT), false, 73);

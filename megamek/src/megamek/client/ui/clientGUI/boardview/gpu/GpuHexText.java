@@ -156,9 +156,10 @@ final class GpuHexText implements Disposable {
                           .ext(centerX + BoardGeometry.width(), centerY + BoardGeometry.width(), z + 1);
                     font.getData().setScale(label.font().getSize2D() / GpuBoardSkin.FONT_RESOLUTION);
                     int argb = label.argb();
-                    // Preserve deliberately colored labels and their outline. Neutral ink adapts without rebuilding.
-                    boolean neutral = (argb >>> 16 & 255) == (argb >>> 8 & 255)
-                          && (argb >>> 8 & 255) == (argb & 255);
+                    // Space always uses white ink and its dark outline; other neutral ink adapts without rebuilding,
+                    // and deliberately colored labels retain their color.
+                    float contrast = tile.backdrop() == BoardBackdrop.SPACE ? 2
+                          : (argb >>> 16 & 255) == (argb >>> 8 & 255) && (argb >>> 8 & 255) == (argb & 255) ? 1 : 0;
                     font.setColor(((argb >>> 16) & 255) / 255f, ((argb >>> 8) & 255) / 255f,
                           (argb & 255) / 255f, ((argb >>> 24) & 255) / 255f);
                     GlyphLayout layout = new GlyphLayout(font, label.text());
@@ -184,11 +185,11 @@ final class GpuHexText implements Disposable {
                         rings.clear();
                         rings.addText(new GlyphLayout(outline, label.text(), ringColor, 0, Align.left, false),
                               left - GpuBoardSkin.OUTLINE * outline.getData().scaleX, top);
-                        Chunk.add(chunk.outlines(), rings, neutral ? -1 : 0, tile);
+                        Chunk.add(chunk.outlines(), rings, -contrast, tile);
                     }
                     glyphs.clear();
                     glyphs.addText(layout, left, top);
-                    Chunk.add(chunk.pages(), glyphs, neutral ? 1 : 0, tile);
+                    Chunk.add(chunk.pages(), glyphs, contrast, tile);
                 }
             }
         } finally {
@@ -349,6 +350,11 @@ final class GpuHexText implements Disposable {
     /** Prepared per-hex ink is borrowed for this draw; glyph geometry and depth/occlusion policy are unchanged. */
     void render(SpriteBatch batch, BoardCamera boardCamera, Texture depth, Texture unitDepth, int bottom,
           GpuAtmosphere atmosphere) {
+        render(batch, boardCamera, depth, unitDepth, bottom, atmosphere, false);
+    }
+
+    void render(SpriteBatch batch, BoardCamera boardCamera, Texture depth, Texture unitDepth, int bottom,
+          GpuAtmosphere atmosphere, boolean wireframe) {
         if (groups.isEmpty()) { return; }
         Camera camera = boardCamera.camera;
         ShaderProgram previous = batch.getShader();
@@ -368,8 +374,8 @@ final class GpuHexText implements Disposable {
             } else {
                 Gdx.gl.glDisable(GL20.GL_BLEND);
             }
-            shader.setUniformf("u_contrastEnabled", 0);
-            if (!tactical && atmosphere != null) { atmosphere.bindContrast(shader, 3); }
+            shader.setUniformf("u_contrastEnabled", !tactical && wireframe ? -1 : 0);
+            if (!tactical && !wireframe && atmosphere != null) { atmosphere.bindContrast(shader, 3); }
             depth.bind(1);
             if (unitDepth != null) { unitDepth.bind(2); }
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);

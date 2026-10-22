@@ -35,12 +35,32 @@ full-detail chunk (`GpuGroundCover.plant`), and the installed tile keeps them.
 Each instance stores position plus a stable sample rank. Density selects an
 ordered prefix by rank: existing roots do not move when density changes.
 
-Beside same-level open water, standing grass thins smoothly over the last three
-metres of dry land before the bare bank. Planting uses the nearest adjoining
+Beside same-level positive-depth open water, standing grass thins smoothly over
+the last three metres of dry land before the bare bank. Planting uses the nearest adjoining
 shore edge and the candidate's existing random chance, after the usual cover
 threshold, so the whole band fades rather than ending at another cutoff. Inland
 roots and surviving positions/ranks stay unchanged. This is CPU preparation only:
 the existing instance layout, blade shaders and draw passes are unchanged.
+
+Depth-zero coasts instead grow grass on their exposed finished banks, fading by
+height above the local waterline and leaving a bare wet toe. Curved shore and bed
+triangles can cross the hex edge; neighboring owners share that support while
+each root stays in its canonical hex. The vegetation snapshot carries the same
+per-vertex water reference as the bank material, including descending streams,
+without retaining terrain builders. A root is also checked against the actual
+water triangles, whose diagonals can differ from the bank's on descending streams.
+Grass uses the neighboring land's sampled
+cover, so a water tile's default grass family cannot green a desert coast.
+Frozen, molten and positive-depth water retain their existing vegetation rules;
+shallow wetland banks remain reed-owned.
+
+At dry slope feet and crests, density follows interpolated terrain shading normals
+instead of rejecting whole triangles. Each hex also receives the finished slope
+triangles that extend into it from higher natural neighbours. Roots still belong
+to their own hex, so this fills the formerly bare green strips without overlapping
+two hexes' grass. The terrain worker prepares this support once, retaining only
+triangles and normals for repainting; it adds no per-frame terrain work. Restored
+grass does add blade instances in those strips.
 
 No cover grows through paint. `BoardPlants` builds `BoardDecals.Opacity` once
 per hex from the decals painting its ground (each image's alpha at the decal's
@@ -67,7 +87,7 @@ keeps its grass. This is decided when the hex is built, never per frame: units
 and meeples stand in the grass and never clear or bend it.
 
 Two-level grassy banks include a shallow intermediate shoulder in their canonical
-terrain profile. It admits roots through the existing slope filter, using the same
+terrain profile. Its grass density follows the same smooth slope fade, using the same
 finished triangles as support and picking. Its ground material remains visible when
 blade density fades at a distance, so both earth faces still read from above.
 

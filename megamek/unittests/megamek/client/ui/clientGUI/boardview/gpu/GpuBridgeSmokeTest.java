@@ -35,6 +35,75 @@ import org.junit.jupiter.api.Test;
 class GpuBridgeSmokeTest {
     private static final Coords CENTER = BoardSurfaceBlendTest.CENTER;
 
+    /** The shipped Canals bridge turns on both banks before its concrete approaches meet the straight streets. */
+    @Test
+    void canalsCurvedBridgeEntrancesRenderInBothGraphicsModes() throws Exception {
+        var scene = GpuRoadSourceTest.scene("Templates/Canals.board");
+        var entrances = List.of(new Coords(10, 11), new Coords(7, 12));
+        assertEquals(17, BoardBridge.feature(scene.tile(entrances.get(0))).bridgeExits(), "1112 turns onto bank 1111");
+        assertEquals(10, BoardBridge.feature(scene.tile(entrances.get(1))).bridgeExits(), "0813 turns onto bank 0814");
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 960);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var weather = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
+                      0, 0, new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 0));
+                var frame = new GpuReviewFrame(weather);
+                try {
+                    for (boolean classic : new boolean[] { false, true }) {
+                        var terrain = new GpuTerrain();
+                        try {
+                            terrain.setColumns(classic);
+                            var camera = new BoardCamera();
+                            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                            camera.setIsometric(true);
+                            camera.camera.zoom = .23f;
+                            camera.center(BoardGeometry.center(entrances.getFirst(), 1)
+                                  .lerp(BoardGeometry.center(entrances.getLast(), 1), .5f));
+                            frame.prepare(terrain, camera, scene);
+                            terrain.update(scene);
+                            terrain.animate(0, List.of());
+                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            assertEquals(classic, terrain.columns());
+                            frame.render(terrain, camera, scene);
+                            String mode = classic ? "classic" : "enhanced";
+                            GpuReviewFrame.save(new File(output, "canals-" + mode + "-overview.png"));
+                            // Remove neighbouring buildings from the close inspection without altering the
+                            // installed bridge, approach solids, road paint or picking geometry.
+                            terrain.setFluffHidden(true);
+                            for (var at : entrances) {
+                                int direction = at.equals(entrances.getFirst()) ? 0 : 3;
+                                var bank = scene.tile(at.translated(direction));
+                                assertEquals(9, bank.roadExits(), "The real bank is a straight north/south road");
+                                var focus = BoardGeometry.center(at, 1)
+                                      .lerp(BoardGeometry.center(bank.coords(), bank.elevation()), .5f);
+                                for (int view : new int[] { -1, 70, 250 }) {
+                                    camera.setIsometric(view >= 0);
+                                    if (view >= 0) { camera.orbit(view - camera.azimuth(), 0); }
+                                    camera.camera.zoom = .085f;
+                                    camera.center(focus);
+                                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                    frame.render(terrain, camera, scene);
+                                    String angle = view < 0 ? "top" : "side-" + view;
+                                    GpuReviewFrame.save(new File(output, "canals-" + mode + "-"
+                                          + at.getBoardNum() + "-" + angle + ".png"));
+                                }
+                            }
+                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        } finally { terrain.dispose(); }
+                    }
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Canals curved bridge entrances", failure.get()); }
+    }
+
     @Test
     void koziceRaisedBridgeApproachesRenderWithoutHoles() throws Exception {
         var scene = GpuRoadSourceTest.scene("unofficial/Strategoslevel3/32x17 (CDS) Kozice Valley Grain Mills.board");
@@ -663,7 +732,8 @@ class GpuBridgeSmokeTest {
             // Generate the opposite end/joint choices at the same grade. Rays must not pick their absent steel;
             // a face occupying the same place in the installed shape is shared and cannot distinguish the choice.
             var alternateDeck = new BoardBridge.Deck(deck.kind(), deck.roadExits(), deck.exits(), deck.natural(),
-                  deck.neighbors(), deck.surface(), deck.rises(), deck.piers(), deck.colours(), deck.joints() ^ deck.exits());
+                  deck.neighbors(), deck.surface(), deck.rises(), deck.piers(), deck.colours(), deck.joints() ^ deck.exits(),
+                  deck.corridor(), deck.cornerRises(), deck.rail());
             var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, new java.util.HashMap<>());
             var alternate = BoardBridgeSlope.build(tile, alternateDeck, footing);
             float reach = 30 * s, tolerance = .05f * s;
@@ -941,6 +1011,12 @@ class GpuBridgeSmokeTest {
         var pavement = GpuRoads.patches(roadTile, road).stream()
               .filter(patch -> patch.texture().equals("roads/asphalt") && !patch.blended()).findFirst().orElseThrow();
         var triangles = GpuRoads.drape(roadTile, surface, pavement);
+        var surfaces = new java.util.HashMap<Coords, BoardSurface>();
+        surfaces.put(roadTile.coords(), surface);
+        var footing = BoardBridgeFooting.build(scene, scene.tile(at), TerrainLod.FULL, surfaces);
+        // The installed bank landing carries paint across a recessed shore before meeting the road surface.
+        triangles.addAll(GpuRoads.deck(pavement, footing.shape(), GpuRoads.SURFACE_LIFT));
+        float coatOffset = (pavement.lift() + .01f - GpuRoads.SURFACE_LIFT) * BoardGeometry.hexScale();
         for (float lateral : new float[] { -6, 0, 6 }) {
             Vector3 boundary = new Vector3(gate).mulAdd(edgeStep, lateral);
             Vector3 bridgePoint = new Vector3(boundary).mulAdd(inward, .05f);
@@ -949,19 +1025,24 @@ class GpuBridgeSmokeTest {
             assertEquals(at, hit.coords());
             float deck = 200 - (float) Math.sqrt(hit.distance());
             Vector3 roadPoint = new Vector3(boundary).mulAdd(inward, -.05f);
+            assertTrue(pavement.shape().contains((roadPoint.x - roadCenter.x) / BoardGeometry.hexScale(),
+                  (roadPoint.y - roadCenter.y) / BoardGeometry.hexScale()), "Road paint reaches the bridge mouth");
             Ray ray = new Ray(new Vector3(roadPoint.x, roadPoint.y, 200), new Vector3(0, 0, -1));
             Vector3 intersection = new Vector3();
-            boolean found = false;
+            float roadHeight = Float.NEGATIVE_INFINITY;
             for (var triangle : triangles) {
                 if (Intersector.intersectRayTriangle(ray, triangle.a(), triangle.b(), triangle.c(), intersection)) {
-                    assertEquals(intersection.z, deck, .001f,
-                          "Bridge " + at.getBoardNum() + " must be flush at exit " + direction + ", offset " + lateral);
-                    found = true;
-                    break;
+                    roadHeight = Math.max(roadHeight, intersection.z);
                 }
             }
-            assertTrue(found, "The road must reach bridge exit " + direction + " at lateral offset " + lateral);
-            Vector3 railPoint = new Vector3(bridgePoint).mulAdd(inward, 5).mulAdd(across, 8.25f - lateral);
+            assertTrue(Float.isFinite(roadHeight),
+                  "The road must reach bridge exit " + direction + " at lateral offset " + lateral);
+            assertEquals(deck + coatOffset, roadHeight, .001f,
+                  "Bridge " + at.getBoardNum() + " must be flush at exit " + direction + ", offset " + lateral);
+            // Sample the shared mouth: farther inside, a turning parapet leaves the straight approach axis.
+            Vector3 railPoint = new Vector3(gate)
+                  .mulAdd(edgeStep, BoardRoad.Kind.PAVED.halfWidth + BoardBridge.SHOULDER / 2)
+                  .mulAdd(inward, .05f);
             hit = terrain.hit(scene, new Ray(new Vector3(railPoint.x, railPoint.y, 200), new Vector3(0, 0, -1)));
             assertNotNull(hit);
             assertEquals(at, hit.coords());

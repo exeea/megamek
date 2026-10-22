@@ -21,7 +21,6 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
-import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -30,12 +29,10 @@ import megamek.common.board.Coords;
 /**
  * The Classic graphics' terrain, as the libGDX board drew it: every hex a plain column at its
  * level, topped by its Saxarba tileset art with the cliff-top rim along each drop and walled in its material down to
- * its lower neighbours or the board's floor. A road meeting a hex of another level ramps through the edge between them,
- * and a bridge's art lies on its deck. Open liquid moves in its animated frames above a recessed bed and pours into the
- * liquid below. Natural shores round into land-textured banks and sandy shallows; concrete quays keep their fitted
- * vertical edges. This class holds the column geometry and material treatment: {@link GpuTerrain} builds a Classic chunk
- * ({@link #write}) on its terrain workers, and draws, shadows, picks and drapes it as it does its 3D relief.
- * Concrete outlines and adjacent water share the fitted corners of {@link BoardConcrete} with the sculpted view.
+ * its lower neighbours or the board's floor. Only connected road and rail inclines cut the flat top, using the shared
+ * route profiles with vertical sides. Generated bridges retain their own shapes; natural bridges keep a normal hex cap
+ * over their hollow passage. Liquid retains its hex outline above a recessed bed. Drawing, tactical overlays and picking
+ * all consume this same column geometry, independently of the Enhanced terrain's sculpted banks and cliffs.
  */
 final class GpuTilesetTerrain {
     /** Isolates graded column artwork from props and animated liquids with otherwise identical materials. */
@@ -52,9 +49,6 @@ final class GpuTilesetTerrain {
     private static final float DECK_LIFT = .16f;
     /** Liquid moves this far above the surface, in hex-scale units. */
     private static final float LIQUID_LIFT = .05f;
-    /** Rounded natural banks from the libGDX board; open mouths and fitted quays retain their full width. */
-    private static final int SHORE_SEGMENTS = 6;
-    private static final float SHORE_WIDTH = 8, SHORE_FADE = 5, SUBMERGED_BANK = 6;
     /**
      * As the libGDX board's falls: hanging this far clear of the wall, in hex-scale units, their art repeating every 48
      * units down and 24 along at hex scale 1, the lip and the foot turning in four steps each.
@@ -84,11 +78,13 @@ final class GpuTilesetTerrain {
      * {@code art} gives a hex's column art (null without any), {@code deck} the bridge art, or null. Grows
      * {@code bounds} by everything written. CPU only: the shapes are emitted on a terrain worker.
      */
-    static void write(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface, BoardConcrete concrete,
+    static void write(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
           BoardFlow.Current current, Function<Coords, TextureRegion> art, TextureRegion deck, GpuAssets assets,
           BiConsumer<Material, Consumer<MeshPartBuilder>> opaque, BiConsumer<Material, Consumer<MeshPartBuilder>> liquid,
           Map<String, GpuTerrain.LiquidSurface> animations, BoundingBox bounds) {
         Coords coords = tile.coords();
+        // Road ramps use their actual normals; the remaining column top is horizontal.
+        Map<Vector3, Vector3> normals = BoardSurface.vertexNormals(surface.top());
         String rock = tile.liquid().molten() ? "terrain/classic/rock" : null;
         for (BoardSurface.Face face : surface.faces()) {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
@@ -100,7 +96,7 @@ final class GpuTilesetTerrain {
             Coords source = face.landEdge() < 0 ? coords : coords.translated(BoardGeometry.edgeDirection(face.landEdge()));
             TextureRegion region = art.apply(source);
             opaque.accept(material(region == null ? null : region.getTexture()),
-                  mesh -> artTriangle(mesh, coords, face, region, concrete));
+                  mesh -> artTriangle(mesh, coords, face, region, normals));
             if (face.finish() == BoardSurface.Finish.SHORE) {
                 Material sand = material(assets.material(rock != null ? rock : "terrain/classic/sand"));
                 sand.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
@@ -120,7 +116,7 @@ final class GpuTilesetTerrain {
             material.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA), FloatAttribute.createAlphaTest(.5f));
             for (BoardSurface.Face face : deck(tile)) {
                 bounds.ext(face.a()).ext(face.b()).ext(face.c());
-                opaque.accept(material, mesh -> artTriangle(mesh, coords, face, deck, null));
+                opaque.accept(material, mesh -> artTriangle(mesh, coords, face, deck, Map.of()));
             }
         }
         if (tile.liquid().present() && !tile.frozen()) {
@@ -128,7 +124,7 @@ final class GpuTilesetTerrain {
             var layer = tile.liquid().molten() ? opaque : liquid;
             TextureRegion frame = new TextureRegion(assets.liquid(source, 0));
             Material pool = liquid(new Liquid(tile.liquid(), source, current, false), assets, animations);
-            layer.accept(pool, mesh -> pool(mesh, tile, surface.water(), frame, concrete));
+            layer.accept(pool, mesh -> pool(mesh, tile, surface.water(), frame));
             if (!surface.waterfalls().isEmpty()) {
                 Material fall = liquid(new Liquid(tile.liquid(), source, BoardFlow.Current.STILL, true), assets, animations);
                 for (BoardSurface.Side side : surface.waterfalls()) { layer.accept(fall, mesh -> fall(mesh, tile, side)); }
@@ -141,6 +137,29 @@ final class GpuTilesetTerrain {
         return tile.tileset() != null ? tile.tileset() : tile.ground();
     }
 
+    /** A natural cap carries dry terrain, never the water or legacy bridge sprite beneath it. */
+    static BoardScene.Pixels naturalBridgeArt(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck) {
+        if (deck == null || !deck.natural()) { return null; }
+        for (int d = 0; d < 6; d++) {
+            var bank = scene.neighbor(tile, d);
+            if (BoardBridge.abutment(tile, bank, d) && bank.surface() == deck.surface() && art(bank) != null) {
+                return art(bank);
+            }
+        }
+        return null;
+    }
+
+    /** The same installed shell supplies the Classic hex cap, its road receiver and picking triangles. */
+    static void naturalBridgeTop(BoardScene.Tile tile, BoardBridge.Shape shape, TextureRegion art,
+          BiConsumer<Material, Consumer<MeshPartBuilder>> opaque) {
+        Material material = material(art == null ? null : art.getTexture());
+        for (var facet : shape.facets()) {
+            if (facet.part() != BoardBridge.Part.TOP) { continue; }
+            var face = new BoardSurface.Face(facet.a(), facet.b(), facet.c(), BoardSurface.Finish.TOP);
+            opaque.accept(material, mesh -> artTriangle(mesh, tile.coords(), face, art, Map.of()));
+        }
+    }
+
     /** Tactical columns retain the authored pit artwork at its game level, without the sculpted view's recess. */
     private static float surfaceZ(BoardScene.Tile tile) {
         return tile.ultraSublevel() ? tile.elevation() * BoardGeometry.level() : BoardGeometry.surfaceZ(tile);
@@ -150,73 +169,53 @@ final class GpuTilesetTerrain {
         return tile.liquid().present() && !tile.frozen() ? BoardGeometry.groundZ(tile) : surfaceZ(tile);
     }
 
-    private static boolean naturalBank(BoardScene.Tile tile, BoardScene.Tile neighbor) {
-        return tile.liquid().present() && !tile.frozen() && neighbor != null && !neighbor.liquid().present()
-              && neighbor.surface() != BoardScene.Surface.CONCRETE;
+    /** Only rendered routes and their paint receivers need a prepared road surface. */
+    static boolean infrastructure(BoardScene scene, BoardScene.Tile tile) {
+        return tile.wayExits() != 0 || BoardBridge.feature(tile) != null
+              || tile.features().stream().anyMatch(BoardRail::route)
+              || !BoardRoad.nearby(scene, tile).isEmpty() || BoardSurface.columnRamps(scene, tile) != 0
+              || !BoardBridge.approaches(scene, tile).isEmpty();
     }
 
-    /**
-     * A plain column at the hex's surface. Where a road leaves it toward a hex of another level, as {@link BoardSurface}
-     * decides, it keeps a hub at its own level and ramps a strip of the road to the edge, to the height both hexes meet
-     * at there, between banks; the walls leave that mouth open. Open liquid falls over each edge above the open liquid
-     * it joins.
-     */
+    /** The nominal column and its actual route cuts are shared by artwork, tactical overlays and picking. */
+    static BoardTacticalGeometry.Surface column(BoardScene scene, BoardScene.Tile tile, float floor,
+          BoardSurface source, Map<Coords, BoardSurface> sources) {
+        if (tile.liquid().present()) { return plainColumn(scene, tile, floor); }
+        if (source == null || !source.columns()) { source = BoardSurface.columns(scene, tile, TerrainLod.FULL); }
+        var top = List.copyOf(source.groundFaces());
+        return new BoardTacticalGeometry.Surface(top, List.of(), top, List.of(),
+              List.copyOf(source.walls(scene, floor, sources)), List.of());
+    }
+
     static BoardTacticalGeometry.Surface column(BoardScene scene, BoardScene.Tile tile, float floor) {
+        return column(scene, tile, floor, null, Map.of());
+    }
+
+    /** Liquid also retains its complete hex footprint; depth is represented by a plain recessed bed. */
+    private static BoardTacticalGeometry.Surface plainColumn(BoardScene scene, BoardScene.Tile tile, float floor) {
         float top = surfaceZ(tile), solidTop = solidZ(tile);
         Vector3 center = BoardGeometry.center(tile.coords(), 0);
         center.z = top;
-        int ramps = BoardSurface.ramps(scene, tile);
-        BoardConcrete concrete = BoardConcrete.of(scene);
-        Vector3[] corners = new Vector3[6], hub = new Vector3[6];
+        Vector3[] corners = new Vector3[6];
         for (int edge = 0; edge < 6; edge++) {
-            corners[edge] = concrete.corner(tile.coords(), edge);
+            corners[edge] = BoardGeometry.corner(tile.coords(), 0, edge);
             corners[edge].z = top;
-            hub[edge] = ramps == 0 ? corners[edge] : new Vector3(corners[edge]).lerp(center, .5f);
         }
         List<BoardSurface.Face> tops = new ArrayList<>(), walls = new ArrayList<>();
         List<BoardSurface.Side> falls = new ArrayList<>();
-        for (int edge = 0; edge < 6; edge++) { triangle(tops, center, hub[edge], hub[(edge + 1) % 6], BoardSurface.Finish.TOP); }
         for (int edge = 0; edge < 6; edge++) {
-            int next = (edge + 1) % 6, direction = BoardGeometry.edgeDirection(edge), reverse = (direction + 3) % 6;
-            BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
+            int next = (edge + 1) % 6, direction = BoardGeometry.edgeDirection(edge);
+            var neighbor = scene.neighbor(tile, direction);
             Vector3 a = corners[edge], b = corners[next];
-            float mouth = BoardSurface.ROAD_MOUTH * BoardGeometry.hexScale() / a.dst(b);
-            Vector3 left = new Vector3(a).lerp(b, .5f - mouth), right = new Vector3(a).lerp(b, .5f + mouth);
-            float road = top;
-            if ((ramps & 1 << direction) != 0) {
-                road = BoardSurface.roadEdgeElevation(tile, neighbor, direction) * BoardGeometry.level();
-                Vector3 innerLeft = new Vector3(hub[edge]).lerp(hub[next], .5f - 2 * mouth);
-                Vector3 innerRight = new Vector3(hub[edge]).lerp(hub[next], .5f + 2 * mouth);
-                Vector3 roadLeft = new Vector3(left.x, left.y, road), roadRight = new Vector3(right.x, right.y, road);
-                quad(tops, hub[edge], a, left, innerLeft, BoardSurface.Finish.TOP);
-                quad(tops, innerRight, right, b, hub[next], BoardSurface.Finish.TOP);
-                quad(tops, innerLeft, roadLeft, roadRight, innerRight, BoardSurface.Finish.TOP);
-                triangle(walls, innerLeft, left, roadLeft, BoardSurface.Finish.BANK);
-                triangle(walls, innerRight, roadRight, right, BoardSurface.Finish.BANK);
-            } else if (ramps != 0) {
-                quad(tops, hub[edge], a, b, hub[next], BoardSurface.Finish.TOP);
-            }
-            float across = neighbor == null ? floor : surfaceZ(neighbor);
-            float solidAcross = neighbor == null ? floor : solidZ(neighbor);
-            float roadTop = road == top ? solidTop : road;
-            float roadAcross = neighbor != null && (BoardSurface.ramps(scene, neighbor) & 1 << reverse) != 0
-                  ? BoardSurface.roadEdgeElevation(neighbor, tile, reverse) * BoardGeometry.level() : solidAcross;
-            // Natural shores supply their own raised rim and wall, including the taper at river mouths.
-            if (!naturalBank(tile, neighbor)) {
-                if (roadTop != solidTop || roadAcross != solidAcross) {
-                    wall(walls, tile, direction, a, left, solidTop, solidAcross);
-                    wall(walls, tile, direction, left, right, roadTop, roadAcross);
-                    wall(walls, tile, direction, right, b, solidTop, solidAcross);
-                } else {
-                    wall(walls, tile, direction, a, b, solidTop, solidAcross);
-                }
-            }
+            triangle(tops, center, a, b, BoardSurface.Finish.TOP);
+            wall(walls, tile, direction, a, b, solidTop, neighbor == null ? floor : solidZ(neighbor));
             if (open(tile, neighbor) && neighbor != null && !tile.frozen() && neighbor.elevation() < tile.elevation()) {
+                float across = surfaceZ(neighbor);
                 falls.add(new BoardSurface.Side(new Vector3(a), new Vector3(b), across, across, edge));
             }
         }
         boolean openWater = tile.liquid().present() && !tile.frozen();
-        List<BoardSurface.Face> water = openWater ? new ArrayList<>(tops) : List.of();
+        List<BoardSurface.Face> water = openWater ? List.copyOf(tops) : List.of();
         List<BoardSurface.Face> solid = tops;
         if (openWater) {
             solid = new ArrayList<>();
@@ -225,127 +224,10 @@ final class GpuTilesetTerrain {
                       new Vector3(face.b().x, face.b().y, solidTop), new Vector3(face.c().x, face.c().y, solidTop),
                       BoardSurface.Finish.BED));
             }
-            shore(scene, tile, corners, tops, solid, water, walls);
         }
         return new BoardTacticalGeometry.Surface(List.copyOf(tops), List.of(), List.copyOf(solid),
-              List.copyOf(water),
-              List.copyOf(walls), List.copyOf(falls));
+              water, List.copyOf(walls), List.copyOf(falls));
     }
-
-    /** One finished shoreline supplies the drawn liquid, dry banks, submerged slopes, picking and overlay support. */
-    private static void shore(BoardScene scene, BoardScene.Tile tile, Vector3[] corners, List<BoardSurface.Face> tops,
-          List<BoardSurface.Face> solid, List<BoardSurface.Face> water, List<BoardSurface.Face> walls) {
-        float scale = BoardGeometry.hexScale(), level = tile.elevation() * BoardGeometry.level();
-        float[] inset = new float[6];
-        boolean banks = false;
-        for (int edge = 0; edge < 6; edge++) {
-            if (naturalBank(tile, scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge))))) {
-                inset[edge] = SHORE_WIDTH * scale;
-                banks = true;
-            }
-        }
-        if (!banks) { return; }
-        Vector3[] line = shoreline(tile, corners, inset, BoardGeometry.waterZ(tile));
-        for (int edge = 0; edge < 6; edge++) { if (inset[edge] > 0) { inset[edge] += SUBMERGED_BANK * scale; } }
-        Vector3[] bed = shoreline(tile, corners, inset, BoardGeometry.groundZ(tile));
-        tops.clear();
-        water.clear();
-        float[] xy = new float[line.length * 2];
-        for (int i = 0; i < line.length; i++) { xy[2 * i] = line[i].x; xy[2 * i + 1] = line[i].y; }
-        var indices = new EarClippingTriangulator().computeTriangles(xy);
-        for (int i = 0; i < indices.size; i += 3) {
-            triangle(water, line[indices.get(i)], line[indices.get(i + 2)], line[indices.get(i + 1)], BoardSurface.Finish.TOP);
-        }
-        for (int edge = 0; edge < 6; edge++) {
-            if (inset[edge] == 0) { continue; }
-            int direction = BoardGeometry.edgeDirection(edge);
-            BoardScene.Tile land = scene.tile(tile.coords().translated(direction));
-            for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
-                int i = edge * SHORE_SEGMENTS + segment, j = (i + 1) % line.length;
-                Vector3 a = bankEdge(corners, inset, edge, segment / (float) SHORE_SEGMENTS, level);
-                Vector3 b = bankEdge(corners, inset, edge, (segment + 1f) / SHORE_SEGMENTS, level);
-                Vector3 lipA = shoreLip(line[i], a), lipB = shoreLip(line[j], b);
-                List<BoardSurface.Face> bank = new ArrayList<>();
-                quad(bank, a, b, lipB, lipA, BoardSurface.Finish.TOP);
-                quad(bank, lipA, lipB, line[j], line[i], BoardSurface.Finish.SHORE);
-                for (var face : bank) {
-                    var finished = new BoardSurface.Face(face.a(), face.b(), face.c(), face.finish(), edge);
-                    tops.add(finished);
-                    solid.add(finished);
-                }
-                quad(solid, line[i], line[j], bed[j], bed[i], BoardSurface.Finish.BANK);
-                wall(walls, tile, direction, a, b, solidZ(land));
-            }
-        }
-        tops.addAll(water);
-    }
-
-    /** The rim tapers to the unchanged water level at an open mouth, leaving no raised seam across the river. */
-    private static Vector3 bankEdge(Vector3[] corners, float[] inset, int edge, float t, float level) {
-        float start = inset[(edge + 5) % 6] > 0 ? 1 : Math.min(1, 3 * t);
-        float end = inset[(edge + 1) % 6] > 0 ? 1 : Math.min(1, 3 * (1 - t));
-        Vector3 point = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], t);
-        point.z = level - BoardGeometry.hexScale() * (1 - start * end);
-        return point;
-    }
-
-    private static Vector3 shoreLip(Vector3 water, Vector3 boundary) {
-        float distance = Vector3.dst(water.x, water.y, 0, boundary.x, boundary.y, 0);
-        Vector3 point = new Vector3(water).lerp(boundary,
-              distance == 0 ? 1 : Math.min(1, SHORE_FADE * BoardGeometry.hexScale() / distance));
-        point.z = boundary.z;
-        return point;
-    }
-
-    /** Offset closed corners, then round the bank with cubic curves. Shared open edges keep their exact endpoints. */
-    private static Vector3[] shoreline(BoardScene.Tile tile, Vector3[] corners, float[] inset, float z) {
-        Vector3[] anchors = new Vector3[6];
-        for (int edge = 0; edge < 6; edge++) {
-            int previous = (edge + 5) % 6;
-            Vector3 corner = corners[edge];
-            Vector3 n1 = new Vector3(corner).sub(corners[previous]).crs(Vector3.Z).nor();
-            Vector3 n2 = new Vector3(corners[(edge + 1) % 6]).sub(corner).crs(Vector3.Z).nor();
-            float determinant = n1.x * n2.y - n1.y * n2.x;
-            anchors[edge] = new Vector3(corner);
-            if (inset[previous] > 0 && inset[edge] > 0 && Math.abs(determinant) > .0001f) {
-                // Solve relative to the corner so the same shape is stable on large boards too.
-                anchors[edge].add((n1.y * inset[edge] - inset[previous] * n2.y) / determinant,
-                      (inset[previous] * n2.x - n1.x * inset[edge]) / determinant, 0);
-            }
-            anchors[edge].z = z;
-        }
-        Vector3[] result = new Vector3[6 * SHORE_SEGMENTS];
-        Vector3 center = BoardGeometry.center(tile.coords(), 0);
-        for (int edge = 0; edge < 6; edge++) {
-            int previous = (edge + 5) % 6, next = (edge + 1) % 6;
-            Vector3 a = anchors[edge], b = anchors[next];
-            Vector3 c1 = new Vector3(a).mulAdd(new Vector3(b).sub(anchors[previous]), 1f / 6);
-            Vector3 c2 = new Vector3(b).mulAdd(new Vector3(anchors[(edge + 2) % 6]).sub(a), -1f / 6);
-            // Mouth endpoints stay fixed, but the submerged curve must still recede below a lone bank edge.
-            float handle = a.dst(b) * inset[edge] / (3 * SHORE_WIDTH * BoardGeometry.hexScale());
-            if (inset[previous] == 0) {
-                c1.set(a).mulAdd(new Vector3(corners[edge]).sub(corners[previous]).crs(Vector3.Z).nor(), -handle);
-            }
-            if (inset[next] == 0) {
-                c2.set(b).mulAdd(new Vector3(corners[(edge + 2) % 6]).sub(corners[next]).crs(Vector3.Z).nor(), -handle);
-            }
-            float phase = tile.coords().getX() * 1.73f + tile.coords().getY() * 2.41f + edge;
-            for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
-                float t = segment / (float) SHORE_SEGMENTS, s = 1 - t;
-                Vector3 point = new Vector3(a).lerp(b, t);
-                if (inset[edge] > 0) {
-                    point.set(a).scl(s * s * s).mulAdd(c1, 3 * s * s * t)
-                          .mulAdd(c2, 3 * s * t * t).mulAdd(b, t * t * t);
-                    float ripple = (float) Math.sin(phase + t * Math.PI * 3) * 16 * t * t * s * s;
-                    point.mulAdd(new Vector3(center.x - point.x, center.y - point.y, 0).nor(), ripple * 1.4f * BoardGeometry.hexScale());
-                }
-                point.z = z;
-                result[edge * SHORE_SEGMENTS + segment] = point;
-            }
-        }
-        return result;
-    }
-
     /** Whether a liquid runs on across an edge: into the open liquid it joins, or off the board. */
     private static boolean open(BoardScene.Tile tile, BoardScene.Tile neighbor) {
         return neighbor == null || !neighbor.frozen() && tile.liquid().connects(neighbor.liquid());
@@ -365,6 +247,8 @@ final class GpuTilesetTerrain {
           float bottom) {
         float top = Math.max(a.z, b.z);
         if (bottom >= top) { return; }
+        if (a.z < bottom) { a = new Vector3(a).lerp(b, (bottom - a.z) / (b.z - a.z)); }
+        else if (b.z < bottom) { b = new Vector3(b).lerp(a, (bottom - b.z) / (a.z - b.z)); }
         boolean rock = BoardRim.high(tile, direction, Math.round((top - bottom) / BoardGeometry.level()));
         quad(walls, a, new Vector3(a.x, a.y, bottom), new Vector3(b.x, b.y, bottom), b,
               rock ? BoardSurface.Finish.OUTCROP : BoardSurface.Finish.WALL);
@@ -410,12 +294,12 @@ final class GpuTilesetTerrain {
 
     /** Draw precisely the water footprint used by picking; only its small depth clearance is visual. */
     private static void pool(MeshPartBuilder mesh, BoardScene.Tile tile, List<BoardSurface.Face> faces,
-          TextureRegion frame, BoardConcrete concrete) {
+          TextureRegion frame) {
         float lift = LIQUID_LIFT * BoardGeometry.hexScale();
         for (var face : faces) {
-            mesh.triangle(topVertex(new Vector3(face.a()).add(0, 0, lift), tile.coords(), frame, concrete).setCol(Color.WHITE),
-                  topVertex(new Vector3(face.b()).add(0, 0, lift), tile.coords(), frame, concrete).setCol(Color.WHITE),
-                  topVertex(new Vector3(face.c()).add(0, 0, lift), tile.coords(), frame, concrete).setCol(Color.WHITE));
+            mesh.triangle(topVertex(new Vector3(face.a()).add(0, 0, lift), tile.coords(), frame).setCol(Color.WHITE),
+                  topVertex(new Vector3(face.b()).add(0, 0, lift), tile.coords(), frame).setCol(Color.WHITE),
+                  topVertex(new Vector3(face.c()).add(0, 0, lift), tile.coords(), frame).setCol(Color.WHITE));
         }
     }
 
@@ -510,24 +394,12 @@ final class GpuTilesetTerrain {
         return faces;
     }
 
-    /** A face of the hex's art; a bank borrows its land neighbour's, mirrored across its fitted edge. */
+    /** Classic artwork retains the nominal hex coordinates, including its actual route ramps. */
     private static void artTriangle(MeshPartBuilder mesh, Coords coords, BoardSurface.Face face, TextureRegion region,
-          BoardConcrete concrete) {
-        Coords source = face.landEdge() < 0 ? coords : coords.translated(BoardGeometry.edgeDirection(face.landEdge()));
-        mesh.triangle(artVertex(face.a(), coords, face, source, region, concrete),
-              artVertex(face.b(), coords, face, source, region, concrete),
-              artVertex(face.c(), coords, face, source, region, concrete));
-    }
-
-    /** Mirror a bank's artwork across its fitted edge, so quays and natural land keep the same atlas mapping. */
-    private static MeshPartBuilder.VertexInfo artVertex(Vector3 point, Coords coords, BoardSurface.Face face, Coords source,
-          TextureRegion region, BoardConcrete concrete) {
-        if (face.landEdge() < 0) { return topVertex(point, source, region, concrete); }
-        Vector3 a = concrete.corner(coords, face.landEdge());
-        Vector3 normal = concrete.corner(coords, face.landEdge() + 1).sub(a).crs(Vector3.Z).nor();
-        Vector3 sample = new Vector3(point).mulAdd(normal, -2 * new Vector3(point).sub(a).dot(normal));
-        Vector3 up = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
-        return topVertex(sample, source, region, concrete).setPos(point).setNor(up);
+          Map<Vector3, Vector3> normals) {
+        mesh.triangle(topVertex(face.a(), coords, region).setNor(normals.getOrDefault(face.a(), Vector3.Z)),
+              topVertex(face.b(), coords, region).setNor(normals.getOrDefault(face.b(), Vector3.Z)),
+              topVertex(face.c(), coords, region).setNor(normals.getOrDefault(face.c(), Vector3.Z)));
     }
 
     /** One fixed id: equal materials share one draw in their chunk layer. */
@@ -537,28 +409,10 @@ final class GpuTilesetTerrain {
         return material;
     }
 
-    /** Tops face straight up, ramps included. */
-    private static MeshPartBuilder.VertexInfo topVertex(Vector3 point, Coords coords, TextureRegion region, BoardConcrete concrete) {
+    /** Flat artwork defaults to an upward normal; actual route ramps replace it with their surface normal. */
+    private static MeshPartBuilder.VertexInfo topVertex(Vector3 point, Coords coords, TextureRegion region) {
         return region == null ? new MeshPartBuilder.VertexInfo().setPos(point).setNor(Vector3.Z).setCol(Color.WHITE)
-              : GpuTerrain.topVertex(artPoint(point, coords, concrete), coords, region, Color.WHITE).setPos(point);
-    }
-
-    /** Carry the whole hex image onto its fitted fan, including water corners extending beyond the original hex. */
-    static Vector3 artPoint(Vector3 point, Coords coords, BoardConcrete concrete) {
-        if (concrete == null) { return point; }
-        Vector3 center = BoardGeometry.center(coords, 0);
-        float x = point.x - center.x, y = point.y - center.y;
-        for (int edge = 0; edge < 6; edge++) {
-            Vector3 a = concrete.corner(coords, edge).sub(center), b = concrete.corner(coords, edge + 1).sub(center);
-            float area = a.x * b.y - a.y * b.x;
-            if (Math.abs(area) < .0001f) { continue; }
-            float u = (x * b.y - y * b.x) / area, v = (a.x * y - a.y * x) / area;
-            if (u < -.0001f || v < -.0001f || u + v > 1.0001f) { continue; }
-            Vector3 originalA = BoardGeometry.corner(coords, 0, edge).sub(center);
-            Vector3 originalB = BoardGeometry.corner(coords, 0, edge + 1).sub(center);
-            return new Vector3(center).mulAdd(originalA, u).mulAdd(originalB, v);
-        }
-        return point;
+              : GpuTerrain.topVertex(point, coords, region, Color.WHITE);
     }
 
     /**

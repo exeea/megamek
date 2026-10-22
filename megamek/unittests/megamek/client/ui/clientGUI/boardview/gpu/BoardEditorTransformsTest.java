@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
@@ -108,7 +107,7 @@ class BoardEditorTransformsTest {
         List<BoardTactical.Fill> fills = new ArrayList<>(); List<BoardTactical.Label> labels = new ArrayList<>();
         for (int x = 0; x < 2; x++) {
             Coords at = new Coords(x, 0);
-            var marks = BoardEditorTerrain.capture(new Hex(x * 3, "deployment_zone:1:1", ""), at, Set.of());
+            var marks = BoardEditorTerrain.capture(new Hex(x * 3, "deployment_zone:1:1", ""), at);
             fills.addAll(marks.fills()); labels.addAll(marks.labels());
             tiles.add(new BoardScene.Tile(at, x * 3, -1, false, 0, BoardScene.Surface.GRASS,
                   null, null, null, null, null, List.of(), List.of()));

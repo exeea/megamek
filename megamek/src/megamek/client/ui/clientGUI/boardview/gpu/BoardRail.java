@@ -31,16 +31,21 @@ import megamek.common.board.RailRoute;
  * without sides draws a short N-S stub. MAGLEV is the elevated beam on the markers' fixed levels, eased between them;
  * RAIL is ballast, sleepers and two rails at real scale draped on what carries it: the ground the road engine shapes for
  * it as for a road ({@link BoardScene.Tile#wayExits}), or its bridge's drawn deck ({@link BoardBridge#drawnTop}). On a
- * drawn road, the ground's or the deck's, only its rails show, set into the road. Rail ends close with buffer stops, which are objects of their own
+ * drawn road, the ground's or the deck's, exposed rails and flush crossing panels replace ballast and sleepers.
+ * Rail ends close with buffer stops, which are objects of their own
  * ({@link RailRoute#stops}).
  */
 final class BoardRail {
     /** The rail profile, model px (2.8 px = 1 m): ballast bed, sleepers on it, rails on them (top at RAIL_TOP). */
-    private static final float BALLAST_TOP = .6f, BALLAST_HALF = 4.4f, BALLAST_FOOT = 5.6f, BALLAST_SINK = -.3f;
-    private static final float SLEEPER_HALF = 3.8f, SLEEPER_HALF_LENGTH = .4f, SLEEPER_TOP = .9f, SLEEPER_PITCH = 3;
-    private static final float GAUGE_HALF = 2.1f, RAIL_HALF = .25f, RAIL_HEIGHT = RailRoute.RAIL_TOP - SLEEPER_TOP;
+    private static final float BALLAST_TOP = .6f * RailRoute.CONVENTIONAL_SCALE, BALLAST_HALF = 4.4f * RailRoute.CONVENTIONAL_SCALE,
+          BALLAST_FOOT = RailRoute.BALLAST_HALF_WIDTH, BALLAST_SINK = -.3f * RailRoute.CONVENTIONAL_SCALE;
+    private static final float SLEEPER_HALF = 3.8f * RailRoute.CONVENTIONAL_SCALE,
+          SLEEPER_HALF_LENGTH = .4f * RailRoute.CONVENTIONAL_SCALE, SLEEPER_TOP = .9f * RailRoute.CONVENTIONAL_SCALE,
+          SLEEPER_PITCH = 3 * RailRoute.CONVENTIONAL_SCALE;
+    private static final float GAUGE_HALF = 2.1f * RailRoute.CONVENTIONAL_SCALE,
+          RAIL_HALF = .25f * RailRoute.CONVENTIONAL_SCALE, RAIL_HEIGHT = RailRoute.RAIL_TOP - SLEEPER_TOP;
     /** The top of a rail set into a road, above the road. */
-    static final float STREET_TOP = .15f;
+    static final float STREET_TOP = .15f * RailRoute.CONVENTIONAL_SCALE;
     /** The longest step between a draped rail's height samples, model px. */
     private static final float STEP = 3;
     private static final Color BALLAST = new Color(.47f, .46f, .44f, 1), SLEEPER = new Color(.24f, .2f, .17f, 1);
@@ -372,7 +377,7 @@ final class BoardRail {
         for (int i = 0; i <= steps; i++) {
             float t = (float) i / steps;
             float[] plan = line.at(t);
-            var point = terminal && line.oa() == 0 && line.ob() == 0 ? new Vector3(b).scl(t)
+            var point = terminal && line.a()[0] == 0 && line.a()[1] == 0 && line.oa() == 0 && line.ob() == 0 ? new Vector3(b).scl(t)
                   : new Vector3(plan[0], plan[1], 0);
             point.z = 0;
             if (i > 0) { distance[i] = distance[i - 1] + point.dst(result.getLast()); }
@@ -518,9 +523,9 @@ final class BoardRail {
     }
 
     /**
-     * Ballast, sleepers and two rails along a draped centre line. Where it is set into a road ({@code street}) only the
-     * rails show, their heads {@link #STREET_TOP} above the road. Sleepers fit whole pitches between the line's ends, as
-     * road dashes fit between borders ({@link BoardRoad#fit}), so they continue evenly across every border.
+     * Ballast, sleepers and two rails along a draped centre line. Where it is set into a road ({@code street}), flush
+     * panels and flange grooves sit below the exposed heads at {@link #STREET_TOP}. Sleepers fit whole pitches between
+     * the line's ends, as road dashes fit between borders ({@link BoardRoad#fit}), so they continue evenly across every border.
      */
     private static void track(MeshBuilder mesh, List<Vector3> path, List<Boolean> street) {
         int count = path.size();
@@ -540,6 +545,19 @@ final class BoardRail {
                 quad(mesh, at(path, across, i - 1, bed[strip]), at(path, across, i, bed[strip]),
                       at(path, across, i, bed[strip + 1]), at(path, across, i - 1, bed[strip + 1]));
             }
+        }
+        // A level crossing keeps the road carrier and inserts dark panels along the actual track. The lower
+        // black bed shows only in the flange gaps beside the exposed rail heads; no separate road-shaped decal.
+        float gap = GAUGE_HALF * .1f;
+        for (int i = 1; i < count; i++) {
+            if (!street.get(i - 1) || !street.get(i)) { continue; }
+            mesh.setColor(.035f, .04f, .04f, 1);
+            infill(mesh, path, across, i, -SLEEPER_HALF, SLEEPER_HALF, STREET_TOP * .55f);
+            mesh.setColor(.16f, .17f, .17f, 1);
+            float inner = GAUGE_HALF - RAIL_HALF - gap, outer = GAUGE_HALF + RAIL_HALF + gap;
+            infill(mesh, path, across, i, -SLEEPER_HALF, -outer, STREET_TOP * .8f);
+            infill(mesh, path, across, i, -inner, inner, STREET_TOP * .8f);
+            infill(mesh, path, across, i, outer, SLEEPER_HALF, STREET_TOP * .8f);
         }
         for (float offset : new float[] { -GAUGE_HALF, GAUGE_HALF }) {
             for (int i = 1; i < count; i++) {
@@ -567,6 +585,13 @@ final class BoardRail {
             Vector3 side = new Vector3(across[segment - 1]).lerp(across[segment], t).nor();
             sleeper(mesh, centre, side);
         }
+    }
+
+    /** A flush crossing strip following the same draped centre line and cross-sections as its rails. */
+    private static void infill(MeshBuilder mesh, List<Vector3> path, Vector3[] across, int end,
+          float left, float right, float height) {
+        quad(mesh, at(path, across, end - 1, left, height), at(path, across, end, left, height),
+              at(path, across, end, right, height), at(path, across, end - 1, right, height));
     }
 
     /** One sleeper across the track at {@code centre}, lying on the ballast: its top and its two long faces. */

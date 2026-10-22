@@ -50,7 +50,7 @@ class BoardBridgeTest {
         }
         var road = BoardRoad.clearance(at, exits);
         var carriageway = road.footprint(-.4f);
-        var rails = road.footprint(BoardRoad.SHOULDER - .3f);
+        var rails = road.footprint(BoardBridge.SHOULDER - .3f);
         rails.subtract(road.footprint(.3f));
         var center = BoardGeometry.center(at, 0);
         int deckSamples = 0, railSamples = 0;

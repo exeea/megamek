@@ -57,9 +57,10 @@ class BoardBridgeSlopeTest {
             var deck = BoardBridge.deck(scene, tile);
             assertEquals(BoardRoad.Kind.PAVED, deck.kind(), "The road material traverses the stepped span");
             var shape = manufactured(scene, tile);
+            var grade = BoardBridgeSlope.profile(tile, deck);
             var road = deck.road(at);
             var footprint = road.footprint(0);
-            var slab = road.footprint(BoardRoad.SHOULDER);
+            var slab = road.footprint(BoardBridge.SHOULDER);
             var center = BoardGeometry.center(at, 2);
             float lift = GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
             for (int d = 0; d < 6; d++) {
@@ -70,7 +71,7 @@ class BoardBridgeSlopeTest {
                 int edge = Math.floorMod(1 - d, 6);
                 var across = BoardGeometry.corner(at, 0, edge + 1).sub(BoardGeometry.corner(at, 0, edge)).nor();
                 float joint = (2 + step(d) / 2f) * BoardGeometry.level() + lift;
-                for (float offset : new float[] { -8.25f, -6, 0, 6, 8.25f }) {
+                for (float offset : new float[] { -16.5f, -12, 0, 12, 16.5f }) {
                     var p = new Vector3(center).add(gate).mulAdd(across, offset * BoardGeometry.hexScale());
                     var inside = new Vector3(p).mulAdd(gate, -.0001f);
                     var outside = new Vector3(p).mulAdd(gate, .0001f);
@@ -83,7 +84,7 @@ class BoardBridgeSlopeTest {
                 }
                 // Check the incline wherever the curved slab crosses these stations, including its rails.
                 // The broad bend needs a small sampling inset from the kerb's 0.1-unit authoring approximation.
-                float reach = exits == 5 ? 8 : 8.25f;
+                float reach = exits == 5 ? 16 : 16.5f;
                 for (float t : new float[] { .55f, .7f, .9f }) {
                     for (float offset : new float[] { -reach, 0, reach }) {
                         var p = new Vector3(center).mulAdd(gate, t).mulAdd(across, offset * BoardGeometry.hexScale());
@@ -94,7 +95,13 @@ class BoardBridgeSlopeTest {
                             continue;
                         }
                         boolean lane = footprint.contains(px, py);
-                        float expected = center.z + lift + step(d) * BoardGeometry.level() * (t - .5f)
+                        // Widened adjacent arms overlap in plan and cannot both impose their independent planes.
+                        // The centre line retains the authored approach grade; off-axis junction points use the
+                        // shared continuous profile (whose partition and seams are checked by WideProfileTest).
+                        float rise = offset == 0 ? step(d) * BoardGeometry.level() * (t - .5f)
+                              : BoardSurface.sampleHeight(grade, p.x, p.y, Float.NaN);
+                        assertTrue(Float.isFinite(rise), "The entire widened crossing has a grade");
+                        float expected = center.z + lift + rise
                               + (lane ? 0 : 2.5f * BoardGeometry.hexScale());
                         assertEquals(expected, actual, .01f, "Continuous grade at exit " + d);
                     }
@@ -204,7 +211,7 @@ class BoardBridgeSlopeTest {
                             var p = new Vector3(center).lerp(roadCenter, t);
                             float grade = center.z + (roadCenter.z - center.z) * (2 * t - .5f) + lift;
                             for (int side : new int[] { -1, 1 }) {
-                                var rail = new Vector3(p).mulAdd(across, side * 8.25f * BoardGeometry.hexScale());
+                                var rail = new Vector3(p).mulAdd(across, side * 16.5f * BoardGeometry.hexScale());
                                 assertEquals(grade + 2.5f * BoardGeometry.hexScale(), height(shape, rail, false), .015f,
                                       "Both rails continue along the ramp without a terminal interrupting the grade");
                                 var origin = new Vector3(p).mulAdd(outward, side * 30 * BoardGeometry.hexScale());
@@ -217,12 +224,13 @@ class BoardBridgeSlopeTest {
                         for (int side : new int[] { -1, 1 }) {
                             var cap = new Vector3(base).mulAdd(along,
                                         BoardBridgeFooting.terminalLength() * BoardGeometry.hexScale() - BoardRelief.metres(1.38f))
-                                  .mulAdd(outward, side * (9 * BoardGeometry.hexScale() + BoardRelief.metres(.15f)));
+                                  .mulAdd(outward, side * (18 * BoardGeometry.hexScale() + BoardRelief.metres(.15f)));
                             assertTrue(height(shape, cap, false) > roadCenter.z + lift + 2.5f * BoardGeometry.hexScale(),
                                   "The authored entrance block is beyond the ramp, on the flat road");
                         }
                     } else {
-                        assertTrue(road.faces.stream().anyMatch(road::bridgeSupport), "The road's cut receives concrete");
+                        assertFalse(road.faces.stream().anyMatch(road::bridgeSupport),
+                              "The descending approach keeps its excavated natural bank");
                     }
                     assertFalse(road.faces.stream().filter(f -> f.a().z == roadCenter.z && f.b().z == roadCenter.z
                           && f.c().z == roadCenter.z).anyMatch(road::bridgeSupport), "The flat road hub keeps its ground");
@@ -367,7 +375,7 @@ class BoardBridgeSlopeTest {
                                       new Vector3(across).scl(-side));
                                 float steelDistance = (float) Math.sqrt(steel.hit(ray));
                                 float concreteDistance = (float) Math.sqrt(concrete.hit(ray));
-                                assertEquals((30 - BoardRoad.Kind.PAVED.halfWidth - BoardRoad.SHOULDER) * scale,
+                                assertEquals((30 - BoardRoad.Kind.PAVED.halfWidth - BoardBridge.SHOULDER) * scale,
                                       Math.min(steelDistance, concreteDistance), .01f, "The ramp side stays closed");
                                 assertFalse(Math.abs(steelDistance - concreteDistance) < .001f,
                                       "Steel and concrete z-fight: direction=" + direction + " road=" + roadLevel

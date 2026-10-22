@@ -13,8 +13,8 @@ import java.util.Set;
  * where it differs from the default of its sides ({@link RailRoute#pieces(int)}): owners {@code "rail"} (the ground
  * rail) and {@code "bridgeRail"} (the deck rail) only, made by {@link #tracks(int)}. {@code beside} chooses the beside-road
  * corridor and its physical side at each border ({@link #beside(Map, String)}); the middle corridor stores none.
- * {@code trafficControl} chooses the cosmetic junction controls for {@code "road"} or {@code "bridgeRoad"}; gantries
- * are the default and store none.
+ * {@code trafficControl} chooses cosmetic junction controls for {@code "road"} or {@code "bridgeRoad"}; an absent
+ * choice uses stop signs at three-arm junctions and gantries at larger junctions.
  */
 public record HexAppearance(String variant, String asset, String material, Double strength,
       BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside,
@@ -55,20 +55,25 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     /** Cosmetic junction controls: stop signs, roadside lights, or overhead lights on a metal gantry. */
     public enum TrafficControl { STOPS, SIGNALS, GANTRY }
 
-    /** The road layer's junction controls; absent choices use stop lines and overhead traffic lights. */
+    /** The brush's junction controls before a road topology is known; absent choices use overhead traffic lights. */
     public static TrafficControl trafficControl(Map<String, HexAppearance> appearance, String owner) {
-        HexAppearance stored = appearance.get(owner);
-        return stored == null || stored.trafficControl() == null ? TrafficControl.GANTRY : stored.trafficControl();
+        return trafficControl(appearance, owner, 0);
     }
 
-    /** Changes only the junction controls, keeping the road's surface and shape. Default controls store nothing. */
+    /** Priority three-arm junctions use stop signs; larger junctions use signals unless explicitly overridden. */
+    public static TrafficControl trafficControl(Map<String, HexAppearance> appearance, String owner, int exits) {
+        HexAppearance stored = appearance.get(owner);
+        if (stored != null && stored.trafficControl() != null) { return stored.trafficControl(); }
+        return Integer.bitCount(exits & 63) == 3 ? TrafficControl.STOPS : TrafficControl.GANTRY;
+    }
+
+    /** Changes only junction controls. Null retains the topology-dependent default; explicit choices are stored. */
     public static HexAppearance withTrafficControl(HexAppearance current, TrafficControl control) {
-        control = control == null ? TrafficControl.GANTRY : control;
         if (current == null) {
-            return control == TrafficControl.GANTRY ? null : new HexAppearance(null, null, null, null,
+            return control == null ? null : new HexAppearance(null, null, null, null,
                   BoardDecoration.Colours.NONE, null, null, null, control);
         }
-        if (control == TrafficControl.GANTRY && current.variant() == null && current.asset() == null && current.material() == null) {
+        if (control == null && current.variant() == null && current.asset() == null && current.material() == null) {
             return null;
         }
         return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(),
@@ -213,10 +218,6 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     public HexAppearance {
         colours = colours == null ? BoardDecoration.Colours.NONE : colours;
-        // Java serialization may contain a control-only gantry from before it became the default.
-        if (trafficControl == TrafficControl.GANTRY && (variant != null || asset != null || material != null)) {
-            trafficControl = null;
-        }
         if (!colours.slots().isEmpty() && !"bridge/truss".equals(variant) && !"bridge/truss-pillars".equals(variant)) {
             throw new IllegalArgumentException("Only a truss bridge stores colours");
         }

@@ -129,7 +129,7 @@ class BoardLunarTest {
     }
 
     @Test
-    void allLiquidAndSurfaceFamiliesBecomeDryRockWithoutVegetationOrIce() {
+    void allLiquidAndSurfaceFamiliesBecomeDryWithoutVegetationOrIceKeepingConcrete() {
         var building = feature("building", BoardScene.FeatureKind.BUILDING);
         var boulder = feature("boulder-0", BoardScene.FeatureKind.BOULDER);
         var features = List.of(building, boulder, feature("tree-oak", BoardScene.FeatureKind.TREE),
@@ -141,8 +141,10 @@ class BoardLunarTest {
             for (var family : BoardScene.Surface.values()) {
                 var lunar = tile(0, -1, new BoardLiquid(kind, "", 2), family, features, true).lunar(true);
                 var scene = new BoardScene(0, 1, 1, List.of(lunar), List.of(), List.of(), -1, "", List.of());
-                assertEquals(BoardScene.Surface.LUNAR, lunar.surface());
-                assertTrue(lunar.detailedGround(), "The LUNAR material must replace captured ground artwork");
+                assertEquals(family == BoardScene.Surface.CONCRETE ? family : BoardScene.Surface.LUNAR, lunar.surface());
+                assertEquals(BoardSurfaceBlend.solid(lunar.surface()), lunar.groundCover(),
+                      "The rendered material must match the airless surface, including preserved concrete");
+                assertTrue(lunar.detailedGround(), "The airless material must replace captured ground artwork");
                 assertEquals(BoardLiquid.NONE, lunar.liquid());
                 assertFalse(lunar.water());
                 assertFalse(lunar.frozen());
@@ -179,8 +181,10 @@ class BoardLunarTest {
                 var original = tile(1, depth, liquid, family, features, false);
                 var airless = original.lunar(false);
                 var scene = new BoardScene(0, 1, 1, List.of(airless), List.of(), List.of(), -1, "", List.of());
-                assertEquals(BoardScene.Surface.LUNAR, airless.surface());
-                assertTrue(airless.detailedGround(), "The LUNAR material must replace captured ground artwork");
+                assertEquals(family == BoardScene.Surface.CONCRETE ? family : BoardScene.Surface.LUNAR, airless.surface());
+                assertEquals(BoardSurfaceBlend.solid(airless.surface()), airless.groundCover(),
+                      "The rendered material must match the airless surface, including preserved concrete");
+                assertTrue(airless.detailedGround(), "The airless material must replace captured ground artwork");
                 assertEquals(liquid, airless.liquid(), "Water freezes and magma stays");
                 assertEquals(depth >= 0, airless.frozen(), "Water and hazardous liquids freeze as ICE does");
                 assertEquals(original.elevation(), airless.elevation());

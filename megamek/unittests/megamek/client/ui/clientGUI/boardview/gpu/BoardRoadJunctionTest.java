@@ -9,10 +9,30 @@ import java.awt.geom.Area;
 
 import com.badlogic.gdx.math.Vector2;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Test;
 
 class BoardRoadJunctionTest {
+    @Test
+    void junctionApproachesHaveSolidChannelsThenDashesBeyondTheFinalRoadWidth() {
+        var at = BoardRoadTest.CENTER;
+        var road = BoardRoad.clearance(at, 27).extended(java.util.Collections.nCopies(6, 50f));
+        var paint = road.markings(at, 27);
+        for (var stop : road.stopApproaches(27)) {
+            for (float distance = 2; distance <= 30; distance += .25f) {
+                assertTrue(paint.contains(stop.x() + stop.nx() * distance, stop.y() + stop.ny() * distance),
+                      "The last full road-width before the conflict is continuously divided");
+            }
+            assertFalse(paint.contains(stop.x() - stop.nx(), stop.y() - stop.ny()), "The crossing remains open for turns");
+            boolean gap = false;
+            for (float distance = 34; distance <= 50; distance += .25f) {
+                gap |= !paint.contains(stop.x() + stop.nx() * distance, stop.y() + stop.ny() * distance);
+            }
+            assertTrue(gap, "The more distant straight approach retains its dashes");
+        }
+    }
+
     @Test
     void everyThreeAndFourWayJunctionHasASolidHubAndStopsOnlyItsIncomingLanes() {
         for (int column : new int[] { 3, 4 }) {
@@ -27,19 +47,19 @@ class BoardRoadJunctionTest {
                     assertTrue(stops.isEmpty());
                     continue;
                 }
-                assertEquals(count, approaches.size());
+                boolean through = (exits & (exits >> 3)) != 0;
+                assertEquals(count == 3 && through ? 1 : count, approaches.size());
                 Area footprint = road.footprint(0), dashes = road.markings(at, exits);
+                assertFalse(dashes.intersects(-6, -6, 12, 12), "Every junction leaves its central turning area unmarked");
                 for (int degrees = 0; degrees < 360; degrees += 15) {
                     double angle = Math.toRadians(degrees);
                     assertTrue(footprint.contains(7 * Math.cos(angle), 7 * Math.sin(angle)), "A crossing has no central island");
-                    for (int radius = 0; radius < 24; radius++) {
-                        assertFalse(dashes.contains(radius * Math.cos(angle), radius * Math.sin(angle)),
-                              "Every approach leaves the shared turning area clear of centre dashes");
-                    }
                 }
                 for (var approach : approaches) {
                     assertTrue((exits & (1 << approach.direction())) != 0);
                     assertEquals(1, Math.hypot(approach.nx(), approach.ny()), .0001);
+                    assertFalse(dashes.contains(approach.x() - approach.nx(), approach.y() - approach.ny()),
+                          "A controlled approach ends its centre dashes before its stop plane");
                     for (float across = approach.inner() + .2f; across < approach.outer(); across += .5f) {
                         float x = approach.x() - approach.ny() * across;
                         float y = approach.y() + approach.nx() * across;
@@ -53,6 +73,67 @@ class BoardRoadJunctionTest {
                 stops.subtract(footprint);
                 assertTrue(stops.isEmpty());
             }
+        }
+    }
+
+    @Test
+    void everyTStopsOnlyItsSideRoadJustBeforeTheThroughCarriageway() {
+        for (int axis = 0; axis < 3; axis++) {
+            for (int branch = 0; branch < 6; branch++) {
+                if (branch == axis || branch == axis + 3) { continue; }
+                int exits = (1 << axis) | (1 << (axis + 3)) | (1 << branch);
+                var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+                var stops = road.stopApproaches(exits);
+                assertEquals(1, stops.size());
+                assertEquals(branch, stops.getFirst().direction());
+                var stop = stops.getFirst();
+                float[] main = RailRoute.border(axis);
+                var normal = new Vector2(-main[1], main[0]).nor();
+                for (float across = stop.inner(); across < stop.outer(); across += .5f) {
+                    float x = stop.x() - stop.ny() * across, y = stop.y() + stop.nx() * across;
+                    assertTrue(Math.abs(x * normal.x + y * normal.y) > BoardRoad.Kind.PAVED.halfWidth,
+                          "Waiting traffic stays outside the through carriageway");
+                }
+                assertTrue(Math.hypot(stop.x(), stop.y()) < 30,
+                      "A stop bar belongs near the conflict edge rather than at the tile border");
+            }
+        }
+    }
+
+    @Test
+    void signalControlledTsStopAllApproachesWithoutChangingTheirClearTurningArea() {
+        for (int exits = 0; exits < 64; exits++) {
+            if (Integer.bitCount(exits) != 3) { continue; }
+            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var priorityPaint = road.markings(BoardRoadTest.CENTER, exits);
+            for (var control : java.util.List.of(HexAppearance.TrafficControl.SIGNALS, HexAppearance.TrafficControl.GANTRY)) {
+                road.control(control);
+                var stops = road.stopApproaches(exits);
+                assertEquals(3, stops.size(), "Signals control each incoming approach");
+                var paint = road.markings(BoardRoadTest.CENTER, exits);
+                paint.exclusiveOr(priorityPaint);
+                assertTrue(paint.isEmpty(), "Stop priority never changes the divider's clear crossing area");
+                for (var stop : stops) {
+                    assertFalse(priorityPaint.contains(stop.x() - stop.nx(), stop.y() - stop.ny()),
+                          "Every incoming divider ends outside the conflict, including the priority T arms");
+                }
+            }
+        }
+    }
+
+    @Test
+    void fiveAndSixArmRailHubsStopIncomingRoadLanesWithoutPaintingTheMedian() {
+        for (int exits = 0; exits < 64; exits++) {
+            if (Integer.bitCount(exits) < 5) { continue; }
+            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits)
+                  .corridor(new RailRoute.Corridor(exits, 0, 0)).control(HexAppearance.TrafficControl.GANTRY);
+            assertEquals(Integer.bitCount(exits), road.stopApproaches(exits).size(),
+                  "A rail corridor replaces circulation with a controlled solid hub");
+            var stops = road.stopLines(exits);
+            assertFalse(stops.isEmpty());
+            stops.intersect(road.medianBand());
+            assertTrue(stops.isEmpty(), "Stop bars keep the central railway clear");
+            assertFalse(road.markings(BoardRoadTest.CENTER, exits).intersects(-6, -6, 12, 12));
         }
     }
 

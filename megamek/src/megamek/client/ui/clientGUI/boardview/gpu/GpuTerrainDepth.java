@@ -22,6 +22,8 @@ import com.badlogic.gdx.utils.Pool;
  */
 final class GpuTerrainDepth implements RenderableProvider {
     private final Array<Renderable> ranges = new Array<>();
+    /** Empty aerospace planes occlude artwork but never block illumination of neighboring platforms. */
+    final RenderableProvider shadows = (renderables, pool) -> gather(renderables, true);
 
     GpuTerrainDepth(List<ModelInstance> instances) {
         for (Renderable next : snapshot(instances)) {
@@ -60,6 +62,7 @@ final class GpuTerrainDepth implements RenderableProvider {
     }
 
     private static boolean sameState(Renderable first, Renderable second) {
+        if (first.material.has(GpuBackdrop.TYPE) != second.material.has(GpuBackdrop.TYPE)) { return false; }
         IntAttribute a = first.material.get(IntAttribute.class, IntAttribute.CullFace);
         IntAttribute b = second.material.get(IntAttribute.class, IntAttribute.CullFace);
         if (a != b && (a == null || b == null || a.value != b.value)) { return false; }
@@ -84,10 +87,15 @@ final class GpuTerrainDepth implements RenderableProvider {
 
     @Override
     public void getRenderables(Array<Renderable> renderables, Pool<Renderable> pool) {
+        gather(renderables, false);
+    }
+
+    private void gather(Array<Renderable> renderables, boolean shadows) {
         for (Renderable range : ranges) {
+            if (shadows && range.material.has(GpuBackdrop.TYPE)) { continue; }
             range.shader = null;
             range.environment = null;
+            renderables.add(range);
         }
-        renderables.addAll(ranges);
     }
 }

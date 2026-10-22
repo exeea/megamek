@@ -91,6 +91,7 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
     private final JTextField heightStartTextField = new JTextField(4);
     private final JTextField heightEndTextField = new JTextField(4);
     private final JTextField nameTextField = new JTextField(4);
+    private boolean refreshingBoards;
 
     public AdvancedSearchMapDialog(JFrame parent) {
         super(parent, true, "AdvancedSearchMapDialog", "AdvancedSearchMapDialog.title");
@@ -148,6 +149,61 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
         }
     }
 
+    /**
+     * Refreshes the board catalogue and previews after saved boards change. Call on the Swing event thread after
+     * invalidating {@link BoardClassifier}'s cached catalogue.
+     */
+    public void refreshBoards() {
+        String selectedPath = getPath();
+        refreshingBoards = true;
+        try {
+            bc = BoardClassifier.getInstance();
+            refreshFilterList(listBoardTags, boardTags());
+            refreshFilterList(listBoardPaths, boardPaths());
+            boardTable.clearSelection();
+            boardModel.setData(bc);
+        } finally {
+            refreshingBoards = false;
+        }
+        filterTables();
+        if (selectedPath != null) {
+            for (int row = 0; row < boardModel.getRowCount(); row++) {
+                if (selectedPath.equals(boardModel.getPathAt(row))) {
+                    int viewRow = boardTable.convertRowIndexToView(row);
+                    if (viewRow >= 0) {
+                        boardTable.setRowSelectionInterval(viewRow, viewRow);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    private static void refreshFilterList(JList<String> list, List<String> data) {
+        var selected = new HashSet<>(list.getSelectedValuesList());
+        boolean allSelected = selected.size() == list.getModel().getSize();
+        list.setListData(data.toArray(String[]::new));
+        for (int index = 0; index < data.size(); index++) {
+            if (allSelected || selected.contains(data.get(index))) {
+                list.addSelectionInterval(index, index);
+            }
+        }
+    }
+
+    private List<String> boardTags() {
+        List<String> tags = new ArrayList<>(Arrays.stream(BoardsTagger.Tags.values())
+              .map(BoardsTagger.Tags::getName)
+              .toList());
+        // Include manual (non-auto) tags found on boards, e.g. "Arena", so they are filterable too.
+        tags.addAll(bc.getBoardsByManualTag().keySet());
+        return tags.stream().distinct().sorted().toList();
+    }
+
+    private List<String> boardPaths() {
+        return bc.getBoardPaths().values().stream()
+              .map(p -> p.substring(0, p.lastIndexOf("\\") + 1)).distinct().sorted().toList();
+    }
+
     private JPanel createFilter() {
         JPanel filterPanel = new JPanel();
         filterPanel.setLayout(new BoxLayout(filterPanel, BoxLayout.PAGE_AXIS));
@@ -162,18 +218,10 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
 
         JPanel tagsTitlePanel = createTitleWithCheckBox(boardTagsAllCheckBox,
               Messages.getString("AdvancedSearchMapDialog.filterBoardTags"));
-        List<String> tags = new ArrayList<>(Arrays.stream(BoardsTagger.Tags.values())
-              .map(BoardsTagger.Tags::getName)
-              .toList());
-        // Include manual (non-auto) tags found on boards, e.g. "Arena", so they are filterable too
-        tags.addAll(bc.getBoardsByManualTag().keySet());
-        tags = tags.stream().distinct().sorted().toList();
-        filterPanel.add(createFilterList(listBoardTags, tags, tagsTitlePanel, true));
+        filterPanel.add(createFilterList(listBoardTags, boardTags(), tagsTitlePanel, true));
 
         JPanel pathsTitlePanel = createTitle(Messages.getString("AdvancedSearchMapDialog.filterBoardPaths"));
-        List<String> paths = bc.getBoardPaths().values().stream().toList();
-        paths = paths.stream().map(p -> p.substring(0, p.lastIndexOf("\\") + 1)).distinct().sorted().toList();
-        filterPanel.add(createFilterList(listBoardPaths, paths, pathsTitlePanel, true));
+        filterPanel.add(createFilterList(listBoardPaths, boardPaths(), pathsTitlePanel, true));
 
         return filterPanel;
     }
@@ -367,6 +415,9 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
     }
 
     private void filterTables() {
+        if (refreshingBoards) {
+            return;
+        }
         RowFilter<BoardTableModel, Integer> boardFilter;
         try {
             boardFilter = new RowFilter<>() {

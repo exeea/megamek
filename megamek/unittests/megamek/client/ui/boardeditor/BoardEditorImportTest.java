@@ -3,7 +3,9 @@ package megamek.client.ui.boardeditor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.OutputStream;
@@ -24,6 +26,72 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardEditorImportTest {
+    @Test
+    void onlySuccessfulSavesAreReportedWhenReturningToTheLobby(@TempDir Path folder) throws Exception {
+        var session = new BoardEditorSession();
+        assertNull(session.lastSavedPath());
+        Path first = folder.resolve("first.board2");
+        session.save(first);
+        assertEquals(first, session.lastSavedPath());
+        assertFalse(session.lastSaveFromAssembledPreview());
+        session.open(Board.createEmptyBoard(3, 3), null);
+        assertEquals(first, session.lastSavedPath(), "Opening another document must not forget a saved map");
+        assertThrows(java.io.IOException.class, () -> session.save(folder));
+        assertEquals(first, session.lastSavedPath(), "A failed save must not replace the last successful save");
+        assertFalse(session.lastSaveFromAssembledPreview(), "A failed save must not change the saved document's origin");
+        Path second = folder.resolve("second.board2");
+        session.save(second);
+        assertEquals(second, session.lastSavedPath(), "Save As reports the new filename");
+        assertTrue(session.lastSaveFromAssembledPreview());
+        session.save(second);
+        assertTrue(session.lastSaveFromAssembledPreview(), "Further saves still contain the assembled adjustments");
+        session.open(second);
+        session.save(second);
+        assertTrue(session.lastSaveFromAssembledPreview(), "Reopening the saved preview still contains its adjustments");
+        session.open(first);
+        assertTrue(session.lastSaveFromAssembledPreview(), "Opening a file must not change the last save's origin");
+        session.save(first);
+        assertFalse(session.lastSaveFromAssembledPreview(), "Saving a different source sheet keeps its own placement");
+        session.open(Board.createEmptyBoard(3, 3), null);
+        session.save(second);
+        session.command(new BoardEditorSession.Command(BoardEditorSession.Action.NEW, "4x4"), null);
+        session.save(second);
+        assertFalse(session.lastSaveFromAssembledPreview(), "New replaces the assembled document");
+    }
+
+    @Test
+    void openingAPreviewCopiesItsCurrentContentsAndKeepsTheSaveDestination(@TempDir Path folder) {
+        Board preview = Board.createEmptyBoard(2, 2);
+        Coords at = new Coords(1, 1);
+        preview.setHex(at, new Hex(3, "fluff:93:8", ""));
+        preview.addTag("Arena");
+        preview.setDescription("Preview map");
+        preview.setAnnotations(at, List.of("Keep this note"));
+        var session = new BoardEditorSession();
+        Path nativeFile = folder.resolve("Preview.board2");
+        session.open(preview, nativeFile);
+        assertEquals(nativeFile, session.path(), "Use the current preview without reloading its file");
+        assertFalse(session.dirty());
+        assertNotSame(preview, session.board());
+        assertNotSame(preview.getHex(at), session.board().getHex(at));
+        assertEquals(3, session.board().getHex(at).getLevel());
+        assertEquals(preview.getTags(), session.board().getTags());
+        assertEquals(preview.getDescription(), session.board().getDescription());
+        assertEquals(preview.getAnnotations(), session.board().getAnnotations());
+        assertFalse(session.board().getHex(at).containsTerrain(Terrains.FLUFF));
+        assertTrue(preview.getHex(at).containsTerrain(Terrains.FLUFF), "Import must not convert the lobby's board");
+        session.board().getHex(at).setLevel(5);
+        assertEquals(3, preview.getHex(at).getLevel(), "Editing must not change the preview's original");
+
+        session.open(preview, folder.resolve("Preview.board"));
+        assertNull(session.path(), "A legacy file is never the editor's save destination");
+        assertEquals("Preview.board2 (imported, unsaved)", session.title());
+        session.open(preview, null);
+        assertNull(session.path(), "Generated maps have no source file");
+        assertTrue(session.dirty(), "Closing a generated map must offer to save it");
+        assertFalse(session.snapshot().canUndo(), "Opening a preview is not an edit to undo");
+    }
+
     @Test
     void openingALegacyBoardConvertsItAndCountsWhatTheBoardHolds(@TempDir Path folder) throws Exception {
         Path file = folder.resolve("Park.board");

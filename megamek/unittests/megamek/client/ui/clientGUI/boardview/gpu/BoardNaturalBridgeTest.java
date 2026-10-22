@@ -30,6 +30,76 @@ class BoardNaturalBridgeTest {
     static final Coords CENTER = new Coords(4, 4);
 
     @Test
+    void classicCapIsAFullFlatHexWithTheSameOpenUnderpassAtEveryDetail() {
+        for (int d = 0; d < 6; d++) {
+            var scene = scene(BoardScene.Surface.GRASS, true, false, CENTER, d);
+            var tile = scene.tile(CENTER);
+            var deck = BoardBridge.deck(scene, tile);
+            var center = BoardGeometry.center(CENTER, 3);
+            for (var lod : TerrainLod.values()) {
+                var shape = BoardNaturalBridge.build(scene, tile, deck, lod, new HashMap<>(), true);
+                for (int edge = 0; edge < 6; edge++) {
+                    var a = BoardGeometry.corner(CENTER, 3, edge);
+                    var b = BoardGeometry.corner(CENTER, 3, edge + 1);
+                    for (float along : new float[] { 0, .5f, 1 }) {
+                        var point = new Vector3(a).lerp(b, along).lerp(center, .001f);
+                        assertEquals(center.z, BoardBridge.top(shape, point.x, point.y), .001f,
+                              "The normal hex's complete perimeter remains at deck height: " + d + "/" + lod);
+                    }
+                }
+                assertTrue(shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.TOP)
+                      .allMatch(f -> f.normal().epsilonEquals(Vector3.Z, .001f)));
+                assertTrue(shape.facets().stream().anyMatch(f -> f.part() == BoardBridge.Part.SOFFIT && f.normal().z < -.5f));
+                assertEquals(Float.POSITIVE_INFINITY, shape.hit(new Ray(
+                      BoardGeometry.center(CENTER, 2).add(-100, 0, 0), Vector3.X)),
+                      "A full hex cap does not fill the river passage below it");
+            }
+        }
+    }
+
+    @Test
+    void classicCapGradesOntoLowerBanksWithOrWithoutRoadTerrain() {
+        for (int direction = 0; direction < 6; direction++) {
+            for (boolean paved : new boolean[] { false, true }) {
+                var scene = scene(BoardScene.Surface.GRASS, true, false, CENTER, direction);
+                int exits = (1 << direction) | (1 << ((direction + 3) % 6));
+                for (int d : new int[] { direction, (direction + 3) % 6 }) {
+                    var at = CENTER.translated(d);
+                    scene = replace(scene, BoardRoadTest.tile(at, paved ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                          paved ? exits : 0, 2, BoardScene.Surface.GRASS));
+                }
+                var tile = scene.tile(CENTER);
+                var center = BoardGeometry.center(CENTER, 3);
+                for (var lod : TerrainLod.values()) {
+                    var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod,
+                          new HashMap<>(), true);
+                    assertEquals(center.z, BoardBridge.top(shape, center.x, center.y), .001f);
+                    for (int d : new int[] { direction, (direction + 3) % 6 }) {
+                        var bank = scene.tile(CENTER.translated(d));
+                        var end = BoardGeometry.center(bank.coords(), 2);
+                        var column = GpuTilesetTerrain.column(scene, bank, BoardGeometry.floor(scene));
+                        for (float fraction : new float[] { .25f, .375f, .4999f, .5001f, .6f }) {
+                            var p = new Vector3(center).lerp(end, fraction);
+                            float height = fraction < .5f ? BoardBridge.top(shape, p.x, p.y)
+                                  : BoardSurface.sampleHeight(column.top(), p.x, p.y, Float.NaN);
+                            float expected = BoardGeometry.level() * (fraction <= .25f ? 3
+                                  : fraction < .5f ? 4 - 4 * fraction : 2);
+                            assertEquals(expected, height, .01f,
+                                  "A continuous grade joins the cap to its actual bank: " + d + "/" + paved + "/" + lod);
+                        }
+                    }
+                    var across = BoardGeometry.center(CENTER.translated(direction), 0)
+                          .sub(BoardGeometry.center(CENTER, 0)).nor();
+                    across.set(-across.y, across.x, 0);
+                    var passage = BoardGeometry.center(CENTER, 1).mulAdd(across, -100);
+                    assertEquals(Float.POSITIVE_INFINITY, shape.hit(new Ray(passage, across)),
+                          "The graded entrances leave the central river passage open");
+                }
+            }
+        }
+    }
+
+    @Test
     void muddyShellDepthStartsAtItsActualTopEdgeOnDescendingDecks() {
         var scene = BoardBridgeSlopeTest.scene(CENTER, 63, false);
         var tile = scene.tile(CENTER);
@@ -101,7 +171,16 @@ class BoardNaturalBridgeTest {
                 for (int d = 0; d < 6; d++) {
                     var next = scene.tile(tile.coords().translated(d));
                     if (!BoardBridge.abutment(tile, next, d) || next.elevation() < shape.level() + 2) { continue; }
-                    var walls = surfaces.get(next.coords()).walls(scene, BoardGeometry.floor(scene), surfaces);
+                    var walls = new ArrayList<>(surfaces.get(next.coords()).walls(scene, BoardGeometry.floor(scene), surfaces));
+                    // A wide rock mouth may enter a continuous cliff in the adjoining hex as well.
+                    for (int direction = 0; direction < 6; direction++) {
+                        var adjacent = scene.tile(next.coords().translated(direction));
+                        if (adjacent == null || adjacent.elevation() <= shape.level() || BoardBridge.feature(adjacent) != null) {
+                            continue;
+                        }
+                        var surface = surfaces.computeIfAbsent(adjacent.coords(), c -> new BoardSurface(scene, adjacent, lod));
+                        walls.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
+                    }
                     var along = BoardGeometry.center(next.coords(), shape.level()).sub(center).nor();
                     // The mouth is perpendicular to the span. Rounded side facets can face nearly the same
                     // direction and reach farther out, but are not the end plane whose burial is checked here.
@@ -163,7 +242,7 @@ class BoardNaturalBridgeTest {
                 assertEquals(1, face.normal().len(), .001f);
             }
         }
-        // Exact bank-outline contacts add bounded triangles: the five surface families submit 157–175 at distance.
+        // Exact bank-outline contacts add bounded triangles: the five widened surface families submit 130–170 at distance.
         assertTrue(previous <= 180,
               "A distant span needs only its silhouette and exact bank contacts: " + family + " submitted " + previous);
     }
@@ -184,6 +263,12 @@ class BoardNaturalBridgeTest {
                       .flatMap(f -> List.of(f.a(), f.b(), f.c()).stream())
                       .filter(p -> Math.abs(new Vector3(p).sub(seam).dot(normal)) < .0001f).distinct().toList();
                 assertEquals(4, points.size(), "Only the mouth's two top and two underside corners lie on the seam");
+                var across = new Vector3(-normal.y, normal.x, 0);
+                for (var point : points) {
+                    float half = Math.abs(new Vector3(point).sub(seam).dot(across));
+                    assertTrue(half >= BoardRelief.metres(8 * .96f) && half <= BoardRelief.metres(8 * 1.04f),
+                          "Natural bridge mouths retain their doubled eight-metre half-width at every orientation");
+                }
                 for (var lod : TerrainLod.values()) {
                     var other = BoardNaturalBridge.build(scene, b, BoardBridge.deck(scene, b), lod, new HashMap<>());
                     var vertices = other.facets().stream().flatMap(f -> List.of(f.a(), f.b(), f.c()).stream()).toList();
@@ -211,12 +296,16 @@ class BoardNaturalBridgeTest {
                 var gate = BoardGeometry.center(next.coords(), shape.level()).sub(center).scl(.5f);
                 var seam = new Vector3(center).add(gate);
                 var normal = new Vector3(gate).nor();
-                // The mouth's corners, top and underside, and the hex corners where the joint closes against its cliff.
-                // Beyond those corners each span's own bank mouth meets the edge's line.
-                float half = BoardGeometry.width() / 4 + .001f;
+                // The mouth's corners, top and underside, or the hex corners that replace them where the joint closes
+                // against its cliff. Those lie on the hex edge itself, which a diagonal neighbour's 84 by 72 hex does
+                // not quite meet square. Beyond them, each span's own bank mouth meets the edge's line.
+                var first = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(1 - d, 6));
+                var edge = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(2 - d, 6)).sub(first).nor();
+                float half = BoardRelief.metres(BoardBridge.NATURAL_HALF_WIDTH * 1.04f) + .001f;
                 var points = shape.facets().stream().filter(f -> f.part() != BoardBridge.Part.SIDE)
                       .flatMap(f -> List.of(f.a(), f.b(), f.c()).stream())
-                      .filter(p -> Math.abs(new Vector3(p).sub(seam).dot(normal)) < .0001f
+                      .filter(p -> (Math.abs(new Vector3(p).sub(seam).dot(normal)) < .0001f
+                                  || Math.abs(edge.x * (p.y - first.y) - edge.y * (p.x - first.x)) < .001f)
                             && Vector3.dst(p.x, p.y, 0, seam.x, seam.y, 0) <= half).distinct().toList();
                 assertTrue(points.size() >= 4, "The open mouth: " + points.size());
                 for (var lod : TerrainLod.values()) {

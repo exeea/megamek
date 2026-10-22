@@ -20,6 +20,36 @@ class BoardSurfaceCacheTest {
     private static final Coords CENTER = new Coords(3, 3);
 
     @Test
+    void graphicsModeSwitchesTheCachedGroundUsedByUnitContacts() {
+        var lower = CENTER;
+        var upper = lower.translated(0);
+        var bank = lower.translated(1);
+        var scene = BoardSurfaceBlendTest.scene(at -> BoardRoadTest.tile(at,
+              at.equals(lower) || at.equals(upper) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+              at.equals(lower) ? 1 : at.equals(upper) ? 8 : 0,
+              at.equals(lower) ? 0 : at.equals(upper) ? 3 : 1, BoardScene.Surface.GRASS));
+        var tile = scene.tile(bank);
+        var cache = new BoardSurface.Cache();
+        var enhanced = cache.get(scene, tile);
+        var point = enhanced.groundFaces().stream()
+              .map(face -> new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3))
+              .filter(p -> Math.abs(p.z - BoardGeometry.surfaceZ(tile)) > .5f
+                    && BoardGeometry.contains(bank, p.x, p.y)).findFirst().orElseThrow();
+        float sculpted = UnitLandingSupports.terrain(scene, point.x, point.y, cache);
+        cache.columns(true);
+        var classic = cache.get(scene, tile);
+        assertNotSame(enhanced, classic, "A mode switch must not retain the previous height field");
+        assertEquals(BoardGeometry.surfaceZ(tile), UnitLandingSupports.terrain(scene, point.x, point.y, cache), .001f,
+              "Units stand on the full sharp Classic roof beside the road");
+        cache.columns(true);
+        assertSame(classic, cache.get(scene, tile), "An unchanged mode retains its cached geometry");
+        cache.columns(false);
+        assertNotSame(classic, cache.get(scene, tile));
+        assertEquals(sculpted, UnitLandingSupports.terrain(scene, point.x, point.y, cache), .001f,
+              "Switching back restores Enhanced ground contact");
+    }
+
+    @Test
     void artworkAndTacticalSnapshotsReuseTerrainAndItsCachedWalls() {
         BoardScene scene = scene(0, 7, 7, true);
         BoardSurface.Cache cache = new BoardSurface.Cache();
@@ -92,6 +122,29 @@ class BoardSurfaceCacheTest {
         assertNotSame(first, changed, "A road approaching the neighbor from the second ring grades the neighbor");
         // Ground a road only approaches keeps its natural rim, so the join with it keeps its height.
         assertEquals(first.height(edge.x, edge.y), changed.height(edge.x, edge.y), .003f);
+    }
+
+    @Test
+    void aSecondRingReciprocalExitChangesTheTerminalGradeEvenWhenTheRampMaskStaysTheSame() {
+        BoardScene scene = scene(0, 7, 7, true);
+        Coords neighbor = CENTER.translated(0), distant = neighbor.translated(0);
+        scene = replace(scene, shape(scene.tile(CENTER), 3, 1, BoardScene.Surface.GRASS));
+        scene = replace(scene, shape(scene.tile(neighbor), 2, 9, BoardScene.Surface.GRASS));
+        scene = replace(scene, shape(scene.tile(distant), 1, 8, BoardScene.Surface.GRASS));
+        var cache = new BoardSurface.Cache();
+        var first = cache.get(scene, scene.tile(CENTER));
+
+        // The one-sided approach still climbs, but no longer belongs to a continuous reciprocal route.
+        var edited = replace(scene, shape(scene.tile(distant), 1, 4, BoardScene.Surface.GRASS));
+        assertSame(scene.tile(CENTER), edited.tile(CENTER));
+        assertSame(scene.tile(neighbor), edited.tile(neighbor));
+        assertEquals(BoardSurface.ramps(scene, scene.tile(neighbor)), BoardSurface.ramps(edited, edited.tile(neighbor)));
+        var changed = cache.get(edited, edited.tile(CENTER));
+        assertNotSame(first, changed);
+        Vector3 point = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(neighbor, 0), 1f / 9);
+        assertTrue(Math.abs(first.height(point.x, point.y) - changed.height(point.x, point.y))
+              > .25f * BoardGeometry.hexScale(), "The new route must rebuild the terminal's vertical transition");
+        assertSame(changed, cache.get(edited, edited.tile(CENTER)));
     }
 
     @Test

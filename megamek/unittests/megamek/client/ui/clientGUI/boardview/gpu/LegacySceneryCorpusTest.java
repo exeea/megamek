@@ -297,7 +297,7 @@ class LegacySceneryCorpusTest {
         assertEquals(new TreeMap<>(Map.ofEntries(Map.entry("decal/landing-pads clipped", 503),
               Map.entry("decal/landing-pads spanning", 85), Map.entry("decal/landing-pads/heli-pad", 978),
               Map.entry("decal/lettering", 327), Map.entry("decal/lettering painted", 68),
-              Map.entry("decal/rail/level-crossing", 4), Map.entry("decal/runway", 4_525), Map.entry("decal/sport", 142),
+              Map.entry("decal/runway", 4_525), Map.entry("decal/sport", 142),
               Map.entry("scenery/rail/crossing-signal", 16), Map.entry("scenery/roofs/landing-light", 4_443))), families);
         System.out.printf("CORPUS rail markers=%d (on a bridge deck %d, storing tracks %d)%n", rails, deckRails, storedTracks);
         // Only rails with a side along their bridge ride its deck; the four that cross under one lie beneath it. 105 of
