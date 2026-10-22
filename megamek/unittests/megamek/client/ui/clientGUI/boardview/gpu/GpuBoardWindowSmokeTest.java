@@ -747,12 +747,17 @@ class GpuBoardWindowSmokeTest {
                 await(() -> onSwing(() -> mapWindow("board-preview-2d") != null));
                 assertTrue(source.isClosed());
                 JDialog legacy2D = onSwing(() -> (JDialog) mapWindow("board-preview-2d"));
-                captureLegacy2D(legacy2D, "preview-renderer", "preview-view-switch-2d.png");
+                captureLegacy2D(legacy2D, "preview-view", "preview-view-switch-2d.png");
                 Application nativeView = Gdx.app;
                 String graphics = GUIPreferences.getInstance().getBoardGraphics() == BoardGraphics.CLASSIC
                       ? ClientGUI.VIEW_GRAPHICS_CLASSIC : ClientGUI.VIEW_GRAPHICS_ENHANCED;
                 onSwing(() -> {
-                    JMenu renderer = (JMenu) namedButton(legacy2D, "preview-renderer");
+                    assertTrue(java.util.Arrays.stream(legacy2D.getJMenuBar().getMenu(0).getMenuComponents())
+                          .anyMatch(item -> item instanceof JMenuItem entry
+                                && entry.getText().equals(Messages.getString("CommonMenuBar.PrintMenu"))),
+                          "The Legacy 2D preview's File menu offers Print, as the 3D preview's Menu does");
+                    JMenu view = (JMenu) namedButton(legacy2D, "preview-view");
+                    JMenu renderer = (JMenu) namedButton(view.getPopupMenu(), "preview-renderer");
                     assertTrue(rendererItem(renderer, ClientGUI.VIEW_LEGACY_2D).isSelected());
                     rendererItem(renderer, graphics).doClick(0);
                     return null;

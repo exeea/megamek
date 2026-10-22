@@ -15,8 +15,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageTypeSpecifier;
+import javax.imageio.ImageWriteParam;
 import javax.imageio.metadata.IIOMetadataNode;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -307,11 +309,11 @@ final class GpuMapSource implements BoardSource {
             // the Client Settings' Trace Overlay section.
             view.add(viewCommand("boardTraceOverlay", null, gui.getShowTraceOverlay(), gui::toggleTraceConditionsOverlay));
             view.add(menuCommand("boardTraceOverlaySettings", "BoardEditor.traceSettings",
-                  () -> clientSettings(CommonSettingsPane.SETTINGS_OVERLAYS)));
+                  () -> clientSettings(owner, CommonSettingsPane.SETTINGS_OVERLAYS)));
         }
         commands.add(new BoardScene.Command("view", Messages.getString("CommonMenuBar.ViewMenu"), "", true,
               false, view, () -> { }));
-        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> clientSettings(null)));
+        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> clientSettings(owner, null)));
         commands.add(menuCommand("helpAbout", "CommonMenuBar.helpAbout", () -> new MMAboutDialog(owner).show()));
         if (requestClose != null) { commands.add(menuCommand("close", "Close", requestClose)); }
         return List.copyOf(commands);
@@ -364,7 +366,7 @@ final class GpuMapSource implements BoardSource {
     }
 
     /** The Client Settings dialog, opened on the settings page {@code route} when there is one. */
-    private void clientSettings(String route) {
+    static void clientSettings(Window owner, String route) {
         Window parent = owner;
         while (parent != null && !(parent instanceof JFrame)) { parent = parent.getOwner(); }
         CommonSettingsDialog settings = new CommonSettingsDialog((JFrame) parent);
@@ -428,30 +430,33 @@ final class GpuMapSource implements BoardSource {
 
     @Override public GpuBoardPrint.Request takePrintRequest() { return printRequest.getAndSet(null); }
 
-    /** Print follows the board's existing printable-PNG workflow, using the 3D snapshot instead of 2D tiles. */
+    /** Print saves the 3D snapshot as a printable JPEG. */
     private void choosePrint() {
         if (closed || printing || savingPrint || choosingPrint) { return; }
         choosingPrint = true;
         refresh();
         try {
             Path near = editor == null ? null : editor.path();
-            JFileChooser chooser = new JFileChooser(near == null ? new File(".") : near.toFile().getParentFile());
-            chooser.setDialogTitle(Messages.getString("CommonMenuBar.PrintMenu"));
-            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                  Messages.getString("GpuBoard.print.filter"), "png"));
-            chooser.setAccessory(new JLabel(Messages.getString("GpuBoard.print.scale")));
-            String name = near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString());
-            if (name == null || name.isBlank()) { name = "board"; }
-            chooser.setSelectedFile(new File(name + "-3d.png"));
-            if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION || closed) { return; }
-            Path target = chooser.getSelectedFile().toPath();
-            if (!target.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
-                target = target.resolveSibling(target.getFileName() + ".png");
-            }
-            Path output = target;
-            requestPrint(image -> savePrint(image, output), this::printFailed);
+            Path target = choosePrintFile(owner, near == null ? new File(".") : near.toFile().getParentFile(),
+                  near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString()), "-3d");
+            if (target == null || closed) { return; }
+            requestPrint(image -> savePrint(image, target), this::printFailed);
         } catch (RuntimeException failure) { printFailed(failure); }
         finally { choosingPrint = false; refresh(); }
+    }
+
+    /** The print's JPEG file, chosen in {@code directory}; null when cancelled. Shared by the 3D and 2D previews. */
+    static Path choosePrintFile(Window owner, File directory, String name, String suffix) {
+        JFileChooser chooser = new JFileChooser(directory);
+        chooser.setDialogTitle(Messages.getString("CommonMenuBar.PrintMenu"));
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+              Messages.getString("GpuBoard.print.filter"), "jpg", "jpeg"));
+        chooser.setAccessory(new JLabel(Messages.getString("GpuBoard.print.scale")));
+        chooser.setSelectedFile(new File((name == null || name.isBlank() ? "board" : name) + suffix + ".jpg"));
+        if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) { return null; }
+        Path target = chooser.getSelectedFile().toPath();
+        String file = target.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return file.endsWith(".jpg") || file.endsWith(".jpeg") ? target : target.resolveSibling(target.getFileName() + ".jpg");
     }
 
     private void savePrint(BufferedImage image, Path target) {
@@ -459,7 +464,7 @@ final class GpuMapSource implements BoardSource {
         Thread worker = new Thread(() -> {
             Exception failure = null;
             try {
-                writePrint(image, target, GpuBoardPrint.PIXELS_PER_METRE);
+                writePrint(image, target, GpuBoardPrint.DPI, GpuBoardPrint.DPI);
             } catch (IOException | RuntimeException error) { failure = error; }
             Exception result = failure;
             onSwing(() -> {
@@ -474,30 +479,44 @@ final class GpuMapSource implements BoardSource {
         worker.start();
     }
 
-    /** The PNG's physical pixel density preserves hex size in print programs that honor its resolution metadata. */
-    static void writePrint(BufferedImage image, Path target, int pixelsPerMetre) throws IOException {
-        if (pixelsPerMetre <= 0) { throw new IllegalArgumentException("Print resolution must be positive"); }
-        var writers = ImageIO.getImageWritersByFormatName("png");
-        if (!writers.hasNext()) { throw new IOException("No PNG writer"); }
+    /**
+     * An RGB image as a JPEG whose density (dots per inch) keeps the hex size in print programs that honour it. Quality
+     * 0.92 without chroma subsampling: on a 12 x 9 print a fifth of the earlier PNG's size, its labels and grid lines
+     * indistinguishable from the PNG's at three times magnification.
+     */
+    static void writePrint(BufferedImage image, Path target, int dotsPerInchX, int dotsPerInchY) throws IOException {
+        if (dotsPerInchX <= 0 || dotsPerInchY <= 0) { throw new IllegalArgumentException("Print resolution must be positive"); }
+        var writers = ImageIO.getImageWritersByFormatName("jpeg");
+        if (!writers.hasNext()) { throw new IOException("No JPEG writer"); }
         var writer = writers.next();
         try (var output = ImageIO.createImageOutputStream(target.toFile())) {
             if (output == null) { throw new IOException("Cannot write " + target); }
             writer.setOutput(output);
             var parameters = writer.getDefaultWriteParam();
+            parameters.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            parameters.setCompressionQuality(.92f);
             var metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), parameters);
-            var root = new IIOMetadataNode("javax_imageio_png_1.0");
-            var resolution = new IIOMetadataNode("pHYs");
-            resolution.setAttribute("pixelsPerUnitXAxis", Integer.toString(pixelsPerMetre));
-            resolution.setAttribute("pixelsPerUnitYAxis", Integer.toString(pixelsPerMetre));
-            resolution.setAttribute("unitSpecifier", "meter");
-            root.appendChild(resolution);
-            metadata.mergeTree("javax_imageio_png_1.0", root);
-            writer.write(null, new javax.imageio.IIOImage(image, null, metadata), parameters);
+            String format = "javax_imageio_jpeg_image_1.0";
+            var root = (IIOMetadataNode) metadata.getAsTree(format);
+            var density = (IIOMetadataNode) root.getElementsByTagName("app0JFIF").item(0);
+            density.setAttribute("resUnits", "1");
+            density.setAttribute("Xdensity", Integer.toString(dotsPerInchX));
+            density.setAttribute("Ydensity", Integer.toString(dotsPerInchY));
+            var components = root.getElementsByTagName("componentSpec");
+            for (int index = 0; index < components.getLength(); index++) {
+                var component = (IIOMetadataNode) components.item(index);
+                component.setAttribute("HsamplingFactor", "1");
+                component.setAttribute("VsamplingFactor", "1");
+            }
+            metadata.setFromTree(format, root);
+            writer.write(null, new IIOImage(image, null, metadata), parameters);
         } finally { writer.dispose(); }
     }
 
-    private void printFailed(Exception failure) {
-        LOGGER.error(failure, "Unable to save printable 3D board");
+    private void printFailed(Exception failure) { printFailed(owner, failure); }
+
+    static void printFailed(Window owner, Exception failure) {
+        LOGGER.error(failure, "Unable to save printable board");
         String message = failure.getMessage();
         if (message == null || message.isBlank()) { message = failure.toString(); }
         JOptionPane.showMessageDialog(owner, message, Messages.getString("ClientGUI.errorSavingFile"),

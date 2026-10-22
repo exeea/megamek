@@ -190,6 +190,8 @@ final class GpuAtmosphere implements Disposable {
     /** Derived on control changes; zero offsets leave the existing display conversion unchanged. */
     private final Vector3 whiteBalanceShift = new Vector3();
     private boolean transparentBackground;
+    /** A print tile's place in its whole picture (uv offset and scale) and that picture's aspect; null on screen. */
+    private float[] printFrame;
     private List<BoardScene.Tile> groundTiles;
     private float groundLevel;
     private float groundBase;
@@ -393,8 +395,17 @@ final class GpuAtmosphere implements Disposable {
         }
     }
 
-    /** Board-cutout PNGs preserve coverage; additive light outside that coverage has no straight-alpha representation. */
+    /** A print's cutout keeps coverage for its paper; additive light outside that coverage has no straight-alpha form. */
     void setTransparentBackground(boolean enabled) { transparentBackground = enabled; }
+
+    /**
+     * The next composites are the tile at {@code left, top} (pixels, rows downward) of a {@code width} by
+     * {@code height} print: the space sky spans the whole print, and no lens vignette darkens each tile's corners.
+     */
+    void setPrintTile(int left, int top, int tileWidth, int tileHeight, int width, int height) {
+        printFrame = new float[] { left / (float) width, (height - top - tileHeight) / (float) height,
+              tileWidth / (float) width, tileHeight / (float) height, width / (float) height };
+    }
 
     /** The backdrop: the visible sky palette, or with "Show lighting sky" the sky that lights the scene. */
     private Color backdropSky() { return options.lightingSky() ? lighting.environmentSky() : lighting.sky(); }
@@ -666,8 +677,11 @@ final class GpuAtmosphere implements Disposable {
         if (environment != null) { environment.bindImage(compositeShader, 8); }
         else { compositeShader.setUniformf("u_environmentImage", 0, 1); }
         compositeShader.setUniformf("u_transparentBackground", transparentBackground ? 1 : 0);
-        compositeShader.setUniformf("u_spaceBackdrop", spaceBackdrop(board) ? 1 : 0,
-              camera.viewportWidth / Math.max(1, camera.viewportHeight), cameraRelativeLight ? 1 : 0);
+        compositeShader.setUniformf("u_spaceBackdrop", spaceBackdrop(board) ? 1 : 0, printFrame == null
+              ? camera.viewportWidth / Math.max(1, camera.viewportHeight) : printFrame[4], cameraRelativeLight ? 1 : 0);
+        if (printFrame == null) { compositeShader.setUniformf("u_frame", 0, 0, 1, 1); }
+        else { compositeShader.setUniformf("u_frame", printFrame[0], printFrame[1], printFrame[2], printFrame[3]); }
+        compositeShader.setUniformf("u_vignette", printFrame == null ? 1 : 0);
         // Zero drift or density constants can optimize these uniforms out of an edited shader.
         compositeShader.setUniformf(compositeShader.fetchUniformLocation("u_spaceTime", false), (float) spaceTime);
         compositeShader.setUniformMatrix(compositeShader.fetchUniformLocation("u_spaceView", false), camera.view);

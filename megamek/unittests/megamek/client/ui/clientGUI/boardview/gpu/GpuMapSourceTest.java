@@ -115,32 +115,49 @@ class GpuMapSourceTest {
     }
 
     @Test
-    void printablePngKeepsItsPhysicalResolutionAndTransparency() throws Exception {
-        Path output = temporary.resolve("print.png");
+    void printableJpegKeepsTheMapsheetHexSizeAndFullColour() throws Exception {
+        Path output = temporary.resolve("print.jpg");
         var image = new BufferedImage(GpuBoardPrint.HEX_WIDTH_PIXELS, GpuBoardPrint.PIXELS_PER_HEX,
-              BufferedImage.TYPE_INT_ARGB);
-        image.setRGB(5, 7, 0x804A719A);
-        GpuMapSource.writePrint(image, output, GpuBoardPrint.PIXELS_PER_METRE);
-        var reader = ImageIO.getImageReadersByFormatName("png").next();
+              BufferedImage.TYPE_3BYTE_BGR);
+        var graphics = image.createGraphics();
+        try {
+            graphics.setColor(java.awt.Color.WHITE);
+            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+            graphics.setColor(new java.awt.Color(0x4A719A));
+            graphics.fillRect(40, 40, 64, 64);
+            // A one-pixel red line: subsampled chroma would spread and fade it.
+            graphics.setColor(java.awt.Color.RED);
+            graphics.drawLine(150, 20, 150, 240);
+        } finally { graphics.dispose(); }
+        GpuMapSource.writePrint(image, output, GpuBoardPrint.DPI, GpuBoardPrint.DPI);
+        var reader = ImageIO.getImageReadersByFormatName("jpeg").next();
         try (var input = ImageIO.createImageInputStream(output.toFile())) {
             reader.setInput(input);
-            var root = (IIOMetadataNode) reader.getImageMetadata(0).getAsTree("javax_imageio_png_1.0");
-            var resolution = (IIOMetadataNode) root.getElementsByTagName("pHYs").item(0);
-            assertNotNull(resolution);
-            assertEquals(Integer.toString(GpuBoardPrint.PIXELS_PER_METRE), resolution.getAttribute("pixelsPerUnitXAxis"));
-            assertEquals(Integer.toString(GpuBoardPrint.PIXELS_PER_METRE), resolution.getAttribute("pixelsPerUnitYAxis"));
-            assertEquals("meter", resolution.getAttribute("unitSpecifier"));
+            var root = (IIOMetadataNode) reader.getImageMetadata(0).getAsTree("javax_imageio_jpeg_image_1.0");
+            var density = (IIOMetadataNode) root.getElementsByTagName("app0JFIF").item(0);
+            assertNotNull(density);
+            assertEquals("1", density.getAttribute("resUnits"), "The density is in dots per inch");
             var saved = reader.read(0);
-            double pixelsPerMetreX = Double.parseDouble(resolution.getAttribute("pixelsPerUnitXAxis"));
-            double pixelsPerMetreY = Double.parseDouble(resolution.getAttribute("pixelsPerUnitYAxis"));
-            assertEquals(1.5, saved.getWidth() / pixelsPerMetreX / .0254, .00001,
+            assertEquals(1.5, saved.getWidth() / Double.parseDouble(density.getAttribute("Xdensity")), .00001,
                   "Printed hex width matches official mapsheets without fit-to-page scaling");
-            assertEquals(1.3, saved.getHeight() / pixelsPerMetreY / .0254, .00001,
+            assertEquals(1.3, saved.getHeight() / Double.parseDouble(density.getAttribute("Ydensity")), .00001,
                   "Printed hex height matches official mapsheets without fit-to-page scaling");
-            assertTrue(saved.getColorModel().hasAlpha(), "The printable PNG retains transparency");
-            assertEquals(0, saved.getRGB(0, 0), "The empty background remains transparent");
-            assertEquals(image.getRGB(5, 7), saved.getRGB(5, 7));
+            var components = root.getElementsByTagName("componentSpec");
+            for (int index = 0; index < components.getLength(); index++) {
+                var component = (IIOMetadataNode) components.item(index);
+                assertEquals("1", component.getAttribute("HsamplingFactor"), "No chroma subsampling");
+                assertEquals("1", component.getAttribute("VsamplingFactor"), "No chroma subsampling");
+            }
+            assertClose(0x4A719A, saved.getRGB(72, 72), 4);
+            assertClose(0xFF0000, saved.getRGB(150, 130), 40);
         } finally { reader.dispose(); }
+    }
+
+    private static void assertClose(int expected, int actual, int tolerance) {
+        for (int shift : new int[] { 16, 8, 0 }) {
+            assertTrue(Math.abs((expected >> shift & 255) - (actual >> shift & 255)) <= tolerance,
+                  String.format("%06X is not within %d of %06X", actual & 0xFFFFFF, tolerance, expected));
+        }
     }
 
     @ParameterizedTest

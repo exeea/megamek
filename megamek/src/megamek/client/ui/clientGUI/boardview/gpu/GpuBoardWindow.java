@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.AWTEvent;
 import java.awt.BorderLayout;
+import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Frame;
 import java.awt.Toolkit;
@@ -16,18 +17,25 @@ import java.awt.event.WindowEvent;
 import java.awt.event.WindowAdapter;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
+import javax.swing.JMenu;
 import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
+import javax.swing.event.MenuEvent;
+import javax.swing.event.MenuListener;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
@@ -46,6 +54,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.common.annotations.Nullable;
@@ -407,23 +416,35 @@ public final class GpuBoardWindow {
             BoardEditorSession session = new BoardEditorSession();
             session.open(mapGame.getBoard(), previewFile == null ? null : previewFile.toPath());
             close(false);
-            afterClose = () -> {
-                Window owner = swingWindow;
-                if (owner instanceof AdvancedSearchMapDialog browser) {
-                    owner = browser.getOwner();
-                    // End the original modal call deliberately; the editor returns directly to the lobby.
-                    browser.setResult(DialogResult.CANCELLED);
-                    browser.dispose();
-                }
-                if (owner == null || !owner.isDisplayable()) { return; }
-                try {
-                    startEditor(owner, session);
-                } catch (RuntimeException | LinkageError failure) {
-                    reportPreviewFailure(owner, failure);
-                }
-            };
+            afterClose = () -> editCopy(swingWindow, session);
         } catch (RuntimeException failure) {
             reportPreviewFailure(swingWindow, failure);
+        }
+    }
+
+    /** Opens the editor on a preview's copied board, once no other native window holds the renderer. EDT. */
+    private static synchronized void editCopy(Window owner, BoardEditorSession session) {
+        if (active != null) {
+            if (active.preview) {
+                active.close(false);
+                active.afterClose = () -> editCopy(owner, session);
+            } else {
+                JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+            }
+            return;
+        }
+        Window launcher = owner;
+        if (launcher instanceof AdvancedSearchMapDialog browser) {
+            launcher = browser.getOwner();
+            // End the original modal call deliberately; the editor returns directly to the lobby.
+            browser.setResult(DialogResult.CANCELLED);
+            browser.dispose();
+        }
+        if (launcher == null || !launcher.isDisplayable()) { return; }
+        try {
+            startEditor(launcher, session);
+        } catch (RuntimeException | LinkageError failure) {
+            reportPreviewFailure(launcher, failure);
         }
     }
 
@@ -454,42 +475,112 @@ public final class GpuBoardWindow {
             return;
         }
         preview2D = boardWindow2D(swingWindow, Messages.getString("BoardEditor.preview2D"), "board-editor-preview-2d",
-              editor.game());
+              editor.game(), null);
         if (preview2D != null) { showLegacy2D(null, preview2D); }
     }
 
     /**
-     * A file-browser or lobby preview's Legacy 2D window, with the 3D preview's Renderer menu: Classic or Enhanced
-     * returns to the 3D preview of this exact board, including a randomly generated one, with the chosen graphics.
+     * A file-browser or lobby preview's Legacy 2D window, with the 3D preview's menu ({@link #previewMenu2D}): Classic or
+     * Enhanced returns to the 3D preview of this exact board, including a randomly generated one, with the chosen graphics.
      */
     private static void showLegacy2DPreview(Window owner, Game game, File file) {
-        JDialog dialog = boardWindow2D(owner, previewTitle(game.getBoard()), "board-preview-2d", game);
+        JDialog dialog = boardWindow2D(owner, previewTitle(game.getBoard()), "board-preview-2d", game,
+              (window, view) -> previewMenu2D(window, view, game, file, () -> {
+                  openPreview(owner, game.getBoard(), file);
+                  if (active != null && active.preview && active.swingWindow == owner
+                        && active.mapGame.getBoard() == game.getBoard()) { window.dispose(); }
+              }));
         if (dialog == null) { return; }
-        JMenuBar menu = new JMenuBar();
-        menu.add(CommonMenuBar.rendererMenu(event -> {
-            String choice = event.getActionCommand();
-            if (!ClientGUI.VIEW_LEGACY_2D.equals(choice)) {
-                GUIPreferences.getInstance().setBoardGraphics(ClientGUI.VIEW_GRAPHICS_CLASSIC.equals(choice)
-                      ? BoardGraphics.CLASSIC : BoardGraphics.ENHANCED);
-                openPreview(owner, game.getBoard(), file);
-                if (active != null && active.preview && active.swingWindow == owner
-                      && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
-            }
-            // This window draws Legacy 2D for as long as it is open.
-            CommonMenuBar.selectRenderer(menu.getMenu(0), ClientGUI.VIEW_LEGACY_2D);
-        }));
-        menu.getMenu(0).setName("preview-renderer");
-        CommonMenuBar.selectRenderer(menu.getMenu(0), ClientGUI.VIEW_LEGACY_2D);
-        dialog.setJMenuBar(menu);
         showLegacy2D(null, dialog);
+    }
+
+    /** The 2D board art's column and row pitch (63 and 72 px) at the mapsheet's 1.125 and 1.3 inches. */
+    private static final int PRINT_2D_DPI_X = 56, PRINT_2D_DPI_Y = 55;
+
+    /**
+     * A Legacy 2D preview's menu bar, the 3D preview's Menu: File (3D Editor on a copy of the board, Print, Close), View
+     * (Renderer, Hex Coords, Hex Types, Client Settings) and Help (About). Renderer's Classic or Enhanced chooses the 3D
+     * graphics, then {@code show3D} shows the board in 3D; the window itself always draws Legacy 2D. Print saves the 2D
+     * board art (the old Save As Image's, with labels) as the 3D print's JPEG, at the density that prints each hex at
+     * its mapsheet size. EDT.
+     */
+    public static JMenuBar previewMenu2D(JDialog dialog, BoardView view, Game game, @Nullable File file, Runnable show3D) {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        JMenu document = new JMenu(Messages.getString("CommonMenuBar.FileMenu"));
+        document.add(menuItem("BoardEditor.edit3D", () -> {
+            try {
+                BoardEditorSession session = new BoardEditorSession();
+                session.open(game.getBoard(), file == null ? null : file.toPath());
+                editCopy(dialog.getOwner(), session);
+            } catch (RuntimeException failure) { reportPreviewFailure(dialog, failure); }
+        }));
+        document.add(menuItem("CommonMenuBar.PrintMenu", () -> {
+            Path target = GpuMapSource.choosePrintFile(dialog, file == null ? new File(".") : file.getAbsoluteFile().getParentFile(),
+                  file == null ? game.getBoard().getBoardName() : BoardFile.withoutExtension(file.getName()), "-2d");
+            if (target == null) { return; }
+            dialog.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            try {
+                GpuMapSource.writePrint(view.getClientState().getEntireBoardImage(true), target, PRINT_2D_DPI_X, PRINT_2D_DPI_Y);
+            } catch (IOException | RuntimeException failure) {
+                GpuMapSource.printFailed(dialog, failure);
+            } finally { dialog.setCursor(Cursor.getDefaultCursor()); }
+        }));
+        document.addSeparator();
+        document.add(menuItem("Close", () -> dialog.dispatchEvent(new WindowEvent(dialog, WindowEvent.WINDOW_CLOSING))));
+        JMenu renderer = CommonMenuBar.rendererMenu(event -> {
+            if (!ClientGUI.VIEW_LEGACY_2D.equals(event.getActionCommand())) {
+                preferences.setBoardGraphics(ClientGUI.VIEW_GRAPHICS_CLASSIC.equals(event.getActionCommand())
+                      ? BoardGraphics.CLASSIC : BoardGraphics.ENHANCED);
+                show3D.run();
+            }
+        });
+        renderer.setName("preview-renderer");
+        JCheckBoxMenuItem coordinates = new JCheckBoxMenuItem(Messages.getString("CommonMenuBar.viewToggleHexCoords"));
+        coordinates.addActionListener(event -> preferences.toggleCoords());
+        JCheckBoxMenuItem types = new JCheckBoxMenuItem(Messages.getString("CommonMenuBar.viewToggleHexTypes"));
+        types.addActionListener(event -> preferences.toggleHexTypes());
+        // The window draws Legacy 2D for as long as it is open; the checks show the preferences, which other menus change.
+        Runnable checks = () -> {
+            CommonMenuBar.selectRenderer(renderer, ClientGUI.VIEW_LEGACY_2D);
+            coordinates.setSelected(preferences.getCoordsEnabled());
+            types.setSelected(preferences.getHexTypesEnabled());
+        };
+        checks.run();
+        JMenu display = new JMenu(Messages.getString("CommonMenuBar.ViewMenu"));
+        display.setName("preview-view");
+        display.addMenuListener(new MenuListener() {
+            @Override public void menuSelected(MenuEvent event) { checks.run(); }
+            @Override public void menuDeselected(MenuEvent event) { }
+            @Override public void menuCanceled(MenuEvent event) { }
+        });
+        display.add(renderer);
+        display.add(coordinates);
+        display.add(types);
+        display.addSeparator();
+        display.add(menuItem("CommonMenuBar.viewClientSettings", () -> GpuMapSource.clientSettings(dialog, null)));
+        JMenu help = new JMenu(Messages.getString("CommonMenuBar.HelpMenu"));
+        help.add(menuItem("CommonMenuBar.helpAbout", () -> new MMAboutDialog(dialog).show()));
+        JMenuBar menu = new JMenuBar();
+        menu.add(document);
+        menu.add(display);
+        menu.add(help);
+        return menu;
+    }
+
+    private static JMenuItem menuItem(String label, Runnable action) {
+        JMenuItem item = new JMenuItem(Messages.getString(label));
+        item.addActionListener(event -> action.run());
+        return item;
     }
 
     /**
      * The one 2D window of a map, for the map preview's 2D Board and the editor's 2D Preview: a non-modal window showing
      * {@code game}'s board as the 2D board draws it, through a {@link BoardView} that follows the game's board events and
-     * is disposed with the window. Returns null after reporting a failure. EDT.
+     * is disposed with the window, and the menu bar {@code menu} makes for them, if any. Returns null after reporting a
+     * failure. EDT.
      */
-    private static JDialog boardWindow2D(Window owner, String title, String name, Game game) {
+    private static JDialog boardWindow2D(Window owner, String title, String name, Game game,
+          @Nullable BiFunction<JDialog, BoardView, JMenuBar> menu) {
         JDialog dialog = new JDialog(owner, title, Dialog.ModalityType.MODELESS);
         dialog.setName(name);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -498,6 +589,7 @@ public final class GpuBoardWindow {
             view.setUseLosTool(false);
             view.setDisplayInvalidFields(false);
             dialog.add(view.getComponent(true), BorderLayout.CENTER);
+            if (menu != null) { dialog.setJMenuBar(menu.apply(dialog, view)); }
             dialog.addWindowListener(new WindowAdapter() {
                 @Override public void windowClosed(WindowEvent event) { view.dispose(); }
             });

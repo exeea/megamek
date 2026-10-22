@@ -1474,6 +1474,9 @@ public class ChatLounge extends AbstractPhaseDisplay
             previewPanel.add(previewSettingsPanel);
             previewPanel.add(previewBV.getComponent(true));
             boardPreviewW.add(previewPanel);
+            // The 3D preview's Menu: Classic or Enhanced opens the 3D preview of this board beside this one.
+            boardPreviewW.setJMenuBar(GpuBoardWindow.previewMenu2D(boardPreviewW, previewBV, boardPreviewGame, null,
+                  this::previewGameBoard3D));
             boardPreviewW.setSize(clientgui.getFrame().getWidth() / 2, clientgui.getFrame().getHeight() / 2);
             // remember the preview window's size and position between sessions, like the standard dialogs do
             // (the preferences are written when MegaMek exits normally)
