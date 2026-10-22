@@ -14,6 +14,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
@@ -136,7 +137,9 @@ class GpuBoardPrintSmokeTest {
                   "The live board supplies rain and fog that must be excluded from printing");
 
             boolean[] printedColumns = { false };
-            BufferedImage image = print(source, view, () -> {
+            String name = (editing ? "board-print-editor" : "board-print-preview")
+                  + (graphics == BoardGraphics.CLASSIC ? "-classic" : "");
+            BufferedImage image = print(source, view, name, () -> {
                 Object print = field(view, "boardPrint");
                 if (print != null && field(print, "terrain") instanceof GpuTerrain printTerrain) {
                     printedColumns[0] |= printTerrain.columns();
@@ -144,19 +147,13 @@ class GpuBoardPrintSmokeTest {
             });
             assertEquals(graphics == BoardGraphics.CLASSIC, printedColumns[0],
                   "The print builds the live view's 3D Graphics: " + graphics);
-            String name = (editing ? "board-print-editor" : "board-print-preview")
-                  + (graphics == BoardGraphics.CLASSIC ? "-classic" : "");
-            BufferedImage saved = save(image, name);
             assertEquals(2775, image.getWidth(), "Twelve columns at 1.125-inch pitch plus the edge, at 200 DPI");
             assertEquals(2470, image.getHeight(), "Nine 1.3-inch rows plus the staggered half hex, at 200 DPI");
             for (int y : List.of(100, 1100, 2100)) {
-                assertEquals(0xFFFFFF, image.getRGB(0, y) & 0xFFFFFF,
-                      "The empty background is the paper's white across framebuffer tile boundaries");
-                assertTrue(brightness(saved.getRGB(0, y)) > 250, "The JPEG keeps the white background");
+                assertTrue(brightness(image.getRGB(0, y)) > 250,
+                      "The empty background is the paper's white across framebuffer tile and JPEG band boundaries");
             }
             assertTrue(brightness(image.getRGB(150, 130)) < 220, "The board itself covers the paper");
-            assertTrue(Math.abs(brightness(image.getRGB(150, 130)) - brightness(saved.getRGB(150, 130))) < 8,
-                  "The JPEG keeps the board's colour");
             assertNoPaper(image, 110, 245, 80, 30); // The horizontal grid edge between the first two rows.
             // Every framebuffer tile is one part of one picture: no vignette darkens its corners (1.06 with one).
             double vignette = tileVignette(image);
@@ -220,9 +217,8 @@ class GpuBoardPrintSmokeTest {
         try {
             view.create();
             GpuBoardTestUi.present(view);
-            BufferedImage image = print(source, view, () -> { });
             String name = "board-print-space" + (graphics == BoardGraphics.CLASSIC ? "-classic" : "");
-            save(image, name);
+            BufferedImage image = print(source, view, name, () -> { });
             view.render();
             GpuBoardTestUi.capture(new File(reviewDirectory(), name + "-live.png"));
             long total = 0;
@@ -248,37 +244,35 @@ class GpuBoardPrintSmokeTest {
         }
     }
 
-    /** Prints through the map's EDT request while the view keeps rendering, as the live window does. */
-    private static BufferedImage print(GpuMapSource source, GpuBattleView view, ThrowingRunnable eachFrame)
+    /**
+     * Prints through the map's EDT request while the view keeps rendering, as the live window does, into the review
+     * directory's {@code name}.jpg, and reads that file back.
+     */
+    private static BufferedImage print(GpuMapSource source, GpuBattleView view, String name, ThrowingRunnable eachFrame)
           throws Exception {
-        AtomicReference<BufferedImage> printed = new AtomicReference<>();
+        File target = new File(reviewDirectory(), name + ".jpg");
+        AtomicBoolean printed = new AtomicBoolean();
         AtomicReference<Throwable> failed = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> source.requestPrint(image -> {
+        SwingUtilities.invokeAndWait(() -> source.requestPrint(target.toPath(), () -> {
             if (!SwingUtilities.isEventDispatchThread()) {
                 failed.set(new AssertionError("The completion must return to the map's EDT owner"));
             }
-            printed.set(image);
+            printed.set(true);
         }, failed::set));
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
-        while (printed.get() == null && failed.get() == null) {
+        while (!printed.get() && failed.get() == null) {
             assertTrue(System.nanoTime() < deadline, "Printing must complete while the view continues to render");
             view.render();
             eachFrame.run();
             SwingUtilities.invokeAndWait(() -> { });
         }
         if (failed.get() != null) { throw new AssertionError("Print rendering failed", failed.get()); }
-        assertNotNull(printed.get());
-        return printed.get();
+        BufferedImage image = ImageIO.read(target);
+        assertNotNull(image, "The print wrote a readable JPEG");
+        return image;
     }
 
     private interface ThrowingRunnable { void run() throws Exception; }
-
-    /** Writes the print as the Print command does, for review, and reads it back. */
-    private static BufferedImage save(BufferedImage image, String name) throws Exception {
-        File outputFile = new File(reviewDirectory(), name + ".jpg");
-        GpuMapSource.writePrint(image, outputFile.toPath(), GpuBoardPrint.DPI, GpuBoardPrint.DPI);
-        return ImageIO.read(outputFile);
-    }
 
     private static File reviewDirectory() {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));

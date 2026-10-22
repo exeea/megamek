@@ -520,7 +520,10 @@ public final class GpuBoardWindow {
             if (target == null) { return; }
             dialog.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
             try {
-                GpuMapSource.writePrint(view.getClientState().getEntireBoardImage(true), target, PRINT_2D_DPI_X, PRINT_2D_DPI_Y);
+                var image = view.getClientState().getEntireBoardImage(true);
+                try (var jpeg = new GpuPrintJpeg(target, image.getWidth(), image.getHeight(), PRINT_2D_DPI_X, PRINT_2D_DPI_Y)) {
+                    jpeg.write(image);
+                }
             } catch (IOException | RuntimeException failure) {
                 GpuMapSource.printFailed(dialog, failure);
             } finally { dialog.setCursor(Cursor.getDefaultCursor()); }

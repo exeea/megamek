@@ -5,9 +5,7 @@ import java.awt.Font;
 import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,11 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import javax.imageio.IIOImage;
-import javax.imageio.ImageIO;
-import javax.imageio.ImageTypeSpecifier;
-import javax.imageio.ImageWriteParam;
-import javax.imageio.metadata.IIOMetadataNode;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -150,7 +143,6 @@ final class GpuMapSource implements BoardSource {
     private volatile boolean closed;
     /** EDT-owned job state; only the immutable request crosses to the render thread. */
     private boolean printing;
-    private boolean savingPrint;
     private boolean choosingPrint;
     private final AtomicReference<GpuBoardPrint.Request> printRequest = new AtomicReference<>();
     /** EDT-owned: the board tagger runs ({@link #runBoardTagger}). */
@@ -298,7 +290,7 @@ final class GpuMapSource implements BoardSource {
                   "", !tagging, false, false, List.of(), () -> onSwing(() -> { if (!closed) { runBoardTagger(); } })));
         }
         commands.add(new BoardScene.Command("fileBoardPrint", Messages.getString("CommonMenuBar.PrintMenu"), "",
-              !printing && !savingPrint && !choosingPrint, false, false, List.of(), () -> onSwing(this::choosePrint)));
+              !printing && !choosingPrint, false, false, List.of(), () -> onSwing(this::choosePrint)));
         GUIPreferences gui = GUIPreferences.getInstance();
         List<BoardScene.Command> view = new ArrayList<>(List.of(renderer(gui),
               viewCommand(ClientGUI.VIEW_TOGGLE_HEX_COORDS, editor == null ? KeyCommandBind.HEX_COORDS : null,
@@ -408,15 +400,15 @@ final class GpuMapSource implements BoardSource {
         }).toList());
     }
 
-    /** EDT entry point; completion and failure return to that same owner after the GL thread finishes its snapshot. */
-    void requestPrint(Consumer<BufferedImage> completed, Consumer<Exception> failed) {
+    /** EDT entry point; completion and failure return to that same owner after the GL thread has written the file. */
+    void requestPrint(Path target, Runnable completed, Consumer<Exception> failed) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
-        if (closed || printing || savingPrint) { return; }
+        if (closed || printing) { return; }
         printing = true;
         try {
-            printRequest.set(new GpuBoardPrint.Request(printScene(), image -> onSwing(() -> {
+            printRequest.set(new GpuBoardPrint.Request(printScene(), target, () -> onSwing(() -> {
                 printing = false;
-                if (!closed) { completed.accept(image); refresh(); }
+                if (!closed) { completed.run(); refresh(); }
             }), failure -> onSwing(() -> {
                 printing = false;
                 if (!closed) { failed.accept(failure); refresh(); }
@@ -430,9 +422,9 @@ final class GpuMapSource implements BoardSource {
 
     @Override public GpuBoardPrint.Request takePrintRequest() { return printRequest.getAndSet(null); }
 
-    /** Print saves the 3D snapshot as a printable JPEG. */
+    /** Print writes the 3D snapshot as a printable JPEG. */
     private void choosePrint() {
-        if (closed || printing || savingPrint || choosingPrint) { return; }
+        if (closed || printing || choosingPrint) { return; }
         choosingPrint = true;
         refresh();
         try {
@@ -440,7 +432,7 @@ final class GpuMapSource implements BoardSource {
             Path target = choosePrintFile(owner, near == null ? new File(".") : near.toFile().getParentFile(),
                   near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString()), "-3d");
             if (target == null || closed) { return; }
-            requestPrint(image -> savePrint(image, target), this::printFailed);
+            requestPrint(target, () -> { }, this::printFailed);
         } catch (RuntimeException failure) { printFailed(failure); }
         finally { choosingPrint = false; refresh(); }
     }
@@ -457,60 +449,6 @@ final class GpuMapSource implements BoardSource {
         Path target = chooser.getSelectedFile().toPath();
         String file = target.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
         return file.endsWith(".jpg") || file.endsWith(".jpeg") ? target : target.resolveSibling(target.getFileName() + ".jpg");
-    }
-
-    private void savePrint(BufferedImage image, Path target) {
-        savingPrint = true;
-        Thread worker = new Thread(() -> {
-            Exception failure = null;
-            try {
-                writePrint(image, target, GpuBoardPrint.DPI, GpuBoardPrint.DPI);
-            } catch (IOException | RuntimeException error) { failure = error; }
-            Exception result = failure;
-            onSwing(() -> {
-                savingPrint = false;
-                if (!closed) {
-                    if (result != null) { printFailed(result); }
-                    refresh();
-                }
-            });
-        }, "board-print-image");
-        worker.setDaemon(true);
-        worker.start();
-    }
-
-    /**
-     * An RGB image as a JPEG whose density (dots per inch) keeps the hex size in print programs that honour it. Quality
-     * 0.92 without chroma subsampling: on a 12 x 9 print a fifth of the earlier PNG's size, its labels and grid lines
-     * indistinguishable from the PNG's at three times magnification.
-     */
-    static void writePrint(BufferedImage image, Path target, int dotsPerInchX, int dotsPerInchY) throws IOException {
-        if (dotsPerInchX <= 0 || dotsPerInchY <= 0) { throw new IllegalArgumentException("Print resolution must be positive"); }
-        var writers = ImageIO.getImageWritersByFormatName("jpeg");
-        if (!writers.hasNext()) { throw new IOException("No JPEG writer"); }
-        var writer = writers.next();
-        try (var output = ImageIO.createImageOutputStream(target.toFile())) {
-            if (output == null) { throw new IOException("Cannot write " + target); }
-            writer.setOutput(output);
-            var parameters = writer.getDefaultWriteParam();
-            parameters.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-            parameters.setCompressionQuality(.92f);
-            var metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), parameters);
-            String format = "javax_imageio_jpeg_image_1.0";
-            var root = (IIOMetadataNode) metadata.getAsTree(format);
-            var density = (IIOMetadataNode) root.getElementsByTagName("app0JFIF").item(0);
-            density.setAttribute("resUnits", "1");
-            density.setAttribute("Xdensity", Integer.toString(dotsPerInchX));
-            density.setAttribute("Ydensity", Integer.toString(dotsPerInchY));
-            var components = root.getElementsByTagName("componentSpec");
-            for (int index = 0; index < components.getLength(); index++) {
-                var component = (IIOMetadataNode) components.item(index);
-                component.setAttribute("HsamplingFactor", "1");
-                component.setAttribute("VsamplingFactor", "1");
-            }
-            metadata.setFromTree(format, root);
-            writer.write(null, new IIOImage(image, null, metadata), parameters);
-        } finally { writer.dispose(); }
     }
 
     private void printFailed(Exception failure) { printFailed(owner, failure); }
