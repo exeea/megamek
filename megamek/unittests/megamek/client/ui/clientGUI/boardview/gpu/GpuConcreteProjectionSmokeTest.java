@@ -101,8 +101,7 @@ class GpuConcreteProjectionSmokeTest {
             maps.data().bind(3);
             noise.bind(1);
             if (source.isBlank()) {
-                assets.finishArrays(List.of("terrain/surfaces/cast")).surfaces().bind(2);
-                assets.finishArrays(List.of("terrain/surfaces/cast")).emission().bind(4);
+                assets.finishArrays(List.of("terrain/surfaces/cast"), 1).maps().bind(2);
             }
             shader.bind();
             shader.setUniformi("u_terrainLayers", 0);
@@ -112,7 +111,6 @@ class GpuConcreteProjectionSmokeTest {
                 shader.setUniformi("u_surfaceLayers", 2);
                 shader.setUniformf("u_finishSurface[0]", .9f, 0, 0, -1);
                 // The probe outputs roughness alone; the compiler may drop the emission it never shows.
-                if (shader.hasUniform("u_emissionLayers")) { shader.setUniformi("u_emissionLayers", 4); }
                 if (shader.hasUniform("u_finishEmission[0]")) { shader.setUniformf("u_finishEmission[0]", 0, 0, 0, -1); }
                 if (shader.hasUniform("u_finishGlow[0]")) { shader.setUniformf("u_finishGlow[0]", 0, 0, 0); }
             }

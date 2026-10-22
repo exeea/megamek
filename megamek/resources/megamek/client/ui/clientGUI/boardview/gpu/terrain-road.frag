@@ -29,13 +29,13 @@ uniform float u_bridgeDeckCoverage; // GpuAssets.coverage of the deck's road tex
 #ifdef roadMapsFlag
 uniform sampler2D u_roadSurface;
 uniform float u_roadTransition;
-uniform float u_roadFinish; // the material's place in GpuRoads.MATERIALS
+uniform float u_roadFinish; // the material's place in GpuRoads.MATERIALS, -1 for none
 #endif
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
 // Per road material, its heightmap parallax as Godot draws it: the depth along U and V in UV units (heightmap_scale /
 // 100, negative where Godot flips the tangent or binormal); the deep parallax's minimum and maximum layers, 0 for one
 // step.
-uniform vec4 u_roadRelief[3];
+uniform vec4 u_roadRelief[FINISH_COUNT - ROAD_FINISH];
 #endif
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
 uniform vec4 u_roadProfile;
@@ -112,12 +112,12 @@ vec3 roadNormal(RoadMaps m, vec2 uv, float strength) {
 }
 
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
-// The material's place in the board's finish arrays (finish-arrays.glsl).
+// The material's place in the board's finish arrays (finish-arrays.glsl); -1 for a road material they lack.
 int roadFinish(RoadMaps m) {
 #ifdef roadCoatFlag
     return m.mapped ? ROAD_FINISH + m.maps : m.maps - 3;
 #else
-    return ROAD_FINISH + int(u_roadFinish + .5);
+    return u_roadFinish < -.5 ? -1 : ROAD_FINISH + int(u_roadFinish + .5);
 #endif
 }
 
@@ -135,9 +135,10 @@ float roadHeight(RoadMaps m, vec2 uv, mat2 gradient) {
 
 // dx and dy are the surface position's derivatives; view points from it to the eye.
 vec2 roadParallax(RoadMaps m, vec2 uv, mat2 gradient, vec3 face, vec3 dx, vec3 dy, vec3 view) {
-    vec4 relief = u_roadRelief[clamp(roadFinish(m) - ROAD_FINISH, 0, 2)];
+    int material = roadFinish(m) - ROAD_FINISH;
     float determinant = gradient[0].x * gradient[1].y - gradient[0].y * gradient[1].x;
-    if (!m.mapped || abs(determinant) < 1e-12) return vec2(0.0);
+    if (!m.mapped || material < 0 || abs(determinant) < 1e-12) return vec2(0.0);
+    vec4 relief = u_roadRelief[material];
     vec3 tangent = (dx * gradient[1].y - dy * gradient[0].y) / determinant;
     vec3 bitangent = (dy * gradient[0].x - dx * gradient[1].x) / determinant;
     vec3 v = normalize(vec3(dot(view, normalize(tangent)), dot(view, normalize(bitangent)), dot(view, face)));
@@ -283,10 +284,13 @@ void main() {
     // The material's finish; a mapped material's roughness is its surface map's, with the wear and mud above.
     Finish finish = Finish(m.mapped ? properties.g : -1.0, 0.0, 0.0, vec3(0.0));
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
-    Finish authored = finishTexel(roadFinish(m), materialUV, roadGradient);
-    finish = Finish(m.mapped ? properties.g : authored.roughness, authored.metallic, authored.scatter, authored.emission);
-    // Mud buries the soil's own finish.
-    coverFinish(finish, soilMud);
+    int material = roadFinish(m);
+    if (material >= 0) {
+        Finish authored = finishTexel(material, materialUV, roadGradient);
+        finish = Finish(m.mapped ? properties.g : authored.roughness, authored.metallic, authored.scatter, authored.emission);
+        // Mud buries the soil's own finish.
+        coverFinish(finish, soilMud);
+    }
 #endif
     albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, finish,
           m.mapped ? mix(1.0, properties.b, .7) : 1.0);

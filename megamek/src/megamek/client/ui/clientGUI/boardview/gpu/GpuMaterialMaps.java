@@ -13,6 +13,7 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 import megamek.common.Configuration;
+import megamek.logging.MMLogger;
 
 /**
  * The renderer's GPU layouts of a board material, packed on the CPU from its Godot 4 Standard maps
@@ -22,6 +23,7 @@ import megamek.common.Configuration;
  * Godot's material factors (albedo colour, roughness, metallic, normal scale, subsurface strength) apply.
  */
 final class GpuMaterialMaps {
+    private static final MMLogger LOGGER = MMLogger.create(GpuMaterialMaps.class);
     enum Layout {
         /** Albedo with its alpha coverage. */
         COLOR,
@@ -63,7 +65,7 @@ final class GpuMaterialMaps {
     static GodotMaterial board(String name) {
         File file = new File(boardTextures(), name + ".tres");
         if (!file.isFile()) { throw new IllegalArgumentException("Missing required Enhanced terrain asset: " + file); }
-        return GodotMaterial.read(file, boardTextures());
+        return read(file, boardTextures());
     }
 
     /** A board material's colour (its albedo times its albedo colour, with its alpha); the caller owns the pixels. */
@@ -104,8 +106,30 @@ final class GpuMaterialMaps {
         if (split <= 0 || !file.endsWith(".png")) { return null; }
         File resource = new File(path.getParentFile(), file.substring(0, split) + ".tres");
         if (!resource.isFile()) { return null; }
-        GodotMaterial material = GodotMaterial.read(resource, textures);
-        return same(path, material.albedo()) ? material : null;
+        try {
+            GodotMaterial material = read(resource, textures);
+            return same(path, material.albedo()) ? material : null;
+        } catch (IllegalArgumentException | java.io.UncheckedIOException error) {
+            // One broken resource must not stop every model sharing its albedo: they keep their GLB's own material.
+            LOGGER.warn("Model materials keep their glTF finish: unreadable board material {}: {}", resource, error.getMessage());
+            return null;
+        }
+    }
+
+    /** A resource read once while unchanged on disk; models share many and parse them on loader threads. */
+    private record Read(long modified, long length, GodotMaterial material) { }
+
+    private static final java.util.Map<File, Read> READS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    static GodotMaterial read(File resource, File textures) {
+        File key = resource.getAbsoluteFile();
+        long modified = key.lastModified(), length = key.length();
+        Read read = READS.get(key);
+        if (read == null || read.modified() != modified || read.length() != length) {
+            read = new Read(modified, length, GodotMaterial.read(key, textures));
+            READS.put(key, read);
+        }
+        return read.material();
     }
 
     /**
@@ -164,11 +188,14 @@ final class GpuMaterialMaps {
         File heightmap = material.kind == GodotMaterial.Kind.STANDARD ? material.heightmap() : null;
         float depth = material.heightmapScale() / 100;
         boolean deep = material.flag("heightmap_deep_parallax", false);
+        // Godot's own range for the deep parallax's layers.
+        int minimum = Math.clamp(material.integer("heightmap_min_layers", 8), 1, 64);
+        int maximum = Math.clamp(material.integer("heightmap_max_layers", 32), 1, 64);
         return new ModelFinish(mapped ? 1 : material.roughness(), mapped ? 1 : material.metallic(), mapped ? 1 : scatter, map,
               glows ? emission.tint() : new float[] { 1, 1, 1 }, glows ? emission.glow() : new float[3], emission.map(),
               heightmap, material.flag("heightmap_flip_tangent", false) ? -depth : depth,
               material.flag("heightmap_flip_binormal", false) ? -depth : depth,
-              deep ? material.integer("heightmap_min_layers", 8) : 0, deep ? material.integer("heightmap_max_layers", 32) : 0);
+              deep ? minimum : 0, deep ? maximum : 0);
     }
 
     /** A model's image as one of a board material's maps: the pixels of its GPU layout, and its cache key suffix. */

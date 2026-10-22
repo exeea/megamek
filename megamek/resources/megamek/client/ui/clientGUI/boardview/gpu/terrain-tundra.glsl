@@ -41,7 +41,7 @@ Finish tundraFinish(float layer, float tile, MaterialProjection p, float variati
         texel = finishOf(mix(surface.rgb, mapped, terrainNormalDetail), texel.emission);
     }
     if (emission.a >= 0.0) {
-        texel.emission += emission.rgb * tundraTexel(u_emissionLayers, emission.a, tile, p, variation).rgb;
+        texel.emission += emission.rgb * toLinear(tundraTexel(u_surfaceLayers, emission.a, tile, p, variation).rgb);
     }
     return texel;
 }

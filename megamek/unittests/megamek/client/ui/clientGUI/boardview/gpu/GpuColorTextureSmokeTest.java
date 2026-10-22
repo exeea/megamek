@@ -780,41 +780,39 @@ class GpuColorTextureSmokeTest {
                 glow.setRGB(0, 0, 0xff8000);
                 javax.imageio.ImageIO.write(glow, "png", sculpt.resolve("scalar_emission.png").toFile());
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 8);
-                var material = assets.finishArrays(SURFACES);
+                var material = assets.finishArrays(SURFACES, SURFACES.size());
                 assertEquals(8, GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT), "Odd rows must restore unpack state");
-                assertSame(material, assets.finishArrays(SURFACES));
+                assertSame(material, assets.finishArrays(SURFACES, SURFACES.size()));
                 // The ORM's blue channel is 0 in the mapped material: its metal is uniform, the factor times black.
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
                       new float[] { 127 / 255f, 0, 0, 0, .27f, 0, 0, -1, 1, 0, 0, -1 }, material.surface(), 1e-6f);
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
-                      new float[] { 0, 0, 0, -1, 2, 2, 2, 0, 0, 0, 0, -1 }, material.tint(), 1e-6f);
+                      new float[] { 0, 0, 0, -1, 2, 2, 2, 1, 0, 0, 0, -1 }, material.tint(), 1e-6f,
+                      "The emission layer follows the surface layers in the one array");
                 org.junit.jupiter.api.Assertions.assertArrayEquals(new float[9], material.glow(), 1e-6f,
                       "Godot's default emission colour is black");
-                material.surfaces().bind();
+                material.maps().bind();
                 assertEquals(GL30.GL_RGBA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
-                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "The finish is raw numerical data");
-                material.emission().bind();
-                assertEquals(GL30.GL_SRGB8_ALPHA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
-                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "Emission is a colour, as Godot reads it");
-                assertEquals(3, material.surfaces().getWidth());
-                assertEquals(2, material.surfaces().getHeight());
+                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "The finish is raw data; emission's sRGB bytes decode in the shader");
+                assertEquals(3, material.maps().getWidth());
+                assertEquals(2, material.maps().getHeight());
+                assertEquals(2, material.maps().getDepth(), "One surface layer and one emission layer, one sampler");
                 for (int y = 0; y < 2; y++) {
                     for (int x = 0; x < 3; x++) {
                         assertEquals(values[y * 3 + x] / 255.0,
-                              sample.read(material.surfaces(), (x + .5f) / 3, (y + .5f) / 2, 0, 0)[0], .0006,
+                              sample.read(material.maps(), (x + .5f) / 3, (y + .5f) / 2, 0, 0)[0], .0006,
                               "Raw roughness must not be sRGB-decoded, resized or row-padded");
                     }
                 }
                 assertAuthoredFinish(material);
-                int surfaces = material.surfaces().getTextureObjectHandle();
-                int emission = material.emission().getTextureObjectHandle();
-                assertTrue(GL11.glIsTexture(surfaces) && GL11.glIsTexture(emission));
+                int maps = material.maps().getTextureObjectHandle();
+                assertTrue(GL11.glIsTexture(maps));
                 assets.dispose();
-                assertEquals(0, material.surfaces().getTextureObjectHandle());
-                assertFalse(GL11.glIsTexture(surfaces) || GL11.glIsTexture(emission), "The asset owner releases the arrays");
-                var reloaded = assets.finishArrays(SURFACES);
+                assertEquals(0, material.maps().getTextureObjectHandle());
+                assertFalse(GL11.glIsTexture(maps), "The asset owner releases the array");
+                var reloaded = assets.finishArrays(SURFACES, SURFACES.size());
                 org.junit.jupiter.api.Assertions.assertNotSame(material, reloaded);
-                assertEquals(103 / 255.0, sample.read(reloaded.surfaces(), 2.5f / 3, .25f, 0, 0)[0], .0006);
+                assertEquals(103 / 255.0, sample.read(reloaded.maps(), 2.5f / 3, .25f, 0, 0)[0], .0006);
             } finally {
                 assets.dispose();
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, unpack);
@@ -838,11 +836,9 @@ class GpuColorTextureSmokeTest {
                     """);
         try {
             GpuAtmosphere.screenState();
-            material.surfaces().bind(0);
-            material.emission().bind(1);
+            material.maps().bind(0);
             shader.bind();
             shader.setUniformi("u_surfaceLayers", 0);
-            shader.setUniformi("u_emissionLayers", 1);
             shader.setUniform4fv("u_finishSurface[0]", material.surface(), 0, material.surface().length);
             shader.setUniform4fv("u_finishEmission[0]", material.tint(), 0, material.tint().length);
             shader.setUniform3fv("u_finishGlow[0]", material.glow(), 0, material.glow().length);
@@ -875,11 +871,10 @@ class GpuColorTextureSmokeTest {
                 // A smaller map takes the largest grid, as the colour arrays resample theirs.
                 var assets = new GpuAssets();
                 try {
-                    var mixed = assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second"));
-                    assertEquals(3, mixed.surfaces().getWidth());
-                    assertEquals(2, mixed.surfaces().getHeight());
-                    assertEquals(2, mixed.surfaces().getDepth());
-                    assertEquals(1, mixed.emission().getDepth(), "Without emission maps, one black placeholder");
+                    var mixed = assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second"), 2);
+                    assertEquals(3, mixed.maps().getWidth());
+                    assertEquals(2, mixed.maps().getHeight());
+                    assertEquals(2, mixed.maps().getDepth(), "Two surface layers and no emission layer");
                 } finally { assets.dispose(); }
                 Files.delete(sculpt.resolve("second_orm.png"));
                 assertFinishRejected("second_orm.png");
@@ -897,7 +892,7 @@ class GpuColorTextureSmokeTest {
         var assets = new GpuAssets();
         try {
             var error = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                  () -> assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second")));
+                  () -> assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second"), 2));
             assertTrue(error.getMessage().contains(message), error.getMessage());
         } finally { assets.dispose(); }
     }

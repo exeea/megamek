@@ -387,11 +387,10 @@ final class GpuTerrain implements Disposable {
                 private final int mudMaterialUniform = register("u_mudMaterial");
                 private final int bankMaterialsUniform = register("u_bankMaterials");
                 private final int surfaceLayersUniform = register("u_surfaceLayers");
-                private final int emissionLayersUniform = register("u_emissionLayers");
                 // Upload before render-time texture-unit assignment, like the other shared maps.
                 private final GpuAssets.FinishArrays finishArrays = program.hasUniform("u_finishSurface[0]")
-                      ? assets.finishArrays(FINISHES) : null;
-                private int surfaceLayersUnit = -1, emissionLayersUnit = -1;
+                      ? assets.finishArrays(FINISHES, SCULPT_LAYERS.size()) : null;
+                private int surfaceLayersUnit = -1;
                 private final int tundraLayersUniform = register("u_tundraLayers");
                 private final int tundraTilesUniform = register("u_tundraTiles");
                 private final int treePitMaterialUniform = register("u_treePitMaterial");
@@ -515,7 +514,8 @@ final class GpuTerrain implements Disposable {
                         set(biomeSoilTileUniform, assets.sculptTile("earth") * .45f);
                     }
                     if (has(meadowFinishUniform)) {
-                        set(meadowFinishUniform, SCULPT_LAYERS.indexOf("grass"), assets.sculptTile("grass"));
+                        float tile = assets.sculptTile("grass");
+                        set(meadowFinishUniform, SCULPT_LAYERS.indexOf("grass"), tile, tile * BoardRelief.metres(1));
                     }
                     if (has(mudMaterialUniform)) {
                         set(mudMaterialUniform, 2f * SCULPT_LAYERS.indexOf("mud"), assets.sculptTile("mud"));
@@ -596,8 +596,7 @@ final class GpuTerrain implements Disposable {
                     // Touch them for each draw so their sampler uniforms never point at another chunk's field.
                     // BaseShader.set skips uniforms absent from this shader; resident textures are reused.
                     if (finishArrays != null) {
-                        surfaceLayersUnit = bindShared(surfaceLayersUniform, finishArrays.surfaces(), surfaceLayersUnit);
-                        emissionLayersUnit = bindShared(emissionLayersUniform, finishArrays.emission(), emissionLayersUnit);
+                        surfaceLayersUnit = bindShared(surfaceLayersUniform, finishArrays.maps(), surfaceLayersUnit);
                     }
                     rainNoiseUnit = bindShared(rainNoiseUniform, rainNoise, rainNoiseUnit);
                     if (has(groundDamageUniform)) {
