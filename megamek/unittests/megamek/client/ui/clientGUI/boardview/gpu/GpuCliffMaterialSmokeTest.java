@@ -50,8 +50,12 @@ class GpuCliffMaterialSmokeTest {
         var quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
         String materials = GpuShaderSource.read("terrain-materials.glsl");
-        String sampling = materials.substring(materials.indexOf("vec4 materialTexel("),
-              materials.indexOf("// Every role shares projection"));
+        int start = materials.indexOf("vec4 materialTexel(");
+        String sampling = materials.substring(start, materials.indexOf("#ifdef volcanicFlag", start));
+        // The translated and fungal reads' heights (the terrain's parallax) sample through terrain-projection.glsl's.
+        String projection = GpuShaderSource.read("terrain-projection.glsl");
+        sampling = projection.substring(projection.indexOf("float heightTexel("), projection.indexOf("// planar's height"))
+              + sampling;
         var shader = GpuGlsl.compile("cliff-material-repeat-test", """
               in vec2 a_position;
               void main() { gl_Position = vec4(a_position, 0.0, 1.0); }

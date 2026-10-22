@@ -417,12 +417,12 @@ class GpuAssetReloadSmokeTest {
         }
     }
 
-    /** Compare actual completed uploads with the packed native maps, retaining the RGB/data domain boundary. */
     /** The sculpt layers as the board material names the finish arrays take. */
     private static List<String> surfaces(List<String> layers) {
         return layers.stream().map(name -> "terrain/surfaces/" + name).toList();
     }
 
+    /** Compare actual completed uploads with the packed native maps, retaining the RGB/data domain boundary. */
     private static void checkNativeBatch(GpuAssets assets, List<String> layers, Path data) throws Exception {
         var arrays = assets.sculptArray(layers);
         var authored = assets.finishArrays(surfaces(layers), layers.size());

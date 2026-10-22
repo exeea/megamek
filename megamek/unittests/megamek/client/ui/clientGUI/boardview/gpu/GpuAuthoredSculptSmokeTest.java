@@ -171,7 +171,7 @@ class GpuAuthoredSculptSmokeTest {
                   if (u_authoredSculptReview == 2) value = authored;
                   if (u_authoredSculptReview == 3) value = reviewSnow;
                   if (u_authoredSculptReview == 4) value = vec3(reviewWeight, tint, 0.0);
-                  if (u_authoredSculptReview == 5) value = vec3(materialHeight, roughness, cavity);
+                  if (u_authoredSculptReview == 5) value = vec3(materialHeight, finish.roughness, cavity);
                   if (u_authoredSculptReview == 6) value = vec3(bark.a, barkNormal.a, terrainNormalDetail);
                   if (u_authoredSculptReview == 7) value = normal * .5 + .5;
                   if (u_authoredSculptReview == 8) value = upNormal(barkNormal.rgb, face) * .5 + .5;

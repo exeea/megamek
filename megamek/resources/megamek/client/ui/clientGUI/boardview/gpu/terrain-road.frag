@@ -22,9 +22,7 @@ in vec2 v_roadMaskUV;
 #endif
 #ifdef bridgeDeckFlag
 uniform float u_worldMetre;
-#ifdef bridgeDeckFlag
 uniform float u_bridgeDeckCoverage; // GpuAssets.coverage of the deck's road texture
-#endif
 #endif
 #ifdef roadMapsFlag
 uniform sampler2D u_roadSurface;

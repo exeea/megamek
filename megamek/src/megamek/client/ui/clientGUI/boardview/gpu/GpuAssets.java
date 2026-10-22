@@ -198,7 +198,7 @@ final class GpuAssets implements Disposable {
 
     /**
      * The finish ({@link #authoredFinish}) of every board material the terrain draws from arrays (sculpted surfaces, then
-     * from {@code roads} on the road materials), in the given stable order of material names. One raw RGBA8 array holds
+     * from {@code firstRoad} on the road materials), in the given stable order of material names. One raw RGBA8 array holds
      * the surface layer (roughness, metallic and scattering in R, G and B) of each material whose finish varies and,
      * after them, each emission map's sRGB bytes, which the shader decodes: one sampler for both, as the terrain's
      * programs are at their texture units' limit. Per material: its surface values or means and surface layer (-1 if
@@ -213,18 +213,18 @@ final class GpuAssets implements Disposable {
         @Override public void dispose() { maps.dispose(); }
     }
 
-    FinishArrays finishArrays(List<String> materials, int roads) {
+    FinishArrays finishArrays(List<String> materials, int firstRoad) {
         if (finishArrays != null) { return finishArrays; }
         int count = materials.size();
         float[] surface = new float[count * 4], tint = new float[count * 4], glow = new float[count * 3];
-        float[] relief = new float[roads * 2];
+        float[] relief = new float[firstRoad * 2];
         var surfaces = new ArrayList<Supplier<Pixmap>>();
         var emissions = new ArrayList<Supplier<Pixmap>>();
         var surfaceLayers = new int[count];
         var emissionLayers = new int[count];
         int width = 0, height = 0, roadWidth = 1, roadHeight = 1;
         for (int index = 0; index < count; index++) {
-            var finish = authoredFinish(definition(materials.get(index)), index < roads);
+            var finish = authoredFinish(definition(materials.get(index)), index < firstRoad);
             System.arraycopy(finish.surface(), 0, surface, index * 4, 3);
             System.arraycopy(finish.tint(), 0, tint, index * 4, 3);
             System.arraycopy(finish.glow(), 0, glow, index * 3, 3);
@@ -233,7 +233,7 @@ final class GpuAssets implements Disposable {
             int[] emissionSize = finish.emission() == null ? new int[] { 1, 1 } : GpuMaterialMaps.size(finish.emission());
             int layerWidth = Math.max(finish.map() == null ? 1 : finish.width(), emissionSize[0]);
             int layerHeight = Math.max(finish.map() == null ? 1 : finish.height(), emissionSize[1]);
-            if (index < roads) {
+            if (index < firstRoad) {
                 width = Math.max(width, layerWidth);
                 height = Math.max(height, layerHeight);
                 var parallax = GpuMaterialMaps.modelFinish(definition(materials.get(index)));

@@ -298,7 +298,8 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
     return vec4(color, pigment.a);
 }
 
-// Base surface authority is independent of optional normal detail and its distance fade. A role without weight
+// A role's finish, as rockTexel's: roughness, metallic and scattering from its map while the normal detail lasts, and
+// beyond that the map's means, which cost no read; emission from its map at every distance. A role without weight
 // contributes nothing.
 Finish materialFinish(float colorMap, float tile, float weight, MaterialProjection p,
       float variation, bool fungus, bool singleScale) {
@@ -306,9 +307,9 @@ Finish materialFinish(float colorMap, float tile, float weight, MaterialProjecti
     int material = int(colorMap * .5);
     vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
     Finish texel = meanFinish(material);
-    if (surface.a >= 0.0) {
-        texel = finishOf(sampleMaterialMap(u_surfaceLayers, surface.a, tile, p, variation, fungus, singleScale).rgb,
-              texel.emission);
+    if (surface.a >= 0.0 && terrainNormalDetail > 0.0) {
+        vec3 mapped = sampleMaterialMap(u_surfaceLayers, surface.a, tile, p, variation, fungus, singleScale).rgb;
+        texel = finishOf(mix(surface.rgb, mapped, terrainNormalDetail), texel.emission);
     }
     if (emission.a >= 0.0) {
         texel.emission += emission.rgb

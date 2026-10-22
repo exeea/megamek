@@ -32,7 +32,7 @@ textures folder. The game reads these `StandardMaterial3D` properties and ignore
 | Property | Use |
 | --- | --- |
 | `albedo_texture`, `albedo_color` | Colour, times the tint. |
-| `normal_enabled`, `normal_texture`, `normal_scale` | Normal; a scale other than 1 scales its slope. |
+| `normal_enabled`, `normal_texture`, `normal_scale` | Normal; the scale mixes it with the flat normal, as Godot does (0 flat, above 1 steeper). |
 | `ao_enabled`, `ao_texture`, `ao_texture_channel` | Ambient occlusion. |
 | `roughness`, `roughness_texture`, `roughness_texture_channel` | Roughness: the factor times the channel. |
 | `metallic`, `metallic_texture`, `metallic_texture_channel` | Metallic: the factor times the channel. |
@@ -55,13 +55,14 @@ all a change needs: grass that glows, metallic sand or shrubs that scatter light
 | Subsurface scattering | Only where enabled: `subsurf_scatter_strength` times the scattering map's red. Thick bodies wrap the light past the terminator by that share; leaves, which are thin tissue, pass it through to their far side. |
 | Emission | Only where enabled: (`emission` + map) × energy under the add operator (Godot's default), `emission` × map × energy under multiply. `emission` is an sRGB colour, black by default. A uniform map counts as a constant. |
 | Ambient occlusion | The occlusion map's channel. |
-| Normal | The normal map, scaled by `normal_scale`. |
+| Normal | The normal map with its height rebuilt from X and Y, then `normalize(mix(N, map, normal_scale))`. |
 | Height | Parallax ([below](#parallax)): Godot's whole algorithm on models and roads, one step on the sculpted terrain. |
 
 Covers that bury a material keep none of its metal, scattering or glow: churned and charred
 ground, scorch deposits, mud, marsh peat and tundra mats (which bring their own finish). A
-material's own wear, wetness and the distance fade of its grain (to the map's means, which costs
-no texture read) change its roughness only.
+material's own wear and wetness change its roughness only; the distance fade of its grain takes
+roughness, metallic and scattering to the map's means (which costs no texture read) and keeps its
+emission.
 
 `material-finish.glsl` holds the shared record (`Finish`) and its blending;
 `surface-shading.glsl` lights it (`metallicShare`, `Surface.scatter`, `Surface.emission`).
@@ -91,6 +92,17 @@ What keeps its own shading:
   finish as the means of its maps: a uniform roughness, metallic, scattering and glow.
 - Meadow blades are their grass: they take the grass material's finish where they root, as
   turf takes its ground's.
+- All three crop-row views take `crop-row-side`'s finish; `crop-row-front` and `crop-row-top`
+  give their colour only.
+- Ground-damage brushes (`terrain/damage`) and the scatter atlas's props read their colour only:
+  scars and scatter set their own finish.
+- Modular buildings' bark takes `vegetation/bark`'s colour; its plant role gives it bark's .90.
+- Roads darken by 70% of their occlusion map, as before.
+
+Plant GLB materials on a board albedo are their `.tres` like any other model, roughness map and
+scattering included. Shrubs and snowy canopies, which used to take the bark and snow roles' fixed
+.90 and .95 without scattering, now take their maps' (about .6–.85, scattering up to .43): a
+deliberate change.
 
 ### Parallax
 
@@ -107,7 +119,9 @@ on its own.
 - Models (`model-surface.glsl`) and roads (`terrain-road.frag`) draw one material through its own
   UVs and take Godot's whole algorithm: with `heightmap_deep_parallax` it marches from
   `heightmap_max_layers` at grazing views to `heightmap_min_layers` head-on and interpolates the
-  crossing, otherwise it takes one step.
+  crossing, otherwise it takes one step. Plants (`terrain-foliage.frag`), scenery drawn with the
+  ground (geysers, rubble, fortifications: `terrain-normal.frag`) and road coats that paint a
+  sculpted material take none.
 - The sculpted terrain blends up to four materials in a pixel, each read in several projections,
   so it takes one step per material, whatever the deep settings say (`relievedProjection` in
   `terrain-materials.glsl`): each projection is the plane it is read in, a top the ground's and a
@@ -156,7 +170,7 @@ always read, so the shaders and the texture-unit budget are unchanged. Packing m
 bytes between channels unchanged. Two exceptions: the normal's green is flipped from
 Godot's "up the image" to the board's "down the image" (+V), and Godot's factors apply.
 Converting the previous packed maps into this format and packing them again gives
-the previous bytes exactly.
+the previous bytes exactly, except crust heat's G and B, which no shader reads.
 
 | Layout | Channels | Used by |
 | --- | --- | --- |
@@ -192,8 +206,8 @@ roughness of its own for any material.
 Every role of a natural surface (cover, mantle, debris and rock, on tops and walls)
 reads its material's finish with the same projection as its colour, and so do tundra
 mats, turf and meadow blades (their ground's or their grass's), road coats, pavement,
-tree pits and rock kits. On natural surfaces and tundra mats, where the normal detail
-fades out with distance, roughness, metallic and scattering fade to their means, which
+tree pits and rock kits. On natural surfaces (volcanic ones too) and tundra mats, where the
+normal detail fades out with distance, roughness, metallic and scattering fade to their means, which
 costs no texture read; emission keeps its map at every distance. Mud and scorch also
 keep their roughness in their own normal maps, which their shaders read.
 

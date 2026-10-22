@@ -359,8 +359,9 @@ class GpuMaterialLodSmokeTest {
             // Ground fines and exposed granite may have similar pigment. Read the final production role
             // weights instead of requiring an authored color gain, a light direction or a display contrast.
             // The third channel also verifies that the bound cover and bedrock use distinct map layers.
-            String emission = "result.emission = vec3(0.0);";
-            String roles = "result.emission = vec3(weights.w, weights.x, layers.z != layers.x ? 1.0 : 0.0);";
+            String emission = "materialFinish(layers.z, tiles.z, weights.w, pd, broad, fungus, false), weights);";
+            String roles = emission
+                  + "\n    result.finish.emission = vec3(weights.w, weights.x, layers.z != layers.x ? 1.0 : 0.0);";
             assertTrue(material.contains(emission), "The probe reads completed natural-material roles");
             String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
             String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
@@ -368,7 +369,7 @@ class GpuMaterialLodSmokeTest {
             assertTrue(sculpt.contains(result) && sculpt.contains(output), "The role probe uses the final scene writer");
             // Ground rock is opaque. An exact alpha tag excludes boulders, cliffs, clear color and other props;
             // alpha is not scaled, while linearPixels restores the production RGB storage units once.
-            sculpt = sculpt.replace(result, "vec3 result = emission;")
+            sculpt = sculpt.replace(result, "vec3 result = finish.emission;")
                   .replace(output, "fragColor = vec4(result, ground ? .25 : 1.0);");
             assertTrue(manager.apply(Map.of("terrain-sculpt.frag", sculpt,
                   "terrain-materials.glsl", material.replace(emission, roles))).success());

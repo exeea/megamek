@@ -116,17 +116,22 @@ final class GpuMaterialMaps {
         }
     }
 
-    /** A resource read once while unchanged on disk; models share many and parse them on loader threads. */
-    private record Read(long modified, long length, GodotMaterial material) { }
+    /**
+     * A resource read once while it and the {@code .gdshader} beside it (a ShaderMaterial's declared parameters) are
+     * unchanged on disk; models share many and parse them on loader threads.
+     */
+    private record Read(long modified, long length, long shader, GodotMaterial material) { }
 
     private static final java.util.Map<File, Read> READS = new java.util.concurrent.ConcurrentHashMap<>();
 
     static GodotMaterial read(File resource, File textures) {
         File key = resource.getAbsoluteFile();
-        long modified = key.lastModified(), length = key.length();
+        String name = key.getName();
+        File shader = new File(key.getParentFile(), name.substring(0, name.length() - ".tres".length()) + ".gdshader");
+        long modified = key.lastModified(), length = key.length(), shaderModified = shader.lastModified();
         Read read = READS.get(key);
-        if (read == null || read.modified() != modified || read.length() != length) {
-            read = new Read(modified, length, GodotMaterial.read(key, textures));
+        if (read == null || read.modified() != modified || read.length() != length || read.shader() != shaderModified) {
+            read = new Read(modified, length, shaderModified, GodotMaterial.read(key, textures));
             READS.put(key, read);
         }
         return read.material();
@@ -214,7 +219,14 @@ final class GpuMaterialMaps {
         if (split <= 0 || !file.endsWith(".png")) { return null; }
         File resource = new File(path.getParentFile(), file.substring(0, split) + ".tres");
         if (!resource.isFile()) { return null; }
-        GodotMaterial material = GodotMaterial.read(resource, textures);
+        GodotMaterial material;
+        try {
+            material = read(resource, textures);
+        } catch (IllegalArgumentException | java.io.UncheckedIOException error) {
+            // As boardMaterial: the model keeps its own images, as they are.
+            LOGGER.warn("Model maps load as they are: unreadable board material {}: {}", resource, error.getMessage());
+            return null;
+        }
         String name = name(material, textures);
         Layout layout = switch (usage) {
             case ModelTexture.USAGE_DIFFUSE -> same(path, material.albedo()) ? colorLayout(name) : null;
@@ -314,7 +326,23 @@ final class GpuMaterialMaps {
     }
 
     /** A map's RGB where every texel shares it, or null where the map varies. */
+    /** A map's uniform colour, decoded once while the file is unchanged; models share emission maps. */
+    private record Uniform(long modified, long length, int[] color) { }
+
+    private static final java.util.Map<File, Uniform> UNIFORMS = new java.util.concurrent.ConcurrentHashMap<>();
+
     static int[] uniformColor(File map) {
+        File key = map.getAbsoluteFile();
+        long modified = key.lastModified(), length = key.length();
+        Uniform known = UNIFORMS.get(key);
+        if (known == null || known.modified() != modified || known.length() != length) {
+            known = new Uniform(modified, length, decodeUniformColor(key));
+            UNIFORMS.put(key, known);
+        }
+        return known.color() == null ? null : known.color().clone();
+    }
+
+    private static int[] decodeUniformColor(File map) {
         Map8 decoded = Map8.decode(map);
         byte[] rgba = decoded.rgba;
         for (int at = 4; at < rgba.length; at += 4) {
@@ -442,12 +470,20 @@ final class GpuMaterialMaps {
                     for (int pixel = 0, at = 0; pixel < width * height; pixel++, at += 4) {
                         int x = primary.value(pixel, 0), y = 255 - primary.value(pixel, 1), z = primary.value(pixel, 2);
                         if (scale != 1) {
-                            // Godot scales the normal's tangent components and rebuilds its height.
-                            float nx = (x / 255f * 2 - 1) * scale, ny = (y / 255f * 2 - 1) * scale;
-                            float nz = (float) Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
-                            x = encode(nx);
-                            y = encode(ny);
-                            z = encode(nz);
+                            // Godot rebuilds the map's height from X and Y, then takes normalize(mix(N, mapped,
+                            // normal_scale)): in tangent space N is +Z.
+                            float mx = x / 255f * 2 - 1, my = y / 255f * 2 - 1;
+                            float mz = (float) Math.sqrt(Math.max(0, 1 - mx * mx - my * my));
+                            float nx = mx * scale, ny = my * scale, nz = 1 + (mz - 1) * scale;
+                            float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+                            if (length > 1e-6f) {
+                                x = encode(nx / length);
+                                y = encode(ny / length);
+                                z = encode(nz / length);
+                            } else {
+                                x = y = 128;
+                                z = 255;
+                            }
                         }
                         out[at] = (byte) x;
                         out[at + 1] = (byte) y;

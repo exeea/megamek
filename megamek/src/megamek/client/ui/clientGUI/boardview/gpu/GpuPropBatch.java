@@ -90,13 +90,20 @@ final class GpuPropBatch implements Disposable {
         }
     }
 
+    /**
+     * The maps a board material's .tres gives a prop (RigidGlb.boardSurface, GpuAssets.finish). The merge keeps each
+     * material whole and the model shader takes its tangent frame from screen derivatives, so they batch as colour does.
+     */
+    private static final long BOARD_MAPS = TextureAttribute.Normal | TextureAttribute.Ambient | TextureAttribute.Emissive
+          | TextureAttribute.Bump;
+
     private static boolean eligible(Renderable value) {
         long mask = value.material.getMask();
         return value.bones == null && !value.meshPart.mesh.isInstanced()
               && value.meshPart.primitiveType == GL20.GL_TRIANGLES && value.meshPart.size > 0
               && value.meshPart.mesh.getNumIndices() > 0 && Arrays.equals(value.worldTransform.val, IDENTITY)
               && ((mask & ~(ColorAttribute.Diffuse | TextureAttribute.Diffuse | GpuModelMaterial.TYPE
-                    | GpuLinearColors.TYPE)) == 0 || GpuTerrain.batchableSculpt(value.material));
+                    | GpuLinearColors.TYPE | BOARD_MAPS)) == 0 || GpuTerrain.batchableSculpt(value.material));
     }
 
     /** Chunk caches already contain world-space vertices. Copy them without normalizing their normals again. */

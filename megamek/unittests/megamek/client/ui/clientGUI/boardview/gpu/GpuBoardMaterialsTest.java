@@ -297,6 +297,24 @@ class GpuBoardMaterialsTest {
             surface.dispose();
             color.dispose();
         }
+        // Above 1, Godot's normalize(mix(N, mapped, scale)) steepens the texel without flattening it onto the surface.
+        Files.writeString(folder.resolve("test.tres"), tres.replace("normal_scale = 1.0", "normal_scale = 2.0"));
+        Pixmap steep = GpuMaterialMaps.pack(new GpuAssets().definition("terrain/surfaces/test"),
+              GpuMaterialMaps.Layout.NORMAL);
+        try {
+            int pixel = steep.getPixel(1, 0);
+            float x = (pixel >>> 24) / 255f * 2 - 1, y = (pixel >>> 16 & 255) / 255f * 2 - 1, z = (pixel >>> 8 & 255) / 255f * 2 - 1;
+            // The fixture's texel in the board's convention (+V down the image), as the packer writes it.
+            float mx = 200 / 255f * 2 - 1, my = 160 / 255f * 2 - 1;
+            float mz = (float) Math.sqrt(1 - mx * mx - my * my);
+            float[] godot = { 2 * mx, 2 * my, 1 + 2 * (mz - 1) };
+            float length = (float) Math.sqrt(godot[0] * godot[0] + godot[1] * godot[1] + godot[2] * godot[2]);
+            assertArrayEquals(new float[] { godot[0] / length, godot[1] / length, godot[2] / length },
+                  new float[] { x, y, z }, .01f, "normal_scale 2 takes Godot's mix of the flat and mapped normals");
+            assertTrue(z > .3f, "A steepened texel keeps its height");
+        } finally {
+            steep.dispose();
+        }
     }
 
     @Test
