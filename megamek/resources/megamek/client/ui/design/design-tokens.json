@@ -1,0 +1,76 @@
+{
+  "version": "0.1",
+  "about": "MegaMek suite design tokens: the one source of truth for Swing and libGDX. Colors are #RRGGBB or #RRGGBBAA in sRGB. 'overlay' is the translucent value a surface uses when it is drawn over the board (libGDX); opaque Swing surfaces use 'dark'. Sizes are logical pixels at scale 1. See docs/design-system/tokens.md.",
+  "color": {
+    "surface.base": { "dark": "#0E1314", "light": "#ECEFEE", "use": "Window and app background." },
+    "surface.panel": { "dark": "#141A1C", "light": "#FFFFFF", "overlay": "#12181AEB", "use": "Panels, dialogs, cards." },
+    "surface.raised": { "dark": "#1C2426", "light": "#F4F6F5", "overlay": "#1C2426F7", "use": "Headers, footers and sections raised from a panel." },
+    "surface.popover": { "dark": "#172022", "light": "#FFFFFF", "use": "Menus, popovers, tooltips." },
+    "surface.input": { "dark": "#1D2426", "light": "#FFFFFF", "use": "Text fields, selects, spinners." },
+    "surface.hover": { "dark": "#FFFFFF0F", "light": "#16201E0D", "use": "Hover wash laid over any surface." },
+    "surface.inverse": { "dark": "#F0F2EE", "light": "#1C2426", "use": "Inverted faces: primary button, checked toggle." },
+
+    "text.primary": { "dark": "#F1F4F0", "light": "#16201E", "use": "Body text, values, titles." },
+    "text.secondary": { "dark": "#CBD3D0", "light": "#3A4542", "use": "Button labels, secondary values (hud-v3 ACCENT)." },
+    "text.muted": { "dark": "#9AA6A3", "light": "#596562", "use": "Captions, hints, placeholder text." },
+    "text.disabled": { "dark": "#5F6B69", "light": "#98A29F", "use": "Disabled text; exempt from contrast minimums." },
+    "text.onInverse": { "dark": "#16201E", "light": "#F1F4F0", "use": "Text on surface.inverse." },
+    "text.onAccent": { "dark": "#0F1A18", "light": "#FFFFFF", "use": "Text on an accent.primary fill." },
+
+    "border.control": { "dark": "#6B7774", "light": "#7A8683", "use": "Edges that identify a control (3:1)." },
+    "border.subtle": { "dark": "#2A3133", "light": "#D5DBD9", "use": "Decorative dividers and panel rails; never the only cue." },
+    "border.strong": { "dark": "#E8F1EB", "light": "#2A3533", "use": "Hovered control edge, corner ticks at full frame." },
+
+    "accent.primary": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Brand accent: active state, links, progress, info." },
+    "focus.ring": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Keyboard focus indicator (2 wide, 2 offset)." },
+
+    "selected.primary": { "dark": "#9982D3", "light": "#5A49C6", "use": "Selected/current item: marker, edge, map selection." },
+    "selected.background": { "dark": "#9982D33D", "light": "#5A49C624", "use": "Selected row or cell wash, laid over its surface." },
+
+    "status.danger": { "dark": "#FA878C", "light": "#8C1C12", "use": "Errors, destruction, enemy, critical." },
+    "status.warning": { "dark": "#F2D42D", "light": "#A24F00", "use": "Caution, heat, at-risk." },
+    "status.success": { "dark": "#669C00", "light": "#357A48", "use": "Done, healthy, valid." },
+    "status.info": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Neutral information; shares the accent on purpose." }
+  },
+  "typography": {
+    "family": "Roboto",
+    "iconFamily": "Material Symbols Rounded",
+    "fallbackFamilies": ["Noto Sans Symbols 2", "Bitter"],
+    "caseRule": "Sentence case everywhere. Only the 'overline' style is upper case, and only for labels of one or two words.",
+    "styles": {
+      "display": { "size": 23, "weight": 500, "case": "sentence", "tracking": 0, "use": "Phase banner, splash titles." },
+      "headline": { "size": 20, "weight": 500, "case": "sentence", "tracking": 0, "use": "Page and dialog headings." },
+      "title": { "size": 16, "weight": 500, "case": "sentence", "tracking": 0, "use": "Panel and section titles." },
+      "body": { "size": 13, "weight": 400, "case": "sentence", "tracking": 0, "use": "Default text." },
+      "body.strong": { "size": 13, "weight": 500, "case": "sentence", "tracking": 0, "use": "Emphasis, names, values." },
+      "label": { "size": 12.5, "weight": 500, "case": "sentence", "tracking": 0.01, "use": "Buttons, tabs, field labels." },
+      "small": { "size": 11.5, "weight": 400, "case": "sentence", "tracking": 0, "use": "Dense tables, secondary lines." },
+      "caption": { "size": 10.5, "weight": 400, "case": "sentence", "tracking": 0.01, "use": "Hints, units, timestamps." },
+      "overline": { "size": 10.5, "weight": 500, "case": "upper", "tracking": 0.08, "use": "Short section eyebrows and tags." }
+    }
+  },
+  "space": { "xxs": 2, "xs": 4, "sm": 6, "md": 8, "lg": 12, "xl": 16, "xxl": 24, "xxxl": 32 },
+  "radius": { "sm": 2, "md": 3 },
+  "size": {
+    "control.sm": 28, "control.md": 36, "control.lg": 46,
+    "icon.sm": 16, "icon.md": 20, "icon.lg": 24,
+    "border": 1, "focus.width": 2, "focus.offset": 2,
+    "tick.control": 8, "tick.panel": 13, "tick.width": 2
+  },
+  "opacity": { "tint.hover": 0.16, "tint.pressed": 0.28 },
+  "motion": { "fast": 120, "medium": 200, "slow": 320, "easing": [0.2, 0.0, 0.0, 1.0] },
+  "checks": {
+    "contrast": [
+      { "fg": ["text.primary", "text.secondary", "text.muted"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover", "surface.input"], "min": 4.5, "why": "WCAG 1.4.3 text" },
+      { "fg": ["text.primary"], "bg": ["selected.background"], "over": "surface.panel", "min": 4.5, "why": "Text on a selected row" },
+      { "fg": ["text.onInverse"], "bg": ["surface.inverse"], "min": 4.5, "why": "Text on inverted faces" },
+      { "fg": ["text.onAccent"], "bg": ["accent.primary"], "min": 4.5, "why": "Text on accent fills" },
+      { "fg": ["accent.primary", "status.danger", "status.warning", "status.success", "status.info"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover"], "min": 4.5, "why": "Accent and status colors may be used as text" },
+      { "fg": ["border.control", "border.strong", "focus.ring", "selected.primary"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover", "surface.input"], "min": 3.0, "why": "WCAG 1.4.11 non-text contrast" }
+    ],
+    "distinct": [
+      { "colors": ["status.danger", "status.warning", "status.success", "selected.primary"], "minDeltaE": 10, "why": "Statuses and selection stay apart for every vision type" },
+      { "colors": ["accent.primary", "status.danger", "status.warning", "status.success", "selected.primary"], "minDeltaE": 8, "why": "The accent is not mistaken for a status or the selection" }
+    ]
+  }
+}

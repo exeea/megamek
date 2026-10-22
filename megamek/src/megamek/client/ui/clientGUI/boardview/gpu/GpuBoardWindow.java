@@ -540,6 +540,23 @@ public final class GpuBoardWindow {
         open(gui, null, panel);
     }
 
+    /**
+     * EDT: frees the one native window for the developer UI library. Returns true when none is open; closes a map
+     * preview and runs {@code then} once it is gone; refuses beside a board or an editor.
+     */
+    static synchronized boolean yieldNativeWindow(Window owner, Runnable then) {
+        if (active == null) {
+            return true;
+        }
+        if (active.preview || active.closing) {
+            active.close(false);
+            active.afterClose = then;
+        } else {
+            JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+        }
+        return false;
+    }
+
     private static void open(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU board on the Swing event thread");
@@ -568,6 +585,10 @@ public final class GpuBoardWindow {
     }
 
     private static void start(GpuBoardWindow window) {
+        // The developer UI library holds the one native window; it closes first and the board then starts.
+        if (GpuUiLibraryWindow.closeThen(() -> start(window))) {
+            return;
+        }
         try {
             active = window;
             ClientGUI gui = window.gui;
