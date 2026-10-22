@@ -212,6 +212,8 @@ final class GpuTerrain implements Disposable {
         // The board-edge section's top follows the waves it meets (water-waves.vert).
         private final DefaultShader.Config waterCutShader = new DefaultShader.Config(waterShader.vertexShader,
               litFragment("water-cut.frag"));
+        private final DefaultShader.Config waterBeyondShader = new DefaultShader.Config(waterShader.vertexShader,
+              GpuShaderSource.read("water-beyond.frag"));
         private final DefaultShader.Config liquidShader = new DefaultShader.Config(config.vertexShader,
               GpuLiquidShader.fragment(config.fragmentShader));
         private final DefaultShader.Config waterLiquidShader = new DefaultShader.Config(waterShader.vertexShader,
@@ -253,6 +255,7 @@ final class GpuTerrain implements Disposable {
                       case FALL -> animated ? waterfallLiquidShader : waterfallShader;
                       case SPRAY -> sprayShader;
                       case CUT -> waterCutShader;
+                      case BEYOND -> waterBeyondShader;
                   } : animated ? liquidShader : config;
             // Only these programs use model.frag (GpuUnitShader.fragment); custom surfaces own their factor colours.
             boolean modelColors = chosen == config || chosen == instancedPropShader || chosen == liquidShader;
@@ -1710,6 +1713,8 @@ final class GpuTerrain implements Disposable {
         Array<Renderable> paintRenderables;
         final List<ModelInstance> water = new ArrayList<>();
         Array<Renderable> waterRenderables;
+        /** The far sides of the board-edge sections among waterRenderables, for what lies beyond the board. */
+        final Array<Renderable> beyondRenderables = new Array<>();
         final List<LiquidSurface> liquidMaterials = new ArrayList<>();
         final List<ModelInstance> tactical = new ArrayList<>();
         final List<Prop> props = new ArrayList<>();
@@ -4827,9 +4832,18 @@ final class GpuTerrain implements Disposable {
             chunk.terrainRenderables = GpuTerrainDepth.snapshot(chunk.opaque);
             chunk.scatterRenderables = GpuTerrainDepth.snapshot(chunk.scatter);
             chunk.waterRenderables = GpuTerrainDepth.snapshot(chunk.water);
+            chunk.beyondRenderables.clear();
+            for (Renderable part : chunk.waterRenderables) {
+                Material beyond = GpuWaterPages.beyondMaterial(part.material);
+                if (beyond == null) { continue; }
+                Renderable copy = new Renderable().set(part);
+                copy.material = beyond;
+                chunk.beyondRenderables.add(copy);
+            }
             // Ground, water and magma draw these materials as they are. An editor also retains the other actual parts,
             // including grass and bank turf: palette cards may draw any of them after the loading stage.
-            for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.scatterRenderables, chunk.waterRenderables)) {
+            for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.scatterRenderables, chunk.waterRenderables,
+                  chunk.beyondRenderables)) {
                 for (Renderable part : layer) {
                     if (editable || part.material.has(Sculpt.TYPE) || part.material.has(Pit.TYPE)
                           || part.material.has(GpuBackdrop.TYPE)
@@ -4909,7 +4923,9 @@ final class GpuTerrain implements Disposable {
                     if (depth != null) { prepareTerrainMaterial(depth, part.meshPart.mesh.getVertexAttributes()); }
                     // A palette sample is a one-hex board, so its water exposes a cut even when this board does not.
                     if (waterMode(part.material) == GpuWaterShader.Mode.SURFACE) {
-                        prepareTerrainMaterial(GpuWaterPages.cutMaterial(part.material), part.meshPart.mesh.getVertexAttributes());
+                        Material cut = GpuWaterPages.cutMaterial(part.material);
+                        prepareTerrainMaterial(cut, part.meshPart.mesh.getVertexAttributes());
+                        prepareTerrainMaterial(GpuWaterPages.beyondMaterial(cut), part.meshPart.mesh.getVertexAttributes());
                     }
                 }
                 List<Array<Renderable>> layers = new ArrayList<>(List.of(chunk.shadowPropRenderables, chunk.looseDecorations,
@@ -7294,7 +7310,19 @@ final class GpuTerrain implements Disposable {
         updateDetail(camera);
         if (!installedColumns) { biomes.update(coverScene); }
         boolean hasWater = waterVisible() && chunks.stream().anyMatch(chunk -> chunk.waterField != null);
-        if (hasWater) { waterExposure.update(coverScene); }
+        if (hasWater) {
+            waterExposure.update(coverScene);
+            // The water goes on beyond the board: a view through it that leaves the board meets a board-edge section's
+            // far side, which covers the sky there before the faded features and the water blend over it.
+            batch.begin(camera);
+            for (Chunk chunk : chunks) {
+                if (!camera.frustum.boundsInFrustum(chunk.bounds)) { continue; }
+                for (Renderable part : chunk.beyondRenderables) {
+                    part.shader = null; part.environment = environment; batch.render(part);
+                }
+            }
+            batch.end();
+        }
         waterPages.begin();
         int pageRows = (chunkRows + GpuWaterPages.CHUNKS_PER_PAGE - 1) / GpuWaterPages.CHUNKS_PER_PAGE;
         batch.begin(camera);
