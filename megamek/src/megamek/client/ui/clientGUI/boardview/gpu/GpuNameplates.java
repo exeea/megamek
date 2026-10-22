@@ -96,7 +96,7 @@ final class GpuNameplates implements GpuHud.Component {
 
     /** The tag of a friendly unit, the focus unit (.mint), an enemy (.coral) and a sensor contact (.blip). */
     private enum Look {
-        FRIEND(UiTheme.MINT, rgba(139, 229, 210, .45f), FILL, false),
+        FRIEND(UiTheme.MINT, UiTheme.alpha(UiTheme.MINT, .45f), FILL, false),
         FOCUS(SELECTED_TEXT, UiTheme.MINT, FILL, false),
         ENEMY(UiTheme.CORAL, rgba(237, 152, 148, .5f), FILL, false),
         CONTACT(UiTheme.BLIP, rgba(255, 174, 102, .8f), rgba(40, 28, 20, .85f), true);

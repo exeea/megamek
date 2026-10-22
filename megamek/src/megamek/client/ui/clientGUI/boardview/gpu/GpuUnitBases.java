@@ -89,7 +89,7 @@ final class GpuUnitBases implements Disposable {
     private static final Color INK = new Color(.06f, .08f, .08f, 1);
     private static final Color PANEL = new Color(.09f, .13f, .13f, .92f);
     private static final Color GREY = Color.valueOf("9AA6A3");
-    private static final Color ACTING_GLOW = Color.valueOf("a3ffe0");
+    private static final Color ACTING_GLOW = UiTheme.MINT;
     private static final Color FOCUS_GLOW = Color.valueOf("ff7a70");
     private static final Color CROSS = Color.valueOf("ff8a80");
     private static final Color TRACK = Color.valueOf("4a5553");

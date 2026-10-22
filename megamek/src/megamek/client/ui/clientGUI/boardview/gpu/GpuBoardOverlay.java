@@ -39,6 +39,7 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -58,8 +59,8 @@ import megamek.logging.MMLogger;
 final class GpuBoardOverlay implements Disposable {
     /** One prototype pixel in hex radii at the prototype's Tactical View zoom, where 38 pixels are 1.25 radii. */
     static final float PIXEL = 1.25f / 38;
-    // overlay.js:10-12, the selection palette of both views; movement uses the client's colours.
-    private static final Color MINT = new Color(.45f, .92f, .80f, 1);
+    // overlay.js:10-12, the selection palette of both views (its mint is the theme's); movement uses the client's colours.
+    private static final Color MINT = UiTheme.MINT;
     private static final Color CORAL = new Color(1, .44f, .40f, 1);
     private static final Color BLIP = new Color(1, .66f, .34f, 1);
     private static final Color WRECK = new Color(.3f, .3f, .3f, 1);
