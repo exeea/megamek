@@ -423,14 +423,31 @@ class BoardNaturalBridgeTest {
             var groundOnly = replace(scene, without);
             var before = new BoardSurface(groundOnly, without);
             var after = new BoardSurface(scene, tile);
-            assertEquals(before.faces, after.faces, "The natural bridge must not fill or reshape the ground below");
-            assertEquals(before.waterFaces, after.waterFaces, "The river must remain below the separate bridge shell");
+            sameGeometry(before.faces, after.faces, "The natural bridge must not fill or reshape the ground below");
+            sameGeometry(before.waterFaces, after.waterFaces, "The river must remain below the separate bridge shell");
             assertEquals(BoardRoad.of(groundOnly, without).joins(), BoardRoad.of(scene, tile).joins());
             if (!water) {
                 var at = BoardGeometry.center(CENTER, 0);
                 assertEquals(UnitLandingSupports.ground(groundOnly, at.x, at.y),
                       UnitLandingSupports.ground(scene, at.x, at.y), .001f, "A unit below must stay on the lower road");
             }
+        }
+    }
+
+    /**
+     * The same faces, finishes and vertices, to float rounding. A road under any bridge takes no bend at its borders
+     * ({@code BoardRoad.bent}); a straight course computed that way differs from the plain one only in its last bits.
+     */
+    private static void sameGeometry(List<BoardSurface.Face> expected, List<BoardSurface.Face> actual, String message) {
+        assertEquals(expected.size(), actual.size(), message);
+        float tolerance = .001f * BoardGeometry.hexScale();
+        for (int i = 0; i < expected.size(); i++) {
+            var a = expected.get(i);
+            var b = actual.get(i);
+            assertEquals(a.finish(), b.finish(), message);
+            assertEquals(a.landEdge(), b.landEdge(), message);
+            assertTrue(a.a().epsilonEquals(b.a(), tolerance) && a.b().epsilonEquals(b.b(), tolerance)
+                  && a.c().epsilonEquals(b.c(), tolerance), message + ": " + a + " became " + b);
         }
     }
 
