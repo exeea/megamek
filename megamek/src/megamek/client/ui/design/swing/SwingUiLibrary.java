@@ -30,7 +30,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
-import javax.swing.ButtonModel;
+import javax.swing.DefaultButtonModel;
 import javax.swing.Icon;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
@@ -391,17 +391,20 @@ public final class SwingUiLibrary extends JFrame {
                     continue;
                 }
                 AbstractButton button = sampleButton(kind, size);
-                ButtonModel model = button.getModel();
+                // The "at rest" sample is live; the others keep their column's state whatever the pointer does
                 switch (state) {
-                    case "hover" -> model.setRollover(true);
-                    case "pressed" -> {
-                        model.setArmed(true);
-                        model.setPressed(true);
+                    case "hover" -> button.setModel(new FrozenModel(true, false, false));
+                    case "pressed" -> button.setModel(new FrozenModel(true, true, false));
+                    case "focus" -> {
+                        button.setModel(new FrozenModel(false, false, false));
+                        button.putClientProperty(FlatClientProperties.COMPONENT_FOCUS_OWNER,
+                              (Predicate<JComponent>) component -> true);
                     }
-                    case "focus" -> button.putClientProperty(FlatClientProperties.COMPONENT_FOCUS_OWNER,
-                          (Predicate<JComponent>) component -> true);
-                    case "selected" -> button.setSelected(true);
-                    case "disabled" -> button.setEnabled(false);
+                    case "selected" -> button.setModel(new FrozenModel(false, false, true));
+                    case "disabled" -> {
+                        button.setModel(new FrozenModel(false, false, false));
+                        button.setEnabled(false);
+                    }
                     default -> { }
                 }
                 matrix.add(button, cell);
@@ -422,6 +425,40 @@ public final class SwingUiLibrary extends JFrame {
             default -> TokenButtons.button(kind, label, size);
         };
     }
+
+    /** A button model that always reports one state, so a gallery sample keeps showing it under the pointer. */
+    private static final class FrozenModel extends DefaultButtonModel {
+        private final boolean rollover;
+        private final boolean pressed;
+        private final boolean selected;
+
+        FrozenModel(boolean rollover, boolean pressed, boolean selected) {
+            this.rollover = rollover;
+            this.pressed = pressed;
+            this.selected = selected;
+        }
+
+        @Override
+        public boolean isRollover() {
+            return rollover;
+        }
+
+        @Override
+        public boolean isArmed() {
+            return pressed;
+        }
+
+        @Override
+        public boolean isPressed() {
+            return pressed;
+        }
+
+        @Override
+        public boolean isSelected() {
+            return selected;
+        }
+    }
+
     private JComponent statusStrip() {
         JPanel strip = row(color("surface.panel"));
         strip.add(chip(ICON_ERROR, "status.danger", "UiLibrary.status.danger"));

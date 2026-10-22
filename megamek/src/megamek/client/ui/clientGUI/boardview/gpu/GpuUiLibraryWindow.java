@@ -16,6 +16,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -328,6 +329,9 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
                     case "selected" -> button.pressed(true);
                     case "disabled" -> button.setDisabled(true);
                     default -> { }
+                }
+                if (!state.equals("rest")) {
+                    button.setTouchable(Touchable.disabled);
                 }
                 matrix.add(button);
             }
