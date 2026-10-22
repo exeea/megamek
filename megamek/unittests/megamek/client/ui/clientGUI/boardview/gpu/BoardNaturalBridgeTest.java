@@ -23,6 +23,7 @@ import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardNaturalBridgeTest {
@@ -295,10 +296,18 @@ class BoardNaturalBridgeTest {
                 var gate = BoardGeometry.center(next.coords(), shape.level()).sub(center).scl(.5f);
                 var seam = new Vector3(center).add(gate);
                 var normal = new Vector3(gate).nor();
+                // The mouth's corners, top and underside, or the hex corners that replace them where the joint closes
+                // against its cliff. Those lie on the hex edge itself, which a diagonal neighbour's 84 by 72 hex does
+                // not quite meet square. Beyond them, each span's own bank mouth meets the edge's line.
+                var first = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(1 - d, 6));
+                var edge = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(2 - d, 6)).sub(first).nor();
+                float half = BoardRelief.metres(BoardBridge.NATURAL_HALF_WIDTH * 1.04f) + .001f;
                 var points = shape.facets().stream().filter(f -> f.part() != BoardBridge.Part.SIDE)
                       .flatMap(f -> List.of(f.a(), f.b(), f.c()).stream())
-                      .filter(p -> Math.abs(new Vector3(p).sub(seam).dot(normal)) < .0001f).distinct().toList();
-                assertEquals(4, points.size());
+                      .filter(p -> (Math.abs(new Vector3(p).sub(seam).dot(normal)) < .0001f
+                                  || Math.abs(edge.x * (p.y - first.y) - edge.y * (p.x - first.x)) < .001f)
+                            && Vector3.dst(p.x, p.y, 0, seam.x, seam.y, 0) <= half).distinct().toList();
+                assertTrue(points.size() >= 4, "The open mouth: " + points.size());
                 for (var lod : TerrainLod.values()) {
                     var other = BoardNaturalBridge.build(scene, next, BoardBridge.deck(scene, next), lod, new HashMap<>());
                     var vertices = other.facets().stream().flatMap(f -> List.of(f.a(), f.b(), f.c()).stream()).toList();
@@ -309,6 +318,98 @@ class BoardNaturalBridgeTest {
                 }
             }
         }
+    }
+
+    /** Lava Tubes 1's spans 1010 and 1011, the 2D editor's way to stand them on its banks: heights 4 and 4 or 3. */
+    private static final List<Coords> RAISED = List.of(new Coords(9, 9), new Coords(9, 10));
+
+    static BoardScene raisedLavaTubes(int north, int south) throws Exception {
+        return GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board", board -> {
+            int[] heights = { north, south };
+            for (int i = 0; i < RAISED.size(); i++) {
+                var hex = board.getHex(RAISED.get(i));
+                hex.removeTerrain(Terrains.BRIDGE_ELEV);
+                hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, heights[i]));
+                board.setHex(RAISED.get(i), hex);
+            }
+        });
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "4, 4", "4, 3", "5, 4" })
+    void raisedLavaTubeSpansCloseTheirJointWithoutHolesFoldsOrDips(int north, int south) throws Exception {
+        var scene = raisedLavaTubes(north, south);
+        float metre = BoardRelief.metres(1);
+        var first = BoardGeometry.center(RAISED.get(0), 0);
+        var middle = new Vector3(first).lerp(BoardGeometry.center(RAISED.get(1), 0), .5f);
+        var along = BoardGeometry.center(RAISED.get(1), 0).sub(first).nor();
+        var across = new Vector3(-along.y, along.x, 0);
+        float deck = (north - 2) * BoardGeometry.level();
+        for (var lod : TerrainLod.values()) {
+            var surfaces = new HashMap<Coords, BoardSurface>();
+            var shapes = new ArrayList<BoardBridge.Shape>();
+            for (var at : RAISED) {
+                var tile = scene.tile(at);
+                var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, surfaces);
+                for (var face : shape.facets()) {
+                    if (face.part() == BoardBridge.Part.TOP || face.part() == BoardBridge.Part.RIM) {
+                        assertTrue(face.normal().z > 0, "Smoothing a stepped joint must not fold its top: " + lod);
+                    }
+                }
+                shapes.add(shape);
+            }
+            var ground = new ArrayList<BoardSurface.Face>();
+            for (var at : RAISED) {
+                for (int d = 0; d < 6; d++) {
+                    var bank = surfaces.get(at.translated(d));
+                    if (bank != null && !RAISED.contains(at.translated(d))) { ground.addAll(bank.foundation()); }
+                }
+            }
+            // Both spans rest on banks beside both ends of their shared edge, so the rock closes those corners: no
+            // gap between the spans' outlines or their banks, and a level joint keeps one flat walking surface.
+            int samples = 0;
+            for (float u = -5; u <= 5; u += .25f) {
+                for (float v = -12; v <= 12; v += .25f) {
+                    var p = new Vector3(middle).mulAdd(along, u * metre).mulAdd(across, v * metre);
+                    if (RAISED.stream().noneMatch(at -> BoardGeometry.contains(at, p.x, p.y))) { continue; }
+                    float height = BoardSurface.sampleHeight(ground, p.x, p.y, Float.NEGATIVE_INFINITY);
+                    for (var shape : shapes) { height = Math.max(height, BoardBridge.top(shape, p.x, p.y)); }
+                    assertTrue(Float.isFinite(height), "No hole beside the joint: " + north + "/" + south + " " + lod + " " + p);
+                    if (north == south) {
+                        assertEquals(deck, height, BoardRelief.metres(.05f), "One flat joint: " + lod + " at " + p);
+                    }
+                    samples++;
+                }
+            }
+            assertTrue(samples > 1000);
+        }
+    }
+
+    @Test
+    void banksBesideAClosedJointShadeTheirWholeSupportedRimAsGround() throws Exception {
+        var scene = raisedLavaTubes(4, 4);
+        var surfaces = new HashMap<Coords, BoardSurface>();
+        for (var at : RAISED) {
+            var tile = scene.tile(at);
+            BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), TerrainLod.FULL, surfaces);
+        }
+        int rimSamples = 0;
+        // 0911 and 1111 each stand beside both spans: their rims run from either mouth to the corner the spans close.
+        for (var bankAt : List.of(new Coords(8, 10), new Coords(10, 10))) {
+            var bank = surfaces.get(bankAt);
+            var corner = BoardGeometry.center(RAISED.get(0), 0).add(BoardGeometry.center(RAISED.get(1), 0))
+                  .add(BoardGeometry.center(bankAt, 0)).scl(1f / 3);
+            for (var p : bank.foundation().stream().flatMap(f -> List.of(f.a(), f.b(), f.c()).stream()).distinct().toList()) {
+                if (Vector3.dst(p.x, p.y, 0, corner.x, corner.y, 0) > BoardRelief.metres(7)
+                      || Math.abs(bank.relief.clearance(p.x, p.y)) > BoardRelief.metres(.001f)) { continue; }
+                var shade = bank.relief.shade(p);
+                if (shade == null) { continue; }
+                assertTrue(shade.normal().z > .999f, "The closed corner's bank must not shade like an exposed cliff rim: "
+                      + bankAt.getBoardNum() + " at " + p);
+                rimSamples++;
+            }
+        }
+        assertTrue(rimSamples > 0, "Exercise the banks' actual rims beside the closed corners");
     }
 
     @Test
@@ -322,14 +423,31 @@ class BoardNaturalBridgeTest {
             var groundOnly = replace(scene, without);
             var before = new BoardSurface(groundOnly, without);
             var after = new BoardSurface(scene, tile);
-            assertEquals(before.faces, after.faces, "The natural bridge must not fill or reshape the ground below");
-            assertEquals(before.waterFaces, after.waterFaces, "The river must remain below the separate bridge shell");
+            sameGeometry(before.faces, after.faces, "The natural bridge must not fill or reshape the ground below");
+            sameGeometry(before.waterFaces, after.waterFaces, "The river must remain below the separate bridge shell");
             assertEquals(BoardRoad.of(groundOnly, without).joins(), BoardRoad.of(scene, tile).joins());
             if (!water) {
                 var at = BoardGeometry.center(CENTER, 0);
                 assertEquals(UnitLandingSupports.ground(groundOnly, at.x, at.y),
                       UnitLandingSupports.ground(scene, at.x, at.y), .001f, "A unit below must stay on the lower road");
             }
+        }
+    }
+
+    /**
+     * The same faces, finishes and vertices, to float rounding. A road under any bridge takes no bend at its borders
+     * ({@code BoardRoad.bent}); a straight course computed that way differs from the plain one only in its last bits.
+     */
+    private static void sameGeometry(List<BoardSurface.Face> expected, List<BoardSurface.Face> actual, String message) {
+        assertEquals(expected.size(), actual.size(), message);
+        float tolerance = .001f * BoardGeometry.hexScale();
+        for (int i = 0; i < expected.size(); i++) {
+            var a = expected.get(i);
+            var b = actual.get(i);
+            assertEquals(a.finish(), b.finish(), message);
+            assertEquals(a.landEdge(), b.landEdge(), message);
+            assertTrue(a.a().epsilonEquals(b.a(), tolerance) && a.b().epsilonEquals(b.b(), tolerance)
+                  && a.c().epsilonEquals(b.c(), tolerance), message + ": " + a + " became " + b);
         }
     }
 

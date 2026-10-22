@@ -3474,7 +3474,7 @@ final class BoardRelief {
                 normal = new Vector3(0, 0, 1);
             }
             if (bridge != null) {
-                float join = 1 - smooth((Math.abs(bridge.lateral(p)) / bridge.width() - .8f) / .2f);
+                float join = bridge.weight(p);
                 normal.lerp(Vector3.Z, join).nor();
                 seam[0] = lerp(seam[0], 99, join);
             }

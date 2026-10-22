@@ -26,7 +26,7 @@ public class UiButton extends TextButton {
     /** The sub-labels and details, muted, darker on a filled face. */
     public final List<Label> details = new ArrayList<>();
     private final UiKit kit;
-    private boolean pressed, hovered;
+    private boolean pressed, hovered, held, focused;
     private Label badge;
     private Image dot;
     private Actor trailing;
@@ -60,6 +60,26 @@ public class UiButton extends TextButton {
     @Override
     public boolean isOver() {
         return hovered || super.isOver();
+    }
+
+    /** Shows the held look of a pointer pressing the button, without input, as a gallery does. */
+    public UiButton held(boolean value) {
+        held = value;
+        return this;
+    }
+
+    @Override
+    public boolean isPressed() {
+        return held || super.isPressed();
+    }
+
+    /**
+     * Shows the focus ring while a view moves its own keyboard selection here; a button with the stage's keyboard
+     * focus shows it anyway. Only the token button styles have a ring.
+     */
+    public UiButton focused(boolean value) {
+        focused = value;
+        return this;
     }
 
     /** The same as {@link #pressed}: a view's own change fires no event. */
@@ -133,5 +153,14 @@ public class UiButton extends TextButton {
               : UiTheme.FILL_INK.equals(text) ? UiTheme.FILL_MUTED : UiTheme.MUTED;
         details.forEach(label -> label.setColor(detail));
         super.draw(batch, parentAlpha);
+        if (!isDisabled() && (focused || hasKeyboardFocus())
+              && getStyle() instanceof UiTheme.TokenButtonStyle token && token.focusOuter != null) {
+            Color color = getColor();
+            batch.setColor(color.r, color.g, color.b, color.a * parentAlpha);
+            token.focusOuter.draw(batch, getX(), getY(), getWidth(), getHeight());
+            if (token.focusInner != null) {
+                token.focusInner.draw(batch, getX() + 1, getY() + 1, getWidth() - 2, getHeight() - 2);
+            }
+        }
     }
 }

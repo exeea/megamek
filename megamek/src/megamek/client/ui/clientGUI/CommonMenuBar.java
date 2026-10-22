@@ -56,6 +56,7 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 
 import megamek.MMConstants;
 import megamek.MegaMek;
@@ -64,6 +65,8 @@ import megamek.client.ui.CopySystemDataAction;
 import megamek.client.ui.Messages;
 import megamek.client.ui.PackageBugReportAction;
 import megamek.client.ui.ShowBugReportDialogAction;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuUiLibraryWindow;
+import megamek.client.ui.design.swing.SwingUiLibrary;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.KeyBindParser;
 import megamek.common.enums.GamePhase;
@@ -157,6 +160,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JCheckBoxMenuItem viewForceDisplay = new JCheckBoxMenuItem(getString("CommonMenuBar.viewForceDisplay"));
     private final JMenuItem viewNovaNetworks = new JMenuItem(getString("CommonMenuBar.viewNovaNetworks"));
     private final JMenuItem viewAccessibilityWindow = new JMenuItem(getString("CommonMenuBar.viewAccessibilityWindow"));
+    private final JMenu helpUiLibrary = new JMenu(getString("CommonMenuBar.helpUiLibrary"));
     private final JCheckBoxMenuItem viewKeybindsOverlay = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewKeyboardShortcuts"));
     private final JCheckBoxMenuItem viewPlanetaryConditionsOverlay = new JCheckBoxMenuItem(getString(
@@ -432,6 +436,16 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         JMenuItem helpAbout = new JMenuItem(getString("CommonMenuBar.helpAbout"));
         initMenuItem(helpAbout, menu, HELP_ABOUT);
 
+        // Developer galleries of the design system; shown only in the lobby.
+        JMenuItem swingLibrary = new JMenuItem(getString("CommonMenuBar.helpUiLibrarySwing"));
+        swingLibrary.addActionListener(event -> SwingUiLibrary.showLibrary(SwingUtilities.getWindowAncestor(this)));
+        helpUiLibrary.add(swingLibrary);
+        JMenuItem nativeLibrary = new JMenuItem(getString("CommonMenuBar.helpUiLibraryNative"));
+        nativeLibrary.addActionListener(
+              event -> GpuUiLibraryWindow.showLibrary(SwingUtilities.getWindowAncestor(this)));
+        helpUiLibrary.add(nativeLibrary);
+        menu.add(helpUiLibrary);
+
         setKeyBinds();
         GUIP.addPreferenceChangeListener(this);
         KeyBindParser.addPreferenceChangeListener(this);
@@ -554,6 +568,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         boolean isNotVictory = !phase.isVictory();
 
         viewAccessibilityWindow.setEnabled(false);
+        helpUiLibrary.setVisible(isLobby);
 
         gameQLoad.setEnabled(isMainMenu || isLobby);
         gameLoad.setEnabled(isMainMenu || isLobby);

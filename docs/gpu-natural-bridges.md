@@ -70,9 +70,27 @@ through the whole bank. Walkable banks also fit the finished top, ignoring decor
 and underside inside the cliff rather than fitting only its upper rim. Connected sections share mouth
 corners, underside clearance and arch support influence, and omit internal end walls across mixed LODs.
 
+In Enhanced graphics, where both exits around a hex corner rest on ground (an abutment) or on a joined natural span, and so do
+those of every span joined there, the rock closes that corner instead of curving away from it
+(`BoardNaturalBridge.closes`). Every span at the corner then decides alike, so their outlines meet: the lattice
+corner replaces a joint mouth's corner that would overshoot it, and all of them build it at one height (the
+bank's top beside a bank both rest on, else the joint's; three joined spans take their mean). Beside ground,
+the joint's edge runs on along its line into that ground's rounded-off corner, whose cliff recedes up to about
+eight metres there: a bank mouth reaching across that line is cut where it crosses it, so the spans never
+overlap, and a shallower mouth gets a small tongue out to the line, built apart from the centre's fan. Between
+two grounds, a lone span ends both wide mouths on the corner's ray and seats the corner there as deep as they
+reach. Shared edges have no internal walls. An open corner keeps its curved, eroded rim.
+
+Only the exposed rim erodes. Mouths, joints and closed corners keep the plane they share, and the erosion
+fades in over the first few metres of exposed rim. The top's spokes carry the rim heights inwards blended
+around the centre (exact at the rim), so a span stepping to a joint one level away, or climbing to a bank
+above it, curves smoothly instead of folding into thin wedges; towards a bank the slope reaches the bank's
+height at the hex edge, where its cliff stands, rather than only inside the bank.
+
 At a level bank, the walking surface keeps the bank's height through the entrance rather than eroding
 below its lip. The bank owns the top inside its actual scalloped outline; bridge top facets are clipped
-there, avoiding coplanar overlap. The supported passage uses upward bank normals, while the adjacent
+there, avoiding coplanar overlap. The supported passage uses upward bank normals, as does the rest of
+the bank's edge on a side whose corner the span closes (`BoardNaturalBridge.BankJoin`), while the adjacent
 exposed cliff retains its rounding. The buried rock shell remains separate from the bank. Removing the
 bridge rebuilds the neighbouring terrain and restores its exposed edge; the surface cache key also
 includes the derived natural-bridge type so retyping a span updates this join.
