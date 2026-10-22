@@ -23,7 +23,7 @@ in vec2 v_roadMaskUV;
 // A road material's repeat at the width it is catalogued for (BoardRelief.detailMetres(1)).
 uniform float u_worldMetre;
 #ifdef bridgeDeckFlag
-uniform float u_bridgeDeckCoverage; // GpuAssets.coverage of the deck's road texture
+uniform float u_bridgeDeckCoverage; // GpuAssets.roadCoverage of the deck's road texture
 #endif
 #ifdef roadMapsFlag
 uniform sampler2D u_roadSurface;

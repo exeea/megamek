@@ -125,7 +125,7 @@ class GpuAssetReloadSmokeTest {
                             originalEmission = assets().lavaEmission();
                             originalRoughness = assets().finishArrays(surfaces(sculptLayers), sculptLayers.size()).maps();
                             sculptTile = assets().sculptTile("grass");
-                            asphaltCoverage = assets().coverage("roads/asphalt");
+                            asphaltCoverage = assets().roadCoverage("roads/asphalt");
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
                             scatterHeight = BoardScatter.bush(BoardScene.Surface.SAND, 0).height();
@@ -186,7 +186,7 @@ class GpuAssetReloadSmokeTest {
                             var asphaltEntry = (ObjectNode) loose.get("roads/asphalt");
                             asphaltEntry.put("pixels", asphaltEntry.get("pixels").intValue() / 2);
                             catalogMapper.writerWithDefaultPrettyPrinter().writeValue(catalog.toFile(), entries);
-                            assertEquals(asphaltCoverage, assets().coverage("roads/asphalt"),
+                            assertEquals(asphaltCoverage, assets().roadCoverage("roads/asphalt"),
                                   "Edits wait for the actual Reload action");
                             assertSame(originalEmission, assets().lavaEmission(), "Edits wait for the actual Reload action");
                             scaleMesh(directory.resolve("models/board/tree.glb"));
@@ -219,7 +219,7 @@ class GpuAssetReloadSmokeTest {
                             assertNotSame(originalSculpt, sculpt);
                             assertEquals(sculptTile * 2 * 1.25f, assets().sculptTile("grass"), .0001f,
                                   "Reload must re-read the catalogue and the material's width as well as its maps");
-                            assertEquals(asphaltCoverage * 2, assets().coverage("roads/asphalt"),
+                            assertEquals(asphaltCoverage * 2, assets().roadCoverage("roads/asphalt"),
                                   "A catalogue edit reaches the road's repeat after Reload assets");
                             int grassLayer = sculptLayers.indexOf("grass") * 2;
                             assertTrue(grassLayer >= 0);

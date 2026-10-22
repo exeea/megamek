@@ -88,11 +88,12 @@ class GpuTerrainContactSmokeTest {
                     frame.render(terrain, camera, scene, false);
                     var before = screen();
                     try {
-                        TextureArray array = ((GpuAssets.MaterialArrays) field(field(terrain, "assets"), "sculptArray")).color();
-                        arrayHandle = array.getTextureObjectHandle();
                         var layersField = GpuTerrain.class.getDeclaredField("SCULPT_LAYERS");
                         layersField.setAccessible(true);
-                        var names = (List<?>) layersField.get(null);
+                        @SuppressWarnings("unchecked")
+                        var names = (List<String>) layersField.get(null);
+                        TextureArray array = ((GpuAssets) field(terrain, "assets")).sculptArray(names).color();
+                        arrayHandle = array.getTextureObjectHandle();
                         // Change only land cover to a sentinel. Deep bed pixels must be independent of those maps.
                         array.bind();
                         var sentinel = new Pixmap(array.getWidth(), array.getHeight(), Pixmap.Format.RGBA8888);

@@ -236,6 +236,8 @@ final class GpuAssets implements Disposable {
             terrainArrays = terrainArrays(names, materials);
         }
         // Built by sculptArray, they hold the road materials it found; the indices must still be these materials'.
+        // A missing material reports its own file first.
+        materials.forEach(this::definition);
         List<String> built = terrainArrays.materials();
         if (materials.size() > built.size() || !built.subList(0, materials.size()).equals(materials)) {
             throw new IllegalArgumentException("The terrain arrays hold the finish of " + built + ", not " + materials);
