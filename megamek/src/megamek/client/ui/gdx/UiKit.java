@@ -31,6 +31,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
 import megamek.client.ui.Messages;
+import megamek.client.ui.design.DesignTokens;
 
 /**
  * The hud-v3 widgets that native views build from a UiTheme's skin (rebuild plan C.3), and the helpers they all use: a
@@ -326,7 +327,8 @@ public final class UiKit {
      * the prototype does it. The parts stack in a top-right utility and above a sub-label; otherwise the icon leads the
      * caption on one line. Styles: hud (quiet, .b), hud-plain (normal-case .brow .b), hud-main (commit), hud-mini,
      * hud-icon (30-unit .b.ib), hud-seg, hud-utility (icon over label), hud-utility-row (.b.util.row) and
-     * hud-utility-small (.b.brk.sm).
+     * hud-utility-small (.b.brk.sm); and the token button set, button-&lt;kind&gt; and button-&lt;kind&gt;-compact
+     * ({@link UiTheme#BUTTON_KINDS}), in sentence case, which new views use.
      */
     public UiButton button(String style, String icon, String text, String sub) {
         UiButton button = new UiButton(this, style);
@@ -371,6 +373,9 @@ public final class UiKit {
     }
 
     private static float iconSize(String style) {
+        if (style.startsWith("button-")) {
+            return DesignTokens.shipped().size().get(style.endsWith(UiTheme.COMPACT) ? "icon.sm" : "icon.md");
+        }
         return switch (style) {
             case "hud-icon" -> 16;
             case "hud-mini" -> 13;
