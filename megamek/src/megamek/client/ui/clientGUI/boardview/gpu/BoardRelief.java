@@ -1565,6 +1565,11 @@ final class BoardRelief {
         return share;
     }
 
+    /** Water or dry ground that keeps its outline, paving: land above it takes its step on its own side (#band). */
+    private static boolean kept(Site site) {
+        return site != null && (site.liquid() || site.fixedOutline() && !site.ultraSublevel());
+    }
+
     /** From none at a waterline at this level to all half a level above it. */
     private static float waterline(float level, float z) {
         return smooth((z - level * BoardGeometry.level()) / (.5f * BoardGeometry.level()));
@@ -1806,7 +1811,11 @@ final class BoardRelief {
                     gy = Math.signum(dot) * ny;
                 }
                 var grade = BoardRoadGrade.of(scene, scene.tile(site.coords()), true);
-                float headroom = grade == null ? (site.level() + BoardRoadGrade.CLEARANCE) * level : grade.clearanceTop(px, py);
+                // Up to the headroom; beside a road cut down onto an apron over the whole range it spans, as high as its
+                // bank cuts there (BoardRoadBank).
+                float headroom = grade == null ? (site.level() + BoardRoadGrade.CLEARANCE) * level
+                      : grade.intoApron() ? Math.max(grade.clearanceTop(px, py), grade.high() + BoardRoadGrade.CLEARANCE * level)
+                      : grade.clearanceTop(px, py);
                 // Everything below the road's headroom recedes but a shallow drop below the road, which the road's bank
                 // fills (BoardRoadBank) rather than moving it away.
                 float surface = headroom - BoardRoadGrade.CLEARANCE * level + .05f * level;
@@ -2145,14 +2154,15 @@ final class BoardRelief {
     /**
      * Room a step takes on each side of its edge, in world units: none unless hex transitions or padding are on, and
      * only between detailed grounds, water among them. Special artwork, buildings and roads keep their outline
-     * on the hex edge; water keeps its own where {@link #band} says. Pits have no ground to carry a talus apron.
+     * on the hex edge, natural ground above a concrete road sloping down onto it there; water keeps its own where
+     * {@link #band} says. Pits have no ground to carry a talus apron.
      * Dry cliffs need less transition width than gentle slopes, leaving more of their plateau and ridge connections.
      */
     private static float room(Site upper, Site lower) {
         float width = BoardGeometry.tuning().stepsBetweenTops() && upper != null && lower != null
               && upper.level() != lower.level() && upper.detailed() && lower.detailed()
               && !(upper.liquid() && lower.liquid())
-              && !upper.fixedRoad() && !lower.fixedRoad()
+              && !upper.fixedRoad() && !(lower.fixedRoad() && upper.family() == CONCRETE)
               && !upper.ultraSublevel() && !lower.ultraSublevel()
               && !(upper.family() == CONCRETE && wall(upper, lower))
               && !wetCliff(upper, lower)
@@ -2183,7 +2193,7 @@ final class BoardRelief {
      * its room at the foot, following {@link #transition} up to its room back at the rim. A slope down to water runs
      * on under it to the bed: land a level above water a level deep takes a two-level slope, which meets the water on
      * the edge. Where a wall of three levels or more stands above water, or water stands above land, the water keeps
-     * its outline on the edge, so the land takes a step half as wide, all on its own side.
+     * its outline on the edge, so the land takes a step half as wide, all on its own side; so does land above paving.
      */
     private static float band(Site upper, Site lower, float z, float x, float y) {
         float room = room(upper, lower);
@@ -2204,7 +2214,8 @@ final class BoardRelief {
             float bench = .35f + .5f * shoulder;
             t = 1 - 2 * (height + bench * (float) Math.sin(4 * Math.PI * height) / (4 * (float) Math.PI));
         }
-        return wall && lower.liquid() ? room / 2 * (t - 1) : upper.liquid() ? room / 2 * (t + 1) : room * t;
+        return wall && lower.liquid() || !lower.liquid() && kept(lower) ? room / 2 * (t - 1)
+              : upper.liquid() ? room / 2 * (t + 1) : room * t;
     }
 
     /**

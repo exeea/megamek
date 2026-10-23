@@ -742,7 +742,8 @@ final class BoardRoadCut {
         // Beside a road built in concrete the cut is cast as well. Beside a bridge's ramp, which has no natural bank,
         // only the fill under the road is: a cut above it stays the bank's own, as the rest of the cut is.
         boolean cast = grade.poured() || grade.bridgeRamp();
-        if (grade.poured()) { wall = concrete; }
+        // A road built in concrete has concrete cut faces; ground cut by a roadless apron's ramp shows its own face.
+        if (grade.poured() && BoardRoad.carriageway(grade.tile())) { wall = concrete; }
         WallBuilder fillWall = grade.bridgeRamp() ? concrete : wall;
         // Natural ground beside a natural road closes up to it only from a fill's depth: further down the road passes
         // over it, as it does at a bridge's landing, and the ground keeps its shape.

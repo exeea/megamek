@@ -74,6 +74,8 @@ final class BoardRoadGrade {
     private int planar;
     /** Whether the carriageway is built in concrete (see {@link #poured()}). */
     private final boolean poured;
+    /** Whether a natural carriageway ramps down onto an apron (see {@link #intoApron()}). */
+    private boolean intoApron;
 
     private BoardRoadGrade(BoardScene scene, BoardScene.Tile tile, int arms, boolean carriageway, boolean eased) {
         this.tile = tile;
@@ -110,7 +112,11 @@ final class BoardRoadGrade {
             if ((arms & 1 << d) != 0 && next != null && BoardSurface.connectingBridge(tile, next, d) != null) {
                 planar |= 1 << d;
             } else if (edges[d] != level) {
-                boolean across = (next.surface() == BoardScene.Surface.CONCRETE) != concrete;
+                // A natural road ramping down onto an apron stays natural, cut into its own ground: the apron casts its
+                // own half of the ramp. One ramping up to an apron stands on a cast base.
+                boolean across = (next.surface() == BoardScene.Surface.CONCRETE) != concrete
+                      && (concrete || !apron(tile, next, d) || next.elevation() > tile.elevation());
+                intoApron |= !concrete && !across && apron(tile, next, d);
                 crossing |= across;
                 natural |= !across && !concrete;
             }
@@ -300,7 +306,7 @@ final class BoardRoadGrade {
     }
 
     /** A road ending at a roadless concrete hex within two levels ramps into that apron. */
-    private static boolean apron(BoardScene.Tile road, BoardScene.Tile apron, int direction) {
+    static boolean apron(BoardScene.Tile road, BoardScene.Tile apron, int direction) {
         return (road.wayExits() & 1 << direction) != 0 && !road.liquid().present()
               && apron.surface() == BoardScene.Surface.CONCRETE && !BoardRoad.carriageway(apron)
               && !apron.liquid().present() && Math.abs(road.elevation() - apron.elevation()) <= 2
@@ -373,6 +379,12 @@ final class BoardRoadGrade {
      * A carriageway that also ramps between natural hexes keeps their banks.
      */
     boolean poured() { return poured; }
+
+    /**
+     * Whether this natural carriageway ramps down onto an apron, cut into its own ground: its bank cuts that ground over
+     * the whole range it spans, which the steps beside it then clear as well (BoardRelief#push).
+     */
+    boolean intoApron() { return intoApron; }
 
     /** Whether any arm leaves the hex's level. */
     boolean graded() {
