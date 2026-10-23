@@ -38,7 +38,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
@@ -126,10 +125,7 @@ class GpuHelpMenuPlayersSmokeTest {
                   ? new GpuBoardSource.Bind(bind.command(), bind.keyCode(), bind.modifiers(), "F12")
                   : bind.command() == KeyCommandBind.FORCES_GRID
                   ? new GpuBoardSource.Bind(bind.command(), 0, 0, "") : bind);
-            GpuBoardSource.UiPreferences changed = new GpuBoardSource.UiPreferences(preferences.scale(),
-                  preferences.reportKeywords(), preferences.reportFilterKeywords(), preferences.minimapEnabled(),
-                  preferences.contactsEnabled(), preferences.conditionsVisible(),
-                  preferences.turnDetails(), binds, preferences.moveSprintRgb(), BoardGraphics.ENHANCED);
+            GpuBoardSource.UiPreferences changed = GpuHudInputTest.with(preferences, Map.of("binds", binds));
             help.update(inputs(hud, frame(List.of(), GpuPlayers.Snapshot.EMPTY), changed, false));
             lines = lines(root);
             assertPair(lines, "F12", "KeyBinds.cmdNames.toggleKeybinds");

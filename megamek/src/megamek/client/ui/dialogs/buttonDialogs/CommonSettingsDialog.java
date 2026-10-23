@@ -71,6 +71,7 @@ import megamek.client.ui.clientGUI.GifRecordingMode;
 import megamek.client.ui.clientGUI.UITheme;
 import megamek.client.ui.clientGUI.UnitDisplayOrderPreferences;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.comboBoxes.MMComboBox;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
@@ -265,6 +266,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private final JCheckBox showUnitId = new JCheckBox(Messages.getString("CommonSettingsDialog.showUnitId"));
     private final MMComboBox<LabelDisplayStyle> unitLabelStyle =
           new MMComboBox<>("unitLabelStyle", LabelDisplayStyle.values());
+    private final MMComboBox<NameplateMode> nameplateMode = new MMComboBox<>("nameplateMode", NameplateMode.values());
     private final JCheckBox showAutoResolvePanel = new JCheckBox(Messages.getString(
           "CommonSettingsDialog.showAutoResolvePanel"));
     private final JCheckBox pauseBotGamesAtStart = new JCheckBox(Messages.getString(
@@ -1213,8 +1215,10 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         JLabel unitLabelStyleLabel = new JLabel(Messages.getString("CommonSettingsDialog.unitLabelStyle"));
         unitLabelStyle.setToolTipText(Messages.getString("CommonSettingsDialog.unitLabelStyle.tooltip"));
+        JLabel nameplateModeLabel = new JLabel(Messages.getString("CommonSettingsDialog.nameplateMode"));
+        nameplateMode.setToolTipText(Messages.getString("CommonSettingsDialog.nameplateMode.tooltip"));
         comps.add(List.of(createGameBoardFieldGrid("CommonSettingsGameBoardUnitLabelStyleGrid",
-              unitLabelStyleLabel, unitLabelStyle)));
+              unitLabelStyleLabel, unitLabelStyle, nameplateModeLabel, nameplateMode)));
 
         List.of(showDamageLevel, showDamageDecal, showUnitId)
             .forEach(checkBox -> configureCheckBox(checkBox, null));
@@ -2901,6 +2905,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             chkHighPerformanceGraphics.setSelected(GUIP.getHighPerformanceGraphics());
             showDamageLevel.setSelected(GUIP.getShowDamageLevel());
             unitLabelStyle.setSelectedItem(GUIP.getUnitLabelStyle());
+            nameplateMode.setSelectedItem(GUIP.getNameplateMode());
             showDamageDecal.setSelected(GUIP.getShowDamageDecal());
             aOHexShadows.setSelected(GUIP.getAOHexShadows());
             floatingIso.setSelected(GUIP.getFloatingIso());
@@ -3244,6 +3249,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     @Override
     protected void okAction() {
         GUIP.setUnitLabelStyle(Objects.requireNonNull(unitLabelStyle.getSelectedItem()));
+        GUIP.setNameplateMode(Objects.requireNonNull(nameplateMode.getSelectedItem()));
         GUIP.setShowDamageLevel(showDamageLevel.isSelected());
         GUIP.setShowDamageDecal(showDamageDecal.isSelected());
         GUIP.setUnitLabelBorder(entityOwnerColor.isSelected());

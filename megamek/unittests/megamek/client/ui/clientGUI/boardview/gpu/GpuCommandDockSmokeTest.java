@@ -45,7 +45,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
@@ -1247,10 +1246,8 @@ class GpuCommandDockSmokeTest {
         GpuHudData panels = shot.panels();
         GpuBoardActions.PhaseInfo info = new GpuBoardActions.PhaseInfo("", false, DONE, SKIP, "",
               List.of("Walk 1 hex (1 MP)", "Walk 1 hex (2 MP)"), List.of());
-        GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
         return new Shot(shot.status(), withPhase(panels, info), shot.commands(), shot.reports(), shot.playback(),
-              new GpuBoardSource.UiPreferences(preferences.scale(), "", "", true, true, false, true,
-                    preferences.binds(), 0, BoardGraphics.ENHANCED));
+              GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("turnDetails", true)));
     }
 
     /** The shot whose phase info names these Done and skip commands, as GpuBoardActions.phaseInfo derives them. */

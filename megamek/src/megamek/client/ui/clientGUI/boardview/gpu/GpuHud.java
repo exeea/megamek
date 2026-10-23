@@ -25,6 +25,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.util.KeyCommandBind;
@@ -290,7 +291,7 @@ final class GpuHud implements GpuBoardHud {
         overlays = new GpuTacticalOverlays(kit, source);
         GpuContactsPanel contacts = new GpuContactsPanel(kit, source, state, contextMenu, this::select);
         // The guides follow the contacts panel's toggles and open row; hex-anchored labels need the board camera.
-        boardLabels = new GpuBoardLabels(kit, source, state, camera, contacts);
+        boardLabels = new GpuBoardLabels(kit, source, state, camera, contacts, nameplates);
         weapons = new GpuWeaponsPanel(kit, source, state, contextMenu);
         GpuSolutionCard solution = new GpuSolutionCard(kit, source, state);
         log = new GpuLogPanel(kit, source, state, contextMenu);
@@ -583,13 +584,13 @@ final class GpuHud implements GpuBoardHud {
 
     /**
      * True when the release belongs to a press the HUD consumed. Releasing the nameplate key ends the nameplates,
-     * whatever other modifier is still held.
+     * whatever other modifier is still held, unless the key toggles them.
      */
     @Override
     public boolean keyUp(int key, int awt) {
-        if (inputs != null && inputs.preferences().binds().stream()
+        if (inputs != null && !toggledNameplates() && inputs.preferences().binds().stream()
               .anyMatch(bind -> bind.command() == KeyCommandBind.SHOW_NAMEPLATES && bind.keyCode() == awt)) {
-            state.altHeld = false;
+            state.allNameplates = false;
         }
         stage.keyUp(key);
         return consumedKeys.remove(key);
@@ -609,9 +610,16 @@ final class GpuHud implements GpuBoardHud {
     /** The window lost the focus: no key is held any more. */
     @Override
     public void focusLost() {
-        state.altHeld = false;
+        if (!toggledNameplates()) {
+            state.allNameplates = false;
+        }
         consumedKeys.clear();
         losPanel.dismiss();
+    }
+
+    /** The nameplate key toggles every nameplate instead of showing them while it is held. */
+    private boolean toggledNameplates() {
+        return inputs != null && inputs.preferences().nameplates() == NameplateMode.TOGGLE;
     }
 
     private Set<KeyCommandBind> binds(int awt, int modifiers) {
@@ -719,7 +727,11 @@ final class GpuHud implements GpuBoardHud {
         }
         if (binds.contains(KeyCommandBind.SHOW_NAMEPLATES)) {
             // Alt with a focused grip belongs to the grip's reordering.
-            state.altHeld = !focused;
+            if (!toggledNameplates()) {
+                state.allNameplates = !focused;
+            } else if (!focused) {
+                state.allNameplates = !state.allNameplates;
+            }
         } else if (binds.contains(KeyCommandBind.ROUND_REPORT)) {
             state.toggleLog();
         } else if (binds.contains(KeyCommandBind.KEY_BINDS)) {

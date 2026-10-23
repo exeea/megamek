@@ -8,9 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.awt.event.InputEvent;
+
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector3;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
@@ -103,6 +106,28 @@ class GpuBattleViewTest {
             assertFalse(keys.keyUp(Input.Keys.ENTER));
         } finally {
             Gdx.input = original;
+        }
+    }
+
+    /** The fullscreen switch takes its keys ahead of the game's bindings, so no default bind on any platform uses one. */
+    @Test
+    void noDefaultBindUsesAFullscreenKey() {
+        int[] masks = { InputEvent.SHIFT_DOWN_MASK, InputEvent.CTRL_DOWN_MASK, InputEvent.ALT_DOWN_MASK,
+              InputEvent.META_DOWN_MASK };
+        for (boolean mac : new boolean[] { false, true }) {
+            for (int key = 0; key <= Input.Keys.MAX_KEYCODE; key++) {
+                for (int combination = 0; combination < 1 << masks.length; combination++) {
+                    int modifiers = 0;
+                    for (int bit = 0; bit < masks.length; bit++) {
+                        if ((combination & 1 << bit) != 0) { modifiers |= masks[bit]; }
+                    }
+                    if (!GpuBattleView.isFullscreenSwitch(key, modifiers, mac)) { continue; }
+                    for (KeyCommandBind bind : KeyCommandBind.values()) {
+                        assertFalse(KeyCommandBind.matches(bind.keyDefault, bind.modifiersDefault,
+                              GpuBattleView.awtKey(key, true), modifiers), bind.cmd + " uses a fullscreen key");
+                    }
+                }
+            }
         }
     }
 

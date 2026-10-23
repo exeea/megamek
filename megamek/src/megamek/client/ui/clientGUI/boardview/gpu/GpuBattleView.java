@@ -47,7 +47,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.utils.SharedLibraryLoader;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
@@ -156,11 +158,12 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, UnitAnimator> animators = new HashMap<>();
     /** The ground of the units other than troops, as last drawn, by the hexes they occupy; troops step around it. */
     private final Map<Coords, List<Polygon>> occupiedGround = new HashMap<>();
+    private final HexCrowds crowds = new HexCrowds();
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
     final FullscreenKey fullscreenKey = new FullscreenKey();
-    /** The window's bounds before Alt+Enter made it fullscreen; the next Alt+Enter restores them. */
+    /** The window's bounds before the fullscreen key made it fullscreen; the key's next press restores them. */
     private GpuWindowBounds windowed;
     /** Render-thread snapshot of modifiers delivered to the separate Swing tools window. */
     private final List<Hover> hover = new ArrayList<>();
@@ -1601,10 +1604,11 @@ class GpuBattleView extends ApplicationAdapter {
             var ground = new Polygon(java.util.Arrays.copyOf(hull.items, hull.size - 2));
             unit.footprint().forEach(coords -> occupiedGround.computeIfAbsent(coords, ignored -> new ArrayList<>()).add(ground));
         }
+        crowds.pack(occupiedGround);
     }
 
     private UnitAnimator newAnimator() {
-        return new UnitAnimator(groundSurfaces, () -> scene, coords -> occupiedGround.getOrDefault(coords, List.of()));
+        return new UnitAnimator(groundSurfaces, () -> scene, crowds);
     }
 
     /** Frame an action before its clock advances, including when one large frame reaches several queued actions. */
@@ -3100,17 +3104,33 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * Alt+Enter (either Alt, Enter or numpad Enter), ahead of the HUD and the game's key bindings: its press, the
-     * character the window types for it and for each repeat, and its release reach neither.
+     * The fullscreen switch: Alt+Enter (either Alt, Enter or numpad Enter) everywhere, and the platform's own key, which
+     * no default bind uses: Control+Command+F on macOS, whose F11 shows the desktop, and F11 elsewhere.
+     */
+    static boolean isFullscreenSwitch(int key, int modifiers, boolean mac) {
+        return switch (key) {
+            case Input.Keys.ENTER, Input.Keys.NUMPAD_ENTER -> (modifiers & InputEvent.ALT_DOWN_MASK) != 0;
+            case Input.Keys.F -> mac && modifiers == (InputEvent.CTRL_DOWN_MASK | InputEvent.META_DOWN_MASK);
+            case Input.Keys.F11 -> !mac && modifiers == 0;
+            default -> false;
+        };
+    }
+
+    /**
+     * The fullscreen switch ({@link #isFullscreenSwitch}), ahead of the HUD and the game's key bindings: its press, the
+     * character the window types for an Enter and for each repeat, and its release reach neither.
      */
     final class FullscreenKey extends InputAdapter {
         private int held = -1;
 
         @Override
         public boolean keyDown(int key) {
-            if (key != Input.Keys.ENTER && key != Input.Keys.NUMPAD_ENTER) { return false; }
-            held = (modifiers() & InputEvent.ALT_DOWN_MASK) != 0 ? key : -1;
-            if (held < 0) { return false; }
+            if (!isFullscreenSwitch(key, modifiers(), SharedLibraryLoader.os == Os.MacOsX)) {
+                // A release the window never delivered (focus lost): the key's next plain press is the game's again.
+                if (key == held) { held = -1; }
+                return false;
+            }
+            held = key;
             toggleFullscreen();
             return true;
         }
@@ -3124,7 +3144,7 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean keyTyped(char character) {
-            return held >= 0 && character == '\n';
+            return character == '\n' && (held == Input.Keys.ENTER || held == Input.Keys.NUMPAD_ENTER);
         }
     }
 

@@ -34,7 +34,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiMenuList;
@@ -752,7 +751,7 @@ class GpuContextMenuSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values()).map(bind -> new GpuBoardSource.Bind(bind,
               bind.keyDefault, bind.modifiersDefault, KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault)))
               .toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, binds, 0, BoardGraphics.ENHANCED);
+        return GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("binds", binds));
     }
 
     // ---------------------------------------------------------------- reading and pressing the menu

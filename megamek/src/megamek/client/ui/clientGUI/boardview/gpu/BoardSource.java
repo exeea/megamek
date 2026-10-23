@@ -11,6 +11,7 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -25,11 +26,12 @@ interface BoardSource extends AutoCloseable {
      * Immutable preference snapshot published to the render thread: the 3D board's UI scale (the Tuning panel's share
      * of the scale the window takes from the monitor and its size; Swing's GUI scale is Swing's alone), the existing
      * preferences the native views read, whether the battle HUD shows its contacts panel, every key binding, the
-     * 3D board's graphics, MegaMek's movement colours and the overlay switches.
+     * 3D board's graphics, MegaMek's movement colours, the overlay switches and when every nameplate shows.
      */
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
           boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-          List<Bind> binds, BoardGraphics graphics, Overlays overlays, Map<GpuMovePlan.Band, Integer> movementColors) {
+          List<Bind> binds, BoardGraphics graphics, Overlays overlays, Map<GpuMovePlan.Band, Integer> movementColors,
+          NameplateMode nameplates) {
         public UiPreferences {
             binds = List.copyOf(binds);
             movementColors = Map.copyOf(movementColors);
@@ -57,41 +59,6 @@ interface BoardSource extends AutoCloseable {
             }
         }
 
-        /** Captures the client's movement palette, with the supplied sprint and jump colours. */
-        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb, Overlays overlays) {
-            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
-                  turnDetails, binds, graphics, overlays, Map.of(
-                        GpuMovePlan.Band.WALK, GUIPreferences.getInstance().getMoveDefaultColor().getRGB(),
-                        GpuMovePlan.Band.BACK, GUIPreferences.getInstance().getMoveBackColor().getRGB(),
-                        GpuMovePlan.Band.RUN, GUIPreferences.getInstance().getMoveRunColor().getRGB(),
-                        GpuMovePlan.Band.BOOST, GUIPreferences.getInstance().getMoveMASCColor().getRGB(),
-                        GpuMovePlan.Band.SPRINT, moveSprintRgb,
-                        GpuMovePlan.Band.JUMP, moveJumpRgb,
-                        GpuMovePlan.Band.ILLEGAL, GUIPreferences.getInstance().getMoveIllegalColor().getRGB()));
-        }
-
-        public int moveSprintRgb() {
-            return movementColors.get(GpuMovePlan.Band.SPRINT);
-        }
-
-        /** Preferences with the overlays' defaults, as the tests that switch no overlay build them. */
-        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb) {
-            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
-                  turnDetails, binds, moveSprintRgb, graphics, moveJumpRgb, Overlays.DEFAULTS);
-        }
-
-        /** Preferences with MegaMek's default jump colour, as the tests that draw no jump build them. */
-        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics) {
-            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
-                  turnDetails, binds, moveSprintRgb, graphics, java.awt.Color.RED.getRGB());
-        }
-
         static UiPreferences capture() {
             var preferences = PreferenceManager.getClientPreferences();
             GUIPreferences gui = GUIPreferences.getInstance();
@@ -100,8 +67,15 @@ interface BoardSource extends AutoCloseable {
                   gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
                   Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
                         KeyCommandBind.getDesc(bind))).toList(),
-                  gui.getMoveSprintColor().getRGB(), gui.getBoardGraphics(), gui.getMoveJumpColor().getRGB(),
-                  Overlays.capture(gui));
+                  gui.getBoardGraphics(), Overlays.capture(gui), Map.of(
+                        GpuMovePlan.Band.WALK, gui.getMoveDefaultColor().getRGB(),
+                        GpuMovePlan.Band.BACK, gui.getMoveBackColor().getRGB(),
+                        GpuMovePlan.Band.RUN, gui.getMoveRunColor().getRGB(),
+                        GpuMovePlan.Band.BOOST, gui.getMoveMASCColor().getRGB(),
+                        GpuMovePlan.Band.SPRINT, gui.getMoveSprintColor().getRGB(),
+                        GpuMovePlan.Band.JUMP, gui.getMoveJumpColor().getRGB(),
+                        GpuMovePlan.Band.ILLEGAL, gui.getMoveIllegalColor().getRGB()),
+                  gui.getNameplateMode());
         }
     }
 

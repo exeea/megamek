@@ -28,7 +28,6 @@ import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.util.KeyCommandBind;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -73,10 +72,10 @@ class GpuKeyboardSmokeTest {
                             // Alt goes down reporting Alt itself: the nameplate key, which never reaches Swing.
                             press(keyboard, InputEvent.ALT_DOWN_MASK);
                             assertTrue(processor.keyDown(Input.Keys.ALT_LEFT));
-                            assertTrue(hud.state.altHeld, "Alt shows every nameplate while held");
+                            assertTrue(hud.state.allNameplates, "Alt shows every nameplate while held");
                             press(keyboard, 0);
                             processor.keyUp(Input.Keys.ALT_LEFT);
-                            assertFalse(hud.state.altHeld);
+                            assertFalse(hud.state.allNameplates);
                             verify(source, never()).key(anyInt(), anyBoolean(), anyInt());
 
                             // A bare Shift has no bind: Swing gets it with the mask it reports.
@@ -239,8 +238,7 @@ class GpuKeyboardSmokeTest {
         GpuBoardSource.UiPreferences defaults = GpuHudInputTest.preferences();
         List<GpuBoardSource.Bind> binds = defaults.binds().stream().map(bind -> keys.containsKey(bind.command())
               ? new GpuBoardSource.Bind(bind.command(), keys.get(bind.command()), 0, bind.text()) : bind).toList();
-        return new GpuBoardSource.UiPreferences(defaults.scale(), "", "", true, true, false, false, binds, 0,
-              BoardGraphics.ENHANCED);
+        return GpuHudInputTest.with(defaults, Map.of("binds", binds));
     }
 
     /** The modifier keys the mocked input reports as held, as GLFW does while they are down. */

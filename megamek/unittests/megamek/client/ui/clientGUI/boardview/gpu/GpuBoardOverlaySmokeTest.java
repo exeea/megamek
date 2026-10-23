@@ -26,7 +26,6 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
@@ -1048,8 +1047,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     static GpuBoardSource.UiPreferences preferences() {
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, List.of(),
-              GUIPreferences.getInstance().getMoveSprintColor().getRGB(), BoardGraphics.ENHANCED);
+        return GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("binds", List.of()));
     }
 
     static BoardScene.Unit unit(BoardScene scene, int id) {

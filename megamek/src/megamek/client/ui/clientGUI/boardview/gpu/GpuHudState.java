@@ -67,8 +67,8 @@ final class GpuHudState {
     /** The sheet sections the player collapsed, by their caption keys. */
     final Set<String> collapsedSections = new HashSet<>();
     boolean forcesGrid;
-    /** The nameplate key (SHOW_NAMEPLATES) is held. */
-    boolean altHeld;
+    /** The nameplate key (SHOW_NAMEPLATES) shows every nameplate: it is held, or toggled on (NameplateMode). */
+    boolean allNameplates;
     private boolean logOpen;
     /** A report phase opened the closed log, so the next phase that is no report closes it again. */
     private boolean logAuto;
