@@ -476,8 +476,11 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 end[i].z = BoardSurface.sampleHeight(ground, end[i].x, end[i].y, BoardGeometry.groundZ(next))
                       + GpuRoads.SURFACE_LIFT * scale;
             }
-            // A level road landing on a natural bank that falls away below its edge stands on an abutment (Enhanced).
-            boolean abutment = !bare && !ramp && !columns && next.surface() != BoardScene.Surface.CONCRETE
+            // A level road landing on a natural bank that falls away below its edge stands on an abutment (Enhanced). Over
+            // a cliff's drop the cliff itself comes out under the deck's end (BoardRelief#ends): an abutment there would
+            // only show through its rock.
+            boolean cliff = gate.z - BoardGeometry.groundZ(tile) > 2.5f * BoardGeometry.level();
+            boolean abutment = !bare && !ramp && !columns && !cliff && next.surface() != BoardScene.Surface.CONCRETE
                   && falls(ground, start, along, gate.z - BoardBridge.SLAB * scale);
             float bottom = Float.NaN;
             if (ramp || abutment) {
