@@ -311,8 +311,10 @@ work for Swing, and item 11 is under investigation.
 - ~~Tables~~: the list's rows across every column with faint zebra stripes, a hover wash over the cells, the violet
   selection and marker, and upper-case overline headers aligned like their column, in Swing; see
   [tokens.md](tokens.md#tables).
-- The rest of the gallery: the remaining controls (progress bar, separators, titled borders, split panes, toolbars),
-  in Swing (libGDX only where the in-game UI needs them).
+- ~~The rest of the gallery~~: progress bars (a thin accent pill with its text above it), section headers (titled
+  panels, collapsible sections and separators share one upper-case header with a line) and split panes (a subtle line
+  that turns accent under the pointer), in Swing; see [tokens.md](tokens.md#progress-bars),
+  [Sections](tokens.md#sections) and [Split panes](tokens.md#split-panes). No view uses a toolbar, so there is none.
 - Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
   every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the
   Swing controls still switch states instantly, which reads as a desktop app rather than a game.

@@ -54,8 +54,10 @@ import javax.swing.JRadioButton;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
+import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
@@ -355,13 +357,9 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.sliders.note"), "small", "text.muted"));
         page.add(sliderMatrix());
 
-        page.add(heading(Messages.getString("UiLibrary.controls.ranges")));
-        JPanel ranges = row(color("surface.base"));
-        JProgressBar progress = new JProgressBar(0, 100);
-        progress.setValue(60);
-        progress.setStringPainted(true);
-        ranges.add(progress);
-        page.add(ranges);
+        page.add(heading(Messages.getString("UiLibrary.controls.progress")));
+        page.add(paragraph(Messages.getString("UiLibrary.progress.note"), "small", "text.muted"));
+        page.add(progressSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.tabs")));
         page.add(paragraph(Messages.getString("UiLibrary.tabs.note"), "small", "text.muted"));
@@ -402,6 +400,14 @@ public final class SwingUiLibrary extends JFrame {
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         page.add(paragraph(Messages.getString("UiLibrary.tables.note"), "small", "text.muted"));
         page.add(tableSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.sections")));
+        page.add(paragraph(Messages.getString("UiLibrary.sections.note"), "small", "text.muted"));
+        page.add(sectionSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.splitPanes")));
+        page.add(paragraph(Messages.getString("UiLibrary.splitPanes.note"), "small", "text.muted"));
+        page.add(splitPaneSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.focus")));
         page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
@@ -849,6 +855,155 @@ public final class SwingUiLibrary extends JFrame {
         JScrollPane scroll = new JScrollPane(table);
         scroll.setPreferredSize(new Dimension(scaleForGUI(430), scaleForGUI(190)));
         samples.add(scroll, cell);
+    }
+
+    /** Progress bars with and without text, indeterminate and disabled. */
+    private JComponent progressSamples() {
+        JPanel samples = sampleGrid();
+        JProgressBar loading = sampleProgress(Messages.getString("UiLibrary.progress.loading"));
+        addSample(samples, 0, 0, "UiLibrary.progress.determinate", loading);
+        addSample(samples, 1, 0, "UiLibrary.progress.plain", sampleProgress(null));
+        JProgressBar waiting = sampleProgress(Messages.getString("UiLibrary.progress.waiting"));
+        waiting.setIndeterminate(true);
+        addSample(samples, 2, 0, "UiLibrary.progress.indeterminate", waiting);
+        JProgressBar disabled = sampleProgress(Messages.getString("UiLibrary.progress.loading"));
+        disabled.setEnabled(false);
+        addSample(samples, 3, 0, "UiLibrary.progress.disabled", disabled);
+        return samples;
+    }
+
+    private static JProgressBar sampleProgress(String text) {
+        JProgressBar progress = new JProgressBar(0, 100);
+        progress.setValue(60);
+        if (text != null) {
+            progress.setString(text);
+            progress.setStringPainted(true);
+        }
+        Dimension size = progress.getPreferredSize();
+        progress.setPreferredSize(new Dimension(Math.max(scaleForGUI(200), size.width), size.height));
+        progress.setMinimumSize(progress.getPreferredSize());
+        return progress;
+    }
+
+    /**
+     * Section headers alone, titling a panel (new and legacy side by side) and opening and closing a section, then
+     * plain separators. Hover is frozen on one collapsible; the others are live.
+     */
+    private JComponent sectionSamples() {
+        JPanel samples = sampleGrid();
+        JPanel header = column(color("surface.base"));
+        header.add(TokenSections.header(Messages.getString("UiLibrary.sections.movement")));
+        header.add(sectionContent());
+        addSample(samples, 0, 0, "UiLibrary.sections.header", header);
+
+        JPanel titled = sectionContent();
+        titled.setBorder(TokenSections.titled(Messages.getString("UiLibrary.sections.deployment")));
+        addSample(samples, 1, 0, "UiLibrary.sections.titled", titled);
+        JPanel legacy = sectionContent();
+        legacy.setBorder(BorderFactory.createTitledBorder(Messages.getString("UiLibrary.sections.deployment")));
+        addSample(samples, 2, 0, "UiLibrary.sections.legacy", legacy);
+
+        addSample(samples, 0, 1, "UiLibrary.sections.expanded",
+              TokenSections.collapsible(Messages.getString("UiLibrary.sections.advanced"), sectionContent(), true));
+        addSample(samples, 1, 1, "UiLibrary.sections.collapsed",
+              TokenSections.collapsible(Messages.getString("UiLibrary.sections.victory"), sectionContent(), false));
+        TokenCollapsibleSection hover = TokenSections.collapsible(Messages.getString("UiLibrary.sections.movement"),
+              sectionContent(), false);
+        hover.putClientProperty(TokenCollapsibleSection.FROZEN_HOVER, true);
+        addSample(samples, 2, 1, "UiLibrary.sections.hover", hover);
+
+        JPanel separators = new JPanel(new BorderLayout(scaleForGUI(8), scaleForGUI(8)));
+        separators.setBackground(color("surface.base"));
+        separators.add(new JSeparator(), BorderLayout.NORTH);
+        JPanel vertical = row(color("surface.base"));
+        for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB", "UiLibrary.controls.tabC")) {
+            if (vertical.getComponentCount() > 0) {
+                JSeparator line = new JSeparator(SwingConstants.VERTICAL);
+                line.setPreferredSize(new Dimension(line.getPreferredSize().width, scaleForGUI(16)));
+                vertical.add(line);
+            }
+            vertical.add(text(Messages.getString(key), "body", "text.secondary"));
+        }
+        separators.add(vertical, BorderLayout.CENTER);
+        addSample(samples, 0, 2, "UiLibrary.sections.separators", separators);
+        return samples;
+    }
+
+    /** A small group of fields to fill a section sample. */
+    private JPanel sectionContent() {
+        JPanel content = new JPanel(new GridBagLayout());
+        content.setOpaque(false);
+        content.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(2), 0, scaleForGUI(2), scaleForGUI(8));
+        cell.gridy = 0;
+        content.add(text(Messages.getString("UiLibrary.sections.zone"), "body", "text.primary"), cell);
+        content.add(new JComboBox<>(new String[] { "North", "South", "Any" }), cell);
+        cell.gridy++;
+        content.add(text(Messages.getString("UiLibrary.sections.round"), "body", "text.primary"), cell);
+        content.add(new JSpinner(new SpinnerNumberModel(1, 0, 20, 1)), cell);
+        cell.gridy++;
+        cell.gridwidth = 2;
+        content.add(TokenChoices.check(Messages.getString("UiLibrary.controls.checked"), true), cell);
+        return content;
+    }
+
+    /** Split panes side by side and stacked; hover is frozen on one, the others are live. */
+    private JComponent splitPaneSamples() {
+        JPanel samples = sampleGrid();
+        addSample(samples, 0, 0, "UiLibrary.splitPanes.rest", sampleSplit(JSplitPane.HORIZONTAL_SPLIT));
+        JSplitPane hover = sampleSplit(JSplitPane.HORIZONTAL_SPLIT);
+        hover.putClientProperty(TokenSplitPaneUI.FROZEN_HOVER, true);
+        addSample(samples, 1, 0, "UiLibrary.splitPanes.hover", hover);
+        addSample(samples, 2, 0, "UiLibrary.splitPanes.vertical", sampleSplit(JSplitPane.VERTICAL_SPLIT));
+        return samples;
+    }
+
+    private JSplitPane sampleSplit(int orientation) {
+        JList<String> units = new JList<>(new String[] { "Atlas AS7-D", "Griffin GRF-1N", "Locust LCT-1V",
+                                                         "Marauder MAD-3R", "Wasp WSP-1A" });
+        JScrollPane list = TokenLists.scroll(units);
+        list.setMinimumSize(new Dimension(scaleForGUI(60), scaleForGUI(40)));
+        JTextArea details = paragraph(Messages.getString("UiLibrary.splitPanes.details"), "body", "text.secondary");
+        details.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(8), scaleForGUI(8),
+              scaleForGUI(8)));
+        details.setMinimumSize(new Dimension(scaleForGUI(60), scaleForGUI(40)));
+        JSplitPane split = new JSplitPane(orientation, list, details);
+        split.setResizeWeight(0.5);
+        split.setPreferredSize(new Dimension(scaleForGUI(300), scaleForGUI(180)));
+        split.setBackground(color("surface.base"));
+        return split;
+    }
+
+    /** A grid of captioned samples that grows with them, as an opening section does. */
+    private JPanel sampleGrid() {
+        JPanel samples = new JPanel(new GridBagLayout()) {
+            @Override
+            public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 10;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
+    }
+
+    /** Adds {@code sample} under a caption, at {@code column} of caption row {@code row}, a fixed width. */
+    private void addSample(JPanel samples, int column, int row, String captionKey, JComponent sample) {
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.NORTHWEST;
+        cell.fill = GridBagConstraints.HORIZONTAL;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(18));
+        cell.gridx = column;
+        cell.gridy = row * 2;
+        samples.add(text(Messages.getString(captionKey), "caption", "text.muted"), cell);
+        cell.gridy++;
+        samples.add(sample, cell);
     }
 
     /**

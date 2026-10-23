@@ -570,6 +570,78 @@ empty message.
 
 **libGDX.** Nothing new yet; hud-v3 has no table.
 
+## Progress bars
+
+How far along a known amount of work is, or that unknown work is still going on.
+
+| Part / state | Look |
+| --- | --- |
+| Track | An `xs` (4) high `border.control` pill, as on sliders |
+| Fill | `accent.primary` from the leading edge, in the same pill shape |
+| Text | Above the track, `xs` (4) away, in `small` type and `text.secondary`, leading-aligned; never inside the bar |
+| Indeterminate | An `accent.primary` segment, 30% of the track, enters at the start, crosses and leaves at the end, once every 1.6 s |
+| Disabled | A `border.subtle` track with a `text.disabled` fill and text |
+
+- **Text outside the bar.** Status messages ("Round 3: waiting for the other players") are often longer than the bar
+  is wide, and text over a thin fill can't keep its contrast.
+- **Determinate when possible.** Use the indeterminate bar only when the amount of work is truly unknown.
+
+**Swing.** The MegaMek themes draw every horizontal `JProgressBar` this way through
+[`TokenProgressBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenProgressBarUI.java), so existing views get
+it without changes; the bar grows by the text's height when it shows text. Vertical bars keep FlatLaf's drawing in the
+same colors.
+
+**libGDX.** Nothing new yet.
+
+## Sections
+
+A heading that names the group of fields or content below it, inside a page or a dialog.
+
+| Part / state | Look |
+| --- | --- |
+| Header | A `control.sm` (28) high row: an `overline` title (upper case) in `text.secondary`, then a 1px `border.subtle` line from `sm` (6) past it to the far edge, level with the middle of the capitals |
+| Titled panel | The header across the top of the panel; the content starts below it, flush with the title. No box |
+| Collapsible | The header with the tree's chevron `sm` (6) in from its leading edge; the content below opens and closes |
+| Collapsible hover | A `surface.hover` wash over the header row with a `radius.sm` corner; the title turns `text.primary` |
+| Collapsible focus | The focus ring inside the header row (see [Focus](#focus)) |
+| Disabled | A `text.disabled` title; a collapsible section doesn't open or close |
+| Separator | The line alone, `border.subtle`, horizontal or vertical |
+
+- **Short titles.** Overline is for labels of one or two words; longer explanations go in the content.
+- **Keys.** A collapsible section's header takes the keyboard focus; Enter or Space opens or closes it.
+- **No boxes.** Sections are told apart by their headers and space, not by frames around them.
+
+**Swing.** [`TokenSections`](../../megamek/src/megamek/client/ui/design/swing/TokenSections.java) makes the three
+forms: `header(title)` is a label to place above a group, `titled(title)` is a
+[`TokenTitledBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTitledBorder.java) for a panel, and
+`collapsible(title, content, expanded)` is a
+[`TokenCollapsibleSection`](../../megamek/src/megamek/client/ui/design/swing/TokenCollapsibleSection.java) that fires
+`expanded` when it opens or closes. Screen readers get the title as written, not in capitals, and the collapsible
+header as a toggle that is expanded or collapsed. `JSeparator` already has the separator's look.
+
+Existing borders from `BorderFactory.createTitledBorder` change with the themes but keep the JDK's layout: their title
+gets `label` type in `text.secondary` and a `border.subtle` line after it instead of a box, but it stays in mixed case
+and sits about 3px further in than the content. Moving a view to `TokenSections.titled` gives it the true look. The
+settings dialog's `CollapsibleSectionPanel` is the developers' to move to `TokenSections.collapsible`.
+
+**libGDX.** Nothing new yet; hud-v3 has no collapsible section.
+
+## Split panes
+
+Two areas side by side or stacked, with a divider the user drags to share the space between them.
+
+| Part / state | Look |
+| --- | --- |
+| Divider | A 1px `border.subtle` line in the middle of an `md` (8) wide grab area |
+| Hover / dragging | A `selection.width` (2) `accent.primary` line |
+| One-touch arrows | `text.muted`, `text.primary` on hover and `accent.primary` pressed |
+
+**Swing.** The MegaMek themes draw every `JSplitPane` divider this way through
+[`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java), so existing views get it
+without changes.
+
+**libGDX.** Nothing new yet.
+
 ## Code
 
 | Class | Role |
@@ -597,10 +669,14 @@ empty message.
 | [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |
 | [`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java) | The Swing sliders and their readout |
 | [`TokenTables`](../../megamek/src/megamek/client/ui/design/swing/TokenTables.java), [`TokenTableUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableUI.java), [`TokenTableHeaderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableHeaderUI.java), [`TokenTableCellBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTableCellBorder.java) | The Swing tables |
+| [`TokenProgressBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenProgressBarUI.java) | The Swing progress bars |
+| [`TokenSections`](../../megamek/src/megamek/client/ui/design/swing/TokenSections.java), [`TokenTitledBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTitledBorder.java), [`TokenCollapsibleSection`](../../megamek/src/megamek/client/ui/design/swing/TokenCollapsibleSection.java) | The Swing section headers, titled panels and collapsible sections |
+| [`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java) | The Swing split panes |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens; lists, trees, menus, tooltips, scrollbars and sliders are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections and split
+panes are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
 Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
 only once the developers accept the system.

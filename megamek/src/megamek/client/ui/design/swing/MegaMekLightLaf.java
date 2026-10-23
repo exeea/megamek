@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.design.swing;
 
+import javax.swing.UIDefaults;
+
 import com.formdev.flatlaf.FlatLightLaf;
 import megamek.client.ui.design.DesignTokens.Mode;
 
@@ -15,6 +17,13 @@ public class MegaMekLightLaf extends FlatLightLaf {
     @Override
     public String getName() {
         return NAME;
+    }
+
+    @Override
+    public UIDefaults getDefaults() {
+        UIDefaults defaults = super.getDefaults();
+        TokenLafDefaults.putFonts(defaults);
+        return defaults;
     }
 
     @Override
