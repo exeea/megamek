@@ -1098,9 +1098,14 @@ class GpuBridgeSmokeTest {
                     camera.center(BoardGeometry.center(deck, 2));
                     var top = BoardGeometry.center(deck, 2);
                     var ground = BoardGeometry.center(field, 0);
-                    float[][] dryPixels = shot(terrain, frame, camera, dry, new File(output, "natural-deck-dry.png"), top, ground);
+                    // The road is textured: a few samples along the deck's top, so one dark or bright patch of its
+                    // material decides nothing.
+                    var next = BoardGeometry.center(new Coords(3, 3), 2);
+                    Vector3[] points = { top, ground, new Vector3(top).lerp(next, -.3f), new Vector3(top).lerp(next, -.15f),
+                          new Vector3(top).lerp(next, .15f), new Vector3(top).lerp(next, .3f) };
+                    float[][] dryPixels = shot(terrain, frame, camera, dry, new File(output, "natural-deck-dry.png"), points);
                     float[][] mudPixels = shot(terrain, frame, camera, muddy, new File(output, "natural-deck-mud.png"), top, ground);
-                    float[][] roadPixels = shot(terrain, frame, camera, road, new File(output, "natural-deck-road.png"), top, ground);
+                    float[][] roadPixels = shot(terrain, frame, camera, road, new File(output, "natural-deck-road.png"), points);
                     float dryLuma = dryPixels[0][0] + dryPixels[0][1] + dryPixels[0][2];
                     float mudLuma = mudPixels[0][0] + mudPixels[0][1] + mudPixels[0][2];
                     assertTrue(mudLuma < dryLuma - 15, "The muddy deck top is darker: " + mudLuma + " vs " + dryLuma);
@@ -1109,9 +1114,17 @@ class GpuBridgeSmokeTest {
                     for (int c = 0; c < 3; c++) {
                         assertEquals(dryPixels[1][c], mudPixels[1][c], 2, "The ground beside the span is unchanged");
                     }
-                    float roadChange = 0;
-                    for (int c = 0; c < 3; c++) { roadChange += Math.abs(roadPixels[0][c] - dryPixels[0][c]); }
-                    assertTrue(roadChange > 15, "The dirt road shows on the arch's top: " + roadChange);
+                    float[] roadChanges = new float[points.length - 1];
+                    for (int i = 0; i < points.length; i++) {
+                        if (i == 1) { continue; }
+                        float change = 0;
+                        for (int c = 0; c < 3; c++) { change += Math.abs(roadPixels[i][c] - dryPixels[i][c]); }
+                        roadChanges[i == 0 ? 0 : i - 1] = change;
+                    }
+                    java.util.Arrays.sort(roadChanges);
+                    float roadChange = roadChanges[roadChanges.length / 2];
+                    assertTrue(roadChange > 15, "The dirt road shows on the arch's top: median " + roadChange + " of "
+                          + java.util.Arrays.toString(roadChanges));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {

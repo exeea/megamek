@@ -432,8 +432,10 @@ normals and a packed surface map: R height, G roughness, B cavity occlusion, A r
 range (from `heightmap_scale`). Texture height affects fine
 coverage/wetting; the ground mesh continues to own actual height and support.
 The Material Maker projects under mm-data's `tools/materials/roads/` export the aligned maps.
-A road texture exported wider than its catalogued 1024 pixels covers proportionally more
-road before it repeats.
+Each road texture is catalogued at 1024 pixels over 12 m (`materials.json`), so it covers 12 m
+of road before it repeats (`GpuAssets.roadCoverage`); one exported wider covers proportionally
+more. Sand and snow verges and markings take their sculpted material's catalogued metres
+(`GpuAssets.sculptCoverage`), so a verge meets the ground beside it at its scale.
 
 Unsupported road levels, custom artwork combinations and submerged roads keep the
 existing artwork fallback. Ice on dry ground supports native roads. Supported road
