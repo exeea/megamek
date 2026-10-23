@@ -376,10 +376,11 @@ final class BoardRoadCut {
             float[] under = new float[3], over = new float[3];
             Vector3[] corners = { a, b, c };
             boolean top = face.finish() == BoardSurface.Finish.TOP && !shore, pouredTop = !natural && top;
-            // Natural slopes are cut just under the road's surface, which covers their cut edge; the board's cut at the
-            // surface itself, as it has no ground beyond it. Poured ground keeps a band beneath the road.
+            // Natural slopes are cut just under the road's surface, which covers their cut edge; at the surface itself
+            // the board's cut, which has no ground beyond it, and an upright face, which never lies along the road.
+            // Poured ground keeps a band beneath the road.
             boolean boardCut = !top && face.landEdge() >= 0 && (boardEdges & 1 << face.landEdge()) != 0;
-            float band = boardCut ? 0 : natural ? UNDER : ON_SURFACE;
+            float band = boardCut || natural && nudge > 0 ? 0 : natural ? UNDER : ON_SURFACE;
             for (int i = 0; i < 3; i++) {
                 if (pouredTop) {
                     under[i] = Float.MAX_VALUE;
@@ -745,7 +746,13 @@ final class BoardRoadCut {
         List<Float> stations = new ArrayList<>(List.of(0f, 1f));
         stations.addAll(crossings(p.x, p.y, q.x, q.y));
         List<Vector3> corners = new ArrayList<>();
-        for (Segment s : edge) { corners.add(new Vector3(s.ax(), s.ay(), 0)); }
+        for (Segment s : edge) {
+            corners.add(new Vector3(s.ax(), s.ay(), 0));
+            // Where the road's edge leaves the stretch, beside it: the face stands only along the reserved ground.
+            float[] hit = intersection(p.x + nx * probe, p.y + ny * probe, q.x + nx * probe, q.y + ny * probe, s.ax(), s.ay(),
+                  s.bx(), s.by());
+            if (hit != null && hit[0] * length > epsilon && (1 - hit[0]) * length > epsilon) { stations.add(hit[0]); }
+        }
         for (BoardSurface.Face face : near(road, Math.min(p.x, q.x), Math.min(p.y, q.y), Math.max(p.x, q.x), Math.max(p.y, q.y))) {
             corners.addAll(List.of(face.a(), face.b(), face.c()));
         }
@@ -759,6 +766,7 @@ final class BoardRoadCut {
             if (stations.get(i) - stations.get(i - 1) < 1e-6f) { continue; }
             Vector3 a = i == 1 ? p : new Vector3(p).lerp(q, stations.get(i - 1));
             Vector3 b = i == stations.size() - 1 ? q : new Vector3(p).lerp(q, stations.get(i));
+            if (!region.contains((a.x + b.x) / 2 + nx * probe, (a.y + b.y) / 2 + ny * probe)) { continue; }
             // The emitted road's own surface, so the face's top runs along the road's edge between its vertices.
             float ra = roadHeight(road, a.x, a.y, edge(grade, a.x, a.y)), rb = roadHeight(road, b.x, b.y, edge(grade, b.x, b.y));
             float da = a.z - ra, db = b.z - rb;

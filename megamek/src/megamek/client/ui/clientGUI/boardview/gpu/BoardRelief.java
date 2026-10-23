@@ -1398,11 +1398,10 @@ final class BoardRelief {
         // it needs to clear the road: the foot's talus steepens into the road's verge while the face above, which never
         // stood in the way, keeps its place, so the face never overhangs its foot. Above the headroom the slope keeps
         // its natural shape, easing back to it no faster than the band's own run allows, so no height overhangs the one
-        // below (a smooth ease moves up to 1.5 times its share per run).
-        float fade = .5f * BoardGeometry.level(), height = edge.top() - edge.bottom(), run = edge.room + edge.footRoom;
-        if (Float.isFinite(height) && run > 0) {
-            fade = Math.max(fade, 1.5f * (float) Math.hypot(push[0], push[1]) * height / run);
-        }
+        // below (a smooth ease moves up to 1.5 times its share per run). A corner eases as its steepest step does, so
+        // every edge through it moves it alike.
+        float slope = lerp(slope(t < .5f ? edge.a : edge.b), slope(edge), smooth(Math.min(t, 1 - t) / CORNER_EASE));
+        float fade = Math.max(.5f * BoardGeometry.level(), 1.5f * (float) Math.hypot(push[0], push[1]) * slope);
         float share = (z <= push[2] ? 1 : 1 - smooth((z - push[2]) / fade)) * wet(edge, t, z);
         // A drop below the road keeps one band, which fills out under the road's verge.
         float surface = push[2] - BoardRoadGrade.CLEARANCE * BoardGeometry.level();
@@ -1412,6 +1411,19 @@ final class BoardRelief {
         point.x += push[0] * share;
         point.y += push[1] * share;
         return cutForBridges(edge, t, point);
+    }
+
+    /** A step's height over its run; 0 without a profile. */
+    private static float slope(Edge edge) {
+        float height = edge.top() - edge.bottom(), run = edge.room + edge.footRoom;
+        return Float.isFinite(height) && run > 0 ? height / run : 0;
+    }
+
+    /** The steepest step through a corner. */
+    private float slope(Corner corner) {
+        float result = 0;
+        for (Edge edge : edges(corner)) { result = Math.max(result, slope(edge)); }
+        return result;
     }
 
     /**
