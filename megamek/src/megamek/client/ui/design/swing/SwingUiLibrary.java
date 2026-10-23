@@ -348,9 +348,12 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.inputs.forms.note"), "small", "text.muted"));
         page.add(formSamples());
 
+        page.add(heading(Messages.getString("UiLibrary.controls.sliders")));
+        page.add(paragraph(Messages.getString("UiLibrary.sliders.note"), "small", "text.muted"));
+        page.add(sliderMatrix());
+
         page.add(heading(Messages.getString("UiLibrary.controls.ranges")));
         JPanel ranges = row(color("surface.base"));
-        ranges.add(new JSlider(0, 100, 60));
         JProgressBar progress = new JProgressBar(0, 100);
         progress.setValue(60);
         progress.setStringPainted(true);
@@ -771,6 +774,77 @@ public final class SwingUiLibrary extends JFrame {
         glue.weightx = 1;
         samples.add(Box.createHorizontalGlue(), glue);
         return samples;
+    }
+
+    /**
+     * Sliders plain and with ticks and labels in each state, hover, dragging and focus frozen, then live ones with a
+     * readout.
+     */
+    private JComponent sliderMatrix() {
+        List<String> states = List.of("rest", "hover", "dragging", "focus", "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.sliders.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("plain", "ticks")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.sliders.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                JSlider slider = sampleSlider(kind.equals("ticks"));
+                switch (state) {
+                    case "hover" -> slider.putClientProperty(TokenSliderUI.FROZEN_STATE, TokenSliderUI.HOVER);
+                    case "dragging" -> slider.putClientProperty(TokenSliderUI.FROZEN_STATE, TokenSliderUI.PRESSED);
+                    case "focus" -> focused(slider);
+                    case "disabled" -> slider.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(slider, cell);
+            }
+        }
+
+        cell.gridy++;
+        cell.anchor = GridBagConstraints.BASELINE_LEADING;
+        matrix.add(text(Messages.getString("UiLibrary.sliders.kind.readout"), "label", "text.primary"), cell);
+        JSlider opacity = new JSlider(0, 100, 75);
+        cell.gridwidth = 2;
+        cell.fill = GridBagConstraints.HORIZONTAL;
+        matrix.add(TokenSliders.withReadout(opacity, value -> value + "%"), cell);
+        JSlider scale = sampleSlider(true);
+        scale.setMinimum(7);
+        scale.setMaximum(24);
+        scale.setValue(10);
+        scale.setMajorTickSpacing(1);
+        scale.setMinorTickSpacing(0);
+        scale.setPaintLabels(false);
+        scale.setSnapToTicks(true);
+        matrix.add(TokenSliders.withReadout(scale, value -> String.format(Locale.ROOT, "%.1fx", value / 10f)), cell);
+
+        cell.gridx = states.size() + 1;
+        cell.gridwidth = 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    /** A sample slider from 0 to 10, with major ticks and labels every 5 and minor ticks every 1 when asked. */
+    private static JSlider sampleSlider(boolean ticks) {
+        JSlider slider = new JSlider(0, 10, 6);
+        if (ticks) {
+            slider.setMajorTickSpacing(5);
+            slider.setMinorTickSpacing(1);
+            slider.setPaintTicks(true);
+            slider.setPaintLabels(true);
+            slider.setSnapToTicks(true);
+        }
+        slider.setPreferredSize(new Dimension(scaleForGUI(150), slider.getPreferredSize().height));
+        return slider;
     }
 
     /** Selects of each kind in each state; hover and focus are frozen, the rest stay live. */

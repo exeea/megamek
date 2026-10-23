@@ -306,8 +306,10 @@ work for Swing, and item 11 is under investigation.
   secondary detail for info cards, in Swing; see [tokens.md](tokens.md#tooltips).
 - ~~Scrollbars~~: a thin pill thumb with no track or arrows of its own, sitting on the content it scrolls, with a
   rail and a brighter thumb under the pointer, in Swing; see [tokens.md](tokens.md#scrollbars).
-- The rest of the gallery: tables, sliders and the remaining controls, in Swing (libGDX only where the in-game UI
-  needs them).
+- ~~Sliders~~: an accent fill up to a round thumb on a pill track, the same with ticks and labels, with an optional
+  value readout, in Swing; see [tokens.md](tokens.md#sliders).
+- The rest of the gallery: tables and the remaining controls, in Swing (libGDX only where the in-game UI needs
+  them).
 - Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
   every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the
   Swing controls still switch states instantly, which reads as a desktop app rather than a game.

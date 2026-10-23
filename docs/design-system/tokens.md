@@ -510,6 +510,33 @@ shows what's behind it.
 
 **libGDX.** Nothing new yet; hud-v3's 4-wide list knob stays until the developers accept the system.
 
+## Sliders
+
+A number picked from a range by dragging the thumb, clicking the track (the thumb jumps there) or the arrow keys.
+
+| Part / state | Look |
+| --- | --- |
+| Track | An `xs` (4) high pill: `accent.primary` up to the thumb, `border.control` past it |
+| Thumb | An `icon.sm` (16) `accent.primary` disc, with or without ticks and labels |
+| Ticks | `tick.width` (2) pills under the track in `border.control`: major ones `sm` (6) long, minor ones half that |
+| Labels | `small` type in `text.muted` under the ticks |
+| Hover / dragging | The pointer anywhere on the slider gives the thumb a `border.strong` edge and leans its face as on a checked box: toward the on-accent color on hover, toward the text color while dragging |
+| Focus | The ring around the thumb, `focus.gap` (1) away (see [Focus](#focus)) |
+| Disabled | A `border.subtle` track and ticks with no fill, and a `text.disabled` thumb |
+
+- **One look.** Ticks and labels don't change the thumb or drop the fill, so every slider reads the same way.
+- **Readout.** When the exact value matters (opacity, scale, a count), show it beside the track in `body` type. It
+  keeps the width of the longest value so the track doesn't shift as it changes.
+- **Not by color alone.** The thumb's position carries the value; the fill only repeats it.
+
+**Swing.** The MegaMek themes draw every `JSlider` this way through
+[`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), so existing views get it
+without changes, including their ticks and standard labels; a custom label table keeps the labels it was given.
+[`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java)`.withReadout(slider, format)` adds
+the readout and lines it up with the track on the slider's baseline.
+
+**libGDX.** Nothing new yet; the tuning panel's slider style stays until the developers accept the system.
+
 ## Code
 
 | Class | Role |
@@ -535,10 +562,11 @@ shows what's behind it.
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
 | [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |
+| [`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java) | The Swing sliders and their readout |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens; lists, trees, menus, tooltips and scrollbars are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+styles read the tokens; lists, trees, menus, tooltips, scrollbars and sliders are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
 Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
 only once the developers accept the system.

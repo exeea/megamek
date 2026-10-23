@@ -34,6 +34,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
@@ -464,6 +465,56 @@ class TokenLafDefaultsTest {
                 assertEquals(UIScale.scale(width), bar.getPreferredSize().width);
                 list.setOpaque(false);
                 assertEquals(scroll.getViewport().getBackground(), TokenScrollBarUI.contentBackground(scroll));
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void slidersKeepTheRoundThumbAndShowTheirValue() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                assertColor(defaults, "Slider.trackColor", "border.control", mode);
+                assertColor(defaults, "Slider.trackValueColor", "accent.primary", mode);
+                assertColor(defaults, "Slider.thumbColor", "accent.primary", mode);
+                assertColor(defaults, "Slider.hoverThumbBorderColor", "border.strong", mode);
+                assertColor(defaults, "Slider.tickColor", "border.control", mode);
+                assertColor(defaults, "Slider.disabledTickColor", "border.subtle", mode);
+                assertColor(defaults, "Slider.foreground", "text.muted", mode);
+                // The thumb and the value fill stand out from the window and the panels
+                int accent = tokens.color("accent.primary", mode);
+                for (String surface : List.of("surface.base", "surface.panel", "surface.raised")) {
+                    double contrast = ColorMath.contrast(accent, tokens.color(surface, mode));
+                    assertTrue(contrast >= 3, mode + " thumb on " + surface + " " + contrast);
+                }
+
+                JSlider ticked = new JSlider(0, 10, 6);
+                ticked.setMajorTickSpacing(5);
+                ticked.setMinorTickSpacing(1);
+                ticked.setPaintTicks(true);
+                ticked.setPaintLabels(true);
+                TokenSliderUI ui = assertInstanceOf(TokenSliderUI.class, ticked.getUI());
+                assertTrue(ui.isRoundThumb(), "ticks and labels keep the round thumb");
+                assertEquals(UIScale.scale(Math.round(tokens.space().get("sm"))), ui.getTickLength());
+                assertEquals(TokenFonts.font("small").getSize2D(), ticked.getFont().getSize2D(), 0.01);
+
+                JSlider slider = new JSlider(0, 255, 5);
+                JComponent row = TokenSliders.withReadout(slider, value -> value + "%");
+                JLabel readout = (JLabel) row.getComponent(1);
+                assertEquals("5%", readout.getText());
+                int width = readout.getPreferredSize().width;
+                slider.setValue(255);
+                assertEquals("255%", readout.getText());
+                assertEquals(width, readout.getPreferredSize().width, "the readout keeps its width");
+                Dimension size = row.getPreferredSize();
+                assertTrue(row.getBaseline(size.width, size.height) > 0, "the row has the slider's baseline");
             }
         } finally {
             if (previous != null) {

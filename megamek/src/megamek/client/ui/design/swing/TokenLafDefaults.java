@@ -381,19 +381,32 @@ public final class TokenLafDefaults {
         put("ProgressBar.foreground", accent);
         put("ProgressBar.selectionForeground", color("text.onAccent"));
         put("ProgressBar.selectionBackground", color("text.primary"));
+        // Sliders (TokenSliderUI): an accent fill up to a round icon.sm thumb on an xs pill track, the same with ticks
+        // and labels. Hover and drag lean the thumb as on a checked box and give it a strong edge; focus rings it a gap
+        // away. Ticks are tick.width pills under the track, labels small and muted.
+        values.put("SliderUI", TokenSliderUI.class.getName());
+        values.put("Slider.trackWidth", number(tokens.space().get("xs")));
+        int thumb = Math.round(tokens.size().get("icon.sm"));
+        values.put("Slider.thumbSize", thumb + "," + thumb);
+        values.put("Slider.focusWidth", number(ringAround));
+        values.put("Slider.focusRingWidth", number(tokens.size().get("focus.width")));
+        values.put("Slider.thumbBorderWidth", number(tokens.size().get("border")));
+        values.put("Slider.tickLength", number(tokens.space().get("sm")));
+        values.put("Slider.tickWidth", number(tokens.size().get("tick.width")));
         put("Slider.trackColor", color("border.control"));
         put("Slider.trackValueColor", accent);
         put("Slider.thumbColor", accent);
+        put("Slider.thumbBorderColor", accent);
+        put("Slider.hoverThumbColor", accentHover);
+        put("Slider.pressedThumbColor", accentPressed);
+        put("Slider.hoverThumbBorderColor", color("border.strong"));
+        put("Slider.focusedColor", color("focus.ring"));
+        put("Slider.tickColor", color("border.control"));
         put("Slider.disabledTrackColor", color("border.subtle"));
         put("Slider.disabledThumbColor", color("text.disabled"));
-        // A focused thumb gets the ring around it: FlatLaf fills a focusWidth disc behind the thumb, and the thumb's
-        // border turns the window color while focused to leave the gap. At rest the border matches the thumb.
-        values.put("Slider.focusWidth", number(tokens.size().get("focus.width")));
-        values.put("Slider.thumbBorderWidth", number(tokens.size().get("focus.gap")));
-        put("Slider.focusedColor", color("focus.ring"));
-        put("Slider.thumbBorderColor", accent);
-        put("Slider.focusedThumbBorderColor", base);
         put("Slider.disabledThumbBorderColor", color("text.disabled"));
+        put("Slider.disabledTickColor", color("border.subtle"));
+        put("Slider.foreground", color("text.muted"));
         // Scrollbars (TokenScrollBarUI, TokenScrollPaneUI): no track or arrows of their own, so a bar shows the content
         // it scrolls; an sm pill thumb xxs from the bar's sides, at least control.sm long. The pointer anywhere on the
         // bar shows the rail as a translucent wash over that content and brightens the thumb.
