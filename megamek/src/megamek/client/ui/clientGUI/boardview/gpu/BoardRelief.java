@@ -1781,8 +1781,9 @@ final class BoardRelief {
                     if (z <= headroom && !(shallow && z <= surface)) { heights[count++] = z; }
                 }
                 float moved = clearance(edge, t, site, road, gx, gy, heights, count);
-                if (landing && road.distance(bx, by) < clear) {
-                    // Where the road crosses, its whole band comes out to the edge, so the road ends on its top.
+                if (landing && (road.distance(bx, by) < clear || !across)) {
+                    // Where the road crosses, and at the corners of the edge it ends on, its whole band comes out to the
+                    // edge, so the road ends on its top however near the corners its reserved ground reaches.
                     for (int k = 0; k < count; k++) {
                         Vector3 q = naturalPoint(edge, t, heights[k]);
                         moved = Math.max(moved, Math.min(ROAD_PUSH, ((px - q.x) * gx + (py - q.y) * gy) / scale));
