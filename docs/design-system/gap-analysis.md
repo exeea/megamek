@@ -296,7 +296,12 @@ work for Swing, and item 11 is under investigation.
   section, in two sizes, in Swing and libGDX; see [tokens.md](tokens.md#tabs).
 - ~~Select~~: an input-faced select in two sizes and an inline one with a dotted underline, sharing one popup list
   (neutral wash, violet check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
-- A `UiTheme` rename pass, so hud-v3 reads the same roles.
+- The rest of the gallery: lists and trees, tables, menus, tooltips, scrollbars, sliders and the remaining
+  controls, in Swing and libGDX.
 - Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
   Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
   can migrate to one shape.
+- A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
+  controls, so the developers can judge the system in real use.
+- If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
+  rename pass). Until then, hud-v3 code does not change.

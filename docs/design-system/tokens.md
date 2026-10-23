@@ -433,4 +433,5 @@ select; `select(i)` from code fires none, and `placeholder(text)` shows the plac
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens. The Swing themes are selectable but not the default, and no view uses the new controls yet.
-Next come a `UiTheme` rename pass so hud-v3 reads the same roles, and then dialogs.
+Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
+only once the developers accept the system.
