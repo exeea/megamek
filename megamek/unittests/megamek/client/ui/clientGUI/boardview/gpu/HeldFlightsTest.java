@@ -106,6 +106,17 @@ class HeldFlightsTest {
     }
 
     @Test
+    void aTakeoffPlaysAtOnce() {
+        List<BoardScene.Waypoint> path = new ArrayList<>(flight(fighter, ROUND).path());
+        path.set(0, path.getFirst().withAeroState(BoardScene.AeroState.LANDED));
+        HeldFlight takeoff = new HeldFlight(fighter.getId(), ROUND, path, true, EntityMovementType.MOVE_SAFE_THRUST,
+              0, 6);
+
+        assertFalse(heldFlights.hold(fighter, GamePhase.MOVEMENT, takeoff, "test"), "a takeoff plays now");
+        assertTrue(heldFlights.snapshot().flights().isEmpty());
+    }
+
+    @Test
     void aMoveOutsideTheWaitingPhasesPlaysAtOnce() {
         assertFalse(heldFlights.hold(fighter, GamePhase.PHYSICAL, flight(fighter, ROUND), "test"));
     }

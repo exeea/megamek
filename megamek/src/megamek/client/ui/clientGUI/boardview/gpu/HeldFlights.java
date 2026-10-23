@@ -256,6 +256,10 @@ final class HeldFlights {
         if (flight.path().size() < 2) {
             return "no path to fly";
         }
+        if (flight.start().aeroState() == BoardScene.AeroState.LANDED) {
+            // a takeoff starts on the ground, where the player watched it sit; it lifts off at once
+            return "it took off this move";
+        }
         if (!flight.startKnown()) {
             return "the player did not see where it started";
         }
