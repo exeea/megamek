@@ -297,6 +297,70 @@ final class GpuRoads {
     /** A cast base's lift: over the loose verge, under the carriageway's own paint. */
     private static final float CAST_LIFT = .03f;
 
+    /** A road carried on through a ground portal to the end of its tunnel. */
+    static BoardRoad through(BoardRoad road, BoardTunnel tunnel) {
+        List<Float> lengths = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f));
+        lengths.set(tunnel.direction(), BoardTunnel.DEPTH - BoardTunnel.SETBACK);
+        return road.extended(lengths, 1 << tunnel.direction());
+    }
+
+    /**
+     * The paint a road {@link #through} a ground portal carries on past its hex's edge: its verges and markings, on the
+     * tunnel's floor, which carries the road's own surface.
+     */
+    static List<Patch> tunnelPatches(BoardScene.Tile tile, BoardRoad road, BoardTunnel tunnel) {
+        float scale = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
+        Path2D.Float outline = new Path2D.Float();
+        for (Vector3 corner : tunnelFloor(tunnel)) {
+            float x = (corner.x - cx) / scale, y = (corner.y - cy) / scale;
+            if (outline.getCurrentPoint() == null) { outline.moveTo(x, y); } else { outline.lineTo(x, y); }
+        }
+        outline.closePath();
+        Area floor = new Area(outline);
+        String surface = texture(tile.road());
+        List<Patch> result = new ArrayList<>();
+        for (var patch : patches(tile, road)) {
+            if (patch.texture().equals(surface)) { continue; }
+            Area shape = new Area(patch.shape());
+            shape.intersect(floor);
+            if (!shape.isEmpty()) {
+                result.add(new Patch(shape, patch.texture(), patch.tint(), patch.repeat(), patch.lift(), patch.fade()));
+            }
+        }
+        return result;
+    }
+
+    /** The floor a tunnel's paint lies on, flat at the portal's base: the opening's width, from the hex's edge in. */
+    static List<BoardTacticalGeometry.Triangle> tunnelFloor(BoardTunnel tunnel, Patch patch) {
+        var corners = tunnelFloor(tunnel);
+        float lift = patch.lift() * BoardGeometry.hexScale();
+        for (var corner : corners) { corner.z += lift; }
+        return List.of(new BoardTacticalGeometry.Triangle(corners.get(0), corners.get(1), corners.get(2), -1),
+              new BoardTacticalGeometry.Triangle(corners.get(0), corners.get(2), corners.get(3), -1));
+    }
+
+    private static List<Vector3> tunnelFloor(BoardTunnel tunnel) {
+        float scale = BoardGeometry.hexScale(), half = BoardTunnel.HALF_WIDTH * tunnel.widthScale() * scale;
+        Vector3 along = tunnel.along(), across = new Vector3(along.y, -along.x, 0);
+        List<Vector3> corners = new ArrayList<>();
+        for (float[] c : new float[][] { { -1, BoardTunnel.SETBACK }, { 1, BoardTunnel.SETBACK },
+              { 1, BoardTunnel.DEPTH }, { -1, BoardTunnel.DEPTH } }) {
+            corners.add(new Vector3(tunnel.origin()).mulAdd(across, c[0] * half).mulAdd(along, c[1] * scale));
+        }
+        return corners;
+    }
+
+    /** A tunnel's paint mask, darkening into it as its floor does (BoardTunnel#light). */
+    static MaskData tunnelMask(BoardScene.Tile tile, BoardRoad road, Patch patch, BoardTunnel tunnel) {
+        float scale = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
+        return mask(patch, (x, y, scratch) -> {
+            Color tint = color(road, patch, x, y, scratch);
+            // The shader reads a mask's tint as sRGB.
+            float light = (float) Math.pow(BoardTunnel.light(tunnel.depth(cx + x * scale, cy + y * scale)), 1 / 2.2);
+            return tint.set(tint.r * light, tint.g * light, tint.b * light, tint.a);
+        });
+    }
+
     /** Paint ending on bare ground: a grounded material apron, the road's own paint fading out over it. */
     private static List<Patch> bare(List<Patch> patches, BoardRoad road, boolean paved) {
         float apron = BoardBridgeFooting.apronLength();

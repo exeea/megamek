@@ -2003,7 +2003,8 @@ final class BoardRelief {
         var fitB = coast.shift(edge.b.key);
         px += lerp(fitA.x(), fitB.x(), t);
         py += lerp(fitA.y(), fitB.y(), t);
-        float keep = 1;
+        float keep = 1, cast = Float.NEGATIVE_INFINITY;
+        Set<BoardTunnel> walled = new HashSet<>();
         // A corner is shared by three edges and must move alike on each: there only the corner's own hexes decide.
         Corner at = t == 0 ? edge.a : t == 1 ? edge.b : null;
         for (Corner end : at != null ? new Corner[] { at } : new Corner[] { edge.a, edge.b }) {
@@ -2042,11 +2043,17 @@ final class BoardRelief {
                         keep = Math.min(keep, roadClearance(deck, site.x(), site.y(), px, py, point.x - px, point.y - py));
                     }
                 }
-                if (!site.road()) { continue; }
-                // A tunnel portal's wings stand on the lattice line: the face it is set into stays flat to its top.
+                if (!site.road()) {
+                    if (site.family() == CONCRETE) { cast = Math.max(cast, site.level() * BoardGeometry.level()); }
+                    continue;
+                }
+                // A tunnel portal's wings stand on the lattice line: the face it is set into stays flat to its top, and
+                // the rock above and beside it eases back to the natural face as a buttress round the portal.
                 for (BoardTunnel portal : portals.computeIfAbsent(site.coords(), key -> BoardTunnel.entrances(scene, scene.tile(key)))) {
                     float above = (z - portal.origin().z) / BoardGeometry.hexScale();
-                    keep = Math.min(keep, Math.max(smooth(portal.beside(px, py) / 2), smooth((above - 22) / 3)));
+                    keep = Math.min(keep, Math.max(smooth(portal.beside(px, py) / PORTAL_SIDE),
+                          smooth((above - BoardTunnel.ROOF - 3) / PORTAL_RISE)));
+                    walled.add(portal);
                 }
             }
         }
@@ -2054,8 +2061,15 @@ final class BoardRelief {
             point.x = lerp(px, point.x, keep);
             point.y = lerp(py, point.y, keep);
         }
+        // Beside its approach natural ground stands behind a portal's wing walls; a cast wall stays straight.
+        for (BoardTunnel portal : walled) {
+            if (cast <= portal.origin().z) { portal.clearWings(point); }
+        }
         return point;
     }
+
+    /** Over how many tile pixels the rock round a tunnel portal eases back to its natural face, above and beside it. */
+    private static final float PORTAL_RISE = 36, PORTAL_SIDE = 16;
 
     /** Move a shared bank outside its actual road or deck, allowing a 1:1 cut above a descending curve. */
     private static Vector3 cutBoundary(BoardRoad deck, Site site, float px, float py, float rise) {
