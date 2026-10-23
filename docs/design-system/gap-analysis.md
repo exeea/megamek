@@ -294,7 +294,8 @@ work for Swing, and item 11 is under investigation.
   Swing and libGDX; see [tokens.md](tokens.md#choices).
 - ~~Tabs and segmented control~~: violet-underlined tabs and a joined segmented control with a violet selected
   section, in two sizes, in Swing and libGDX; see [tokens.md](tokens.md#tabs).
-- Select, with a shared popup list (keeping the inline dotted variant).
+- ~~Select~~: an input-faced select in two sizes and an inline one with a dotted underline, sharing one popup list
+  (neutral wash, violet check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
 - A `UiTheme` rename pass, so hud-v3 reads the same roles.
 - Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
   Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs

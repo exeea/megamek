@@ -517,6 +517,21 @@ public final class UiKit {
         return new UiSegmented(this, compact, labels);
     }
 
+    /** A token select in an input box (docs/design-system/tokens.md, Select), the first item current. */
+    public UiSelect tokenSelect(boolean compact, String... items) {
+        return new UiSelect(this, compact ? UiSelect.Kind.COMPACT : UiSelect.Kind.REGULAR, items);
+    }
+
+    /** An inline token select: text with a dotted underline, for a value inside a sentence or a dense row. */
+    public UiSelect tokenSelectInline(String... items) {
+        return new UiSelect(this, UiSelect.Kind.INLINE, items);
+    }
+
+    /** A token popup list on its own, as a gallery shows it; a select makes its own. */
+    public UiListPopup tokenListPopup(String... items) {
+        return new UiListPopup(this, items);
+    }
+
     /** Shared numeric controls use the theme's track, mint fill and narrow handle. */
     public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle sliderStyle() {
         var track = skin.newDrawable("white", UiTheme.TRACK); track.setMinHeight(4); track.setMinWidth(0);

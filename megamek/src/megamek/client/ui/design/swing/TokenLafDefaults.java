@@ -279,7 +279,21 @@ public final class TokenLafDefaults {
         values.put("TabbedPane.tabHeight", number(tokens.size().get("control.sm")));
         int tabSide = Math.round(tokens.space().get("md"));
         values.put("TabbedPane.tabInsets", "0," + tabSide + ",0," + tabSide);
-        put("PopupMenu.borderColor", color("border.subtle"));
+        put("PopupMenu.borderColor", color("border.control"));
+        // Select (TokenSelects): the shared popup list. Rows under the pointer or the keyboard get the hover wash, not
+        // the selection violet; the current value has a violet check instead.
+        put("ComboBox.popupBackground", popover);
+        put("ComboBox.selectionBackground", over(hover, popover));
+        put("ComboBox.selectionForeground", color("text.primary"));
+        values.put("ComboBox.selectionArc", number(tokens.radius().get("sm") * 2));
+        int rowInset = Math.round(tokens.space().get("xs"));
+        values.put("ComboBox.selectionInsets", "0," + rowInset + ",0," + rowInset);
+        values.put("ComboBox.maximumRowCount", "10");
+        values.put(TokenSelects.ROW_HEIGHT, number(tokens.size().get("control.sm")));
+        put(TokenSelects.CHECK_COLOR, color("selected.primary"));
+        put(TokenSelects.INLINE_FOREGROUND, color("text.secondary"));
+        put(TokenSelects.INLINE_HOVER_FOREGROUND, color("text.primary"));
+        put(TokenSelects.PLACEHOLDER_FOREGROUND, color("text.muted"));
         put("MenuBar.borderColor", color("border.subtle"));
         put("ToolTip.background", popover);
         put("ToolTip.foreground", color("text.primary"));

@@ -37,6 +37,7 @@ import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayer;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JProgressBar;
@@ -351,6 +352,11 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.segmented.note"), "small", "text.muted"));
         page.add(segmentedMatrix());
 
+        page.add(heading(Messages.getString("UiLibrary.controls.select")));
+        page.add(paragraph(Messages.getString("UiLibrary.select.note"), "small", "text.muted"));
+        page.add(selectMatrix());
+        page.add(selectPopupSample());
+
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         JTable table = new JTable(new Object[][] {
               { "Atlas AS7-D", "100", "3/5/0", "54" },
@@ -627,6 +633,132 @@ public final class SwingUiLibrary extends JFrame {
         cell.weightx = 1;
         matrix.add(Box.createHorizontalGlue(), cell);
         return matrix;
+    }
+
+    /** Selects of each kind in each state; hover and focus are frozen, the rest stay live. */
+    private JComponent selectMatrix() {
+        List<String> states = List.of("rest", "hover", "focus", "placeholder", "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.inputs.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("REGULAR", "COMPACT", "INLINE")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.select.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                JComboBox<String> select = sampleSelect(kind);
+                switch (state) {
+                    case "hover" -> select.putClientProperty(FieldEdge.FROZEN_HOVER, true);
+                    case "focus" -> focused(select);
+                    case "placeholder" -> {
+                        TokenSelects.placeholder(select, Messages.getString("UiLibrary.select.placeholder"));
+                        select.setSelectedIndex(-1);
+                    }
+                    case "disabled" -> select.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(select, cell);
+            }
+        }
+        cell.gridx = states.size() + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    private static JComboBox<String> sampleSelect(String kind) {
+        String[] items = { Messages.getString("UiLibrary.controls.optionA"),
+                           Messages.getString("UiLibrary.controls.optionB"),
+                           Messages.getString("UiLibrary.select.optionC"),
+                           Messages.getString("UiLibrary.select.optionD") };
+        return switch (kind) {
+            case "INLINE" -> TokenSelects.inline(items);
+            case "COMPACT" -> TokenSelects.select(TokenButtons.Size.COMPACT, items);
+            default -> TokenSelects.select(TokenButtons.Size.REGULAR, items);
+        };
+    }
+
+    /**
+     * The popup list drawn in place, as the open select shows it: the current value checked and the second row under
+     * the pointer. A live select sits beside it.
+     */
+    private JComponent selectPopupSample() {
+        JPanel samples = row(color("surface.base"));
+        JComboBox<String> owner = sampleSelect("REGULAR");
+        // The list and its frame take the popup colors again whenever the look and feel changes, as a real popup does
+        JList<String> list = new JList<>(owner.getModel()) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setBackground(UIManager.getColor("ComboBox.popupBackground"));
+                setSelectionBackground(UIManager.getColor("ComboBox.selectionBackground"));
+                setSelectionForeground(UIManager.getColor("ComboBox.selectionForeground"));
+            }
+        };
+        int padY = scaleForGUI(2);
+        int padX = scaleForGUI(8);
+        list.setCellRenderer((l, value, index, selected, focus) -> {
+            Component c = owner.getRenderer().getListCellRendererComponent(l, value, index, selected, focus);
+            if (c instanceof JComponent component) {
+                component.setBorder(BorderFactory.createEmptyBorder(padY, padX, padY, padX));
+            }
+            return c;
+        });
+        Insets rowInsets = UIManager.getInsets("ComboBox.selectionInsets");
+        list.putClientProperty(FlatClientProperties.STYLE, "selectionArc: " + UIManager.getInt("ComboBox.selectionArc")
+              + "; selectionInsets: " + rowInsets.top + "," + rowInsets.left + "," + rowInsets.bottom + ","
+              + rowInsets.right);
+        list.setSelectedIndex(1);
+        list.setFocusable(false);
+        JPanel popup = new JPanel(new BorderLayout()) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension size = super.getPreferredSize();
+                size.width = Math.max(size.width, owner.getPreferredSize().width);
+                return size;
+            }
+
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setBorder(UIManager.getBorder("PopupMenu.border"));
+                setBackground(UIManager.getColor("ComboBox.popupBackground"));
+            }
+        };
+        popup.add(list);
+
+        JPanel open = new JPanel(new GridBagLayout());
+        open.setOpaque(false);
+        GridBagConstraints place = new GridBagConstraints();
+        place.gridx = 0;
+        place.anchor = GridBagConstraints.WEST;
+        open.add(text(Messages.getString("UiLibrary.select.popup"), "caption", "text.muted"), place);
+        open.add(owner, place);
+        place.insets = new Insets(scaleForGUI(4), 0, 0, 0);
+        open.add(popup, place);
+        samples.add(open);
+
+        JPanel live = new JPanel();
+        live.setOpaque(false);
+        live.setLayout(new BoxLayout(live, BoxLayout.Y_AXIS));
+        JComponent caption = text(Messages.getString("UiLibrary.select.live"), "caption", "text.muted");
+        caption.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(caption);
+        JPanel controls = row(color("surface.base"));
+        controls.setAlignmentX(LEFT_ALIGNMENT);
+        controls.add(sampleSelect("REGULAR"));
+        controls.add(sampleSelect("COMPACT"));
+        controls.add(sampleSelect("INLINE"));
+        live.add(controls);
+        samples.add(live);
+        return samples;
     }
 
     /**

@@ -307,6 +307,7 @@ public final class UiTheme implements Disposable {
         tokenFields();
         tokenChoices();
         tokenOptions();
+        tokenSelects();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -821,6 +822,73 @@ public final class UiTheme implements Disposable {
         style.hairline = subtle;
         style.ring = ring;
         style.line = skin.newDrawable("white");
+        skin.add("default", style);
+    }
+
+    /** The colors and drawables of a select and its popup list ({@link UiSelect}, {@link UiListPopup}). */
+    public static final class SelectStyle {
+        /** The face at rest, under the pointer or open, with the focus ring, and disabled: the input boxes. */
+        public Drawable face;
+        public Drawable faceOver;
+        public Drawable faceFocus;
+        public Drawable faceDisabled;
+        /** The focus ring around an inline select, which has no box. */
+        public Drawable ring;
+        /** The popup list's frame. */
+        public Drawable popup;
+        /** The wash under the row at the pointer or the keyboard. */
+        public Drawable rowOver;
+        /** The inline select's dotted underline in white, tinted by the batch color per state. */
+        public Drawable line;
+        public Color text;
+        public Color placeholder;
+        /** An inline select's value at rest; under the pointer, open or focused it takes {@link #text}. */
+        public Color inlineText;
+        public Color disabledText;
+        public Color chevron;
+        /** The check before the current value in the popup list. */
+        public Color check;
+        public Color underline;
+        public Color underlineOver;
+        public Color underlineDisabled;
+    }
+
+    /**
+     * Selects and their popup list in dark mode (docs/design-system/tokens.md, Select). The face is the input box; the
+     * inline variant has a dotted underline instead. The popup list is a popover frame with a control edge: the row
+     * at the pointer or the keyboard gets the hover wash, and the current value a violet check, so violet keeps
+     * meaning selected.
+     */
+    private void tokenSelects() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        Color control = token(tokens.color("border.control", mode));
+        float border = tokens.size().get("border");
+        box("sel-ring", Color.CLEAR, token(tokens.color("focus.ring", mode)), tokens.size().get("focus.width"),
+              tokens.radius().get("md"), null, 0, 0, 0);
+        box("sel-popup", token(tokens.color("surface.popover", mode)), control, border, tokens.radius().get("md"),
+              null, 0, 0, 0);
+        box("sel-row-over", token(tokens.color("surface.hover", mode)), null, 0, tokens.radius().get("sm"), null, 0,
+              0, 0);
+
+        SelectStyle style = new SelectStyle();
+        style.face = skin.getDrawable("in");
+        style.faceOver = skin.getDrawable("in-over");
+        style.faceFocus = skin.getDrawable("in-focus");
+        style.faceDisabled = skin.getDrawable("in-quiet");
+        style.ring = skin.getDrawable("sel-ring");
+        style.popup = skin.getDrawable("sel-popup");
+        style.rowOver = skin.getDrawable("sel-row-over");
+        style.line = new Dashes(skin.get("white", Texture.class), Color.WHITE, border, 2, 2, false);
+        style.text = token(tokens.color("text.primary", mode));
+        style.placeholder = token(tokens.color("text.muted", mode));
+        style.inlineText = token(tokens.color("text.secondary", mode));
+        style.disabledText = token(tokens.color("text.disabled", mode));
+        style.chevron = token(tokens.color("text.secondary", mode));
+        style.check = token(tokens.color("selected.primary", mode));
+        style.underline = control;
+        style.underlineOver = token(tokens.color("border.strong", mode));
+        style.underlineDisabled = token(tokens.color("border.subtle", mode));
         skin.add("default", style);
     }
 

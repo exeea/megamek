@@ -37,8 +37,10 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
+import megamek.client.ui.gdx.UiListPopup;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiSegmented;
+import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTabs;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
@@ -250,6 +252,12 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         segmentedNote.setWrap(true);
         content.add(segmentedNote).width(1100).padBottom(8).row();
         content.add(segmentedMatrix()).row();
+        section(content, "UiLibrary.controls.select");
+        Label selectNote = kit.label(text("UiLibrary.select.note"), "hud-small", 11.5f, UiTheme.MUTED);
+        selectNote.setWrap(true);
+        content.add(selectNote).width(1100).padBottom(8).row();
+        content.add(selectMatrix()).row();
+        content.add(selectSamples()).padTop(6).row();
         section(content, "UiLibrary.gdx.buttons");
         content.add(buttons()).row();
         section(content, "UiLibrary.gdx.controls");
@@ -568,6 +576,78 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             matrix.row();
         }
         return matrix;
+    }
+
+    /** Every select kind in every state; transient states are frozen through UiSelect. */
+    private Table selectMatrix() {
+        List<String> states = List.of("rest", "hover", "focus", "placeholder", "disabled");
+        Table matrix = new Table();
+        matrix.defaults().left().padRight(16).padBottom(8);
+        matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(110);
+        for (String state : states) {
+            matrix.add(kit.label(text("UiLibrary.inputs.state." + state), "hud-small", 11, UiTheme.MUTED));
+        }
+        matrix.row();
+        for (UiSelect.Kind kind : UiSelect.Kind.values()) {
+            matrix.add(kit.label(text("UiLibrary.select.kind." + kind.name()), "hud-medium", 12.5f, UiTheme.TEXT));
+            for (String state : states) {
+                UiSelect select = sampleSelect(kind);
+                switch (state) {
+                    case "hover" -> select.hovered(true);
+                    case "focus" -> select.focused(true);
+                    case "placeholder" -> select.placeholder(text("UiLibrary.select.placeholder"));
+                    case "disabled" -> select.setDisabled(true);
+                    default -> { }
+                }
+                if (!state.equals("rest") && !state.equals("placeholder")) {
+                    select.setTouchable(Touchable.disabled);
+                }
+                matrix.add(select);
+            }
+            matrix.row();
+        }
+        return matrix;
+    }
+
+    private UiSelect sampleSelect(UiSelect.Kind kind) {
+        String[] items = selectItems();
+        return kind == UiSelect.Kind.INLINE ? kit.tokenSelectInline(items)
+              : kit.tokenSelect(kind == UiSelect.Kind.COMPACT, items);
+    }
+
+    private String[] selectItems() {
+        return new String[] { text("UiLibrary.controls.optionA"), text("UiLibrary.controls.optionB"),
+                              text("UiLibrary.select.optionC"), text("UiLibrary.select.optionD") };
+    }
+
+    /**
+     * The popup list drawn in place under a face frozen open, the current value checked and the second row under the
+     * pointer; live selects to click beside it.
+     */
+    private Table selectSamples() {
+        Table samples = new Table();
+        samples.top().left();
+        samples.defaults().left().top().padRight(32);
+        Table open = new Table();
+        open.defaults().left();
+        open.add(kit.label(text("UiLibrary.select.popup"), "hud-small", 11, UiTheme.MUTED)).padBottom(4).row();
+        UiSelect owner = sampleSelect(UiSelect.Kind.REGULAR).opened(true);
+        owner.setTouchable(Touchable.disabled);
+        open.add(owner).row();
+        UiListPopup list = kit.tokenListPopup(selectItems()).current(0).active(1);
+        list.setTouchable(Touchable.disabled);
+        open.add(list).minWidth(owner.getPrefWidth()).padTop(tokens.space().get("xs")).row();
+        samples.add(open);
+
+        Table live = new Table();
+        live.defaults().left().padRight(16);
+        live.add(kit.label(text("UiLibrary.select.live"), "hud-small", 11, UiTheme.MUTED)).colspan(3).padBottom(4)
+              .row();
+        live.add(sampleSelect(UiSelect.Kind.REGULAR));
+        live.add(sampleSelect(UiSelect.Kind.COMPACT));
+        live.add(sampleSelect(UiSelect.Kind.INLINE));
+        samples.add(live);
+        return samples;
     }
 
     private Table buttons() {

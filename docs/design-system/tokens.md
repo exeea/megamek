@@ -229,7 +229,8 @@ gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; ali
 | `hud-utility`, `hud-utility-narrow`, `hud-utility-row` | special (the icon-above-label layout stays a HUD composition) |
 | `hud-tab`, `hud-tab-caps` | Not buttons: [tabs](#tabs) |
 | `hud-seg`, `hud-pill` | Not buttons: the [segmented control](#segmented-control) |
-| `hud-row`, `hud-menu-row`, `hud-select`, `hud-select-inline` | Not buttons: list row, menu item and select come later |
+| `hud-row`, `hud-menu-row` | Not buttons: list row and menu item come later |
+| `hud-select`, `hud-select-inline` | Not buttons: the [select](#select) |
 
 The hud-v3 styles stay until their views move; the libGDX gallery lists them under "hud-v3 button styles (to
 migrate)".
@@ -367,6 +368,44 @@ keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires 
 traversal yet. hud-v3's `UiKit.segmented` and the `hud-tab`, `hud-seg` and `hud-pill` styles stay until their views
 move.
 
+## Select
+
+Picks one value from a list that opens below the face. Use a segmented control or radio buttons when two to five
+options should stay visible.
+
+| Part / state | Look |
+| --- | --- |
+| Face | The input box (see [Inputs](#inputs)): the value in `text.primary`, a `text.secondary` chevron, a `text.muted` placeholder while nothing is chosen |
+| Inline face | No box: `text.secondary` value that turns `text.primary` under the pointer, open or focused, over a dotted (2 on, 2 off) `border.control` underline, `border.strong` under the pointer |
+| Hover / open | `border.strong` edge |
+| Focus | The ring in place of the edge; the inline face gets the ring around it instead of the underline |
+| Disabled | As a disabled input; the inline underline turns `border.subtle` |
+| Popup list | `surface.popover` frame with a `border.control` edge, `xs` (4) below the face (above it when there is no room), at least as wide as the face; scrolls after 10 rows |
+| Rows | `control.sm` (28) high; a `surface.hover` wash, inset `xs`, on the row under the pointer or the keyboard; a `selected.primary` check before the current value, in a leading `icon.sm` slot |
+
+- **Sizes** match inputs: regular `control.md` (36), compact `control.sm` (28). The face is as wide as its widest item
+  or placeholder, so it does not jump when the value changes. The inline face is `control.sm` high.
+- **Inline** is for a value inside a header or running text, where a box would be too heavy.
+- **Violet means selected.** The check, not the wash, marks the current value, so the wash stays neutral.
+- **Keys.** Enter, Space or Down opens the list on the current value; Up and Down move, Home and End jump, Enter
+  chooses and Escape closes without a choice. The focus comes back to the face.
+
+**Swing.** The MegaMek themes give every `JComboBox` the face, the popup list (check, wash, edge, gap and 10 rows)
+through the `ComboBox` delegate in `FieldUIs`, so existing views get them without changes. The popup edge is the
+themes' `PopupMenu.borderColor`, so menus get the `border.control` edge too.
+[`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java) builds them: `select(size,
+items...)`, `inline(items...)` (or `inline(combo)`) and `placeholder(combo, text)`, shown while the selected index is
+-1. Swing's list has no disabled rows or separators.
+
+**libGDX.** [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java) is the face and
+[`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) the list, drawn from the input boxes, the
+`sel-*` drawables and the `SelectStyle` colors [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java)
+registers. `UiKit` builds them: `tokenSelect(compact, items...)` and `tokenSelectInline(items...)`. The list sits on
+the stage's root while open and closes on a press outside it. Choosing another item fires a `ChangeEvent` from the
+select; `select(i)` from code fires none, and `placeholder(text)` shows the placeholder until a choice. `hovered`,
+`focused` and `opened` freeze those states for the gallery. hud-v3's `UiKit.select`, its `hud-select` styles and the
+`UiPopover` / `UiMenuList` drop-downs stay until their views move.
+
 ## Code
 
 | Class | Role |
@@ -387,9 +426,11 @@ move.
 | [`UiChoice`](../../megamek/src/megamek/client/ui/gdx/UiChoice.java) | The libGDX check box, radio button and switch |
 | [`TokenTabs`](../../megamek/src/megamek/client/ui/design/swing/TokenTabs.java), [`TokenSegmented`](../../megamek/src/megamek/client/ui/design/swing/TokenSegmented.java) | The Swing tabs and segmented control |
 | [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
+| [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
+| [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
-Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab and segmented styles read
-the tokens. The Swing themes are selectable but not the default, and no view uses the new controls yet. Next come
-select with a shared popup list, a `UiTheme` rename pass so hud-v3 reads the same roles, and then dialogs.
+Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
+styles read the tokens. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+Next come a `UiTheme` rename pass so hud-v3 reads the same roles, and then dialogs.
