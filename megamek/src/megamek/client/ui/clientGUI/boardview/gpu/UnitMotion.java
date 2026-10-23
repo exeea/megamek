@@ -752,6 +752,48 @@ final class UnitMotion {
         return remaining.stream().mapToDouble(Playback::end).sum() - elapsed;
     }
 
+    /**
+     * When the move under way first reaches a hex's centre, for an aircraft's attack run to time its shots.
+     *
+     * @param hex a hex on the path
+     *
+     * @return the motion seconds from now until the unit is over the hex, or a negative value when its current move
+     *       does not pass it
+     */
+    double secondsToReach(megamek.common.board.Coords hex) {
+        if (!isMoving()) {
+            return -1;
+        }
+        Playback playback = remaining.getFirst();
+        List<BoardScene.Waypoint> path = playback.path();
+        int index = -1;
+        for (int step = 0; step < path.size(); step++) {
+            if (path.get(step).coords().equals(hex)) {
+                index = step;
+                break;
+            }
+        }
+        if (index < 0) {
+            return -1;
+        }
+        if (path.size() < 2) {
+            return 0;
+        }
+        // Progress runs over the waypoints evenly; find the first moment it reaches this one.
+        double wanted = index / (double) (path.size() - 1);
+        double low = 0;
+        double high = playback.duration();
+        for (int iteration = 0; iteration < 40; iteration++) {
+            double middle = (low + high) / 2;
+            if (progress(playback, middle) + 1e-6 >= wanted) {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        return Math.max(0, high - elapsed);
+    }
+
     public Vector3 position() {
         return position;
     }

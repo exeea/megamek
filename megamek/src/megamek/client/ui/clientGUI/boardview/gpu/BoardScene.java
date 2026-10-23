@@ -37,7 +37,18 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
       List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
       List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
       List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, BoardElectronicWarfare electronicWarfare,
-      List<Designation> designations, List<StarShell> starShells) {
+      List<Designation> designations, List<StarShell> starShells, BoardAirspace airspace) {
+
+    /** A scene with no aircraft moves held back: everything but the live battle board. */
+    BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
+          List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
+          List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
+          List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, BoardElectronicWarfare electronicWarfare,
+          List<Designation> designations, List<StarShell> starShells) {
+        this(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, light, firingLines,
+              rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, designations, starShells,
+              BoardAirspace.EMPTY);
+    }
 
     /** A scene with no TAG designations in effect and no illumination rounds burning. */
     BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
@@ -882,20 +893,28 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         if (shown == tiles) { return this; }
         return new BoardScene(boardId, width, height, shown, units, plannedPath, selectedId, phase, commands, light,
               firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, designations,
-              starShells);
+              starShells, airspace);
+    }
+
+    /** The aircraft moves held back in this frame; the live battle board's source sets them. */
+    BoardScene withAirspace(BoardAirspace held) {
+        if (held.equals(airspace)) { return this; }
+        return new BoardScene(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, light,
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, designations,
+              starShells, held);
     }
 
     BoardScene withUnits(List<Unit> shown) {
         return new BoardScene(boardId, width, height, tiles, shown, plannedPath, selectedId, phase, commands, light,
               firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, designations,
-              starShells);
+              starShells, airspace);
     }
 
     /** Keep the displayed selection without exposing the next turn's commands, route or firing guides. */
     BoardScene withPlaybackSelection(int id) {
         return new BoardScene(boardId, width, height, tiles, units, List.of(), id, phase,
               List.of(), light, List.of(), List.of(), markers, tactical, List.of(), fieldOfView,
-              electronicWarfare, designations, starShells);
+              electronicWarfare, designations, starShells, airspace);
     }
 
     /** Board artwork, terrain and authorized contacts advance with the queue; interactive tools stay live. */
@@ -914,7 +933,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hideMovement ? List.of() : world.firingLines, hideMovement ? List.of() : world.rangeBorders, shownMarkers,
               tactical.duringPlayback(settled == null ? BoardTactical.EMPTY : settled.tactical, hideMovement),
               hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView,
-              world.electronicWarfare, world.designations, world.starShells);
+              world.electronicWarfare, world.designations, world.starShells, airspace);
     }
 
     /** Excludes HUD commands and other live controls, which do not need a playback checkpoint. */
@@ -925,7 +944,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               && firingLines.equals(other.firingLines) && rangeBorders.equals(other.rangeBorders)
               && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView)
               && electronicWarfare.equals(other.electronicWarfare) && designations.equals(other.designations)
-              && starShells.equals(other.starShells);
+              && starShells.equals(other.starShells) && airspace.equals(other.airspace);
     }
 
     /**

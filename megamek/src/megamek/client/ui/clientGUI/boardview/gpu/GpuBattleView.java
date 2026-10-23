@@ -168,6 +168,8 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuFireControl fireControl;
     /** The board overlay: envelopes, the route and its ghost, rings and glows, bands and arcs. */
     private GpuBoardOverlay overlay;
+    /** Held aircraft: their models drawn at the start of their move, faded copies at their destination. */
+    private GpuFlightModels flightModels;
     private GpuTactical tactical;
     private final GpuFieldOfView fieldOfView;
     private GpuAtmosphere atmosphere;
@@ -377,6 +379,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>(false, true);
         overlay = new GpuBoardOverlay();
+        flightModels = new GpuFlightModels();
         // One skin for the window: the loading screen's, when it showed, becomes the HUD's (M1 row 1). The loading
         // screen borrows it again while the terrain builds.
         theme = loadingTheme == null ? new GpuBoardSkin() : loadingTheme;
@@ -842,6 +845,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         updateEquipmentDetail();
         if (boardCamera.tactical()) { anchorOnBases(); }
+        flightModels.update(scene, unitInstances);
         markers.update(unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
@@ -854,10 +858,10 @@ class GpuBattleView extends ApplicationAdapter {
             attackEffects.artilleryScorches(scorch -> terrain.scorch(scene, scorch));
         }
         unitBounds.begin();
-        List<ModelInstance> units = new ArrayList<>(unitInstances.values());
+        List<ModelInstance> units = flightModels.drawn(new ArrayList<>(unitInstances.values()));
         List<ModelInstance> outlined = scene.units().stream()
               .filter(unit -> !unit.sensorContact() || GpuMarkers.outlineEnabled(BoardMarker.Kind.SENSOR_CONTACT))
-              .map(unit -> unitInstances.get(unit.id() + ":" + unit.part()))
+              .map(unit -> flightModels.drawn(unitInstances.get(unit.id() + ":" + unit.part())))
               .collect(Collectors.toCollection(ArrayList::new));
         outlined.addAll(markers.outlinedInstances());
         outlined.removeIf(instance -> instance == null || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
@@ -975,6 +979,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         renderHexText(wireframeView);
         overlay.renderGhost(boardCamera.camera, shownUnit);
+        flightModels.renderShadows(boardCamera.camera);
         fireControl.renderLabels(boardCamera.camera);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         tactical.renderLabels(boardCamera.camera);
@@ -1382,7 +1387,7 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.beginFrame();
         if (unitModels != null) {
             for (var unit : scene.units()) {
-                var motion = motions.get(unit.id());
+                var motion = playback.motion(unit.id());
                 if (unit.sensorContact() || motion == null) {
                     continue;
                 }
@@ -1436,7 +1441,7 @@ class GpuBattleView extends ApplicationAdapter {
             Vector3 position = BoardGeometry.center(unit.location().coords(), unit.location().elevation());
             playback.placeDisplacement(unit, position);
             float facing = unit.location().facing() * 60;
-            UnitMotion motion = unit.sensorContact() ? null : motions.get(unit.id());
+            UnitMotion motion = unit.sensorContact() ? null : playback.motion(unit.id());
             UnitMotion.Sample sample = motion == null ? UnitMotion.Sample.STILL : motion.sample();
             BoardScene.Unit placement = sample.placement(unit);
             boolean airborne = sample.airborne(unit);
@@ -1567,7 +1572,7 @@ class GpuBattleView extends ApplicationAdapter {
                   ? markers.placeSensor(unit.location().coords(), instance, boardCamera.camera, position)
                   : visual.meeple() ? MeepleAnimator.place(visual, instance, placement, sample, boardCamera.camera, position, facing,
                         playback.conversion(), boardCamera.isTopDown())
-                  : visual.place(instance, boardCamera.camera, position, facing, placement);
+                  : visual.place(instance, boardCamera.camera, position, facing, placement, playback.runPitch(unit.id()));
             anchor = UnitScreenScale.grow(placement, instance, anchor, growth);
             UnitAnimator animator = animators.get(key);
             if (authored && animator != null && unit.attachment() == null && animator.groundSupports(scene, placement, sample)) {
@@ -1610,7 +1615,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** Frame an action before its clock advances, including when one large frame reaches several queued actions. */
     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) {
         if (state.movement() != null) {
-            boardCamera.frameMovement(state.movement(), motions.get(state.activeEntityId()), state.present(scene), playbackCameraWidth());
+            boardCamera.frameMovement(state.movement(), state.motion(state.movement().entityId()), state.present(scene), playbackCameraWidth(),
+                  state.runTargets());
         } else if (state.attack() != null && state.attack().shot()) {
             boardCamera.frameAttacks(state.attacks(), playbackCameraWidth());
         } else if (state.detonation() != null) {
@@ -1700,7 +1706,8 @@ class GpuBattleView extends ApplicationAdapter {
                       && playback.movement().path().getFirst().coords().equals(request.coords())) {
                     centerSequence = request.sequence();
                 }
-                boardCamera.frameMovement(playback.movement(), motions.get(playback.activeEntityId()), scene, playbackCameraWidth());
+                boardCamera.frameMovement(playback.movement(), playback.motion(playback.movement().entityId()), scene, playbackCameraWidth(),
+                      playback.runTargets());
                 return;
             }
             cameraFollowingPlayback = true;
@@ -1712,7 +1719,7 @@ class GpuBattleView extends ApplicationAdapter {
                   .findFirst().orElse(null);
             if (active != null && onMap(scene, active)) {
                 playbackCameraWidth();
-                var motion = motions.get(active.id());
+                var motion = playback.motion(active.id());
                 Vector3 position = motion != null && motion.isMoving() ? motion.surfacePosition(scene).cpy()
                       : BoardGeometry.center(active.location().coords(), active.location().elevation());
                 playback.placeDisplacement(active, position);
@@ -1844,7 +1851,7 @@ class GpuBattleView extends ApplicationAdapter {
             instance = newUnitInstance(key, model);
         }
         animators.computeIfAbsent(key, ignored -> newAnimator()).apply(model, instance, unit,
-              motions.get(unit.id()).sample(), hoverClock, 0, true, unit.model().twist());
+              playback.motion(unit.id()).sample(), hoverClock, 0, true, unit.model().twist());
     }
 
     /** Level a floating visual's stem ends at, or NaN when no stem is drawn for this token at this time. */
@@ -1869,7 +1876,7 @@ class GpuBattleView extends ApplicationAdapter {
         for (BoardScene.Unit unit : scene.units()) {
             BoardScene.Tile tile = scene.tile(unit.location().coords());
             ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
-            UnitMotion motion = motions.get(unit.id());
+            UnitMotion motion = playback.motion(unit.id());
             if (tile == null || instance == null) {
                 continue;
             }
@@ -2102,7 +2109,7 @@ class GpuBattleView extends ApplicationAdapter {
     private void renderUnits(boolean thermal) {
         unitBatch.begin(boardCamera.camera);
         for (BoardScene.Unit unit : unitAnchors.keySet()) {
-            ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
+            ModelInstance instance = flightModels.drawn(unitInstances.get(unit.id() + ":" + unit.part()));
             if (boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
                 if (unit.sensorContact()) {
                     unitBatch.render(instance);
@@ -2482,6 +2489,11 @@ class GpuBattleView extends ApplicationAdapter {
                 var instance = unitInstances.get(unit.id() + ":" + unit.part());
                 if (instance == null) { continue; }
                 float distance = unitPicking.distance(instance, ray);
+                // A held aircraft is also picked where its model waits, at the start of its move.
+                ModelInstance waiting = flightModels.drawn(instance);
+                if (waiting != instance) {
+                    distance = Math.min(distance, unitPicking.distance(waiting, ray));
+                }
                 if (distance < nearest) {
                     nearest = distance;
                     picked = unit;
@@ -3244,6 +3256,9 @@ class GpuBattleView extends ApplicationAdapter {
         fieldOfView.dispose();
         if (overlay != null) {
             overlay.dispose();
+        }
+        if (flightModels != null) {
+            flightModels.dispose();
         }
         if (source != null) {
             source.close();

@@ -14,6 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
 
 /** One GL-owned event queue for both cameras. The game remains free to receive updates while it plays. */
@@ -32,6 +33,10 @@ final class UnitPlayback {
     private BoardScene.Animation active;
     private UnitAttack attack;
     private final List<UnitAttack> attacks = new ArrayList<>();
+    /** The aircraft attack run being played, or null. */
+    private AttackRunPlayer run;
+    /** Holds playback at the firing results' burst until it can be turned into attack runs. */
+    private final FiringBurstGate burstGate = new FiringBurstGate();
     /** Completed/instant shots wait only until the next render consumes their persistent cosmetic impacts. */
     private final Map<UUID, UnitAttack> completedAttacks = new LinkedHashMap<>();
     private final Map<UUID, megamek.common.NuclearDetonation> detonations = new LinkedHashMap<>();
@@ -53,9 +58,8 @@ final class UnitPlayback {
     /** stepOnce(): the paused queue plays until an action other than {@link #stepFrom} has completed. */
     private boolean stepping;
     private BoardScene.Animation stepFrom;
-    /** A retained attack that a review re-presents over the waiting live queue (A.10), or null. */
-    private UnitAttack review;
-    private List<UnitAttack> reviewed = List.of();
+    /** A retained action that a review re-presents over the waiting live queue (A.10), or null. */
+    private ReviewPlayer review;
     private Predicate<BoardScene.Unit> transports = ignored -> false;
     private final Consumer<BoardScene.Movement> completeMovement;
     private final java.util.function.BiConsumer<UnitAttack, Boolean> soundCue;
@@ -146,10 +150,8 @@ final class UnitPlayback {
         if (review != null) {
             // A review plays alone: the live queue waits, paused or not, so the two never interleave (A.10).
             if (cameraReady.test(this)) {
-                float previous = review.seconds;
-                review.seconds = (float) Math.min(review.duration, review.seconds + Math.max(0, seconds) * speed.rate);
-                cue(review, previous);
-                if (review.seconds >= review.duration) {
+                review.advance(Math.max(0, seconds) * speed.rate, this::cue);
+                if (review.done()) {
                     review(null);
                 }
             }
@@ -163,6 +165,10 @@ final class UnitPlayback {
         while (true) {
             applySceneUpdates();
             if (active == null) {
+                if (pending.peekFirst() instanceof FiringBurst) {
+                    if (!burstGate.letThrough(pending, seconds)) { return; }
+                    continue;
+                }
                 active = pending.pollFirst();
                 if (active == null) {
                     stepping = false;
@@ -171,6 +177,8 @@ final class UnitPlayback {
                 completed = false;
                 if (active instanceof BoardScene.Movement movement) {
                     start(movement);
+                } else if (active instanceof AttackRun attackRun) {
+                    startRun(attackRun);
                 } else if (active instanceof BoardScene.Combat combat) {
                     attack = new UnitAttack(combat);
                     attacks.add(attack);
@@ -210,6 +218,7 @@ final class UnitPlayback {
                     if (active instanceof BoardScene.Detonation detonation && !beforeImpact()) {
                         startDetonation(detonation);
                     }
+                    if (run != null) { run.advance(combatSeconds); }
                     volley.advance((float) combatSeconds);
                     attacks.forEach(shot -> {
                         float previous = shot.seconds;
@@ -240,6 +249,8 @@ final class UnitPlayback {
                 reactions.forEach(reaction -> completeMovement.accept(reaction.movement()));
                 if (active instanceof BoardScene.Movement movement) {
                     completeMovement.accept(movement);
+                } else if (active instanceof AttackRun attackRun) {
+                    completeMovement.accept(attackRun.flight());
                 } else if (active instanceof BoardScene.Conversion change) {
                     settleConversion(change);
                 }
@@ -267,6 +278,7 @@ final class UnitPlayback {
             attack = null;
             attacks.forEach(this::completeAttack);
             attacks.clear();
+            run = null;
             reactions.clear();
             volley.clear();
             volleyScene = null;
@@ -284,9 +296,15 @@ final class UnitPlayback {
     }
 
     /** The presented attack: a reviewed one while a review runs, else the live one. */
-    UnitAttack attack() { return review != null ? review : attack; }
+    UnitAttack attack() { return review != null ? review.first() : attack; }
 
-    List<UnitAttack> attacks() { return review != null ? reviewed : visibleAttacks; }
+    List<UnitAttack> attacks() { return review != null ? review.shots() : visibleAttacks; }
+
+    /** @return this unit's motion: a replayed run's own while a review re-flies it, else the live one, or null */
+    UnitMotion motion(int entityId) {
+        UnitMotion reviewed = review == null ? null : review.motion(entityId);
+        return reviewed != null ? reviewed : motions.get(entityId);
+    }
 
     List<UnitAttack> takeCompletedAttacks() {
         var result = List.copyOf(completedAttacks.values());
@@ -319,9 +337,11 @@ final class UnitPlayback {
         if (completedAttacks.size() > MAX_PENDING_EVENTS) { completedAttacks.remove(completedAttacks.keySet().iterator().next()); }
     }
 
-    /** The live movement under way; none while a review presents an attack. */
+    /** The live movement under way; while a review runs, the flight of the run it re-flies, none for a volley. */
     BoardScene.Movement movement() {
-        return review == null && active instanceof BoardScene.Movement move ? move : null;
+        if (review != null) { return review.flight(); }
+        if (active instanceof AttackRun attackRun) { return attackRun.flight(); }
+        return active instanceof BoardScene.Movement move ? move : null;
     }
 
     /**
@@ -342,8 +362,19 @@ final class UnitPlayback {
      * again afterwards. Null ends a review.
      */
     void review(BoardScene.Combat event) {
-        review = event == null ? null : new UnitAttack(event);
-        reviewed = review == null ? List.of() : List.of(review);
+        review = event == null ? null : new ReviewPlayer(List.of(event));
+    }
+
+    /** Re-presents a retained volley as one action, timed as live play timed it. */
+    void reviewVolley(List<BoardScene.Combat> volley) {
+        review = new ReviewPlayer(volley);
+    }
+
+    /** Re-flies a retained attack run on a motion of its own; the aircraft's live motion is not touched. */
+    void reviewRun(AttackRun attackRun) {
+        UnitMotion motion = new UnitMotion(attackRun.flight().path().getFirst());
+        append(motion, attackRun.flight());
+        review = new ReviewPlayer(attackRun, motion);
     }
 
     boolean reviewing() { return review != null; }
@@ -357,6 +388,10 @@ final class UnitPlayback {
         for (var event : pending) {
             if (event instanceof BoardScene.Combat combat) {
                 ids.add(combat.result().id());
+            } else if (event instanceof AttackRun queuedRun) {
+                for (BoardScene.Combat combat : queuedRun.shots()) {
+                    ids.add(combat.result().id());
+                }
             }
         }
         for (UnitAttack shot : attacks) {
@@ -384,7 +419,7 @@ final class UnitPlayback {
 
     /** Adjacent confirmed shots from the same pose form one volley; movement and physical actions are barriers. */
     private void collectVolley() {
-        if (attack == null || !attack.shot()) { return; }
+        if (run != null || attack == null || !attack.shot()) { return; }
         while (attacks.size() < MAX_PENDING_EVENTS) {
             BoardScene.Combat next = null;
             for (var event : pending) {
@@ -433,14 +468,7 @@ final class UnitPlayback {
 
     private boolean sameVolley(BoardScene.Combat next) {
         var primary = attacks.stream().filter(shot -> !shot.defensive()).findFirst().orElse(attack);
-        boolean defensive = next.result().shot() != null && next.result().shot().defensive();
-        if (defensive) {
-            int incoming = primary.defensive() ? primary.event.result().target().entityId() : primary.event.entityId();
-            return next.result().target().entityId() == incoming;
-        }
-        if (primary.defensive()) { return next.entityId() == primary.event.result().target().entityId(); }
-        return next.entityId() == primary.event.entityId()
-              && next.attacker().location().samePose(primary.event.attacker().location());
+        return VolleyRule.joins(primary.event, next);
     }
 
     UnitConversion conversion() { return conversion; }
@@ -471,14 +499,65 @@ final class UnitPlayback {
         stepping = false;
     }
 
+    /** @return the nose pitch of this unit in the attack run under way, in degrees; level for any other unit */
+    float runPitch(int entityId) {
+        if (review != null) {
+            return review.pitch(entityId);
+        }
+        return (run != null) && (run.run().entityId() == entityId) ? run.pitchDegrees() : 0;
+    }
+
+    /** @return the hexes the attack run under way strikes, for the camera to frame with its flight; none without one */
+    List<Coords> runTargets() {
+        if (review != null) {
+            return review.runTargets();
+        }
+        if (run == null) {
+            return List.of();
+        }
+        List<Coords> targets = new ArrayList<>();
+        for (UnitAttack shot : attacks) {
+            if (shot.event.target() != null) {
+                targets.add(shot.event.target().location().coords());
+            }
+        }
+        return targets;
+    }
+
+    /** Starts an aircraft's attack run: its flight plays on the combat clock with its shots timed along it. */
+    private void startRun(AttackRun attackRun) {
+        run = new AttackRunPlayer(attackRun, start(attackRun.flight()));
+        attacks.addAll(run.shots());
+        attack = run.shots().isEmpty() ? null : run.shots().getFirst();
+        combatSeconds = 0;
+        combatDuration = run.duration();
+        combatContact = run.contact();
+        combatTerrainRelease = run.shots().isEmpty() ? 0 : terrainRelease();
+    }
+
+    /** Until its last impact a run shows its aircraft flying and each target as it was before the run. */
+    private void holdRun(Map<Integer, BoardScene.Unit> shown) {
+        holdUnits(run.run().flight(), shown, true);
+        for (UnitAttack shot : attacks) {
+            BoardScene.Unit target = shot.event.target();
+            if (target != null) {
+                shown.putIfAbsent(target.id(), target);
+            }
+        }
+    }
+
     private UnitMotion start(BoardScene.Movement movement) {
         var motion = motions.computeIfAbsent(movement.entityId(), ignored -> new UnitMotion(movement.path().getFirst()));
+        append(motion, movement);
+        return motion;
+    }
+
+    private void append(UnitMotion motion, BoardScene.Movement movement) {
         var unit = movement.unit();
         int members = unit != null && unit.model() != null && unit.model().state() != null
               && unit.model().state().structure().activeTroopers() > 0 ? unit.model().figures() : 0;
         motion.append(movement.path(), movement.type(), movement.jumpMP(), transports.test(unit), movement.movementMP(), members,
               UnitMotion.DEFAULT_SPEED_GAIN_PER_HEX, Float.isFinite(gravityOverride) ? gravityOverride : movement.gravity());
-        return motion;
     }
 
     void finish() {
@@ -488,6 +567,8 @@ final class UnitPlayback {
         if (!completed) { reactions.forEach(reaction -> completeMovement.accept(reaction.movement())); }
         if (active instanceof BoardScene.Movement movement && !completed) {
             completeMovement.accept(movement);
+        } else if (active instanceof AttackRun attackRun && !completed) {
+            completeMovement.accept(attackRun.flight());
         } else if (active instanceof BoardScene.Conversion change) {
             settleConversion(change);
         }
@@ -498,6 +579,10 @@ final class UnitPlayback {
             } else if (event instanceof BoardScene.Movement movement) {
                 start(movement).finish();
                 completeMovement.accept(movement);
+            } else if (event instanceof AttackRun queuedRun) {
+                start(queuedRun.flight()).finish();
+                completeMovement.accept(queuedRun.flight());
+                queuedRun.shots().forEach(combat -> completeAttack(new UnitAttack(combat)));
             } else if (event instanceof BoardScene.Conversion change) {
                 settleConversion(change);
             } else if (event instanceof BoardScene.Combat combat) {
@@ -515,6 +600,8 @@ final class UnitPlayback {
         active = null;
         attack = null;
         attacks.clear();
+        run = null;
+        burstGate.reset();
         reactions.clear();
         volley.clear();
         volleyScene = null;
@@ -599,11 +686,17 @@ final class UnitPlayback {
      */
     BoardScene present(BoardScene scene) {
         BoardScene live = presentLive(scene);
-        if (review == null || review.seconds + 1e-7 >= review.contactSeconds) {
+        if (review == null || !review.beforeContact()) {
             return live;
         }
         Map<Integer, BoardScene.Unit> shown = new LinkedHashMap<>();
-        holdUnits(review.event, shown, true);
+        if (review.flight() != null) {
+            // A re-flown run shows its aircraft flying and each target as it was before the run.
+            holdUnits(review.flight(), shown, true);
+        }
+        for (UnitAttack shot : review.shots()) {
+            holdUnits(shot.event, shown, true);
+        }
         return live.withUnits(replaced(live.units(), shown));
     }
 
@@ -611,8 +704,8 @@ final class UnitPlayback {
         applySceneUpdates();
         // UnitMotion completion includes landing, unloading and formation settling. Pending moves also hide
         // overlays between events; the final completion hold does not delay their return.
-        boolean movementPending = active instanceof BoardScene.Movement && !completed
-              || pending.stream().anyMatch(BoardScene.Movement.class::isInstance);
+        boolean movementPending = (active instanceof BoardScene.Movement || active instanceof AttackRun) && !completed
+              || pending.stream().anyMatch(event -> event instanceof BoardScene.Movement || event instanceof AttackRun);
         // Until the action's terrain change is due (its contact, or a fuel-air round's ignition) the settled scene shows.
         boolean awaitingAction = active != null && !completed && beforeTerrainRelease()
               || pending.stream().anyMatch(event -> !(event instanceof BoardScene.SceneUpdate));
@@ -640,7 +733,8 @@ final class UnitPlayback {
         }
         Map<Integer, BoardScene.Unit> shown = new LinkedHashMap<>();
         if (active != null && !completed && beforeImpact()) {
-            if (attack == null) { holdUnits(active, shown, true); }
+            if (run != null) { holdRun(shown); }
+            else if (attack == null) { holdUnits(active, shown, true); }
             else { attacks.forEach(shot -> holdUnits(shot.event, shown, true)); }
         }
         pending.forEach(event -> holdUnits(event, shown, false));
@@ -690,7 +784,9 @@ final class UnitPlayback {
             // A queued collapse still needs its authorized victim after the volley checkpoint removes it.
             return;
         }
-        if (event instanceof BoardScene.Combat combat) {
+        if (event instanceof AttackRun queuedRun) {
+            holdUnits(queuedRun.flight(), shown, playing);
+        } else if (event instanceof BoardScene.Combat combat) {
             shown.putIfAbsent(combat.attacker().id(), combat.attacker());
             if (combat.target() != null) {
                 shown.putIfAbsent(combat.target().id(), combat.target());

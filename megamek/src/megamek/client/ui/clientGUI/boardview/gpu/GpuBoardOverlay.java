@@ -17,7 +17,6 @@ import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.VertexAttributes;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
@@ -27,9 +26,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
@@ -51,7 +48,7 @@ import megamek.logging.MMLogger;
  * glows, the other targets' rings, the hovered unit's ring), drawn every frame
  * where the units stand, level as selection bands, so that the pointer lays no mark on the terrain
  * again. MegaMek's own movement envelope belongs to the tactical capture (GpuTactical), the displayed weapon's range
- * walls to GpuFireControl, and the view draws the hovered hex's ring. 
+ * walls to GpuFireControl, and the view draws the hovered hex's ring.
  * It draws the frame's snapshots and decides no rule; the marks and meshes are made again only when what
  * they show changed. Owns its meshes, its pulse, its batch and its shape renderer on the GL thread.
  */
@@ -74,6 +71,8 @@ final class GpuBoardOverlay implements Disposable {
     private static final Color GHOST = new Color(.25f, .72f, .95f, 1);
     private static final Color GHOST_GLOW = new Color(.15f, .43f, .57f, 1);
     private static final float GHOST_OPACITY = .75f;
+    /** The plotted route's ghost: that cyan, showing through scenery. */
+    private static final GpuGhostModel.Look ROUTE_GHOST = new GpuGhostModel.Look(GHOST, GHOST_GLOW, GHOST_OPACITY, true);
     /** The marks the board hides show at this opacity (occluded selection outlines). */
     private static final float HIDDEN_OPACITY = .5f;
     // overlay.js:20-31 and 56-57: the bands of a contact, a wreck, another target and the hovered unit.
@@ -141,12 +140,8 @@ final class GpuBoardOverlay implements Disposable {
     // The ghost of the plotted route: the moving unit as the scene shows it and where the route leaves it, or null.
     private BoardScene.Unit mover;
     private BoardScene.Waypoint arrival;
-    /** The ghost last drawn: a copy of {@link #ghostSource} as it looked at build {@link #ghostBuild}. */
-    private ModelInstance ghost;
-    private ModelInstance ghostSource;
-    private long ghostBuild;
-    /** Each ghost material's opacity at rest, which the pulse's surge raises. */
-    private float[] ghostOpacity;
+    /** The ghost last drawn, a copy of the moving unit's shown instance; the pulse's surge raises its opacity. */
+    private final GpuGhostModel routeGhost = new GpuGhostModel(ROUTE_GHOST);
     /** The plotted route's pulse, drawn over the route each frame; the meshes above never change for it. */
     private final GpuRoutePulse pulse = new GpuRoutePulse();
 
@@ -330,6 +325,7 @@ final class GpuBoardOverlay implements Disposable {
                 driftArrow(drift.coords(), drift.driftTo(), opacity);
             }
         }
+        GpuFlightPaths.draw(scene, opacity, this::triangle);
         shapes.end();
     }
 
@@ -485,19 +481,9 @@ final class GpuBoardOverlay implements Disposable {
         if (source == null) {
             return;
         }
-        if (ghost == null || ghostSource != source || ghostBuild != builds) {
-            // The copy owns copies of the shown materials; the meshes stay the shown model's.
-            ghost = new ModelInstance(source);
-            ghostOpacity = new float[ghost.materials.size];
-            for (int index = 0; index < ghost.materials.size; index++) {
-                Material material = ghost.materials.get(index);
-                ghostly(material);
-                ghostOpacity[index] = ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity;
-            }
-            ghostSource = source;
-            ghostBuild = builds;
-        }
-        surge(pulse.surge());
+        // The copy owns copies of the shown materials; the meshes stay the shown model's.
+        ModelInstance ghost = routeGhost.copyOf(source, builds);
+        surge(ghost, pulse.surge());
         // Moves the shown placement from the unit's hex to the destination; facings turn clockwise, Z rotations not.
         Vector3 from = BoardGeometry.center(mover.location().coords(), mover.location().elevation());
         Vector3 to = BoardGeometry.center(arrival.coords(), arrival.elevation());
@@ -515,41 +501,29 @@ final class GpuBoardOverlay implements Disposable {
      * The pulse's surge on the ghost's copied materials: its glow rises and it turns more opaque, then both ease back
      * as the surge does. It never grows: units keep their size.
      */
-    private void surge(float surge) {
+    private void surge(ModelInstance ghost, float surge) {
         float opaque = Math.min(1, surge) * GpuRoutePulse.GHOST_SURGE_OPACITY;
         Color authoredGlow = pulse.arrivalColor(new Color()).mul(surge * GpuRoutePulse.GHOST_SURGE).add(GHOST_GLOW);
         for (int index = 0; index < ghost.materials.size; index++) {
             Material material = ghost.materials.get(index);
-            ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity =
-                  ghostOpacity[index] + (1 - ghostOpacity[index]) * opaque;
+            float rest = routeGhost.restOpacity(index);
+            ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = rest + (1 - rest) * opaque;
             Color glow = ((ColorAttribute) material.get(ColorAttribute.Emissive)).color;
             glow.set(GpuLinearColors.authored(material, authoredGlow));
         }
     }
 
     /**
-     * Turns a copied material into the ghost's: a lit, translucent cyan that keeps only a cut-out (alpha-tested)
+     * Turns a copied material into the route ghost's: a lit, translucent cyan that keeps only a cut-out (alpha-tested)
      * texture, so that a flat sprite keeps its outline.
      */
-    static void ghostly(Material material) { ghostly(material, GHOST, GHOST_GLOW); }
+    static void ghostly(Material material) {
+        GpuGhostModel.apply(material, ROUTE_GHOST);
+    }
 
     /** The ghost in {@code colour}, glowing {@code glow}: the board editor's Erase preview is red. */
     static void ghostly(Material material, Color colour, Color glow) {
-        Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
-        Attribute cutOut = alphaTest == null ? null : material.get(TextureAttribute.Diffuse);
-        Attribute cullFace = material.get(IntAttribute.CullFace);
-        Attribute linearColors = material.get(GpuLinearColors.TYPE);
-        material.clear();
-        if (linearColors != null) { material.set(linearColors); }
-        material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, colour)),
-              ColorAttribute.createEmissive(GpuLinearColors.authored(material, glow)),
-              new BlendingAttribute(GHOST_OPACITY), new DepthTestAttribute(GL20.GL_ALWAYS, false));
-        if (cutOut != null) {
-            material.set(alphaTest, cutOut);
-        }
-        if (cullFace != null) {
-            material.set(cullFace);
-        }
+        GpuGhostModel.apply(material, new GpuGhostModel.Look(colour, glow, GHOST_OPACITY, true));
     }
 
     /** The prototype's layers that lie on hexes, in its drawing order; the batch keeps that order. */
@@ -1076,8 +1050,7 @@ final class GpuBoardOverlay implements Disposable {
             overlay = null;
         }
         // The ghost owns no GL object: its meshes and textures are the shown model's.
-        ghost = null;
-        ghostSource = null;
+        routeGhost.forget();
         pulse.dispose();
         surfaces.clear();
         batch.dispose();

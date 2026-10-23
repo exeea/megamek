@@ -291,27 +291,38 @@ final class GpuUnitModel implements Disposable {
     }
 
     Vector3 place(ModelInstance placed, Camera camera, Vector3 ground, float facing, int height, boolean multiHex) {
-        return place(placed, camera, ground, facing, height, multiHex, familyScale);
+        return place(placed, camera, ground, facing, height, multiHex, familyScale, 0);
     }
 
     private Vector3 place(ModelInstance placed, Camera camera, Vector3 ground, float facing, int height, boolean multiHex,
-          UnitFamilyScale scaleTuning) {
+          UnitFamilyScale scaleTuning, float pitch) {
         if (modularCoordinates) {
             float scale = horizontalScale(null, scaleTuning);
-            return placeScaled(placed, camera, ground, facing, scale, verticalScale(scale, scaleTuning));
+            return placeScaled(placed, camera, ground, facing, scale, verticalScale(scale, scaleTuning), pitch);
         }
         // Schema-1 sprite sections retain their original placement while external compatibility is supported.
         float scale = (multiHex ? 1 : BoardGeometry.unitScale()) * scaleTuning.unitScale();
         float thickness = height * BoardGeometry.level() * BoardGeometry.unitHeightScale()
               * scaleTuning.unitScale() * scaleTuning.heightScale();
         if (meeple()) { thickness /= MeepleVisual.HEIGHT; }
-        return placeScaled(placed, camera, ground, facing, scale, thickness);
+        return placeScaled(placed, camera, ground, facing, scale, thickness, pitch);
     }
 
     Vector3 place(ModelInstance placed, Camera camera, Vector3 ground, float facing, BoardScene.Unit unit) {
+        return place(placed, camera, ground, facing, unit, 0);
+    }
+
+    /**
+     * Places a unit with its nose pitched: an aircraft diving into or climbing out of an attack run. The models' nose
+     * is their local +Y, so the pitch turns about their local X axis, inside the placement's rotation and before its
+     * scale so it never shears the model.
+     *
+     * @param pitch the nose's pitch in degrees: negative nose down
+     */
+    Vector3 place(ModelInstance placed, Camera camera, Vector3 ground, float facing, BoardScene.Unit unit, float pitch) {
         var scaleTuning = familyScale.forUnit(unit);
         if (!modularCoordinates) {
-            return place(placed, camera, ground, facing, unit.height(), unit.part() >= 0, scaleTuning);
+            return place(placed, camera, ground, facing, unit.height(), unit.part() >= 0, scaleTuning, pitch);
         }
         var footprint = unit.footprint().size() > 1 ? UnitFootprint.layout(unit.location().coords(), unit.footprint(), facing) : null;
         float scale = horizontalScale(footprint, scaleTuning);
@@ -320,7 +331,7 @@ final class GpuUnitModel implements Disposable {
         }
         // Rest geometry controls shape. Gameplay height changes when prone/flying and must not flatten the rig.
         float thickness = verticalScale(scale, scaleTuning);
-        return placeScaled(placed, camera, ground, facing, scale, thickness);
+        return placeScaled(placed, camera, ground, facing, scale, thickness, pitch);
     }
 
     /** Horizontal distance conversion shared by placement and the distance-driven gait/wheel animation. */
@@ -351,9 +362,13 @@ final class GpuUnitModel implements Disposable {
     }
 
     private Vector3 placeScaled(ModelInstance placed, Camera camera, Vector3 ground, float facing, float scale,
-          float thickness) {
+          float thickness, float pitch) {
+        Quaternion rotation = new Quaternion(Vector3.Z, -facing);
+        if (pitch != 0) {
+            rotation.mul(new Quaternion(Vector3.X, pitch));
+        }
         // Keep feet half a world unit above the ground.
-        placed.transform.set(ground, new Quaternion(Vector3.Z, -facing))
+        placed.transform.set(ground, rotation)
               .translate(0, 0, 0.5f)
               .scale(scale, scale, thickness);
         return anchor(placed, camera);
