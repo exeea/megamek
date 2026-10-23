@@ -290,10 +290,7 @@ class GpuEditorPreviewSmokeTest {
                             next();
                         }
                         default -> {
-                            // The buffer stop is the rail's, never an object of its own: the two pieces are the markers'.
-                            List<BoundingBox> drawn = installed(turn);
-                            assertEquals(3, ghosts.stream().filter(box -> drawn.stream().anyMatch(other -> other.min.epsilonEquals(box.min, .01f)
-                                  && other.max.epsilonEquals(box.max, .01f))).count(), "The route's three pieces are laid as their ghosts");
+                            // A rail is its terrain's, never an object: GpuRoutePreviewSmokeTest compares its laid pieces with the ghosts.
                             command(Action.BRUSH, "", "6");
                             nextItem();
                         }
