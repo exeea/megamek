@@ -68,8 +68,8 @@ class GpuWallSmokeTest {
                             assertNotNull(hit);
                             assertEquals(coords, hit.coords());
                             double distance = Math.sqrt(hit.distance());
-                            assertTrue(distance >= 39.8 && distance <= 40.2 + 6 * BoardGeometry.hexScale(),
-                                  "The authored roof recess stays within the wall's rules height");
+                            assertTrue(distance >= 40 - 8 * BoardGeometry.hexScale() && distance <= 40.2,
+                                  "The authored roof caps the wall's complete rules levels");
                             assertNotNull(terrain.selectionHit(scene, ray), "The rendered wall remains selectable");
                         }
                         for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
@@ -139,8 +139,8 @@ class GpuWallSmokeTest {
                             var hit = terrain.hit(scene, new Ray(start, new Vector3(0, 0, -1)));
                             assertNotNull(hit);
                             assertEquals(tile.coords(), hit.coords());
-                            assertTrue(Math.sqrt(hit.distance()) >= 39.8
-                                  && Math.sqrt(hit.distance()) <= 40.2 + 6 * BoardGeometry.hexScale(),
+                            assertTrue(Math.sqrt(hit.distance()) >= 40 - 8 * BoardGeometry.hexScale()
+                                  && Math.sqrt(hit.distance()) <= 40.2,
                                   "Each tower keeps its own rules height beside lower wall bays");
                         }
                     }
@@ -152,6 +152,7 @@ class GpuWallSmokeTest {
                     camera.center(BoardGeometry.center(center, 0));
                     renderReady(frame, terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mixed-height-top.png"));
+                    reviewFamilies(frame, terrain, camera, output);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -163,6 +164,67 @@ class GpuWallSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Wall terrain review", failure.get()); }
+    }
+
+    private static void reviewFamilies(GpuReviewFrame frame, GpuTerrain terrain, BoardCamera camera, File output)
+          throws Exception {
+        int[] cfs = { 10, 15, 40, 90, 150, 151 };
+        Hex[] hexes = new Hex[13 * 7];
+        for (int y = 0; y < 7; y++) {
+            for (int x = 0; x < 13; x++) {
+                boolean wall = x % 2 == 1 && y >= 2 && y <= 4;
+                int exits = y == 2 ? 8 : y == 4 ? 1 : 9;
+                hexes[y * 13 + x] = new Hex(0, wall ? "building:5:" + exits
+                      + ";bldg_elev:2;bldg_cf:" + cfs[x / 2] + ";bldg_basement_type:1" : "", "");
+            }
+        }
+        Board board = new Board(13, 7, hexes);
+        BoardSceneryLayouts.convert(board);
+        var scene = captured(board);
+        terrain.update(scene);
+        camera.setIsometric(true);
+        camera.fit(scene);
+        camera.center(BoardGeometry.center(new Coords(6, 3), 1));
+        camera.camera.zoom = .55f;
+        camera.update();
+        renderReady(frame, terrain, camera, scene);
+        GpuReviewFrame.save(new File(output, "cf-families-oblique.png"));
+        camera.setIsometric(false);
+        camera.center(BoardGeometry.center(new Coords(6, 3), 0));
+        camera.update();
+        renderReady(frame, terrain, camera, scene);
+        GpuReviewFrame.save(new File(output, "cf-families-top.png"));
+
+        var assets = (GpuAssets) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "assets");
+        var civilian = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 10));
+        var castle = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 151));
+        assertNotSame(civilian, castle, "The cache distinguishes identical layouts from different families");
+        assertSame(castle, assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 200)));
+        Coords edited = new Coords(11, 3);
+        var changedHex = board.getHex(edited).duplicate();
+        changedHex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_CF, 10));
+        board.setHex(edited, changedHex);
+        var changed = captured(board);
+        assertFalse(scene.tile(edited).sameGeometry(changed.tile(edited)));
+        terrain.update(changed);
+        renderReady(frame, terrain, camera, changed);
+        boolean replaced = false;
+        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "props")) {
+                if (edited.equals(GpuMixedUnitBenchmarkSmokeTest.field(prop, "coords"))) {
+                    assertSame(civilian.getFirst(), GpuMixedUnitBenchmarkSmokeTest.field(prop, "pickingModel"),
+                          "A CF-only edit replaces the installed draw and picking model");
+                    replaced = true;
+                }
+            }
+        }
+        assertTrue(replaced);
+        GpuReviewFrame.save(new File(output, "cf-family-changed.png"));
+    }
+
+    private static BoardScene captured(Board board) {
+        return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
+              List.of(), List.of(), -1, "", List.of());
     }
 
     /** A changed AO configuration can invalidate shaders during the first render; capture only a settled frame. */

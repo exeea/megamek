@@ -154,12 +154,12 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      * ({@code woods} 0 for none, 1 light, 2 heavy, 3 ultra) and a structure: its {@code structure} kind (a building's
      * type 1-5, {@link #FUEL_TANK} or {@link #INDUSTRIAL}, 0 for none), the hexsides it continues across
      * ({@code exits}, MegaMek directions), its current construction factor (the hex tooltip's rule: the board's
-     * building, else the hex's own CF; 0 for industry) and its height in levels.
+     * building, else the hex's own CF; 0 for industry), pristine map CF for wall appearance, and height in levels.
      */
-    record Cover(int woods, boolean jungle, int structure, int exits, int cf, int height) {
+    record Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height) {
         static final int FUEL_TANK = 6;
         static final int INDUSTRIAL = 7;
-        static final Cover NONE = new Cover(0, false, 0, 0, 0, 0);
+        static final Cover NONE = new Cover(0, false, 0, 0, 0, 0, 0);
 
         static Cover capture(megamek.common.Hex hex, megamek.common.units.IBuilding building, Coords coords) {
             boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
@@ -168,17 +168,19 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 return new Cover(woods, jungle, hex.terrainLevel(Terrains.BUILDING),
                       hex.getTerrain(Terrains.BUILDING).getExits() & 63,
                       building == null ? hex.terrainLevel(Terrains.BLDG_CF) : building.getCurrentCF(coords),
+                      hex.terrainLevel(Terrains.BLDG_CF),
                       hex.terrainLevel(Terrains.BLDG_ELEV));
             }
             if (hex.containsTerrain(Terrains.FUEL_TANK)) {
                 return new Cover(woods, jungle, FUEL_TANK, hex.getTerrain(Terrains.FUEL_TANK).getExits() & 63,
                       building == null ? hex.terrainLevel(Terrains.FUEL_TANK_CF) : building.getCurrentCF(coords),
+                      hex.terrainLevel(Terrains.FUEL_TANK_CF),
                       hex.terrainLevel(Terrains.FUEL_TANK_ELEV));
             }
             if (hex.containsTerrain(Terrains.INDUSTRIAL)) {
-                return new Cover(woods, jungle, INDUSTRIAL, 0, 0, hex.terrainLevel(Terrains.INDUSTRIAL));
+                return new Cover(woods, jungle, INDUSTRIAL, 0, 0, 0, hex.terrainLevel(Terrains.INDUSTRIAL));
             }
-            return woods == 0 ? NONE : new Cover(woods, jungle, 0, 0, 0, 0);
+            return woods == 0 ? NONE : new Cover(woods, jungle, 0, 0, 0, 0, 0);
         }
     }
 
@@ -691,6 +693,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                   && corridor.equals(other.corridor) && deckCorridor.equals(other.deckCorridor)
                   && surface == other.surface && detailedGround == other.detailedGround && road == other.road && biome == other.biome
                   && liquid.equals(other.liquid) && features.equals(other.features) && groundCover.equals(other.groundCover)
+                  && BoardWall.family(this) == BoardWall.family(other)
                   && appearance.equals(other.appearance);
         }
     }

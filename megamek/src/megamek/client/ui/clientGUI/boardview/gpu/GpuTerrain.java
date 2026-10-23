@@ -2534,6 +2534,7 @@ final class GpuTerrain implements Disposable {
                           || refit && !nextCoast.sameCorners(previousCoast, tile.coords());
                     if (shore || !same && (before.frozen() != tile.frozen() || before.biome() != tile.biome()
                           || !before.groundCover().equals(tile.groundCover())
+                          || BoardWall.family(before) != BoardWall.family(tile)
                           || !solidFeatures(before).equals(solidFeatures(tile)))) {
                         int reach = shore ? editReach(beforeScene, scene, at) : 2;
                         for (int x = at.getX() - reach; x <= at.getX() + reach; x++) {
@@ -4282,7 +4283,7 @@ final class GpuTerrain implements Disposable {
                       || fungus || metal || feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/");
                 float sourceHeight = fitHeight ? bounds.getDepth() : 1;
                 float verticalScale = coral ? coralScale
-                      : building == null ? feature.height() * BoardGeometry.level() / sourceHeight
+                      : building == null && wallLayout == null ? feature.height() * BoardGeometry.level() / sourceHeight
                       : BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT;
                 // Authored colonies and understory retain their proportions when fitted to the foliage height.
                 float horizontalScale = fungus || coral

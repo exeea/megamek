@@ -100,7 +100,9 @@ final class GpuBuilding implements Disposable {
     /** Validate module roles before allocating GPU resources. Sparse variant numbers are supported. */
     static Map<String, String> parts(ModelData data) {
         Map<String, String> result = new LinkedHashMap<>();
-        for (var node : data.nodes) {
+        // Wall kits also use this metadata on concurrent terrain workers; libGDX's cached iterator is shared.
+        for (int index = 0; index < data.nodes.size; index++) {
+            var node = data.nodes.get(index);
             var match = PART.matcher(node.id);
             require(match.matches(), "Expected -baseN, -floorN or -roofN: " + node.id);
             require(node.parts != null && node.parts.length > 0 && (node.children == null || node.children.length == 0),

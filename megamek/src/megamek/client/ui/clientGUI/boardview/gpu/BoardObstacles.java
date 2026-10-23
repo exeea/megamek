@@ -160,7 +160,7 @@ final class BoardObstacles {
                   || feature.asset().startsWith("buildings/");
             float verticalScale = object != null ? 1 : feature.kind() == BoardScene.FeatureKind.SCENERY
                   ? scale * (float) feature.stretch().z()
-                  : custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
+                  : custom || wall ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
             // Scenery grounds its lowest authored vertex, including models with an offset origin.
             float low = ground + feature.elevation() * BoardGeometry.level()

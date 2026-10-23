@@ -46,6 +46,36 @@ class GpuMapSourceTest {
     @TempDir
     Path temporary;
 
+    @Test
+    void inspectorWallCfRefreshesItsFamilyWithoutRebuildingTheBoardsBuildingObjects() throws Exception {
+        onEdt(() -> {
+            var editor = new BoardEditorSession();
+            Coords at = new Coords(0, 0);
+            Board board = new Board();
+            board.newData(1, 1, new Hex[] { new Hex(0,
+                  "building:5:0;bldg_elev:2;bldg_cf:150;bldg_basement_type:1", "") }, null);
+            editor.game().setBoard(board);
+            try (var source = new GpuMapSource(editor.game(), null, editor)) {
+                var before = source.takeFrame().scene().tile(at);
+                assertEquals(BoardWall.Family.HARDENED, BoardWall.family(before));
+                long generation = source.takeFrame().boardGeneration();
+                source.editorPointer(at, 0, 0, false, generation);
+                source.endEditorStroke();
+                source.editorCommand(new Command(Action.TERRAIN, "bldg_cf", "11"), generation);
+                var after = source.takeFrame().scene().tile(at);
+                assertEquals(150, board.getBuildingAt(at).getCurrentCF(at), "Map edits leave gameplay objects untouched");
+                assertEquals(11, after.cover().pristineCF());
+                assertEquals(BoardWall.Family.LIGHT, BoardWall.family(after));
+                assertFalse(before.sameGeometry(after));
+                source.editorCommand(new Command(Action.UNDO), generation);
+                assertEquals(BoardWall.Family.HARDENED, BoardWall.family(source.takeFrame().scene().tile(at)));
+                source.editorCommand(new Command(Action.REDO), generation);
+                assertEquals(BoardWall.Family.LIGHT, BoardWall.family(source.takeFrame().scene().tile(at)));
+            }
+            return null;
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void printCapturesEveryLabelWithoutChangingTheViewOrDocument(boolean editing) throws Exception {

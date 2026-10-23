@@ -33,15 +33,13 @@ class BoardWallHeightTest {
     void repeatedBodyJoinsRemainSolidAtAndImmediatelyAroundEverySeam() {
         for (int levels : new int[] { 6, 30 }) {
             var triangles = BoardWall.triangles("buildings/wall-9", levels);
-            float bodyHeight = levels * HexTile.LEVEL_HEIGHT - 12;
-            int repeats = (int) Math.ceil(bodyHeight / 42);
-            for (int section = 0; section <= repeats; section++) {
-                float seam = 6 + section * bodyHeight / repeats;
+            for (int section = 1; section < levels; section++) {
+                float seam = section * HexTile.LEVEL_HEIGHT;
                 for (float offset : new float[] { -.001f, 0, .001f }) {
                     var hit = new Vector3();
                     assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(40, 0, seam + offset),
                           new Vector3(-1, 0, 0)), triangles, hit), "Every repeat meets a closed side surface");
-                    assertTrue(hit.x >= HexTile.ROAD_HALF_WIDTH - .01f);
+                    assertTrue(hit.x >= .7f * HexTile.ROAD_HALF_WIDTH - .01f);
                 }
             }
         }
@@ -57,7 +55,8 @@ class BoardWallHeightTest {
             var triangles = BoardWall.triangles(layout);
             var bounds = new BoundingBox().inf();
             triangles.forEach(bounds::ext);
-            assertEquals(6 * HexTile.LEVEL_HEIGHT, bounds.max.z, .001f, "The tower keeps its complete rules height");
+            assertEquals(6 * HexTile.LEVEL_HEIGHT + 6.2f, bounds.max.z, .001f,
+                  "The tower keeps six full levels and its barbed-wire crown");
             for (int direction : new int[] { 0, 3 }) {
                 var neighbor = scene.neighbor(own, direction);
                 var next = BoardWall.layout(scene, neighbor, neighbor.features().getFirst());

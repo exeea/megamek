@@ -16,8 +16,10 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelMesh;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelMeshPart;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
+import com.badlogic.gdx.math.Matrix3;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ShortArray;
 import megamek.common.Configuration;
@@ -28,13 +30,38 @@ import megamek.common.enums.BuildingType;
 final class BoardWall {
     static final int LODS = 2;
     private static final String PREFIX = "buildings/wall-";
-    private static final float SOURCE_HEIGHT = 54;
-    private static final float TRIM = 6;
-    private static final float BAY_START = 25;
     private static final float BAY_LENGTH = 18;
     private static final Map<File, BoardKit<List<ModelData>>> COMPONENTS = new ConcurrentHashMap<>();
 
     private BoardWall() { }
+
+    enum Family {
+        CIVILIAN("civilian", 17.5f), LIGHT("light", 25), MEDIUM("medium", 25),
+        HEAVY("heavy", 25), HARDENED("hardened", 25), CASTLE_BRIAN("castle_brian", 25);
+
+        final String folder;
+        final float bayStart;
+
+        Family(String folder, float bayStart) {
+            this.folder = folder;
+            this.bayStart = bayStart;
+        }
+    }
+
+    /** Pristine map CF, unaffected by damage. CF 150 belongs to hardened; Castle Brian starts at 151. */
+    static Family family(int cf) {
+        if (cf <= 10) { return Family.CIVILIAN; }
+        if (cf <= 15) { return Family.LIGHT; }
+        if (cf <= 40) { return Family.MEDIUM; }
+        if (cf <= 90) { return Family.HEAVY; }
+        if (cf <= 150) { return Family.HARDENED; }
+        return Family.CASTLE_BRIAN;
+    }
+
+    /** Only generated walls change geometry when an edit crosses a family boundary; model overrides stay authored. */
+    static Family family(BoardScene.Tile tile) {
+        return tile.features().stream().anyMatch(feature -> supports(feature.asset())) ? family(tile.cover().pristineCF()) : null;
+    }
 
     static boolean supports(String asset) {
         if (!asset.startsWith(PREFIX)) { return false; }
@@ -53,25 +80,29 @@ final class BoardWall {
     /** A reload publishes new immutable source data; in-flight terrain workers keep their existing copies. */
     static void reload() { COMPONENTS.clear(); }
 
-    private static ModelData component(String name, int lod) {
-        File root = new File(Configuration.dataDir(), "models/board");
-        File file = new File(root, "buildings/fortress/" + name + ".glb").getAbsoluteFile();
+    private static ModelData component(Family family, String name, int lod) {
+        File root = new File(Configuration.dataDir(), "models/buildings");
+        File file = new File(root, "walls/" + family.folder + "/" + name + ".glb").getAbsoluteFile();
         return COMPONENTS.computeIfAbsent(file,
               key -> new BoardKit<>(() -> RigidGlb.loadLods(new FileHandle(key), root.toPath()))).get().get(lod);
     }
 
     /** Derived from the captured board; shared by CPU clearance, picking and the GPU model cache. */
-    record Layout(String asset, int height, List<Integer> arms) {
+    record Layout(String asset, Family family, int height, List<Integer> arms) {
         Layout { arms = List.copyOf(arms); }
     }
 
     static Layout layout(String asset, int height) {
+        return layout(asset, height, 0);
+    }
+
+    static Layout layout(String asset, int height, int cf) {
         int levels = Math.max(1, height);
-        return new Layout(asset, levels, java.util.Collections.nCopies(6, levels));
+        return new Layout(asset, family(cf), levels, java.util.Collections.nCopies(6, levels));
     }
 
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
-        Layout own = layout(feature.asset(), Math.round(feature.height()));
+        Layout own = layout(feature.asset(), Math.round(feature.height()), tile.cover().pristineCF());
         List<Integer> arms = new ArrayList<>(own.arms());
         int exits = Integer.parseInt(feature.asset().substring(PREFIX.length()));
         for (int direction = 0; direction < 6; direction++) {
@@ -89,7 +120,7 @@ final class BoardWall {
                 arms.set(direction, Math.min(own.height(), top));
             }
         }
-        return new Layout(own.asset(), own.height(), arms);
+        return new Layout(own.asset(), own.family(), own.height(), arms);
     }
 
     /** Local +Y follows the exit; the exact board lattice also supplies the half-bay's endpoint. */
@@ -113,8 +144,9 @@ final class BoardWall {
         for (int direction = 0; direction < 6; direction++) {
             if ((exits & (1 << direction)) == 0) { continue; }
             end = joint(direction);
+            float start = layout.family().bayStart;
             result.add(new Piece("half-bay", (float) Math.atan2(-end.x, end.y),
-                  BAY_START, (end.len() - BAY_START) / BAY_LENGTH, layout.arms().get(direction)));
+                  start, (end.len() - start) / BAY_LENGTH, layout.arms().get(direction)));
         }
         return List.copyOf(result);
     }
@@ -135,8 +167,8 @@ final class BoardWall {
     static ModelData model(String asset, int levels) { return model(asset, levels, 0); }
 
     /**
-     * The source's base and parapet retain their depth at every rules height. Matching body sections repeat rather
-     * than stretching vertically; atlas UVs, images and material factors remain authored. No GL resource belongs here.
+     * The same base/floor/roof contract as ordinary modular buildings: one grounded module per rules level,
+     * then the roof. UVs, images and material factors remain authored. No GL resource belongs here.
      */
     static ModelData model(String asset, int levels, int lod) {
         return model(layout(asset, levels), lod);
@@ -149,7 +181,7 @@ final class BoardWall {
         var materials = new HashSet<String>();
         int index = 0;
         for (Piece piece : pieces(layout)) {
-            var source = (RigidGlb.Data) component(piece.name(), lod);
+            var source = (RigidGlb.Data) component(layout.family(), piece.name(), lod);
             String materialPrefix = piece.name() + "/";
             result.images.putAll(source.images);
             // libGDX Array reuses its iterator: immutable kit data is read concurrently by terrain workers.
@@ -169,113 +201,94 @@ final class BoardWall {
                 if (cutoff != null) { result.alphaTests.put(id, cutoff); }
             }
             String piecePrefix = piece.name() + "-" + index++ + "/";
-            float height = piece.height() * HexTile.LEVEL_HEIGHT;
-            for (Section section : sections(height)) {
-                append(result, source, piece, section, piecePrefix + section.name() + "/", materialPrefix);
-            }
-        }
-        return result;
-    }
-
-    private record Section(String name, float from, float to, float base, float scale) { }
-
-    private static List<Section> sections(float height) {
-        List<Section> result = new ArrayList<>();
-        result.add(new Section("base", 0, TRIM, 0, 1));
-        float body = height - 2 * TRIM;
-        int count = (int) Math.ceil(body / (SOURCE_HEIGHT - 2 * TRIM));
-        float size = body / count;
-        for (int index = 0; index < count; index++) {
-            result.add(new Section("body-" + index, TRIM, SOURCE_HEIGHT - TRIM, TRIM + index * size,
-                  size / (SOURCE_HEIGHT - 2 * TRIM)));
-        }
-        result.add(new Section("cap", SOURCE_HEIGHT - TRIM, SOURCE_HEIGHT, height - TRIM, 1));
-        return result;
-    }
-
-    private static void append(RigidGlb.Data result, RigidGlb.Data source, Piece piece, Section section,
-          String prefix, String materialPrefix) {
-        var included = new HashSet<String>();
-        for (int meshIndex = 0; meshIndex < source.meshes.size; meshIndex++) {
-            var mesh = source.meshes.get(meshIndex);
-            var copy = new ModelMesh();
-            copy.id = prefix + mesh.id;
-            copy.attributes = mesh.attributes;
-            var vertices = new FloatArray();
-            int[] remap = new int[mesh.vertices.length / RigidGlb.STRIDE];
-            Arrays.fill(remap, -1);
-            List<ModelMeshPart> parts = new ArrayList<>();
-            for (var original : mesh.parts) {
-                var indices = new ShortArray();
-                for (int offset = 0; offset < original.indices.length; offset += 3) {
-                    float z = 0;
-                    for (int corner = 0; corner < 3; corner++) {
-                        z += mesh.vertices[Short.toUnsignedInt(original.indices[offset + corner]) * RigidGlb.STRIDE + 2] / 3;
-                    }
-                    boolean body = z >= TRIM && z < SOURCE_HEIGHT - TRIM;
-                    if (!(section.name().equals("base") ? z < TRIM : section.name().equals("cap")
-                          ? z >= SOURCE_HEIGHT - TRIM : body)) { continue; }
-                    for (int corner = 0; corner < 3; corner++) {
-                        int old = Short.toUnsignedInt(original.indices[offset + corner]);
-                        int vertex = old * RigidGlb.STRIDE;
-                        float vz = mesh.vertices[vertex + 2];
-                        if (vz < section.from() - .001f || vz > section.to() + .001f) {
-                            throw new IllegalArgumentException("Wall triangles must end at body section boundaries: " + piece.name());
-                        }
-                        if (remap[old] < 0) {
-                            remap[old] = vertices.size / RigidGlb.STRIDE;
-                            vertices.addAll(mesh.vertices, vertex, RigidGlb.STRIDE);
-                        }
-                        indices.add((short) remap[old]);
+            var roles = GpuBuilding.parts(source);
+            var selected = GpuBuilding.select(roles, piece.height(), 0);
+            for (int level = 0; level < selected.size(); level++) {
+                String name = roles.get(selected.get(level));
+                for (int nodeIndex = 0; nodeIndex < source.nodes.size; nodeIndex++) {
+                    var node = source.nodes.get(nodeIndex);
+                    if (node.id.equals(name)) {
+                        append(result, source, piece, node, level,
+                              piecePrefix + selected.get(level) + "-at-" + level + "/", materialPrefix);
+                        break;
                     }
                 }
-                if (indices.isEmpty()) { continue; }
-                var part = new ModelMeshPart();
-                part.id = prefix + original.id;
-                part.primitiveType = original.primitiveType;
-                part.indices = indices.toArray();
-                parts.add(part);
-                included.add(original.id);
             }
-            if (parts.isEmpty()) { continue; }
-            copy.vertices = vertices.toArray();
-            transform(copy.vertices, piece, section);
-            copy.parts = parts.toArray(ModelMeshPart[]::new);
-            result.meshes.add(copy);
         }
-        for (int nodeIndex = 0; nodeIndex < source.nodes.size; nodeIndex++) {
-            var node = source.nodes.get(nodeIndex);
-            if (node.children.length != 0 || !Arrays.equals(new Matrix4().val,
-                  new Matrix4(node.translation, node.rotation, node.scale).val)) {
-                throw new IllegalArgumentException("Wall components need flat identity nodes: " + piece.name());
-            }
-            var copy = new ModelNode();
-            copy.id = prefix + node.id; copy.meshId = prefix + node.meshId;
-            copy.children = new ModelNode[0];
-            List<ModelNodePart> parts = new ArrayList<>();
-            for (var original : node.parts) {
-                if (!included.contains(original.meshPartId)) { continue; }
-                var part = new ModelNodePart();
-                part.meshPartId = prefix + original.meshPartId;
-                part.materialId = materialPrefix + original.materialId;
-                parts.add(part);
-            }
-            if (parts.isEmpty()) { continue; }
-            copy.parts = parts.toArray(ModelNodePart[]::new);
-            result.nodes.add(copy);
-        }
+        return result;
     }
 
-    private static void transform(float[] vertices, Piece piece, Section section) {
+    private static void append(RigidGlb.Data result, RigidGlb.Data source, Piece piece, ModelNode node, int level,
+          String prefix, String materialPrefix) {
+        Matrix4 placement = new Matrix4(node.translation, node.rotation, node.scale);
+        Matrix3 normals = new Matrix3().set(placement).inv().transpose();
+        var bounds = new BoundingBox().inf();
+        var point = new Vector3();
+        var mesh = source.meshes.first();
+        var included = new HashSet<String>();
+        for (var part : node.parts) { included.add(part.meshPartId); }
+        var copy = new ModelMesh();
+        copy.id = prefix + mesh.id;
+        copy.attributes = mesh.attributes;
+        var vertices = new FloatArray();
+        int[] remap = new int[mesh.vertices.length / RigidGlb.STRIDE];
+        Arrays.fill(remap, -1);
+        List<ModelMeshPart> parts = new ArrayList<>();
+        for (var original : mesh.parts) {
+            if (!included.contains(original.id)) { continue; }
+            var indices = new ShortArray();
+            for (short originalIndex : original.indices) {
+                int old = Short.toUnsignedInt(originalIndex);
+                int vertex = old * RigidGlb.STRIDE;
+                if (remap[old] < 0) {
+                    remap[old] = vertices.size / RigidGlb.STRIDE;
+                    int at = vertices.size;
+                    vertices.addAll(mesh.vertices, vertex, RigidGlb.STRIDE);
+                    point.set(vertices.get(at), vertices.get(at + 1), vertices.get(at + 2)).mul(placement);
+                    bounds.ext(point);
+                    vertices.set(at, point.x); vertices.set(at + 1, point.y); vertices.set(at + 2, point.z);
+                    point.set(vertices.get(at + 3), vertices.get(at + 4), vertices.get(at + 5)).mul(normals).nor();
+                    vertices.set(at + 3, point.x); vertices.set(at + 4, point.y); vertices.set(at + 5, point.z);
+                }
+                indices.add((short) remap[old]);
+            }
+            var part = new ModelMeshPart();
+            part.id = prefix + original.id;
+            part.primitiveType = original.primitiveType;
+            part.indices = indices.toArray();
+            parts.add(part);
+        }
+        if (!bounds.isValid() || !node.id.contains("-roof")
+              && Math.abs(bounds.getDepth() - GpuBuilding.LEVEL_HEIGHT) >= .001f) {
+            throw new IllegalArgumentException("Invalid wall module height: " + node.id);
+        }
+        copy.vertices = vertices.toArray();
+        transform(copy.vertices, piece, level * GpuBuilding.LEVEL_HEIGHT + GpuBuilding.moduleOffset(bounds).z);
+        copy.parts = parts.toArray(ModelMeshPart[]::new);
+        result.meshes.add(copy);
+        var copiedNode = new ModelNode();
+        copiedNode.id = prefix + node.id; copiedNode.meshId = copy.id;
+        copiedNode.children = new ModelNode[0];
+        List<ModelNodePart> nodeParts = new ArrayList<>();
+        for (var original : node.parts) {
+            var part = new ModelNodePart();
+            part.meshPartId = prefix + original.meshPartId;
+            part.materialId = materialPrefix + original.materialId;
+            nodeParts.add(part);
+        }
+        copiedNode.parts = nodeParts.toArray(ModelNodePart[]::new);
+        result.nodes.add(copiedNode);
+    }
+
+    private static void transform(float[] vertices, Piece piece, float height) {
         float c = (float) Math.cos(piece.turn()), s = (float) Math.sin(piece.turn());
         var normal = new Vector3();
         for (int i = 0; i < vertices.length; i += RigidGlb.STRIDE) {
             float x = vertices[i], y = vertices[i + 1] * piece.lengthScale() + piece.start(), z = vertices[i + 2];
             vertices[i] = c * x - s * y;
             vertices[i + 1] = s * x + c * y;
-            vertices[i + 2] = section.base() + (z - section.from()) * section.scale();
-            normal.set(vertices[i + 3], vertices[i + 4] / piece.lengthScale(),
-                  vertices[i + 5] / section.scale()).nor();
+            vertices[i + 2] = z + height;
+            normal.set(vertices[i + 3], vertices[i + 4] / piece.lengthScale(), vertices[i + 5]).nor();
             vertices[i + 3] = c * normal.x - s * normal.y;
             vertices[i + 4] = s * normal.x + c * normal.y;
             vertices[i + 5] = normal.z;
