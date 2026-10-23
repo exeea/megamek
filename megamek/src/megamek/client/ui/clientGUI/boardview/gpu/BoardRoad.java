@@ -673,7 +673,7 @@ final class BoardRoad {
             Kind neighbor = neighbors.apply(direction);
             float width = neighbor == Kind.NONE ? kind.halfWidth : (kind.halfWidth + neighbor.halfWidth) / 2;
             ends.add(new Point(x, y, width));
-            directions.add(bends.apply(direction));
+            directions.add(radial ? null : bends.apply(direction));
             sides.add(direction);
             if (neighbor != Kind.NONE && neighbor != kind) {
                 float length = (float) Math.hypot(x, y);
@@ -693,9 +693,11 @@ final class BoardRoad {
             // A 120-degree connection uses the same broad course as its rail. Holding straight corridors inside
             // this bend pinches the bridge around the track, even though both reach the same border midpoints.
             paths.add(course(ends.get(0), ends.get(1)));
-        } else if (ends.size() == 2 && !radial) {
-            // A return turn needs the whole hex to keep its inner shoulder open at full road width.
-            boolean returnTurn = RailRoute.piece(sides.get(0), sides.get(1)) < 0;
+        } else if (ends.size() == 2) {
+            // A return turn needs the whole hex to keep its inner shoulder open at full road width. A climbing one holds
+            // both ramp corridors instead; its legs converge too closely for an open inner shoulder, which closes into
+            // the wedge between the ramps.
+            boolean returnTurn = !radial && RailRoute.piece(sides.get(0), sides.get(1)) < 0;
             if (returnTurn) {
                 for (int i = 0; i < directions.size(); i++) {
                     if (directions.get(i) == null) { directions.set(i, new Vector2(ends.get(i).x, ends.get(i).y).nor()); }
@@ -746,30 +748,6 @@ final class BoardRoad {
                 }
                 if (to.x != finish.x || to.y != finish.y) { line(path, to, finish); }
             }
-            path.addAll(tail.reversed().subList(1, tail.size()));
-            paths.add(path);
-        } else if (ends.size() == 2) {
-            // A climbing return turn runs in to the hex centre to keep both ramps long and turns just beyond it. Its
-            // legs converge too closely for an open inner shoulder, which closes into the wedge between the ramps, so
-            // the apex rounds as widely as they allow, at most with the inner shoulder's radius.
-            List<Point> path = new ArrayList<>(), tail = new ArrayList<>();
-            Point from = approach(path, ends.get(0), null, kind), to = approach(tail, ends.get(1), null, kind);
-            float radius = kind.halfWidth + SHOULDER;
-            Vector2 vertex = new Vector2(ends.get(0).x + ends.get(1).x, ends.get(0).y + ends.get(1).y).nor().scl(-radius);
-            Vector2 in = new Vector2(vertex.x - from.x, vertex.y - from.y), out = new Vector2(vertex.x - to.x, vertex.y - to.y);
-            float s = in.len(), u = out.len();
-            in.nor();
-            out.nor();
-            float cos = Math.clamp(in.dot(out), -1f, 1f), halfCos = (float) Math.sqrt((1 - cos) / 2);
-            float arm = Math.min(Math.min(s, u), radius * (float) Math.sqrt((1 + cos) / (1 - cos)));
-            Point start = new Point(from.x + in.x * (s - arm), from.y + in.y * (s - arm), from.width);
-            Point finish = new Point(to.x + out.x * (u - arm), to.y + out.y * (u - arm), to.width);
-            float reach = 4 * arm * halfCos / (3 * (1 + halfCos));
-            // Straight runs only where the arc leaves room for them: a repeated point has no direction to measure from.
-            if (s > arm) { line(path, from, start); }
-            curve(path, start, new Point(start.x + in.x * reach, start.y + in.y * reach, start.width),
-                  new Point(finish.x + out.x * reach, finish.y + out.y * reach, finish.width), finish);
-            if (u > arm) { line(path, finish, to); }
             path.addAll(tail.reversed().subList(1, tail.size()));
             paths.add(path);
         } else if (ends.isEmpty()) {
