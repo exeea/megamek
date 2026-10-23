@@ -107,13 +107,24 @@ interface BoardSource extends AutoCloseable {
 
     /**
      * One published snapshot. {@code status} and {@code panels} are always the newest capture; {@code panels} bundles
-     * the HUD services' snapshots. A map preview or the board editor publishes empty ones.
+     * the HUD services' snapshots. A map preview or the board editor publishes empty ones. A battle's {@code tooltip}
+     * is the hex tooltip of the hovered hex, or of the open menu's, and {@code hexDetails} that hex's lines below its
+     * terrain ({@link GpuBoardSource#hexDetails}); empty elsewhere.
      */
     public record Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
-          List<BoardScene.Command> globalCommands, String tooltip,
+          List<BoardScene.Command> globalCommands, String tooltip, String hexDetails,
           BoardFocus centerRequest, long boardGeneration, String actorName,
           BoardAtmosphere.Settings scenarioAtmosphere, GpuReportLog.Snapshot reports,
           GpuBattleStatus.Snapshot status, GpuHudData panels) {
+        /** A frame without a hex's lines below its terrain. */
+        public Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
+              List<BoardScene.Command> globalCommands, String tooltip, BoardFocus centerRequest, long boardGeneration,
+              String actorName, BoardAtmosphere.Settings scenarioAtmosphere, GpuReportLog.Snapshot reports,
+              GpuBattleStatus.Snapshot status, GpuHudData panels) {
+            this(scene, timeline, context, globalCommands, tooltip, "", centerRequest, boardGeneration, actorName,
+                  scenarioAtmosphere, reports, status, panels);
+        }
+
         /** A map's frame: no reports, battle status or HUD panels. */
         public Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
               List<BoardScene.Command> globalCommands, String tooltip, BoardFocus centerRequest, long boardGeneration,
@@ -124,13 +135,13 @@ interface BoardSource extends AutoCloseable {
 
         /** This frame with the animation events queued since the previous frame was taken. */
         Frame withTimeline(List<BoardScene.Animation> events) {
-            return new Frame(scene, events, context, globalCommands, tooltip, centerRequest, boardGeneration,
-                  actorName, scenarioAtmosphere, reports, status, panels);
+            return new Frame(scene, events, context, globalCommands, tooltip, hexDetails, centerRequest,
+                  boardGeneration, actorName, scenarioAtmosphere, reports, status, panels);
         }
 
         /** This frame showing {@code shown}, the scene the playback presents; this frame when it is its own. */
         Frame withScene(BoardScene shown) {
-            return shown == scene ? this : new Frame(shown, timeline, context, globalCommands, tooltip,
+            return shown == scene ? this : new Frame(shown, timeline, context, globalCommands, tooltip, hexDetails,
                   centerRequest, boardGeneration, actorName, scenarioAtmosphere, reports, status, panels);
         }
 

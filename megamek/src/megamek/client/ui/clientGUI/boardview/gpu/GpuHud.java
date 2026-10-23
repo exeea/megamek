@@ -302,17 +302,20 @@ final class GpuHud implements GpuBoardHud {
         GpuPlayersPanel players = new GpuPlayersPanel(kit, source, state);
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
+        GpuHexTip hexTip = new GpuHexTip(kit, state, contextMenu);
         List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, losPanel, phaseHeader,
               initiativeCard, conditionsCard, forces, unitCard, recordSheet, utilities, hint, minimap, overlays,
-              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, toasts, modal));
+              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, toasts,
+              modal));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
         // prototype's #fx strokes (guides, traces, leaders) under every board label, the nameplates included (G8b).
         northSlot = slot(labels, utilities.north());
-        // The unit panel's hover card and slot popover share the popover layer with the context menu.
+        // The hex's hover card, the unit panel's hover card and slot popover share the popover layer with the context
+        // menu, which opens over them.
         List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, boardLabels.fx()),
               slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
-              slot(popover, unitCard.overlay()), slot(popover, recordSheet.overlay()),
+              slot(popover, hexTip.actor()), slot(popover, unitCard.overlay()), slot(popover, recordSheet.overlay()),
               slot(popover, contextMenu.actor()), slot(popover, dock.confirmation().actor())));
         phaseSlot = panel(panels, phaseHeader.actor()).top().left().fillX();
         conditionsSlot = panel(panels, conditionsCard.actor()).top().left().fillX();

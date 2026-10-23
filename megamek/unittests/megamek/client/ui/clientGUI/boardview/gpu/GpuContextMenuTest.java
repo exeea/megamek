@@ -46,6 +46,32 @@ class GpuContextMenuTest {
     }
 
     /**
+     * The hex menu's header and the hover card follow the terrain line with the hex tooltip's lines below it, as
+     * MegaMek words them: a bridge's height and CF, which no terrain name carries. A tooltip of another hex shows
+     * neither, so lines of one capture never pair with another hex.
+     */
+    @Test
+    void aBridgesHeightAndCfFollowTheTerrainLine() {
+        Hex bridge = new Hex(0, "bridge:1:9;bridge_elev:1;bridge_cf:40", "", HEX);
+        String details = GpuBoardSource.hexDetails(bridge, null, 0);
+        assertEquals(List.of("Bridge", "Height: 1, CF: 40"), details.lines().toList());
+
+        BoardScene scene = mock(BoardScene.class);
+        BoardScene.Tile tile = mock(BoardScene.Tile.class);
+        when(scene.tile(HEX)).thenReturn(tile);
+        String tooltip = terrainLine(0, "bridge:1:9;bridge_elev:1;bridge_cf:40");
+        assertEquals(GpuContextMenu.subtitle(tooltip, HEX, 0) + "\n" + details,
+              GpuContextMenu.hexLines(frame(scene, tooltip, details), HEX));
+        when(scene.tile(new Coords(14, 12))).thenReturn(tile);
+        assertNull(GpuContextMenu.hexLines(frame(scene, tooltip, details), new Coords(14, 12)));
+    }
+
+    private static BoardSource.Frame frame(BoardScene scene, String tooltip, String details) {
+        return new BoardSource.Frame(scene, List.of(), null, List.of(), tooltip, details, null, 0, "", null,
+              GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, GpuHudData.EMPTY);
+    }
+
+    /**
      * The units of a hex that the unit menus list first and repeated clicks take in turn: every unit the scene draws
      * there, in the scene's order, a grounded DropShip in each hex of its footprint and a unit drawn in parts once.
      */

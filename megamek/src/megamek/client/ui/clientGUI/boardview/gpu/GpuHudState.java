@@ -161,7 +161,8 @@ final class GpuHudState {
             BoardScene scene = frame.scene() == null ? null : frame.scene().withPlaybackSelection(
                   selectionCleared ? Entity.NONE : focus);
             return new GpuBoardSource.Frame(scene, frame.timeline(), null, frame.globalCommands(), frame.tooltip(),
-                  frame.centerRequest(), frame.boardGeneration(), focus == Entity.NONE ? "" : selectionFrame.actorName(),
+                  frame.hexDetails(), frame.centerRequest(), frame.boardGeneration(),
+                  focus == Entity.NONE ? "" : selectionFrame.actorName(),
                   frame.scenarioAtmosphere(), frame.reports(), focusStatus, shown);
         }
         GpuBattleStatus.Snapshot status = frame.status();
@@ -183,8 +184,8 @@ final class GpuHudState {
         BoardScene.Context context = frame.context();
         return new GpuBoardSource.Frame(frame.scene(), frame.timeline(),
               locked && context != null && !context.selectionCleared() ? null : context,
-              frame.globalCommands(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(),
-              locked ? "" : frame.actorName(), frame.scenarioAtmosphere(), frame.reports(),
+              frame.globalCommands(), frame.tooltip(), frame.hexDetails(), frame.centerRequest(),
+              frame.boardGeneration(), locked ? "" : frame.actorName(), frame.scenarioAtmosphere(), frame.reports(),
               locked ? presentedStatus : status, shown);
     }
 
