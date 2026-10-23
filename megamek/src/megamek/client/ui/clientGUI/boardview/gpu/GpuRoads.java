@@ -620,6 +620,51 @@ final class GpuRoads {
         return mask(patch, (x, y, scratch) -> color(road, patch, x, y, scratch));
     }
 
+    /**
+     * The mask texels this carrier can display. A neighbour's shared mask can change outside these triangles without
+     * changing this hex. Keep a texel around the edges for linear filtering; discard wholly invisible patches.
+     */
+    static MaskData visibleMask(Coords at, MaskData mask, List<BoardTacticalGeometry.Triangle> triangles) {
+        var pixels = mask.pixels();
+        float density = pixels.width() / mask.width();
+        var path = new Path2D.Float();
+        for (var triangle : triangles) {
+            var points = List.of(triangle.a(), triangle.b(), triangle.c());
+            for (int i = 0; i < points.size(); i++) {
+                var p = points.get(i);
+                float x = maskU(at, mask, p) * pixels.width(), y = maskV(at, mask, p) * pixels.height();
+                if (i == 0) { path.moveTo(x, y); } else { path.lineTo(x, y); }
+            }
+            path.closePath();
+        }
+        var image = new BufferedImage(pixels.width(), pixels.height(), BufferedImage.TYPE_INT_ARGB);
+        var graphics = image.createGraphics();
+        try {
+            graphics.setColor(java.awt.Color.WHITE);
+            graphics.fill(path);
+            graphics.setStroke(new BasicStroke(2));
+            graphics.draw(path);
+        } finally { graphics.dispose(); }
+        int[] visible = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
+        // Decode a compacted mask once, not by a search per texel.
+        var decoded = java.nio.IntBuffer.allocate(visible.length);
+        pixels.writeRgba(decoded, 0, visible.length);
+        int minX = pixels.width(), minY = pixels.height(), maxX = -1, maxY = -1;
+        for (int y = 0; y < pixels.height(); y++) {
+            for (int x = 0; x < pixels.width(); x++) {
+                int i = y * pixels.width() + x, rgba = decoded.get(i);
+                if (visible[i] == 0 || (rgba & 255) == 0) { visible[i] = 0; continue; }
+                visible[i] = Integer.rotateRight(rgba, 8);
+                minX = Math.min(minX, x); minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+            }
+        }
+        if (maxX < minX) { return null; }
+        return new MaskData(new BoardScene.Pixels(image.getSubimage(minX, minY, maxX - minX + 1, maxY - minY + 1)).compact(),
+              Math.round(mask.x() * density + minX) / density, Math.round(mask.y() * density + minY) / density,
+              (maxX - minX + 1) / density, (maxY - minY + 1) / density);
+    }
+
     @FunctionalInterface
     interface MaskColor {
         Color at(float x, float y, Color scratch);
@@ -688,11 +733,19 @@ final class GpuRoads {
 
     private static short carrier(MeshPartBuilder mesh, Vector3 p, Vector3 normal, float repeat, Mask mask, BoardScene.Tile tile,
           float coat) {
-        float scale = BoardGeometry.hexScale();
-        float u = ((p.x - BoardGeometry.centerX(tile.coords())) / scale - mask.data.x()) / mask.data.width();
-        float v = ((p.y - BoardGeometry.centerY(tile.coords())) / scale - mask.data.y()) / mask.data.height();
-        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat, u, v,
+        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat,
+              maskU(tile.coords(), mask.data, p), maskV(tile.coords(), mask.data, p),
               mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV);
+    }
+
+    /** Where the point {@code p} of the hex at {@code at} lies across {@code mask}: 0 at its left edge, 1 at its right. */
+    static float maskU(Coords at, MaskData mask, Vector3 p) {
+        return ((p.x - BoardGeometry.centerX(at)) / BoardGeometry.hexScale() - mask.x()) / mask.width();
+    }
+
+    /** Where the point {@code p} of the hex at {@code at} lies down {@code mask}: 0 at its first row, 1 past its last. */
+    static float maskV(Coords at, MaskData mask, Vector3 p) {
+        return ((p.y - BoardGeometry.centerY(at)) / BoardGeometry.hexScale() - mask.y()) / mask.height();
     }
 
     static float coverage(BoardRoad road, Patch patch, float x, float y) {

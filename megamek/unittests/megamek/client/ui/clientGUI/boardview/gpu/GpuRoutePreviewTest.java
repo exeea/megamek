@@ -3,9 +3,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.awt.geom.Area;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
@@ -22,7 +25,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuRoutePreviewTest {
     @ParameterizedTest
-    @ValueSource(strings = { "road", "rail", "wall", "bridge" })
+    @ValueSource(strings = { "road", "rail", "maglev", "wall", "bridge" })
     void pendingNeighbourhoodMatchesCommittedConnections(String kind) {
         var session = new BoardEditorSession();
         session.game().setBoard(Board.createEmptyBoard(12, 12));
@@ -63,8 +66,29 @@ class GpuRoutePreviewTest {
         assertFalse(actual.get(DepthTestAttribute.class, DepthTestAttribute.Type).depthMask);
     }
 
+    @Test void roadComparisonIgnoresPaintOutsideTheReceivingTrianglesButKeepsVisibleColourChanges() {
+        Coords at = new Coords(4, 3);
+        var a = BoardGeometry.center(at, 0);
+        float scale = BoardGeometry.hexScale();
+        var triangles = List.of(new BoardTacticalGeometry.Triangle(a,
+              a.cpy().add(20 * scale, 0, 0), a.cpy().add(0, 20 * scale, 0), -1));
+        var paint = new GpuRoads.Patch(new Area(new Rectangle2D.Float(-2, -2, 24, 24)), "roads/asphalt", Color.WHITE, 20, 0, null);
+        var original = GpuRoads.mask(paint, (x, y, scratch) -> Color.WHITE);
+        // Inside the carrier's bounds, but beyond its diagonal edge: a neighbouring bend's paint.
+        var outside = GpuRoads.mask(paint, (x, y, scratch) -> x > 15 && y > 15 ? Color.RED : Color.WHITE);
+        var inside = GpuRoads.mask(paint, (x, y, scratch) -> x < 5 && y < 5 ? Color.RED : Color.WHITE);
+        assertNotEquals(original, outside);
+        assertEquals(GpuRoads.visibleMask(at, original, triangles), GpuRoads.visibleMask(at, outside, triangles));
+        assertNotEquals(GpuRoads.visibleMask(at, original, triangles), GpuRoads.visibleMask(at, inside, triangles));
+        var elsewhere = new GpuRoads.Patch(new Area(new Rectangle2D.Float(30, 30, 10, 10)), "roads/asphalt", Color.WHITE, 20, 0, null);
+        assertNull(GpuRoads.visibleMask(at, GpuRoads.mask(elsewhere, (x, y, scratch) -> Color.WHITE), triangles));
+    }
+
     static void choose(BoardEditorSession session, String kind) {
-        if (kind.equals("rail")) { session.command(new Command(Action.ASSET, "", RailRoute.Kind.RAIL.asset), null); }
+        if (kind.equals("rail") || kind.equals("maglev")) {
+            var route = kind.equals("rail") ? RailRoute.Kind.RAIL : RailRoute.Kind.MAGLEV;
+            session.command(new Command(Action.ASSET, "", route.asset), null);
+        }
         else {
             session.command(new Command(Action.CHOOSE_BRUSH, kind.equals("wall") ? "building" : kind,
                   kind.equals("wall") ? "wall" : kind.equals("road") ? "1" : "bridge/truss"), null);
@@ -78,7 +102,8 @@ class GpuRoutePreviewTest {
 
     static GpuEditorPreview.Data data(BoardEditorSession session, BoardTiles capture, Coords end) {
         var edit = session.preview(end, 0, 0, "ground");
-        return GpuEditorPreview.data(edit, false, session.snapshot().activeBrush(), session.snapshot().drawsRoutes(),
+        return GpuEditorPreview.data(edit, session.snapshot().tool() == BoardEditorSession.Tool.ERASE,
+              session.snapshot().activeBrush(), session.snapshot().drawsRoutes(),
               (at, hex) -> capture.preview(session.board(), at, hex,
               next -> edit.after().getOrDefault(next, session.board().getHex(next))));
     }

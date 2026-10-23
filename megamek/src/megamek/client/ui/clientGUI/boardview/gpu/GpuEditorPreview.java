@@ -4,9 +4,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -18,7 +20,6 @@ import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
@@ -27,9 +28,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
@@ -54,21 +53,25 @@ import megamek.common.units.Terrains;
 /**
  * The board editor's Paint and Erase preview at the pointer (b10-scope "Paint placement preview" and "Route drawing
  * direction preview"): what the next pointer event would do, as {@link BoardEditorSession#preview} computes it by running
- * that event unseen. Placed objects, stamps' members, decals and route pieces show as ghosts built by the board's own
- * placement and route builders. Drawn roads, rails, walls and bridges use the pending neighbourhood's committed
- * geometry, including changed connections, with the movement destination's blue ghost material. Other terrain cards
- * use tinted stand-ins; Erase shows what goes in red. Hovering rebuilds no installed terrain.
+ * that event unseen. Placed objects, stamps' members and decals show as ghosts built by the board's own placement.
+ * Wherever the event touches roads, bridges, rails, maglev or walls, the tiles whose pieces change show those pieces as
+ * the committed builders make them in the pending neighbourhood, joins included ({@link GpuTerrain#previewRoutes}),
+ * in place of the installed ones; a tile left without pieces shows the ones that go. That comparison runs on a worker:
+ * the frame never waits for it, and the pieces shown stay until it finishes. Ghosts are the movement destination's
+ * blue, what goes red. Terrain cards' results show as tinted stand-ins. Hovering rebuilds no installed terrain.
  */
 final class GpuEditorPreview implements Disposable {
     /**
      * The preview as the render thread draws it, made on the EDT ({@link #data}): the hex the event lands on, whether it
      * erases, the hexes it changes (while a route is drawn by hand, the hexes of its path), the objects it shows by hex
      * (Paint: each changed hex's objects afterwards; Erase: those that go), the terrain stand-ins, their tint (rgba8888),
-     * the label at {@link #at}, route stubs (marked red), and the pending route neighbourhood captured on the EDT.
+     * the label at {@link #at}, route stubs (marked red), the pending tiles of the route neighbourhood the event touches
+     * (empty where it touches no route), and whether the brush draws routes, whose own terrain then shows as their
+     * pieces rather than as stand-ins.
      */
     record Data(Coords at, boolean erase, List<Coords> hexes, Map<Coords, List<BoardScene.Feature>> objects,
           List<StandIn> standIns, int tint, String label, List<Coords> stubs, List<DeckOutline> decks,
-          Map<Coords, BoardScene.Tile> routes, boolean wallRoute) {
+          Map<Coords, BoardScene.Tile> routes, boolean routeBrush) {
         static final Data NONE = new Data(null, false, List.of(), Map.of(), List.of(), 0, "", List.of(), List.of(), Map.of(), false);
     }
     record DeckOutline(Coords at, int level, boolean removed) { }
@@ -81,12 +84,14 @@ final class GpuEditorPreview implements Disposable {
 
     /** Erase's red: the editor's issue red. */
     private static final Color ERASE = Color.valueOf("FF554C");
-    private static final float FILL_OPACITY = .38f, GHOST_OPACITY = .55f, HIDDEN = .4f;
+    private static final Color ERASE_GLOW = new Color(ERASE.r * .5f, ERASE.g * .3f, ERASE.b * .3f, 1);
+    private static final float FILL_OPACITY = .38f, HIDDEN = .4f;
     /** The stand-ins' tops lie this many levels above their level, over the drawn ground's small relief. */
     private static final float LIFT = .06f;
     /**
-     * The most object ghosts a preview builds: a hex stamp's objects over a wide brush show by its footprint and
-     * stand-ins only, as building a ghost each (a decal's projection, a route's ground) would stall the frame.
+     * The most object ghosts, and the most hexes of a route neighbourhood, a preview builds: a hex stamp's objects over
+     * a wide brush show by its footprint and stand-ins only, as building a ghost each (a decal's projection, a route's
+     * ground) would stall the frame.
      */
     private static final int GHOSTS = 200;
     /** A centreline's half width, in hex widths. */
@@ -107,12 +112,20 @@ final class GpuEditorPreview implements Disposable {
     private GpuTerrain builtFor;
     private boolean builtBusy;
     private BoardScene builtScene;
+    /** The installed pending infrastructure; it stays until a comparison for a later preview replaces it. */
     private GpuTerrain.EditorRoutes routes;
+    /** The route comparison under way on a worker ({@link GpuTerrain#compareRoutes}); stale once a later preview is built. */
+    private CompletableFuture<List<GpuTerrain.RouteChange>> comparing;
+    private boolean stale;
     private FrameBuffer ghostLayer;
     private SpriteBatch composite;
+    private final Matrix4 projection = new Matrix4();
     private final IntBuffer viewport = BufferUtils.newIntBuffer(4), framebuffer = BufferUtils.newIntBuffer(1);
+    /** What the ghost layer draws: the route pieces, then {@link #objects}. */
     private final List<ModelInstance> ghosts = new ArrayList<>();
-    /** The models this preview made (route and decal ghosts, the stand-ins), disposed with the next build. */
+    /** The built preview's object ghosts: placed objects, stamps' members and decals. */
+    private final List<ModelInstance> objects = new ArrayList<>();
+    /** The models this preview made (decal ghosts, the stand-ins), disposed with the next build. */
     private final List<Model> owned = new ArrayList<>();
     private ModelInstance standIns;
     private final List<BoundingBox> outlines = new ArrayList<>();
@@ -125,11 +138,11 @@ final class GpuEditorPreview implements Disposable {
 
     /**
      * {@code preview} as the render thread draws it ({@link Data}); {@code capture} makes a hex the tile it would be at its
-     * coords (BoardTiles#preview), whose minimap colour ({@link GpuMinimap#colour}) tints Paint's stand-ins. A route drawn by
-     * hand is labelled with what it lays ({@code brush} where no terrain names it), its length and the session's notice.
-     * On the EDT.
+     * coords (BoardTiles#preview), whose minimap colour ({@link GpuMinimap#colour}) tints Paint's stand-ins, and captures
+     * the route neighbourhood the event touches. A route drawn by hand is labelled with what it lays ({@code brush} where
+     * no terrain names it), its length and the session's notice; {@code routeBrush} says the brush draws routes. On the EDT.
      */
-    static Data data(BoardEditorSession.Preview preview, boolean erase, BoardEditorSession.Brush brush, boolean routePaint,
+    static Data data(BoardEditorSession.Preview preview, boolean erase, BoardEditorSession.Brush brush, boolean routeBrush,
           BiFunction<Coords, Hex, BoardScene.Tile> capture) {
         if (preview.after().isEmpty() && preview.path().isEmpty() && preview.layers().isEmpty()) { return Data.NONE; }
         Set<String> removed = preview.removed().stream().map(BoardEditorSession.Selection::object).collect(Collectors.toSet());
@@ -177,11 +190,13 @@ final class GpuEditorPreview implements Disposable {
         int tint = erase ? Color.rgba8888(ERASE) : labelled == null ? 0
               : GpuMinimap.colour(capture.apply(labelled, preview.after().get(labelled)));
         Map<Coords, BoardScene.Tile> routes = new LinkedHashMap<>();
-        if (!erase && routePaint) {
+        Set<Coords> area = new LinkedHashSet<>(preview.after().keySet());
+        area.addAll(preview.path());
+        if (preview.at() != null) { area.add(preview.at()); }
+        boolean touchesRoutes = !preview.path().isEmpty() || preview.after().entrySet().stream().anyMatch(entry ->
+              routed(entry.getValue(), entry.getKey()) || routed(preview.before().get(entry.getKey()), entry.getKey()));
+        if (touchesRoutes && area.size() <= GHOSTS) {
             // A join changes its neighbours' curves, ramps and end caps even without changing their saved fields.
-            Set<Coords> area = new java.util.LinkedHashSet<>(preview.after().keySet());
-            area.addAll(preview.path());
-            if (preview.at() != null) { area.add(preview.at()); }
             for (int ring = 0; ring < 2; ring++) {
                 for (Coords at : List.copyOf(area)) {
                     for (int side = 0; side < 6; side++) { area.add(at.translated(side)); }
@@ -193,7 +208,15 @@ final class GpuEditorPreview implements Disposable {
             }
         }
         return new Data(labelled == null ? preview.at() : labelled, erase, hexes, objects, List.copyOf(standIns), tint, label,
-              List.copyOf(stubs), List.copyOf(decks), Map.copyOf(routes), brush.component().equals("building"));
+              List.copyOf(stubs), List.copyOf(decks), Map.copyOf(routes), routeBrush);
+    }
+
+    /** Whether {@code hex} holds what the route builders draw: a road, a bridge, a wall or a route's object. */
+    private static boolean routed(Hex hex, Coords at) {
+        return hex.containsAnyTerrainOf(Terrains.ROAD, Terrains.BRIDGE)
+              || hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()
+              || BoardFeatures.decorations(hex, at).stream().anyMatch(feature -> BoardRail.route(feature)
+                    || BoardFeatures.terrainOwned(feature.decoration()));
     }
 
     /** A hex's file form without its objects: what a terrain card changes. */
@@ -246,21 +269,24 @@ final class GpuEditorPreview implements Disposable {
 
     /**
      * Prepare before the scene's colour and depth passes so replaced infrastructure is hidden in every pass. Rebuild
-     * when the edit, installed scene or renderer changes; no authoritative board state is kept on the render thread.
+     * when the edit, installed scene or renderer changes, and install a finished route comparison; no authoritative
+     * board state is kept on the render thread.
      */
     void prepare(BoardScene scene, GpuTerrain terrain, Data data) {
         boolean busy = terrain.busy();
-        if (data != built || terrain != builtFor || builtScene == null || scene == null
-              || scene.tiles() != builtScene.tiles() || builtBusy && !busy) { build(scene, terrain, data); }
+        boolean edited = builtScene == null || scene == null || scene.tiles() != builtScene.tiles();
+        // A release edits the scene: its pieces stay ghosts until the terrain installs them, never the old ones between.
+        boolean installing = busy && edited && routes != null && terrain == builtFor;
+        if (!installing && (data != built || terrain != builtFor || edited || builtBusy && !busy)) { build(scene, terrain, data); }
         builtBusy = busy;
+        if (comparing != null && comparing.isDone()) { compared(); }
     }
 
-    /** Draw over the finished frame: other terrain's stand-ins, then model ghosts. */
+    /** Draw over the finished frame: the stand-ins, then the ghosts. */
     void render(Camera camera, BoardScene scene, GpuTerrain terrain, Data data) {
         prepare(scene, terrain, data);
-        if (data == Data.NONE) { return; }
         if (standIns == null && ghosts.isEmpty()) { return; }
-        if (routes != null && !ghosts.isEmpty()) { renderGhostLayer(camera); }
+        if (!ghosts.isEmpty()) { renderGhostLayer(camera); }
         blend.begin();
         try {
             if (standIns != null) {
@@ -275,24 +301,21 @@ final class GpuEditorPreview implements Disposable {
                 }
             }
             if (!ghosts.isEmpty()) {
-                if (routes != null) {
-                    // Composite opacity once, so overlapping road coats and wall modules do not make bright blobs.
-                    Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
-                    composite.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, ghostLayer.getWidth(), ghostLayer.getHeight()));
-                    composite.begin();
-                    // This overload takes the bottom-left UV first. Framebuffer and screen share that origin.
-                    composite.draw(ghostLayer.getColorBufferTexture(), 0, 0, ghostLayer.getWidth(), ghostLayer.getHeight(), 0, 0, 1, 1);
-                    composite.end();
-                } else {
-                    batch.begin(camera);
-                    ghosts.forEach(ghost -> batch.render(ghost, light));
-                    batch.end();
-                }
+                // Composite opacity once, so overlapping coats, modules and parts do not make bright blobs.
+                Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+                composite.setProjectionMatrix(projection.setToOrtho2D(0, 0, ghostLayer.getWidth(), ghostLayer.getHeight()));
+                composite.begin();
+                // This overload takes the bottom-left UV first. Framebuffer and screen share that origin.
+                composite.draw(ghostLayer.getColorBufferTexture(), 0, 0, ghostLayer.getWidth(), ghostLayer.getHeight(), 0, 0, 1, 1);
+                composite.end();
             }
         } finally { blend.end(); }
     }
 
-    /** Nearest preview surface per pixel, with the gameplay ghost's colour/opacity, over the untouched scene depth. */
+    /**
+     * The nearest ghost surface per pixel, in its colour and with its opacity in alpha ({@link #layered}), over a clear
+     * layer of its own: ghosts show through the scene, as the movement destination's does.
+     */
     private void renderGhostLayer(Camera camera) {
         viewport.clear(); Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, viewport);
         framebuffer.clear(); Gdx.gl.glGetIntegerv(GL30.GL_DRAW_FRAMEBUFFER_BINDING, framebuffer);
@@ -311,22 +334,10 @@ final class GpuEditorPreview implements Disposable {
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glClearColor(0, 0, 0, 0);
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
-            for (var ghost : ghosts) {
-                for (Material material : ghost.materials) {
-                    material.get(BlendingAttribute.class, BlendingAttribute.Type).blended = false;
-                    material.set(new DepthTestAttribute(GL20.GL_LEQUAL, true));
-                }
-            }
             batch.begin(camera);
             ghosts.forEach(ghost -> batch.render(ghost, light));
             batch.end();
         } finally {
-            for (var ghost : ghosts) {
-                for (Material material : ghost.materials) {
-                    material.get(BlendingAttribute.class, BlendingAttribute.Type).blended = true;
-                    material.set(new DepthTestAttribute(GL20.GL_ALWAYS, false));
-                }
-            }
             Gdx.gl.glBindFramebuffer(GL30.GL_FRAMEBUFFER, framebuffer.get(0));
             Gdx.gl.glViewport(viewport.get(0), viewport.get(1), width, height);
             if (srgb) { Gdx.gl.glEnable(GpuLinearOverlay.FRAMEBUFFER_SRGB); }
@@ -344,51 +355,33 @@ final class GpuEditorPreview implements Disposable {
     /** A stand-in material's opacity where nothing hides it: the centrelines nearly opaque, the fills faint. */
     private static float opacity(Material material) { return material.id.equals("lines") ? .9f : FILL_OPACITY; }
 
+    /**
+     * Builds {@code data}'s object ghosts and stand-ins, and starts comparing its route neighbourhood ({@link #compare}).
+     * The route pieces shown stay until that comparison installs the new ones, so the frame never waits for it.
+     */
     private void build(BoardScene scene, GpuTerrain terrain, Data data) {
         clear();
+        if (terrain != builtFor || scene == null || data.routes().isEmpty()) { dropRoutes(); }
         built = data;
         builtFor = terrain;
         builtScene = scene;
-        if (data == Data.NONE || scene == null) { return; }
+        if (comparing != null) { stale = true; }
+        else if (scene != null && !data.routes().isEmpty()) { compare(); }
+        if (data == Data.NONE || scene == null) { collect(); return; }
         Color tint = new Color(data.tint());
-        if (!data.routes().isEmpty()) {
-            var pending = new ArrayList<>(scene.tiles());
-            data.routes().forEach((at, tile) -> pending.set(at.getX() * scene.height() + at.getY(), tile));
-            routes = terrain.previewRoutes(scene.withTiles(pending), data.routes().keySet(), data.wallRoute());
-            routes.ghosts.forEach((at, instances) -> instances.forEach(ghost -> {
-                ghost.materials.forEach(material -> ghostly(material, data.stubs().contains(at)));
-                ghosts.add(ghost);
-            }));
-        }
-        // Other object placements keep their existing support rules; drawn infrastructure was collected together above.
-        List<BoardScene.Tile> tiles = null;
-        for (var entry : data.objects().entrySet()) {
+        // Placed objects, stamps' members and decals; the route pieces are their tiles' (compared).
+        long count = data.objects().entrySet().stream().mapToLong(entry -> {
             var tile = scene.tile(entry.getKey());
-            if (tile == null) { continue; }
-            List<BoardScene.Feature> others = tile.features().stream().filter(feature -> feature.decoration() == null).toList();
-            if (!data.erase() && entry.getValue().stream().anyMatch(BoardRail::route)) {
-                if (tiles == null) { tiles = new ArrayList<>(scene.tiles()); }
-                List<BoardScene.Feature> features = new ArrayList<>(others);
-                features.addAll(entry.getValue());
-                tiles.set(entry.getKey().getX() * scene.height() + entry.getKey().getY(), tile.withFeatures(features));
-            }
-        }
-        BoardScene shown = tiles == null ? scene : scene.withTiles(tiles);
-        long count = data.objects().entrySet().stream().mapToLong(entry -> entry.getValue().stream()
-              .filter(feature -> data.erase() || scene.tile(entry.getKey()) == null
-                    || !scene.tile(entry.getKey()).features().contains(feature)).count()).sum();
+            return tile == null ? 0 : entry.getValue().stream().filter(feature -> objectGhost(tile, feature, data.erase())).count();
+        }).sum();
         for (var entry : count > GHOSTS ? Map.<Coords, List<BoardScene.Feature>>of().entrySet() : data.objects().entrySet()) {
             Coords at = entry.getKey();
-            var tile = shown.tile(at);
+            var tile = scene.tile(at);
             if (tile == null) { continue; }
             for (var feature : entry.getValue()) {
-                if (routes != null && GpuTerrain.routeFeature(tile, feature)) { continue; }
-                if (!data.erase() && scene.tile(at).features().contains(feature)) { continue; }
+                if (!objectGhost(tile, feature, data.erase())) { continue; }
                 ModelInstance ghost;
-                if (BoardRail.route(feature)) {
-                    ghost = terrain.routeGhost(data.erase() ? scene : shown, tile, feature);
-                    if (ghost != null) { owned.add(ghost.model); }
-                } else if (feature.decoration().kind().equals("decal")) {
+                if (feature.decoration().kind().equals("decal")) {
                     Model paint = terrain.decalGhost(at, feature, new Material("paint"));
                     if (paint != null) { owned.add(paint); }
                     ghost = paint == null ? null : new ModelInstance(paint);
@@ -396,13 +389,14 @@ final class GpuEditorPreview implements Disposable {
                     ghost = terrain.editorGhost(at, feature);
                 }
                 if (ghost == null) { continue; }
-                // Where a drawn route ends in a new stub (a turn too sharp to lay), its ghost is red, as Erase's.
-                for (Material material : ghost.materials) { ghostly(material, data.erase() || data.stubs().contains(at)); }
-                ghosts.add(ghost);
+                for (Material material : ghost.materials) { ghostly(material, data.erase()); }
+                layered(ghost);
+                objects.add(ghost);
                 if (data.erase()) { outlines.add(ghost.calculateBoundingBox(new BoundingBox()).mul(ghost.transform)); }
             }
         }
-        if (routes == null && !data.standIns().isEmpty()) {
+        collect();
+        if (!data.routeBrush() && !data.standIns().isEmpty()) {
             Model model = standInModel(data.standIns(), tint, data.erase());
             owned.add(model);
             standIns = new ModelInstance(model);
@@ -412,28 +406,62 @@ final class GpuEditorPreview implements Disposable {
         labelPoint.set(BoardGeometry.center(data.at(), top + .5f));
     }
 
-    /**
-     * Paint uses the gameplay destination ghost; Erase keeps its red tint. Cut-out textures keep their silhouettes.
-     */
-    static void ghostly(Material material, boolean erase) {
-        if (!erase) {
-            GpuBoardOverlay.ghostly(material);
+    /** Compares the built preview's pending route neighbourhood with the installed scene, on a worker. */
+    private void compare() {
+        var pending = new ArrayList<>(builtScene.tiles());
+        built.routes().forEach((at, tile) -> pending.set(at.getX() * builtScene.height() + at.getY(), tile));
+        comparing = builtFor.compareRoutes(builtScene, builtScene.withTiles(pending), built.routes().keySet());
+    }
+
+    /** A comparison finished: its pieces replace the route ghosts, or for a stale one the latest preview is compared. */
+    private void compared() {
+        var done = comparing;
+        comparing = null;
+        var changes = done.join();
+        if (stale) {
+            stale = false;
+            if (builtScene != null && !built.routes().isEmpty()) { compare(); }
             return;
         }
-        if (erase) {
-            Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
-            Attribute cutOut = alphaTest == null ? null : material.get(TextureAttribute.Diffuse);
-            Attribute cullFace = material.get(IntAttribute.CullFace);
-            Attribute linearColors = material.get(GpuLinearColors.TYPE);
-            material.clear();
-            if (linearColors != null) { material.set(linearColors); }
-            material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, ERASE)),
-                  ColorAttribute.createEmissive(GpuLinearColors.authored(material,
-                        new Color(ERASE.r * .5f, ERASE.g * .3f, ERASE.b * .3f, 1))));
-            if (cutOut != null) { material.set(alphaTest, cutOut); }
-            if (cullFace != null) { material.set(cullFace); }
+        dropRoutes();
+        routes = builtFor.previewRoutes(changes);
+        routes.ghosts.forEach((at, pieces) -> pieces.forEach(ghost -> {
+            // What goes is red; so is a piece where a drawn route ends in a new stub (a turn too sharp to lay).
+            boolean goes = routes.removed.contains(at);
+            ghost.materials.forEach(material -> ghostly(material, goes || built.stubs().contains(at)));
+            layered(ghost);
+            if (goes && built.erase()) { outlines.add(ghost.calculateBoundingBox(new BoundingBox()).mul(ghost.transform)); }
+        }));
+        collect();
+    }
+
+    private void collect() {
+        ghosts.clear();
+        if (routes != null) { routes.ghosts.values().forEach(ghosts::addAll); }
+        ghosts.addAll(objects);
+    }
+
+    private void dropRoutes() {
+        if (routes != null) { routes.dispose(); routes = null; }
+    }
+
+    /** Whether the event's object {@code feature} of {@code tile} shows as an object ghost: not a route piece, and new or going. */
+    private static boolean objectGhost(BoardScene.Tile tile, BoardScene.Feature feature, boolean erase) {
+        return !GpuTerrain.routeFeature(tile, feature) && (erase || !tile.features().contains(feature));
+    }
+
+    /** Paint's ghost is the movement destination's ({@link GpuBoardOverlay#ghostly}); what goes is the same in red. */
+    static void ghostly(Material material, boolean erase) {
+        if (erase) { GpuBoardOverlay.ghostly(material, ERASE, ERASE_GLOW); }
+        else { GpuBoardOverlay.ghostly(material); }
+    }
+
+    /** A ghost as {@link #renderGhostLayer} draws it: opaque and depth-tested within the layer, whose composite blends it. */
+    private static void layered(ModelInstance ghost) {
+        for (Material material : ghost.materials) {
+            material.get(BlendingAttribute.class, BlendingAttribute.Type).blended = false;
+            material.set(new DepthTestAttribute(GL20.GL_LEQUAL, true));
         }
-        material.set(new BlendingAttribute(GHOST_OPACITY), new DepthTestAttribute(GL20.GL_LEQUAL, false));
     }
 
     /** The stand-ins as one mesh: their tinted tops and sides, and their centrelines in white (Erase: pale red). */
@@ -495,8 +523,7 @@ final class GpuEditorPreview implements Disposable {
     }
 
     private void clear() {
-        if (routes != null) { routes.dispose(); routes = null; }
-        ghosts.clear();
+        objects.clear();
         outlines.clear();
         standIns = null;
         owned.forEach(Model::dispose);
@@ -505,6 +532,9 @@ final class GpuEditorPreview implements Disposable {
 
     @Override
     public void dispose() {
+        // A worker's comparison still running is left to finish unseen.
+        if (comparing != null) { comparing.cancel(false); comparing = null; }
+        dropRoutes();
         clear();
         batch.dispose();
         blend.dispose();

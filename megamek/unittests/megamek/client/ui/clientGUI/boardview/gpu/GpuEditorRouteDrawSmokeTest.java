@@ -106,7 +106,8 @@ class GpuEditorRouteDrawSmokeTest {
                 private GpuTerrain terrain() throws Exception { return (GpuTerrain) field(this, "terrain"); }
                 private GpuBoardHud hud() throws Exception { return (GpuBoardHud) field(this, "ui"); }
                 private boolean built(GpuEditorPreview.Data preview, Coords at) throws Exception {
-                    return at.equals(preview.at()) && field(field(this, "editorPreview"), "built") == preview;
+                    return at.equals(preview.at()) && field(field(this, "editorPreview"), "built") == preview
+                          && field(field(this, "editorPreview"), "comparing") == null;
                 }
                 private void command(Action action, String target, String value) {
                     source.editorCommand(new Command(action, target, value), source.takeFrame().boardGeneration());

@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -1302,7 +1303,6 @@ final class GpuTerrain implements Disposable {
 
     private static final class Prop {
         private boolean infrastructure;
-        private boolean wall;
         private final Coords coords;
         private final BoundingBox bounds;
         private final String treeAsset;
@@ -4127,8 +4127,7 @@ final class GpuTerrain implements Disposable {
         }
         List<Prop> supports = new ArrayList<>();
         for (BoardScene.Feature feature : features) {
-            if (build.preview != null && (!routeFeature(tile, feature)
-                  || build.preview.walls != BoardWall.building(tile.cover(), feature))) { continue; }
+            if (build.preview != null && !routeFeature(tile, feature)) { continue; }
             if (feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
             if (build.chunk.columns && !columnFeature(feature)) { continue; }
             // Rough boulders are already part of the shared terrain mesh, shading and picking geometry.
@@ -4338,7 +4337,6 @@ final class GpuTerrain implements Disposable {
                         || feature.asset().startsWith("buildings/"),
                   Float.NaN, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
             prop.infrastructure = routeFeature(tile, feature);
-            prop.wall = wallBuilding;
             prop.scatter = feature.kind() == BoardScene.FeatureKind.SCATTER;
             prop.cover = object == null && standTree && !prop.scatter;
             // Terrain-owned transport furniture stays with its shared road/rail geometry in every view. Keep its
@@ -4768,7 +4766,6 @@ final class GpuTerrain implements Disposable {
                               prop.treeAsset, prop.hardSurface, prop.building, prop.structure, prop.floorZ, prop.industrial);
                         copy.scatter = prop.scatter;
                         copy.infrastructure = prop.infrastructure;
-                        copy.wall = prop.wall;
                         copy.tactical = prop.tactical;
                         copy.small = prop.small;
                         copy.decorationId = prop.decorationId;
@@ -5450,7 +5447,7 @@ final class GpuTerrain implements Disposable {
           GpuTextures<BoardScene.Pixels> masks, BoardScene scene, BoardScene.Tile tile) {
         var roadMaps = assets.roadArray();
         for (var preparedPatch : prepared) {
-            overlay.route = preparedPatch.flat() || preparedPatch.source().road() != BoardRoad.Kind.NONE;
+            overlay.route = routeCoat(preparedPatch);
             var patch = preparedPatch.patch();
             var mask = new GpuRoads.Mask(masks.region(preparedPatch.mask().pixels()), preparedPatch.mask());
             String road = GpuRoads.material(preparedPatch.source(), preparedPatch.flat(), patch.texture());
@@ -6650,22 +6647,21 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Pending infrastructure, built against the complete post-edit neighbourhood. Owns generated meshes and mask
-     * atlases, borrows authored models, and hides only the installed infrastructure it replaces. No document or chunk
-     * is changed. The caller disposes this before replacing the preview.
+     * Pending infrastructure of the tiles an editor event changes ({@link #previewRoutes}): each replaced tile's pieces
+     * as the committed builders make them in the pending scene, or, where it keeps none, its installed pieces that go.
+     * Owns generated meshes and mask textures, borrows authored models, and hides only the installed pieces of the tiles
+     * it replaces. No document or chunk is changed. The caller disposes this before replacing the preview.
      */
     final class EditorRoutes implements Disposable {
         final Map<Coords, List<ModelInstance>> ghosts = new LinkedHashMap<>();
-        final Set<Coords> coords;
-        final boolean walls;
+        /** The replaced tiles. */
+        final Set<Coords> coords = new HashSet<>();
+        /** The replaced tiles whose ghosts are the installed pieces that go. */
+        final Set<Coords> removed = new HashSet<>();
         final List<Model> owned = new ArrayList<>();
         final List<Chunk> carriers = new ArrayList<>();
         private final Map<BoardScene.Pixels, Texture> masks = new HashMap<>();
-        private final Map<Chunk, Map<Integer, Array<Renderable>>> retained = new IdentityHashMap<>();
-
-        EditorRoutes(Set<Coords> coords, boolean walls) { this.coords = Set.copyOf(coords); this.walls = walls; }
-
-        boolean affects(Chunk chunk) { return !Collections.disjoint(coords, chunk.tileMeshes.keySet()); }
+        private final Map<Chunk, Hidden> hidden = new IdentityHashMap<>();
 
         /** A draped triangle extends past its mask. Clamp that mask alone, never into an adjacent atlas slot. */
         Texture mask(BoardScene.Pixels pixels) {
@@ -6680,32 +6676,19 @@ final class GpuTerrain implements Disposable {
             });
         }
 
-        /** Split existing draw ranges around replaced roads/decks; the meshes and materials remain chunk-owned. */
-        Array<Renderable> retained(Chunk chunk, int layer) {
-            return retained.computeIfAbsent(chunk, ignored -> new HashMap<>()).computeIfAbsent(layer, ignored -> {
-                Array<Renderable> result = new Array<>();
-                var removed = chunk.tileMeshes.entrySet().stream().filter(entry -> coords.contains(entry.getKey()))
-                      .flatMap(entry -> entry.getValue().ranges.stream()).filter(range -> !walls && range.layer() == layer && range.route())
-                      .sorted(Comparator.comparingInt(TileRange::offset)).toList();
-                for (Renderable source : GpuTerrainDepth.snapshot(layer == 0 ? chunk.opaque : chunk.overlays)) {
-                    int start = source.meshPart.offset, end = start + source.meshPart.size;
-                    for (TileRange range : removed) {
-                        if (range.mesh() != source.meshPart.mesh || range.offset() >= end || range.offset() + range.count() <= start) { continue; }
-                        append(result, source, start, Math.max(start, range.offset()));
-                        start = Math.min(end, range.offset() + range.count());
-                    }
-                    append(result, source, start, end);
+        /** What {@code chunk} draws in place of its caches while this preview replaces some of its tiles. */
+        Hidden hidden(Chunk chunk) {
+            return hidden.computeIfAbsent(chunk, ignored -> {
+                List<TileRange> ranges = new ArrayList<>();
+                boolean props = false;
+                for (Coords at : coords) {
+                    TileMesh mesh = chunk.tileMeshes.get(at);
+                    if (mesh == null) { continue; }
+                    mesh.ranges.stream().filter(TileRange::route).forEach(ranges::add);
+                    props |= mesh.props.stream().anyMatch(prop -> prop.infrastructure);
                 }
-                return result;
+                return new Hidden(without(chunk.opaque, ranges, 0), without(chunk.overlays, ranges, 2), props);
             });
-        }
-
-        private static void append(Array<Renderable> result, Renderable source, int start, int end) {
-            if (start >= end) { return; }
-            Renderable part = new Renderable().set(source);
-            part.meshPart.offset = start;
-            part.meshPart.size = end - start;
-            result.add(part);
         }
 
         @Override public void dispose() {
@@ -6714,48 +6697,192 @@ final class GpuTerrain implements Disposable {
             owned.forEach(Model::dispose);
             masks.values().forEach(Texture::dispose);
             assets.release(this);
-            retained.clear();
+            hidden.clear();
         }
     }
 
-    EditorRoutes previewRoutes(BoardScene scene, Set<Coords> coords, boolean walls) {
-        EditorRoutes result = new EditorRoutes(coords, walls);
+    /**
+     * A chunk's draws while an editor preview replaces some of its tiles: its opaque and overlay layers without the
+     * replaced roads and decks (null where it replaces none in that layer), and whether it replaces any of its props,
+     * which it then draws one by one.
+     */
+    private record Hidden(Array<Renderable> ground, Array<Renderable> overlays, boolean props) {
+        static final Hidden NONE = new Hidden(null, null, false);
+    }
+
+    private Hidden hidden(Chunk chunk) { return editorRoutes == null ? Hidden.NONE : editorRoutes.hidden(chunk); }
+
+    /** The draws of {@code instances} without {@code removed}'s ranges in {@code layer}; the meshes and materials stay theirs. */
+    private static Array<Renderable> without(List<ModelInstance> instances, List<TileRange> removed, int layer) {
+        var ranges = removed.stream().filter(range -> range.layer() == layer)
+              .sorted(Comparator.comparingInt(TileRange::offset)).toList();
+        if (ranges.isEmpty()) { return null; }
+        Array<Renderable> result = new Array<>();
+        for (Renderable source : GpuTerrainDepth.snapshot(instances)) {
+            int start = source.meshPart.offset, end = start + source.meshPart.size;
+            for (TileRange range : ranges) {
+                if (range.mesh() != source.meshPart.mesh || range.offset() >= end || range.offset() + range.count() <= start) { continue; }
+                append(result, source, start, Math.max(start, range.offset()));
+                start = Math.min(end, range.offset() + range.count());
+            }
+            append(result, source, start, end);
+        }
+        return result;
+    }
+
+    private static void append(Array<Renderable> result, Renderable source, int start, int end) {
+        if (start >= end) { return; }
+        Renderable part = new Renderable().set(source);
+        part.meshPart.offset = start;
+        part.meshPart.size = end - start;
+        result.add(part);
+    }
+
+    /** A road coat of the route pieces: a road's, a deck's or a tunnel floor's; other coats are the ground's. */
+    private static boolean routeCoat(RoadPatch patch) { return patch.flat() || patch.source().road() != BoardRoad.Kind.NONE; }
+
+    /** {@code at}'s road coats in {@code side}, as {@link #roads} draws them. */
+    private static List<RoadPatch> coats(RouteSide side, Coords at) {
+        return side.infrastructure().roads().getOrDefault(at, List.of()).stream().filter(GpuTerrain::routeCoat).toList();
+    }
+
+    /**
+     * Whether two road coats of {@code at} are drawn alike ({@link #roads}): the same material, finish and triangles, and
+     * the same mask texels under those triangles, which hold the tint and fading. Paint of a shared mask outside them
+     * is not drawn there.
+     */
+    private static boolean sameCoat(Coords at, RoadPatch was, RoadPatch shown) {
+        var before = was.patch();
+        var after = shown.patch();
+        if (was.flat() != shown.flat() || !before.texture().equals(after.texture()) || before.repeat() != after.repeat()
+              || !GpuRoads.attribute(before).equals(GpuRoads.attribute(after))
+              || !Objects.equals(GpuRoads.material(was.source(), was.flat(), before.texture()),
+                    GpuRoads.material(shown.source(), shown.flat(), after.texture()))
+              || !was.triangles().equals(shown.triangles())) { return false; }
+        return was.mask().equals(shown.mask()) || Objects.equals(GpuRoads.visibleMask(at, was.mask(), was.triangles()),
+              GpuRoads.visibleMask(at, shown.mask(), shown.triangles()));
+    }
+
+    private static boolean sameBridge(BoardBridge.Shape before, BoardBridge.Shape after) {
+        return before == after || before != null && after != null && before.surface() == after.surface()
+              && before.level() == after.level() && before.facets().equals(after.facets());
+    }
+
+    /** {@code scene}'s surfaces and shared infrastructure of {@code coords}, as a chunk at {@code lod} prepares them. */
+    private record RouteSide(BoardScene scene, Map<Coords, BoardSurface> surfaces, Infrastructure infrastructure) {
+        static RouteSide of(BoardScene scene, List<Coords> coords, TerrainLod lod, TerrainSettings settings, boolean columns) {
+            Map<Coords, BoardSurface> surfaces = new ConcurrentHashMap<>();
+            var tiles = coords.stream().map(scene::tile).toList();
+            tiles.parallelStream().forEach(tile -> settings.run(() -> surfaces.put(tile.coords(),
+                  columns ? BoardSurface.columns(scene, tile, lod) : new BoardSurface(scene, tile, lod))));
+            return new RouteSide(scene, surfaces, prepareInfrastructure(scene, tiles, lod, settings, surfaces, () -> { },
+                  new TerrainLoadProgress(), new GpuRoads.Masks(), columns));
+        }
+    }
+
+    /** Whether {@code at} can hold route pieces in {@code scene}: its own, or road coats reaching it from a neighbour. */
+    private static boolean routed(BoardScene scene, Coords at) {
+        var tile = scene.tile(at);
+        if (tile.features().stream().anyMatch(feature -> routeFeature(tile, feature))) { return true; }
+        for (int direction = -1; direction < 6; direction++) {
+            var source = direction < 0 ? tile : scene.neighbor(tile, direction);
+            if (source != null && BoardRoad.rendered(source)) { return true; }
+        }
+        return false;
+    }
+
+    /** Both sides of the route pieces of the routed candidates ({@link #routed}) at {@code lod}, and those that differ. */
+    record RouteChange(TerrainLod lod, RouteSide was, RouteSide shown, List<Coords> changed) { }
+
+    /**
+     * Of {@code candidates}, those whose route pieces the committed builders make differently in {@code after} than in
+     * {@code before} at {@code lod}: walls, rails, bridges, road furniture and the road coats reaching the tile, also
+     * where only a neighbour's join changes them. CPU only.
+     */
+    private static RouteChange compare(BoardScene before, BoardScene after, List<Coords> candidates, TerrainLod lod,
+          TerrainSettings settings, boolean columns) {
+        var routed = candidates.stream().filter(at -> routed(before, at) || routed(after, at)).toList();
+        var was = RouteSide.of(before, routed, lod, settings, columns);
+        var shown = RouteSide.of(after, routed, lod, settings, columns);
+        return new RouteChange(lod, was, shown,
+              settings.call(() -> routed.stream().filter(at -> !sameRoutes(was, shown, at)).toList()));
+    }
+
+    /** {@link #compare}'s changed tiles. */
+    static List<Coords> changedRoutes(BoardScene before, BoardScene after, List<Coords> candidates, TerrainLod lod,
+          TerrainSettings settings, boolean columns) {
+        return compare(before, after, candidates, lod, settings, columns).changed();
+    }
+
+    /** Whether the committed builders' inputs and results for {@code at}'s route pieces agree on both sides. */
+    private static boolean sameRoutes(RouteSide was, RouteSide shown, Coords at) {
+        var before = was.scene().tile(at);
+        var after = shown.scene().tile(at);
+        var oldFeatures = BoardFeatures.fittedControls(was.scene(), before).stream().filter(f -> routeFeature(before, f)).toList();
+        var features = BoardFeatures.fittedControls(shown.scene(), after).stream().filter(f -> routeFeature(after, f)).toList();
+        var oldCoats = coats(was, at);
+        var coats = coats(shown, at);
+        if (!oldFeatures.equals(features) || !features.isEmpty() && before.elevation() != after.elevation()
+              || !Objects.equals(was.infrastructure().bridges().get(at), shown.infrastructure().bridges().get(at))
+              || oldCoats.size() != coats.size()
+              || IntStream.range(0, coats.size()).anyMatch(i -> !sameCoat(at, oldCoats.get(i), coats.get(i)))
+              || !sameBridge(was.infrastructure().bridgeShapes().get(at), shown.infrastructure().bridgeShapes().get(at))) {
+            return false;
+        }
+        if (features.isEmpty()) { return true; }
+        for (var feature : features) {
+            if (BoardRail.route(feature) && !BoardRail.layout(was.scene(), before, feature, was.surfaces().get(at),
+                  was.infrastructure().bridgeShapes()::get).equals(BoardRail.layout(shown.scene(), after, feature,
+                  shown.surfaces().get(at), shown.infrastructure().bridgeShapes()::get))) { return false; }
+            if (BoardWall.building(after.cover(), feature) && BoardWall.supports(feature.asset())
+                  && !BoardWall.layout(was.scene(), before, feature).equals(BoardWall.layout(shown.scene(), after, feature))) {
+                return false;
+            }
+        }
+        return was.surfaces().get(at).groundFaces().equals(shown.surfaces().get(at).groundFaces());
+    }
+
+    /**
+     * The CPU half of the editor preview's pending infrastructure, on a worker: of {@code candidates}, the tiles whose
+     * route pieces differ between {@code before}, the installed scene, and {@code scene}, the pending one, at each
+     * one's terrain level ({@link #compare}). {@link #previewRoutes} installs the result. On the render thread.
+     */
+    CompletableFuture<List<RouteChange>> compareRoutes(BoardScene before, BoardScene scene, Set<Coords> candidates) {
+        Map<TerrainLod, List<Coords>> groups = new EnumMap<>(TerrainLod.class);
+        for (Coords at : candidates) {
+            if (editorTile(at) == null) { continue; }
+            var lod = chunks.get(at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE).lod;
+            groups.computeIfAbsent(lod, ignored -> new ArrayList<>()).add(at);
+        }
+        TerrainSettings settings = installedSettings;
+        boolean columns = columns();
+        return CompletableFuture.supplyAsync(() -> groups.entrySet().stream()
+              .map(group -> compare(before, scene, group.getValue(), group.getKey(), settings, columns)).toList());
+    }
+
+    /**
+     * The editor preview's pending infrastructure ({@link EditorRoutes}) of {@code changes} ({@link #compareRoutes}): the
+     * changed tiles replaced by their pieces in the pending scene, or where they keep none, by their installed pieces
+     * that go. Installed until the returned preview is disposed. On the render thread.
+     */
+    EditorRoutes previewRoutes(List<RouteChange> changes) {
+        EditorRoutes result = new EditorRoutes();
         try {
             installedSettings.run(() -> {
-                Map<TerrainLod, List<BoardScene.Tile>> groups = new EnumMap<>(TerrainLod.class);
-                Map<Coords, BoardSurface> surfaces = new ConcurrentHashMap<>();
-                for (Coords at : coords) {
-                    if (editorTile(at) == null) { continue; }
-                    var tile = scene.tile(at);
-                    var lod = chunks.get(at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE).lod;
-                    groups.computeIfAbsent(lod, ignored -> new ArrayList<>()).add(tile);
-                    surfaces.put(at, columns() ? BoardSurface.columns(scene, tile, lod) : new BoardSurface(scene, tile, lod));
-                }
-                for (var group : groups.entrySet()) {
-                    var progress = new TerrainLoadProgress();
-                    var infrastructure = walls ? new Infrastructure(Map.of(), Map.of(), Map.of())
-                          : prepareInfrastructure(scene, group.getValue(), group.getKey(), installedSettings,
-                                surfaces, () -> { }, progress, new GpuRoads.Masks(), columns());
-                    var prepared = new Prepared(surfaces, null, null, Map.of(), Map.of(), Map.of(), Map.of(),
-                          infrastructure.roads(), infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(),
-                          Set.of(), Map.of(), false);
-                    var build = new ChunkBuild(scene, 0, 0, floor, group.getKey(), columns(), prepared, null, progress);
-                    build.preview = result;
-                    result.carriers.add(build.chunk);
-                    for (var tile : group.getValue()) {
-                        var at = tile.coords();
-                        var surface = surfaces.get(at);
-                        build.chunk.tileMeshes.put(at, new TileMesh());
-                        int first = build.chunk.props.size();
-                        collectFeatures(build, tile, surface, ground(build, at));
-                        List<ModelInstance> ghosts = new ArrayList<>();
-                        build.chunk.props.subList(first, build.chunk.props.size()).forEach(prop -> ghosts.add(prop.instance));
-                        build.layers.get(0).finish(ghosts);
-                        build.layers.get(0).geometry.clear();
-                        // Only these emitted bridge meshes are owned; feature models stay in the asset library.
-                        ghosts.stream().skip(build.chunk.props.size() - first).forEach(ghost -> result.owned.add(ghost.model));
-                        if (!walls) { previewRoads(build, tile, ghosts); }
-                        if (!ghosts.isEmpty()) { result.ghosts.put(at, List.copyOf(ghosts)); }
+                for (var change : changes) {
+                    var changed = change.changed();
+                    if (changed.isEmpty()) { continue; }
+                    result.coords.addAll(changed);
+                    var shown = pieces(result, change.shown(), changed, change.lod());
+                    var gone = changed.stream().filter(at -> shown.get(at).isEmpty()).toList();
+                    var removed = gone.isEmpty() ? Map.<Coords, List<ModelInstance>>of()
+                          : pieces(result, change.was(), gone, change.lod());
+                    for (Coords at : changed) {
+                        boolean goes = shown.get(at).isEmpty();
+                        var ghosts = goes ? removed.get(at) : shown.get(at);
+                        if (ghosts.isEmpty()) { continue; }
+                        if (goes) { result.removed.add(at); }
+                        result.ghosts.put(at, List.copyOf(ghosts));
                     }
                 }
             });
@@ -6768,11 +6895,37 @@ final class GpuTerrain implements Disposable {
         }
     }
 
+    /** {@code side}'s route pieces of {@code coords}, built as a chunk at {@code lod} builds them, owned by {@code owner}. */
+    private Map<Coords, List<ModelInstance>> pieces(EditorRoutes owner, RouteSide side, List<Coords> coords, TerrainLod lod) {
+        var infrastructure = side.infrastructure();
+        var prepared = new Prepared(side.surfaces(), null, null, Map.of(), Map.of(), Map.of(), Map.of(),
+              infrastructure.roads(), infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(), Set.of(), Map.of(), false);
+        var build = new ChunkBuild(side.scene(), 0, 0, floor, lod, columns(), prepared, null, new TerrainLoadProgress());
+        build.preview = owner;
+        owner.carriers.add(build.chunk);
+        Map<Coords, List<ModelInstance>> result = new HashMap<>();
+        for (Coords at : coords) {
+            var tile = side.scene().tile(at);
+            build.chunk.tileMeshes.put(at, new TileMesh());
+            int first = build.chunk.props.size();
+            collectFeatures(build, tile, side.surfaces().get(at), ground(build, at));
+            List<ModelInstance> ghosts = new ArrayList<>();
+            build.chunk.props.subList(first, build.chunk.props.size()).forEach(prop -> ghosts.add(prop.instance));
+            build.layers.get(0).finish(ghosts);
+            build.layers.get(0).geometry.clear();
+            // Only these emitted bridge meshes are owned; feature models stay in the asset library.
+            ghosts.stream().skip(build.chunk.props.size() - first).forEach(ghost -> owner.owned.add(ghost.model));
+            previewRoads(build, tile, ghosts);
+            result.put(at, ghosts);
+        }
+        return result;
+    }
+
     /** The committed road triangles and coverage masks, with ordinary UVs for the shared ghost shader. */
     private void previewRoads(ChunkBuild build, BoardScene.Tile tile, List<ModelInstance> ghosts) {
         var layer = new Layer();
         for (RoadPatch patch : build.prepared.roads().getOrDefault(tile.coords(), List.of())) {
-            if (!patch.flat() && patch.source().road() == BoardRoad.Kind.NONE) { continue; }
+            if (!routeCoat(patch)) { continue; }
             Texture mask = build.preview.mask(patch.mask().pixels());
             Material material = new Material(TextureAttribute.createDiffuse(mask), FloatAttribute.createAlphaTest(.01f),
                   IntAttribute.createCullFace(GL20.GL_BACK));
@@ -6782,9 +6935,8 @@ final class GpuTerrain implements Disposable {
                     var points = new MeshPartBuilder.VertexInfo[3];
                     int index = 0;
                     for (Vector3 p : List.of(triangle.a(), triangle.b(), triangle.c())) {
-                        float u = ((p.x - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale() - patch.mask().x()) / patch.mask().width();
-                        float v = ((p.y - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale() - patch.mask().y()) / patch.mask().height();
-                        points[index++] = vertex(p, normal, u, v, Color.WHITE);
+                        points[index++] = vertex(p, normal, GpuRoads.maskU(tile.coords(), patch.mask(), p),
+                              GpuRoads.maskV(tile.coords(), patch.mask(), p), Color.WHITE);
                     }
                     meshes.get().triangle(points[0], points[1], points[2]);
                 }
@@ -6797,16 +6949,16 @@ final class GpuTerrain implements Disposable {
     }
 
     private boolean replaced(Prop prop) {
-        return editorRoutes != null && prop.infrastructure && prop.wall == editorRoutes.walls && editorRoutes.coords.contains(prop.coords());
+        return editorRoutes != null && prop.infrastructure && editorRoutes.coords.contains(prop.coords());
     }
 
-    private void renderRetained(Chunk chunk, int layer, ModelBatch target, Environment lighting) {
-        for (Renderable part : editorRoutes.retained(chunk, layer)) {
+    private static void renderRetained(Array<Renderable> parts, ModelBatch target, Environment lighting) {
+        for (Renderable part : parts) {
             part.shader = null; part.environment = lighting; target.render(part);
         }
     }
 
-    /** A previewed chunk borrows individual instances so obsolete terminals and junctions never show under ghosts. */
+    /** A previewed chunk draws its props one by one, so the replaced pieces never show under their ghosts. */
     private void renderRetainedProps(Chunk chunk, ModelBatch target, Environment lighting, boolean shadows) {
         for (Prop prop : chunk.cutaways) {
             if (!drawn(prop, shadows) || !Float.isNaN(prop.floorZ) && !chunk.interiorFloorVisible(prop)) { continue; }
@@ -6818,30 +6970,6 @@ final class GpuTerrain implements Disposable {
                 if (chunk.interiorVisible(strut.coords)) { target.render(strut.instance, lighting); }
             }
         }
-    }
-
-    /**
-     * The editor preview's ghost of the route marker {@code feature} on {@code tile} of {@code scene}, the installed scene
-     * with the preview's tiles: the route builder's own mesh ({@link BoardRail#layout}) on that tile's ground and the
-     * installed deck, placed as a chunk places a route. Null off the installed board; the model is the caller's.
-     */
-    ModelInstance routeGhost(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
-        TileMesh mesh = editorTile(tile.coords());
-        if (mesh == null) { return null; }
-        return installedSettings.call(() -> {
-            Chunk chunk = chunks.get(tile.coords().getX() / CHUNK_SIZE * chunkRows + tile.coords().getY() / CHUNK_SIZE);
-            var layout = BoardRail.layout(scene, tile, feature, columns() ? BoardSurface.columns(scene, tile, chunk.lod)
-                  : new BoardSurface(scene, tile, chunk.lod),
-                  at -> {
-                      TileMesh support = editorTile(at);
-                      return support == null ? null : support.bridgeShape;
-                  });
-            ModelInstance ghost = new ModelInstance(new Model(BoardRail.model(layout)));
-            ghost.transform.setToTranslation(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
-                        BoardRail.level(tile, feature) * BoardGeometry.level())
-                  .scale(BoardGeometry.hexScale(), BoardGeometry.hexScale(), BoardGeometry.hexScale());
-            return ghost;
-        });
     }
 
     /**
@@ -7356,25 +7484,26 @@ final class GpuTerrain implements Disposable {
             Chunk chunk = chunks.get(chunkIndex);
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
             boolean scatterVisible = terrain && fluff && visible && chunk.scatterVisible;
-            boolean preview = editorRoutes != null && editorRoutes.affects(chunk);
+            Hidden hidden = hidden(chunk);
+            boolean packed = !hidden.props();
             if (!drawTactical) {
                 // The 3D relief, or the Classic columns, in the chunk's opaque layer.
                 int page = chunkIndex / chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE * terrainPageRows
                       + chunkIndex % chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE;
-                terrainPages.add(chunk.terrainRenderables, page, visible && !preview);
-                if (visible && preview) { renderRetained(chunk, 0, batch, environment); }
+                terrainPages.add(chunk.terrainRenderables, page, visible && hidden.ground() == null);
+                if (visible && hidden.ground() != null) { renderRetained(hidden.ground(), batch, environment); }
             }
             if (!drawTactical) {
                 int propPage = propPage(chunkIndex);
                 // Hover/occupancy changes only this chunk's presentation, not its static page membership.
                 // Keep the complete opaque source cached and draw the opened chunk separately. The Tactical View keeps
                 // the pages too, unseen, and draws the chunk's few kept props on their own.
-                propBatch.add(chunk.shadowProps, propPage, visible && !preview && fluff && chunk.faded.isEmpty());
-                if (visible && !preview && fluff && !chunk.faded.isEmpty()) { propBatch.addDynamic(chunk.solidProps); }
-                if (visible && !preview && !fluff) { propBatch.addDynamic(chunk.kept); }
+                propBatch.add(chunk.shadowProps, propPage, visible && packed && fluff && chunk.faded.isEmpty());
+                if (visible && packed && fluff && !chunk.faded.isEmpty()) { propBatch.addDynamic(chunk.solidProps); }
+                if (visible && packed && !fluff) { propBatch.addDynamic(chunk.kept); }
                 propBatch.add(chunk.scatterRenderables, propPage, scatterVisible);
-                propBatch.add(chunk.routeRenderables, propPage, visible && !preview);
-                if (visible && preview) { renderRetainedProps(chunk, batch, environment, false); }
+                propBatch.add(chunk.routeRenderables, propPage, visible && packed);
+                if (visible && !packed) { renderRetainedProps(chunk, batch, environment, false); }
             }
             if (terrain) {
                 trees.add(chunk.trees(fluff), chunk.treeLod, visible);
@@ -7387,7 +7516,7 @@ final class GpuTerrain implements Disposable {
                 chunk.tactical.forEach(instance -> batch.render(instance));
             } else {
                 // Shared building modules are buildings: the Tactical View hides them.
-                if (!preview) {
+                if (packed) {
                     if (fluff) { trees.add(chunk.sharedProps); }
                     addDecorations(chunk, batch, environment, false);
                 }
@@ -7423,7 +7552,8 @@ final class GpuTerrain implements Disposable {
                 if (visible) {
                     // Roads and shores stay in the Tactical View; decals hide there. A chunk holds the decals of one
                     // graphics only: Enhanced paint, or the Classic tileset decals.
-                    if (editorRoutes != null && editorRoutes.affects(chunk)) { renderRetained(chunk, 2, batch, environment); }
+                    Array<Renderable> overlays = hidden(chunk).overlays();
+                    if (overlays != null) { renderRetained(overlays, batch, environment); }
                     else { chunk.overlays.forEach(instance -> batch.render(instance, environment)); }
                     if (fluff) {
                         chunk.surfaceDecals.forEach(instance -> batch.render(instance, environment));
@@ -7811,7 +7941,7 @@ final class GpuTerrain implements Disposable {
         trees.begin(GpuTreeInstances.Pass.DEPTH);
         for (Chunk chunk : chunks) {
             if (!chunk.faded.isEmpty() && camera.frustum.boundsInFrustum(chunk.bounds)) {
-                if (editorRoutes != null && editorRoutes.affects(chunk)) {
+                if (hidden(chunk).props()) {
                     renderRetainedProps(chunk, depthBatch, null, true);
                     continue;
                 }
@@ -7855,13 +7985,13 @@ final class GpuTerrain implements Disposable {
                 trees.add(chunk.trees(fluff), Math.max(chunk.treeLod, coarsest), visible);
                 trees.add(chunk.scatterStand, Math.max(chunk.treeLod, coarsest), scatterVisible);
                 if (visible) {
-                    boolean preview = editorRoutes != null && editorRoutes.affects(chunk);
-                    if (preview) { renderRetained(chunk, 0, pass, null); }
+                    Hidden hidden = hidden(chunk);
+                    if (hidden.ground() != null) { renderRetained(hidden.ground(), pass, null); }
                     else { pass.render(shadows ? chunk.depthTerrain.shadows : chunk.depthTerrain); }
                     if (scatterVisible) {
                         chunk.scatter.forEach(pass::render);
                     }
-                    if (preview) { renderRetainedProps(chunk, pass, null, shadows); }
+                    if (hidden.props()) { renderRetainedProps(chunk, pass, null, shadows); }
                     else {
                         pass.render(!fluff ? chunk.kept : shadows ? chunk.shadowProps : chunk.solidProps);
                         addDecorations(chunk, pass, null, shadows);

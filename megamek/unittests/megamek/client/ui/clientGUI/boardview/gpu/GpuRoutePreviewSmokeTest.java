@@ -50,7 +50,7 @@ class GpuRoutePreviewSmokeTest {
                     camera.setIsometric(true);
                     for (boolean classic : new boolean[] { false, true }) {
                         terrain.setColumns(classic);
-                        for (String kind : List.of("wall", "road", "rail", "bridge")) {
+                        for (String kind : List.of("wall", "road", "rail", "maglev", "bridge")) {
                             var session = new BoardEditorSession();
                             session.game().setBoard(Board.createEmptyBoard(8, 8));
                             GpuRoutePreviewTest.choose(session, kind);
@@ -65,16 +65,51 @@ class GpuRoutePreviewSmokeTest {
                             frame.prepare(terrain, camera, scene);
                             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                             var chunks = new ArrayList<>((List<?>) field(terrain, "chunks"));
+                            GpuRoutePreviewTest.drag(session, List.of(start, start.translated(3), join));
+                            try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+                                prepared(preview, scene, terrain, GpuRoutePreviewTest.data(session, capture, join));
+                                var unchanged = (GpuTerrain.EditorRoutes) field(preview, "routes");
+                                assertNotNull(unchanged);
+                                assertTrue(unchanged.coords.isEmpty(), kind + ": repainting an identical piece replaces nothing");
+                                assertTrue(unchanged.ghosts.isEmpty(), kind + ": repainting an identical piece has no ghosts");
+                            }
+                            session.cancelStroke();
+                            preview.prepare(scene, terrain, GpuEditorPreview.Data.NONE);
+                            {
+                                Coords nearby = join.translated(2, 2);
+                                try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+                                    var hover = GpuRoutePreviewTest.data(session, capture, nearby);
+                                    prepared(preview, scene, terrain, hover);
+                                    var hovered = (GpuTerrain.EditorRoutes) field(preview, "routes");
+                                    assertTrue(hovered.ghosts.containsKey(nearby), kind + ": the new piece is previewed");
+                                    assertTrue(hover.routes().containsKey(join), "The existing end supplies neighbourhood context");
+                                    for (Coords committed : List.of(start, start.translated(3), join)) {
+                                        assertFalse(hovered.coords.contains(committed), kind + ": hovering must not suppress " + committed);
+                                        assertFalse(hovered.ghosts.containsKey(committed), kind + ": hovering must not ghost " + committed);
+                                    }
+                                    frame.render(terrain, camera, scene);
+                                    preview.render(camera.camera, scene, terrain, hover);
+                                    GpuReviewFrame.save(new File(output, kind + (classic ? "-classic" : "") + "-hover.png"));
+                                }
+                                preview.prepare(scene, terrain, GpuEditorPreview.Data.NONE);
+                            }
                             var path = List.of(join, join.translated(2), join.translated(2, 2));
                             GpuRoutePreviewTest.drag(session, path);
                             GpuEditorPreview.Data data;
                             try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
                                 data = GpuRoutePreviewTest.data(session, capture, path.getLast());
                             }
-                            preview.prepare(scene, terrain, data);
+                            prepared(preview, scene, terrain, data);
                             var routes = (GpuTerrain.EditorRoutes) field(preview, "routes");
                             assertNotNull(routes);
+                            assertTrue(routes.removed.isEmpty(), kind + ": extending a route takes no piece away");
+                            var area = data.routes().keySet();
+                            var committed = installed(terrain, area);
                             assertTrue(routes.ghosts.containsKey(join), "The old end becomes a joined ghost");
+                            assertFalse(routes.coords.contains(start), kind + ": the unchanged far end remains committed");
+                            if (kind.equals("wall")) {
+                                assertFalse(routes.ghosts.containsKey(start.translated(3)), "An unchanged straight remains opaque");
+                            }
                             Map<Coords, Map<String, Integer>> pending = new HashMap<>();
                             routes.ghosts.forEach((at, models) -> pending.put(at, geometry(models)));
                             assertFalse(pending.isEmpty());
@@ -88,18 +123,40 @@ class GpuRoutePreviewSmokeTest {
                             preview.prepare(scene, terrain, GpuEditorPreview.Data.NONE);
                             assertNull(field(terrain, "editorRoutes"));
                             assertEquals(chunks, field(terrain, "chunks"));
+                            // The release: the ghosts stay until the terrain installs the edit, so the old pieces never show between.
+                            prepared(preview, scene, terrain, data);
                             session.finishStroke();
                             scene = scene(session.board());
+                            terrain.update(scene, camera.camera);
+                            assertTrue(terrain.busy());
+                            preview.prepare(scene, terrain, GpuEditorPreview.Data.NONE);
+                            assertNotNull(field(terrain, "editorRoutes"), kind + ": the ghosts are held while the edit installs");
                             terrain.update(scene);
-                            Map<Coords, Map<String, Integer>> installed = installed(terrain, data.routes().keySet());
-                            assertEquals(pending.keySet(), installed.keySet(), kind + " has the same pieces after release");
-                            for (var entry : pending.entrySet()) {
-                                assertEquals(entry.getValue(), installed.get(entry.getKey()),
-                                      kind + " world triangles at " + entry.getKey() + (classic ? " (Classic)" : ""));
+                            preview.prepare(scene, terrain, GpuEditorPreview.Data.NONE);
+                            assertNull(field(terrain, "editorRoutes"), kind + ": the installed edit replaces the ghosts");
+                            // Every tile of the neighbourhood is either replaced by its preview's pieces or keeps its own.
+                            Map<Coords, Map<String, Integer>> installed = installed(terrain, area);
+                            for (Coords at : area) {
+                                boolean replaced = routes.coords.contains(at);
+                                assertEquals(replaced ? pending.get(at) : committed.get(at), installed.get(at), kind
+                                      + (replaced ? " world triangles at " : " unchanged pieces at ") + at + (classic ? " (Classic)" : ""));
                             }
                             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, kind + (classic ? "-classic" : "") + "-committed.png"));
+                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                            // Erasing the far end shows what goes in red, with the rest of the route as it is left.
+                            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.TOOL, "", "ERASE"), null);
+                            try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+                                var erase = GpuRoutePreviewTest.data(session, capture, start);
+                                prepared(preview, scene, terrain, erase);
+                                var erased = (GpuTerrain.EditorRoutes) field(preview, "routes");
+                                assertTrue(erased.removed.contains(start) && erased.ghosts.containsKey(start), kind + ": what goes is shown");
+                                frame.render(terrain, camera, scene);
+                                preview.render(camera.camera, scene, terrain, erase);
+                                GpuReviewFrame.save(new File(output, kind + (classic ? "-classic" : "") + "-erase.png"));
+                            }
+                            preview.prepare(scene, terrain, GpuEditorPreview.Data.NONE);
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         }
                     }
@@ -157,6 +214,16 @@ class GpuRoutePreviewSmokeTest {
         assertEquals(expected.max.x, actual.max.x, 2, "Ghost right edge follows the board camera");
         assertEquals(expected.min.y, actual.min.y, 2, "Ghost bottom edge follows the board camera");
         assertEquals(expected.max.y, actual.max.y, 2, "Ghost top edge follows the board camera");
+    }
+
+    /** {@code data} prepared with its route pieces installed: they arrive from a worker in a later frame. */
+    private static void prepared(GpuEditorPreview preview, BoardScene scene, GpuTerrain terrain, GpuEditorPreview.Data data)
+          throws Exception {
+        preview.prepare(scene, terrain, data);
+        while (field(preview, "comparing") != null) {
+            Thread.sleep(1);
+            preview.prepare(scene, terrain, data);
+        }
     }
 
     private static Object field(Object owner, String name) throws Exception {
