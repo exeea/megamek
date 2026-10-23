@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -14,7 +15,9 @@ import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.ProneCause;
 
@@ -41,6 +44,7 @@ final class UnitAnimator {
     private UnitGroundContact groundContact;
     private final BoardSurface.Cache surfaces;
     private final Supplier<BoardScene> scene;
+    private final Function<Coords, List<Rectangle>> occupied;
     private boolean dying;
     private boolean initialized;
     private ProneCause posture = ProneCause.NONE;
@@ -51,10 +55,17 @@ final class UnitAnimator {
 
     UnitAnimator(BoardSurface.Cache surfaces) { this(surfaces, () -> null); }
 
-    /** @param scene the board the unit stands on, so that a formation stays clear of the steps around its hex */
-    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene) {
+    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene) { this(surfaces, scene, coords -> List.of()); }
+
+    /**
+     * @param scene    the board the unit stands on, so that a formation stays clear of the steps around its hex
+     * @param occupied the ground, in world units, of the units other than troops standing in a hex, which troops there
+     *                 step around
+     */
+    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene, Function<Coords, List<Rectangle>> occupied) {
         this.surfaces = surfaces;
         this.scene = scene;
+        this.occupied = occupied;
     }
 
     private record Joint(Node node, Vector3 translation, Quaternion rotation, Vector3 scale) {
@@ -190,10 +201,15 @@ final class UnitAnimator {
 
     /** Whether {@code other} is a troop formation on the ground of the unit's hex, the unit itself included. */
     private static boolean standsWith(BoardScene.Unit other, BoardScene.Unit unit) {
-        var family = other.model() == null || other.model().state() == null ? null : other.model().state().structure().family();
-        return (family == UnitFamilyScale.INFANTRY || family == UnitFamilyScale.BATTLE_ARMOR) && !other.sensorContact()
-              && !other.airborne() && other.attachment() == null && other.location().coords().equals(unit.location().coords())
+        return troops(other) && !other.sensorContact() && !other.airborne() && other.attachment() == null
+              && other.location().coords().equals(unit.location().coords())
               && other.location().elevation() == unit.location().elevation();
+    }
+
+    /** Conventional infantry or battle armor: drawn as a formation of figures, with or without transports. */
+    static boolean troops(BoardScene.Unit unit) {
+        var family = unit.model() == null || unit.model().state() == null ? null : unit.model().state().structure().family();
+        return family == UnitFamilyScale.INFANTRY || family == UnitFamilyScale.BATTLE_ARMOR;
     }
 
     /** A material replacement rebinds nodes but keeps playback; a new/revealed unit starts directly in its pose. */
@@ -250,7 +266,7 @@ final class UnitAnimator {
         airborne = approach(airborne, motion.airborne(unit) ? 1 : 0, seconds, snap);
         bodies.forEach(Body::reset);
         mounts.forEach(Joint::reset);
-        formation.apply(model, unit, motion, stepRoom(unit));
+        formation.apply(model, unit, motion, stepRoom(unit), occupied.apply(unit.location().coords()), seconds, snap);
         for (Body body : bodies) {
             boolean mek = body.rig.mek() && unit.model().state().structure().anatomy() != null;
             var bodyMotion = motion.member(unit.id(), body.rig.container());

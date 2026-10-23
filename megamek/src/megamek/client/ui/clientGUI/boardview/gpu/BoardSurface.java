@@ -10,10 +10,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.BiPredicate;
 
@@ -368,6 +370,8 @@ final class BoardSurface {
     private int pouredTop;
     /** The reserved road surface this hex emits, which cut faces in its walls meet. */
     private List<Face> reservedRoad = List.of();
+    /** {@link #reservedRoad}'s faces, by identity (#carries). */
+    private final Set<Face> reservedFaces = Collections.newSetFromMap(new IdentityHashMap<>());
     /** The roads around and, on natural ground, its easing into them (Enhanced); null where none reaches. */
     private BoardRoadBank bank;
 
@@ -2395,6 +2399,7 @@ final class BoardSurface {
         List<Face> road = new ArrayList<>();
         cut.mesh(road, wall);
         reservedRoad = List.copyOf(road);
+        reservedFaces.addAll(road);
         List<Face> kept = cut.clip(faces, relief, wall, cutFaces(pouredWalls), roadAround(), bank, natural(), false);
         pouredTop = pouredWalls.size();
         faces.clear();
@@ -2445,6 +2450,16 @@ final class BoardSurface {
             cut.mesh(road, (topA, lowA, topB, lowB, fx, fy) -> { });
             return List.copyOf(road);
         });
+    }
+
+    /**
+     * Whether a face of this hex's top is road surface a neighbour's carriageway reserves here, which that road paints;
+     * other ground here, such as the ground under a bridge it runs onto, lies apart from that road.
+     */
+    boolean carries(Face face, BoardScene.Tile source) {
+        var grade = BoardRoadGrade.of(scene, source, true);
+        if (grade == null || !reservedFaces.contains(face)) { return false; }
+        return grade.contains((face.a().x + face.b().x + face.c().x) / 3, (face.a().y + face.b().y + face.c().y) / 3);
     }
 
     /** The edges of a hex that are the board's, as a bit mask by edge: the board's cut stands under them. */
