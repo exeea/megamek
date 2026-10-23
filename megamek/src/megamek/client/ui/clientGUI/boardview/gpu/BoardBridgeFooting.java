@@ -512,6 +512,10 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 if (terminal > 0) { runs.add(terminal); }
             }
             runs.add(climb);
+            // A wing beside a ramp up onto its bank that runs the whole landing takes over its side's rail and block.
+            boolean[] walled = ramp && curve == null ? wings(faces, ground, gate, along, across, lane, width,
+                  (1 - BoardRoadGrade.BRIDGE_START) * half, reach, bottom,
+                  (lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 1 : 2) * scale) : new boolean[2];
             var previous = start;
             for (float t : runs) {
                 var row = row(start, end, t, !bare, climb);
@@ -525,10 +529,10 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                           -BoardBridge.SLAB * scale, 0, BoardBridge.Part.TOP);
                 }
                 float rail = 2.5f * scale;
-                if (t <= terminals[0]) {
+                if (t <= terminals[0] && !walled[0]) {
                     prism(faces, previous[0], row[0], row[1], previous[1], 0, rail, BoardBridge.Part.STRUCTURE);
                 }
-                if (t <= terminals[1]) {
+                if (t <= terminals[1] && !walled[1]) {
                     prism(faces, previous[2], row[2], row[3], previous[3], 0, rail, BoardBridge.Part.STRUCTURE);
                 }
                 // The support continues on the bank under the rails and terminal blocks: where the bank falls away
@@ -543,12 +547,138 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             }
             bend(faces, firstFace, tile.coords(), d, curve, gate, along);
             for (int side : new int[] { -1, 1 }) {
+                if (walled[(side + 1) / 2]) { continue; }
                 terminal(faces, block.shape(), start, end, stops[(side + 1) / 2], reach, side, ground, !bare, climb,
                       curve, tile.coords(), d);
             }
         }
         return new BoardBridgeFooting(BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces),
               List.copyOf(lengths), bareExits, solidExits, columns ? 0 : solidExits, Map.copyOf(bankCurves));
+    }
+
+    /**
+     * Concrete wing walls beside a ramp up onto its bank ({@code ground}): where the bank beside the road stands above
+     * it, a wall on the rail's line retains it, from {@code bottom} to a capped top seated on the bank's edge, from
+     * the abutment at the gate (never into the bridge hex, over the deck's own parapet) to where the road has climbed
+     * to the bank, at most {@code run} past the gate, and there slopes down into the road. Its top never falls toward
+     * the gate, so it holds its height over a corner whose ground falls away beside the abutment. A wing that runs
+     * from the abutment past the landing's {@code reach} is that side's parapet: at least a rail high, it takes over
+     * the rail and its block (by side, the result). A bank that rises above the road only further in gets its own
+     * stretch. Stations every {@code step}; {@code along} points into the bank.
+     */
+    private static boolean[] wings(List<BoardBridge.Facet> faces, List<BoardSurface.Face> ground, Vector3 gate,
+          Vector3 along, Vector3 across, float lane, float width, float run, float reach, float bottom, float step) {
+        float scale = BoardGeometry.hexScale(), rail = 2.5f * scale;
+        // From just behind the rail's inner face to just past the slab's edge, where the bank's cut face stands.
+        float inner = lane + BoardRelief.metres(.03f), outer = width + BoardRelief.metres(.1f);
+        boolean[] walled = new boolean[2];
+        for (int side : new int[] { -1, 1 }) {
+            // Stretches of stations {u, road, top} where the bank stands above the road, from where it starts to where it
+            // runs out.
+            List<List<float[]>> stretches = new ArrayList<>();
+            List<float[]> stretch = null;
+            float previous = Float.NaN;
+            for (float u = 0; u <= run + step / 2; u += step) {
+                float at = Math.min(u, run);
+                var station = station(ground, gate, along, across, side, inner, outer, at);
+                boolean stands = !Float.isNaN(station[2]), stood = stretch != null;
+                if (stands != stood && !Float.isNaN(previous)) {
+                    float low = previous, high = at;
+                    for (int i = 0; i < 12; i++) {
+                        float middle = (low + high) / 2;
+                        if (Float.isNaN(station(ground, gate, along, across, side, inner, outer, middle)[2]) != stood) {
+                            low = middle;
+                        } else { high = middle; }
+                    }
+                    if (!stood) { stretches.add(stretch = new ArrayList<>()); }
+                    stretch.add(station(ground, gate, along, across, side, inner, outer, stood ? low : high));
+                    if (stood) { stretch = null; }
+                }
+                if (stands) {
+                    if (stretch == null) { stretches.add(stretch = new ArrayList<>()); }
+                    stretch.add(station);
+                }
+                previous = at;
+            }
+            for (var wall : stretches) {
+                // A bank starting just in from the gate is retained from the abutment on.
+                var first = wall.getFirst();
+                if (wall == stretches.getFirst() && first[0] > 0 && first[0] <= PAST_GATE * scale) {
+                    wall.addFirst(new float[] { 0, station(ground, gate, along, across, side, inner, outer, 0)[1], first[2] });
+                }
+                boolean parapet = wall.getFirst()[0] <= 0 && wall.getLast()[0] >= reach;
+                walled[(side + 1) / 2] |= parapet;
+                float[] last = wall.getLast();
+                if (parapet && last[0] < run) {
+                    // Past the cut the parapet slopes down into the road over a rail's height.
+                    float u = Math.min(run, last[0] + rail);
+                    wall.add(new float[] { u, Float.NaN, station(ground, gate, along, across, side, inner, outer, u)[1] });
+                }
+                for (int i = wall.size() - 1; i >= 0; i--) {
+                    float[] station = wall.get(i);
+                    if (parapet && i < wall.size() - 1 && !Float.isNaN(station[1])) {
+                        station[2] = Math.max(station[2], station[1] + rail);
+                    }
+                    if (i < wall.size() - 1) { station[2] = Math.max(station[2], wall.get(i + 1)[2]); }
+                }
+                wing(faces, wall, gate, along, across, side, inner, outer, bottom);
+            }
+        }
+        return walled;
+    }
+
+    /** How far in from the gate a bank may start beside the road and still be retained from the abutment, in model px. */
+    private static final float PAST_GATE = 8;
+
+    /**
+     * A wing's station {u, road, top} at {@code u} past the gate on {@code side}: the road beside it and its top, on the
+     * bank's edge with a cap no deeper than the cut, so it meets the road where the cut ends; the top is NaN where the
+     * bank does not stand above the road.
+     */
+    private static float[] station(List<BoardSurface.Face> ground, Vector3 gate, Vector3 along, Vector3 across, int side,
+          float inner, float outer, float u) {
+        var p = new Vector3(gate).mulAdd(along, u);
+        var road = new Vector3(p).mulAdd(across, side * (inner - BoardGeometry.hexScale()));
+        var beyond = new Vector3(p).mulAdd(across, side * (outer + BoardRelief.metres(.05f)));
+        // At the gate the deck carries the road at the gate's height.
+        float base = BoardSurface.sampleHeight(ground, road.x, road.y, u <= 0 ? gate.z : Float.NaN);
+        float cut = BoardSurface.sampleHeight(ground, beyond.x, beyond.y, Float.NaN) - base;
+        float top = base + cut + BoardRelief.metres(.15f) * Math.min(1, cut / (2.5f * BoardGeometry.hexScale()));
+        return new float[] { u, base, cut > 0 ? top : Float.NaN };
+    }
+
+    /** One wing through stations {u, road, top} on {@code side}, between {@code inner} and {@code outer}, closed. */
+    private static void wing(List<BoardBridge.Facet> faces, List<float[]> wall, Vector3 gate, Vector3 along,
+          Vector3 across, int side, float inner, float outer, float bottom) {
+        if (wall.size() < 2) { return; }
+        List<Vector3[]> sections = new ArrayList<>();
+        for (float[] station : wall) {
+            var p = new Vector3(gate).mulAdd(along, station[0]);
+            var a = new Vector3(p).mulAdd(across, side * inner);
+            var b = new Vector3(p).mulAdd(across, side * outer);
+            sections.add(new Vector3[] { new Vector3(a.x, a.y, bottom), new Vector3(a.x, a.y, station[2]),
+                  new Vector3(b.x, b.y, bottom), new Vector3(b.x, b.y, station[2]) });
+        }
+        var road = new Vector3(across).scl(-side);
+        var bank = new Vector3(across).scl(side);
+        for (int i = 1; i < sections.size(); i++) {
+            var a = sections.get(i - 1);
+            var b = sections.get(i);
+            facing(faces, a[0], b[0], b[1], a[1], road);
+            facing(faces, a[2], b[2], b[3], a[3], bank);
+            facing(faces, a[1], b[1], b[3], a[3], Vector3.Z);
+        }
+        var first = sections.getFirst();
+        var last = sections.getLast();
+        facing(faces, first[0], first[2], first[3], first[1], new Vector3(along).scl(-1));
+        facing(faces, last[0], last[2], last[3], last[1], along);
+    }
+
+    /** A structural quad wound to face {@code out}. */
+    private static void facing(List<BoardBridge.Facet> faces, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 out) {
+        var normal = new Vector3(c).sub(a).crs(new Vector3(d).sub(b));
+        if (normal.dot(out) >= 0) { quad(faces, a, b, c, d, BoardBridge.Part.STRUCTURE); }
+        else { quad(faces, d, c, b, a, BoardBridge.Part.STRUCTURE); }
     }
 
     /** Whether the bank ({@code ground}) lies below {@code underside} just inside either outer corner of the gate's row. */
