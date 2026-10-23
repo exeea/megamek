@@ -406,6 +406,37 @@ select; `select(i)` from code fires none, and `placeholder(text)` shows the plac
 `focused` and `opened` freeze those states for the gallery. hud-v3's `UiKit.select`, its `hud-select` styles and the
 `UiPopover` / `UiMenuList` drop-downs stay until their views move.
 
+## Lists and trees
+
+Show many items to pick from or browse. A select is better when only the chosen value needs to stay visible; a table
+when items have several comparable columns.
+
+| Part / state | Look |
+| --- | --- |
+| Frame | The scroll pane: `surface.input` inside a `border.control` edge; it carries the keyboard focus ring |
+| Rows | At least `control.sm` (28) high, the shape inset `xs` (4) with a `radius.sm` corner, like the popup list's rows |
+| Hover | A `surface.hover` wash on the row under the pointer |
+| Selected | The `selected.background` wash, at full strength whether or not the list has focus, and a `selected.primary` marker, `selection.width` (2) by `icon.sm` (16), at the row shape's leading edge |
+| Text | `text.primary`, starting `sm` (6) past the marker; `text.disabled` when the list is disabled, which drops the hover and the marker |
+| Two-line row | At least `control.lg` (46) high: the title over a `small` detail line in `text.secondary` |
+| Empty | A `text.muted` message centered in the first row's place |
+| Tree | The list's rows with `text.secondary` chevrons and no connecting lines; each level indents 16, and the leading edge leaves room for the marker |
+
+- **Violet means selected**, and the marker keeps a selection visible without relying on its color, in multiple
+  selections too. Hover stays neutral.
+- **Keys** are Swing's: Up and Down move, Home and End jump, Shift and Ctrl extend a multiple selection; Left and Right
+  collapse and expand tree nodes.
+
+**Swing.** The MegaMek themes draw every `JList` and `JTree` this way through
+[`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java) and
+[`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java), so existing views get them without
+changes; a combo box's popup list keeps the select's rows. Lists with their own cell renderers keep their rows'
+content and get the hover and the marker, but only the stock renderer gets the rounded selection.
+[`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java) adds `emptyText(list, text)`,
+`twoLine(list, title, detail)` and `scroll(view)`.
+
+**libGDX.** Nothing new yet. hud-v3's `UiList` and `UiTree` stay until the developers accept the system.
+
 ## Code
 
 | Class | Role |
@@ -428,10 +459,11 @@ select; `select(i)` from code fires none, and `placeholder(text)` shows the plac
 | [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
 | [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
+| [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+styles read the tokens; lists and trees are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
 Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
 only once the developers accept the system.

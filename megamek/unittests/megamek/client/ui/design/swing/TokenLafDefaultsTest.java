@@ -23,6 +23,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JList;
 import javax.swing.JPasswordField;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
@@ -31,6 +32,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
@@ -270,6 +272,59 @@ class TokenLafDefaultsTest {
                 assertFalse(segmented.segment(2).isEnabled());
                 press(segmented.segment(1), "nextSegment");
                 assertEquals(1, segmented.getSelectedIndex(), "a disabled control ignores keys");
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void listsAndTreesFollowTheTokens() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                assertColor(defaults, TokenLists.MARKER_COLOR, "selected.primary", mode);
+                assertColor(defaults, TokenLists.EMPTY_FOREGROUND, "text.muted", mode);
+                int hover = ColorMath.over(tokens.color("surface.hover", mode), tokens.color("surface.input", mode));
+                assertEquals(new Color(hover), new Color(defaults.getColor(TokenLists.HOVER_BACKGROUND).getRGB()));
+                int rowHeight = UIScale.scale(Math.round(tokens.size().get("control.sm")));
+
+                JList<String> list = new JList<>(new String[] { "Atlas", "Marauder" });
+                assertTrue(list.getUI() instanceof TokenListUI);
+                assertTrue(list.getCellBounds(0, 0).height >= rowHeight, "rows are at least control.sm high");
+                Insets margins = ((JComponent) list.getCellRenderer()
+                      .getListCellRendererComponent(list, "Atlas", 0, false, false)).getInsets();
+                int markerSpace = Math.round(tokens.space().get("xs") + tokens.size().get("selection.width")
+                      + tokens.space().get("sm"));
+                assertEquals(UIScale.scale(markerSpace), margins.left, "the text starts past the marker");
+
+                // The select's popup list keeps its own rows
+                JList<String> popup = new JList<>(new String[] { "Atlas" });
+                popup.setName(TokenLists.POPUP_LIST);
+                popup.getPreferredSize();
+                Insets popupMargins = ((JComponent) popup.getCellRenderer()
+                      .getListCellRendererComponent(popup, "Atlas", 0, false, false)).getInsets();
+                assertTrue(popupMargins.left < margins.left, "popup rows have no marker space");
+
+                JList<String> twoLine = TokenLists.twoLine(new JList<>(new String[] { "Atlas AS7-D" }), s -> s,
+                      s -> "100 t");
+                assertTrue(twoLine.getCellBounds(0, 0).height
+                      >= UIScale.scale(Math.round(tokens.size().get("control.lg"))), "two-line rows are control.lg");
+                assertEquals("Nothing here", TokenLists.emptyText(new JList<String>(), "Nothing here")
+                      .getClientProperty(TokenLists.EMPTY_TEXT));
+
+                JTree tree = new JTree();
+                assertTrue(tree.getUI() instanceof TokenTreeUI);
+                assertEquals(rowHeight, tree.getRowHeight());
+                int indent = Math.round(tokens.space().get("md"));
+                assertEquals(UIScale.scale(indent * 2), ((TokenTreeUI) tree.getUI()).getLeftChildIndent()
+                      + ((TokenTreeUI) tree.getUI()).getRightChildIndent());
+                assertEquals(UIScale.scale(markerSpace), tree.getInsets().left, "chevrons clear the marker");
             }
         } finally {
             if (previous != null) {

@@ -50,6 +50,7 @@ import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.JTree;
 import javax.swing.JViewport;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
@@ -59,6 +60,7 @@ import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.PlainDocument;
+import javax.swing.tree.DefaultMutableTreeNode;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import megamek.client.ui.Messages;
@@ -357,6 +359,10 @@ public final class SwingUiLibrary extends JFrame {
         page.add(selectMatrix());
         page.add(selectPopupSample());
 
+        page.add(heading(Messages.getString("UiLibrary.controls.lists")));
+        page.add(paragraph(Messages.getString("UiLibrary.lists.note"), "small", "text.muted"));
+        page.add(listSamples());
+
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         JTable table = new JTable(new Object[][] {
               { "Atlas AS7-D", "100", "3/5/0", "54" },
@@ -635,6 +641,77 @@ public final class SwingUiLibrary extends JFrame {
         return matrix;
     }
 
+    /**
+     * Lists and a tree side by side, each with a caption: hover is frozen on a row of the first list and the tree, the
+     * rest stay live.
+     */
+    private JComponent listSamples() {
+        String[] units = { "Atlas AS7-D", "Marauder MAD-3R", "Phoenix Hawk PXH-1", "Locust LCT-1V", "Wasp WSP-1A" };
+        JPanel samples = new JPanel(new GridBagLayout());
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+
+        JList<String> states = new JList<>(units);
+        states.setSelectedIndex(2);
+        states.putClientProperty(TokenLists.FROZEN_HOVER, 0);
+        addListSample(samples, 0, 0, "UiLibrary.lists.states", states);
+
+        JList<String> multi = new JList<>(units);
+        multi.setSelectedIndices(new int[] { 1, 2, 4 });
+        addListSample(samples, 1, 0, "UiLibrary.lists.multi", multi);
+
+        JList<String[]> twoLine = TokenLists.twoLine(new JList<>(new String[][] {
+              { "Atlas AS7-D", "100", "3" }, { "Marauder MAD-3R", "75", "4" }, { "Locust LCT-1V", "20", "8" } }),
+              unit -> unit[0], unit -> Messages.getString("UiLibrary.lists.detail", unit[1], unit[2]));
+        twoLine.setSelectedIndex(1);
+        addListSample(samples, 2, 0, "UiLibrary.lists.twoLine", twoLine);
+
+        DefaultMutableTreeNode company = new DefaultMutableTreeNode(Messages.getString("UiLibrary.lists.company"));
+        DefaultMutableTreeNode command = new DefaultMutableTreeNode(Messages.getString("UiLibrary.lists.commandLance"));
+        command.add(new DefaultMutableTreeNode(units[0]));
+        command.add(new DefaultMutableTreeNode(units[1]));
+        DefaultMutableTreeNode fire = new DefaultMutableTreeNode(Messages.getString("UiLibrary.lists.fireLance"));
+        fire.add(new DefaultMutableTreeNode(units[2]));
+        fire.add(new DefaultMutableTreeNode(units[3]));
+        company.add(command);
+        company.add(fire);
+        JTree tree = new JTree(company);
+        for (int row = 0; row < tree.getRowCount(); row++) {
+            tree.expandRow(row);
+        }
+        tree.setSelectionRow(3);
+        tree.putClientProperty(TokenLists.FROZEN_HOVER, 2);
+        addListSample(samples, 0, 1, "UiLibrary.lists.tree", tree);
+
+        JList<String> empty = TokenLists.emptyText(new JList<>(), Messages.getString("UiLibrary.lists.emptyText"));
+        addListSample(samples, 1, 1, "UiLibrary.lists.empty", empty);
+
+        JList<String> disabled = new JList<>(units);
+        disabled.setSelectedIndex(1);
+        disabled.setEnabled(false);
+        addListSample(samples, 2, 1, "UiLibrary.lists.disabled", disabled);
+
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 3;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
+    }
+
+    /** Adds {@code view} in its scroll pane under a caption, at {@code column} of caption row {@code row}. */
+    private void addListSample(JPanel samples, int column, int row, String captionKey, JComponent view) {
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.NORTHWEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridx = column;
+        cell.gridy = row * 2;
+        samples.add(text(Messages.getString(captionKey), "caption", "text.muted"), cell);
+        cell.gridy++;
+        JScrollPane scroll = TokenLists.scroll(view);
+        scroll.setPreferredSize(new Dimension(scaleForGUI(210), scaleForGUI(170)));
+        samples.add(scroll, cell);
+    }
+
     /** Selects of each kind in each state; hover and focus are frozen, the rest stay live. */
     private JComponent selectMatrix() {
         List<String> states = List.of("rest", "hover", "focus", "placeholder", "disabled");
@@ -717,6 +794,8 @@ public final class SwingUiLibrary extends JFrame {
               + rowInsets.right);
         list.setSelectedIndex(1);
         list.setFocusable(false);
+        // Named like a real popup list, so it keeps the select's rows rather than the plain list's
+        list.setName(TokenLists.POPUP_LIST);
         JPanel popup = new JPanel(new BorderLayout()) {
             @Override
             public Dimension getPreferredSize() {

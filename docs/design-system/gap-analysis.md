@@ -296,8 +296,11 @@ work for Swing, and item 11 is under investigation.
   section, in two sizes, in Swing and libGDX; see [tokens.md](tokens.md#tabs).
 - ~~Select~~: an input-faced select in two sizes and an inline one with a dotted underline, sharing one popup list
   (neutral wash, violet check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
-- The rest of the gallery: lists and trees, tables, menus, tooltips, scrollbars, sliders and the remaining
-  controls, in Swing and libGDX.
+- ~~Lists and trees~~: inset rounded rows at least 28 high, a neutral hover wash, and a violet wash plus a leading
+  marker for the selection, with two-line rows and an empty state, in Swing; libGDX keeps hud-v3's `UiList` and
+  `UiTree` until the developers accept the system; see [tokens.md](tokens.md#lists-and-trees).
+- The rest of the gallery: tables, menus, tooltips, scrollbars, sliders and the remaining controls, in Swing (libGDX
+  only where the in-game UI needs them).
 - Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
   Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
   can migrate to one shape.

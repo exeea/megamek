@@ -256,6 +256,35 @@ public final class TokenLafDefaults {
         put("TableHeader.bottomSeparatorColor", color("border.control"));
         put("TableHeader.hoverBackground", over(hover, raised));
         put("TableHeader.pressedBackground", over(pressed, raised));
+        // Lists and trees (TokenListUI, TokenTreeUI): rows at least control.sm high, inset and rounded like the popup
+        // list. The pointer's row gets the hover wash; a selected row keeps the violet wash, focused or not, and adds a
+        // violet marker at its leading edge, so selection never relies on color alone. Text starts past the marker.
+        values.put("ListUI", TokenListUI.class.getName());
+        values.put("TreeUI", TokenTreeUI.class.getName());
+        String rowArc = number(tokens.radius().get("sm") * 2);
+        String rowInsets = "0," + Math.round(tokens.space().get("xs")) + ",0," + Math.round(tokens.space().get("xs"));
+        int markerSpace = Math.round(tokens.space().get("xs") + tokens.size().get("selection.width")
+              + tokens.space().get("sm"));
+        int textSide = Math.round(tokens.space().get("xs") + tokens.space().get("sm"));
+        values.put("List.selectionArc", rowArc);
+        values.put("List.selectionInsets", rowInsets);
+        values.put(TokenListUI.CELL_MARGINS, "1," + markerSpace + ",1," + textSide);
+        values.put(TokenLists.ROW_HEIGHT, number(tokens.size().get("control.sm")));
+        values.put(TokenLists.TWO_LINE_HEIGHT, number(tokens.size().get("control.lg")));
+        put(TokenLists.HOVER_BACKGROUND, over(hover, input));
+        put(TokenLists.MARKER_COLOR, color("selected.primary"));
+        put(TokenLists.EMPTY_FOREGROUND, color("text.muted"));
+        put(TokenLists.DETAIL_FOREGROUND, color("text.secondary"));
+        values.put("Tree.selectionArc", rowArc);
+        values.put("Tree.selectionInsets", rowInsets);
+        values.put("Tree.rowHeight", number(tokens.size().get("control.sm")));
+        // Each level indents 16, as the libGDX tree does; the leading border keeps the chevrons clear of the marker
+        int halfIndent = Math.round(tokens.space().get("md"));
+        values.put("Tree.leftChildIndent", Integer.toString(halfIndent));
+        values.put("Tree.rightChildIndent", Integer.toString(halfIndent));
+        values.put("Tree.border", "1," + markerSpace + ",1," + Math.round(tokens.space().get("xs")));
+        values.put("Tree.paintLines", "false");
+        values.put("Tree.showDefaultIcons", "false");
 
         // Containers and popups
         put("Panel.background", base);
