@@ -681,35 +681,52 @@ final class BoardRoadCut {
             float rt = rightPart == null ? mt - nt / norm * offset : rightPart.y();
             boolean leftReserved = region.contains(a.x + ls * (b.x - a.x) + lt * (c.x - a.x), a.y + ls * (b.y - a.y) + lt * (c.y - a.y));
             boolean rightReserved = region.contains(a.x + rs * (b.x - a.x) + rt * (c.x - a.x), a.y + rs * (b.y - a.y) + rt * (c.y - a.y));
-            if (leftReserved == rightReserved) { continue; }
+            if (leftReserved == rightReserved) {
+                // On the reserved ground, natural ground kept over the road's headroom meets the part that gave way
+                // below it: a cut face from its edge down to the road closes it, so the overhang stands on the verge.
+                if (natural && leftReserved && left != OUTSIDE && right != OUTSIDE && (left == KEPT) != (right == KEPT)) {
+                    Vector3 p = vertex.apply(new Point(s.ax(), s.ay())), q = vertex.apply(new Point(s.bx(), s.by()));
+                    float rp = roadHeight(road, p.x, p.y, Float.NaN), rq = roadHeight(road, q.x, q.y, Float.NaN);
+                    float above = BoardRoadGrade.CLEARANCE * BoardGeometry.level() / 2;
+                    if (p.z - rp > above && q.z - rq > above) {
+                        float gs = left == KEPT ? rs : ls, gt = left == KEPT ? rt : lt;
+                        curtain(p, q, new Vector3(a).mulAdd(new Vector3(b).sub(a), gs).mulAdd(new Vector3(c).sub(a), gt),
+                              region, wall, concrete, road, false, natural);
+                    }
+                }
+                continue;
+            }
             // A kept face's own edge on the reserved ground's boundary closes against the road too: the reserved side is
             // another face's, which, removed, leaves it to this one.
             if ((left == OUTSIDE || right == OUTSIDE) && (left == OUTSIDE ? right : left) != KEPT
                   || left == OUTSIDE && !leftReserved || right == OUTSIDE && !rightReserved) {
                 continue;
             }
-            curtain(vertex.apply(new Point(s.ax(), s.ay())), vertex.apply(new Point(s.bx(), s.by())), region, wall,
+            curtain(vertex.apply(new Point(s.ax(), s.ay())), vertex.apply(new Point(s.bx(), s.by())), null, region, wall,
                   concrete, road, left == right, natural);
         }
     }
 
     /**
-     * The vertical face between a cut terrain edge and the road beside it, split where the two cross; with
+     * The vertical face between a cut terrain edge and the road beside it, on the road's side ({@code toward}, or the
+     * reserved side of the boundary), split where the two cross; with
      * {@code fill}, only where the ground lies under the road; below it, at most {@link BoardRoadGrade#FILL} deep where
      * the ground and the road beside it are both natural.
      * Beside a road built in concrete it is {@code concrete}'s; beside a bridge's ramp only where it lies under the road.
      */
-    private void curtain(Vector3 p, Vector3 q, Area region, WallBuilder wall, WallBuilder concrete,
+    private void curtain(Vector3 p, Vector3 q, Vector3 toward, Area region, WallBuilder wall, WallBuilder concrete,
           List<BoardSurface.Face> road, boolean fill, boolean natural) {
         float dx = q.x - p.x, dy = q.y - p.y, length = (float) Math.hypot(dx, dy);
         if (length < epsilon) { return; }
-        // The reserved side of this stretch of boundary.
+        // The road's side of this stretch: towards the given point, else the reserved side of the boundary.
         float nx = -dy / length, ny = dx / length, mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2, probe = 4 * epsilon;
-        if (!region.contains(mx + nx * probe, my + ny * probe)) { nx = -nx; ny = -ny; }
+        if (toward != null ? (toward.x - mx) * nx + (toward.y - my) * ny < 0 : !region.contains(mx + nx * probe, my + ny * probe)) {
+            nx = -nx;
+            ny = -ny;
+        }
         // The grade beside the middle of the stretch; its surface continues to both ends, even round a corner.
         BoardRoadGrade grade = grade(mx + nx * probe, my + ny * probe);
         if (grade == null) { return; }
-        // Beside a road built in concrete, or a bridge's ramp, which has no natural bank, the cut is cast as well.
         // Beside a road built in concrete the cut is cast as well. Beside a bridge's ramp, which has no natural bank,
         // only the fill under the road is: a cut above it stays the bank's own, as the rest of the cut is.
         boolean cast = grade.poured() || grade.bridgeRamp();

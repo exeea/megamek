@@ -1839,11 +1839,12 @@ final class BoardRelief {
 
     /**
      * Whether a site's road, leaving it at d towards other, ends there on the step's top: a bridge's deck lands on it from
-     * there, or the ground there lies further down than a road ramps (BoardRoadGrade#edgeLevel) and carries none.
+     * there, or the ground there lies further down than a road ramps (BoardRoadGrade#edgeLevel); either way only where
+     * no road of its own runs below, from which the step recedes as usual.
      */
     private boolean ends(Site site, Site other, int d) {
-        return BoardBridge.bank(scene.tile(other.coords()), scene.tile(site.coords()), (d + 3) % 6)
-              || !other.road() && !other.liquid() && other.level() < site.level() - 2;
+        return !other.road() && (BoardBridge.bank(scene.tile(other.coords()), scene.tile(site.coords()), (d + 3) % 6)
+              || !other.liquid() && other.level() < site.level() - 2);
     }
 
     /**

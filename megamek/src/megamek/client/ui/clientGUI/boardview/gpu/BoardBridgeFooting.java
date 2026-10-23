@@ -476,12 +476,24 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 end[i].z = BoardSurface.sampleHeight(ground, end[i].x, end[i].y, BoardGeometry.groundZ(next))
                       + GpuRoads.SURFACE_LIFT * scale;
             }
+            // A level road landing on a natural bank that falls away below its edge stands on an abutment (Enhanced).
+            boolean abutment = !bare && !ramp && !columns && next.surface() != BoardScene.Surface.CONCRETE
+                  && falls(ground, start, along, gate.z - BoardBridge.SLAB * scale);
             float bottom = Float.NaN;
-            if (ramp) {
+            if (ramp || abutment) {
                 var below = ground(scene, tile, lod, surfaces, columns);
                 bottom = (float) below.groundFaces().stream()
                       .mapToDouble(f -> Math.min(f.a().z, Math.min(f.b().z, f.c().z))).min().orElse(BoardGeometry.groundZ(tile))
                       - BoardRelief.metres(.05f);
+            }
+            if (abutment) {
+                // From the slab down past the bank over the whole landing, its face a hair out under the deck: the bank
+                // runs on under the deck to its face and along its sides, and the road's own fill stays inside it.
+                var out = new Vector3(along).scl(-BoardRelief.metres(.1f));
+                support(faces, List.of(new Vector3(start[0]).add(out), end[0], end[3], new Vector3(start[3]).add(out)),
+                      bottom, -BoardBridge.SLAB * scale);
+            }
+            if (ramp) {
                 // The support ends at the bridge's inset, leaving the level centre of the span open below.
                 var inner = new Vector3(center).lerp(corner, .5f);
                 var left = new Vector3(start[0]);
@@ -537,6 +549,15 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         }
         return new BoardBridgeFooting(BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces),
               List.copyOf(lengths), bareExits, solidExits, columns ? 0 : solidExits, Map.copyOf(bankCurves));
+    }
+
+    /** Whether the bank ({@code ground}) lies below {@code underside} just inside either outer corner of the gate's row. */
+    private static boolean falls(List<BoardSurface.Face> ground, Vector3[] start, Vector3 along, float underside) {
+        for (var corner : new Vector3[] { start[0], start[3] }) {
+            var p = new Vector3(corner).mulAdd(along, BoardRelief.metres(.5f));
+            if (!(BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN) >= underside)) { return true; }
+        }
+        return false;
     }
 
     /**

@@ -370,7 +370,8 @@ class BoardBridgeFootingTest {
                             }
                         }
                     }
-                    int budget = lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 440 : 248;
+                    // Both banks fall away below their landings: each abutment adds four sides, eight facets.
+                    int budget = (lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 440 : 248) + 2 * 8;
                     assertTrue(footing.shape().facets().size() <= budget, "Close LODs bevel the caps; distant LODs keep the silhouette");
                 }
             }
