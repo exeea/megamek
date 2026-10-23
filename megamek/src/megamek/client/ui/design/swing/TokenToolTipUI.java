@@ -55,7 +55,7 @@ public class TokenToolTipUI extends FlatToolTipUI {
             FlatUIUtils.setRenderingHints(g2);
             Insets insets = c.getInsets();
             int x = insets.left;
-            int y = insets.top;
+            int y = insets.top + layout.textTop();
             y = paintLines(c, g2, layout.titleLines(), layout.titleFont(), c.getForeground(), x, y);
             if (!layout.titleLines().isEmpty() && !layout.detailLines().isEmpty()) {
                 y += layout.gap();
@@ -113,15 +113,25 @@ public class TokenToolTipUI extends FlatToolTipUI {
         if (!titleLines.isEmpty() && !detailLines.isEmpty()) {
             height += gap;
         }
+        FontMetrics firstLine = titleLines.isEmpty() ? detailMetrics : titleMetrics;
+        int textTop = 0;
+        float keyTop = 0;
         if (card.key() != null) {
+            // The chip's text shares the first line's baseline, and the chip centers on its capitals; the chip keeps
+            // its fractional position so whole-pixel rounding doesn't push it off center at scaled sizes
+            float capCenter = firstLine.getAscent() - capHeight(keyMetrics) / 2;
+            keyTop = capCenter - keyHeight / 2f;
+            if (keyTop < 0) {
+                textTop = (int) Math.ceil(-keyTop);
+                keyTop += textTop;
+            }
             width += keyGap + keyWidth;
-            height = Math.max(height, keyHeight);
+            height = Math.max(textTop + height, (int) Math.ceil(keyTop + keyHeight));
         }
         Color detailColor = card.title() == null ? c.getForeground()
               : UIManager.getColor(TokenTooltips.DETAIL_FOREGROUND);
-        FontMetrics firstLine = titleLines.isEmpty() ? detailMetrics : titleMetrics;
         return new Layout(titleLines, detailLines, titleFont, detailFont, detailColor, gap, width, height, card.key(),
-              keyFont, keyWidth, keyHeight, firstLine.getHeight());
+              keyFont, keyWidth, keyHeight, textTop, keyTop, firstLine.getAscent());
     }
 
     private static int space(String name) {
@@ -139,9 +149,9 @@ public class TokenToolTipUI extends FlatToolTipUI {
         return y;
     }
 
-    /** The shortcut chip, centered on the first text line: a key cap with a control edge. */
+    /** The shortcut chip: a key cap with a control edge, its text on the first line's baseline. */
     private static void paintKey(JComponent c, Graphics2D g2, Layout layout, int x, int top) {
-        int y = top + Math.max(0, (layout.firstLineHeight() - layout.keyHeight()) / 2);
+        float y = top + layout.keyTop();
         float arc = scaleForGUI(DesignTokens.shipped().radius().get("sm") * 2);
         g2.setColor(UIManager.getColor(TokenTooltips.KEY_BORDER_COLOR));
         FlatUIUtils.paintOutline(g2, x, y, layout.keyWidth(), layout.keyHeight(), scaleForGUI(1), arc);
@@ -149,8 +159,14 @@ public class TokenToolTipUI extends FlatToolTipUI {
         g2.setColor(UIManager.getColor(TokenTooltips.KEY_FOREGROUND));
         FontMetrics metrics = c.getFontMetrics(g2.getFont());
         int textX = x + (layout.keyWidth() - metrics.stringWidth(layout.key())) / 2;
-        int textY = y + (layout.keyHeight() - metrics.getHeight()) / 2 + metrics.getAscent();
+        int textY = top + layout.textTop() + layout.firstAscent();
         FlatUIUtils.drawString(c, g2, layout.key(), textX, textY);
+    }
+
+    /** The height of a capital letter, so a line can be centered on its capitals rather than its whole line box. */
+    private static float capHeight(FontMetrics metrics) {
+        return (float) metrics.getFont().createGlyphVector(metrics.getFontRenderContext(), "H").getVisualBounds()
+              .getHeight();
     }
 
     /** Breaks {@code text} into lines no wider than {@code width}, at line breaks and spaces where it can. */
@@ -187,6 +203,6 @@ public class TokenToolTipUI extends FlatToolTipUI {
 
     private record Layout(List<String> titleLines, List<String> detailLines, Font titleFont, Font detailFont,
           Color detailColor, int gap, int width, int height, String key, Font keyFont, int keyWidth, int keyHeight,
-          int firstLineHeight) {
+          int textTop, float keyTop, int firstAscent) {
     }
 }
