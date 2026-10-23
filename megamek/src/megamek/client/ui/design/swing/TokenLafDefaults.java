@@ -236,10 +236,16 @@ public final class TokenLafDefaults {
         put("CheckBox.icon.focusedSelectedBackground", accent);
         put("CheckBox.icon.focusedCheckmarkColor", color("text.onAccent"));
         put("CheckBox.icon.hoverBorderColor", color("border.strong"));
+        put("CheckBox.icon.pressedBorderColor", color("border.strong"));
         put("CheckBox.icon.hoverBackground", over(hover, input));
         put("CheckBox.icon.pressedBackground", over(pressed, input));
-        put("CheckBox.icon.hoverSelectedBackground", over(hover, accent));
-        put("CheckBox.icon.pressedSelectedBackground", over(pressed, accent));
+        // A checked box hovers and presses like a primary button: a surface wash is invisible on the accent
+        put("CheckBox.icon.hoverSelectedBorderColor", color("border.strong"));
+        put("CheckBox.icon.pressedSelectedBorderColor", color("border.strong"));
+        put("CheckBox.icon.hoverSelectedBackground", accentHover);
+        put("CheckBox.icon.pressedSelectedBackground", accentPressed);
+        // An off switch's thumb (TokenSwitchIcon); on, it takes the check mark color
+        put("CheckBox.icon.switchThumbColor", color("text.secondary"));
 
         // Text and lists
         put("Label.disabledForeground", color("text.disabled"));

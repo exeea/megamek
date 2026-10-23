@@ -121,7 +121,7 @@ public final class UiTheme implements Disposable {
           Map.entry("tactical", 0xE3B4), Map.entry("map", 0xE55B), Map.entry("report", 0xE873),
           Map.entry("help", 0xF1C0), Map.entry("settings", 0xE8B8), Map.entry("menu", 0xE5D2),
           Map.entry("chat", 0xE0B7), Map.entry("grid", 0xE9B0),
-          Map.entry("list", 0xE896), Map.entry("check", 0xE5CA), Map.entry("flame", 0xEF55),
+          Map.entry("list", 0xE896), Map.entry("check", 0xE5CA), Map.entry("remove", 0xE15B), Map.entry("flame", 0xEF55),
           Map.entry("chevron-down", 0xE5CF), Map.entry("chevron-up", 0xE5CE), Map.entry("twist-left", 0xE419),
           Map.entry("twist-right", 0xE41A), Map.entry("more", 0xE5D3), Map.entry("undo", 0xE166),
           Map.entry("locate", 0xE55C), Map.entry("play", 0xE037), Map.entry("pause", 0xE034),
@@ -305,6 +305,7 @@ public final class UiTheme implements Disposable {
         skin.add("hud", tooltip);
         icons();
         tokenFields();
+        tokenChoices();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -674,6 +675,86 @@ public final class UiTheme implements Disposable {
         NinePatchDrawable drawable = resized(box, vertical, left, height);
         drawable.setRightWidth(right);
         return drawable;
+    }
+
+    /** The edge of a check box or radio button and the height of a switch's track (icon.sm). */
+    public static final float CHOICE_SIZE = DesignTokens.shipped().size().get("icon.sm");
+    /** A switch's track length, as a multiple of its height. */
+    public static final float SWITCH_LENGTH = 1.75f;
+    /** The space between a switch's track edge and its thumb. */
+    public static final float SWITCH_INSET = 2;
+    /** The diameter of the dot in a selected radio button. */
+    public static final float RADIO_DOT = 8;
+    /** The focus ring's width plus its gap from the indicator: the room a choice keeps around it. */
+    public static final float CHOICE_RING = DesignTokens.shipped().size().get("focus.width")
+          + DesignTokens.shipped().size().get("focus.gap");
+    /** The state suffixes of the choice drawables {@code choice-<shape><state>}, in {@link UiChoice}'s order. */
+    public static final List<String> CHOICE_STATES = List.of("", "-over", "-down", "-disabled", "-on", "-on-over",
+          "-on-down", "-on-disabled");
+
+    /** The colors of a choice's label and marks; its faces are the {@code choice-*} drawables. */
+    public static final class ChoiceStyle {
+        public Color text;
+        public Color disabledText;
+        /** The check, dash, dot or on-thumb on the accent fill. */
+        public Color mark;
+        /** An off switch's thumb. */
+        public Color thumb;
+        /** Every mark while disabled. */
+        public Color disabledMark;
+    }
+
+    /**
+     * The token choices in dark mode: a box, circle or pill in the input fill and control edge, strong under the
+     * pointer; on, an accent fill that hovers and presses like a primary button; disabled, no fill and a subtle edge.
+     * The focus ring sits a gap away, so it never hides the state.
+     */
+    private void tokenChoices() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        int input = tokens.color("surface.input", mode);
+        int hover = tokens.color("surface.hover", mode);
+        int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
+        int accent = tokens.color("accent.primary", mode);
+        int accentHover = ColorMath.over(ColorMath.withAlpha(tokens.color("text.onAccent", mode),
+              tokens.alpha("tint.hover")), accent);
+        int accentPressed = ColorMath.over(ColorMath.withAlpha(tokens.color("text.primary", mode),
+              tokens.alpha("tint.pressed")), accent);
+        Color base = token(tokens.color("surface.base", mode));
+        Color control = token(tokens.color("border.control", mode));
+        Color strong = token(tokens.color("border.strong", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color ring = token(tokens.color("focus.ring", mode));
+        float border = tokens.size().get("border");
+        float width = tokens.size().get("focus.width");
+        float gap = tokens.size().get("focus.gap");
+        Map<String, Float> radii = Map.of("box", tokens.radius().get("sm"), "radio", CHOICE_SIZE / 2,
+              "track", CHOICE_SIZE / 2);
+        radii.forEach((shape, radius) -> {
+            // A disc or pill is all corner, so it needs its minimum height to keep its shape
+            float height = shape.equals("box") ? 0 : CHOICE_SIZE;
+            String name = "choice-" + shape;
+            box(name, token(input), control, border, radius, null, 0, 0, height);
+            box(name + "-over", token(ColorMath.over(hover, input)), strong, border, radius, null, 0, 0, height);
+            box(name + "-down", token(ColorMath.over(pressed, input)), strong, border, radius, null, 0, 0, height);
+            box(name + "-disabled", base, subtle, border, radius, null, 0, 0, height);
+            box(name + "-on", token(accent), token(accent), border, radius, null, 0, 0, height);
+            box(name + "-on-over", token(accentHover), strong, border, radius, null, 0, 0, height);
+            box(name + "-on-down", token(accentPressed), strong, border, radius, null, 0, 0, height);
+            skin.add(name + "-on-disabled", skin.getDrawable(name + "-disabled"), Drawable.class);
+            box(name + "-focus", Color.CLEAR, ring, width, radius + gap + width, null, 0, 0,
+                  height == 0 ? 0 : height + 2 * (gap + width));
+        });
+        box("choice-dot", Color.WHITE, null, 0, RADIO_DOT / 2, null, 0, 0, RADIO_DOT);
+        float thumb = CHOICE_SIZE - 2 * SWITCH_INSET;
+        box("choice-thumb", Color.WHITE, null, 0, thumb / 2, null, 0, 0, thumb);
+        ChoiceStyle style = new ChoiceStyle();
+        style.text = token(tokens.color("text.primary", mode));
+        style.disabledText = token(tokens.color("text.disabled", mode));
+        style.mark = token(tokens.color("text.onAccent", mode));
+        style.thumb = token(tokens.color("text.secondary", mode));
+        style.disabledMark = style.disabledText;
+        skin.add("default", style);
     }
 
     /** A libGDX color from a token's ARGB value. */

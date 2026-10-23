@@ -273,6 +273,44 @@ in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD
 can not be selected, because scene2d has no read-only field. The `hud` and `hud-search` field styles stay until their
 views move.
 
+## Choices
+
+Check box, radio button and switch, with the label on the right. A click on the indicator or its label flips it. Both
+galleries show every kind in every state, and a live row to click.
+
+| State | Look |
+| --- | --- |
+| Off | `surface.input` fill, `border.control` edge |
+| On | `accent.primary` fill and edge with a `text.onAccent` mark: a check, a dot, or the switch's thumb on the right |
+| Mixed (check box) | As on, with a dash in place of the check |
+| Hover / pressed | `border.strong` edge; off adds the `surface.hover` wash, on leans the accent as a primary button does |
+| Focus | The ring around the indicator, `focus.gap` (1) away (see [Focus](#focus)) |
+| Disabled | `surface.base` fill, `border.subtle` edge, `text.disabled` mark and label |
+
+- **Size.** The box and circle are `icon.sm` (16) in every row density; the switch's track is 16 high and 28 long,
+  with a 12 thumb. The label sits `xs` (4) beyond the ring's room.
+- **Which one.** A check box is for a choice confirmed with the rest of a form; a switch applies at once, like a
+  setting; radio buttons pick one of a few, and a group always keeps one selected.
+- **Not by color alone.** On always adds a mark or moves the thumb, so the state reads without telling colors apart.
+- **Mixed** means some of the items a check box stands for are checked. It reads as unchecked, so a click checks
+  everything; nothing clicks back into mixed.
+
+**Swing.** The MegaMek themes give every `JCheckBox` and `JRadioButton` the token look through
+[`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java) and
+[`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), so existing views
+get it without changes. [`TokenChoices`](../../megamek/src/megamek/client/ui/design/swing/TokenChoices.java) builds
+them: `check(text, checked)`, `radio(text, selected)`, `group(radios...)` and `toggleSwitch(text, on)` (a `JCheckBox`
+with [`TokenSwitchIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenSwitchIcon.java), announced as a toggle
+button); `mixed(box, true)` shows the dash through FlatLaf's indeterminate state. Swing's accessibility API has no
+mixed state, so a screen reader hears a mixed box as unchecked.
+
+**libGDX.** [`UiChoice`](../../megamek/src/megamek/client/ui/gdx/UiChoice.java) draws the `choice-<shape><state>`
+drawables [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers (`box`, `radio` and `track`, in
+the `UiTheme.CHOICE_STATES`), its mark and the focus ring. `UiKit` builds them: `check(text, checked)`,
+`radio(text, checked)`, `toggleSwitch(text, on)` and `radioGroup(radios...)`. A click, or Space or Enter while it has
+keyboard focus, fires a `ChangeEvent`; `setChecked` and `mixed(true)` from code fire none. `hovered`, `held` and
+`focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` stays until its views move.
+
 ## Code
 
 | Class | Role |
@@ -289,9 +327,11 @@ views move.
 | [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
 | [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java), [`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) | The Swing inputs and form field |
 | [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java), [`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java) | The libGDX inputs and form field |
+| [`TokenChoices`](../../megamek/src/megamek/client/ui/design/swing/TokenChoices.java), [`TokenSwitchIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenSwitchIcon.java) | The Swing check box, radio button and switch |
+| [`UiChoice`](../../megamek/src/megamek/client/ui/gdx/UiChoice.java) | The libGDX check box, radio button and switch |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
-Outside the galleries, only the two Swing themes and the libGDX button and input styles read the tokens. The Swing
-themes are selectable but not the default, and no view uses the new buttons or inputs yet. Next come choices and tabs,
-and a `UiTheme` rename pass so hud-v3 reads the same roles.
+Outside the galleries, only the two Swing themes and the libGDX button, input and choice styles read the tokens. The
+Swing themes are selectable but not the default, and no view uses the new buttons, inputs or choices yet. Next come
+tabs, the segmented control and select, a `UiTheme` rename pass so hud-v3 reads the same roles, and then dialogs.

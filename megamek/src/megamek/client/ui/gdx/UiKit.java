@@ -482,6 +482,31 @@ public final class UiKit {
         return new UiFormField(this, label, input);
     }
 
+    /** A token check box (docs/design-system/tokens.md, Choices): for a choice a form confirms. */
+    public UiChoice check(String text, boolean checked) {
+        return new UiChoice(this, UiChoice.Kind.CHECK, text, checked);
+    }
+
+    /** A token radio button; put it in a {@link #radioGroup} with the others of its choice. */
+    public UiChoice radio(String text, boolean checked) {
+        return new UiChoice(this, UiChoice.Kind.RADIO, text, checked);
+    }
+
+    /** A token switch: for a setting that applies at once. */
+    public UiChoice toggleSwitch(String text, boolean on) {
+        return new UiChoice(this, UiChoice.Kind.SWITCH, text, on);
+    }
+
+    /** Makes radio buttons exclusive: exactly one stays selected, the first checked one or else the first. */
+    public com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice> radioGroup(UiChoice... radios) {
+        var group = new com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice>();
+        group.setMinCheckCount(1);
+        group.setMaxCheckCount(1);
+        group.setUncheckLast(true);
+        group.add(radios);
+        return group;
+    }
+
     /** Shared numeric controls use the theme's track, mint fill and narrow handle. */
     public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle sliderStyle() {
         var track = skin.newDrawable("white", UiTheme.TRACK); track.setMinHeight(4); track.setMinWidth(0);

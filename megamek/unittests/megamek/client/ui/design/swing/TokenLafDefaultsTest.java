@@ -2,7 +2,9 @@
 package megamek.client.ui.design.swing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
@@ -11,22 +13,29 @@ import java.awt.Insets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.accessibility.AccessibleRole;
+import javax.accessibility.AccessibleState;
 import javax.swing.AbstractButton;
+import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JPasswordField;
+import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingUtilities;
 import javax.swing.UIDefaults;
 import javax.swing.UIManager;
 
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.ui.FlatButtonUI;
 import com.formdev.flatlaf.ui.FlatStylingSupport;
+import com.formdev.flatlaf.util.UIScale;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
@@ -135,6 +144,54 @@ class TokenLafDefaultsTest {
                 table.putClientProperty(FieldEdge.FROZEN_HOVER, true);
                 assertEquals(control, FieldEdge.color(table, control, true, false));
                 assertEquals(spinner, FieldEdge.edgeOf(editor));
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void choicesAreIconSizedAndShowMixedAndSwitchStates() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                int size = Math.round(tokens.size().get("icon.sm"));
+                // The 14-unit box sits in a 15-unit icon; scaled to the token, the box is icon.sm
+                assertEquals(Math.round(UIScale.scale(15) * size / 14f), new TokenCheckBoxIcon().getIconWidth());
+                assertEquals(Math.round(UIScale.scale(15) * size / 15f), new TokenRadioButtonIcon().getIconWidth());
+                TokenSwitchIcon track = new TokenSwitchIcon();
+                assertEquals(UIScale.scale(size), track.getIconHeight());
+                assertEquals(UIScale.scale(Math.round(size * TokenSwitchIcon.LENGTH)), track.getIconWidth());
+                assertColor(lookAndFeel.getDefaults(), "CheckBox.icon.switchThumbColor", "text.secondary", mode);
+                assertColor(lookAndFeel.getDefaults(), "CheckBox.icon.hoverSelectedBorderColor", "border.strong", mode);
+
+                // A mixed box reads as unchecked, and a click checks it and drops the mixed look
+                JCheckBox all = TokenChoices.mixed(TokenChoices.check("All", true), true);
+                assertTrue(TokenChoices.isMixed(all));
+                assertFalse(all.isSelected());
+                all.doClick();
+                assertTrue(all.isSelected());
+                assertFalse(TokenChoices.isMixed(all));
+
+                TokenChoices.Switch autosave = TokenChoices.toggleSwitch("Autosave", false);
+                assertTrue(autosave.getIcon() instanceof TokenSwitchIcon);
+                assertEquals(AccessibleRole.TOGGLE_BUTTON, autosave.getAccessibleContext().getAccessibleRole());
+                autosave.doClick();
+                assertTrue(autosave.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.PRESSED));
+                // Switching the theme rebuilds the icon with the new colors
+                Icon before = autosave.getIcon();
+                SwingUtilities.updateComponentTreeUI(autosave);
+                assertNotSame(before, autosave.getIcon());
+
+                JRadioButton first = TokenChoices.radio("A", true);
+                JRadioButton second = TokenChoices.radio("B", false);
+                TokenChoices.group(first, second);
+                second.doClick();
+                assertFalse(first.isSelected());
             }
         } finally {
             if (previous != null) {

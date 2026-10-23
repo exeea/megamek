@@ -290,4 +290,9 @@ work for Swing, and item 11 is under investigation.
 - ~~Inputs~~: text, password, search, number and text area at button heights, with hover, focus, status, read-only
   and disabled looks, plus the form field (label above, helper or status below), in Swing; libGDX has the in-game
   subset (no number spinner yet); see [tokens.md](tokens.md#inputs).
-- Checkbox / radio / switch, tabs, segmented control and select.
+- ~~Choices~~: check box (with a mixed state), radio button and switch, with hover, focus and disabled looks, in
+  Swing and libGDX; see [tokens.md](tokens.md#choices).
+- Tabs, segmented control and select.
+- Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
+  Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
+  can migrate to one shape.

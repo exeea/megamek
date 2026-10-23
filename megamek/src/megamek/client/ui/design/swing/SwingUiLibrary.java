@@ -29,7 +29,6 @@ import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.ButtonGroup;
 import javax.swing.DefaultButtonModel;
 import javax.swing.Icon;
 import javax.swing.JCheckBox;
@@ -294,18 +293,21 @@ public final class SwingUiLibrary extends JFrame {
         }
 
         page.add(heading(Messages.getString("UiLibrary.controls.choices")));
+        page.add(paragraph(Messages.getString("UiLibrary.choices.note"), "small", "text.muted"));
+        page.add(choiceMatrix());
+        JPanel live = row(color("surface.base"));
+        live.add(text(Messages.getString("UiLibrary.choices.live"), "label", "text.secondary"));
+        live.add(TokenChoices.check(Messages.getString("UiLibrary.controls.checked"), true));
+        live.add(TokenChoices.mixed(TokenChoices.check(Messages.getString("UiLibrary.choices.selectAll"), false),
+              true));
+        JRadioButton standard = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionA"), true);
+        JRadioButton total = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionB"), false);
+        TokenChoices.group(standard, total);
+        live.add(standard);
+        live.add(total);
+        live.add(TokenChoices.toggleSwitch(Messages.getString("UiLibrary.choices.autosave"), true));
+        page.add(live);
         JPanel choices = row(color("surface.base"));
-        choices.add(new JCheckBox(Messages.getString("UiLibrary.controls.checked"), true));
-        choices.add(new JCheckBox(Messages.getString("UiLibrary.controls.unchecked")));
-        JCheckBox disabledCheck = new JCheckBox(Messages.getString("UiLibrary.controls.disabled"), true);
-        disabledCheck.setEnabled(false);
-        choices.add(disabledCheck);
-        ButtonGroup group = new ButtonGroup();
-        for (String key : List.of("UiLibrary.controls.optionA", "UiLibrary.controls.optionB")) {
-            JRadioButton radio = new JRadioButton(Messages.getString(key), group.getButtonCount() == 0);
-            group.add(radio);
-            choices.add(radio);
-        }
         choices.add(new JComboBox<>(new String[] { Messages.getString("UiLibrary.controls.optionA"),
               Messages.getString("UiLibrary.controls.optionB") }));
         choices.add(new JSpinner(new SpinnerNumberModel(4, 0, 12, 1)));
@@ -549,6 +551,54 @@ public final class SwingUiLibrary extends JFrame {
         component.putClientProperty(FlatClientProperties.COMPONENT_FOCUS_OWNER,
               (Predicate<JComponent>) c -> true);
         return component;
+    }
+
+    /**
+     * Every choice kind in every state, frozen through the button model; the live row under it can be clicked.
+     */
+    private JComponent choiceMatrix() {
+        List<String> states = List.of("off", "on", "mixed", "hover", "hoverOn", "focus", "disabled", "disabledOn");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.choices.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("CHECK", "RADIO", "SWITCH")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.choices.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                if (state.equals("mixed") && !kind.equals("CHECK")) {
+                    matrix.add(Box.createHorizontalStrut(0), cell);
+                    continue;
+                }
+                String label = Messages.getString("UiLibrary.choices.sample");
+                AbstractButton choice = switch (kind) {
+                    case "CHECK" -> TokenChoices.check(label, false);
+                    case "RADIO" -> TokenChoices.radio(label, false);
+                    default -> TokenChoices.toggleSwitch(label, false);
+                };
+                boolean on = state.equals("on") || state.endsWith("On");
+                choice.setModel(new FrozenModel(state.startsWith("hover"), false, on));
+                switch (state) {
+                    case "mixed" -> TokenChoices.mixed((JCheckBox) choice, true);
+                    case "focus" -> focused(choice);
+                    case "disabled", "disabledOn" -> choice.setEnabled(false);
+                    default -> { }
+                }
+                choice.setFocusable(false);
+                matrix.add(choice, cell);
+            }
+        }
+        cell.gridx = states.size() + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
     }
 
     /** Every button kind at {@code size} in every state, the transient states frozen through the button model. */

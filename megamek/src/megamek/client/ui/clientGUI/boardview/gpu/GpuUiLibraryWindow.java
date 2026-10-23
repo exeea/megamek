@@ -34,6 +34,7 @@ import megamek.client.ui.design.DesignTokens.ColorToken;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
@@ -227,6 +228,12 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         content.add(kit.label(text("UiLibrary.inputs.forms"), "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6)
               .padBottom(6).row();
         content.add(formSamples()).row();
+        section(content, "UiLibrary.controls.choices");
+        Label choiceNote = kit.label(text("UiLibrary.choices.note"), "hud-small", 11.5f, UiTheme.MUTED);
+        choiceNote.setWrap(true);
+        content.add(choiceNote).width(1100).padBottom(8).row();
+        content.add(choiceMatrix()).row();
+        content.add(choiceSamples()).padTop(6).row();
         section(content, "UiLibrary.gdx.buttons");
         content.add(buttons()).row();
         section(content, "UiLibrary.gdx.controls");
@@ -434,6 +441,61 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         disabled.setDisabled(true);
         forms.add(kit.formField(text("UiLibrary.inputs.form.disabled"), disabled)).width(220);
         return forms;
+    }
+
+    /** Every choice kind in every state; transient states are frozen through UiChoice. */
+    private Table choiceMatrix() {
+        List<String> states = List.of("off", "on", "mixed", "hover", "hoverOn", "focus", "disabled", "disabledOn");
+        Table matrix = new Table();
+        matrix.defaults().left().padRight(16).padBottom(8);
+        matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(110);
+        for (String state : states) {
+            matrix.add(kit.label(text("UiLibrary.choices.state." + state), "hud-small", 11, UiTheme.MUTED));
+        }
+        matrix.row();
+        for (UiChoice.Kind kind : UiChoice.Kind.values()) {
+            matrix.add(kit.label(text("UiLibrary.choices.kind." + kind.name()), "hud-medium", 12.5f, UiTheme.TEXT));
+            for (String state : states) {
+                if (state.equals("mixed") && kind != UiChoice.Kind.CHECK) {
+                    matrix.add();
+                    continue;
+                }
+                String sample = text("UiLibrary.choices.sample");
+                boolean on = state.equals("on") || state.endsWith("On");
+                UiChoice choice = switch (kind) {
+                    case CHECK -> kit.check(sample, on);
+                    case RADIO -> kit.radio(sample, on);
+                    case SWITCH -> kit.toggleSwitch(sample, on);
+                };
+                switch (state) {
+                    case "mixed" -> choice.mixed(true);
+                    case "hover", "hoverOn" -> choice.hovered(true);
+                    case "focus" -> choice.focused(true);
+                    case "disabled", "disabledOn" -> choice.setDisabled(true);
+                    default -> { }
+                }
+                choice.setTouchable(Touchable.disabled);
+                matrix.add(choice);
+            }
+            matrix.row();
+        }
+        return matrix;
+    }
+
+    /** Live choices to click: a check box, a mixed one, two grouped radio buttons and a switch. */
+    private Table choiceSamples() {
+        Table live = new Table();
+        live.defaults().left().padRight(16);
+        live.add(kit.label(text("UiLibrary.choices.live"), "hud-medium", 12.5f, UiTheme.MUTED));
+        live.add(kit.check(text("UiLibrary.controls.checked"), true));
+        live.add(kit.check(text("UiLibrary.choices.selectAll"), false).mixed(true));
+        UiChoice standard = kit.radio(text("UiLibrary.controls.optionA"), true);
+        UiChoice total = kit.radio(text("UiLibrary.controls.optionB"), false);
+        kit.radioGroup(standard, total);
+        live.add(standard);
+        live.add(total);
+        live.add(kit.toggleSwitch(text("UiLibrary.choices.autosave"), true));
+        return live;
     }
 
     private Table buttons() {
