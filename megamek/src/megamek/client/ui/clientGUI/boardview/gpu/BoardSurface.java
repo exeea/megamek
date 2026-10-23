@@ -551,6 +551,7 @@ final class BoardSurface {
             relief.top(faces, bedOutline, openMouths, crestLine, falls);
             meetWetCliffs();
             reserveRoads();
+            relief.field(faces);
             int roughStart = faces.size();
             relief.boulders(faces);
             roughModels = BoardRough.place(this);

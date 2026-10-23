@@ -2534,7 +2534,6 @@ final class BoardRelief {
             bank(destination, boundary, starts, mouths);
             rocks(destination, center);
             fallRocks(destination, center, crests, falls, mouths);
-            field(destination, center);
             return;
         }
         center.z = groundHeight(center.x, center.y);
@@ -2556,7 +2555,6 @@ final class BoardRelief {
             }
             if (!rounded) {
                 rocks(destination, center);
-                field(destination, center);
                 pits(destination);
                 return;
             }
@@ -2608,7 +2606,6 @@ final class BoardRelief {
             addTriangle(destination, face.a(), face.b(), face.c(), BoardSurface.Finish.TOP);
         }
         rocks(destination, center);
-        field(destination, center);
         pits(destination);
     }
 
@@ -3373,12 +3370,13 @@ final class BoardRelief {
 
     /**
      * Sparse field cover: loose stones and low shrubs on open ground, from the hex's own seed and outside the unit
-     * anchor. Hexes with features of their own (woods, buildings, rubble) keep only those.
+     * anchor. Hexes with features of their own (woods, buildings, rubble) keep only those. Placed on the finished top,
+     * after the road banks have eased it, so each stands whole on the ground.
      */
-    private void field(List<BoardSurface.Face> destination, Vector3 anchor) {
+    void field(List<BoardSurface.Face> destination) {
         // Cosmetic stones and shrubs share the full-detail tier; they never contribute gameplay cover.
         boolean tundra = BoardBiome.kind(tile) == BoardScene.Biome.TUNDRA;
-        if (detail != TerrainLod.FULL || !self.detailed() || !BoardScatter.allowed(tile)
+        if (!sculpted || detail != TerrainLod.FULL || !self.detailed() || !BoardScatter.allowed(tile)
               || tile.surface() == BoardScene.Surface.FUNGUS
               || tile.biome() != BoardScene.Biome.NONE && !tundra) { return; }
         if (!tile.features().isEmpty() && (!tundra || tile.features().stream().anyMatch(feature ->
@@ -3386,6 +3384,7 @@ final class BoardRelief {
         // The crust can cover pavement; woody roots cannot. Keep painted and airless ground clear too.
         if (tundra && (tile.barren() || tile.surface() == BoardScene.Surface.CONCRETE
               || BoardDecals.legacyPaint(tile) != null)) { return; }
+        Vector3 anchor = new Vector3(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()), 0);
         Random random = new Random(tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L ^ 0x5f1e1dL);
         float m = metres(1);
         int stones = tundra ? 0 : Math.round(ROCKS[self.family()].stones() * (.3f + 1.4f * random.nextFloat()));
