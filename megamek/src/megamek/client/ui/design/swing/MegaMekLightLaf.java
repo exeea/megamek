@@ -21,10 +21,12 @@ public class MegaMekLightLaf extends FlatLightLaf {
     public void initialize() {
         super.initialize();
         FocusVisibility.install();
+        FieldEdge.install();
     }
 
     @Override
     public void uninitialize() {
+        FieldEdge.uninstall();
         FocusVisibility.uninstall();
         super.uninitialize();
     }

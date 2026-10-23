@@ -453,6 +453,35 @@ public final class UiKit {
         return new SearchField(placeholder);
     }
 
+    /** A token text input (docs/design-system/tokens.md, Inputs); compact is control.sm high, otherwise control.md. */
+    public UiTextField input(String text, boolean compact) {
+        return new UiTextField(text, skin, compact);
+    }
+
+    /** A token password input: the text shows as bullets. */
+    public UiTextField password(boolean compact) {
+        UiTextField field = input("", compact);
+        field.setPasswordMode(true);
+        return field;
+    }
+
+    /** A token search input: a leading search glyph, the placeholder, and a clear button while it holds text. */
+    public TokenSearch tokenSearch(String placeholder, boolean compact) {
+        return new TokenSearch(placeholder, compact);
+    }
+
+    /** A token text area, wrapping its lines, {@code rows} lines high. */
+    public UiTextField.Area area(String text, float rows) {
+        UiTextField.Area area = new UiTextField.Area(text, skin);
+        area.setPrefRows(rows);
+        return area;
+    }
+
+    /** A token form field: {@code label} above the input, and a helper or status message below it. */
+    public UiFormField formField(String label, Actor input) {
+        return new UiFormField(this, label, input);
+    }
+
     /** Shared numeric controls use the theme's track, mint fill and narrow handle. */
     public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle sliderStyle() {
         var track = skin.newDrawable("white", UiTheme.TRACK); track.setMinHeight(4); track.setMinWidth(0);
@@ -606,6 +635,42 @@ public final class UiKit {
         @Override
         public void act(float delta) {
             clear.setVisible(!field.getText().isEmpty());
+            super.act(delta);
+        }
+    }
+
+    /** The token search input and its clear button, which empties the field with a ChangeEvent from the field. */
+    public final class TokenSearch extends Stack {
+        /** The text field; its ChangeEvents report every edit, the clear button's included. */
+        public final UiTextField field;
+        /** The clear button, shown while the field holds text. */
+        public final UiButton clear;
+
+        private TokenSearch(String placeholder, boolean compact) {
+            field = new UiTextField("", skin, "-search", compact);
+            field.setMessageText(placeholder);
+            field.setProgrammaticChangeEvents(true);
+            field.hoverRoot(this);
+            clear = button("button-icon-compact", "close", null, null);
+            onChange(clear, () -> field.setText(""));
+            DesignTokens tokens = DesignTokens.shipped();
+            float inset = tokens.size().get("border") + tokens.space().get("xs");
+            float side = tokens.size().get("border") + tokens.space().get("md");
+            float height = tokens.size().get(compact ? "control.sm" : "control.md");
+            Icon glyph = icon("search", UiTheme.FIELD_ICON, field.getStyle().messageFontColor);
+            glyph.setTouchable(Touchable.disabled);
+            Table overlay = new Table();
+            overlay.add(glyph).size(UiTheme.FIELD_ICON).padLeft(side);
+            overlay.add().expandX();
+            overlay.add(clear).size(height - 2 * inset).padRight(inset);
+            add(field);
+            add(overlay);
+            clear.setVisible(false);
+        }
+
+        @Override
+        public void act(float delta) {
+            clear.setVisible(!field.getText().isEmpty() && !field.isDisabled());
             super.act(delta);
         }
     }

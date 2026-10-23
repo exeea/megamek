@@ -231,6 +231,48 @@ gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; ali
 The hud-v3 styles stay until their views move; the libGDX gallery lists them under "hud-v3 button styles (to
 migrate)".
 
+## Inputs
+
+Text, password, search and number inputs, the text area and the form field. Both galleries show every kind in every
+state.
+
+| State | Look |
+| --- | --- |
+| Rest | `surface.input` fill, `border.control` edge, `text.primary` text, `text.muted` placeholder |
+| Hover | `border.strong` edge |
+| Focus | The focus ring in place of the edge (see [Focus](#focus)); editable text always shows it |
+| Error / warning | `status.danger` / `status.warning` edge and a trailing status icon; the form field adds the words |
+| Read-only | No fill, `border.subtle` edge, `text.primary` text |
+| Disabled | `text.disabled` text and a muted edge |
+
+- **Sizes** match buttons, so a field and a button side by side line up: regular `control.md` (36), compact
+  `control.sm` (28). Text sits `md` (8) inside the edge.
+- **Precedence**: focus wins over a status, and a status over hover. Under the focus ring the status icon still shows.
+- **Form field**: the label above (`text.secondary`), then the input, then a helper (`text.muted`) or a status
+  message in the status color with its icon. The message line is only there while it has text. Dense option grids
+  may keep labels on the left.
+
+**Swing.** The MegaMek themes give every `JTextField`, `JPasswordField`, `JFormattedTextField`, `JSpinner` and
+`JComboBox` the compact height and the hover and read-only edges, so existing views get them without changes; text
+areas get them through their scroll pane. [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java)
+builds regular or compact inputs: `text(size)`, `password(size)`, `search(placeholder, size)` (search glyph, clear
+button, accessible name), `number(model, size)` and `area(textArea)`; `status(input, Status.ERROR)` sets a status.
+[`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) is the form field
+(`setHelper`, `setError`, `setWarning`); its label is the input's `labelFor` and its message the input's accessible
+description. Hover comes from one AWT listener (`FieldEdge`) and custom UI delegates (`FieldUIs`, `FieldBorders`),
+because FlatLaf has no hover edge or minimum height for inputs. A read-only spinner is not offered, because its arrows
+still step.
+
+**libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `TokenFieldStyle`s
+`input<variant>` and `input<variant>-compact` (`UiTheme.INPUT_VARIANTS`: plain or search, each with error, warning or
+read-only). [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java) adds the hover scene2d lacks,
+the status icon, `status(Status)` and `readOnly(true)`; `UiTextField.Area` is the text area. `UiKit` builds them:
+`input(text, compact)`, `password(compact)`, `tokenSearch(placeholder, compact)`, `area(text, rows)` and
+`formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)). It is the
+in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD's number control), and read-only text
+can not be selected, because scene2d has no read-only field. The `hud` and `hud-search` field styles stay until their
+views move.
+
 ## Code
 
 | Class | Role |
@@ -245,9 +287,11 @@ migrate)".
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
 | [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java), [`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java), [`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), [`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) | Swing keyboard focus |
 | [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
+| [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java), [`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) | The Swing inputs and form field |
+| [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java), [`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java) | The libGDX inputs and form field |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
-Outside the galleries, only the two Swing themes and the libGDX button styles read the tokens. The Swing themes are
-selectable but not the default, and no view uses the new buttons yet. Next come inputs, choices and tabs, and a
-`UiTheme` rename pass so hud-v3 reads the same roles.
+Outside the galleries, only the two Swing themes and the libGDX button and input styles read the tokens. The Swing
+themes are selectable but not the default, and no view uses the new buttons or inputs yet. Next come choices and tabs,
+and a `UiTheme` rename pass so hud-v3 reads the same roles.

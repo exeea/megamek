@@ -287,4 +287,7 @@ work for Swing, and item 11 is under investigation.
   comes with the motion work.
 - ~~Focus~~: one keyboard-only ring inside the edge for every Swing control, and on libGDX buttons; see
   [tokens.md](tokens.md#focus).
-- Inputs, checkbox / radio / switch, tabs, segmented control and select.
+- ~~Inputs~~: text, password, search, number and text area at button heights, with hover, focus, status, read-only
+  and disabled looks, plus the form field (label above, helper or status below), in Swing; libGDX has the in-game
+  subset (no number spinner yet); see [tokens.md](tokens.md#inputs).
+- Checkbox / radio / switch, tabs, segmented control and select.

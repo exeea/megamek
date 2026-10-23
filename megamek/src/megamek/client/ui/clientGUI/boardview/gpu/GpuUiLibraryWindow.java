@@ -15,6 +15,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -36,6 +37,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
+import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Configuration;
 import megamek.logging.MMLogger;
@@ -50,6 +52,7 @@ import megamek.logging.MMLogger;
 public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private static final MMLogger LOGGER = MMLogger.create(GpuUiLibraryWindow.class);
     private static final int SWATCHES_PER_ROW = 6;
+    private static final String SAMPLE_PASSWORD = "atlas-as7d";
 
     /** The open gallery; read and written on the EDT. */
     private static GpuUiLibraryWindow open;
@@ -212,6 +215,18 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
                   "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6).padBottom(6).row();
             content.add(buttonMatrix(compact)).row();
         }
+        section(content, "UiLibrary.controls.inputs");
+        Label inputNote = kit.label(text("UiLibrary.gdx.inputs.note"), "hud-small", 11.5f, UiTheme.MUTED);
+        inputNote.setWrap(true);
+        content.add(inputNote).width(1100).padBottom(8).row();
+        for (boolean compact : new boolean[] { false, true }) {
+            content.add(kit.label(text(compact ? "UiLibrary.buttons.compact" : "UiLibrary.buttons.regular"),
+                  "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6).padBottom(6).row();
+            content.add(inputMatrix(compact)).row();
+        }
+        content.add(kit.label(text("UiLibrary.inputs.forms"), "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6)
+              .padBottom(6).row();
+        content.add(formSamples()).row();
         section(content, "UiLibrary.gdx.buttons");
         content.add(buttons()).row();
         section(content, "UiLibrary.gdx.controls");
@@ -338,6 +353,87 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             matrix.row();
         }
         return matrix;
+    }
+
+    /**
+     * Every token input kind at one size in every state, in two blocks of four states to fit the window; hover and
+     * focus are frozen through UiTextField.
+     */
+    private Table inputMatrix(boolean compact) {
+        Table matrix = new Table();
+        matrix.defaults().left().padRight(12).padBottom(8);
+        List<List<String>> blocks = List.of(List.of("rest", "hover", "focus", "placeholder"),
+              List.of("error", "warning", "readOnly", "disabled"));
+        for (List<String> states : blocks) {
+            matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(80)
+                  .padTop(states == blocks.get(0) ? 0 : 6);
+            for (String state : states) {
+                matrix.add(kit.label(text("UiLibrary.inputs.state." + state), "hud-small", 11, UiTheme.MUTED))
+                      .padTop(states == blocks.get(0) ? 0 : 6);
+            }
+            matrix.row();
+            for (String kind : List.of("TEXT", "PASSWORD", "SEARCH")) {
+                matrix.add(kit.label(text("UiLibrary.inputs.kind." + kind), "hud-medium", 12.5f, UiTheme.TEXT));
+                for (String state : states) {
+                    matrix.add(sampleInput(kind, state, compact)).width(160);
+                }
+                matrix.row();
+            }
+        }
+        return matrix;
+    }
+
+    private Actor sampleInput(String kind, String state, boolean compact) {
+        boolean empty = state.equals("placeholder");
+        UiTextField field;
+        Actor cell;
+        if (kind.equals("SEARCH")) {
+            UiKit.TokenSearch search = kit.tokenSearch(text("UiLibrary.inputs.placeholder.SEARCH"), compact);
+            field = search.field;
+            cell = search;
+        } else {
+            field = kind.equals("PASSWORD") ? kit.password(compact) : kit.input("", compact);
+            field.setMessageText(text("UiLibrary.inputs.placeholder." + kind));
+            cell = field;
+        }
+        if (!empty) {
+            field.setText(kind.equals("PASSWORD") ? SAMPLE_PASSWORD : text("UiLibrary.inputs.value." + kind));
+        }
+        switch (state) {
+            case "hover" -> field.hovered(true);
+            case "focus" -> field.focused(true);
+            case "error" -> field.status(UiTextField.Status.ERROR);
+            case "warning" -> field.status(UiTextField.Status.WARNING);
+            case "readOnly" -> field.readOnly(true);
+            case "disabled" -> field.setDisabled(true);
+            default -> { }
+        }
+        if (!state.equals("rest") && !empty) {
+            cell.setTouchable(Touchable.disabled);
+        }
+        return cell;
+    }
+
+    /** Form fields: label above, helper or status below; a text area with a helper, read-only and disabled. */
+    private Table formSamples() {
+        Table forms = new Table();
+        forms.top().left();
+        forms.defaults().left().top().padRight(16).padBottom(12);
+        forms.add(kit.formField(text("UiLibrary.inputs.form.name"), kit.input(text("UiLibrary.inputs.value.TEXT"),
+              false)).helper(text("UiLibrary.inputs.form.nameHelp"))).width(220);
+        forms.add(kit.formField(text("UiLibrary.inputs.form.gunnery"), kit.input("9", false))
+              .error(text("UiLibrary.inputs.form.gunneryError"))).width(220);
+        forms.add(kit.formField(text("UiLibrary.inputs.form.piloting"), kit.input("7", false))
+              .warning(text("UiLibrary.inputs.form.pilotingWarning"))).width(220).row();
+        String notes = text("UiLibrary.inputs.form.notesText");
+        forms.add(kit.formField(text("UiLibrary.inputs.form.notes"), kit.area(notes, 3))
+              .helper(text("UiLibrary.inputs.form.notesHelp"))).width(220);
+        forms.add(kit.formField(text("UiLibrary.inputs.form.briefing"), kit.area(notes, 3).readOnly(true)))
+              .width(220);
+        UiTextField.Area disabled = kit.area(notes, 3);
+        disabled.setDisabled(true);
+        forms.add(kit.formField(text("UiLibrary.inputs.form.disabled"), disabled)).width(220);
+        return forms;
     }
 
     private Table buttons() {

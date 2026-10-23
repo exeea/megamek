@@ -19,7 +19,6 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.awt.font.TextAttribute;
 import java.awt.geom.RoundRectangle2D;
 import java.util.HashMap;
 import java.util.List;
@@ -40,6 +39,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayer;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JProgressBar;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
@@ -57,6 +57,7 @@ import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
+import javax.swing.text.JTextComponent;
 import javax.swing.text.PlainDocument;
 
 import com.formdev.flatlaf.FlatClientProperties;
@@ -89,6 +90,8 @@ public final class SwingUiLibrary extends JFrame {
     private static final int ICON_INFO = 0xE88E;
     private static final int ICON_RADIO_CHECKED = 0xE837;
     private static final int ICON_SEARCH = 0xE8B6;
+    /** Masked in the samples; not a real password. */
+    private static final String SAMPLE_PASSWORD = "atlas-as7d";
 
     private final DesignTokens tokens = DesignTokens.shipped();
     private final VisionLayerUI visionLayer = new VisionLayerUI();
@@ -308,18 +311,19 @@ public final class SwingUiLibrary extends JFrame {
         choices.add(new JSpinner(new SpinnerNumberModel(4, 0, 12, 1)));
         page.add(choices);
 
-        page.add(heading(Messages.getString("UiLibrary.controls.text")));
-        JPanel fields = row(color("surface.base"));
-        fields.add(field(Messages.getString("UiLibrary.controls.value"), null, true));
-        JTextField placeholder = field("", null, true);
-        placeholder.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT,
-              Messages.getString("UiLibrary.controls.placeholder"));
-        fields.add(placeholder);
-        fields.add(field(Messages.getString("UiLibrary.controls.error"), FlatClientProperties.OUTLINE_ERROR, true));
-        fields.add(field(Messages.getString("UiLibrary.controls.warning"), FlatClientProperties.OUTLINE_WARNING,
-              true));
-        fields.add(field(Messages.getString("UiLibrary.controls.disabled"), null, false));
-        page.add(fields);
+        page.add(heading(Messages.getString("UiLibrary.controls.inputs")));
+        page.add(paragraph(Messages.getString("UiLibrary.inputs.note"), "small", "text.muted"));
+        for (TokenButtons.Size size : TokenButtons.Size.values()) {
+            JComponent gap = (JComponent) Box.createVerticalStrut(scaleForGUI(12));
+            gap.setAlignmentX(LEFT_ALIGNMENT);
+            page.add(gap);
+            page.add(text(Messages.getString("UiLibrary.buttons." + size.name().toLowerCase(Locale.ROOT)), "label",
+                  "text.secondary"));
+            page.add(inputMatrix(size));
+        }
+        page.add(heading(Messages.getString("UiLibrary.inputs.forms")));
+        page.add(paragraph(Messages.getString("UiLibrary.inputs.forms.note"), "small", "text.muted"));
+        page.add(formSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.ranges")));
         JPanel ranges = row(color("surface.base"));
@@ -363,19 +367,147 @@ public final class SwingUiLibrary extends JFrame {
         return page;
     }
 
-    private JTextField field(String value, String outline, boolean enabled) {
-        JTextField field = new JTextField(value, 14);
-        field.putClientProperty(FlatClientProperties.OUTLINE, outline);
-        // Status shows as an icon as well as the edge, because the focus ring replaces the edge
-        if (FlatClientProperties.OUTLINE_ERROR.equals(outline)) {
-            field.putClientProperty(FlatClientProperties.TEXT_FIELD_TRAILING_ICON,
-                  FontHandler.symbolIcon(ICON_ERROR, scaleForGUI(16), color("status.danger")));
-        } else if (FlatClientProperties.OUTLINE_WARNING.equals(outline)) {
-            field.putClientProperty(FlatClientProperties.TEXT_FIELD_TRAILING_ICON,
-                  FontHandler.symbolIcon(ICON_WARNING, scaleForGUI(16), color("status.warning")));
-        }
-        field.setEnabled(enabled);
+    private JTextField field(String value, TokenFields.Status status) {
+        JTextField field = TokenFields.status(TokenFields.text(TokenButtons.Size.COMPACT), status);
+        field.setText(value);
+        field.setColumns(14);
         return field;
+    }
+
+    /**
+     * Every input kind at {@code size} in every state. "At rest" is live; hover and focus are frozen, and the rest are
+     * real states that stay interactive.
+     */
+    private JComponent inputMatrix(TokenButtons.Size size) {
+        List<String> states = List.of("rest", "hover", "focus", "placeholder", "error", "warning", "readOnly",
+              "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.inputs.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("TEXT", "PASSWORD", "SEARCH", "NUMBER")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.inputs.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                boolean number = kind.equals("NUMBER");
+                // A number has no placeholder, and a read-only one would still step; show it as text instead
+                if (number && (state.equals("placeholder") || state.equals("readOnly"))) {
+                    matrix.add(Box.createHorizontalStrut(0), cell);
+                    continue;
+                }
+                JComponent input = sampleInput(kind, size, state.equals("placeholder"));
+                JComponent text = input instanceof JSpinner spinner
+                      && spinner.getEditor() instanceof JSpinner.DefaultEditor editor ? editor.getTextField() : input;
+                switch (state) {
+                    case "hover" -> input.putClientProperty(FieldEdge.FROZEN_HOVER, true);
+                    case "focus" -> {
+                        focused(text);
+                        focused(input);
+                    }
+                    case "error" -> TokenFields.status(input, TokenFields.Status.ERROR);
+                    case "warning" -> TokenFields.status(input, TokenFields.Status.WARNING);
+                    case "readOnly" -> ((JTextComponent) text).setEditable(false);
+                    case "disabled" -> input.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(input, cell);
+            }
+        }
+        cell.gridx = states.size() + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    private static JComponent sampleInput(String kind, TokenButtons.Size size, boolean empty) {
+        String placeholder = kind.equals("NUMBER") ? null
+              : Messages.getString("UiLibrary.inputs.placeholder." + kind);
+        JComponent input = switch (kind) {
+            case "PASSWORD" -> {
+                JPasswordField field = TokenFields.password(size);
+                field.setText(empty ? "" : SAMPLE_PASSWORD);
+                yield field;
+            }
+            case "SEARCH" -> {
+                JTextField field = TokenFields.search(placeholder, size);
+                field.setText(empty ? "" : Messages.getString("UiLibrary.inputs.value.SEARCH"));
+                yield field;
+            }
+            case "NUMBER" -> TokenFields.number(new SpinnerNumberModel(4, 0, 8, 1), size);
+            default -> {
+                JTextField field = TokenFields.text(size);
+                field.setText(empty ? "" : Messages.getString("UiLibrary.inputs.value.TEXT"));
+                yield field;
+            }
+        };
+        if (input instanceof JTextField field) {
+            field.setColumns(8);
+            field.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, placeholder);
+        }
+        return input;
+    }
+
+    /** Form fields: a label above every input, a helper or a status message below. */
+    private JComponent formSamples() {
+        JPanel samples = column(color("surface.base"));
+        JPanel singleLine = formRow();
+        samples.add(singleLine);
+        JTextField name = TokenFields.text(TokenButtons.Size.REGULAR);
+        name.setColumns(16);
+        name.setText(Messages.getString("UiLibrary.inputs.value.TEXT"));
+        singleLine.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.name"), name)
+              .setHelper(Messages.getString("UiLibrary.inputs.form.nameHelp")));
+        singleLine.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.gunnery"),
+              TokenFields.number(new SpinnerNumberModel(9, 0, 12, 1), TokenButtons.Size.REGULAR))
+              .setError(Messages.getString("UiLibrary.inputs.form.gunneryError")));
+        singleLine.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.piloting"),
+              TokenFields.number(new SpinnerNumberModel(7, 0, 12, 1), TokenButtons.Size.REGULAR))
+              .setWarning(Messages.getString("UiLibrary.inputs.form.pilotingWarning")));
+
+        JPanel areas = formRow();
+        samples.add(areas);
+        String notes = Messages.getString("UiLibrary.inputs.form.notesText");
+        areas.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.notes"),
+              TokenFields.area(new JTextArea(notes, 3, 22)))
+              .setHelper(Messages.getString("UiLibrary.inputs.form.notesHelp")));
+        JTextArea briefing = new JTextArea(notes, 3, 22);
+        briefing.setEditable(false);
+        areas.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.briefing"),
+              TokenFields.area(briefing)));
+        JTextArea disabled = new JTextArea(notes, 3, 22);
+        disabled.setEnabled(false);
+        JScrollPane disabledScroll = TokenFields.area(disabled);
+        disabledScroll.setEnabled(false);
+        areas.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.disabled"), disabledScroll));
+        singleLine.add(Box.createHorizontalGlue());
+        areas.add(Box.createHorizontalGlue());
+        return samples;
+    }
+
+    /** A row of form fields lined up at their tops, so labels align whatever messages sit below. */
+    private JPanel formRow() {
+        JPanel row = new JPanel(new GridBagLayout()) {
+            @Override
+            public Component add(Component field) {
+                GridBagConstraints cell = new GridBagConstraints();
+                cell.anchor = GridBagConstraints.NORTHWEST;
+                cell.insets = new Insets(scaleForGUI(6), scaleForGUI(8), scaleForGUI(6), scaleForGUI(8));
+                // The trailing glue takes the spare width, so the fields stay at the left
+                cell.weightx = field instanceof TokenFormField ? 0 : 1;
+                super.add(field, cell);
+                return field;
+            }
+        };
+        row.setBackground(color("surface.base"));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        return row;
     }
 
     /** Controls frozen in keyboard focus, which the live samples above only show after Tab. */
@@ -383,9 +515,9 @@ public final class SwingUiLibrary extends JFrame {
         JPanel samples = column(color("surface.base"));
         JPanel controls = row(color("surface.base"));
         samples.add(controls);
-        controls.add(focused(field(Messages.getString("UiLibrary.controls.value"), null, true)));
-        controls.add(focused(field(Messages.getString("UiLibrary.controls.error"), FlatClientProperties.OUTLINE_ERROR,
-              true)));
+        controls.add(focused(field(Messages.getString("UiLibrary.controls.value"), TokenFields.Status.NONE)));
+        controls.add(focused(field(Messages.getString("UiLibrary.controls.error"),
+              TokenFields.Status.ERROR)));
         controls.add(focused(new JComboBox<>(new String[] { Messages.getString("UiLibrary.controls.optionA") })));
         JSpinner spinner = new JSpinner(new SpinnerNumberModel(4, 0, 12, 1));
         if (spinner.getEditor() instanceof JSpinner.DefaultEditor editor) {
@@ -629,19 +761,7 @@ public final class SwingUiLibrary extends JFrame {
     }
 
     private Font font(String styleName) {
-        return fonts.computeIfAbsent(styleName, name -> {
-            TypeStyle style = tokens.typeStyle(name);
-            Map<TextAttribute, Object> attributes = new HashMap<>();
-            // Java2D only reaches the variable font's default (regular) instance, so medium comes from the static
-            // "Roboto Medium" face generated from it in mm-data.
-            boolean medium = style.weight() >= 500 && style.weight() < 600;
-            attributes.put(TextAttribute.FAMILY, medium ? tokens.family() + " Medium" : tokens.family());
-            attributes.put(TextAttribute.SIZE, scaleForGUI(style.size()));
-            attributes.put(TextAttribute.TRACKING, style.tracking());
-            attributes.put(TextAttribute.WEIGHT,
-                  style.weight() >= 600 ? TextAttribute.WEIGHT_BOLD : TextAttribute.WEIGHT_REGULAR);
-            return Font.getFont(attributes);
-        });
+        return fonts.computeIfAbsent(styleName, TokenFonts::font);
     }
 
     private JLabel text(String value, String style, String role) {

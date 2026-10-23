@@ -125,7 +125,7 @@ public final class UiTheme implements Disposable {
           Map.entry("chevron-down", 0xE5CF), Map.entry("chevron-up", 0xE5CE), Map.entry("twist-left", 0xE419),
           Map.entry("twist-right", 0xE41A), Map.entry("more", 0xE5D3), Map.entry("undo", 0xE166),
           Map.entry("locate", 0xE55C), Map.entry("play", 0xE037), Map.entry("pause", 0xE034),
-          Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("walk", 0xF87D),
+          Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("error", 0xE000), Map.entry("walk", 0xF87D),
           Map.entry("chevron-left", 0xE5CB), Map.entry("chevron-right", 0xE5CC), Map.entry("expand", 0xF1CE), Map.entry("grip", 0xE945),
           // unfold_more and unfold_less: a tree's Expand all and Collapse all, as the Client Settings sidebar draws them.
           Map.entry("unfold-more", 0xE5D7), Map.entry("unfold-less", 0xE5D6),
@@ -304,6 +304,7 @@ public final class UiTheme implements Disposable {
         tooltip.wrapWidth = 340;
         skin.add("hud", tooltip);
         icons();
+        tokenFields();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -582,6 +583,96 @@ public final class UiTheme implements Disposable {
         pad(drawable, vertical, horizontal);
         drawable.setMinHeight(height);
         drawable.setMinWidth(square ? height : 0);
+        return drawable;
+    }
+
+    /**
+     * The text input variants (docs/design-system/tokens.md, Inputs): plain or search, each with a status or read-only.
+     * Each is a {@link TokenFieldStyle} named {@code input<variant>}, and {@code input<variant>-compact} at the compact
+     * size.
+     */
+    public static final List<String> INPUT_VARIANTS = List.of("", "-error", "-warning", "-readonly", "-search",
+          "-search-error", "-search-warning", "-search-readonly");
+    /** The size of an input's status and search glyphs (icon.sm). */
+    public static final float FIELD_ICON = DesignTokens.shipped().size().get("icon.sm");
+    /** The gap between an input's text and its trailing status icon (space.xs). */
+    public static final float FIELD_ICON_GAP = DesignTokens.shipped().space().get("xs");
+
+    /** A text input style built from the design tokens, with the edge under the pointer and an optional status icon. */
+    public static final class TokenFieldStyle extends TextField.TextFieldStyle {
+        /** The background under the pointer; a status edge keeps its color. */
+        public Drawable over;
+        /** The status icon drawn at the trailing edge, in {@link #iconColor}; null for none. */
+        public Drawable icon;
+        public Color iconColor;
+    }
+
+    /**
+     * The token inputs in dark mode: an input fill and control edge, strong under the pointer, the focus ring in place
+     * of the edge, a status edge and icon; read-only has no fill and a subtle edge but primary text.
+     */
+    private void tokenFields() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        Color input = token(tokens.color("surface.input", mode));
+        Color base = token(tokens.color("surface.base", mode));
+        Color danger = token(tokens.color("status.danger", mode));
+        Color warning = token(tokens.color("status.warning", mode));
+        float radius = tokens.radius().get("md");
+        float border = tokens.size().get("border");
+        box("in", input, token(tokens.color("border.control", mode)), border, radius, null, 0, 0, 0);
+        box("in-over", input, token(tokens.color("border.strong", mode)), border, radius, null, 0, 0, 0);
+        box("in-focus", input, token(tokens.color("focus.ring", mode)), tokens.size().get("focus.width"), radius, null,
+              0, 0, 0);
+        box("in-error", input, danger, border, radius, null, 0, 0, 0);
+        box("in-warning", input, warning, border, radius, null, 0, 0, 0);
+        box("in-quiet", base, token(tokens.color("border.subtle", mode)), border, radius, null, 0, 0, 0);
+        Drawable selection = skin.newDrawable("white",
+              token(ColorMath.over(tokens.color("selected.background", mode), tokens.color("surface.input", mode))));
+        Color text = token(tokens.color("text.primary", mode));
+        Drawable cursor = skin.newDrawable("white", text);
+        cursor.setMinWidth(border);
+
+        float vertical = border + tokens.space().get("xs");
+        float side = border + tokens.space().get("md");
+        float iconSpace = tokens.size().get("icon.sm") + tokens.space().get("xs");
+        for (boolean compact : new boolean[] { false, true }) {
+            float height = tokens.size().get(compact ? "control.sm" : "control.md");
+            for (String variant : INPUT_VARIANTS) {
+                boolean search = variant.startsWith("-search");
+                String state = search ? variant.substring("-search".length()) : variant;
+                boolean status = state.equals("-error") || state.equals("-warning");
+                float left = search ? side + iconSpace : side;
+                // The search field's clear button and a status icon sit at the trailing edge, the icon innermost
+                float right = (search ? side + height - 2 * vertical : side) + (status ? iconSpace : 0);
+                String rest = status ? "in" + state : "in";
+                TokenFieldStyle style = new TokenFieldStyle();
+                style.font = skin.getFont("hud-body");
+                style.fontColor = text;
+                style.focusedFontColor = text;
+                style.messageFont = style.font;
+                style.messageFontColor = token(tokens.color("text.muted", mode));
+                style.cursor = cursor;
+                style.selection = selection;
+                style.background = field(rest, vertical, left, right, height);
+                style.over = rest.equals("in") ? field("in-over", vertical, left, right, height) : style.background;
+                style.focusedBackground = field("in-focus", vertical, left, right, height);
+                // Disabled: no fill and a subtle edge; read-only is the same box with primary text
+                style.disabledBackground = field("in-quiet", vertical, left, right, height);
+                style.disabledFontColor = state.equals("-readonly") ? text
+                      : token(tokens.color("text.disabled", mode));
+                if (status) {
+                    style.icon = skin.getDrawable(state.equals("-error") ? "icon-error" : "icon-warn");
+                    style.iconColor = state.equals("-error") ? danger : warning;
+                }
+                skin.add("input" + variant + (compact ? COMPACT : ""), style, TextField.TextFieldStyle.class);
+            }
+        }
+    }
+
+    private Drawable field(String box, float vertical, float left, float right, float height) {
+        NinePatchDrawable drawable = resized(box, vertical, left, height);
+        drawable.setRightWidth(right);
         return drawable;
     }
 

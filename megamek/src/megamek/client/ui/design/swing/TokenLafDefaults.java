@@ -98,6 +98,33 @@ public final class TokenLafDefaults {
         put("Component.success.borderColor", color("status.success"));
         put("Component.success.focusedBorderColor", color("focus.ring"));
 
+        // Inputs line up with buttons: control.sm by default, control.md through TokenFields. The edge turns strong
+        // under the pointer; a read-only input has no fill and a subtle edge, but keeps primary text.
+        values.put(FieldEdge.HEIGHT, number(tokens.size().get("control.sm")));
+        put(FieldEdge.HOVER_COLOR, color("border.strong"));
+        put(FieldEdge.READ_ONLY_COLOR, color("border.subtle"));
+        put(TokenFormField.LABEL_COLOR, color("text.secondary"));
+        put(TokenFormField.HELPER_COLOR, color("text.muted"));
+        int padY = Math.round(tokens.space().get("xxs"));
+        int padX = Math.round(tokens.space().get("md"));
+        values.put("@componentMargin", padY + "," + padX + "," + padY + "," + padX);
+        values.put("TextFieldUI", FieldUIs.TextField.class.getName());
+        values.put("PasswordFieldUI", FieldUIs.PasswordField.class.getName());
+        values.put("FormattedTextFieldUI", FieldUIs.FormattedTextField.class.getName());
+        values.put("SpinnerUI", FieldUIs.Spinner.class.getName());
+        values.put("ComboBoxUI", FieldUIs.ComboBox.class.getName());
+        for (String prefix : new String[] { "TextField", "PasswordField", "FormattedTextField" }) {
+            values.put(prefix + ".border", FieldBorders.Text.class.getName());
+        }
+        values.put("Spinner.border", FieldBorders.Round.class.getName());
+        values.put("ComboBox.border", FieldBorders.Round.class.getName());
+        values.put("ScrollPane.border", FieldBorders.ScrollPane.class.getName());
+        for (String prefix : new String[] { "TextField", "PasswordField", "FormattedTextField", "TextArea", "TextPane",
+                                            "EditorPane" }) {
+            put(prefix + ".inactiveBackground", base);
+            put(prefix + ".placeholderForeground", color("text.muted"));
+        }
+
         // Secondary (default) button: raised face, control edge; hover adds a wash, a strong edge and brighter text.
         // Every kind is disabled the same way: raised face, subtle edge, disabled text.
         for (String prefix : new String[] { "Button.", "ToggleButton." }) {
@@ -215,7 +242,6 @@ public final class TokenLafDefaults {
         put("CheckBox.icon.pressedSelectedBackground", over(pressed, accent));
 
         // Text and lists
-        put("TextField.placeholderForeground", color("text.muted"));
         put("Label.disabledForeground", color("text.disabled"));
         put("Separator.foreground", color("border.subtle"));
         put("Table.gridColor", color("border.subtle"));
