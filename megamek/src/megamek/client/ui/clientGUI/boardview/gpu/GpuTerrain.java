@@ -3638,6 +3638,15 @@ final class GpuTerrain implements Disposable {
                         patches.add(new RoadPatch(patch, masks.share(mask), triangles, false, source));
                     }
                 }
+                // A road into a portal carries its verges and markings on along the tunnel's floor.
+                for (var tunnel : columns || source != tile ? List.<BoardTunnel>of() : BoardTunnel.entrances(scene, tile)) {
+                    if (tunnel.bridge()) { continue; }
+                    BoardRoad through = GpuRoads.through(shared, tunnel);
+                    for (var patch : GpuRoads.tunnelPatches(tile, through, tunnel)) {
+                        patches.add(new RoadPatch(patch, masks.share(GpuRoads.tunnelMask(tile, through, patch, tunnel)),
+                              GpuRoads.tunnelFloor(tunnel, patch), true, tile));
+                    }
+                }
             }
             for (var feature : tile.features()) {
                 if (!feature.asset().equals("bridge")) { continue; }
