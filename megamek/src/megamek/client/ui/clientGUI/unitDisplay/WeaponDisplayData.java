@@ -5,13 +5,13 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
+import jakarta.annotation.Nullable;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.RangeType;
-import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.compute.ArtilleryRange;
@@ -601,8 +601,10 @@ public final class WeaponDisplayData {
             avExt *= 10;
         }
 
+        // range labels follow the range scale, which can differ from the damage scale
+        boolean usesCapitalRangeBrackets = weaponType.usesCapitalRangeBrackets();
         String shortRange;
-        if (weaponType.isCapital()) {
+        if (usesCapitalRangeBrackets) {
             shortRange = "1-12";
         } else if (weaponType.hasFlag(WeaponType.F_PD_BAY)) {
             // Point Defense bays have a variable range too, depending on the mode they're in
@@ -610,7 +612,7 @@ public final class WeaponDisplayData {
         } else {
             shortRange = "1-6";
         }
-        return aerospaceValues(null, weaponType.isCapital(), maxRange, shortRange,
+        return aerospaceValues(null, usesCapitalRangeBrackets, maxRange, shortRange,
               List.of(Integer.toString(avShort), Integer.toString(avMed), Integer.toString(avLong),
                     Integer.toString(avExt)));
     }

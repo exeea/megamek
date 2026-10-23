@@ -40,6 +40,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.IntStream;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
@@ -47,7 +48,6 @@ import megamek.client.ui.dialogs.phaseDisplay.AimedShotDialog;
 import megamek.client.ui.widget.IndexedRadioButton;
 import megamek.common.LosEffects;
 import megamek.common.ToHitData;
-import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeSideTable;

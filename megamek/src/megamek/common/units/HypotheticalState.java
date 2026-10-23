@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-import megamek.common.annotations.Nullable;
+import jakarta.annotation.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;

@@ -5,11 +5,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.common.actions.LayExplosivesAttackAction;
 import megamek.common.actions.ScanAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.compute.VirtualRealityPilotingPod;
 import megamek.common.compute.VirtualRealityPilotingPod.Interference;
 import megamek.common.compute.VirtualRealityPilotingPod.InterferenceState;

@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
@@ -98,7 +99,6 @@ import megamek.common.actions.AttackAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.PhysicalAttackAction;
 import megamek.common.actions.WeaponAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
 import megamek.common.board.BoardHelper;

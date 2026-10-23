@@ -432,7 +432,7 @@ public final class BoardSceneryLayouts {
      * board is native. So converting a converted board only types bridges that lack a type. Returns the issues of the
      * decode.
      */
-    public static List<BoardIssue> convert(Board board) {
+    public static List<HexIssue> convert(Board board) {
         List<Coords> hexes = new ArrayList<>();
         if (!board.isNativeFormat()) {
             bridgeExits(board);
@@ -497,7 +497,7 @@ public final class BoardSceneryLayouts {
      * bridge hex gets its type, decoded on the board as given ({@link #bridgeTypes}). Returns those issues. Thread-safe:
      * it changes only {@code board}.
      */
-    public static List<BoardIssue> convert(Board board, Collection<Coords> hexes) {
+    public static List<HexIssue> convert(Board board, Collection<Coords> hexes) {
         boolean nativeBoard = board.isNativeFormat();
         List<Coords> scanned = hexes.stream().filter(board::contains).distinct()
               .sorted(Comparator.comparingInt(Coords::getY).thenComparingInt(Coords::getX)).toList();
@@ -572,7 +572,7 @@ public final class BoardSceneryLayouts {
             }
             return missing;
         }));
-        List<BoardIssue> issues = new ArrayList<>();
+        List<HexIssue> issues = new ArrayList<>();
         // The maglev markers this conversion places, and the rows of pillar art along legacy maglev art (maglevPillars).
         Map<Coords, List<String>> maglevs = new HashMap<>();
         Set<Coords> pillarRows = nativeBoard ? Set.of() : pillarRows(board, scenery);
@@ -647,7 +647,7 @@ public final class BoardSceneryLayouts {
                     added.add(new BoardDecoration(id, "decal", set.getKey(), null, offsetX(coords, centre),
                           offsetY(coords, centre), 0, false, 1, receiver(hex, true), 0, false));
                     if (set.getValue().size() < 7) {
-                        issues.add(new BoardIssue(coords, id, "Emblem set with " + set.getValue().size()
+                        issues.add(new HexIssue(coords, id, "Emblem set with " + set.getValue().size()
                               + " of 7 pieces: the full emblem is placed"));
                     }
                 }
@@ -936,7 +936,7 @@ public final class BoardSceneryLayouts {
     }
 
     /** Converts only the maglev art placed by this import; a native board is otherwise read exactly as authored. */
-    private static void maglevTerrain(Board board, Map<Coords, List<String>> maglevs, List<BoardIssue> issues,
+    private static void maglevTerrain(Board board, Map<Coords, List<String>> maglevs, List<HexIssue> issues,
           boolean legacy) {
         Map<BoardLocation, Hex> changed = new HashMap<>();
         maglevs.forEach((at, ids) -> {
@@ -947,7 +947,7 @@ public final class BoardSceneryLayouts {
                 BoardDecoration marker = objects.stream().filter(object -> object.id().equals(id)).findFirst().orElseThrow();
                 double level = marker.placement().level(hex);
                 if (level < hex.getLevel()) {
-                    issues.add(new BoardIssue(at, id, "Maglev below the ground was moved onto the ground"));
+                    issues.add(new HexIssue(at, id, "Maglev below the ground was moved onto the ground"));
                     level = hex.getLevel();
                 }
                 int elevation = (int) Math.round(level - hex.getLevel());
@@ -964,7 +964,7 @@ public final class BoardSceneryLayouts {
                                   ? "Maglev was omitted: one rail kind per layer" : null;
                 objects.remove(marker);
                 if (refusal != null) {
-                    issues.add(new BoardIssue(at, id, refusal));
+                    issues.add(new HexIssue(at, id, refusal));
                     objects.removeIf(object -> RailRoute.rides(object.asset()) == RailRoute.Kind.MAGLEV
                           && object.placement().equals(marker.placement()));
                     continue;
@@ -976,7 +976,7 @@ public final class BoardSceneryLayouts {
                         // Legacy artwork can cross a bridge sideways. Preserve both routes on the existing deck;
                         // its road keeps its original exits, while the structure also carries the maglev arms.
                         hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, bridge.getExits() | sides));
-                        issues.add(new BoardIssue(at, id, "Bridge exits were widened to carry the legacy maglev crossing"));
+                        issues.add(new HexIssue(at, id, "Bridge exits were widened to carry the legacy maglev crossing"));
                     } else {
                         sides &= RailRoute.bridgeExits(hex);
                     }

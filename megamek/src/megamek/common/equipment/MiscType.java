@@ -528,11 +528,6 @@ public class MiscType extends EquipmentType {
         } else if (hasFlag(F_MASC)) {
             if (entity instanceof ProtoMek) {
                 return RoundWeight.nearestKg(entity.getWeight() * 0.025);
-                // Myomer Boosters for BA
-            } else if (entity instanceof BattleArmor) {
-                // Myomer boosters weight 0.250 tons, however this has to
-                // be split across 3 instances, since it's spreadable equipment
-                return (0.250 / 3);
             } else {
                 if (hasFlag(MiscTypeFlag.S_SUPERCHARGER)) {
                     Engine e = entity.getEngine();
@@ -923,8 +918,6 @@ public class MiscType extends EquipmentType {
             } else if (hasFlag(F_DUNE_BUGGY)) {
                 double totalTons = getTonnage(entity, loc, size);
                 costValue = 10 * totalTons * totalTons;
-            } else if (hasFlag(F_MASC) && hasFlag(F_BA_EQUIPMENT)) {
-                costValue = entity.getRunMP() * 75000;
             } else if (hasFlag(F_HEAD_TURRET) || hasFlag(F_SHOULDER_TURRET) || hasFlag(F_QUAD_TURRET)) {
                 costValue = getTonnage(entity, loc, size) * 10000;
             } else if (hasFlag(F_SPONSON_TURRET)) {
@@ -944,7 +937,8 @@ public class MiscType extends EquipmentType {
                           entity.getWeight() *
                           0.025f);
                 } else if (entity instanceof BattleArmor) {
-                    costValue = entity.getOriginalWalkMP() * 75000;
+                    costValue =
+                          (double) (entity.getWeightClass() >= EntityWeightClass.WEIGHT_HEAVY ? 75000 : 150000) / 3;
                 } else if (hasFlag(MiscTypeFlag.S_SUPERCHARGER) || hasFlag(MiscTypeFlag.S_JET_BOOSTER)) {
                     Engine e = entity.getEngine();
                     if (e == null) {
@@ -8251,7 +8245,9 @@ public class MiscType extends EquipmentType {
               F_TANK_EQUIPMENT,
               F_SUPPORT_TANK_EQUIPMENT,
               F_FIGHTER_EQUIPMENT);
-        misc.rulesRefs = rulesRefs(SourceBookCode.TO_AUE, 108);
+        misc.rulesRefs = rulesRefs(
+                rulesRef(SourceBookCode.TO_AUE, 108),
+                rulesRef(SourceBookCode.CORE, 207));
         misc.techAdvancement.setTechBase(TechBase.IS)
               .setTechRating(TechRating.E)
               .setAvailability(AvailabilityValue.X, AvailabilityValue.X, AvailabilityValue.F, AvailabilityValue.F)
@@ -8998,6 +8994,11 @@ public class MiscType extends EquipmentType {
         String[] modes = { S_HARJEL_II_1F1R, S_HARJEL_II_2F0R, S_HARJEL_II_0F2R };
         misc.setModes(modes);
         misc.rulesRefs = rulesRefs(SourceBookCode.IO_AE, 82);
+        misc.rulesRefs = rulesRefs(
+              rulesRef(SourceBookCode.IO_AE, 82),
+              rulesRef(SourceBookCode.CORE, 208)
+        );
+
         // Tech Progression tweaked to combine IntOps with TRO Prototypes/3145 NTNU RS
         misc.techAdvancement.setTechBase(TechBase.CLAN)
               .setTechRating(TechRating.F)
@@ -9026,7 +9027,11 @@ public class MiscType extends EquipmentType {
         String[] modes = { S_HARJEL_III_2F2R, S_HARJEL_III_4F0R, S_HARJEL_III_3F1R, S_HARJEL_III_1F3R,
                            S_HARJEL_III_0F4R };
         misc.setModes(modes);
-        misc.rulesRefs = rulesRefs(SourceBookCode.IO_AE, 82);
+        misc.rulesRefs = rulesRefs(
+              rulesRef(SourceBookCode.IO_AE, 82),
+              rulesRef(SourceBookCode.CORE, 208)
+        );
+
         // Tech Progression tweaked to combine IntOps with TRO Prototypes/3145 NTNU RS
         misc.techAdvancement.setTechBase(TechBase.CLAN)
               .setTechRating(TechRating.F)
@@ -11992,9 +11997,7 @@ public class MiscType extends EquipmentType {
         misc.setInternalName(EquipmentTypeLookup.BA_MYOMER_BOOSTER);
         misc.addLookupName("CLBAMB");
         misc.addLookupName("BAMyomerBooster");
-        // Need variable tonnage because we have to account for tonnage being
-        // split across 3 criticalSlots, since it's spreadable equipment
-        misc.tonnage = TONNAGE_VARIABLE;
+        misc.tonnage = 0.250 / 3;
         misc.criticalSlots = 3;
         misc.spreadable = true;
         misc.cost = COST_VARIABLE;
@@ -12156,6 +12159,7 @@ public class MiscType extends EquipmentType {
         misc.criticalSlots = 1;
         misc.flags = misc.flags.or(F_BA_EQUIPMENT, F_AP_MOUNT);
         misc.bv = 0;
+        misc.cost = 500;
         misc.rulesRefs = rulesRefs(SourceBookCode.TM, 271);
         misc.techAdvancement.setTechBase(TechBase.ALL)
               .setStaticTechLevel(SimpleTechLevel.STANDARD)
@@ -12182,6 +12186,7 @@ public class MiscType extends EquipmentType {
         misc.hittable = false;
         misc.flags = misc.flags.or(F_BA_EQUIPMENT, F_MODULAR_WEAPON_MOUNT);
         misc.bv = 0;
+        misc.cost = 1000;
         misc.rulesRefs = rulesRefs(SourceBookCode.TM, 271);
         // I couldn't find this information anywhere so I just copied it from the AP weapon mount
         misc.techAdvancement.setTechBase(TechBase.ALL)

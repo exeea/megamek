@@ -43,12 +43,12 @@ import java.awt.RenderingHints;
 import java.io.File;
 import javax.swing.ImageIcon;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.util.ImageUtil;
 import megamek.logging.MMLogger;

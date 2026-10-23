@@ -4,11 +4,11 @@ package megamek.client.ui.dialogs.phaseDisplay;
 import java.util.List;
 import javax.swing.JCheckBox;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.common.annotations.Nullable;
 
 /**
  * One pod that a pod trigger dialog ({@link TriggerAPPodDialog}, {@link TriggerBPodDialog}) offers.

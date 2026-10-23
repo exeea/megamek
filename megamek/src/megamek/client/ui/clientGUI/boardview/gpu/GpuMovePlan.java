@@ -17,6 +17,7 @@ import java.util.stream.Stream;
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.SharedUtility;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -27,7 +28,6 @@ import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.Hex;
 import megamek.common.ManeuverType;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.MoveStepType;

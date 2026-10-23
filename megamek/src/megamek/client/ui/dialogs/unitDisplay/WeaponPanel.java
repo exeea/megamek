@@ -54,6 +54,7 @@ import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import javax.swing.event.MouseInputAdapter;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.GBC;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -68,7 +69,6 @@ import megamek.client.ui.widget.picmap.PMUtil;
 import megamek.client.ui.widget.picmap.PicMap;
 import megamek.common.Configuration;
 import megamek.common.ToHitData;
-import megamek.common.annotations.Nullable;
 import megamek.common.enums.WeaponSortOrder;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.Mounted;
@@ -537,8 +537,14 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
         wInfantryRange5R = new JLabel("---", SwingConstants.CENTER);
         setupLabel(wInfantryRange5R);
 
-        // range panel
-        JPanel pRange = new JPanel(new GridBagLayout());
+        // range panel. Its row count changes with the unit (aerospace adds the AV row), so its minimum height follows
+        // its content: when space is short the parent lays out at minimum sizes, and a fixed minimum cut off the AV row.
+        JPanel pRange = new JPanel(new GridBagLayout()) {
+            @Override
+            public Dimension getMinimumSize() {
+                return new Dimension(INTERNAL_PANE_WIDTH, getPreferredSize().height);
+            }
+        };
         pRange.setAlignmentX(Component.LEFT_ALIGNMENT);
         pRange.setAlignmentY(Component.TOP_ALIGNMENT);
         pRange.setOpaque(false);
@@ -1235,7 +1241,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
                 modifiers[bracket].setVisible(true);
             }
         } else {
-            for (JLabel label : List.of(wShortL, wMedL, wLongL, wMinR, wShortR, wMedR, wLongR)) {
+            for (JLabel label : List.of(wShortL, wMedL, wLongL, wShortR, wMedR, wLongR)) {
                 label.setVisible(true);
             }
             if (!isAerospaceAttack(entity)) {
