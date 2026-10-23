@@ -1951,7 +1951,9 @@ final class BoardRelief {
         px += lerp(fitA.x(), fitB.x(), t);
         py += lerp(fitA.y(), fitB.y(), t);
         float keep = 1;
-        for (Corner end : new Corner[] { edge.a, edge.b }) {
+        // A corner is shared by three edges and must move alike on each: there only the corner's own hexes decide.
+        Corner at = t == 0 ? edge.a : t == 1 ? edge.b : null;
+        for (Corner end : at != null ? new Corner[] { at } : new Corner[] { edge.a, edge.b }) {
             for (Site site : end.around) {
                 if (site == null) { continue; }
                 var source = scene.tile(site.coords());
@@ -1962,14 +1964,17 @@ final class BoardRelief {
                       && !BoardBridge.guideway(source)
                       && z >= (source.elevation() + bridge.elevation()) * BoardGeometry.level() - EPSILON) {
                     float level = source.elevation() + bridge.elevation();
-                    boolean reserve = false;
-                    for (Site beside : edge.a.around) {
-                        if (beside == null || beside.level() <= level || beside.family() == CONCRETE) { continue; }
+                    boolean reserve = false, higher = edge.upper != null && edge.upper.level() > level;
+                    for (Site beside : at != null ? at.around : edge.a.around) {
+                        if (beside == null || beside.level() <= level) { continue; }
+                        higher |= at != null;
+                        if (beside.family() == CONCRETE) { continue; }
+                        if (at != null) { reserve = true; continue; }
                         for (Site other : edge.b.around) { reserve |= other == beside; }
                     }
-                    if (reserve || edge.upper != null && edge.upper.level() > level) {
+                    if (reserve || higher) {
                         var deck = decks.computeIfAbsent(site.coords(), key -> BoardBridge.deck(scene, source).slab(key));
-                        // TEMP-PROPOSAL: the gate a deck's road lands across keeps its boundary: the bank's road
+                        // The gate a deck's road lands across keeps its boundary: the bank's road
                         // reserves its mouth and the footing stands on it; moved out of the slab, it would run
                         // across the bank's ramp.
                         Site bank = site == edge.lower ? edge.upper : site == edge.upper ? edge.lower : null;
@@ -1977,7 +1982,7 @@ final class BoardRelief {
                               source.coords().direction(bank.coords()));
                         // Wide decks can cross the nominal corner itself; reserve their full slab before
                         // trimming natural relief against that same canonical boundary on both sides.
-                        if (reserve && !gate) {
+                        if (reserve && (at != null || !gate)) {
                             var clear = cutBoundary(deck, site, px, py, 0);
                             if (clear != null) { px = clear.x; py = clear.y; }
                         }

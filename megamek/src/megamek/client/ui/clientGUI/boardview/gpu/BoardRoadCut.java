@@ -314,6 +314,11 @@ final class BoardRoadCut {
 
     /** How far, in levels, poured ground may lie under a road's surface and still be taken as lying on it. */
     private static final float ON_SURFACE = .02f;
+    /**
+     * How far, in levels, natural ground may lie under a road's surface and still give way: the bank lays it onto the
+     * road's grade, which the emitted road follows only to within this, and left there it would show through the road.
+     */
+    private static final float UNDER = .05f;
 
     /**
      * Removes every part of {@code faces} that stands on the reserved ground and keeps the rest, cut exactly along its
@@ -371,10 +376,10 @@ final class BoardRoadCut {
             float[] under = new float[3], over = new float[3];
             Vector3[] corners = { a, b, c };
             boolean top = face.finish() == BoardSurface.Finish.TOP && !shore, pouredTop = !natural && top;
-            // Natural slopes are cut at the road's surface itself, where it covers their cut edge; so is the board's cut,
-            // which has no ground beyond it. Poured ground keeps a band beneath the road.
+            // Natural slopes are cut just under the road's surface, which covers their cut edge; the board's cut at the
+            // surface itself, as it has no ground beyond it. Poured ground keeps a band beneath the road.
             boolean boardCut = !top && face.landEdge() >= 0 && (boardEdges & 1 << face.landEdge()) != 0;
-            float band = natural || boardCut ? 0 : ON_SURFACE;
+            float band = boardCut ? 0 : natural ? UNDER : ON_SURFACE;
             for (int i = 0; i < 3; i++) {
                 if (pouredTop) {
                     under[i] = Float.MAX_VALUE;
