@@ -2362,7 +2362,8 @@ final class BoardSurface {
             // field leaves the water's own cell as it is. Its faces stay as they are listed, as its bed indexes them.
             bank.move(faces);
         } else if (natural()) {
-            List<Face> eased = bank.conform(faces, Float.NEGATIVE_INFINITY);
+            // A copy: with no bank to shape, conform hands back the list itself.
+            List<Face> eased = new ArrayList<>(bank.conform(faces, Float.NEGATIVE_INFINITY));
             faces.clear();
             faces.addAll(eased);
         }
