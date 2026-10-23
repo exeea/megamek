@@ -170,17 +170,30 @@ final class UnitAnimator {
         return null;
     }
 
-    /** Fit to the completed terrain rim, including corners displaced by rivers and constructed shores. */
+    /**
+     * Fit to the completed terrain rim, including corners displaced by rivers and constructed shores, and to this
+     * formation's sector of a hex it shares with other troops.
+     */
     private float[] stepRoom(BoardScene.Unit unit) {
         BoardScene board = scene.get();
         BoardScene.Tile tile = board == null || formation.isEmpty() ? null : board.tile(unit.location().coords());
         if (tile == null) { return InfantryFootprint.NO_STEPS; }
         var relief = surfaces.get(board, tile).relief;
-        float[] room = new float[6];
+        // Troop formations sharing the hex, friend or foe, each keep to their own sector of it.
+        var troops = board.units().stream().filter(other -> standsWith(other, unit)).map(BoardScene.Unit::id).sorted().toList();
+        float[] room = InfantryFootprint.sector(troops.indexOf(unit.id()), troops.size());
         for (int edge = 0; edge < room.length; edge++) {
-            room[edge] = relief.topInset(edge);
+            room[edge] = Math.max(room[edge], relief.topInset(edge));
         }
         return room;
+    }
+
+    /** Whether {@code other} is a troop formation on the ground of the unit's hex, the unit itself included. */
+    private static boolean standsWith(BoardScene.Unit other, BoardScene.Unit unit) {
+        var family = other.model() == null || other.model().state() == null ? null : other.model().state().structure().family();
+        return (family == UnitFamilyScale.INFANTRY || family == UnitFamilyScale.BATTLE_ARMOR) && !other.sensorContact()
+              && !other.airborne() && other.attachment() == null && other.location().coords().equals(unit.location().coords())
+              && other.location().elevation() == unit.location().elevation();
     }
 
     /** A material replacement rebinds nodes but keeps playback; a new/revealed unit starts directly in its pose. */

@@ -149,8 +149,9 @@ final class InfantryMotion {
     }
 
     /**
-     * @param room the world units that the steps on each edge of the unit's hex take from its level ground, which the
-     *             formation keeps clear of; {@link InfantryFootprint#NO_STEPS} for a hex level to its edges
+     * @param room the world units that the steps on each edge of the unit's hex, or the sectors of other troops
+     *             sharing it, take from its level ground, which the formation keeps clear of;
+     *             {@link InfantryFootprint#NO_STEPS} for a hex level to its edges and a formation alone in it
      */
     void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room) {
         var travel = motion.boarding();
