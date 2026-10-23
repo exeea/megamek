@@ -152,6 +152,8 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, UpperBodyTurn> upperBodyTurns = new HashMap<>();
     private final Map<String, ArmFlip> armFlips = new HashMap<>();
     private final Map<String, UnitAnimator> animators = new HashMap<>();
+    /** The ground of the units other than troops, as last drawn, by the hexes they occupy; troops step around it. */
+    private final Map<Coords, List<Rectangle>> occupiedGround = new HashMap<>();
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
@@ -1545,7 +1547,7 @@ class GpuBattleView extends ApplicationAdapter {
                     facing = 0; // Troops and their transports have cosmetic member headings, no gameplay facing.
                 }
                 var turn = upperBodyTurns.get(key);
-                animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(visual, instance, unit,
+                animators.computeIfAbsent(key, ignored -> newAnimator()).apply(visual, instance, unit,
                       sample, hoverClock, animationSeconds(),
                       history.speed() == UnitMotion.Speed.INSTANT, turn == null ? 0 : turn.degrees(),
                       UnitScreenScale.growth(placement, growth));
@@ -1578,6 +1580,21 @@ class GpuBattleView extends ApplicationAdapter {
             unitFootprints.put(unit, new UnitFootprint.Pose(placement, position, footprintFacing));
             unitAnchors.put(unit, anchor);
         }
+        occupiedGround.clear();
+        for (BoardScene.Unit unit : scene.units()) {
+            var instance = unitInstances.get(unit.id() + ":" + unit.part());
+            if (instance == null || UnitAnimator.troops(unit) || unit.sensorContact() || unit.airborne()
+                  || unit.attachment() != null) { continue; }
+            // Whole world units, so idle animation does not keep nudging the troops beside a unit.
+            var bounds = UnitBounds.world(instance);
+            float left = MathUtils.floor(bounds.min.x), bottom = MathUtils.floor(bounds.min.y);
+            var ground = new Rectangle(left, bottom, MathUtils.ceil(bounds.max.x) - left, MathUtils.ceil(bounds.max.y) - bottom);
+            unit.footprint().forEach(coords -> occupiedGround.computeIfAbsent(coords, ignored -> new ArrayList<>()).add(ground));
+        }
+    }
+
+    private UnitAnimator newAnimator() {
+        return new UnitAnimator(groundSurfaces, () -> scene, coords -> occupiedGround.getOrDefault(coords, List.of()));
     }
 
     /** Frame an action before its clock advances, including when one large frame reaches several queued actions. */
@@ -1816,7 +1833,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (instance == null || instance.model != model.instance.model) {
             instance = newUnitInstance(key, model);
         }
-        animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(model, instance, unit,
+        animators.computeIfAbsent(key, ignored -> newAnimator()).apply(model, instance, unit,
               motions.get(unit.id()).sample(), hoverClock, 0, true, unit.model().twist());
     }
 
