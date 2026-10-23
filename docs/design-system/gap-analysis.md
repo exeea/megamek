@@ -302,6 +302,9 @@ work for Swing, and item 11 is under investigation.
   `UiTree` until the developers accept the system; see [tokens.md](tokens.md#lists-and-trees).
 - The rest of the gallery: tables, menus, tooltips, scrollbars, sliders and the remaining controls, in Swing (libGDX
   only where the in-game UI needs them).
+- Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
+  every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the
+  Swing controls still switch states instantly, which reads as a desktop app rather than a game.
 - Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
   Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
   can migrate to one shape.
