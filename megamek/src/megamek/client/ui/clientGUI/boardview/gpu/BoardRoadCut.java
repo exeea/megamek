@@ -425,7 +425,7 @@ final class BoardRoadCut {
             for (Segment s : edge) {
                 if (Math.max(s.ax(), s.bx()) < minX - epsilon || Math.min(s.ax(), s.bx()) > maxX + epsilon
                       || s.high() < minY - epsilon || s.low() > maxY + epsilon) { continue; }
-                Segment chord = chord(face, s);
+                Segment chord = chord(face, s, nudge);
                 if (chord != null) { chords.add(chord); }
             }
             if (!chords.isEmpty() || region.contains(mx + ox, my + oy)) {
@@ -589,10 +589,15 @@ final class BoardRoadCut {
 
     private static long cellKey(int i, int j) { return (long) i << 32 ^ (j & 0xffffffffL); }
 
-    /** The trace of a boundary segment's vertical plane on a face, in the face's (s, t) coordinates; null if none. */
-    private static Segment chord(BoardSurface.Face face, Segment s) {
+    /**
+     * The trace of a boundary segment's vertical plane on a face, in the face's (s, t) coordinates; null if none. On an
+     * upright face it is a vertical line, where the segment crosses the face's plan: one ending there, as where the
+     * outline turns on the face's line, still marks it if it reaches within {@code reach} of it.
+     */
+    private static Segment chord(BoardSurface.Face face, Segment s, float reach) {
         Vector3 a = face.a(), b = face.b(), c = face.c();
         float dx = s.bx() - s.ax(), dy = s.by() - s.ay(), length2 = dx * dx + dy * dy;
+        float slack = reach / (float) Math.sqrt(length2);
         float bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y;
         // The plane: alpha s + beta t + gamma = 0; the position along the segment: lambda0 + ls s + lt t.
         float alpha = dx * by - dy * bx, beta = dx * cy - dy * cx, gamma = dx * (a.y - s.ay()) - dy * (a.x - s.ax());
@@ -607,8 +612,8 @@ final class BoardRoadCut {
         float[] range = { Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY };
         // s >= 0, t >= 0, s + t <= 1, 0 <= lambda <= 1.
         if (!limit(range, p0s, ds) || !limit(range, p0t, dt) || !limit(range, 1 - p0s - p0t, -ds - dt)
-              || !limit(range, lambda0 + ls * p0s + lt * p0t, ls * ds + lt * dt)
-              || !limit(range, 1 - lambda0 - ls * p0s - lt * p0t, -ls * ds - lt * dt)) { return null; }
+              || !limit(range, lambda0 + ls * p0s + lt * p0t + slack, ls * ds + lt * dt)
+              || !limit(range, 1 - lambda0 - ls * p0s - lt * p0t + slack, -ls * ds - lt * dt)) { return null; }
         if (range[1] - range[0] < 1e-6f) { return null; }
         return new Segment(p0s + ds * range[0], p0t + dt * range[0], p0s + ds * range[1], p0t + dt * range[1]);
     }

@@ -2459,9 +2459,27 @@ final class BoardSurface {
     /** Natural ground eases into the roads around; poured ground is cut clean. */
     private boolean natural() { return tile.surface() != BoardScene.Surface.CONCRETE; }
 
-    /** Cut faces into {@code into}. */
+    /**
+     * Cut faces into {@code into}. Poured ground has none along an edge a cast wall already closes (#sides): its own down
+     * to a lower hex, or a higher poured hex's down to it. A cut face in that wall's plane would fight it.
+     */
     private BoardRoadCut.WallBuilder cutFaces(List<Face> into) {
-        return (topA, lowA, topB, lowB, fx, fy) -> relief.cutWall(topA, lowA, topB, lowB, fx, fy, into);
+        return (topA, lowA, topB, lowB, fx, fy) -> {
+            if (natural() || !onCastStep(topA, topB)) { relief.cutWall(topA, lowA, topB, lowB, fx, fy, into); }
+        };
+    }
+
+    /** Whether a run lies along an edge a cast wall closes: down to a lower hex, or up to poured ground. */
+    private boolean onCastStep(Vector3 a, Vector3 b) {
+        float tolerance = .01f * BoardGeometry.hexScale();
+        for (int edge = 0; edge < 6; edge++) {
+            var next = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
+            if (next == null || next.backdrop().present() || next.elevation() == tile.elevation()
+                  || next.elevation() > tile.elevation() && next.surface() != BoardScene.Surface.CONCRETE) { continue; }
+            Vector3 p = moved(edge), q = moved((edge + 1) % 6);
+            if (edgeDistance(a, p, q) < tolerance && edgeDistance(b, p, q) < tolerance) { return true; }
+        }
+        return false;
     }
 
     /** Slopes ease into the roads around, as the top does, and give way to the carriageways that reserve their ground. */

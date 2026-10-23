@@ -541,10 +541,12 @@ final class BoardRoadGrade {
                       AffineTransform.getTranslateInstance(2 * across[0], 2 * across[1])));
             }
         } else {
+            // Each lane runs a pixel past its edge, which the hex then cuts: its square end is not the lattice edge (an
+            // 84 x 72 hex is not regular), and short of it, it would leave a sliver of the apron's level along the edge.
             local = new Area();
             for (int d = 0; d < 6; d++) {
                 if ((arms & 1 << d) != 0) {
-                    local.add(new Area(lane(d, BoardSurface.roadMouth(tile, scene.neighbor(tile, d), d), 0, 1)));
+                    local.add(new Area(lane(d, BoardSurface.roadMouth(tile, scene.neighbor(tile, d), d), 0, 1 + 1 / 36f)));
                 }
             }
             local.intersect(new Area(hexagon(1)));
