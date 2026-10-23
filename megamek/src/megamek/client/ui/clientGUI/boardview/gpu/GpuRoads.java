@@ -234,18 +234,48 @@ final class GpuRoads {
     }
 
     /** Tile pixels a paved deck's asphalt stays solid past its footing on a bare bank, before fading over the apron. */
-    static float landingSetback(BoardBridge.Deck deck) {
-        boolean paved = deck.kind() == BoardRoad.Kind.PAVED || deck.kind() == BoardRoad.Kind.ALLEY;
-        return paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0;
-    }
+    static float landingSetback(BoardBridge.Deck deck) { return setback(paved(deck.kind())); }
+
+    /** Tile pixels asphalt stays solid before a bare end, before fading over its apron; none for loose roads. */
+    private static float setback(boolean paved) { return paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0; }
+
+    private static boolean paved(BoardRoad.Kind kind) { return kind == BoardRoad.Kind.PAVED || kind == BoardRoad.Kind.ALLEY; }
 
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road, BoardBridgeFooting footing) {
         var patches = deckPatches(tile, deck, road);
-        if (footing.bareExits() == 0) { return patches; }
-        boolean paved = deck.kind() == BoardRoad.Kind.PAVED || deck.kind() == BoardRoad.Kind.ALLEY;
+        return footing.bareExits() == 0 ? patches : bare(patches, road, paved(deck.kind()));
+    }
+
+    /**
+     * The road painting a hex's ground: one ending on a cliff's top (BoardRoadGrade#overDrop) runs on just past the rim,
+     * so its paint wears out to gravel at the very edge, as if crumbling with the cliff's fall (#bare).
+     */
+    static BoardRoad painted(BoardScene scene, BoardScene.Tile tile, BoardRoad road) {
+        int drops = 0;
+        List<Float> past = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f));
+        for (int d = 0; d < 6; d++) {
+            if ((tile.roadExits() & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
+                drops |= 1 << d;
+                past.set(d, BoardRelief.metres(CRUMBLE) / BoardGeometry.hexScale());
+            }
+        }
+        return drops == 0 ? road : road.extended(past, drops);
+    }
+
+    /** How far, in metres, a road ending on a cliff's top runs on past its rim: its asphalt there is mostly gravel. */
+    private static final float CRUMBLE = 3.5f;
+
+    /** The paint of a road, worn out towards the ends {@link #painted} gives it on cliff tops. */
+    static List<Patch> patches(BoardScene.Tile tile, BoardRoad painted, BoardRoad road) {
+        var patches = patches(tile, painted);
+        return painted == road ? patches : bare(patches, painted, paved(tile.road()));
+    }
+
+    /** Paint ending on bare ground: a grounded material apron, the road's own paint fading out over it. */
+    private static List<Patch> bare(List<Patch> patches, BoardRoad road, boolean paved) {
         float apron = BoardBridgeFooting.apronLength();
-        float setback = landingSetback(deck);
+        float setback = setback(paved);
         Area landing = road.endZone(apron);
         var result = new ArrayList<Patch>();
         if (paved) {
