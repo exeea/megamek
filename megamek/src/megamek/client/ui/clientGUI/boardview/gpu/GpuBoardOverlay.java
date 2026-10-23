@@ -531,15 +531,18 @@ final class GpuBoardOverlay implements Disposable {
      * Turns a copied material into the ghost's: a lit, translucent cyan that keeps only a cut-out (alpha-tested)
      * texture, so that a flat sprite keeps its outline.
      */
-    static void ghostly(Material material) {
+    static void ghostly(Material material) { ghostly(material, GHOST, GHOST_GLOW); }
+
+    /** The ghost in {@code colour}, glowing {@code glow}: the board editor's Erase preview is red. */
+    static void ghostly(Material material, Color colour, Color glow) {
         Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
         Attribute cutOut = alphaTest == null ? null : material.get(TextureAttribute.Diffuse);
         Attribute cullFace = material.get(IntAttribute.CullFace);
         Attribute linearColors = material.get(GpuLinearColors.TYPE);
         material.clear();
         if (linearColors != null) { material.set(linearColors); }
-        material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, GHOST)),
-              ColorAttribute.createEmissive(GpuLinearColors.authored(material, GHOST_GLOW)),
+        material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, colour)),
+              ColorAttribute.createEmissive(GpuLinearColors.authored(material, glow)),
               new BlendingAttribute(GHOST_OPACITY), new DepthTestAttribute(GL20.GL_ALWAYS, false));
         if (cutOut != null) {
             material.set(alphaTest, cutOut);

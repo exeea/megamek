@@ -68,8 +68,15 @@ final class BoardRoadBank {
     /** Every grade within reach, in one order on every hex. */
     private final List<BoardRoadGrade> grades = new ArrayList<>();
     private final List<Bank> banks = new ArrayList<>();
-    /** Centres of the poured and wet hexes within reach, whose ground keeps its shape, and the room it keeps past them. */
-    private final List<float[]> kept = new ArrayList<>();
+    /**
+     * A poured or wet hex within reach, whose ground keeps its shape: its centre, the room its steps keep past its edges,
+     * whether it is poured, and by corner, as HexTile's outline runs, the edges it meets natural ground at its own level
+     * by, without a step, and those it casts a step down to natural ground from.
+     */
+    private record Kept(float x, float y, float room, boolean poured, int level, int down) { }
+
+    /** The poured and wet hexes within reach. */
+    private final List<Kept> kept = new ArrayList<>();
     private final float level = BoardGeometry.level(), scale = BoardGeometry.hexScale();
     /** The hex's relief, which decides where containment walls retain the slopes beside a road. */
     private final BoardRelief relief;
@@ -85,9 +92,11 @@ final class BoardRoadBank {
                 if (grade != null) { grades.add(grade); }
                 // A poured hex never eases its own faces, its cast steps included, which reach past its edge into the
                 // natural ground beside it; a wet hex's shore eases as that ground does.
-                if (other.liquid().present() || other.surface() == BoardScene.Surface.CONCRETE) {
-                    kept.add(new float[] { BoardGeometry.centerX(other.coords()), BoardGeometry.centerY(other.coords()),
-                          other.liquid().present() ? 0 : BoardRelief.stepRoom() });
+                float cx = BoardGeometry.centerX(other.coords()), cy = BoardGeometry.centerY(other.coords());
+                if (other.liquid().present()) {
+                    kept.add(new Kept(cx, cy, 0, false, 0, 0));
+                } else if (other.surface() == BoardScene.Surface.CONCRETE) {
+                    kept.add(new Kept(cx, cy, BoardRelief.stepRoom(), true, edges(scene, other, 0), edges(scene, other, -1)));
                 }
             }
         }
@@ -110,6 +119,28 @@ final class BoardRoadBank {
                       box[3] + reach));
             }
         }
+    }
+
+    /**
+     * The edges a poured hex meets dry natural ground by, at its own level ({@code sign} 0) or below it (-1); by corner,
+     * as HexTile's outline runs.
+     */
+    private int edges(BoardScene scene, BoardScene.Tile poured, int sign) {
+        int result = 0;
+        for (int d = 0; d < 6; d++) {
+            var next = scene.neighbor(poured, d);
+            if (next == null || Integer.signum(next.elevation() - poured.elevation()) != sign
+                  || next.liquid().present() || next.surface() == BoardScene.Surface.CONCRETE) { continue; }
+            // Edge k faces the neighbour whose centre lies at the sum of its two corners' offsets.
+            float dx = (BoardGeometry.centerX(next.coords()) - BoardGeometry.centerX(poured.coords())) / scale;
+            float dy = (BoardGeometry.centerY(next.coords()) - BoardGeometry.centerY(poured.coords())) / scale;
+            for (int k = 0; k < 6; k++) {
+                float ex = HexTile.cornerOffsetX(k, HexTile.WIDTH) + HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH);
+                float ey = HexTile.cornerOffsetY(k, HexTile.HEIGHT) + HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT);
+                if (Math.abs(ex - dx) + Math.abs(ey - dy) < .5f) { result |= 1 << k; }
+            }
+        }
+        return result;
     }
 
     /** Whether any carriageway's ground or bank reaches this hex's surroundings. */
@@ -140,12 +171,12 @@ final class BoardRoadBank {
         boolean[] inside = new boolean[grades.size()];
         boolean reserved = false;
         for (int i = 0; i < inside.length; i++) { reserved |= inside[i] = grades.get(i).contains(x, y); }
-        float weight = weight(x, y);
-        if (weight == 0) { return z; }
+        float cutWeight = weight(x, y, true), fillWeight = weight(x, y, false);
+        if (cutWeight == 0 && fillWeight == 0) { return z; }
         int count = banks.size();
-        float[] beds = new float[count], limits = new float[count];
+        float[] beds = new float[count], limits = new float[count], distances = new float[count], nearby = new float[2 * count];
         // Reserved ground follows only the roads reserving it: a bank beside another road never lifts it over this one.
-        float cut = z;
+        float nearest = Float.POSITIVE_INFINITY;
         for (int i = 0; i < count; i++) {
             Bank bank = banks.get(i);
             limits[i] = Float.NaN;
@@ -155,14 +186,26 @@ final class BoardRoadBank {
             float[] q = new float[2];
             float d = inside[bank.index()] ? 0 : distance(grade.outline(), x, y, q);
             beds[i] = d == 0 ? grade.height(x, y) : grade.height(q[0], q[1]);
-            // A level verge first, so ground cut at the reserved edge lies on the road, not a sliver above it.
-            limits[i] = SLOPE * Math.max(0, d - VERGE * scale);
+            distances[i] = d;
+            limits[i] = 0;
+            nearby[2 * i] = q[0];
+            nearby[2 * i + 1] = q[1];
+            nearest = Math.min(nearest, d);
+        }
+        float cut = z;
+        for (int i = 0; i < count; i++) {
+            if (Float.isNaN(limits[i])) { continue; }
+            BoardRoadGrade grade = banks.get(i).grade();
+            float d = distances[i];
+            // A level verge first, so ground cut at the reserved edge lies on the road, not a sliver above it. A road
+            // further off than the nearest leaves the ground there to that one: joined grades never step it.
+            limits[i] = SLOPE * (Math.max(0, d - VERGE * scale) + d - nearest);
             // Above the road the bank cuts the ground down, over the range the road spans; beside it up to its headroom.
             float verge = 1 - smooth((d - VERGE * scale) / (VERGE * scale));
             float release = smooth((z - grade.high() - verge * BoardRoadGrade.CLEARANCE * level) / (RELEASE * level));
             if (release < 1) {
                 // Behind a containment wall the slope keeps up to the wall's height over the road.
-                float retained = d == 0 ? 0 : Math.min(z - beds[i], WALL * level) * relief.walled(q[0], q[1]);
+                float retained = d == 0 ? 0 : Math.min(z - beds[i], WALL * level) * relief.walled(nearby[2 * i], nearby[2 * i + 1]);
                 cut = Math.min(cut, lerp(beds[i] + settle(z - beds[i], limits[i] + retained), z, release));
             }
         }
@@ -174,7 +217,7 @@ final class BoardRoadBank {
             float release = smooth((beds[i] - cut - banks.get(i).fill()) / (RELEASE * level));
             if (release < 1) { result = Math.max(result, lerp(beds[i] - settle(beds[i] - cut, limits[i]), cut, release)); }
         }
-        return lerp(z, result, weight);
+        return lerp(z, cut, cutWeight) + (result - cut) * fillWeight;
     }
 
     /** A height difference to a road kept within a bank's limit, rounded where the bank leaves the ground. */
@@ -188,31 +231,53 @@ final class BoardRoadBank {
     /**
      * One away from poured or wet hexes, fading to none on a wet hex's outline and at the foot of a poured hex's steps:
      * on reserved ground too, whose top gives way to the road anyway (BoardRoadCut#clip), so a step down to the water
-     * under a bridge's landing keeps its face.
+     * under a bridge's landing keeps its face. A {@code cut} keeps only the paving's cast steps' room in front of them, and
+     * beside its edges at its own level eases into a road nearer than a full fade by the road's verge: ground over the
+     * road slopes from the paving's edge down to it instead of standing cut beside it. A fill keeps the room all round,
+     * as cast steps wrap round their corners into the natural slopes beside them.
      */
-    private float weight(float x, float y) {
-        float nearest = Float.POSITIVE_INFINITY, fade = FADE * scale;
-        for (float[] center : kept) {
-            if (Math.hypot(x - center[0], y - center[1]) < BoardGeometry.width() / 2 + center[2] + fade) {
-                nearest = Math.min(nearest, Math.max(0, cellDistance(center, x, y) - center[2]));
+    private float weight(float x, float y, boolean cut) {
+        float result = 1, fade = FADE * scale, road = Float.NaN;
+        for (Kept hex : kept) {
+            if (Math.hypot(x - hex.x(), y - hex.y()) >= BoardGeometry.width() / 2 + hex.room() + fade) { continue; }
+            boolean inside = true;
+            for (int k = 0; k < 6; k++) {
+                float ax = hex.x() + HexTile.cornerOffsetX(k, HexTile.WIDTH) * scale;
+                float ay = hex.y() + HexTile.cornerOffsetY(k, HexTile.HEIGHT) * scale;
+                float bx = hex.x() + HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH) * scale;
+                float by = hex.y() + HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT) * scale;
+                float length = (float) Math.hypot(bx - ax, by - ay);
+                float along = ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / length;
+                float out = -((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / length;
+                inside &= out <= 0;
+                float edge = BoardRelief.distance(x, y, ax, ay, bx, by), away = Math.max(0, edge - hex.room()), reach = fade;
+                if (cut && hex.poured() && (hex.level() & 1 << k) != 0) {
+                    // No step: the paving's edge itself, which ground beside a road leaves for the road by its verge.
+                    away = edge;
+                    if (away < fade) {
+                        if (Float.isNaN(road)) { road = roadDistance(x, y); }
+                        reach = Math.min(fade, away + road);
+                    }
+                } else if (cut && hex.poured() && (hex.down() & 1 << k) != 0) {
+                    // The cast step's room in front of the edge, fading out four times as fast past its ends.
+                    away = (float) Math.hypot(4 * Math.max(0, Math.max(-along, along - length)),
+                          out < 0 ? -out : Math.max(0, out - hex.room()));
+                }
+                result = Math.min(result, reach <= 0 ? 0 : smooth(away / reach));
             }
+            if (inside) { return 0; }
         }
-        return nearest >= fade ? 1 : smooth(nearest / fade);
+        return result;
     }
 
-    /** Distance from a point to a hex's outline, zero inside. */
-    private float cellDistance(float[] center, float x, float y) {
+    /** How far a point lies past the level verge of the nearest reserved ground; zero on it. */
+    private float roadDistance(float x, float y) {
         float nearest = Float.POSITIVE_INFINITY;
-        boolean inside = true;
-        for (int k = 0; k < 6; k++) {
-            float ax = center[0] + HexTile.cornerOffsetX(k, HexTile.WIDTH) * scale;
-            float ay = center[1] + HexTile.cornerOffsetY(k, HexTile.HEIGHT) * scale;
-            float bx = center[0] + HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH) * scale;
-            float by = center[1] + HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT) * scale;
-            inside &= (bx - ax) * (y - ay) - (by - ay) * (x - ax) >= 0;
-            nearest = Math.min(nearest, BoardRelief.distance(x, y, ax, ay, bx, by));
+        for (Bank bank : banks) {
+            BoardRoadGrade grade = bank.grade();
+            nearest = Math.min(nearest, grade.contains(x, y) ? 0 : distance(grade.outline(), x, y, null));
         }
-        return inside ? 0 : nearest;
+        return Math.max(0, nearest - VERGE * scale);
     }
 
     /** Distance from a point to the nearest of an outline's segments, and that nearest point into q if given. */
