@@ -2154,7 +2154,8 @@ final class BoardRelief {
     /**
      * Room a step takes on each side of its edge, in world units: none unless hex transitions or padding are on, and
      * only between detailed grounds, water among them. Special artwork, buildings and roads keep their outline
-     * on the hex edge, natural ground above a concrete road sloping down onto it there; water keeps its own where
+     * on the hex edge, natural ground carrying a road down onto a concrete one sloping down onto it there (a cliff beside
+     * stands at the paving's edge); water keeps its own where
      * {@link #band} says. Pits have no ground to carry a talus apron.
      * Dry cliffs need less transition width than gentle slopes, leaving more of their plateau and ridge connections.
      */
@@ -2162,7 +2163,7 @@ final class BoardRelief {
         float width = BoardGeometry.tuning().stepsBetweenTops() && upper != null && lower != null
               && upper.level() != lower.level() && upper.detailed() && lower.detailed()
               && !(upper.liquid() && lower.liquid())
-              && !upper.fixedRoad() && !(lower.fixedRoad() && upper.family() == CONCRETE)
+              && !upper.fixedRoad() && !(lower.fixedRoad() && (upper.family() == CONCRETE || !upper.road()))
               && !upper.ultraSublevel() && !lower.ultraSublevel()
               && !(upper.family() == CONCRETE && wall(upper, lower))
               && !wetCliff(upper, lower)
