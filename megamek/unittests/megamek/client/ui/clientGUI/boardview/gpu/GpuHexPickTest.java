@@ -205,9 +205,9 @@ class GpuHexPickTest {
         return new Session(gui, view, source, princess, sent);
     }
 
-    /** EDT: Princess's Strategic Target item in the panel's Priority Target popup, as the Swing panel shows it. */
+    /** EDT: Princess's Strategic Target item in the panel's Targets popup, as the Swing panel shows it. */
     private static JMenuItem strategicTarget(Session game) {
-        String title = Messages.getString("BotCommandPanel.PriorityTarget.title");
+        String title = Messages.getString("BotCommandPanel.Targets.title");
         BotCommandsPanel.PopupCommand command = game.gui().getBotCommandsPanel().popupCommands(game.princess())
               .stream().filter(popup -> popup.button().getText().equals(title)).findFirst().orElseThrow();
         Component[] items = command.popup().get().getComponents();
@@ -226,7 +226,7 @@ class GpuHexPickTest {
         players.setPanelOpen(true);
         BoardScene.Command order = onSwing(() -> players.capture().players().stream()
               .filter(row -> row.id() == game.princess().getId()).findFirst().orElseThrow().botCommands().stream()
-              .filter(group -> group.label().equals(Messages.getString("BotCommandPanel.PriorityTarget.title")))
+              .filter(group -> group.label().equals(Messages.getString("BotCommandPanel.Targets.title")))
               .findFirst().orElseThrow());
         BoardScene.Command item = leaf(order, Messages.getString("BotCommandPanel.StrategicTarget.title"));
         players.setPanelOpen(false);

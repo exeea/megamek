@@ -4763,9 +4763,17 @@ public class ClientGUI extends AbstractClientGUI
      * into MekHQ windows. Hotkeys must only fire while the game frame, or a window it owns such as the minimap, is the
      * active window; otherwise e.g. Backspace (undo step) and the arrow keys (weapon/target cycling) are swallowed
      * from MekHQ text fields. See MekHQ issue #10642.
+     * <p>
+     * The native board window is not a Swing window, so while it has the focus Swing reports no active window at all.
+     * That counts as the game window when this client's native window is up; a MekHQ window is a Swing window and so
+     * still does not.
+     * </p>
      */
     private boolean isGameWindowActive() {
         Window window = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+        if ((window == null) && GpuBoardWindow.isActiveFor(this)) {
+            return true;
+        }
         while (window != null) {
             if (window == frame) {
                 return true;

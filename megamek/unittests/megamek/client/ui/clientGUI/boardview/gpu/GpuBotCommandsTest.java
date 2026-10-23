@@ -116,7 +116,8 @@ class GpuBotCommandsTest {
                     assertFalse(expected.isEmpty(), labels + " sends an order");
                     assertEquals(expected, List.copyOf(sent), labels.toString());
                     assertTrue(expected.stream().allMatch(message -> !message.startsWith("chat: ")
-                          || message.startsWith("chat: Princess: ")), "orders go to Princess: " + expected);
+                          || message.startsWith("chat: Princess: ") || message.startsWith("chat: /unitOrder ")),
+                          "orders go to Princess, by her chat or a unit order: " + expected);
                     compared++;
                 }
             }
@@ -129,7 +130,7 @@ class GpuBotCommandsTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Bots game = onSwing(() -> bots(fixture, new CopyOnWriteArrayList<>()));
             GpuPlayers.Snapshot open = onSwing(game.players()::capture);
-            assertEquals(List.of("GPU review 0", "Princess 6", "Opponent 0", "Enemy bot 0", "Bot Two 4"),
+            assertEquals(List.of("GPU review 0", "Princess 5", "Opponent 0", "Enemy bot 0", "Bot Two 3"),
                   open.players().stream().map(row -> row.name() + " " + row.botCommands().size()).toList(),
                   "an enemy bot is not under the local player's command; a bot without units on the board has no"
                         + " movement, waypoint or artillery orders");
