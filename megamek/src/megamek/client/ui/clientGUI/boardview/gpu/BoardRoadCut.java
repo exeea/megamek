@@ -798,7 +798,8 @@ final class BoardRoadCut {
         if (Math.abs(p.z - rp) < tolerance && Math.abs(q.z - rq) < tolerance) { return; }
         boolean cut = p.z + q.z > rp + rq;
         float depth = Math.max(rp - p.z, rq - q.z);
-        if (fill && cut || shallow && !cut && depth > BoardRoadGrade.FILL * BoardGeometry.level()) { return; }
+        // A hair past a fill's depth too: ground a whole level under the road is common, and float noise would toggle it.
+        if (fill && cut || shallow && !cut && depth > (BoardRoadGrade.FILL + .1f) * BoardGeometry.level()) { return; }
         if (!cut) { wall = fillWall; }
         // A cut faces the road; terrain below a raised road faces away from it.
         wall.wall(new Vector3(p.x, p.y, Math.max(p.z, rp)), new Vector3(p.x, p.y, Math.min(p.z, rp)),
