@@ -1820,7 +1820,7 @@ final class BoardRelief {
         return moved;
     }
 
-    /** Whether a site's road leaves it onto a bridge's deck that lands on it, from a hex around these corners. */
+    /** Whether a site's road ends on the step's top towards a hex around these corners (see {@link #ends}). */
     private boolean landing(Site site, Corner[] ends) {
         int exits = scene.tile(site.coords()).wayExits();
         for (Corner end : ends) {
@@ -1828,13 +1828,22 @@ final class BoardRelief {
                 if (other == null || other.coords().equals(site.coords())) { continue; }
                 for (int d = 0; d < 6; d++) {
                     if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())
-                          && BoardBridge.bank(scene.tile(other.coords()), scene.tile(site.coords()), (d + 3) % 6)) {
+                          && ends(site, other, d)) {
                         return true;
                     }
                 }
             }
         }
         return false;
+    }
+
+    /**
+     * Whether a site's road, leaving it at d towards other, ends there on the step's top: a bridge's deck lands on it from
+     * there, or the ground there lies further down than a road ramps (BoardRoadGrade#edgeLevel) and carries none.
+     */
+    private boolean ends(Site site, Site other, int d) {
+        return BoardBridge.bank(scene.tile(other.coords()), scene.tile(site.coords()), (d + 3) % 6)
+              || !other.road() && !other.liquid() && other.level() < site.level() - 2;
     }
 
     /**
@@ -1848,10 +1857,10 @@ final class BoardRelief {
             for (Site other : end.around) {
                 if (other == null || other == site || other.level() == site.level() || other.road()) { continue; }
                 for (int d = 0; d < 6; d++) {
-                    // A road carried on by a bridge's deck has no mouth there: the step under the deck stays a natural
-                    // drop, which recedes from the road's end like any other.
+                    // A road ending on the step's top has no mouth there: the step under its end stays a natural drop,
+                    // which comes out to the road's end (see #landing).
                     if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())
-                          && !BoardBridge.bank(scene.tile(other.coords()), scene.tile(site.coords()), (d + 3) % 6)) {
+                          && !ends(site, other, d)) {
                         return true;
                     }
                 }
