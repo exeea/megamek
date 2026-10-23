@@ -42,6 +42,7 @@ import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JProgressBar;
 import javax.swing.JRadioButton;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
@@ -52,6 +53,7 @@ import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.JTree;
 import javax.swing.JViewport;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
@@ -63,6 +65,8 @@ import javax.swing.text.PlainDocument;
 import javax.swing.tree.DefaultMutableTreeNode;
 
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.ui.FlatUIUtils;
+import com.formdev.flatlaf.util.UIScale;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
@@ -793,13 +797,28 @@ public final class SwingUiLibrary extends JFrame {
               + "; selectionInsets: " + rowInsets.top + "," + rowInsets.left + "," + rowInsets.bottom + ","
               + rowInsets.right);
         list.setSelectedIndex(1);
+        list.setVisibleRowCount(owner.getItemCount());
         list.setFocusable(false);
         // Named like a real popup list, so it keeps the select's rows rather than the plain list's
         list.setName(TokenLists.POPUP_LIST);
+        JScrollPane scroller = new JScrollPane(list, ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+              ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setBorder(null);
+                setOpaque(false);
+                getViewport().setOpaque(false);
+                list.setOpaque(false);
+            }
+        };
+        // Built like the real popup: the scroll pane first makes PopupMenu.border a hairline, the width leaves room for
+        // the scroll bar as FlatLaf's popup does, and the corners round as the popup window's do
         JPanel popup = new JPanel(new BorderLayout()) {
             @Override
             public Dimension getPreferredSize() {
                 Dimension size = super.getPreferredSize();
+                size.width += new JScrollBar(JScrollBar.VERTICAL).getPreferredSize().width;
                 size.width = Math.max(size.width, owner.getPreferredSize().width);
                 return size;
             }
@@ -809,9 +828,38 @@ public final class SwingUiLibrary extends JFrame {
                 super.updateUI();
                 setBorder(UIManager.getBorder("PopupMenu.border"));
                 setBackground(UIManager.getColor("ComboBox.popupBackground"));
+                setOpaque(false);
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    FlatUIUtils.setRenderingHints(g2);
+                    g2.setColor(getBackground());
+                    FlatUIUtils.paintComponentBackground(g2, 0, 0, getWidth(), getHeight(), 0, arc());
+                } finally {
+                    g2.dispose();
+                }
+            }
+
+            @Override
+            protected void paintBorder(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    FlatUIUtils.setRenderingHints(g2);
+                    g2.setColor(UIManager.getColor("PopupMenu.borderColor"));
+                    FlatUIUtils.paintOutline(g2, 0, 0, getWidth(), getHeight(), UIScale.scale(1f), arc());
+                } finally {
+                    g2.dispose();
+                }
+            }
+
+            private float arc() {
+                return UIScale.scale(UIManager.getInt("Popup.borderCornerRadius") * 2f);
             }
         };
-        popup.add(list);
+        popup.add(scroller);
 
         JPanel open = new JPanel(new GridBagLayout());
         open.setOpaque(false);

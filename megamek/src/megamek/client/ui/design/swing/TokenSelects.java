@@ -99,7 +99,7 @@ public final class TokenSelects {
             row = index >= 0;
             if (row && !(value instanceof Icon)) {
                 boolean current = value != null && value.equals(combo.getSelectedItem());
-                setIcon(current ? check() : new Blank());
+                setIcon(new Slot(current ? check() : null));
                 setIconTextGap(gap());
             }
             return this;
@@ -133,10 +133,23 @@ public final class TokenSelects {
             return UIUtil.scaleForGUI(Size.COMPACT.iconSize());
         }
 
-        /** The empty check slot that keeps every row's text lined up. */
-        private static final class Blank implements Icon {
+        /**
+         * The check slot: a fixed square, the check centered in it or left empty, so every row's text lines up however
+         * narrow the check glyph is.
+         */
+        private static final class Slot implements Icon {
+            private final Icon mark;
+
+            Slot(Icon mark) {
+                this.mark = mark;
+            }
+
             @Override
             public void paintIcon(Component c, Graphics g, int x, int y) {
+                if (mark != null) {
+                    mark.paintIcon(c, g, x + (getIconWidth() - mark.getIconWidth()) / 2,
+                          y + (getIconHeight() - mark.getIconHeight()) / 2);
+                }
             }
 
             @Override
@@ -146,7 +159,7 @@ public final class TokenSelects {
 
             @Override
             public int getIconHeight() {
-                return iconSize();
+                return mark == null ? iconSize() : Math.max(iconSize(), mark.getIconHeight());
             }
         }
     }
