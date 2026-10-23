@@ -476,9 +476,10 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 end[i].z = BoardSurface.sampleHeight(ground, end[i].x, end[i].y, BoardGeometry.groundZ(next))
                       + GpuRoads.SURFACE_LIFT * scale;
             }
+            float bottom = Float.NaN;
             if (ramp) {
                 var below = ground(scene, tile, lod, surfaces, columns);
-                float bottom = (float) below.groundFaces().stream()
+                bottom = (float) below.groundFaces().stream()
                       .mapToDouble(f -> Math.min(f.a().z, Math.min(f.b().z, f.c().z))).min().orElse(BoardGeometry.groundZ(tile))
                       - BoardRelief.metres(.05f);
                 // The support ends at the bridge's inset, leaving the level centre of the span open below.
@@ -517,6 +518,14 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 }
                 if (t <= terminals[1]) {
                     prism(faces, previous[2], row[2], row[3], previous[3], 0, rail, BoardBridge.Part.STRUCTURE);
+                }
+                // The support continues on the bank under the rails and terminal blocks: where the bank falls away
+                // beside the ramp, concrete closes the space beneath them. Its sides stand a hair inside the slab's,
+                // behind the faces the road's reserved ground casts on that line (BoardRoadGrade#region).
+                if (ramp) {
+                    var inset = new Vector3(across).scl(BoardRelief.metres(.05f));
+                    side(faces, new Vector3(previous[0]).add(inset), new Vector3(row[0]).add(inset), bottom);
+                    side(faces, new Vector3(row[3]).sub(inset), new Vector3(previous[3]).sub(inset), bottom);
                 }
                 previous = row;
             }
@@ -844,12 +853,13 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
      */
     private static void support(List<BoardBridge.Facet> faces, List<Vector3> ring, float bottom, float underside) {
         var top = ring.stream().map(p -> new Vector3(p).add(0, 0, underside)).toList();
-        for (int i = 0; i < top.size(); i++) {
-            var p = top.get(i);
-            var q = top.get((i + 1) % top.size());
-            quad(faces, p, new Vector3(p.x, p.y, Math.min(bottom, p.z)),
-                  new Vector3(q.x, q.y, Math.min(bottom, q.z)), q, BoardBridge.Part.STRUCTURE);
-        }
+        for (int i = 0; i < top.size(); i++) { side(faces, top.get(i), top.get((i + 1) % top.size()), bottom); }
+    }
+
+    /** One face of a support's side from p to q (its outside on the right), down to {@code bottom}; see {@link #support}. */
+    private static void side(List<BoardBridge.Facet> faces, Vector3 p, Vector3 q, float bottom) {
+        quad(faces, p, new Vector3(p.x, p.y, Math.min(bottom, p.z)), new Vector3(q.x, q.y, Math.min(bottom, q.z)), q,
+              BoardBridge.Part.STRUCTURE);
     }
 
     private static void prism(List<BoardBridge.Facet> faces, Vector3 a, Vector3 b, Vector3 c, Vector3 d,

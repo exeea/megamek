@@ -1299,6 +1299,16 @@ final class BoardRelief {
     /** Whether this hex's outline follows the relief's rim, rather than keeping its lattice edges. */
     boolean graded() { return self.sculpted(); }
 
+    /** Whether a corner's water lies at its lowest level only, under the land's steps (see {@link #wet}). */
+    private static boolean wetBelow(Corner corner) {
+        boolean land = false;
+        for (Site site : corner.around) {
+            if (site == null || site.liquid() && site.level() != corner.low) { return false; }
+            land |= !site.liquid();
+        }
+        return land;
+    }
+
     private static boolean dry(Corner corner) {
         for (Site site : corner.around) {
             if (site == null || site.liquid()) { return false; }
@@ -1387,8 +1397,13 @@ final class BoardRelief {
         // Where the step rises from the road, each height of the band below the road's headroom recedes only as far as
         // it needs to clear the road: the foot's talus steepens into the road's verge while the face above, which never
         // stood in the way, keeps its place, so the face never overhangs its foot. Above the headroom the slope keeps
-        // its natural shape.
-        float share = z <= push[2] ? 1 : 1 - smooth((z - push[2]) / (.5f * BoardGeometry.level()));
+        // its natural shape, easing back to it no faster than the band's own run allows, so no height overhangs the one
+        // below (a smooth ease moves up to 1.5 times its share per run).
+        float fade = .5f * BoardGeometry.level(), height = edge.top() - edge.bottom(), run = edge.room + edge.footRoom;
+        if (Float.isFinite(height) && run > 0) {
+            fade = Math.max(fade, 1.5f * (float) Math.hypot(push[0], push[1]) * height / run);
+        }
+        float share = (z <= push[2] ? 1 : 1 - smooth((z - push[2]) / fade)) * wet(edge, t, z);
         // A drop below the road keeps one band, which fills out under the road's verge.
         float surface = push[2] - BoardRoadGrade.CLEARANCE * BoardGeometry.level();
         float middle = t == 0 ? (edge.a.low + edge.a.high) / 2f * BoardGeometry.level()
@@ -1451,16 +1466,59 @@ final class BoardRelief {
         }
         return pushes.computeIfAbsent(edge, key -> new HashMap<>()).computeIfAbsent(t, key -> {
             float[] own = ownPush(edge, t);
-            // Ease from the nearer corner's move, so the band never jumps between its corner and its middle.
-            float[] end = t < .5f ? cornerPush(edge.a, edge, 0) : cornerPush(edge.b, edge, 1);
+            float[] first = cornerPush(edge.a, edge, 0), second = cornerPush(edge.b, edge, 1);
+            float ex = (edge.b.x - edge.a.x) / edge.length, ey = (edge.b.y - edge.a.y) / edge.length;
+            // Across the edge the bay departs from either corner's move by at most PUSH_SLOPE per run, as it does from
+            // its own stations: where the band turns round a corner a steeper bay would fold it over itself.
+            float across = own[0] * -ey + own[1] * ex, acrossA = first[0] * -ey + first[1] * ex;
+            float acrossB = second[0] * -ey + second[1] * ex, runA = t * edge.length * PUSH_SLOPE;
+            float runB = (1 - t) * edge.length * PUSH_SLOPE;
+            float low = Math.max(acrossA - runA, acrossB - runB), high = Math.min(acrossA + runA, acrossB + runB);
+            float bay = low > high ? lerp(acrossA, acrossB, t) : Math.clamp(across, low, high);
+            // Easing from the nearer corner's move, the band never jumps between its corner and its middle. Along the
+            // edge the bay itself never moves: the corners' moves blend straight from one to the other, so the outline
+            // never runs back on itself.
             float share = smooth(Math.min(t, 1 - t) / CORNER_EASE);
-            return share >= 1 ? own : new float[] { lerp(end[0], own[0], share), lerp(end[1], own[1], share),
-                  Math.max(end[2], own[2]) };
+            float[] end = t < .5f ? first : second;
+            float side = lerp(end[0] * -ey + end[1] * ex, bay, share);
+            float along = lerp(first[0] * ex + first[1] * ey, second[0] * ex + second[1] * ey, t);
+            // The move's headroom; the corners' too where theirs shape it.
+            float top = bay == across && share >= 1 && along == 0 ? own[2]
+                  : Math.max(own[2], Math.max(first[2], second[2]));
+            return new float[] { -ey * side + ex * along, ex * side + ey * along, top };
         });
     }
 
-    /** Whether an edge's band recedes between its corners on its own, as a bay; otherwise it follows its corners. */
-    private static boolean bayed(Edge edge) { return edge.profiled && !edge.upper.liquid() && !edge.lower.liquid(); }
+    /**
+     * Whether an edge's band recedes between its corners on its own, as a bay; otherwise it follows its corners. A step
+     * down into water moves too, above its waterline (see {@link #wet}).
+     */
+    private static boolean bayed(Edge edge) { return edge.profiled && !edge.upper.liquid(); }
+
+    /**
+     * How much of its push a band's point at height z takes beside water: none at the waterline, whose outline the
+     * water keeps, all half a level above it, so a cliff over water comes out above its foot. A wet corner holds the
+     * edges through it alike, easing off along them.
+     */
+    private float wet(Edge edge, float t, float z) {
+        float share = 1;
+        if (edge.lower != null && edge.lower.liquid()) { share = waterline(edge.lower.level(), z); }
+        for (Corner end : new Corner[] { edge.a, edge.b }) {
+            float water = Float.NEGATIVE_INFINITY;
+            for (Site site : end.around) {
+                if (site != null && site.liquid()) { water = Math.max(water, site.level()); }
+            }
+            if (water == Float.NEGATIVE_INFINITY) { continue; }
+            float near = 1 - smooth((end == edge.a ? t : 1 - t) / CORNER_EASE);
+            share = Math.min(share, lerp(1, waterline(water, z), near));
+        }
+        return share;
+    }
+
+    /** From none at a waterline at this level to all half a level above it. */
+    private static float waterline(float level, float z) {
+        return smooth((z - level * BoardGeometry.level()) / (.5f * BoardGeometry.level()));
+    }
 
     /** Stations an edge's own push is found at. */
     private static final int PUSH_STATIONS = 24;
@@ -1515,8 +1573,9 @@ final class BoardRelief {
         Station known = cornerPushes.get(corner);
         if (known != null) { return known; }
         // Only a corner a step runs through has a slope to move; a level corner keeps its place.
-        Station station = dry(corner) && corner.low != corner.high ? push(edge, t, new Corner[] { corner },
-              corner.low * BoardGeometry.level(), corner.high * BoardGeometry.level(), false) : Station.UNMOVED;
+        Station station = (dry(corner) || wetBelow(corner)) && corner.low != corner.high ? push(edge, t,
+              new Corner[] { corner }, corner.low * BoardGeometry.level(), corner.high * BoardGeometry.level(), false)
+              : Station.UNMOVED;
         cornerPushes.put(corner, station);
         return station;
     }
@@ -1668,7 +1727,14 @@ final class BoardRelief {
                 // Between corners the road crosses the edge there, up the step its own grade climbs, so it stays.
                 float gx = road.distance(bx + .25f, by) - road.distance(bx - .25f, by);
                 float gy = road.distance(bx, by + .25f) - road.distance(bx, by - .25f);
-                if (Math.hypot(gx, gy) < 1e-4f) {
+                // A road carried on by a bridge's deck past these corners ends on the step's top: the step comes out
+                // under the deck's end, straight across the edge or away from the road's hex at a corner, as a
+                // natural pillar or bank under an abutment.
+                boolean landing = landing(site, ends);
+                if (landing && !across) {
+                    gx = px - site.x();
+                    gy = py - site.y();
+                } else if (Math.hypot(gx, gy) < 1e-4f && !landing) {
                     if (across) { continue; }
                     Site high = site;
                     for (Site other : end.around) {
@@ -1684,8 +1750,8 @@ final class BoardRelief {
                 if (across) {
                     // Along an edge the band only recedes across it; a road running along the edge is its mouth's.
                     float nx = -(edge.b.y - edge.a.y) / edge.length, ny = (edge.b.x - edge.a.x) / edge.length;
-                    float dot = gx * nx + gy * ny;
-                    if (Math.abs(dot) < .5f) { continue; }
+                    float dot = landing ? nx * (px - site.x()) + ny * (py - site.y()) : gx * nx + gy * ny;
+                    if (!landing && Math.abs(dot) < .5f) { continue; }
                     gx = Math.signum(dot) * nx;
                     gy = Math.signum(dot) * ny;
                 }
@@ -1703,6 +1769,13 @@ final class BoardRelief {
                     if (z <= headroom && !(shallow && z <= surface)) { heights[count++] = z; }
                 }
                 float moved = clearance(edge, t, site, road, gx, gy, heights, count);
+                if (landing && road.distance(bx, by) < clear) {
+                    // Where the road crosses, its whole band comes out to the edge, so the road ends on its top.
+                    for (int k = 0; k < count; k++) {
+                        Vector3 q = naturalPoint(edge, t, heights[k]);
+                        moved = Math.max(moved, Math.min(ROAD_PUSH, ((px - q.x) * gx + (py - q.y) * gy) / scale));
+                    }
+                }
                 // Behind a wall only the slope above the wall's top recedes, so the wall stays low.
                 float wallTop = surface + BoardRoadBank.WALL * level, highest = Math.min(top, headroom);
                 float kept = moved;
@@ -1747,6 +1820,23 @@ final class BoardRelief {
         return moved;
     }
 
+    /** Whether a site's road leaves it onto a bridge's deck that lands on it, from a hex around these corners. */
+    private boolean landing(Site site, Corner[] ends) {
+        int exits = scene.tile(site.coords()).wayExits();
+        for (Corner end : ends) {
+            for (Site other : end.around) {
+                if (other == null || other.coords().equals(site.coords())) { continue; }
+                for (int d = 0; d < 6; d++) {
+                    if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())
+                          && BoardBridge.bank(scene.tile(other.coords()), scene.tile(site.coords()), (d + 3) % 6)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     /**
      * Whether a site's road leaves it towards roadless ground at another level around these corners: its mouth crosses
      * the step there, so the step is cut through rather than receding. A road merely passing a corner, or climbing to
@@ -1758,7 +1848,12 @@ final class BoardRelief {
             for (Site other : end.around) {
                 if (other == null || other == site || other.level() == site.level() || other.road()) { continue; }
                 for (int d = 0; d < 6; d++) {
-                    if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())) { return true; }
+                    // A road carried on by a bridge's deck has no mouth there: the step under the deck stays a natural
+                    // drop, which recedes from the road's end like any other.
+                    if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())
+                          && !BoardBridge.bank(scene.tile(other.coords()), scene.tile(site.coords()), (d + 3) % 6)) {
+                        return true;
+                    }
                 }
             }
         }

@@ -514,10 +514,14 @@ final class BoardRoadGrade {
                     ramp.intersect(new Area(hexagon(1)));
                     local.add(ramp);
                 }
-                Area mouth = new Area(lane(d, BoardSurface.roadMouth(tile, next, d), 1, 1 + PAST_MOUTH / 36));
+                // A ramp up onto this bank meets the deck below the bank's own wall on the edge: the mouth reserves a
+                // pixel either side of the edge, as the lane's square end is not the lattice edge (an 84 x 72 hex is not
+                // regular) and the shore fit can move the wall off it, so all of it gives way to the road.
+                float seal = edges[d] < level ? 1 / 36f : 0;
+                Area mouth = new Area(lane(d, BoardSurface.roadMouth(tile, next, d), 1 - seal, 1 + PAST_MOUTH / 36));
                 float[] across = RailRoute.border(d);
                 mouth.subtract(new Area(hexagon(1)).createTransformedArea(
-                      AffineTransform.getTranslateInstance(2 * across[0], 2 * across[1])));
+                      AffineTransform.getTranslateInstance((2 + seal) * across[0], (2 + seal) * across[1])));
                 local.add(mouth);
             }
             // Slivers and mouth strips reserve only neighbouring ground the road can claim. A column is cut only about

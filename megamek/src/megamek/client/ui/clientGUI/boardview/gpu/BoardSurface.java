@@ -2323,10 +2323,11 @@ final class BoardSurface {
         if (own != null) { grades.add(own); }
         for (int d = 0; d < 6; d++) {
             var next = scene.neighbor(tile, d);
-            // Only arms along an edge that ends at one of this hex's corners can reach past it into this hex. Any other
-            // reserved ground beside this hex counts, a roadless apron's too, where this hex's steps reach into it.
-            int arms = 1 << (d + 2) % 6 | 1 << (d + 4) % 6;
-            if (next == null || corners && (next.wayExits() & arms) == 0) { continue; }
+            // Only arms along an edge that ends at one of this hex's corners can reach past it into this hex. Otherwise
+            // any carriageway beside this hex counts, and a roadless apron where a step between them reaches into it.
+            if (next == null) { continue; }
+            int arms = corners ? 1 << (d + 2) % 6 | 1 << (d + 4) % 6 : 63;
+            if ((next.wayExits() & arms) == 0 && (corners || next.elevation() == tile.elevation())) { continue; }
             var grade = BoardRoadGrade.of(scene, next, eased);
             if (grade != null) { grades.add(grade); }
         }
@@ -2374,7 +2375,7 @@ final class BoardSurface {
                 var cut = new BoardRoadCut(new Area(), cell(tile.coords()), center.z, grades, boardEdges(scene, tile));
                 List<Face> shore = faces.stream().filter(face -> face.finish() == Finish.TOP).toList();
                 List<Face> kept = cut.clip(shore, relief, cutFaces(retainingWalls), cutFaces(pouredWalls), roadAround(),
-                      null, true);
+                      null, true, true);
                 faces.removeIf(face -> face.finish() == Finish.TOP);
                 faces.addAll(kept);
             }
@@ -2386,7 +2387,7 @@ final class BoardSurface {
         List<Face> road = new ArrayList<>();
         cut.mesh(road, wall);
         reservedRoad = List.copyOf(road);
-        List<Face> kept = cut.clip(faces, relief, wall, cutFaces(pouredWalls), roadAround(), bank, natural());
+        List<Face> kept = cut.clip(faces, relief, wall, cutFaces(pouredWalls), roadAround(), bank, natural(), false);
         pouredTop = pouredWalls.size();
         faces.clear();
         faces.addAll(kept);
@@ -2464,7 +2465,7 @@ final class BoardSurface {
         List<Face> curtains = new ArrayList<>();
         pouredWalls.subList(pouredTop, pouredWalls.size()).clear();
         List<Face> result = new ArrayList<>(cut.clip(walls, relief, cutFaces(curtains), cutFaces(pouredWalls),
-              roadAround(), bank, natural()));
+              roadAround(), bank, natural(), false));
         result.addAll(curtains);
         containmentWalls.clear();
         if (natural() && BoardRelief.tuning().containmentWalls()) {

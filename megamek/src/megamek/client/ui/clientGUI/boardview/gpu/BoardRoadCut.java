@@ -322,12 +322,14 @@ final class BoardRoadCut {
      * removed whole when their middle is reserved. A poured top gives way to the road wholly; a poured step only above
      * the emitted road surface, so a step under a bridge's deck keeps its shape and meets the road exactly where it
      * passes under it. {@code natural} ground is already eased into the roads around ({@code bank}): its top gives way
-     * wholly below the road's headroom, so none lies hidden just under the road, and its slopes and cliffs above the
-     * road's surface, so their faces run on beneath its edge; a cliff over the headroom stands over its verge. Natural ground gives way to a road built in concrete (BoardRoadGrade#poured) as poured ground does, and its
-     * cut faces beside that road go to {@code concrete}.
+     * below the road's headroom down to a fill's depth under the road, so none lies hidden just under it, and its slopes
+     * and cliffs above the road's surface, so their faces run on beneath its edge; a cliff over the headroom stands over
+     * its verge. A water hex's {@code shore} carries no road of its own: its top gives way only above the road's
+     * surface, as a slope does. Natural ground gives way to a road built in concrete (BoardRoadGrade#poured) as poured
+     * ground does, and its cut faces beside that road go to {@code concrete}.
      */
     List<BoardSurface.Face> clip(List<BoardSurface.Face> faces, BoardRelief relief, WallBuilder wall,
-          WallBuilder concrete, List<BoardSurface.Face> road, BoardRoadBank bank, boolean natural) {
+          WallBuilder concrete, List<BoardSurface.Face> road, BoardRoadBank bank, boolean natural, boolean shore) {
         Area region = region();
         Rectangle2D bounds = region.getBounds2D();
         List<BoardSurface.Face> result = new ArrayList<>();
@@ -368,7 +370,7 @@ final class BoardRoadCut {
             // headroom it is reserved.
             float[] under = new float[3], over = new float[3];
             Vector3[] corners = { a, b, c };
-            boolean top = face.finish() == BoardSurface.Finish.TOP, pouredTop = !natural && top;
+            boolean top = face.finish() == BoardSurface.Finish.TOP && !shore, pouredTop = !natural && top;
             // Natural slopes are cut at the road's surface itself, where it covers their cut edge; so is the board's cut,
             // which has no ground beyond it. Poured ground keeps a band beneath the road.
             boolean boardCut = !top && face.landEdge() >= 0 && (boardEdges & 1 << face.landEdge()) != 0;
@@ -387,6 +389,7 @@ final class BoardRoadCut {
                       : corners[i].z - (bed + BoardRoadGrade.CLEARANCE * BoardGeometry.level());
             }
             float lift = -band * BoardGeometry.level(), headroom = BoardRoadGrade.CLEARANCE * BoardGeometry.level();
+            float fill = BoardRoadGrade.FILL * BoardGeometry.level();
             Reserved reserved = (s, t) -> {
                 float x = a.x + s * (b.x - a.x) + t * (c.x - a.x) + ox;
                 float y = a.y + s * (b.y - a.y) + t * (c.y - a.y) + oy;
@@ -397,11 +400,14 @@ final class BoardRoadCut {
                 boolean above = exactly ? z >= surface + lift : under[0] + s * (under[1] - under[0]) + t * (under[2] - under[0]) >= 0;
                 BoardRoadGrade grade = natural ? grade(x, y) : null;
                 if (grade != null && grade.poured()) { return top || above; }
-                // A natural top gives way to the road wholly below its headroom: it would only lie hidden under it. A
+                // A natural top gives way to the road below its headroom down to a fill's depth under it: it would only
+                // lie hidden under the road. Further down it is ground the road passes over, as at a bridge's landing. A
                 // slope or cliff keeps what passes under the road, so its face runs on beneath the road's edge.
                 boolean clear = exactly && natural ? z > surface + headroom
                       : over[0] + s * (over[1] - over[0]) + t * (over[2] - over[0]) > 0;
-                return (natural && top || above) && !clear;
+                boolean near = exactly ? z >= surface - fill
+                      : under[0] + s * (under[1] - under[0]) + t * (under[2] - under[0]) + fill >= 0;
+                return (natural && top && near || above) && !clear;
             };
             boolean ground = face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.WALL
                   || face.finish() == BoardSurface.Finish.RIM || face.finish() == BoardSurface.Finish.CAP;
@@ -417,18 +423,19 @@ final class BoardRoadCut {
                 if (chord != null) { chords.add(chord); }
             }
             if (!chords.isEmpty() || region.contains(mx + ox, my + oy)) {
-                // A natural top is cut only at the headroom (see reserved).
+                // A natural top is cut at the headroom and a fill's depth under the road (see reserved).
                 boolean surfaceCut = !(natural && top && !pouredHere);
                 List<BoardSurface.Face> planes = nudge > 0 || pouredTop ? List.of() : near(road, minX, minY, maxX, maxY);
                 if (planes.isEmpty()) {
-                    for (float[] values : surfaceCut ? List.of(under, over) : List.of(over)) {
+                    float[] deep = { under[0] + fill, under[1] + fill, under[2] + fill };
+                    for (float[] values : surfaceCut ? List.of(under, over) : List.of(over, deep)) {
                         Segment chord = zero(values);
                         if (chord != null) { chords.add(chord); }
                     }
                 } else {
-                    // Where the face meets the road's surface or headroom over each of the road's faces.
+                    // Where the face meets the road's surface, headroom or a fill's depth over each of the road's faces.
                     List<Float> offsets = new ArrayList<>();
-                    if (surfaceCut) { offsets.add(lift); }
+                    offsets.add(surfaceCut ? lift : -fill);
                     if (natural) { offsets.add(headroom); }
                     for (BoardSurface.Face piece : planes) {
                         for (float offset : offsets) {
@@ -445,7 +452,7 @@ final class BoardRoadCut {
                 if (!reserved.at(1 / 3f, 1 / 3f)) { result.add(face); }
                 continue;
             }
-            clipFace(face, chords, region, reserved, relief, result, wall, natural ? concrete : wall, welded, road);
+            clipFace(face, chords, region, reserved, relief, result, wall, natural ? concrete : wall, welded, road, natural);
         }
         return result;
     }
@@ -612,7 +619,7 @@ final class BoardRoadCut {
 
     private void clipFace(BoardSurface.Face face, List<Segment> chords, Area region, Reserved reserved, BoardRelief relief,
           List<BoardSurface.Face> result, WallBuilder wall, WallBuilder concrete, Map<List<Long>, Vector3> welded,
-          List<BoardSurface.Face> road) {
+          List<BoardSurface.Face> road, boolean natural) {
         Vector3 a = face.a(), b = face.b(), c = face.c();
         List<Segment> segments = new ArrayList<>(chords);
         segments.add(new Segment(0, 0, 1, 0));
@@ -682,17 +689,18 @@ final class BoardRoadCut {
                 continue;
             }
             curtain(vertex.apply(new Point(s.ax(), s.ay())), vertex.apply(new Point(s.bx(), s.by())), region, wall,
-                  concrete, road, left == right);
+                  concrete, road, left == right, natural);
         }
     }
 
     /**
      * The vertical face between a cut terrain edge and the road beside it, split where the two cross; with
-     * {@code fill}, only where the ground lies under the road, however deep, so nothing shows through under its edge.
-     * Beside a road built in concrete or a bridge's ramp it is {@code concrete}'s.
+     * {@code fill}, only where the ground lies under the road; below it, at most {@link BoardRoadGrade#FILL} deep where
+     * the ground and the road beside it are both natural.
+     * Beside a road built in concrete it is {@code concrete}'s; beside a bridge's ramp only where it lies under the road.
      */
     private void curtain(Vector3 p, Vector3 q, Area region, WallBuilder wall, WallBuilder concrete,
-          List<BoardSurface.Face> road, boolean fill) {
+          List<BoardSurface.Face> road, boolean fill, boolean natural) {
         float dx = q.x - p.x, dy = q.y - p.y, length = (float) Math.hypot(dx, dy);
         if (length < epsilon) { return; }
         // The reserved side of this stretch of boundary.
@@ -702,7 +710,14 @@ final class BoardRoadCut {
         BoardRoadGrade grade = grade(mx + nx * probe, my + ny * probe);
         if (grade == null) { return; }
         // Beside a road built in concrete, or a bridge's ramp, which has no natural bank, the cut is cast as well.
-        if (grade.poured() || grade.bridgeRamp()) { wall = concrete; }
+        // Beside a road built in concrete the cut is cast as well. Beside a bridge's ramp, which has no natural bank,
+        // only the fill under the road is: a cut above it stays the bank's own, as the rest of the cut is.
+        boolean cast = grade.poured() || grade.bridgeRamp();
+        if (grade.poured()) { wall = concrete; }
+        WallBuilder fillWall = grade.bridgeRamp() ? concrete : wall;
+        // Natural ground beside a natural road closes up to it only from a fill's depth: further down the road passes
+        // over it, as it does at a bridge's landing, and the ground keeps its shape.
+        boolean shallow = fill || natural && !cast;
         // The road's edge bends only at its stations and the emitted road's own vertices: the face meets it at each.
         List<Float> stations = new ArrayList<>(List.of(0f, 1f));
         stations.addAll(crossings(p.x, p.y, q.x, q.y));
@@ -728,9 +743,9 @@ final class BoardRoadCut {
                 float u = da / (da - db);
                 Vector3 m = new Vector3(a).lerp(b, u);
                 float rm = ra + (rb - ra) * u;
-                curtain(a, ra, m, rm, nx, ny, wall, fill);
-                curtain(m, rm, b, rb, nx, ny, wall, fill);
-            } else { curtain(a, ra, b, rb, nx, ny, wall, fill); }
+                curtain(a, ra, m, rm, nx, ny, wall, fillWall, fill, shallow);
+                curtain(m, rm, b, rb, nx, ny, wall, fillWall, fill, shallow);
+            } else { curtain(a, ra, b, rb, nx, ny, wall, fillWall, fill, shallow); }
         }
     }
 
@@ -740,11 +755,15 @@ final class BoardRoadCut {
         return Float.isNaN(h) ? grade.height(x, y) : h;
     }
 
-    private void curtain(Vector3 p, float rp, Vector3 q, float rq, float nx, float ny, WallBuilder wall, boolean fill) {
+    /** A cut goes to {@code wall}, ground under the road to {@code fillWall}. */
+    private void curtain(Vector3 p, float rp, Vector3 q, float rq, float nx, float ny, WallBuilder wall,
+          WallBuilder fillWall, boolean fill, boolean shallow) {
         float tolerance = .001f * BoardGeometry.hexScale();
         if (Math.abs(p.z - rp) < tolerance && Math.abs(q.z - rq) < tolerance) { return; }
         boolean cut = p.z + q.z > rp + rq;
-        if (fill && cut) { return; }
+        float depth = Math.max(rp - p.z, rq - q.z);
+        if (fill && cut || shallow && !cut && depth > BoardRoadGrade.FILL * BoardGeometry.level()) { return; }
+        if (!cut) { wall = fillWall; }
         // A cut faces the road; terrain below a raised road faces away from it.
         wall.wall(new Vector3(p.x, p.y, Math.max(p.z, rp)), new Vector3(p.x, p.y, Math.min(p.z, rp)),
               new Vector3(q.x, q.y, Math.max(q.z, rq)), new Vector3(q.x, q.y, Math.min(q.z, rq)),
