@@ -26,6 +26,8 @@ public final class TokenLafDefaults {
     private static final int MENU_ROW_MARGIN = 5;
     /** Menu bar item padding above and below the text. */
     private static final int MENU_BAR_MARGIN = 4;
+    /** The widest a tooltip's text runs before it wraps, about 45 characters of small text. */
+    private static final int TOOLTIP_MAX_WIDTH = 280;
 
     private final DesignTokens tokens;
     private final Mode mode;
@@ -354,8 +356,19 @@ public final class TokenLafDefaults {
             put(item + ".selectionForeground", color("text.primary"));
         }
         put("MenuBar.borderColor", color("border.subtle"));
+        // Tooltips (TokenToolTipUI): a card on the popup surface with the popup's edge and corner. Plain text wraps
+        // at the maximum width; a card's detail text and its shortcut chip are secondary.
         put("ToolTip.background", popover);
         put("ToolTip.foreground", color("text.primary"));
+        values.put("ToolTipUI", TokenToolTipUI.class.getName());
+        int tipY = Math.round(tokens.space().get("sm")) + border;
+        int tipX = Math.round(tokens.space().get("md")) + border;
+        values.put("ToolTip.border", tipY + "," + tipX + "," + tipY + "," + tipX + "," + hex(color("border.control"))
+              + "," + border + "," + number(tokens.radius().get("md") * 2));
+        values.put(TokenTooltips.MAX_WIDTH, number(TOOLTIP_MAX_WIDTH));
+        put(TokenTooltips.DETAIL_FOREGROUND, color("text.secondary"));
+        put(TokenTooltips.KEY_FOREGROUND, color("text.secondary"));
+        put(TokenTooltips.KEY_BORDER_COLOR, color("border.control"));
         put("TitlePane.background", raised);
         put("TitlePane.inactiveBackground", base);
         put("TitlePane.foreground", color("text.primary"));

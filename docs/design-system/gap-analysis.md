@@ -302,7 +302,9 @@ work for Swing, and item 11 is under investigation.
   `UiTree` until the developers accept the system; see [tokens.md](tokens.md#lists-and-trees).
 - ~~Menus~~: menu bars, menus and context menus on the select's popup, with neutral hover rows, violet checks and
   radios, and muted shortcuts, in Swing; see [tokens.md](tokens.md#menus).
-- The rest of the gallery: tables, tooltips, scrollbars, sliders and the remaining controls, in Swing (libGDX
+- ~~Tooltips~~: small cards on the popup surface that wrap at 280, with a key chip for shortcuts and a title over
+  secondary detail for info cards, in Swing; see [tokens.md](tokens.md#tooltips).
+- The rest of the gallery: tables, scrollbars, sliders and the remaining controls, in Swing (libGDX
   only where the in-game UI needs them).
 - Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
   every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the

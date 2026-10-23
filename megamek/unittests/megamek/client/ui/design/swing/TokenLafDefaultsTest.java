@@ -3,12 +3,15 @@ package megamek.client.ui.design.swing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.util.ArrayList;
@@ -23,6 +26,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JMenuItem;
 import javax.swing.JPasswordField;
@@ -34,6 +38,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.JToolTip;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
@@ -44,6 +49,7 @@ import javax.swing.UIManager;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.ui.FlatButtonUI;
+import com.formdev.flatlaf.ui.FlatLineBorder;
 import com.formdev.flatlaf.ui.FlatStylingSupport;
 import com.formdev.flatlaf.util.UIScale;
 import megamek.client.ui.design.ColorMath;
@@ -365,6 +371,61 @@ class TokenLafDefaultsTest {
             if (previous != null) {
                 UIManager.setLookAndFeel(previous);
             }
+        }
+    }
+
+    @Test
+    void tooltipsAreWrappedCards() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                assertColor(defaults, "ToolTip.background", "surface.popover", mode);
+                // The popup's edge, which Windows 11 also takes for the native border
+                FlatLineBorder edge = assertInstanceOf(FlatLineBorder.class, defaults.getBorder("ToolTip.border"));
+                assertEquals(new Color(tokens.color("border.control", mode)), new Color(edge.getLineColor().getRGB()));
+
+                JLabel owner = new JLabel();
+                String text = "Units that moved this turn cannot be deployed again until the next round";
+                owner.setToolTipText(text);
+                JToolTip tip = owner.createToolTip();
+                tip.setTipText(text);
+                assertInstanceOf(TokenToolTipUI.class, tip.getUI());
+                Dimension wrapped = tip.getPreferredSize();
+                Insets insets = tip.getInsets();
+                assertTrue(wrapped.width - insets.left - insets.right <= UIUtil.scaleForGUI(280),
+                      "long text wraps at the maximum width");
+                tip.setTipText("Fire");
+                assertTrue(wrapped.height > tip.getPreferredSize().height, "the wrapped text takes more lines");
+
+                TokenTooltips.card(owner, "Medium laser", "Damage 5, heat 3", "F");
+                tip.setTipText(owner.getToolTipText());
+                Dimension card = tip.getPreferredSize();
+                tip.setTipText("Medium laser");
+                assertTrue(card.height > tip.getPreferredSize().height, "a card shows its detail under the title");
+
+                tip.setTipText("<html>Atlas<br>AS7-D</html>");
+                assertTrue(tip.getPreferredSize().width > 0, "HTML tooltips keep FlatLaf's layout");
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+        assertThrows(IllegalArgumentException.class, () -> TokenTooltips.card(new JLabel(), " ", null, "F"));
+    }
+
+    @Test
+    void tooltipTextWrapsAtSpacesAndBreaksLongWords() {
+        JLabel label = new JLabel();
+        FontMetrics metrics = label.getFontMetrics(TokenFonts.font("small"));
+        int width = metrics.stringWidth("Units that moved");
+        List<String> lines = TokenToolTipUI.wrap("Units that moved this turn\nstay", metrics, width);
+        assertEquals(List.of("Units that moved", "this turn", "stay"), lines);
+        for (String line : TokenToolTipUI.wrap("Supercalifragilistic", metrics, metrics.stringWidth("Super"))) {
+            assertTrue(metrics.stringWidth(line) <= metrics.stringWidth("Super"), line);
         }
     }
 

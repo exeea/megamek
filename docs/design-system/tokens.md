@@ -461,6 +461,29 @@ Menu bars, their menus and context menus. They share the select's popup, so ever
 
 **libGDX.** Nothing new yet; the in-game UI has no menus that need it.
 
+## Tooltips
+
+Tooltips are small info cards, not bare OS labels: they share the popup's surface, edge and corner, and they can
+carry a shortcut and a title.
+
+| Part | Look |
+| --- | --- |
+| Card | `surface.popover` with a `border.control` edge and a `radius.md` corner, padded `sm` (6) top and bottom and `md` (8) at the sides |
+| Plain text | `small`, `text.primary`; wraps at 280 (about 45 characters), at spaces and line breaks |
+| Info card | A `body.strong` title in `text.primary` over `small` detail in `text.secondary`, `xxs` (2) apart |
+| Shortcut | A key chip at the end of the first line: `caption` in `text.secondary` inside a `border.control` edge with a `radius.sm` corner |
+| HTML | Keeps its own layout inside the same card |
+
+- **One line of plain text is about `control.sm` (28) tall**, the height of a compact control.
+- **Delays stay user settings**: MegaMek's tooltip delay and dismiss preferences still apply. Tooltips fade in once
+  the motion step lands; until then they appear at once.
+
+**Swing.** The MegaMek themes draw every tooltip this way. `TokenTooltips.withKey(component, text, key)` adds a
+shortcut chip; `TokenTooltips.card(component, title, detail, key)` makes an info card. Both set the plain tooltip text
+too, so screen readers and other look and feels still get it.
+
+**libGDX.** Nothing new yet; hud-v3's tooltip stays until the developers accept the system.
+
 ## Code
 
 | Class | Role |
@@ -484,10 +507,11 @@ Menu bars, their menus and context menus. They share the select's popup, so ever
 | [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
+| [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens; lists, trees and menus are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+styles read the tokens; lists, trees, menus and tooltips are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
 Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
 only once the developers accept the system.

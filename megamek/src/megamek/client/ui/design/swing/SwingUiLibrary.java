@@ -61,6 +61,7 @@ import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.JToolTip;
 import javax.swing.JTree;
 import javax.swing.JViewport;
 import javax.swing.KeyStroke;
@@ -382,6 +383,10 @@ public final class SwingUiLibrary extends JFrame {
         page.add(heading(Messages.getString("UiLibrary.controls.menus")));
         page.add(paragraph(Messages.getString("UiLibrary.menus.note"), "small", "text.muted"));
         page.add(menuSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
+        page.add(paragraph(Messages.getString("UiLibrary.tooltips.note"), "small", "text.muted"));
+        page.add(tooltipSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         JTable table = new JTable(new Object[][] {
@@ -1051,6 +1056,89 @@ public final class SwingUiLibrary extends JFrame {
         JMenuItem item = new JMenuItem(Messages.getString(key));
         item.setAccelerator(KeyStroke.getKeyStroke(accelerator, InputEvent.CTRL_DOWN_MASK));
         return item;
+    }
+
+    /** Plain, shortcut, info card and wrapped tooltips drawn in place, beside live controls to hover. */
+    private JComponent tooltipSamples() {
+        JPanel samples = row(color("surface.base"));
+
+        JPanel open = new JPanel();
+        open.setOpaque(false);
+        open.setLayout(new BoxLayout(open, BoxLayout.Y_AXIS));
+        JComponent caption = text(Messages.getString("UiLibrary.tooltips.open"), "caption", "text.muted");
+        caption.setAlignmentX(LEFT_ALIGNMENT);
+        open.add(caption);
+        JLabel plain = new JLabel();
+        plain.setToolTipText(Messages.getString("UiLibrary.tooltips.plain"));
+        for (JComponent owner : List.of(plain, keyTipOwner(new JLabel()), cardTipOwner(new JLabel()),
+              longTipOwner(new JLabel()))) {
+            open.add(Box.createVerticalStrut(scaleForGUI(8)));
+            JComponent tip = frozenTip(owner);
+            tip.setAlignmentX(LEFT_ALIGNMENT);
+            open.add(tip);
+        }
+        samples.add(open);
+
+        JPanel live = new JPanel();
+        live.setOpaque(false);
+        live.setLayout(new BoxLayout(live, BoxLayout.Y_AXIS));
+        JComponent liveCaption = text(Messages.getString("UiLibrary.tooltips.live"), "caption", "text.muted");
+        liveCaption.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(liveCaption);
+        JPanel controls = row(color("surface.base"));
+        controls.setAlignmentX(LEFT_ALIGNMENT);
+        AbstractButton search = TokenButtons.icon(ICON_SEARCH, Messages.getString("UiLibrary.tooltips.keyText"),
+              false, TokenButtons.Size.REGULAR);
+        controls.add(keyTipOwner(search));
+        controls.add(cardTipOwner(TokenButtons.button(TokenButtons.Kind.SECONDARY,
+              Messages.getString("UiLibrary.tooltips.cardButton"), TokenButtons.Size.REGULAR)));
+        JLabel hint = text(Messages.getString("UiLibrary.tooltips.longLabel"), "body", "text.secondary");
+        controls.add(longTipOwner(hint));
+        JLabel plainLive = text(Messages.getString("UiLibrary.tooltips.plainLabel"), "body", "text.secondary");
+        plainLive.setToolTipText(Messages.getString("UiLibrary.tooltips.plain"));
+        controls.add(plainLive);
+        live.add(controls);
+        samples.add(live);
+        return samples;
+    }
+
+    private static <T extends JComponent> T keyTipOwner(T owner) {
+        return TokenTooltips.withKey(owner, Messages.getString("UiLibrary.tooltips.keyText"),
+              Messages.getString("UiLibrary.tooltips.key"));
+    }
+
+    private static <T extends JComponent> T cardTipOwner(T owner) {
+        return TokenTooltips.card(owner, Messages.getString("UiLibrary.tooltips.cardTitle"),
+              Messages.getString("UiLibrary.tooltips.cardDetail"), Messages.getString("UiLibrary.tooltips.cardKey"));
+    }
+
+    private static <T extends JComponent> T longTipOwner(T owner) {
+        owner.setToolTipText(Messages.getString("UiLibrary.tooltips.long"));
+        return owner;
+    }
+
+    /** A real tooltip for {@code owner}, laid out as a component with the rounded face its popup gets on screen. */
+    private static JComponent frozenTip(JComponent owner) {
+        JToolTip tip = new JToolTip() {
+            @Override
+            public boolean isOpaque() {
+                return false;
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return getPreferredSize();
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                paintPopupFace(this, g);
+                getUI().paint(g, this);
+            }
+        };
+        tip.setComponent(owner);
+        tip.setTipText(owner.getToolTipText());
+        return tip;
     }
 
     /**
