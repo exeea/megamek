@@ -169,6 +169,7 @@ Every transition uses the `motion` tokens and one easing curve; nothing bounces 
   scrolling. It is a MegaMek client setting (Client Settings, next to the theme), off by default.
 - **Popups only fade where they have their own window**, which is every popup on Windows 11 and any popup that
   reaches past its window elsewhere. One that fits inside its window appears at once.
+- **The gallery shows it live** on the Spacing and shape tab: one sample of each kind, and Play runs them all once.
 
 **Swing.** [`TokenMotion`](../../megamek/src/megamek/client/ui/design/swing/TokenMotion.java) is the one animator:
 a control asks for the value it would paint for its current state and gets the value on its way there, and one shared

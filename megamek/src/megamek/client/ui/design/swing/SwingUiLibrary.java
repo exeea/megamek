@@ -20,9 +20,11 @@ import java.awt.RenderingHints;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.geom.RoundRectangle2D;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -35,6 +37,7 @@ import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultButtonModel;
 import javax.swing.Icon;
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
@@ -74,6 +77,8 @@ import javax.swing.SortOrder;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
@@ -123,6 +128,7 @@ public final class SwingUiLibrary extends JFrame {
     private final JPanel content = new JPanel(new BorderLayout());
     private final JLayer<JComponent> layer = new JLayer<>(content, visionLayer);
     private final Map<String, Font> fonts = new HashMap<>();
+    private final List<TokenChoices.Switch> reduceSwitches = new ArrayList<>();
     private Mode mode = Mode.DARK;
     private int selectedTab;
     private final String previousLookAndFeel;
@@ -205,6 +211,7 @@ public final class SwingUiLibrary extends JFrame {
         }
         content.removeAll();
         fonts.clear();
+        reduceSwitches.clear();
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab(Messages.getString("UiLibrary.tab.colors"), page(colorsPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.checks"), page(checksPage()));
@@ -298,7 +305,157 @@ public final class SwingUiLibrary extends JFrame {
             page.add(text(entry.getKey() + "  " + trim(entry.getValue()) + " ms", "body", "text.secondary"));
         }
         page.add(paragraph(Messages.getString("UiLibrary.shape.motionRules"), "small", "text.muted"));
+        page.add(motionDemo());
         return page;
+    }
+
+    /**
+     * One live sample of each kind of motion, and a Play button that runs them all once: it hovers, presses and
+     * toggles the samples itself and sweeps the pointer down the rows, then puts everything back.
+     */
+    private JComponent motionDemo() {
+        JPanel demo = column(color("surface.base"));
+        JPanel controls = row(color("surface.base"));
+        JButton play = TokenButtons.primary(Messages.getString("UiLibrary.motion.play"));
+        controls.add(play);
+        controls.add(reduceMotionSwitch());
+        controls.add(text(Messages.getString("UiLibrary.motion.playNote"), "small", "text.muted"));
+        demo.add(controls);
+
+        JPanel samples = sampleGrid();
+        JButton hover = TokenButtons.secondary(Messages.getString("UiLibrary.motion.hoverMe"));
+        addSample(samples, 0, 0, "UiLibrary.motion.hover", unstretched(hover));
+        SpecialButton special = TokenButtons.special(Messages.getString("UiLibrary.motion.hoverMe"),
+              TokenButtons.Size.REGULAR);
+        addSample(samples, 1, 0, "UiLibrary.motion.special", unstretched(special));
+        JButton press = TokenButtons.primary(Messages.getString("UiLibrary.motion.pressMe"));
+        addSample(samples, 2, 0, "UiLibrary.motion.press", unstretched(press));
+
+        // The section opens last and alone in its row, so nothing beside it moves while it does
+        JPanel choices = row(color("surface.base"));
+        JCheckBox check = TokenChoices.check(Messages.getString("UiLibrary.controls.checked"), false);
+        JRadioButton optionA = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionA"), true);
+        JRadioButton optionB = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionB"), false);
+        TokenChoices.group(optionA, optionB);
+        TokenChoices.Switch toggle = TokenChoices.toggleSwitch(Messages.getString("UiLibrary.choices.autosave"),
+              false);
+        choices.add(check);
+        choices.add(optionA);
+        choices.add(optionB);
+        choices.add(toggle);
+        addSample(samples, 0, 1, "UiLibrary.motion.choices", choices);
+        JPanel popups = row(color("surface.base"));
+        JComboBox<String> select = new JComboBox<>(new String[] { "North", "South", "Any" });
+        JButton tipped = TokenButtons.quiet(Messages.getString("UiLibrary.motion.hoverMe"));
+        tipped.setToolTipText(Messages.getString("UiLibrary.motion.tooltip"));
+        popups.add(select);
+        popups.add(tipped);
+        addSample(samples, 1, 1, "UiLibrary.motion.popup", popups);
+        JSlider slider = sampleSlider(false);
+        addSample(samples, 2, 1, "UiLibrary.motion.slider", unstretched(slider));
+
+        TokenCollapsibleSection section = TokenSections.collapsible(
+              Messages.getString("UiLibrary.sections.advanced"), sectionContent(), false);
+        addSample(samples, 0, 2, "UiLibrary.motion.section", section);
+        JList<String> units = new JList<>(new String[] { "Atlas AS7-D", "Griffin GRF-1N", "Locust LCT-1V",
+                                                         "Marauder MAD-3R", "Wasp WSP-1A" });
+        units.setVisibleRowCount(5);
+        addSample(samples, 1, 2, "UiLibrary.motion.rows", TokenLists.scroll(units));
+        demo.add(samples);
+
+        play.addActionListener(event -> {
+            play.setEnabled(false);
+            boolean wasChecked = check.isSelected();
+            boolean wasA = optionA.isSelected();
+            boolean wasOn = toggle.isSelected();
+            boolean wasOpen = section.isExpanded();
+            int rows = units.getModel().getSize();
+            int tipDelay = ToolTipManager.sharedInstance().getInitialDelay();
+            // Steps every 80ms: hover and toggle at once while the pointer sweeps the rows, then press and open
+            // the select, then show the tooltip, then put it all back
+            int[] step = { 0 };
+            Timer script = new Timer(80, null);
+            script.addActionListener(tick -> {
+                int now = step[0]++;
+                if (now == 0) {
+                    hover.getModel().setRollover(true);
+                    special.getModel().setRollover(true);
+                    check.setSelected(!wasChecked);
+                    (wasA ? optionB : optionA).setSelected(true);
+                    toggle.setSelected(!wasOn);
+                    section.setExpanded(!wasOpen);
+                    pointer(slider, MouseEvent.MOUSE_ENTERED, slider.getWidth() / 2, slider.getHeight() / 2);
+                    pointer(slider, MouseEvent.MOUSE_MOVED, slider.getWidth() / 2, slider.getHeight() / 2);
+                }
+                if (now < rows) {
+                    Rectangle cellBounds = units.getCellBounds(now, now);
+                    if (cellBounds != null) {
+                        pointer(units, MouseEvent.MOUSE_MOVED, cellBounds.x + cellBounds.width / 2,
+                              (int) cellBounds.getCenterY());
+                    }
+                } else if (now == rows) {
+                    pointer(units, MouseEvent.MOUSE_EXITED, -1, -1);
+                }
+                if (now == 10) {
+                    press.getModel().setArmed(true);
+                    press.getModel().setPressed(true);
+                    if (select.isShowing()) {
+                        select.setPopupVisible(true);
+                    }
+                } else if (now == 15) {
+                    // Disarm first so releasing the press doesn't fire the button
+                    press.getModel().setArmed(false);
+                    press.getModel().setPressed(false);
+                } else if (now == 20) {
+                    select.setPopupVisible(false);
+                    ToolTipManager.sharedInstance().setInitialDelay(0);
+                    pointer(tipped, MouseEvent.MOUSE_ENTERED, tipped.getWidth() / 2, tipped.getHeight() / 2);
+                    pointer(tipped, MouseEvent.MOUSE_MOVED, tipped.getWidth() / 2, tipped.getHeight() / 2);
+                } else if (now == 30) {
+                    pointer(tipped, MouseEvent.MOUSE_EXITED, -1, -1);
+                    ToolTipManager.sharedInstance().setInitialDelay(tipDelay);
+                    hover.getModel().setRollover(false);
+                    special.getModel().setRollover(false);
+                    check.setSelected(wasChecked);
+                    (wasA ? optionA : optionB).setSelected(true);
+                    toggle.setSelected(wasOn);
+                    section.setExpanded(wasOpen);
+                    pointer(slider, MouseEvent.MOUSE_EXITED, -1, -1);
+                } else if (now >= 36) {
+                    script.stop();
+                    play.setEnabled(true);
+                }
+            });
+            script.start();
+        });
+        return demo;
+    }
+
+    /** Holds {@code component} at its preferred size inside a stretched grid cell. */
+    private static JPanel unstretched(JComponent component) {
+        JPanel holder = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
+        holder.setOpaque(false);
+        holder.add(component);
+        return holder;
+    }
+
+    /** Sends {@code component} a synthetic pointer event, as if the pointer were at {@code x, y}. */
+    private static void pointer(JComponent component, int id, int x, int y) {
+        component.dispatchEvent(new MouseEvent(component, id, System.currentTimeMillis(), 0, x, y, 0, false));
+    }
+
+    /** A reduce motion switch kept in step with the others in the gallery. */
+    private TokenChoices.Switch reduceMotionSwitch() {
+        TokenChoices.Switch reduce = TokenChoices.toggleSwitch(Messages.getString("UiLibrary.controls.reduceMotion"),
+              TokenMotion.isReduced());
+        reduce.addItemListener(event -> {
+            TokenMotion.setReduced(reduce.isSelected());
+            for (TokenChoices.Switch other : reduceSwitches) {
+                other.setSelected(reduce.isSelected());
+            }
+        });
+        reduceSwitches.add(reduce);
+        return reduce;
     }
 
     // ---- Samples
@@ -308,10 +465,7 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.controls.intro",
               mode == Mode.DARK ? MegaMekDarkLaf.NAME : MegaMekLightLaf.NAME), "small", "text.muted"));
         JPanel motion = row(color("surface.base"));
-        TokenChoices.Switch reduce = TokenChoices.toggleSwitch(Messages.getString("UiLibrary.controls.reduceMotion"),
-              TokenMotion.isReduced());
-        reduce.addItemListener(event -> TokenMotion.setReduced(reduce.isSelected()));
-        motion.add(reduce);
+        motion.add(reduceMotionSwitch());
         motion.add(text(Messages.getString("UiLibrary.controls.reduceMotionNote"), "small", "text.muted"));
         page.add(motion);
 
@@ -954,6 +1108,11 @@ public final class SwingUiLibrary extends JFrame {
         cell.gridy++;
         cell.gridwidth = 2;
         content.add(TokenChoices.check(Messages.getString("UiLibrary.controls.checked"), true), cell);
+        // Extra width goes to a trailing column, keeping the fields at the leading edge
+        GridBagConstraints rest = new GridBagConstraints();
+        rest.gridx = 2;
+        rest.weightx = 1;
+        content.add(Box.createHorizontalGlue(), rest);
         return content;
     }
 
