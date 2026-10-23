@@ -11,7 +11,9 @@ import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -28,6 +30,7 @@ import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
+import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.EntityMovementMode;
@@ -82,6 +85,7 @@ class GpuInfantryMeepleSmokeTest {
                     }
                     renderReview(batch, instances);
                     library.setDisplayMode(UnitDisplayMode.ALL_MEEPLES, false);
+                    verifyMemberHover(library);
                     var tileset = new MekTileset(new File(Configuration.dataDir(), "images/units"));
                     tileset.loadFromFile("mekset.txt");
                     int id = 100;
@@ -161,6 +165,87 @@ class GpuInfantryMeepleSmokeTest {
             }
         }, GpuBoardWindow.configuration(false));
         if (failure.get() != null) { throw new AssertionError("Infantry meeple review failed", failure.get()); }
+    }
+
+    private static void verifyMemberHover(GpuUnitModels library) {
+        var infantry = new ConvInfantry();
+        infantry.initializeInternal(28, ConvInfantry.LOC_INFANTRY);
+        infantry.setMovementMode(EntityMovementMode.VTOL);
+        var tileset = mock(MekTileset.class);
+        when(tileset.modelFor(infantry, -1)).thenReturn("units/modular/infantry.json");
+        when(tileset.entryFor(infantry, -1)).thenReturn(tileset.new MekEntry("Infantry/Infantry_VTOL_Squad.png"));
+        var selection = UnitModelSelection.capture(infantry, -1, false, tileset);
+        var unit = hoverUnit(selection, true);
+        var model = library.get(selection, unit.id());
+        assertNotNull(model);
+        var placed = new ModelInstance(model.instance.model);
+        var animator = new UnitAnimator();
+        float amplitude = UnitAnimator.HOVER_LEVELS * BoardGeometry.level();
+        var reference = hoverFrame(animator, model, placed, unit, .61f, 1);
+        assertEquals(6, reference.size());
+        assertEquals(6, reference.values().stream().map(value -> Math.round(value * 10000)).distinct().count(),
+              "Each airborne member has its own phase");
+        for (float scale : new float[] { .6f, 1, 1.8f }) {
+            var scaled = hoverFrame(animator, model, placed, unit, .61f, scale);
+            reference.forEach((member, offset) -> assertEquals(offset, scaled.get(member), .0001f,
+                  "World-space bobbing must not grow with display scaling"));
+            var repeated = hoverFrame(animator, model, placed, unit, .61f, scale);
+            scaled.forEach((member, offset) -> assertEquals(offset, repeated.get(member), .0001f,
+                  "A paused frame must not accumulate offsets"));
+        }
+        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+        for (int frame = 0; frame < 60; frame++) {
+            float clock = frame * UnitAnimator.HOVER_PERIOD_SECONDS / 60;
+            var offsets = hoverFrame(animator, model, placed, unit, clock, 1);
+            float shared = UnitAnimator.hoverOffset(clock, unit.id(), unit.part());
+            for (float offset : offsets.values()) {
+                assertTrue(Math.abs(offset + shared) <= amplitude + .002f, "The shared wave must not be added twice");
+                assertTrue(Math.abs(offset) < amplitude * .5f, "Members only lead or lag the formation slightly");
+            }
+            float first = offsets.get("trooper-0") + shared;
+            low = Math.min(low, first);
+            high = Math.max(high, first);
+        }
+        assertTrue(low < -amplitude * .99f && high > amplitude * .99f, "Keep the original bobbing height");
+        var nextCycle = hoverFrame(animator, model, placed, unit, .61f + UnitAnimator.HOVER_PERIOD_SECONDS, 1);
+        reference.forEach((member, offset) -> assertEquals(offset, nextCycle.get(member), .002f));
+        var rebound = hoverFrame(animator, model, new ModelInstance(model.instance.model), unit, .61f, 1);
+        reference.forEach((member, offset) -> assertEquals(offset, rebound.get(member), .0001f));
+        infantry.setInternal(4, ConvInfantry.LOC_INFANTRY);
+        var reducedSelection = UnitModelSelection.capture(infantry, -1, false, tileset);
+        var reduced = library.get(reducedSelection, unit.id());
+        var survivors = new ModelInstance(reduced.instance.model);
+        var survivorOffsets = hoverFrame(animator, reduced, survivors, hoverUnit(reducedSelection, true), .61f, 1);
+        assertEquals(2, survivorOffsets.size());
+        survivorOffsets.forEach((member, offset) -> assertEquals(reference.get(member), offset, .0001f,
+              "Casualties must not reassign survivor phases"));
+        var grounded = hoverUnit(reducedSelection, false);
+        var firstGround = hoverFrame(animator, reduced, survivors, grounded, .61f, 1);
+        var laterGround = hoverFrame(animator, reduced, survivors, grounded, 1.3f, 1);
+        firstGround.forEach((member, offset) -> assertEquals(0, offset, .0001f));
+        assertEquals(firstGround, laterGround, "Landing removes all member hover offsets");
+    }
+
+    private static BoardScene.Unit hoverUnit(BoardScene.UnitModel selection, boolean flying) {
+        return new BoardScene.Unit(57, -1, "VTOL infantry", new BoardScene.Waypoint(new Coords(0, 0), flying ? 5 : 0, 0),
+              null, false, null, 1, flying, selection, 0);
+    }
+
+    private static Map<String, Float> hoverFrame(UnitAnimator animator, GpuUnitModel model, ModelInstance placed,
+          BoardScene.Unit unit, float clock, float verticalScale) {
+        animator.apply(model, placed, unit, UnitMotion.Sample.STILL, clock, 0, true, 0);
+        model.place(placed, new OrthographicCamera(), new Vector3(0, 0, 90), 0, unit);
+        placed.transform.scale(1, 1, verticalScale);
+        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
+              null, null, null, List.of(), List.of());
+        var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(unit), List.of(), -1, "MOVEMENT", List.of());
+        animator.groundSupports(scene, unit, UnitMotion.Sample.STILL);
+        Map<String, Float> offsets = new LinkedHashMap<>();
+        for (var rig : model.rigs()) {
+            var root = UnitAnimator.find(placed.getNode(rig.container()).getChildren(), "root");
+            offsets.put(rig.container(), root.globalTransform.getTranslation(new Vector3()).z * placed.transform.getScaleZ());
+        }
+        return offsets;
     }
 
     private static int triangles(Iterable<Node> nodes) {

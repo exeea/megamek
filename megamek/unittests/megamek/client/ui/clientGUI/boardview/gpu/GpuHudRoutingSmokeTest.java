@@ -1420,7 +1420,7 @@ class GpuHudRoutingSmokeTest {
             state.forcesGrid = false;
             state.inspected = Entity.NONE;
             state.armedWeapon = -1;
-            state.altHeld = false;
+            state.allNameplates = false;
             hud.boardPress();
         }
 

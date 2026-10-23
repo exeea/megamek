@@ -27,6 +27,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiKit;
@@ -37,7 +38,8 @@ import megamek.common.units.Entity;
 /**
  * Unit nameplates and pips over the board, the lowest HUD layer
  * Every unit with a head anchor gets a team pip, or a tag while it is the focus unit, hovered,
- * inspected, the physical target or a sensor contact, and every unit while the nameplate key is held. A tag names the
+ * inspected, the physical target or a sensor contact, and every unit while the nameplate key shows them all or the
+ * client's nameplate setting ({@link NameplateMode}) always does. A tag names the
  * unit as the client's label style does (the Legacy 2D board label's name) before its status words; a tag with neither
  * stays a pip (the user's decision of 2026-10-07: no phase words, no model repeated after the name).
  * Every unit but a sensor contact or a destroyed unit also gets its board label's marks on its head, under the pip or
@@ -45,8 +47,9 @@ import megamek.common.units.Entity;
  * source its "ECM"/"ECCM" chip beside them. A tag carries the unit's weight class letter and its gunnery and piloting
  * skills. In the Tactical View the units' bases show the pips, marks and E(C)CM badges, so a unit has a tag or
  * nothing. The weapon target cards replace their targets' plates, and a unit whose head lies behind the camera has
- * none. The hovered unit's plate and the plate of the unit the card shows are drawn over the others. It reads the
- * presented snapshots only, on the render thread, and takes no presses.
+ * none. The hovered unit's plate and the plate of the unit the card shows are drawn over the others, and the board
+ * labels' TN badges stand on the plates ({@link #top}). It reads the presented snapshots only, on the render thread,
+ * and takes no presses.
  */
 final class GpuNameplates implements GpuHud.Component {
     /** Beyond this many units an unhovered sensor contact shows only "?". */
@@ -175,6 +178,7 @@ final class GpuNameplates implements GpuHud.Component {
         Set<TargetKey> carded = fire.carded();
         int physicalTarget = physical.active() ? physical.targetId() : Entity.NONE;
         boolean many = units.size() > MANY_UNITS;
+        boolean all = state.allNameplates || inputs.preferences().nameplates() == NameplateMode.ALWAYS;
         // In the Tactical View the bases carry the pips, marks and E(C)CM badges.
         boolean based = view.tactical();
         BoardScene scene = inputs.frame().scene();
@@ -190,7 +194,7 @@ final class GpuNameplates implements GpuHud.Component {
             }
             boolean hovered = view.hoveredUnit() == unit.id();
             boolean enemy = unit.side() == GpuBattleStatus.Side.ENEMY;
-            boolean tagged = unit.id() == state.focus() || hovered || state.altHeld || unit.id() == state.inspected
+            boolean tagged = unit.id() == state.focus() || hovered || all || unit.id() == state.inspected
                   || unit.id() == physicalTarget;
             String sub = tagged && !unit.sensorContact() ? sub(unit, hovered && enemy ? focus : null, fire) : "";
             boolean tag = unit.sensorContact() || tagged && !(unit.label().isEmpty() && sub.isEmpty());
@@ -234,6 +238,12 @@ final class GpuNameplates implements GpuHud.Component {
         }
         GpuHudKit.stack(ordered.stream().map(plate -> plate.marks).filter(Actor::hasParent).toList(),
               hovered == null ? null : hovered.marks, card == null ? null : card.marks);
+    }
+
+    /** The top of the unit's plate this frame, y up, or {@code head} when it has none. */
+    float top(int unitId, float head) {
+        Plate plate = plates.get(unitId);
+        return plate == null ? head : plate.marker().getY() + plate.marker().getHeight();
     }
 
     /**

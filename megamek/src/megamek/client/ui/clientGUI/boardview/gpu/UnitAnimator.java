@@ -30,6 +30,8 @@ final class UnitAnimator {
     /** A rigid meeple figure's hop: its length and height as fractions of the figure's height. */
     private static final float MEEPLE_HOP_LENGTH = .5f;
     private static final float MEEPLE_HOP_HEIGHT = .1f;
+    /** Maximum lead/lag within the shared hover cycle, stable for each formation member. */
+    private static final float MEEPLE_HOVER_PHASE_SECONDS = .2f;
     private static final float ARM_AIM_LIMIT_DEGREES = 120;
     private final List<Body> bodies = new ArrayList<>();
     private final List<Joint> mounts = new ArrayList<>();
@@ -103,6 +105,8 @@ final class UnitAnimator {
         float wheelSteps, lastSteps;
         /** This frame's hop of a meeple figure, in model units, added once it stands on the ground. */
         float hop;
+        /** Signed world-space correction to the whole entity's hover wave. */
+        float hover;
         long movementSequence = -1;
 
         Body(UnitRig rig, ModelInstance instance, ModelInstance rest) {
@@ -161,6 +165,7 @@ final class UnitAnimator {
 
         void reset() {
             joints.values().forEach(Joint::reset);
+            hover = 0;
         }
     }
 
@@ -264,6 +269,12 @@ final class UnitAnimator {
             // Keep the phase small: adding a large hash to a float loses sub-step movement precision.
             // Mix adjacent troop IDs so their gait, breathing and watch motions do not synchronize.
             float seed = Math.floorMod(identity * (body.rig.trooper() ? 0x9E3779B9 : 1), 4096) * (MathUtils.PI2 / 4096);
+            if (flying && body.rig.meeple() && body.rig.container() != null
+                  && body.rig.container().startsWith("trooper-") && unit.attachment() == null) {
+                // The view still adds the entity's wave. Replace just this member's phase, without doubling its amplitude.
+                float phaseSeconds = MathUtils.sin(seed) * MEEPLE_HOVER_PHASE_SECONDS;
+                body.hover = hoverOffset(clock + phaseSeconds, unit.id(), unit.part()) - hoverOffset(clock, unit.id(), unit.part());
+            }
             var memberStep = formation.step(body.rig.container());
             float distance = (memberStep == null ? bodyMotion.steps() * BoardGeometry.height() / groundScale
                   : memberStep.distance()) / body.memberScale;
@@ -548,17 +559,19 @@ final class UnitAnimator {
         if (dying) { return false; }
         boolean rough = formation.roughGround(instance, scene, unit, motion, surfaces, stepRoom(unit));
         boolean contact = groundContact != null && groundContact.apply(scene, unit, motion);
-        boolean hops = hop();
-        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough || hops;
+        boolean lifted = liftMembers();
+        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough || lifted;
     }
 
-    /** Lift hopping meeple figures off the ground they now stand on, which ground contact would otherwise settle. */
-    private boolean hop() {
+    /** Apply member hops/hover after contact settling and placement, using the actual displayed vertical scale. */
+    private boolean liftMembers() {
         boolean lifted = false;
         for (Body body : bodies) {
-            if (body.hop <= 0) { continue; }
+            if (body.hop == 0 && body.hover == 0) { continue; }
+            float lift = body.hop + body.hover / instance.transform.getScaleZ();
+            if (lift == 0) { continue; }
             Node root = body.joints.get("root").node();
-            root.translation.z += body.hop / (root.getParent() == null ? 1 : root.getParent().globalTransform.getScaleZ());
+            root.translation.z += lift / (root.getParent() == null ? 1 : root.getParent().globalTransform.getScaleZ());
             lifted = true;
         }
         if (lifted) { instance.calculateTransforms(); }
