@@ -287,6 +287,22 @@ final class BoardRoadBank {
         return result;
     }
 
+    /**
+     * The faces split on the world's grid where the field can move them, as {@link #conform} splits them, their
+     * vertices kept: so ground the field then moves in place ({@link #move}) meets ground beside it that conform eased,
+     * vertex for vertex.
+     */
+    List<BoardSurface.Face> split(List<BoardSurface.Face> faces) {
+        if (banks.isEmpty()) { return faces; }
+        float grid = GRID * scale;
+        Map<Cut, Vector3> cuts = new HashMap<>();
+        List<BoardSurface.Face> result = new ArrayList<>(faces.size());
+        for (var face : faces) {
+            if (reached(face)) { split(face, grid, cuts, relief, result); } else { result.add(face); }
+        }
+        return result;
+    }
+
     /** Moves every vertex of the faces in place by the field, without splitting any face or changing the list. */
     void move(List<BoardSurface.Face> faces) {
         Set<Vector3> seen = Collections.newSetFromMap(new IdentityHashMap<>());

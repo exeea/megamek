@@ -2361,8 +2361,12 @@ final class BoardSurface {
         if (!bank.active()) {
             bank = null;
         } else if (tile.liquid().present()) {
-            // A water hex's shore reaches into the dry hexes around, whose ground it shares: it eases alike, though the
-            // field leaves the water's own cell as it is. Its faces stay as they are listed, as its bed indexes them.
+            // A water hex's shore reaches into the dry hexes around, whose ground it shares: split on the same grid, it
+            // eases alike, though the field leaves the water's own cell as it is. Its vertices move in place, as its
+            // water shares them.
+            List<Face> split = new ArrayList<>(bank.split(faces));
+            faces.clear();
+            faces.addAll(split);
             bank.move(faces);
         } else if (natural()) {
             // A copy: with no bank to shape, conform hands back the list itself.
