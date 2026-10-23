@@ -1969,9 +1969,15 @@ final class BoardRelief {
                     }
                     if (reserve || edge.upper != null && edge.upper.level() > level) {
                         var deck = decks.computeIfAbsent(site.coords(), key -> BoardBridge.deck(scene, source).slab(key));
+                        // TEMP-PROPOSAL: the gate a deck's road lands across keeps its boundary: the bank's road
+                        // reserves its mouth and the footing stands on it; moved out of the slab, it would run
+                        // across the bank's ramp.
+                        Site bank = site == edge.lower ? edge.upper : site == edge.upper ? edge.lower : null;
+                        boolean gate = bank != null && BoardBridge.road(source, scene.tile(bank.coords()),
+                              source.coords().direction(bank.coords()));
                         // Wide decks can cross the nominal corner itself; reserve their full slab before
                         // trimming natural relief against that same canonical boundary on both sides.
-                        if (reserve) {
+                        if (reserve && !gate) {
                             var clear = cutBoundary(deck, site, px, py, 0);
                             if (clear != null) { px = clear.x; py = clear.y; }
                         }

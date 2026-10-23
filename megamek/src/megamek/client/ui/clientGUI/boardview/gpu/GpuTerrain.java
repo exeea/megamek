@@ -5444,6 +5444,9 @@ final class GpuTerrain implements Disposable {
             material.set(GpuRoads.attribute(patch));
             material.set(mask);
             material = GpuIceShader.road(material, scene, tile);
+            // A coat lies lifted over its ground. Past a crest steeper than the view its underside would show as a dark
+            // line above the ground's edge: only the coat's top is ever seen.
+            material.set(IntAttribute.createCullFace(GL20.GL_BACK));
             float vertexCoat = coat;
             overlay.addTriangles(material, meshes -> GpuRoads.write(meshes, preparedPatch.triangles(), patch, mask, surface,
                   preparedPatch.flat(), vertexCoat));
