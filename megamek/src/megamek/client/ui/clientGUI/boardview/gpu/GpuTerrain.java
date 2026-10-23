@@ -1013,6 +1013,7 @@ final class GpuTerrain implements Disposable {
     private Request requested;
     private Rebuild rebuild;
     private TerrainSettings installedSettings;
+    private EditorRoutes editorRoutes;
     private final ArrayDeque<Chunk> retiredChunks = new ArrayDeque<>();
     private final Set<Coords> atlasChanges = new HashSet<>();
     private final Set<Coords> atlasTileChanges = new HashSet<>();
@@ -1300,6 +1301,8 @@ final class GpuTerrain implements Disposable {
     }
 
     private static final class Prop {
+        private boolean infrastructure;
+        private boolean wall;
         private final Coords coords;
         private final BoundingBox bounds;
         private final String treeAsset;
@@ -1672,7 +1675,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /** Index ranges borrow the chunk's meshes; no duplicate geometry or construction-time scene is retained. */
-    private record TileRange(int layer, Mesh mesh, Material material, int offset, int count) { }
+    private record TileRange(int layer, Mesh mesh, Material material, int offset, int count, boolean route) { }
     private record PaintedDecal(BoardDecals.Stamp stamp, List<BoardSurface.Face> faces, float lift) { }
 
     private record InteriorStruts(Coords coords, ModelInstance instance) { }
@@ -1955,20 +1958,21 @@ final class GpuTerrain implements Disposable {
 
     /** Collect by material before opening a mesh part: ModelBuilder has only one active part at a time. */
     private static final class Layer {
-        private record Shape(Coords owner, Material material, Consumer<MeshBatch> emit) { }
+        private record Shape(Coords owner, Material material, boolean route, Consumer<MeshBatch> emit) { }
         final Map<Material, List<Shape>> geometry = new LinkedHashMap<>();
         Coords owner;
+        boolean route;
 
         void add(Material material, Consumer<MeshPartBuilder> shape) {
             // Bounded legacy shapes retain the headroom previously reserved at 48,000 vertices.
             geometry.computeIfAbsent(material, key -> new ArrayList<>())
-                  .add(new Shape(owner, material, batch -> shape.accept(batch.reserve(65536 - 48001))));
+                  .add(new Shape(owner, material, route, batch -> shape.accept(batch.reserve(65536 - 48001))));
         }
 
         /** Request a mesh before each triangle; a new mesh also requires fresh shared vertex indices. */
         void addTriangles(Material material, Consumer<Supplier<MeshPartBuilder>> shape) {
             geometry.computeIfAbsent(GpuRoads.batchMaterial(material), key -> new ArrayList<>())
-                  .add(new Shape(owner, material, batch -> shape.accept(() -> batch.reserve(3))));
+                  .add(new Shape(owner, material, route, batch -> shape.accept(() -> batch.reserve(3))));
         }
 
         /** Snapshot CPU mesh buffers while the GL thread still owns the source chunk. */
@@ -1981,7 +1985,7 @@ final class GpuTerrain implements Disposable {
             if (mask != null) { GpuRoads.relocate(vertices, mask); }
             short[] elements = indices.toArray();
             int count = vertices.length / (range.mesh().getVertexSize() / Float.BYTES);
-            geometry.computeIfAbsent(GpuRoads.batchMaterial(material), key -> new ArrayList<>()).add(new Shape(owner, material, batch -> {
+            geometry.computeIfAbsent(GpuRoads.batchMaterial(material), key -> new ArrayList<>()).add(new Shape(owner, material, range.route(), batch -> {
                 MeshPartBuilder mesh = batch.reserve(count);
                 int base = mesh.lastIndex() + 1;
                 // MeshBuilder.addMesh uses a static remapping table, so it cannot run on multiple workers.
@@ -2014,7 +2018,7 @@ final class GpuTerrain implements Disposable {
                 }
                 for (var shape : ordered) {
                     if ((shapes++ & 63) == 0) { check.run(); }
-                    batch.owner(shape.owner(), shape.material());
+                    batch.owner(shape.owner(), shape.material(), shape.route());
                     shape.emit().accept(batch);
                     completed.run();
                 }
@@ -2084,7 +2088,7 @@ final class GpuTerrain implements Disposable {
     /** Splits even a single sculpted hex across meshes without exceeding unsigned 16-bit vertex indices. */
     private static final class MeshBatch {
         private record Part(MeshPart mesh, Material material) { }
-        private record Range(Coords owner, Material material, int offset, int count) { }
+        private record Range(Coords owner, Material material, int offset, int count, boolean route) { }
         private static final class Buffer {
             final Builder builder = new Builder();
             final List<Part> parts = new ArrayList<>();
@@ -2103,6 +2107,7 @@ final class GpuTerrain implements Disposable {
         private Material material;
         private Material rangeMaterial;
         private Coords owner;
+        private boolean route;
         private int rangeStart;
         private int index;
 
@@ -2120,15 +2125,17 @@ final class GpuTerrain implements Disposable {
             rangeStart = current.builder.getNumIndices();
         }
 
-        void owner(Coords next, Material source) {
-            if (!Objects.equals(owner, next) || rangeMaterial != source) { endRange(); owner = next; rangeMaterial = source; }
+        void owner(Coords next, Material source, boolean infrastructure) {
+            if (!Objects.equals(owner, next) || rangeMaterial != source || route != infrastructure) {
+                endRange(); owner = next; rangeMaterial = source; route = infrastructure;
+            }
         }
 
         void endRange() {
             if (current == null) { return; }
             int end = current.builder.getNumIndices();
             if (owner != null && end > rangeStart) {
-                current.ranges.add(new Range(owner, rangeMaterial, rangeStart, end - rangeStart));
+                current.ranges.add(new Range(owner, rangeMaterial, rangeStart, end - rangeStart, route));
             }
             rangeStart = end;
         }
@@ -2202,7 +2209,7 @@ final class GpuTerrain implements Disposable {
             destination.add(new ModelInstance(model.end()));
             if (tiles != null) {
                 for (Range range : buffer.ranges) {
-                    tiles.get(range.owner()).ranges.add(new TileRange(layer, mesh, range.material(), range.offset(), range.count()));
+                    tiles.get(range.owner()).ranges.add(new TileRange(layer, mesh, range.material(), range.offset(), range.count(), range.route()));
                 }
             }
             // MeshBuilder.end() only fills CPU buffers. Bind now so uploads share the refinement budget instead
@@ -4109,6 +4116,8 @@ final class GpuTerrain implements Disposable {
         }
         List<Prop> supports = new ArrayList<>();
         for (BoardScene.Feature feature : features) {
+            if (build.preview != null && (!routeFeature(tile, feature)
+                  || build.preview.walls != BoardWall.building(tile.cover(), feature))) { continue; }
             if (feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
             if (build.chunk.columns && !columnFeature(feature)) { continue; }
             // Rough boulders are already part of the shared terrain mesh, shading and picking geometry.
@@ -4146,12 +4155,14 @@ final class GpuTerrain implements Disposable {
                 chunk.bounds.ext(bridgeShape.bounds());
             }
             if (bridge) {
+                solid.route = true;
                 var deck = prepared.bridges().get(tile.coords());
                 if (deck.natural()) {
                     TextureRegion cap = chunk.columns ? this.ground.region(new GroundSlot(tile.coords(), true)) : null;
                     naturalBridge(solid, bridgeShape, tile.deckMud(), cap != null);
                     if (cap != null) { GpuTilesetTerrain.naturalBridgeTop(tile, bridgeShape, cap, solid::add); }
                 } else { builtBridge(solid, bridgeShape, deck, scene, tile); }
+                solid.route = false;
                 continue;
             }
             boolean generatedIndustrial = BoardIndustrial.supports(feature);
@@ -4165,7 +4176,7 @@ final class GpuTerrain implements Disposable {
             boolean placedObject = feature.decoration() != null;
             boolean editable = placedObject && !BoardFeatures.terrainOwned(feature.decoration());
             // Both graphics modes use the same finished rail carrier, including road embedding and bridge grades.
-            Model model = BoardRail.route(feature) ? assets.route(BoardRail.layout(scene, tile, feature, surface,
+            Model model = BoardRail.route(feature) ? routeModel(build, BoardRail.layout(scene, tile, feature, surface,
                         prepared.bridgeShapes()::get))
                   : placedObject ? assets.slotted(feature.asset())
                   : generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
@@ -4174,7 +4185,7 @@ final class GpuTerrain implements Disposable {
                   : feature.kind() == BoardScene.FeatureKind.TREE
                   ? assets.lodModel(feature.asset(), 0)
                   : assets.model(feature.asset(), feature.colours());
-            assets.take(this, building, model);
+            assets.take(build.preview == null ? this : build.preview, building, model);
             java.util.function.UnaryOperator<Model> drawn = mesh ->
                   feature.kind() == BoardScene.FeatureKind.TREE || fungus || foliageModel(mesh) ? foliage(mesh) : mesh;
             ModelInstance instance = building != null ? building.instance(0)
@@ -4315,6 +4326,8 @@ final class GpuTerrain implements Disposable {
                   object != null && !foliageModel(model) || feature.kind() == BoardScene.FeatureKind.BUILDING
                         || feature.asset().startsWith("buildings/"),
                   Float.NaN, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
+            prop.infrastructure = routeFeature(tile, feature);
+            prop.wall = wallBuilding;
             prop.scatter = feature.kind() == BoardScene.FeatureKind.SCATTER;
             prop.cover = object == null && standTree && !prop.scatter;
             // Terrain-owned transport furniture stays with its shared road/rail geometry in every view. Keep its
@@ -4367,8 +4380,10 @@ final class GpuTerrain implements Disposable {
             }
             chunk.bounds.ext(bounds);
         }
-        placeDecals(build, tile, ground, supports);
-        placeDecorationPaint(build, tile, ground.faces(), ground.deck(), supports);
+        if (build.preview == null) {
+            placeDecals(build, tile, ground, supports);
+            placeDecorationPaint(build, tile, ground.faces(), ground.deck(), supports);
+        }
     }
 
     /**
@@ -4637,6 +4652,7 @@ final class GpuTerrain implements Disposable {
     }
 
     private final class ChunkBuild {
+        EditorRoutes preview;
         final Chunk chunk = new Chunk();
         final Chunk source;
         final BoundingBox bounds = new BoundingBox().inf();
@@ -4740,6 +4756,8 @@ final class GpuTerrain implements Disposable {
                         Prop copy = new Prop(coords, copy(prop.instance), prop.bounds,
                               prop.treeAsset, prop.hardSurface, prop.building, prop.structure, prop.floorZ, prop.industrial);
                         copy.scatter = prop.scatter;
+                        copy.infrastructure = prop.infrastructure;
+                        copy.wall = prop.wall;
                         copy.tactical = prop.tactical;
                         copy.small = prop.small;
                         copy.decorationId = prop.decorationId;
@@ -5421,6 +5439,7 @@ final class GpuTerrain implements Disposable {
           GpuTextures<BoardScene.Pixels> masks, BoardScene scene, BoardScene.Tile tile) {
         var roadMaps = assets.roadArray();
         for (var preparedPatch : prepared) {
+            overlay.route = preparedPatch.flat() || preparedPatch.source().road() != BoardRoad.Kind.NONE;
             var patch = preparedPatch.patch();
             var mask = new GpuRoads.Mask(masks.region(preparedPatch.mask().pixels()), preparedPatch.mask());
             String road = GpuRoads.material(preparedPatch.source(), preparedPatch.flat(), patch.texture());
@@ -5452,6 +5471,7 @@ final class GpuTerrain implements Disposable {
             overlay.addTriangles(material, meshes -> GpuRoads.write(meshes, preparedPatch.triangles(), patch, mask, surface,
                   preparedPatch.flat(), vertexCoat));
         }
+        overlay.route = false;
     }
 
     private Material roadMaterial(String name, boolean blended) {
@@ -6604,6 +6624,191 @@ final class GpuTerrain implements Disposable {
         });
     }
 
+    /** Infrastructure uses exactly the same feature collection and placement in a preview and a committed chunk. */
+    static boolean routeFeature(BoardScene.Tile tile, BoardScene.Feature feature) {
+        return feature.asset().equals("bridge") || BoardWall.building(tile.cover(), feature) || BoardRail.route(feature)
+              || feature.decoration() != null && BoardFeatures.terrainOwned(feature.decoration())
+                    && (feature.asset().startsWith("scenery/road/") || feature.asset().startsWith("scenery/rail/"));
+    }
+
+    private Model routeModel(ChunkBuild build, BoardRail.Layout layout) {
+        if (build.preview == null) { return assets.route(layout); }
+        Model model = new Model(BoardRail.model(layout));
+        build.preview.owned.add(model);
+        return model;
+    }
+
+    /**
+     * Pending infrastructure, built against the complete post-edit neighbourhood. Owns generated meshes and mask
+     * atlases, borrows authored models, and hides only the installed infrastructure it replaces. No document or chunk
+     * is changed. The caller disposes this before replacing the preview.
+     */
+    final class EditorRoutes implements Disposable {
+        final Map<Coords, List<ModelInstance>> ghosts = new LinkedHashMap<>();
+        final Set<Coords> coords;
+        final boolean walls;
+        final List<Model> owned = new ArrayList<>();
+        final List<Chunk> carriers = new ArrayList<>();
+        private final Map<BoardScene.Pixels, Texture> masks = new HashMap<>();
+        private final Map<Chunk, Map<Integer, Array<Renderable>>> retained = new IdentityHashMap<>();
+
+        EditorRoutes(Set<Coords> coords, boolean walls) { this.coords = Set.copyOf(coords); this.walls = walls; }
+
+        boolean affects(Chunk chunk) { return !Collections.disjoint(coords, chunk.tileMeshes.keySet()); }
+
+        /** A draped triangle extends past its mask. Clamp that mask alone, never into an adjacent atlas slot. */
+        Texture mask(BoardScene.Pixels pixels) {
+            return masks.computeIfAbsent(pixels, image -> {
+                Pixmap pixmap = GpuTextures.pixmap(image, 0, false);
+                try {
+                    Texture texture = new Texture(pixmap);
+                    texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+                    texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+                    return texture;
+                } finally { pixmap.dispose(); }
+            });
+        }
+
+        /** Split existing draw ranges around replaced roads/decks; the meshes and materials remain chunk-owned. */
+        Array<Renderable> retained(Chunk chunk, int layer) {
+            return retained.computeIfAbsent(chunk, ignored -> new HashMap<>()).computeIfAbsent(layer, ignored -> {
+                Array<Renderable> result = new Array<>();
+                var removed = chunk.tileMeshes.entrySet().stream().filter(entry -> coords.contains(entry.getKey()))
+                      .flatMap(entry -> entry.getValue().ranges.stream()).filter(range -> !walls && range.layer() == layer && range.route())
+                      .sorted(Comparator.comparingInt(TileRange::offset)).toList();
+                for (Renderable source : GpuTerrainDepth.snapshot(layer == 0 ? chunk.opaque : chunk.overlays)) {
+                    int start = source.meshPart.offset, end = start + source.meshPart.size;
+                    for (TileRange range : removed) {
+                        if (range.mesh() != source.meshPart.mesh || range.offset() >= end || range.offset() + range.count() <= start) { continue; }
+                        append(result, source, start, Math.max(start, range.offset()));
+                        start = Math.min(end, range.offset() + range.count());
+                    }
+                    append(result, source, start, end);
+                }
+                return result;
+            });
+        }
+
+        private static void append(Array<Renderable> result, Renderable source, int start, int end) {
+            if (start >= end) { return; }
+            Renderable part = new Renderable().set(source);
+            part.meshPart.offset = start;
+            part.meshPart.size = end - start;
+            result.add(part);
+        }
+
+        @Override public void dispose() {
+            if (editorRoutes == this) { editorRoutes = null; refreshShadows(); }
+            carriers.forEach(Chunk::dispose);
+            owned.forEach(Model::dispose);
+            masks.values().forEach(Texture::dispose);
+            assets.release(this);
+            retained.clear();
+        }
+    }
+
+    EditorRoutes previewRoutes(BoardScene scene, Set<Coords> coords, boolean walls) {
+        EditorRoutes result = new EditorRoutes(coords, walls);
+        try {
+            installedSettings.run(() -> {
+                Map<TerrainLod, List<BoardScene.Tile>> groups = new EnumMap<>(TerrainLod.class);
+                Map<Coords, BoardSurface> surfaces = new ConcurrentHashMap<>();
+                for (Coords at : coords) {
+                    if (editorTile(at) == null) { continue; }
+                    var tile = scene.tile(at);
+                    var lod = chunks.get(at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE).lod;
+                    groups.computeIfAbsent(lod, ignored -> new ArrayList<>()).add(tile);
+                    surfaces.put(at, columns() ? BoardSurface.columns(scene, tile, lod) : new BoardSurface(scene, tile, lod));
+                }
+                for (var group : groups.entrySet()) {
+                    var progress = new TerrainLoadProgress();
+                    var infrastructure = walls ? new Infrastructure(Map.of(), Map.of(), Map.of())
+                          : prepareInfrastructure(scene, group.getValue(), group.getKey(), installedSettings,
+                                surfaces, () -> { }, progress, new GpuRoads.Masks(), columns());
+                    var prepared = new Prepared(surfaces, null, null, Map.of(), Map.of(), Map.of(), Map.of(),
+                          infrastructure.roads(), infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(),
+                          Set.of(), Map.of(), false);
+                    var build = new ChunkBuild(scene, 0, 0, floor, group.getKey(), columns(), prepared, null, progress);
+                    build.preview = result;
+                    result.carriers.add(build.chunk);
+                    for (var tile : group.getValue()) {
+                        var at = tile.coords();
+                        var surface = surfaces.get(at);
+                        build.chunk.tileMeshes.put(at, new TileMesh());
+                        int first = build.chunk.props.size();
+                        collectFeatures(build, tile, surface, ground(build, at));
+                        List<ModelInstance> ghosts = new ArrayList<>();
+                        build.chunk.props.subList(first, build.chunk.props.size()).forEach(prop -> ghosts.add(prop.instance));
+                        build.layers.get(0).finish(ghosts);
+                        build.layers.get(0).geometry.clear();
+                        // Only these emitted bridge meshes are owned; feature models stay in the asset library.
+                        ghosts.stream().skip(build.chunk.props.size() - first).forEach(ghost -> result.owned.add(ghost.model));
+                        if (!walls) { previewRoads(build, tile, ghosts); }
+                        if (!ghosts.isEmpty()) { result.ghosts.put(at, List.copyOf(ghosts)); }
+                    }
+                }
+            });
+            editorRoutes = result;
+            refreshShadows();
+            return result;
+        } catch (RuntimeException | Error failure) {
+            result.dispose();
+            throw failure;
+        }
+    }
+
+    /** The committed road triangles and coverage masks, with ordinary UVs for the shared ghost shader. */
+    private void previewRoads(ChunkBuild build, BoardScene.Tile tile, List<ModelInstance> ghosts) {
+        var layer = new Layer();
+        for (RoadPatch patch : build.prepared.roads().getOrDefault(tile.coords(), List.of())) {
+            if (!patch.flat() && patch.source().road() == BoardRoad.Kind.NONE) { continue; }
+            Texture mask = build.preview.mask(patch.mask().pixels());
+            Material material = new Material(TextureAttribute.createDiffuse(mask), FloatAttribute.createAlphaTest(.01f),
+                  IntAttribute.createCullFace(GL20.GL_BACK));
+            layer.addTriangles(material, meshes -> {
+                for (var triangle : patch.triangles()) {
+                    Vector3 normal = new Vector3(triangle.b()).sub(triangle.a()).crs(new Vector3(triangle.c()).sub(triangle.a())).nor();
+                    var points = new MeshPartBuilder.VertexInfo[3];
+                    int index = 0;
+                    for (Vector3 p : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                        float u = ((p.x - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale() - patch.mask().x()) / patch.mask().width();
+                        float v = ((p.y - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale() - patch.mask().y()) / patch.mask().height();
+                        points[index++] = vertex(p, normal, u, v, Color.WHITE);
+                    }
+                    meshes.get().triangle(points[0], points[1], points[2]);
+                }
+            });
+        }
+        List<ModelInstance> roads = new ArrayList<>();
+        layer.finish(roads);
+        roads.forEach(road -> build.preview.owned.add(road.model));
+        ghosts.addAll(roads);
+    }
+
+    private boolean replaced(Prop prop) {
+        return editorRoutes != null && prop.infrastructure && prop.wall == editorRoutes.walls && editorRoutes.coords.contains(prop.coords());
+    }
+
+    private void renderRetained(Chunk chunk, int layer, ModelBatch target, Environment lighting) {
+        for (Renderable part : editorRoutes.retained(chunk, layer)) {
+            part.shader = null; part.environment = lighting; target.render(part);
+        }
+    }
+
+    /** A previewed chunk borrows individual instances so obsolete terminals and junctions never show under ghosts. */
+    private void renderRetainedProps(Chunk chunk, ModelBatch target, Environment lighting, boolean shadows) {
+        for (Prop prop : chunk.cutaways) {
+            if (!drawn(prop, shadows) || !Float.isNaN(prop.floorZ) && !chunk.interiorFloorVisible(prop)) { continue; }
+            if (shadows || !chunk.faded.contains(prop)) { target.render(prop.instance(), lighting); }
+            else if (prop.hoverOpaque != null) { target.render(prop.hoverOpaque, lighting); }
+        }
+        if (!shadows && !fluffHidden) {
+            for (InteriorStruts strut : chunk.struts) {
+                if (chunk.interiorVisible(strut.coords)) { target.render(strut.instance, lighting); }
+            }
+        }
+    }
+
     /**
      * The editor preview's ghost of the route marker {@code feature} on {@code tile} of {@code scene}, the installed scene
      * with the preview's tiles: the route builder's own mesh ({@link BoardRail#layout}) on that tile's ground and the
@@ -7140,22 +7345,25 @@ final class GpuTerrain implements Disposable {
             Chunk chunk = chunks.get(chunkIndex);
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
             boolean scatterVisible = terrain && fluff && visible && chunk.scatterVisible;
+            boolean preview = editorRoutes != null && editorRoutes.affects(chunk);
             if (!drawTactical) {
                 // The 3D relief, or the Classic columns, in the chunk's opaque layer.
                 int page = chunkIndex / chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE * terrainPageRows
                       + chunkIndex % chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE;
-                terrainPages.add(chunk.terrainRenderables, page, visible);
+                terrainPages.add(chunk.terrainRenderables, page, visible && !preview);
+                if (visible && preview) { renderRetained(chunk, 0, batch, environment); }
             }
             if (!drawTactical) {
                 int propPage = propPage(chunkIndex);
                 // Hover/occupancy changes only this chunk's presentation, not its static page membership.
                 // Keep the complete opaque source cached and draw the opened chunk separately. The Tactical View keeps
                 // the pages too, unseen, and draws the chunk's few kept props on their own.
-                propBatch.add(chunk.shadowProps, propPage, visible && fluff && chunk.faded.isEmpty());
-                if (visible && fluff && !chunk.faded.isEmpty()) { propBatch.addDynamic(chunk.solidProps); }
-                if (visible && !fluff) { propBatch.addDynamic(chunk.kept); }
+                propBatch.add(chunk.shadowProps, propPage, visible && !preview && fluff && chunk.faded.isEmpty());
+                if (visible && !preview && fluff && !chunk.faded.isEmpty()) { propBatch.addDynamic(chunk.solidProps); }
+                if (visible && !preview && !fluff) { propBatch.addDynamic(chunk.kept); }
                 propBatch.add(chunk.scatterRenderables, propPage, scatterVisible);
-                propBatch.add(chunk.routeRenderables, propPage, visible);
+                propBatch.add(chunk.routeRenderables, propPage, visible && !preview);
+                if (visible && preview) { renderRetainedProps(chunk, batch, environment, false); }
             }
             if (terrain) {
                 trees.add(chunk.trees(fluff), chunk.treeLod, visible);
@@ -7168,8 +7376,10 @@ final class GpuTerrain implements Disposable {
                 chunk.tactical.forEach(instance -> batch.render(instance));
             } else {
                 // Shared building modules are buildings: the Tactical View hides them.
-                if (fluff) { trees.add(chunk.sharedProps); }
-                addDecorations(chunk, batch, environment, false);
+                if (!preview) {
+                    if (fluff) { trees.add(chunk.sharedProps); }
+                    addDecorations(chunk, batch, environment, false);
+                }
             }
         }
         // Trees first: the opaque sorter keeps this order of shaders, so the ground hidden under crowns fails the depth
@@ -7202,7 +7412,8 @@ final class GpuTerrain implements Disposable {
                 if (visible) {
                     // Roads and shores stay in the Tactical View; decals hide there. A chunk holds the decals of one
                     // graphics only: Enhanced paint, or the Classic tileset decals.
-                    chunk.overlays.forEach(instance -> batch.render(instance, environment));
+                    if (editorRoutes != null && editorRoutes.affects(chunk)) { renderRetained(chunk, 2, batch, environment); }
+                    else { chunk.overlays.forEach(instance -> batch.render(instance, environment)); }
                     if (fluff) {
                         chunk.surfaceDecals.forEach(instance -> batch.render(instance, environment));
                         chunk.tilesetDecals.forEach(instance -> batch.render(instance, environment));
@@ -7441,7 +7652,7 @@ final class GpuTerrain implements Disposable {
      * packed prop is small: only placed objects are, and they are never packed.
      */
     private boolean drawn(Prop prop, boolean shadows) {
-        return (!fluffHidden || prop.tactical || prop.route()) && shown(prop, shadows);
+        return !replaced(prop) && (!fluffHidden || prop.tactical || prop.route()) && shown(prop, shadows);
     }
 
     /**
@@ -7589,6 +7800,10 @@ final class GpuTerrain implements Disposable {
         trees.begin(GpuTreeInstances.Pass.DEPTH);
         for (Chunk chunk : chunks) {
             if (!chunk.faded.isEmpty() && camera.frustum.boundsInFrustum(chunk.bounds)) {
+                if (editorRoutes != null && editorRoutes.affects(chunk)) {
+                    renderRetainedProps(chunk, depthBatch, null, true);
+                    continue;
+                }
                 depthBatch.render(chunk.shadowProps);
                 // Placed objects, complete like the packed shadow caches above (KEEP IN SYNC, see addDecorations).
                 addDecorations(chunk, depthBatch, null, true);
@@ -7629,14 +7844,19 @@ final class GpuTerrain implements Disposable {
                 trees.add(chunk.trees(fluff), Math.max(chunk.treeLod, coarsest), visible);
                 trees.add(chunk.scatterStand, Math.max(chunk.treeLod, coarsest), scatterVisible);
                 if (visible) {
-                    pass.render(shadows ? chunk.depthTerrain.shadows : chunk.depthTerrain);
+                    boolean preview = editorRoutes != null && editorRoutes.affects(chunk);
+                    if (preview) { renderRetained(chunk, 0, pass, null); }
+                    else { pass.render(shadows ? chunk.depthTerrain.shadows : chunk.depthTerrain); }
                     if (scatterVisible) {
                         chunk.scatter.forEach(pass::render);
                     }
-                    pass.render(!fluff ? chunk.kept : shadows ? chunk.shadowProps : chunk.solidProps);
-                    addDecorations(chunk, pass, null, shadows);
-                    pass.render(chunk.routes);
-                    if (fluff) { trees.add(shadows ? chunk.sharedShadows : chunk.sharedProps); }
+                    if (preview) { renderRetainedProps(chunk, pass, null, shadows); }
+                    else {
+                        pass.render(!fluff ? chunk.kept : shadows ? chunk.shadowProps : chunk.solidProps);
+                        addDecorations(chunk, pass, null, shadows);
+                        pass.render(chunk.routes);
+                        if (fluff) { trees.add(shadows ? chunk.sharedShadows : chunk.sharedProps); }
+                    }
                 }
             }
             pass.render(trees);

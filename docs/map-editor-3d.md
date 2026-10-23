@@ -51,11 +51,27 @@ Weapon-range letters retain their camera-dependent clearance.
 
 ## Hidden terrain flags
 
-`BoardEditorTerrain` captures authoring annotations for black ice, collapsed
-basements and metal deposits. It also marks basement/fluff flags when their
-selected artwork is transparent; cached alpha checks avoid scanning the same
-image repeatedly. Any visible match for a flag takes precedence. Only the editor
-receives these markers, and its tooltip lists all flags when a marker is compacted.
+`BoardEditorTerrain` captures floating authoring badges for basements, collapsed
+basements, black ice and metal deposits. Multiple flags form one vertical stack per hex,
+in that order, with border edges touching without overlap or padding and a single stem identifying the hex.
+Each row has its own symbol and label;
+there are no ground cards or hidden `+N` flags. Black ice has a blue snowflake, collapse
+has a coral broken-floor symbol, and metal has a purple ingot and its authored level.
+
+Basements have staircase badges above their own hex's roof: amber `B1`/`B2`
+for the depth, or a gray dashed `B?` for unknown (including an unspecified basement).
+Basement state belongs to each hex, including within multi-hex buildings. `NONE`
+produces no badge; the property remains stored on the building hex. The existing
+hex hover outline identifies the footprint. No basement hover card is displayed;
+the building's properties remain available in the editor. Each flag updates independently,
+and a false collapse flag produces no row. Deployment zones keep their existing borders and labels.
+
+`GpuMapSource` captures immutable lists of badges on the EDT and publishes an immutable map
+with the frame. `GpuEditorBadges` borrows the shared annotation batch in both cameras.
+Building stacks use rendered roof bounds; other stacks stay at the ground/water surface,
+regardless of trees or mineral models. The renderer owns and disposes its shared artwork atlas. Stacks shrink
+with the projected hex size and disappear at overview zoom, while the hovered hex remains
+readable. Map previews and gameplay receive no editor badges.
 
 Visible ground-fluff gradients remain artwork. Saxarba families 1–5 represent
 desert, grass, tropical, Mars and lunar ground; selectors 1–5 encode strength.

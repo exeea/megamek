@@ -4,10 +4,12 @@ package megamek.client.ui.boardeditor;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.common.Hex;
+import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
@@ -19,80 +21,98 @@ class BoardEditorWallTest {
     private static final Coords CENTER = new Coords(5, 5);
 
     @Test
-    void aNewSegmentJoinsBothSidesInEveryDirectionAndUndoAndSaveKeepThoseExits() throws Exception {
+    void wallDrawingKeepsTheExistingBuildingWeightAndPaletteEntry() {
+        var blueprint = BoardEditorBlueprint.get();
+        assertNotNull(blueprint.entry("building/wall"));
+        var session = wallBrush();
+        assertTrue(session.snapshot().drawsRoutes());
+        assertEquals(5, session.snapshot().activeBrush().property("building").value());
+        send(session, Action.BRUSH_VALUE, "terrain:building", "4");
+        assertFalse(session.snapshot().drawsRoutes(), "Changing the brush to an ordinary building stops path drawing");
+    }
+
+    @Test
+    void pathsJoinInAllDirectionsAndSaveAndUndoAsOneStroke() throws Exception {
         for (int direction = 0; direction < 6; direction++) {
             var session = wallBrush();
-            Coords next = CENTER.translated(direction);
-            paint(session, CENTER);
-            paint(session, next);
+            Coords next = CENTER.translated(direction), far = next.translated(direction);
+            drag(session, CENTER, far); // Skipped hex is filled by the shared route drawing code.
+            assertFalse(session.board().getHex(CENTER).containsTerrain(Terrains.BUILDING));
+            var preview = session.preview(far, 0, 0, "ground");
+            assertEquals(List.of(CENTER, next, far), preview.path());
+            assertFalse(session.board().getHex(next).containsTerrain(Terrains.BUILDING), "Preview leaves the board untouched");
+            session.finishStroke();
             assertEquals(1 << direction, exits(session, CENTER));
-            assertEquals(1 << ((direction + 3) % 6), exits(session, next));
+            assertEquals((1 << direction) | (1 << ((direction + 3) % 6)), exits(session, next));
+            assertEquals(1 << ((direction + 3) % 6), exits(session, far));
+            preview.after().forEach((at, hex) -> assertEquals(hex.getTerrain(Terrains.BUILDING).toString(),
+                  session.board().getHex(at).getTerrain(Terrains.BUILDING).toString()));
             send(session, Action.UNDO, "", "");
-            assertEquals(0, exits(session, CENTER), "Undo restores the previously placed neighbor too");
-            assertFalse(session.board().getHex(next).containsTerrain(Terrains.BUILDING));
+            for (Coords at : List.of(CENTER, next, far)) { assertFalse(session.board().getHex(at).containsTerrain(Terrains.BUILDING)); }
             send(session, Action.REDO, "", "");
             Path file = directory.resolve("walls-" + direction + ".board2");
             session.save(file);
             var loaded = BoardFile.read(file);
-            assertEquals(exits(session, CENTER), loaded.getHex(CENTER).getTerrain(Terrains.BUILDING).getExits());
-            assertEquals(exits(session, next), loaded.getHex(next).getTerrain(Terrains.BUILDING).getExits());
+            for (Coords at : List.of(CENTER, next, far)) {
+                assertEquals(exits(session, at), loaded.getHex(at).getTerrain(Terrains.BUILDING).getExits());
+                assertEquals(5, loaded.getHex(at).terrainLevel(Terrains.BUILDING));
+            }
         }
     }
 
     @Test
-    void erasingASegmentRemovesOnlyItsNeighborsBackEdgeAndUndoRestoresTheJoin() {
+    void retracingRemovesPendingHexesAndTurnsBeforeReleaseAndCancelDropsThePath() {
         var session = wallBrush();
-        Coords north = CENTER.translated(0), far = north.translated(0);
+        Coords next = CENTER.translated(0), far = next.translated(0), turn = next.translated(1);
+        drag(session, CENTER, next, far, next, turn);
+        var preview = session.preview(turn, 0, 0, "ground");
+        assertEquals(List.of(CENTER, next, turn), preview.path());
+        assertFalse(preview.after().containsKey(far));
+        session.finishStroke();
+        assertFalse(session.board().getHex(far).containsTerrain(Terrains.BUILDING));
+        assertEquals(10, exits(session, next));
+        send(session, Action.UNDO, "", "");
+        assertFalse(session.board().getHex(turn).containsTerrain(Terrains.BUILDING));
+        drag(session, CENTER, next, far);
+        session.cancelStroke();
+        session.finishStroke();
+        assertFalse(session.board().getHex(CENTER).containsTerrain(Terrains.BUILDING));
+    }
+
+    @Test
+    void branchingRetainsExistingConnectionsButDoesNotJoinNearbyParallelWalls() {
+        var session = wallBrush();
+        Coords north = CENTER.translated(0), far = north.translated(0), beside = CENTER.translated(1);
         session.board().setHex(north, wall(1));
         session.board().setHex(far, wall(8));
-        paint(session, CENTER);
+        session.board().setHex(beside, wall(0));
+        drag(session, CENTER, north); session.finishStroke();
+        assertEquals(1, exits(session, CENTER));
         assertEquals(9, exits(session, north));
+        assertEquals(0, exits(session, beside));
         send(session, Action.TOOL, "", "ERASE");
-        paint(session, CENTER);
+        var preview = session.preview(CENTER, 0, 0, "ground");
+        assertEquals(1, preview.after().get(north).getTerrain(Terrains.BUILDING).getExits());
+        assertEquals(9, exits(session, north));
+        drag(session, CENTER); session.finishStroke();
         assertFalse(session.board().getHex(CENTER).containsTerrain(Terrains.BUILDING));
-        assertEquals(1, exits(session, north), "The neighbor's other authored connection survives");
+        assertEquals(1, exits(session, north));
         assertEquals(8, exits(session, far));
         send(session, Action.UNDO, "", "");
         assertEquals(1, exits(session, CENTER));
         assertEquals(9, exits(session, north));
-        send(session, Action.REDO, "", "");
-        assertFalse(session.board().getHex(CENTER).containsTerrain(Terrains.BUILDING));
-        assertEquals(1, exits(session, north));
     }
 
     @Test
-    void repaintingIdenticalUnjoinedWallsPreviewsAndCommitsOnlyTheMissingConnections() {
+    void wallStrokeCannotOverwriteBuildingsOrLeaveDanglingExitsThroughThem() {
         var session = wallBrush();
-        Coords next = CENTER.translated(0);
-        session.board().setHex(CENTER, wall(0));
-        session.board().setHex(next, wall(0));
-        var preview = session.preview(CENTER, 0, 0, "ground");
-        assertEquals(1, preview.after().get(CENTER).getTerrain(Terrains.BUILDING).getExits());
-        assertEquals(8, preview.after().get(next).getTerrain(Terrains.BUILDING).getExits());
-        assertEquals(0, exits(session, CENTER), "Preview restores both live hexes");
-        assertEquals(0, exits(session, next));
-        paint(session, CENTER);
-        assertEquals(1, exits(session, CENTER));
-        assertEquals(8, exits(session, next));
-        send(session, Action.UNDO, "", "");
+        Coords next = CENTER.translated(0), far = next.translated(0);
+        session.board().setHex(next, new Hex(0, "building:4:0;bldg_cf:120;bldg_elev:2", ""));
+        drag(session, CENTER, far); session.finishStroke();
         assertEquals(0, exits(session, CENTER));
-        assertEquals(0, exits(session, next));
-    }
-
-    @Test
-    void wallBrushUsesTheExistingBuildingTypeClassAndEmplacementConnectionRules() {
-        for (String neighbor : new String[] {
-              "building:4:0;bldg_cf:120;bldg_elev:2",
-              "building:5:0;bldg_cf:120;bldg_elev:2;bldg_class:1",
-              "building:5:0;bldg_cf:120;bldg_elev:2;bldg_class:3" }) {
-            var session = wallBrush();
-            if (neighbor.endsWith("bldg_class:3")) { send(session, Action.BRUSH_VALUE, "terrain:bldg_class", "3"); }
-            Coords next = CENTER.translated(0);
-            session.board().setHex(next, new Hex(0, neighbor, ""));
-            paint(session, CENTER);
-            assertEquals(0, exits(session, CENTER), neighbor);
-            assertEquals(0, exits(session, next), neighbor);
-        }
+        assertEquals(0, exits(session, far));
+        assertEquals(4, session.board().getHex(next).terrainLevel(Terrains.BUILDING));
+        assertEquals(120, session.board().getHex(next).terrainLevel(Terrains.BLDG_CF));
     }
 
     @Test
@@ -103,17 +123,12 @@ class BoardEditorWallTest {
         session.board().setHex(next, wall(0));
         session.adjustElevation(CENTER, 1);
         session.finishStroke();
-        assertEquals(0, exits(session, CENTER), "Arming a wall brush does not rewrite an elevation edit");
-        assertEquals(0, exits(session, next));
-        send(session, Action.CHOOSE_BRUSH, "ground", "clear");
-        session.adjustElevation(next, 1);
-        session.finishStroke();
         assertEquals(0, exits(session, CENTER));
         assertEquals(0, exits(session, next));
     }
 
     private static Hex wall(int exits) {
-        return new Hex(0, "building:5:" + exits + ";bldg_cf:120;bldg_elev:2;bldg_basement_type:1", "");
+        return new Hex(0, "building:5:" + exits + ";bldg_cf:120;bldg_elev:2", "");
     }
 
     private static BoardEditorSession wallBrush() {
@@ -122,9 +137,8 @@ class BoardEditorWallTest {
         return session;
     }
 
-    private static void paint(BoardEditorSession session, Coords at) {
-        session.pointer(at, 0, 0, false);
-        session.finishStroke();
+    private static void drag(BoardEditorSession session, Coords... path) {
+        for (int i = 0; i < path.length; i++) { session.pointer(path[i], 0, 0, i != 0); }
     }
 
     private static int exits(BoardEditorSession session, Coords at) {

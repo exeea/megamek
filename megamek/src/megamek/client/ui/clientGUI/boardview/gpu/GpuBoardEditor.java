@@ -1162,7 +1162,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private void componentControls(BoardEditorSession.Brush brush) {
         List<Actor> controls = new ArrayList<>();
         if (brush.way()) { wayHeight(brush); }
-        else { controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "")); }
+        else if (!snapshot.drawsRoutes()) { controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "")); }
         var definition = blueprint.component(brush.component());
         if (brush.sampledHex() != null || definition.id().equals("ground")) {
             controls.add(brushNumber(UiKit.text("BoardEditor.levelLabel"), brush.elevation(), -10, 30, 1, Action.BRUSH_VALUE, "elevation")
@@ -1224,11 +1224,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         var fill = ui.checkbox(UiKit.text("BoardEditor.fill"), brush.fill()); fill.setName("editor-fill");
         onChange(fill, () -> send(Action.BRUSH_VALUE, "fill", Boolean.toString(fill.isTicked())));
         ui.tip(fill).getActor().setText(UiKit.text("BoardEditor.fill.tooltip"));
-        if (!brush.way()) { controls.add(fill); }
+        if (!snapshot.drawsRoutes()) { controls.add(fill); }
         brushRows.add(controls);
         brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.paintStamp"
               : brush.themeCard() ? "BoardEditor.hint.theme" : zone != null ? "BoardEditor.deploymentZoneHint"
-              : snapshot.drawsRoutes() ? "BoardEditor.hint.road" : "BoardEditor.hint.paint")));
+              : snapshot.drawsRoutes() ? brush.component().equals("building") ? "BoardEditor.hint.wall" : "BoardEditor.hint.road"
+              : "BoardEditor.hint.paint")));
     }
 
     /** The old editor's "Only overwrite clear hexes", for Paint and Sculpt: hexes that hold terrain are left as they are. */

@@ -1222,10 +1222,9 @@ public final class BoardEditorSession {
     }
 
     /**
-     * Whether a Paint drag with the active brush draws a route by hand: a rail or maglev brush, or the Road card (the user's
-     * design of 2026-10-11). Erase, and every other brush, applies each event at once.
+     * Whether a Paint drag draws a road, bridge, rail or wall path. Erase applies each event at once.
      */
-    private boolean drawsRoutes() { return tool == Tool.PAINT && wayBrush(); }
+    private boolean drawsRoutes() { return tool == Tool.PAINT && (wayBrush() || wallBrush()); }
 
     private boolean wayBrush() {
         return sampledHex == null && stampLayout() == null && (brushComponent.equals("road")
@@ -1282,7 +1281,8 @@ public final class BoardEditorSession {
         if (drawing == null) { return; }
         List<Coords> hexes = drawing.hexes();
         drawing = null;
-        paintWays(hexes);
+        if (wallBrush()) { paintWalls(hexes); }
+        else { paintWays(hexes); }
     }
 
     /** Picks the height and layer once. Dry ground following is deliberately allowed to climb arbitrary hills. */
@@ -1842,7 +1842,7 @@ public final class BoardEditorSession {
                     // A route drawn by hand is built as its release builds it; any other event is the event itself.
                     if (drawsRoutes()) { wayReceivers.put(at, support); drawing = new RoutePath(drawn); drawPath(); }
                     else { pointer(event, pointX, pointY, routing, null, false, support); }
-                    if (!stroke.isEmpty() || wallBrush() && !painted.isEmpty()) { completeStroke(); }
+                    if (!stroke.isEmpty()) { completeStroke(); }
                     notice[0] = strokeNotice;
                     layers.putAll(wayLayers);
                     originals.keySet().forEach(cell -> after.put(cell, board().getHex(cell).duplicate()));
@@ -1856,7 +1856,12 @@ public final class BoardEditorSession {
         } finally { restore(saved); }
         Map<Coords, Hex> before = new LinkedHashMap<>(), changed = new LinkedHashMap<>();
         after.forEach((cell, hex) -> {
-            if (!BoardFile.hexNode(hex).equals(BoardFile.hexNode(originals.get(cell)))) {
+            Hex original = originals.get(cell);
+            // Automatic exits are omitted from the file form, but change a neighbour's previewed junction.
+            boolean exitsChanged = java.util.stream.IntStream.of(Terrains.ROAD, Terrains.BRIDGE_ROAD).anyMatch(type ->
+                  hex.containsTerrain(type) && original.containsTerrain(type)
+                        && hex.getTerrain(type).getExits() != original.getTerrain(type).getExits());
+            if (exitsChanged || !BoardFile.hexNode(hex).equals(BoardFile.hexNode(original))) {
                 before.put(cell, originals.get(cell).duplicate());
                 changed.put(cell, hex);
             }
@@ -3157,7 +3162,7 @@ public final class BoardEditorSession {
             moveObjects(destinations);
         }
         moveHexes(); dragOrigin = moveTarget = null; movingObjects.clear();
-        if (!stroke.isEmpty() || wallBrush() && !painted.isEmpty()) { completeStroke(); }
+        if (!stroke.isEmpty()) { completeStroke(); }
         if (!stroke.isEmpty()) {
             Map<Coords, Hex> after = new LinkedHashMap<>();
             stroke.keySet().forEach(at -> after.put(at, board().getHex(at).duplicate()));
@@ -3181,42 +3186,64 @@ public final class BoardEditorSession {
     private void completeStroke() {
         // Reconcile after all stamped hexes are installed, so adjacent copies can keep their joined route sides.
         if (sampledHex != null && (tool == Tool.PAINT || tool == Tool.ERASE)) { keepJoinedSides(painted); }
-        if (wallBrush()) { joinWalls(); }
+        if (wallBrush() && tool == Tool.ERASE) { disconnectWalls(); }
         // Resolve any legacy tokens pasted by an older brush before reconciling the authored layers.
         convertTokens();
         wayDecks();
     }
 
     private boolean wallBrush() {
-        return brushKey.equals("building/wall") && (tool == Tool.PAINT || tool == Tool.ERASE);
+        return sampledHex == null && brushComponent.equals("building")
+              && paintTemplate.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()
+              && (tool == Tool.PAINT || tool == Tool.ERASE);
     }
 
-    /** Only the wall brush joins its newly painted segments; existing unrelated authored exits remain untouched. */
-    private void joinWalls() {
+    /** The shared drawing path supplies explicit connections, retaining branches already drawn at its endpoints. */
+    private void paintWalls(List<Coords> path) {
+        Set<Coords> allowed = new java.util.HashSet<>();
+        for (Coords at : path) {
+            Hex hex = board().getHex(at);
+            if (overwrites(at) && !hex.containsAnyTerrainOf(Terrains.FUEL_TANK, Terrains.BRIDGE)
+                  && (!hex.containsTerrain(Terrains.BUILDING) || hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue())) {
+                allowed.add(at);
+            } else { strokeNotice = Messages.getString("BoardEditor.way.structure"); }
+        }
+        for (int i = 0; i < path.size(); i++) {
+            Coords at = path.get(i);
+            if (!allowed.contains(at)) { continue; }
+            Terrain existing = board().getHex(at).getTerrain(Terrains.BUILDING);
+            int sides = existing == null ? 0 : existing.getExits();
+            for (int j : new int[] { i - 1, i + 1 }) {
+                if (j >= 0 && j < path.size() && allowed.contains(path.get(j)) && at.distance(path.get(j)) == 1) {
+                    sides |= 1 << at.direction(path.get(j));
+                }
+            }
+            int exits = sides;
+            change(at, hex -> {
+                paintFields(hex, paintTemplate, blueprint.component("building"));
+                hex.addTerrain(new Terrain(Terrains.BUILDING, BuildingType.WALL.getTypeValue(), true, exits));
+                appearance(hex, "building", paintTemplate.getAppearance().get("building"));
+            });
+        }
+        if (!path.isEmpty()) {
+            selected = path.getLast(); selectedObject = ""; component = "building";
+            selection.clear(); selection.add(new Selection(selected, ""));
+        }
+        message = strokeNotice;
+    }
+
+    /** Erasing a wall clears the neighbours' back edges in the same preview and undo step. */
+    private void disconnectWalls() {
         int wall = BuildingType.WALL.getTypeValue();
         for (Coords at : painted) {
-            Hex current = board().getHex(at), before = stroke.get(at);
-            boolean present = current.terrainLevel(Terrains.BUILDING) == wall;
-            if (!present && (before == null || before.terrainLevel(Terrains.BUILDING) != wall)) { continue; }
-            int exits = 0;
-            if (present) {
-                // Let Hex decide matching building types/classes and single-hex emplacements; no duplicated rules.
-                Hex automatic = current.duplicate();
-                automatic.addTerrain(new Terrain(Terrains.BUILDING, wall, false, 0));
-                for (int direction = 0; direction < 6; direction++) {
-                    automatic.setExits(board().getHex(at.translated(direction)), direction, false);
-                }
-                exits = automatic.getTerrain(Terrains.BUILDING).getExits() & 63;
-                int joined = exits;
-                change(at, hex -> hex.addTerrain(new Terrain(Terrains.BUILDING, wall, true, joined)));
-            }
+            Hex before = stroke.get(at);
+            if (before == null || before.terrainLevel(Terrains.BUILDING) != wall) { continue; }
             for (int direction = 0; direction < 6; direction++) {
                 Coords next = at.translated(direction);
                 Hex neighbour = board().getHex(next);
                 if (neighbour == null || neighbour.terrainLevel(Terrains.BUILDING) != wall) { continue; }
-                int back = 1 << ((direction + 3) % 6), sides = neighbour.getTerrain(Terrains.BUILDING).getExits();
-                int joined = (exits & 1 << direction) != 0 ? sides | back : sides & ~back;
-                change(next, hex -> hex.addTerrain(new Terrain(Terrains.BUILDING, wall, true, joined)));
+                int exits = neighbour.getTerrain(Terrains.BUILDING).getExits() & ~(1 << ((direction + 3) % 6));
+                change(next, hex -> hex.addTerrain(new Terrain(Terrains.BUILDING, wall, true, exits)));
             }
         }
     }

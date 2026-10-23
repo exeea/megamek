@@ -51,7 +51,8 @@ All ice shares world-anchored floes: snow drifts, bare grey ice and refrozen
 joints, so lake and land ice continue across each other. Land ice meets dry
 ground at its level along a shattered border straddling their hex edge: the dry
 tile draws its side (`GpuIceShader` modes 4 and 5). Toward water or another
-level it breaks off short. Ice never coats ground under water.
+level it breaks off short. Ice never coats ground under water. Land ice coats its
+ground's blended cover, so neighbouring materials still fade across the edge beneath it.
 
 Costs: lake ice stays one transparent draw per chunk, blended after open water;
 land ice is a shader variant of existing ground draws, and so is its border on

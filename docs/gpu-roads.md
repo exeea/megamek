@@ -12,9 +12,8 @@ unit support must continue to agree on the underlying surface.
 | --- | --- |
 | `BoardScene.Tile.road / roadExits` | Carry captured ground road kind and exits. `railBed` comes from ground rail terrain; `wayExits` (road or rail) shapes the carriageway. `deckRoad / deckRoadExits` and `corridor / deckCorridor` keep the two layers separate. |
 | `BoardRoad` | Build carriageway/junction footprints, end shapes, wear coordinates and obstacle-clearance queries. |
-| `BoardSurface` | Shape the physical approach between plateau, neighboring road and bridge deck. |
-| `BoardRelief / BoardConcrete` | Join the approach to natural cut/fill or engineered retaining walls. |
-| `BoardRampMesh` | Simplify interior ramp geometry while preserving boundary joins and height constraints. |
+| `BoardRoadGrade` | Reserve each carriageway's ground and give its height along the course. |
+| `BoardRoadCut / BoardSurface` | Lay the reserved road into the terrain: cut faces in Classic and on concrete, natural banks otherwise. |
 | `GpuRoads` | Rasterize coverage/control masks and draw them on existing supporting triangles. |
 | `GpuAssets / terrain-road.frag` | Supply material maps and shade asphalt, dirt, gravel, paint, deposits and wear. |
 
@@ -132,7 +131,7 @@ and both LODs share the same lamp positions and supported roadside origin.
 Rails share the carriageway (batch 10, docs/3d-board-editor.md): every shape and
 clearance site reads `wayExits` and `BoardRoad.carriageway` (a drawn road or a ground
 rail on dry ground), so a rail-only hex is shaped exactly as the road hex
-with the same exits (hub, ramps of one or two levels, concrete cuts, retaining walls,
+with the same exits (hub, ramps of one or two levels, concrete cuts, containment walls,
 the ramp onto a deck), and the rail's track is draped on the faces road paint lies on.
 Only roads receive carriageway paint and vote a bridge deck's road material.
 Classic, Enhanced and either Tactical View share the infrastructure preparation,
@@ -327,54 +326,25 @@ for the separate maps, which now load only for the kinds that decks and tunnel f
 
 ## Physical ramps and joins
 
-`BoardSurface` rounds the change from a flat center into a graded approach, then meets
-the neighbor at a shared height and tangent. Road-to-bridge approaches use the same
-planar inset as stepped bridges: each hex carries half the rise, meeting halfway in
-height at the shared edge. Tile centers retain their game elevation and grades stay within the connected
-hexes; they do not spread into an arbitrary chain of tiles.
+`BoardRoadGrade` reserves each carriageway's ground and gives its height; `BoardRoadCut` removes the
+terrain over it. [Road grades](gpu-road-slopes-tunnels.md) describes the edge heights, ramp shares and the
+Classic/Enhanced profiles. Tile centres keep their game elevation and grades stay within the connected
+hexes. A road exit onto dry ground within two levels ramps to it; greater differences need connected exits
+on both sides, and unconnected roads keep the cliff instead of inventing movement connections.
 
-Across a dry difference of up to two levels, an exit can form an approach onto unpaved
-ground. Greater differences require connected exits on both sides. An aligned bridge
-approach uses its deck height and the existing connection checks. Unconnected roads
-retain the cliff instead of inventing movement connections.
-
-Natural cut/fill uses the shared cliff profile and lateral shoulders. Concrete keeps
-engineered slabs and retaining walls. A roadless concrete apron receives each incline
-directly, without inventing connecting bends that could put a retaining wall across
-an approach. `BoardRampMesh` can remove redundant interior
-samples, but must retain shared boundaries, the center and the curved carriageway.
-Contact queries choose a containing triangle before using an edge-tolerance fallback.
 Raised bridge approaches form a closed concrete support spanning both insets, built by
-`BoardBridgeFooting`. The underlying road bank and shoreline retain their own geometry.
-The deck half uses `BoardBridgeMesh`'s actual carriageway and slab outlines, clipped
-to its approach grade. Its retaining walls follow the curve, so the ramp cannot
-cut across the road or protrude beyond the parapets. The bank half meets the same
-mouth and the bridge retains its generated rails above the support. Those rails continue to the road inset, with the
-existing `bridge-terminal` GLB wedges on the flat road beyond the base. The level centre
-of the bridge remains open below. The block's faces serve both road paint and picking;
-`BoardBridgeSlope` omits the generated slab inside that block to avoid overlapping faces.
-Descending approaches cut the natural road bank. Their exposed terrain keeps its
-native material; the bridge footing owns the actual concrete structure.
+`BoardBridgeFooting`. The road keeps the deck's plane over its own inset half. In Enhanced a solid ramp (deck
+above its bank) eases off the deck and onto the bank, one smoothstep over both insets in eight rows per half
+(`BoardBridgeSlope.ease`); the concrete structure keeps its straight lines, and Classic keeps the straight ramp. The deck half uses
+`BoardBridgeMesh`'s actual carriageway and slab outlines, clipped to its approach grade. Its retaining walls
+follow the curve, so the ramp cannot cut across the road or protrude beyond the parapets. The bridge's
+generated rails continue to the road inset, with the existing `bridge-terminal` GLB wedges on the flat road
+beyond the base. The level centre of the bridge remains open below. The block's faces serve both road paint
+and picking; `BoardBridgeSlope` omits the generated slab inside that block to avoid overlapping faces.
+Descending approaches cut the natural road bank; the bridge footing owns the actual concrete structure.
 
-At shifted shorelines, walls compare road and bank heights at corresponding edge
-parameters in each surface's original profile. The wall then joins the ramp's emitted
-rim to the bank's sampled boundary. Sampling the road at the shifted shore instead
-leaves the wall short beneath graded road approaches. Graded wall endpoints stay
-exact even beside water, so the joins do not leave pinholes.
-
-At concrete cuts, the wall endpoints use the roof triangle selected inside each edge
-interval. Sampling the highest roof at a discontinuous shoulder can otherwise bridge
-the opening with a wall. The cliff builder preserves incomplete edge coverage, and
-nearly coincident cut points merge into the next interval instead of leaving slits.
-Regression checks ray-test the carriageway in all six directions at all four LoDs and
-inspect five/six-way native junction captures for open wall seams. Batching checks also
-compare separate tile submissions against shared draws before an edit, after it, and
-after reverting it, across both projections and three camera tilts.
-
-For cracks beside a road, inspect shared surface/corner samples before changing the
-road mask. For a bright seam with continuous geometry, inspect mask coordinates,
-material weights and normals instead. [Tunnel and roadside details](gpu-road-slopes-tunnels.md)
-cover portals and cliff clipping.
+For cracks beside a road, inspect the reserved boundary and its cut faces before changing the road mask.
+For a bright seam with continuous geometry, inspect mask coordinates, material weights and normals instead.
 
 ## Bridges and invalidation
 
@@ -432,8 +402,7 @@ At a curved road connection, the landing, parapets and extended paint follow the
 bank road's existing course. Parapet offsets interpolate the course tangents, while
 the terminal GLBs rotate as rigid blocks instead of bending with the slab. The
 level road beyond a curved ramp remains its sole asphalt carrier; adding another
-flat slab there would overlap its markings and tyre wear. A built parapet also
-replaces an ordinary retaining panel when both occupy the same landing.
+flat slab there would overlap its markings and tyre wear.
 
 A built bridge meeting a dry bank one level below its deck uses the same full solid
 ramp with or without a road or rail. The slope spans both hex insets; adding or

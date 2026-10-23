@@ -600,7 +600,8 @@ final class GpuMapSource implements BoardSource {
         if (next != shownPreview) {
             shownPreview = next;
             previewData = GpuEditorPreview.data(next, state.tool() == BoardEditorSession.Tool.ERASE,
-                  state.activeBrush().label(), (coords, hex) -> terrain.preview(board, coords, hex));
+                  state.activeBrush(), state.drawsRoutes(), (coords, hex) -> terrain.preview(board, coords, hex,
+                        at -> next.after().getOrDefault(at, board.getHex(at))));
         }
         return previewData;
     }

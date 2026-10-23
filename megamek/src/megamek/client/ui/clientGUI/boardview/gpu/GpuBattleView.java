@@ -457,6 +457,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (boardPrint != null) { boardPrint.dispose(); boardPrint = null; }
         GpuGlsl.linkOffscreen(null);
         if (offscreenLinks != null) { offscreenLinks.dispose(); offscreenLinks = null; }
+        if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         // Join the terrain worker before releasing the model buffers it borrows.
         if (terrain != null) { terrain.dispose(); terrain = null; }
         if (fireControl != null) { fireControl.dispose(); fireControl = null; }
@@ -468,7 +469,6 @@ class GpuBattleView extends ApplicationAdapter {
         if (hexText != null) { hexText.dispose(); hexText = null; }
         if (hexGrid != null) { hexGrid.dispose(); hexGrid = null; }
         if (traceOverlay != null) { traceOverlay.dispose(); traceOverlay = null; }
-        if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         if (tethers != null) { tethers.dispose(); tethers = null; }
         if (tetherShader != null) { GpuShaderManager.dispose(tetherShader); tetherShader = null; }
@@ -876,6 +876,9 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
               ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
+        if (source.isEditor()) {
+            editorPreview.prepare(scene, terrain, editorPreviewShown() ? source.editorPreview() : GpuEditorPreview.Data.NONE);
+        }
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, units);
         renderStage("cloud transmission");

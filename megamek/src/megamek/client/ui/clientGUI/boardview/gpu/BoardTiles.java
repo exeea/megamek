@@ -74,9 +74,16 @@ final class BoardTiles implements AutoCloseable {
      * so the board's own tile there is captured anew from the board.
      */
     BoardScene.Tile preview(Board board, Coords coords, Hex hex) {
+        return preview(board, coords, hex, board::getHex);
+    }
+
+    /** Preview neighbours come from the same pending edit, including rail corridors and ground clearance. */
+    BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending) {
+        if (hex == null) { hex = pending.apply(coords); }
+        if (hex == null) { return null; }
         artwork.invalidate(coords);
         try {
-            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, new BoardScene.PixelPool(), board::getHex);
+            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, new BoardScene.PixelPool(), pending);
         } finally { artwork.invalidate(coords); }
     }
 
