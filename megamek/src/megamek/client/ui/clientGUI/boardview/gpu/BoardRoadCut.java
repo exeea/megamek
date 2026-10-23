@@ -656,8 +656,9 @@ final class BoardRoadCut {
             }
         });
         // Cut faces along every trace of the reserved ground's boundary on this face: between kept and reserved parts,
-        // and where the ground kept on both sides passes under the road's edge, a fill face up to it.
-        for (Segment s : wall == null ? List.<Segment>of() : sweep.segments()) {
+        // and where the ground kept on both sides passes under the road's edge, a fill face up to it. An upright face has
+        // no side in plan: a cut face from it would only lie in its own plane.
+        for (Segment s : wall == null || upright ? List.<Segment>of() : sweep.segments()) {
             float ms = (s.ax() + s.bx()) / 2, mt = (s.ay() + s.by()) / 2;
             float ns = -(s.by() - s.ay()), nt = s.bx() - s.ax(), norm = (float) Math.hypot(ns, nt);
             if (norm < 1e-9f) { continue; }
@@ -1033,12 +1034,15 @@ final class BoardRoadCut {
      */
     private static Part beside(Sweep sweep, Segment s, boolean left) {
         float ms = (s.ax() + s.bx()) / 2, mt = (s.ay() + s.by()) / 2;
-        if (s.ay() == s.by()) {
-            // A level segment bounds the rows above and below it.
+        if (Math.abs(s.by() - s.ay()) <= 1e-3f * Math.abs(s.bx() - s.ax())) {
+            // A level segment, or one so nearly level that its own rows hold only slivers, bounds the rows above and
+            // below it.
             boolean above = left == s.bx() > s.ax();
+            float y = above ? s.high() : s.low();
             for (Part part : sweep.parts()) {
-                if ((above ? part.bottom() : part.top()) == s.ay() && ms >= part.left().x(s.ay())
-                      && ms <= part.right().x(s.ay())) { return part; }
+                if ((above ? part.bottom() : part.top()) == y && ms >= part.left().x(y) && ms <= part.right().x(y)) {
+                    return part;
+                }
             }
             return null;
         }

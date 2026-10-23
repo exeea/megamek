@@ -2337,11 +2337,14 @@ final class BoardSurface {
         return grades;
     }
 
-    /** The ground a hex owns: its lattice outline. */
-    private static Area cell(Coords coords) {
+    /**
+     * The ground a hex owns: its lattice outline, fitted to concrete as its top is (BoardConcrete#corner), so the road a
+     * hex meshes covers the top it replaces. A shore's move is not: the water's own shore takes the ground it frees.
+     */
+    private static Area cell(BoardScene scene, Coords coords, boolean fitted) {
         Path2D.Float outline = new Path2D.Float();
         for (int k = 0; k < 6; k++) {
-            Vector3 corner = BoardGeometry.corner(coords, 0, k);
+            Vector3 corner = fitted ? BoardConcrete.of(scene).corner(coords, k) : BoardGeometry.corner(coords, 0, k);
             if (k == 0) { outline.moveTo(corner.x, corner.y); } else { outline.lineTo(corner.x, corner.y); }
         }
         outline.closePath();
@@ -2373,7 +2376,7 @@ final class BoardSurface {
             // its bed and water stay as they are.
             var grades = grades(false);
             if (!grades.isEmpty() && natural()) {
-                var cut = new BoardRoadCut(new Area(), cell(tile.coords()), center.z, grades, boardEdges(scene, tile));
+                var cut = new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), center.z, grades, boardEdges(scene, tile));
                 List<Face> shore = faces.stream().filter(face -> face.finish() == Finish.TOP).toList();
                 List<Face> kept = cut.clip(shore, relief, cutFaces(retainingWalls), cutFaces(pouredWalls), roadAround(),
                       null, true, true);
@@ -2414,7 +2417,7 @@ final class BoardSurface {
             level = next == null || next.elevation() == tile.elevation() && !next.liquid().present();
         }
         if (level) { return null; }
-        return new BoardRoadCut(new Area(), cell(tile.coords()), BoardGeometry.center(tile.coords(), tile.groundLevel()).z,
+        return new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), BoardGeometry.center(tile.coords(), tile.groundLevel()).z,
               grades, boardEdges(scene, tile));
     }
 
@@ -2462,7 +2465,7 @@ final class BoardSurface {
         if (bank != null && natural()) { walls = bank.conform(walls, floor); }
         var grades = grades(false);
         if (grades.isEmpty()) { return walls; }
-        var cut = new BoardRoadCut(new Area(), cell(tile.coords()), center.z, grades, boardEdges(scene, tile));
+        var cut = new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), center.z, grades, boardEdges(scene, tile));
         List<Face> curtains = new ArrayList<>();
         pouredWalls.subList(pouredTop, pouredWalls.size()).clear();
         List<Face> result = new ArrayList<>(cut.clip(walls, relief, cutFaces(curtains), cutFaces(pouredWalls),
@@ -2485,7 +2488,7 @@ final class BoardSurface {
     private boolean reservedTop() {
         var grades = grades(true);
         if (grades.isEmpty()) { return false; }
-        Area cell = cell(tile.coords());
+        Area cell = cell(scene, tile.coords(), false);
         var cut = new BoardRoadCut(cell, cell, center.z, grades, boardEdges(scene, tile));
         if (!cut.reserves() || !cut.graded()) { return false; }
         cut.mesh(faces, (topA, lowA, topB, lowB, fx, fy) -> relief.cutWall(topA, lowA, topB, lowB, fx, fy, retainingWalls));
