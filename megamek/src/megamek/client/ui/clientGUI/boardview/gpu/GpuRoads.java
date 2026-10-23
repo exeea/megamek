@@ -266,11 +266,24 @@ final class GpuRoads {
     /** How far, in metres, a road ending on a cliff's top runs on past its rim: its asphalt there is mostly gravel. */
     private static final float CRUMBLE = 3.5f;
 
-    /** The paint of a road, worn out towards the ends {@link #painted} gives it on cliff tops. */
-    static List<Patch> patches(BoardScene.Tile tile, BoardRoad painted, BoardRoad road) {
-        var patches = patches(tile, painted);
+    /**
+     * The paint of a road, worn out towards the ends {@link #painted} gives it on cliff tops. A road built in concrete
+     * (BoardRoadGrade#poured) stands on its cast base, whose top shows beside the paint.
+     */
+    static List<Patch> patches(BoardScene scene, BoardScene.Tile tile, BoardRoad painted, BoardRoad road) {
+        var patches = new ArrayList<>(patches(tile, painted));
+        var grade = BoardRoadGrade.of(scene, tile, true);
+        if (grade != null && grade.poured()) {
+            float scale = BoardGeometry.hexScale();
+            Area base = grade.region().createTransformedArea(new AffineTransform(1 / scale, 0, 0, 1 / scale,
+                  -BoardGeometry.centerX(tile.coords()) / scale, -BoardGeometry.centerY(tile.coords()) / scale));
+            patches.add(new Patch(base, "concrete", Color.WHITE, 1, CAST_LIFT, null));
+        }
         return painted == road ? patches : bare(patches, painted, paved(tile.road()));
     }
+
+    /** A cast base's lift: over the loose verge, under the carriageway's own paint. */
+    private static final float CAST_LIFT = .03f;
 
     /** Paint ending on bare ground: a grounded material apron, the road's own paint fading out over it. */
     private static List<Patch> bare(List<Patch> patches, BoardRoad road, boolean paved) {

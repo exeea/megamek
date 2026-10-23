@@ -3624,7 +3624,7 @@ final class GpuTerrain implements Disposable {
                 var source = scene.tile(shared.coords());
                 // A road ending on a cliff's top wears out to gravel at the rim (Enhanced).
                 BoardRoad road = columns ? shared : GpuRoads.painted(scene, source, shared);
-                for (var patch : GpuRoads.patches(source, road, shared)) {
+                for (var patch : GpuRoads.patches(scene, source, road, shared)) {
                     check.run();
                     road.clipPaint(patch.shape());
                     var triangles = GpuRoads.drape(source, surface, patch);
