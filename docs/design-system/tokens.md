@@ -484,6 +484,32 @@ too, so screen readers and other look and feels still get it.
 
 **libGDX.** Nothing new yet; hud-v3's tooltip stays until the developers accept the system.
 
+## Scrollbars
+
+Scroll bars stay quiet until they're needed: no track or arrow buttons of their own, so a bar sits on the content it
+scrolls instead of drawing a stripe beside it.
+
+| Part / state | Look |
+| --- | --- |
+| Bar | 10 wide (`sm` + 2 × `xxs`), the color of the scrolled content; the corner between two bars matches it |
+| Thumb | An `sm` (6) wide pill, `xxs` (2) from the bar's sides, at least `control.sm` (28) long; `border.control` |
+| Hover | The pointer anywhere on the bar shows the rail, a `surface.hover` pill over the content, and turns the thumb `text.muted` |
+| Dragging | The thumb turns `text.secondary` |
+| Disabled | No thumb and no rail |
+
+- **The thumb stays visible on every surface**: `border.control` keeps at least 3:1 against the base, panel, input and
+  popover surfaces in both modes.
+- **Wheel and keys** are Swing's. Smooth scrolling stays on; it follows the reduce-motion setting once the motion step
+  lands.
+
+**Swing.** The MegaMek themes draw every `JScrollBar` and `JScrollPane` this way through
+[`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java) and
+[`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java), so existing views get
+them without changes. A bar takes the color of an opaque view, otherwise the viewport's; a transparent scroll pane
+shows what's behind it.
+
+**libGDX.** Nothing new yet; hud-v3's 4-wide list knob stays until the developers accept the system.
+
 ## Code
 
 | Class | Role |
@@ -508,10 +534,11 @@ too, so screen readers and other look and feels still get it.
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
+| [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens; lists, trees, menus and tooltips are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+styles read the tokens; lists, trees, menus, tooltips and scrollbars are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
 Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
 only once the developers accept the system.

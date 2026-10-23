@@ -32,6 +32,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JRadioButton;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
@@ -61,6 +62,8 @@ import org.junit.jupiter.api.Test;
 class TokenLafDefaultsTest {
     /** Keys FlatLaf styles through the component's own setters rather than the UI delegate. */
     private static final Set<String> COMPONENT_KEYS = Set.of("background", "foreground", "margin", "font");
+    /** Washes painted over whatever content lies under them rather than as a component's background. */
+    private static final Set<String> TRANSLUCENT_KEYS = Set.of("ScrollBar.hoverTrackColor");
 
     private final DesignTokens tokens = DesignTokens.shipped();
 
@@ -78,7 +81,7 @@ class TokenLafDefaultsTest {
     void everyColorValueIsOpaque() {
         for (Mode mode : Mode.values()) {
             for (Map.Entry<String, String> entry : TokenLafDefaults.of(mode).entrySet()) {
-                if (entry.getValue().startsWith("#")) {
+                if (entry.getValue().startsWith("#") && !TRANSLUCENT_KEYS.contains(entry.getKey())) {
                     assertEquals(7, entry.getValue().length(), entry.getKey() + " must be opaque");
                 }
             }
@@ -426,6 +429,46 @@ class TokenLafDefaultsTest {
         assertEquals(List.of("Units that moved", "this turn", "stay"), lines);
         for (String line : TokenToolTipUI.wrap("Supercalifragilistic", metrics, metrics.stringWidth("Super"))) {
             assertTrue(metrics.stringWidth(line) <= metrics.stringWidth("Super"), line);
+        }
+    }
+
+    @Test
+    void scrollBarsSitOnTheContentTheyScroll() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                assertColor(defaults, "ScrollBar.thumb", "border.control", mode);
+                assertColor(defaults, "ScrollBar.hoverThumbColor", "text.muted", mode);
+                assertColor(defaults, "ScrollBar.pressedThumbColor", "text.secondary", mode);
+                assertColor(defaults, "ScrollBar.hoverTrackColor", "surface.hover", mode);
+                assertFalse(defaults.getBoolean("ScrollBar.showButtons"), "no arrow buttons");
+                // The thumb stays visible on every surface a scrolled view uses
+                int thumb = tokens.color("border.control", mode);
+                for (String surface : List.of("surface.base", "surface.panel", "surface.input", "surface.popover")) {
+                    double contrast = ColorMath.contrast(thumb, tokens.color(surface, mode));
+                    assertTrue(contrast >= 3, mode + " thumb on " + surface + " " + contrast);
+                }
+
+                JList<String> list = new JList<>(new String[] { "Atlas AS7-D" });
+                JScrollPane scroll = new JScrollPane(list);
+                assertInstanceOf(TokenScrollPaneUI.class, scroll.getUI());
+                JScrollBar bar = scroll.getVerticalScrollBar();
+                assertInstanceOf(TokenScrollBarUI.class, bar.getUI());
+                assertFalse(bar.isOpaque(), "the scroll pane paints behind the bar");
+                assertEquals(list.getBackground(), TokenScrollBarUI.contentBackground(scroll));
+                assertEquals(list.getBackground(), TokenScrollBarUI.contentBackground(bar));
+                int width = Math.round(tokens.space().get("sm") + 2 * tokens.space().get("xxs"));
+                assertEquals(UIScale.scale(width), bar.getPreferredSize().width);
+                list.setOpaque(false);
+                assertEquals(scroll.getViewport().getBackground(), TokenScrollBarUI.contentBackground(scroll));
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
         }
     }
 

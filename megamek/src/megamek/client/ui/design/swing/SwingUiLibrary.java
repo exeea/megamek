@@ -69,6 +69,7 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
@@ -387,6 +388,10 @@ public final class SwingUiLibrary extends JFrame {
         page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
         page.add(paragraph(Messages.getString("UiLibrary.tooltips.note"), "small", "text.muted"));
         page.add(tooltipSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.scrollbars")));
+        page.add(paragraph(Messages.getString("UiLibrary.scrollbars.note"), "small", "text.muted"));
+        page.add(scrollbarSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         JTable table = new JTable(new Object[][] {
@@ -724,7 +729,7 @@ public final class SwingUiLibrary extends JFrame {
     }
 
     /** Adds {@code view} in its scroll pane under a caption, at {@code column} of caption row {@code row}. */
-    private void addListSample(JPanel samples, int column, int row, String captionKey, JComponent view) {
+    private JScrollPane addListSample(JPanel samples, int column, int row, String captionKey, JComponent view) {
         GridBagConstraints cell = new GridBagConstraints();
         cell.anchor = GridBagConstraints.NORTHWEST;
         cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
@@ -735,6 +740,37 @@ public final class SwingUiLibrary extends JFrame {
         JScrollPane scroll = TokenLists.scroll(view);
         scroll.setPreferredSize(new Dimension(scaleForGUI(210), scaleForGUI(170)));
         samples.add(scroll, cell);
+        return scroll;
+    }
+
+    /**
+     * Scroll bars on a list in each state, and both bars on text that runs past both edges. Hover and dragging are
+     * frozen; the others stay live.
+     */
+    private JComponent scrollbarSamples() {
+        String[] units = { "Atlas AS7-D", "Awesome AWS-8Q", "BattleMaster BLR-1G", "Catapult CPLT-C1",
+                           "Commando COM-2D", "Griffin GRF-1N", "Hunchback HBK-4G", "Locust LCT-1V",
+                           "Marauder MAD-3R", "Phoenix Hawk PXH-1", "Rifleman RFL-3N", "Wasp WSP-1A" };
+        JPanel samples = new JPanel(new GridBagLayout());
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+
+        addListSample(samples, 0, 0, "UiLibrary.scrollbars.rest", new JList<>(units));
+        JScrollPane hover = addListSample(samples, 1, 0, "UiLibrary.scrollbars.hover", new JList<>(units));
+        hover.getVerticalScrollBar().putClientProperty(TokenScrollBarUI.FROZEN_STATE, TokenScrollBarUI.HOVER);
+        JScrollPane pressed = addListSample(samples, 2, 0, "UiLibrary.scrollbars.pressed", new JList<>(units));
+        pressed.getVerticalScrollBar().putClientProperty(TokenScrollBarUI.FROZEN_STATE, TokenScrollBarUI.PRESSED);
+        SwingUtilities.invokeLater(() -> pressed.getVerticalScrollBar().setValue(scaleForGUI(80)));
+
+        JTextArea log = new JTextArea(Messages.getString("UiLibrary.scrollbars.log"));
+        log.setEditable(false);
+        addListSample(samples, 3, 0, "UiLibrary.scrollbars.both", log);
+
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 4;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
     }
 
     /** Selects of each kind in each state; hover and focus are frozen, the rest stay live. */

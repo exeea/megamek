@@ -394,9 +394,24 @@ public final class TokenLafDefaults {
         put("Slider.thumbBorderColor", accent);
         put("Slider.focusedThumbBorderColor", base);
         put("Slider.disabledThumbBorderColor", color("text.disabled"));
+        // Scrollbars (TokenScrollBarUI, TokenScrollPaneUI): no track or arrows of their own, so a bar shows the content
+        // it scrolls; an sm pill thumb xxs from the bar's sides, at least control.sm long. The pointer anywhere on the
+        // bar shows the rail as a translucent wash over that content and brightens the thumb.
+        values.put("ScrollBarUI", TokenScrollBarUI.class.getName());
+        values.put("ScrollPaneUI", TokenScrollPaneUI.class.getName());
+        int thumbInset = Math.round(tokens.space().get("xxs"));
+        int thumbWidth = Math.round(tokens.space().get("sm"));
+        values.put("ScrollBar.width", number(thumbWidth + 2 * thumbInset));
+        values.put("ScrollBar.thumbInsets", thumbInset + "," + thumbInset + "," + thumbInset + "," + thumbInset);
+        values.put("ScrollBar.minimumThumbSize",
+              thumbWidth + "," + number(tokens.size().get("control.sm") - 2 * thumbInset));
+        values.put("ScrollBar.thumbArc", "999");
+        values.put("ScrollBar.trackArc", "999");
+        values.put("ScrollBar.showButtons", "false");
+        values.put("ScrollBar.hoverThumbWithTrack", "true");
         put("ScrollBar.track", base);
         put("ScrollBar.thumb", color("border.control"));
-        put("ScrollBar.hoverTrackColor", over(hover, base));
+        put("ScrollBar.hoverTrackColor", hover);
         put("ScrollBar.hoverThumbColor", color("text.muted"));
         put("ScrollBar.pressedThumbColor", color("text.secondary"));
 
