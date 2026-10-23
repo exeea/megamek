@@ -306,6 +306,7 @@ public final class UiTheme implements Disposable {
         icons();
         tokenFields();
         tokenChoices();
+        tokenOptions();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -754,6 +755,72 @@ public final class UiTheme implements Disposable {
         style.mark = token(tokens.color("text.onAccent", mode));
         style.thumb = token(tokens.color("text.secondary", mode));
         style.disabledMark = style.disabledText;
+        skin.add("default", style);
+    }
+
+    /** The colors of tabs and segmented controls; their faces are the {@code tab-*} and {@code seg-*} drawables. */
+    public static final class OptionStyle {
+        /** An option at rest. */
+        public Color text;
+        /** An option under the pointer, pressed or selected. */
+        public Color activeText;
+        public Color disabledText;
+        /** The selected tab's underline. */
+        public Color underline;
+        public Color disabledUnderline;
+        /** The hairline under a tab strip and the dividers between unselected sections. */
+        public Color hairline;
+        /** The focus ring inside a tab. */
+        public Color ring;
+        /** A one-unit white texel, tinted for underlines and hairlines. */
+        public Drawable line;
+    }
+
+    /**
+     * Tabs and segmented controls in dark mode (docs/design-system/tokens.md, Tabs and Segmented control). A tab is a
+     * label on the window surface with a wash under the pointer and a violet underline when selected. A segmented
+     * control is one raised frame; its selected section has a violet wash and edge, like a selected toggle, drawn over
+     * the frame edge.
+     */
+    private void tokenOptions() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        int raised = tokens.color("surface.raised", mode);
+        int hover = tokens.color("surface.hover", mode);
+        int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
+        int selected = tokens.color("selected.background", mode);
+        int selectedDisabled = ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2);
+        Color control = token(tokens.color("border.control", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color violet = token(tokens.color("selected.primary", mode));
+        Color ring = token(tokens.color("focus.ring", mode));
+        float border = tokens.size().get("border");
+        float focus = tokens.size().get("focus.width");
+        float radius = tokens.radius().get("md");
+
+        // Tabs: a square wash under the pointer; pressed looks the same, as in FlatLaf
+        skin.add("tab-over", skin.newDrawable("white", token(hover)), Drawable.class);
+
+        box("seg-frame", token(raised), control, border, radius, null, 0, 0, 0);
+        box("seg-frame-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
+        // A section's wash sits inside the frame edge, so its corners follow the edge's inner radius
+        float inner = Math.max(radius - border, 0);
+        box("seg-over", token(hover), null, 0, inner, null, 0, 0, 0);
+        box("seg-down", token(pressed), null, 0, inner, null, 0, 0, 0);
+        box("seg-on", token(ColorMath.over(selected, raised)), violet, border, radius, null, 0, 0, 0);
+        box("seg-on-disabled", token(ColorMath.over(selectedDisabled, raised)), subtle, border, radius, null, 0, 0,
+              0);
+        box("seg-focus", Color.CLEAR, ring, focus, radius, null, 0, 0, 0);
+
+        OptionStyle style = new OptionStyle();
+        style.text = token(tokens.color("text.secondary", mode));
+        style.activeText = token(tokens.color("text.primary", mode));
+        style.disabledText = token(tokens.color("text.disabled", mode));
+        style.underline = violet;
+        style.disabledUnderline = subtle;
+        style.hairline = subtle;
+        style.ring = ring;
+        style.line = skin.newDrawable("white");
         skin.add("default", style);
     }
 

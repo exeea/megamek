@@ -264,9 +264,21 @@ public final class TokenLafDefaults {
         // Focus is a ring inside the selected tab (TokenTabbedPaneUI), not a tint that reads like hover
         put("TabbedPane.focusColor", base);
         values.put("TabbedPaneUI", TokenTabbedPaneUI.class.getName());
+        // Tabs: secondary labels that brighten under the pointer; the selected tab has a violet underline whether or
+        // not the strip has focus. Plain tab panes are compact; TokenTabs makes regular ones.
         put("TabbedPane.contentAreaColor", color("border.subtle"));
-        put("TabbedPane.inactiveUnderlineColor", color("border.control"));
+        put("TabbedPane.foreground", color("text.secondary"));
+        put("TabbedPane.hoverForeground", color("text.primary"));
+        put("TabbedPane.selectedForeground", color("text.primary"));
+        put("TabbedPane.disabledForeground", color("text.disabled"));
+        put("TabbedPane.underlineColor", color("selected.primary"));
+        put("TabbedPane.inactiveUnderlineColor", color("selected.primary"));
         put("TabbedPane.disabledUnderlineColor", color("border.subtle"));
+        values.put("TabbedPane.tabSelectionHeight", number(tokens.size().get("selection.width")));
+        values.put("TabbedPane.contentSeparatorHeight", number(tokens.size().get("border")));
+        values.put("TabbedPane.tabHeight", number(tokens.size().get("control.sm")));
+        int tabSide = Math.round(tokens.space().get("md"));
+        values.put("TabbedPane.tabInsets", "0," + tabSide + ",0," + tabSide);
         put("PopupMenu.borderColor", color("border.subtle"));
         put("MenuBar.borderColor", color("border.subtle"));
         put("ToolTip.background", popover);
@@ -313,6 +325,7 @@ public final class TokenLafDefaults {
         // Button captions use the label style's medium weight
         values.put("Button.font", medium);
         values.put("ToggleButton.font", medium);
+        values.put("TabbedPane.font", medium);
         return values;
     }
 

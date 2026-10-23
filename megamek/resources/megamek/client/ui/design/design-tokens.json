@@ -54,7 +54,7 @@
   "size": {
     "control.sm": 28, "control.md": 36, "control.lg": 46,
     "icon.sm": 16, "icon.md": 20, "icon.lg": 24,
-    "border": 1, "focus.width": 2, "focus.gap": 1,
+    "border": 1, "focus.width": 2, "focus.gap": 1, "selection.width": 2,
     "tick.control": 8, "tick.panel": 13, "tick.width": 2
   },
   "opacity": { "tint.hover": 0.16, "tint.pressed": 0.28 },

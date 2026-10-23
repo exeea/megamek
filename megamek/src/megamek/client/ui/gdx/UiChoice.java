@@ -55,7 +55,8 @@ public class UiChoice extends Button {
             case SWITCH -> "choice-thumb";
         });
         dash = kit.skin.getDrawable("icon-remove");
-        label = kit.label(text, "hud-body", 13, colors.text);
+        // White style color: draw() sets the label's own color, which Label multiplies by the style's
+        label = kit.label(text, "hud-body", 13, Color.WHITE);
         float ring = UiTheme.CHOICE_RING;
         float width = kind == Kind.SWITCH ? Math.round(UiTheme.CHOICE_SIZE * UiTheme.SWITCH_LENGTH)
               : UiTheme.CHOICE_SIZE;

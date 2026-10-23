@@ -137,6 +137,7 @@ variable font. Both platforms therefore draw the same outlines from one source.
 | Control height | sm 28, md 36, lg 46 |
 | Icon | sm 16, md 20, lg 24 |
 | Border | 1 |
+| Selection | 2 (the selected tab's underline) |
 | Focus ring | 2 wide inside the edge; 1 gap around small indicators; `focus.ring` |
 | Corner ticks | 8 on controls, 13 on panels; 2 wide |
 | Opacity | tint.hover 0.16, tint.pressed 0.28 (a status color washed over a face) |
@@ -226,7 +227,9 @@ gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; ali
 | `hud-delete-icon`, `hud-icon` | icon |
 | `hud-mini`, `hud-utility-small` | secondary, compact |
 | `hud-utility`, `hud-utility-narrow`, `hud-utility-row` | special (the icon-above-label layout stays a HUD composition) |
-| `hud-seg`, `hud-pill`, `hud-tab`, `hud-tab-caps`, `hud-row`, `hud-menu-row`, `hud-select`, `hud-select-inline` | Not buttons: segmented control, tabs, list row, menu item and select come later |
+| `hud-tab`, `hud-tab-caps` | Not buttons: [tabs](#tabs) |
+| `hud-seg`, `hud-pill` | Not buttons: the [segmented control](#segmented-control) |
+| `hud-row`, `hud-menu-row`, `hud-select`, `hud-select-inline` | Not buttons: list row, menu item and select come later |
 
 The hud-v3 styles stay until their views move; the libGDX gallery lists them under "hud-v3 button styles (to
 migrate)".
@@ -311,6 +314,59 @@ the `UiTheme.CHOICE_STATES`), its mark and the focus ring. `UiKit` builds them: 
 keyboard focus, fires a `ChangeEvent`; `setChecked` and `mixed(true)` from code fire none. `hovered`, `held` and
 `focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` stays until its views move.
 
+## Tabs
+
+Labels on the window surface that switch between the pages of one view.
+
+| State | Look |
+| --- | --- |
+| Rest | `text.secondary` label; a 1-wide `border.subtle` hairline runs under the whole strip |
+| Hover | `text.primary` label (libGDX adds the `surface.hover` wash) |
+| Selected | `text.primary` label and a `selection.width` (2) `selected.primary` underline, with or without focus |
+| Focus | The ring inside the selected tab (see [Focus](#focus)) |
+| Disabled | `text.disabled` labels and a `border.subtle` underline |
+
+- **Sizes.** Compact (`control.sm`, 28 high, `md` side padding) is the default for every tab pane, since most sit in
+  panels; regular (`control.md`, 36, `lg` padding) is for a window's top-level pages.
+- **Labels** are sentence case in Roboto Medium, like buttons; hud-v3's all-caps tabs go.
+- **Not by color alone.** The underline marks the selected tab as well as the brighter label.
+
+## Segmented control
+
+Two to five short, mutually exclusive options in one raised frame, for switching a view or a mode in place (map, list
+or cards). Use tabs to switch between pages, and radio buttons for a choice in a form.
+
+| State | Look |
+| --- | --- |
+| Rest | `surface.raised` frame with a `border.control` edge; `border.subtle` dividers; `text.secondary` labels |
+| Hover / pressed | The `surface.hover` wash (twice for pressed) on the section, `text.primary` label |
+| Selected | `selected.background` wash and `selected.primary` edge on the section, as a selected toggle; the dividers beside it give way |
+| Focus | The ring on the selected section, over its edge |
+| Disabled | `border.subtle` edges, `text.disabled` labels, the selected wash at half strength |
+
+- **Sizes** match buttons: regular `control.md` (36) with `lg` padding, compact `control.sm` (28) with `md`.
+- **Width.** The sections share the width equally, the widest label setting it.
+- **Keys.** Tab reaches the control as one stop; Left and Right move the selection, which applies at once.
+
+**Swing.** The MegaMek themes give every `JTabbedPane` the token tabs, compact, so existing views get them without
+changes; [`TokenTabs`](../../megamek/src/megamek/client/ui/design/swing/TokenTabs.java) makes a pane of either size
+(`tabs(size)`, `size(tabs, size)`). FlatLaf has no pressed tab color, so a pressed tab looks hovered.
+[`TokenSegmented`](../../megamek/src/megamek/client/ui/design/swing/TokenSegmented.java) is the segmented control:
+`new TokenSegmented(size, labels...)`, `getSelectedIndex()`, `setSelectedIndex(i)` (fires nothing) and
+`addActionListener` (user changes only, with the label as the command). Its sections are toggle buttons in a button
+group, announced as radio buttons.
+
+**libGDX.** [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java) and
+[`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) share
+[`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), which keeps the selection and draws the
+faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
+[`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers. `UiKit` builds them:
+`tokenTabs(compact, labels...)` and `tokenSegmented(compact, labels...)`. A click, or Left and Right while the bar has
+keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
+`focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no Tab
+traversal yet. hud-v3's `UiKit.segmented` and the `hud-tab`, `hud-seg` and `hud-pill` styles stay until their views
+move.
+
 ## Code
 
 | Class | Role |
@@ -329,9 +385,11 @@ keyboard focus, fires a `ChangeEvent`; `setChecked` and `mixed(true)` from code 
 | [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java), [`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java) | The libGDX inputs and form field |
 | [`TokenChoices`](../../megamek/src/megamek/client/ui/design/swing/TokenChoices.java), [`TokenSwitchIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenSwitchIcon.java) | The Swing check box, radio button and switch |
 | [`UiChoice`](../../megamek/src/megamek/client/ui/gdx/UiChoice.java) | The libGDX check box, radio button and switch |
+| [`TokenTabs`](../../megamek/src/megamek/client/ui/design/swing/TokenTabs.java), [`TokenSegmented`](../../megamek/src/megamek/client/ui/design/swing/TokenSegmented.java) | The Swing tabs and segmented control |
+| [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
-Outside the galleries, only the two Swing themes and the libGDX button, input and choice styles read the tokens. The
-Swing themes are selectable but not the default, and no view uses the new buttons, inputs or choices yet. Next come
-tabs, the segmented control and select, a `UiTheme` rename pass so hud-v3 reads the same roles, and then dialogs.
+Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab and segmented styles read
+the tokens. The Swing themes are selectable but not the default, and no view uses the new controls yet. Next come
+select with a shared popup list, a `UiTheme` rename pass so hud-v3 reads the same roles, and then dialogs.

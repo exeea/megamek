@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Insets;
+import java.awt.event.ActionEvent;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -20,18 +22,22 @@ import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JPasswordField;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
+import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.UIDefaults;
 import javax.swing.UIManager;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.ui.FlatButtonUI;
 import com.formdev.flatlaf.ui.FlatStylingSupport;
@@ -198,6 +204,83 @@ class TokenLafDefaultsTest {
                 UIManager.setLookAndFeel(previous);
             }
         }
+    }
+
+    @Test
+    void tabsAndSegmentedControlsFollowTheTokens() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                // The underline stays violet when the strip loses focus
+                assertColor(defaults, "TabbedPane.underlineColor", "selected.primary", mode);
+                assertColor(defaults, "TabbedPane.inactiveUnderlineColor", "selected.primary", mode);
+                assertColor(defaults, "TabbedPane.disabledUnderlineColor", "border.subtle", mode);
+                assertColor(defaults, "TabbedPane.foreground", "text.secondary", mode);
+                assertColor(defaults, "TabbedPane.hoverForeground", "text.primary", mode);
+                assertColor(defaults, "TabbedPane.selectedForeground", "text.primary", mode);
+                assertColor(defaults, "TabbedPane.disabledForeground", "text.disabled", mode);
+                assertEquals(Math.round(tokens.size().get("selection.width")),
+                      defaults.getInt("TabbedPane.tabSelectionHeight"));
+                assertEquals(TokenButtons.Size.COMPACT.height(), defaults.getInt("TabbedPane.tabHeight"));
+                JTabbedPane regular = TokenTabs.tabs(TokenButtons.Size.REGULAR);
+                assertEquals(TokenButtons.Size.REGULAR.height(),
+                      regular.getClientProperty(FlatClientProperties.TABBED_PANE_TAB_HEIGHT));
+                int side = Math.round(tokens.space().get("lg"));
+                assertEquals(new Insets(0, side, 0, side),
+                      regular.getClientProperty(FlatClientProperties.TABBED_PANE_TAB_INSETS));
+
+                for (TokenButtons.Size size : TokenButtons.Size.values()) {
+                    TokenSegmented segmented = new TokenSegmented(size, "Map", "List", "Cards");
+                    Dimension preferred = segmented.getPreferredSize();
+                    assertEquals(UIUtil.scaleForGUI(size.height()), preferred.height, size.name());
+                    segmented.setSize(preferred);
+                    segmented.doLayout();
+                    assertEquals(segmented.segment(0).getWidth(), segmented.segment(2).getWidth(), "equal widths");
+                }
+
+                TokenSegmented segmented = new TokenSegmented(TokenButtons.Size.COMPACT, "Map", "List", "Cards");
+                assertEquals(AccessibleRole.RADIO_BUTTON,
+                      segmented.segment(1).getAccessibleContext().getAccessibleRole());
+                assertTrue(segmented.isFocusTraversalPolicyProvider(), "one Tab stop, the selected section");
+                assertEquals(0, segmented.getSelectedIndex());
+                List<String> heard = new ArrayList<>();
+                segmented.addActionListener(event -> heard.add(event.getActionCommand()));
+                segmented.setSelectedIndex(2);
+                assertEquals(2, segmented.getSelectedIndex());
+                assertTrue(heard.isEmpty(), "setSelectedIndex is silent");
+                segmented.segment(0).doClick();
+                assertEquals(List.of("Map"), heard);
+                segmented.segment(0).doClick();
+                assertEquals(1, heard.size(), "clicking the selected section changes nothing");
+                assertTrue(segmented.segment(0).isSelected(), "the selection can't be cleared");
+
+                // Left and Right move the selection; there is nothing past either end
+                JToggleButton first = segmented.segment(0);
+                assertEquals("nextSegment", first.getInputMap(JComponent.WHEN_FOCUSED)
+                      .get(KeyStroke.getKeyStroke("RIGHT")));
+                press(first, "previousSegment");
+                assertEquals(0, segmented.getSelectedIndex());
+                press(first, "nextSegment");
+                assertEquals(1, segmented.getSelectedIndex());
+                assertEquals(List.of("Map", "List"), heard);
+                segmented.setEnabled(false);
+                assertFalse(segmented.segment(2).isEnabled());
+                press(segmented.segment(1), "nextSegment");
+                assertEquals(1, segmented.getSelectedIndex(), "a disabled control ignores keys");
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    private static void press(JComponent component, String action) {
+        component.getActionMap().get(action).actionPerformed(new ActionEvent(component,
+              ActionEvent.ACTION_PERFORMED, action));
     }
 
     private void assertUsesTokens(FlatLaf lookAndFeel, Mode mode) {

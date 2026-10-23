@@ -337,16 +337,19 @@ public final class SwingUiLibrary extends JFrame {
         page.add(ranges);
 
         page.add(heading(Messages.getString("UiLibrary.controls.tabs")));
-        JTabbedPane sampleTabs = new JTabbedPane();
-        for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB", "UiLibrary.controls.tabC")) {
-            JPanel tabBody = new JPanel(new BorderLayout());
-            tabBody.add(new JLabel(Messages.getString(key)), BorderLayout.CENTER);
-            tabBody.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(8), scaleForGUI(8),
-                  scaleForGUI(8)));
-            sampleTabs.addTab(Messages.getString(key), tabBody);
+        page.add(paragraph(Messages.getString("UiLibrary.tabs.note"), "small", "text.muted"));
+        for (TokenButtons.Size size : TokenButtons.Size.values()) {
+            JComponent gap = (JComponent) Box.createVerticalStrut(scaleForGUI(12));
+            gap.setAlignmentX(LEFT_ALIGNMENT);
+            page.add(gap);
+            page.add(text(Messages.getString("UiLibrary.buttons." + size.name().toLowerCase(Locale.ROOT)), "label",
+                  "text.secondary"));
+            page.add(tabSamples(size));
         }
-        sampleTabs.setAlignmentX(LEFT_ALIGNMENT);
-        page.add(sampleTabs);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.segmented")));
+        page.add(paragraph(Messages.getString("UiLibrary.segmented.note"), "small", "text.muted"));
+        page.add(segmentedMatrix());
 
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         JTable table = new JTable(new Object[][] {
@@ -551,6 +554,79 @@ public final class SwingUiLibrary extends JFrame {
         component.putClientProperty(FlatClientProperties.COMPONENT_FOCUS_OWNER,
               (Predicate<JComponent>) c -> true);
         return component;
+    }
+
+    /** Tab strips at {@code size}: a live one, one frozen in focus and a disabled one. */
+    private JComponent tabSamples(TokenButtons.Size size) {
+        JPanel samples = row(color("surface.base"));
+        for (String state : List.of("rest", "focus", "disabled")) {
+            JPanel sample = new JPanel(new BorderLayout());
+            sample.setOpaque(false);
+            sample.add(text(Messages.getString("UiLibrary.buttons.state." + state), "caption", "text.muted"),
+                  BorderLayout.NORTH);
+            JTabbedPane tabs = TokenTabs.tabs(size);
+            for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB",
+                  "UiLibrary.controls.tabC")) {
+                JPanel body = new JPanel(new BorderLayout());
+                body.add(new JLabel(Messages.getString(key)), BorderLayout.CENTER);
+                body.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(8), scaleForGUI(8),
+                      scaleForGUI(8)));
+                tabs.addTab(Messages.getString(key), body);
+            }
+            switch (state) {
+                case "focus" -> focused(tabs);
+                case "disabled" -> tabs.setEnabled(false);
+                default -> { }
+            }
+            // One strip, wide enough for its tabs; a wrapping tab pane in a flow row stacks them
+            tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+            tabs.setPreferredSize(new Dimension(scaleForGUI(280), tabs.getPreferredSize().height));
+            sample.add(tabs, BorderLayout.CENTER);
+            samples.add(sample);
+        }
+        return samples;
+    }
+
+    /**
+     * Segmented controls in every state, one column per size; the second section carries the frozen state and the "at
+     * rest" sample is live.
+     */
+    private JComponent segmentedMatrix() {
+        List<String> states = List.of("rest", "hover", "pressed", "focus", "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(8), scaleForGUI(4), scaleForGUI(8));
+        cell.gridy = 0;
+        matrix.add(Box.createHorizontalStrut(0), cell);
+        for (TokenButtons.Size size : TokenButtons.Size.values()) {
+            matrix.add(text(Messages.getString("UiLibrary.buttons." + size.name().toLowerCase(Locale.ROOT)),
+                  "caption", "text.muted"), cell);
+        }
+        for (String state : states) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.buttons.state." + state), "label", "text.primary"), cell);
+            for (TokenButtons.Size size : TokenButtons.Size.values()) {
+                TokenSegmented segmented = new TokenSegmented(size,
+                      Messages.getString("UiLibrary.segmented.optionA"),
+                      Messages.getString("UiLibrary.segmented.optionB"),
+                      Messages.getString("UiLibrary.segmented.optionC"));
+                switch (state) {
+                    case "hover" -> segmented.segment(1).setModel(new FrozenModel(true, false, false));
+                    case "pressed" -> segmented.segment(1).setModel(new FrozenModel(true, true, false));
+                    case "focus" -> focused(segmented.segment(1));
+                    case "disabled" -> segmented.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(segmented, cell);
+            }
+        }
+        cell.gridx = TokenButtons.Size.values().length + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
     }
 
     /**

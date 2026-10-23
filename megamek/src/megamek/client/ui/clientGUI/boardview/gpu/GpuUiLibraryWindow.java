@@ -38,6 +38,8 @@ import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
+import megamek.client.ui.gdx.UiSegmented;
+import megamek.client.ui.gdx.UiTabs;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Configuration;
@@ -234,6 +236,20 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         content.add(choiceNote).width(1100).padBottom(8).row();
         content.add(choiceMatrix()).row();
         content.add(choiceSamples()).padTop(6).row();
+        section(content, "UiLibrary.controls.tabs");
+        Label tabNote = kit.label(text("UiLibrary.tabs.note"), "hud-small", 11.5f, UiTheme.MUTED);
+        tabNote.setWrap(true);
+        content.add(tabNote).width(1100).padBottom(8).row();
+        for (boolean compact : new boolean[] { false, true }) {
+            content.add(kit.label(text(compact ? "UiLibrary.buttons.compact" : "UiLibrary.buttons.regular"),
+                  "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6).padBottom(6).row();
+            content.add(tabSamples(compact)).row();
+        }
+        section(content, "UiLibrary.controls.segmented");
+        Label segmentedNote = kit.label(text("UiLibrary.segmented.note"), "hud-small", 11.5f, UiTheme.MUTED);
+        segmentedNote.setWrap(true);
+        content.add(segmentedNote).width(1100).padBottom(8).row();
+        content.add(segmentedMatrix()).row();
         section(content, "UiLibrary.gdx.buttons");
         content.add(buttons()).row();
         section(content, "UiLibrary.gdx.controls");
@@ -496,6 +512,62 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         live.add(total);
         live.add(kit.toggleSwitch(text("UiLibrary.choices.autosave"), true));
         return live;
+    }
+
+    /** One tab strip per state at one size: at rest (live), focused (frozen) and disabled. */
+    private Table tabSamples(boolean compact) {
+        Table samples = new Table();
+        samples.defaults().left().top().padRight(24);
+        for (String state : List.of("rest", "focus", "disabled")) {
+            Table sample = new Table();
+            sample.defaults().left();
+            sample.add(kit.label(text("UiLibrary.buttons.state." + state), "hud-small", 11, UiTheme.MUTED))
+                  .padBottom(4).row();
+            UiTabs tabs = kit.tokenTabs(compact, text("UiLibrary.controls.tabA"), text("UiLibrary.controls.tabB"),
+                  text("UiLibrary.controls.tabC"));
+            switch (state) {
+                case "focus" -> tabs.option(0).focused(true);
+                case "disabled" -> tabs.setDisabled(true);
+                default -> { }
+            }
+            if (!state.equals("rest")) {
+                tabs.setTouchable(Touchable.disabled);
+            }
+            sample.add(tabs).width(280);
+            samples.add(sample);
+        }
+        return samples;
+    }
+
+    /** Segmented controls in every state, one column per size; the second section carries the frozen state. */
+    private Table segmentedMatrix() {
+        List<String> states = List.of("rest", "hover", "pressed", "focus", "disabled");
+        Table matrix = new Table();
+        matrix.defaults().left().padRight(24).padBottom(8);
+        matrix.add().width(110);
+        matrix.add(kit.label(text("UiLibrary.buttons.regular"), "hud-small", 11, UiTheme.MUTED));
+        matrix.add(kit.label(text("UiLibrary.buttons.compact"), "hud-small", 11, UiTheme.MUTED));
+        matrix.row();
+        for (String state : states) {
+            matrix.add(kit.label(text("UiLibrary.buttons.state." + state), "hud-medium", 12.5f, UiTheme.TEXT));
+            for (boolean compact : new boolean[] { false, true }) {
+                UiSegmented segmented = kit.tokenSegmented(compact, text("UiLibrary.segmented.optionA"),
+                      text("UiLibrary.segmented.optionB"), text("UiLibrary.segmented.optionC"));
+                switch (state) {
+                    case "hover" -> segmented.option(1).hovered(true);
+                    case "pressed" -> segmented.option(1).held(true);
+                    case "focus" -> segmented.option(1).focused(true);
+                    case "disabled" -> segmented.setDisabled(true);
+                    default -> { }
+                }
+                if (!state.equals("rest")) {
+                    segmented.setTouchable(Touchable.disabled);
+                }
+                matrix.add(segmented);
+            }
+            matrix.row();
+        }
+        return matrix;
     }
 
     private Table buttons() {

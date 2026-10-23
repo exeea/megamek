@@ -507,6 +507,16 @@ public final class UiKit {
         return group;
     }
 
+    /** Token tabs (docs/design-system/tokens.md, Tabs), the first selected; compact ones are for panels. */
+    public UiTabs tokenTabs(boolean compact, String... labels) {
+        return new UiTabs(this, compact, labels);
+    }
+
+    /** A token segmented control (docs/design-system/tokens.md, Segmented control), the first option selected. */
+    public UiSegmented tokenSegmented(boolean compact, String... labels) {
+        return new UiSegmented(this, compact, labels);
+    }
+
     /** Shared numeric controls use the theme's track, mint fill and narrow handle. */
     public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle sliderStyle() {
         var track = skin.newDrawable("white", UiTheme.TRACK); track.setMinHeight(4); track.setMinWidth(0);
