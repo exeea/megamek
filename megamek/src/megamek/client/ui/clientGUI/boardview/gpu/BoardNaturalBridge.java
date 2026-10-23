@@ -27,6 +27,11 @@ final class BoardNaturalBridge {
     private static final float CORNER_DEPTH = 9;
     /** Radians over which the deck's centre blends the rim heights its spokes carry (see {@link #blend}). */
     private static final float BLEND = .6f;
+    /**
+     * Down an exposed face, each broken stratum's share of the depth and its outward relief in metres: a rounded lip
+     * overhangs an undercut band, and a lower ledge stands above the soffit. A medium span keeps only the lip.
+     */
+    private static final float[][] STRATA = { { .2f, .9f }, { .45f, -.6f }, { .72f, .35f } };
 
     /**
      * An outline point. {@code exit}: the direction whose mouth it belongs to, else -1. {@code corner}: it seats a closed
@@ -66,7 +71,11 @@ final class BoardNaturalBridge {
             var mouth = new ArrayList<Rim>();
             mouths.add(mouth);
             if ((exits & (1 << d)) == 0) {
-                float waist = .38f + .16f * noise((center.x + gate.x) * .45f, (center.y + gate.y) * .45f);
+                // A free side narrows to the arch's waist. Between two supports dropping into a hollow beyond it,
+                // it is the lip the banks continue around, so it keeps near the hex edge instead of pinching in.
+                float wander = noise((center.x + gate.x) * .45f, (center.y + gate.y) * .45f);
+                float waist = drops(scene, tile, d, (d + 5) % 6) && drops(scene, tile, d, (d + 1) % 6)
+                      ? .86f + .08f * wander : .38f + .16f * wander;
                 mouth.add(new Rim(new Vector3(center).mulAdd(along, length * waist), -1, false, false));
                 continue;
             }
@@ -118,6 +127,8 @@ final class BoardNaturalBridge {
             if (closes(scene, tile, d)) {
                 var tongue = corner(scene, tile, d, center, mouths, Math.max(reaches[d], reaches[(d + 1) % 6]), points);
                 if (tongue != null) { tongues.add(tongue); }
+            } else {
+                shoulder(scene, tile, d, center, mouths, points);
             }
         }
         var outline = new ArrayList<Rim>();
@@ -212,11 +223,11 @@ final class BoardNaturalBridge {
             // A joined span builds the other side of a shared edge: no internal wall.
             if (seam == Seam.JOINT) { continue; }
             // Broad broken strata define the close silhouette; the shared normal maps supply small fissures.
-            int beds = fullHex ? 1 : lod == TerrainLod.FULL ? 3 : lod == TerrainLod.MEDIUM ? 2 : 1;
+            int beds = fullHex ? 0 : lod == TerrainLod.FULL ? STRATA.length : lod == TerrainLod.MEDIUM ? 1 : 0;
             var a = top[rings][i];
             var b = top[rings][n];
-            for (int bed = 1; bed <= beds; bed++) {
-                float t = bed / (float) beds;
+            for (int bed = 0; bed <= beds; bed++) {
+                float t = bed < beds ? STRATA[bed][0] : 1;
                 var c = new Vector3(top[rings][i]).lerp(bottom[rings][i], t);
                 var e = new Vector3(top[rings][n]).lerp(bottom[rings][n], t);
                 if (bed < beds) {
@@ -225,8 +236,7 @@ final class BoardNaturalBridge {
                         if (exposed == 0) { continue; }
                         var p = side == 0 ? c : e;
                         var outward = new Vector3(p).sub(center); outward.z = 0; outward.nor();
-                        p.mulAdd(outward, BoardRelief.metres(1.4f) * (float) Math.sin(Math.PI * t)
-                              * (.3f + .7f * noise(p.x + bed, p.y)) * exposed);
+                        p.mulAdd(outward, BoardRelief.metres(STRATA[bed][1]) * (.4f + .6f * noise(p.x + bed, p.y)) * exposed);
                     }
                 }
                 triangle(facets, a, c, e, Part.SIDE);
@@ -245,7 +255,16 @@ final class BoardNaturalBridge {
             facing(facets, new Vector3(deep), top[rings][mouth], bottom[rings][mouth], Part.SIDE, outward);
             facing(facets, new Vector3(deep), bottom[rings][mouth], under, Part.SIDE, outward);
         }
-        return BoardBridge.shape(deck.surface(), level, outsideBanks(facets, new Area(bankTops)));
+        return BoardBridge.shape(fullHex ? deck.surface() : shell(deck.surface()), level,
+              outsideBanks(facets, new Area(bankTops)));
+    }
+
+    /**
+     * The rock of an Enhanced span over banks of this family: a meadow does not root on a thin arch, so over grass the
+     * shell is bare rock, onto which the banks' cover fades across each passage ({@link BoardSurfaceBlend}).
+     */
+    static BoardScene.Surface shell(BoardScene.Surface banks) {
+        return banks == BoardScene.Surface.GRASS ? BoardScene.Surface.ROCK : banks;
     }
 
     /** A facet wound to face {@code toward}. */
@@ -355,11 +374,21 @@ final class BoardNaturalBridge {
 
     /** Both exits around the corner between directions d and d + 1 rest on ground or on a joined natural span. */
     private static boolean rests(BoardScene scene, BoardScene.Tile tile, int d) {
-        for (int direction : new int[] { d, (d + 1) % 6 }) {
-            var next = scene.tile(tile.coords().translated(direction));
-            if (!joined(tile, next, direction) && !BoardBridge.abutment(tile, next, direction)) { return false; }
-        }
-        return true;
+        return supported(scene, tile, d) && supported(scene, tile, (d + 1) % 6);
+    }
+
+    /** The exit in {@code direction} rests on ground or on a joined natural span. */
+    private static boolean supported(BoardScene scene, BoardScene.Tile tile, int direction) {
+        var next = scene.tile(tile.coords().translated(direction));
+        return joined(tile, next, direction) || BoardBridge.abutment(tile, next, direction);
+    }
+
+    /** Beyond the free side {@code open} the ground lies below the support in {@code beside}: its cliff turns there. */
+    private static boolean drops(BoardScene scene, BoardScene.Tile tile, int open, int beside) {
+        var low = scene.tile(tile.coords().translated(open));
+        var next = scene.tile(tile.coords().translated(beside));
+        return low != null && supported(scene, tile, beside)
+              && low.elevation() < (joined(tile, next, beside) ? deck(next) : next.elevation());
     }
 
     /**
@@ -454,6 +483,27 @@ final class BoardNaturalBridge {
         mouth.removeAll(new ArrayList<>(near.subList(0, beyond)));
         if (joinsFirst) { mouth.addFirst(cut); } else { mouth.addLast(cut); }
         return null;
+    }
+
+    /**
+     * Where a bank's cliff turns the corner between directions d and d + 1 onto a side without an exit, the rim follows
+     * it to just inside that corner instead of cutting across; not where the bank's wide mouth already reaches past it.
+     */
+    private static void shoulder(BoardScene scene, BoardScene.Tile tile, int d, Vector3 center, List<List<Rim>> mouths,
+          List<Rim> points) {
+        int e = (d + 1) % 6, exits = BoardBridge.feature(tile).bridgeExits();
+        int bank = (exits & (1 << e)) == 0 ? d : (exits & (1 << d)) == 0 ? e : -1;
+        var ground = bank < 0 ? null : scene.tile(tile.coords().translated(bank));
+        if (bank < 0 || !BoardBridge.abutment(tile, ground, bank) || !drops(scene, tile, bank == d ? e : d, bank)) { return; }
+        var vertex = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(1 - d, 6));
+        var ray = new Vector3(vertex).sub(center);
+        ray.z = 0;
+        float sign = Math.signum(side(ray, center, BoardGeometry.center(ground.coords(), 0)));
+        if (mouths.get(bank).stream().anyMatch(rim -> sign * side(ray, center, rim.point()) <= 0)) { return; }
+        float inset = BoardRelief.metres(.7f + .6f * noise(vertex.x, vertex.y));
+        var point = new Vector3(center).mulAdd(new Vector3(ray).nor(), ray.len() - inset);
+        point.z = support(tile, ground, bank);
+        points.add(new Rim(point, -1, false, false));
     }
 
     /**

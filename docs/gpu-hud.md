@@ -792,7 +792,8 @@ the size), merged into the same font. Icons are Material Symbols Rounded glyphs 
    `ui.empty(list, text)`, and `ui.footer(panel)`. Centred dialogs: `ui.dialog(title, close)`.
 5. Controls: `UiButton button = ui.button(style, icon, text, sub); UiKit.onChange(button, action);` show state with
    `button.pressed(...)`; also `ui.segmented`, `ui.select`, `ui.search`, `ui.chip`, `ui.meter`, `ui.checkbox`;
-   tooltips through `ui.tip(actor)`.
+   `ui.progress(caption)`, a meter whose `set(done)` shows the percentage and the mint share and whose
+   `caption(text)` names the running step (the map views' print card); tooltips through `ui.tip(actor)`.
 6. Custom drawing: `ui.fill(batch, color, alpha, x, y, width, height)`, `UiTheme.pixelScale(batch)` and `snap`, the
    drawables `UiTheme.HudFrame`, `EdgeBox`, `Dashes`.
 7. A view's own styles go into the same skin through `theme.add(name, resource, type)`, `theme.box(...)` or
@@ -908,10 +909,10 @@ A developer and tester tool, to be removed before release.
 | Board | Geometry (with Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
 | Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
 | Terrain | Terrain build progress, Hex joins (Hex transitions, Hex padding), Water (Cliffs directly into water), Terrain detail (Grass blades, Water effects). Terrain and object detail levels are always on |
-| Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view |
+| Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view; the live view as one line with Copy (`BoardCamera.readout`: `cam ortho\|persp\|fly fov az tilt span at x,y,z hex`) |
 
 **Removing it before release:**
-1. Delete `GpuTuningPanel` and `GpuTuningPanelSmokeTest`.
+1. Delete `GpuTuningPanel`, `GpuTuningPanelSmokeTest` and `BoardCamera.readout`.
 2. In `GpuHud`, delete the tuning block (its comment says so) and the `tuningModel` constructor parameter, and drop
    the argument in `GpuBattleView.createBoard`.
 3. Delete `GpuHudState.Dialog.TUNING` and the `GpuBoard.hud.tuning.*` message keys.

@@ -42,7 +42,7 @@ class BoardRoadLevelToeTest {
 
     @ParameterizedTest(name = "{0}, concrete={1}, {2}, direction={3}, parity={4}")
     @MethodSource("specimens")
-    void equalLowerPlateausStayFlatOutsideTheReservedRoad(String id, boolean concrete,
+    void equalLowerPlateausGrowNoFinOutsideTheReservedRoad(String id, boolean concrete,
           RoadGradeFixture.Panel panel, int direction, int parity) {
         var board = RoadGradeFixture.focused(concrete, panel, id, direction, parity);
         var scene = RoadGradeFixture.scene(board);
@@ -57,7 +57,7 @@ class BoardRoadLevelToeTest {
                 if (cornerOf(at, p) && cornerOf(upper, p)) { covered = covered(scene, bank, p); }
             }
             if (scene.tile(bank).wayExits() != 0 || covered) { continue; }
-            for (var lod : TerrainLod.values()) { assertFlatTop(scene, bank, lod); }
+            for (var lod : TerrainLod.values()) { assertPlateau(scene, bank, lod); }
         }
     }
 
@@ -72,21 +72,26 @@ class BoardRoadLevelToeTest {
             for (var bank : banks) {
                 assertTrue(!coveredCorner(scene, bank), "The reported raised toe lies outside the actual road");
                 for (var lod : TerrainLod.values()) {
-                    assertFlatTop(scene, bank, lod);
+                    assertPlateau(scene, bank, lod);
                     BoardRoadSlopeTest.assertClosed(scene, bank, lod);
                 }
             }
         }
     }
 
-    private static void assertFlatTop(BoardScene scene, Coords at, TerrainLod lod) {
+    /**
+     * The plateau keeps its level, moved only by the bank every hex shares near roads (Enhanced): an embankment of a
+     * higher road beside it may round onto it, but nothing else raises it.
+     */
+    private static void assertPlateau(BoardScene scene, Coords at, TerrainLod lod) {
         var tile = scene.tile(at);
         var surface = new BoardSurface(scene, tile, lod);
+        var bank = new BoardRoadBank(scene, tile, surface.relief);
         float level = tile.elevation() * BoardGeometry.level();
         for (var face : surface.groundFaces()) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
             for (var p : List.of(face.a(), face.b(), face.c())) {
-                assertEquals(level, p.z, .006f,
+                assertEquals(bank.active() ? bank.height(p.x, p.y, level) : level, p.z, .006f,
                       "An uncovered lower plateau must not grow a road-corner fin: " + at + "/" + lod + " " + p);
             }
         }

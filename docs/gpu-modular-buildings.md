@@ -11,6 +11,7 @@
 | `GpuBuilding` | Validate named modules, choose stable base/floor/roof recipes, assemble them and expose picking geometry. |
 | `GpuBuildingInterior` | Generate shared floor sheets and supports from the roof's occupied footprint. |
 | `BoardIndustrial` | Generate deterministic machinery with independent equipment heights and neighbor pipe joints. |
+| `BoardWall` | Choose a wall family from pristine map CF and assemble its layered components for drawing, picking and clearance. |
 | `GpuTreeInstances / GpuTerrain` | Instance module ranges; install chunks and retire unused recipes/interior buffers. |
 
 The board's tileset still chooses building artwork. `BoardArtwork.customBuildingFile` maps the selected legacy
@@ -22,6 +23,18 @@ asset to `data/models/buildings/<family>/<name>.glb`, removing the `saxarba/` pr
 `data/models/board/buildings/...` GLB/G3DJ loader, height fitting and wall textures.
 Discovery accepts a custom kit even if there is no legacy model.
 Malformed custom kits fail with an authoring error rather than silently concealing invalid assets.
+
+Generated `buildings/wall-<exits>` uses `data/models/buildings/walls/<family>/` in both
+the game and editor. Pristine `BLDG_CF` selects civilian (1–10), light (11–15), medium
+(16–40), heavy (41–90), hardened (91–150), or Castle Brian (151+). `Cover.pristineCF`
+captures the map value separately from current gameplay CF, so damage cannot change
+the family. Editor CF edits across a tier boundary invalidate geometry and select a
+different cached layout. Explicit wall model overrides retain their authored appearance.
+
+Each wall component has base/floor/roof modules and two internal LODs. The shared
+module-role selection grounds one base and repeats 18-unit floors for the remaining
+rules levels, then adds the roof above them. Picking and vegetation clearance use the
+same assembled geometry and scale. Civilian connectors use the narrower junction footprint.
 
 ## Asset contract
 
@@ -58,12 +71,13 @@ windows, doors and slab bands on the same surface, avoiding nearly coplanar acce
 The three small rooftop vents are omitted from LOD1. The fortress uses 32 triangles per distant floor and 262
 for the complete distant kit. The atlas adds a shared texture; lower triangle counts alone do not establish an FPS gain.
 Author the modules as a readable stack: this kit's base0, floor0, floor1 and roof0 stand at Z=0,18,36,54.
-The second LOD stands alongside at X=110, also assembled. Thus a viewer shows the building, not overlapping pieces.
+Both LODs share the same XY origin and are superimposed; hide one LOD when inspecting the other in a viewer.
 
-The loader computes each module's transformed geometry bounds and removes its horizontal center and minimum Z.
-Saved object origins, baked vertex translations and display offsets therefore do not determine placement.
-Modules must share a centered horizontal envelope and footprint, including across LODs; asymmetric protrusions
-must not shift one variant's bounding center. Group transforms remain identity, as required by the rigid importer.
+The loader preserves each module's authored XY coordinates, including node transforms and baked vertex offsets.
+It removes only the transformed geometry's minimum Z so pieces can be stacked vertically. Author all modules and
+LODs relative to the same horizontal origin; do not offset them sideways for display. Asymmetric protrusions do
+not recenter a piece or shift its alignment with the other modules. Group transforms remain identity, as required
+by the rigid importer. Rendering, picking, interiors and obstacle clearance use the same authored placement.
 
 For N levels, select one random `base#`, then N-1 random `floor#` modules (including `floor0`), then one random
 `roof#`. A single variant is always used when it is the only choice for that role. A placement seed derived from

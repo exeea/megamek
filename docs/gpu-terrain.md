@@ -32,8 +32,8 @@ the worker pipeline, detail selection, opaque batches and resource lifetime.
 ## Roads and structures
 
 `BoardRoad` computes the road footprint and clearance mask.
-`BoardSurface` owns physical approach heights; `BoardRampMesh` simplifies their
-render mesh while preserving boundaries. `GpuRoads` carries road material masks
+`BoardRoadGrade` owns physical approach heights and `BoardRoadCut` lays them into
+the terrain. `GpuRoads` carries road material masks
 on the supporting triangles. Change the footprint, grade or appearance at its
 respective owner so road drawing and ground contact continue to agree.
 

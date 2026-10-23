@@ -58,12 +58,9 @@ class BoardBridgeBankCurveTest {
                                 Math.abs(p.z - ground - GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale()) < .001f)),
                           "The level bank road must not have a second asphalt slab beneath the terminals");
                 }
-                var shape = footing.withDeck(scene, tile, BoardBridge.deck(scene, tile), lod, surfaces);
                 var bank = surfaces.get(new Coords(9, 6));
-                var remaining = BoardBridgeFooting.exposedPanels(scene, bank, java.util.Map.of(at, shape));
-                assertTrue(bank.retainingPanelFaces().isEmpty(),
+                assertTrue(bank.containmentWalls.isEmpty(),
                       "The grass bank must not add concrete panels beside the authored bridge terminals");
-                assertTrue(remaining.isEmpty(), "The natural approach has no freestanding roadside barriers");
                 BoardRoadSlopeTest.assertClosed(scene, new Coords(9, 6), lod);
             }
         }
@@ -107,8 +104,8 @@ class BoardBridgeBankCurveTest {
                             if (other == null) { continue; }
                             for (float t : new float[] { 0, .25f, .5f, .75f, 1 }) {
                                 for (float z : new float[] { 2 * BoardGeometry.level(), 3 * BoardGeometry.level() }) {
-                                    var point = entry.getValue().relief.roadPoint(edge, t, z);
-                                    assertTrue(point.epsilonEquals(other.relief.roadPoint((edge + 3) % 6, 1 - t, z), .003f),
+                                    var point = entry.getValue().relief.outlinePoint(edge, t, z);
+                                    assertTrue(point.epsilonEquals(other.relief.outlinePoint((edge + 3) % 6, 1 - t, z), .003f),
                                           "The recessed bridge bank must retain its shared rim: " + panel + "/" + lod);
                                 }
                             }

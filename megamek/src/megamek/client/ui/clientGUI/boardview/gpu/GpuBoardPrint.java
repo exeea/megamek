@@ -2,8 +2,17 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Consumer;
 
 import com.badlogic.gdx.Gdx;
@@ -13,6 +22,7 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.client.ui.Messages;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 
@@ -22,16 +32,18 @@ final class GpuBoardPrint implements Disposable {
      * Official mapsheet hex: 1.5 inches corner-to-corner by 1.3 inches flat-to-flat, at 200 DPI.
      * The 18-by-22-inch map on page 2 of Catalyst's BattleForce MapPack preview has a 1.125-inch column pitch
      * and a 1.3-inch row pitch: https://d1vzi28wh99zvq.cloudfront.net/pdf_previews/114190-sample.pdf.
-     * PNG density is rounded to whole pixels/metre; print at 100%, without fit-to-page scaling.
+     * The JPEG states this density; print at 100%, without fit-to-page scaling.
      */
     static final int HEX_WIDTH_PIXELS = 300;
     static final int PIXELS_PER_HEX = 260;
-    static final int PIXELS_PER_METRE = 7874;
+    static final int DPI = 200;
     private static final int TILE_SIZE = 1024;
-    private static final long MAX_PIXELS = 100_000_000;
 
     /** Captured on the EDT. Only the render thread consumes the scene; callbacks marshal their own results. */
-    record Request(BoardScene scene, Consumer<BufferedImage> completed, Consumer<Exception> failed) { }
+    record Request(BoardScene scene, Path target, Runnable completed, Consumer<Exception> failed) { }
+
+    /** The step the print runs, as its progress bar names it, and that step's share done. */
+    record Progress(String step, float done) { }
 
     private final Request request;
     private final GpuTerrain lender;
@@ -47,10 +59,16 @@ final class GpuBoardPrint implements Disposable {
     private GpuHexGrid grid;
     private SpriteBatch batch;
     private FrameBuffer target;
-    private BufferedImage image;
-    private int x, y;
+    private GpuPrintJpeg jpeg;
+    /** One thread encodes a finished band of tile rows while the next renders, so at most two bands are in memory. */
+    private ExecutorService encoder;
+    private Future<?> encoding;
+    private BufferedImage band, finishedBand;
+    private int printWidth, printHeight;
+    private int x, y, tiles;
+    private Progress progress = new Progress(Messages.getString("GpuBoard.print.preparing"), 0);
     private float zoomX, zoomY;
-    private boolean finished;
+    private boolean finished, cancelled;
 
     GpuBoardPrint(Request request, GpuTerrain lender, BitmapFont font, BitmapFont outline,
           BoardAtmosphere.Settings conditions, GpuAtmosphere.Options lightingOptions) {
@@ -70,22 +88,50 @@ final class GpuBoardPrint implements Disposable {
               conditions.moonlight(), AtmosphericTaint.BREATHABLE, conditions.gravity());
     }
 
-    /** Builds progressively, then reads one raster tile per frame. Never changes the live view's camera or terrain. */
+    /**
+     * Builds progressively, then reads one raster tile per frame and writes each finished band of tile rows to the file.
+     * Never changes the live view's camera or terrain.
+     */
     boolean update() {
         if (finished) { return true; }
+        if (cancelled) {
+            dispose();
+            return true;
+        }
         try {
             if (terrain == null) { initialize(); }
             terrain.refine(camera.camera);
-            if (terrain.busy() || !terrain.ready(request.scene())) { return false; }
-            try (TerrainSettings.Scope ignored = TerrainSettings.use(terrain.settings())) {
-                renderTile();
+            if (terrain.busy() || !terrain.ready(request.scene())) {
+                int built = terrain.buildProgress();
+                progress = new Progress(Messages.getString("GpuBoard.print.preparing"), built < 0 ? 1 : built / 100f);
+                return false;
             }
-            if (y < image.getHeight()) { return false; }
-            BufferedImage result = image;
+            if (finishedBand != null) {
+                if (encoding != null) {
+                    if (!encoding.isDone()) { return false; }
+                    encoded();
+                }
+                BufferedImage rows = finishedBand;
+                GpuPrintJpeg file = jpeg;
+                encoding = encoder.submit(() -> { file.write(rows); return null; });
+                finishedBand = null;
+            }
+            if (y < printHeight) {
+                try (TerrainSettings.Scope ignored = TerrainSettings.use(terrain.settings())) {
+                    renderTile();
+                }
+                int total = ((printWidth + TILE_SIZE - 1) / TILE_SIZE) * ((printHeight + TILE_SIZE - 1) / TILE_SIZE);
+                progress = new Progress(Messages.getString("GpuBoard.print.rendering"), tiles / (float) total);
+                return false;
+            }
+            progress = new Progress(Messages.getString("GpuBoard.print.writing"), 1);
+            if (!encoding.isDone()) { return false; }
+            encoded();
+            jpeg.close();
             finished = true;
             dispose();
-            request.completed().accept(result);
-        } catch (RuntimeException failure) {
+            request.completed().run();
+        } catch (IOException | RuntimeException failure) {
             finished = true;
             dispose();
             request.failed().accept(failure);
@@ -100,12 +146,24 @@ final class GpuBoardPrint implements Disposable {
 
     private void initialize() {
         BoardScene scene = request.scene();
-        int width = Math.toIntExact(((long) scene.width() * 3 + 1) * HEX_WIDTH_PIXELS / 4);
-        int height = Math.toIntExact(((long) scene.height() * 2 + 1) * PIXELS_PER_HEX / 2);
-        if ((long) width * height > MAX_PIXELS) {
-            throw new IllegalArgumentException("Board print exceeds 100 million pixels");
+        long width = ((long) scene.width() * 3 + 1) * HEX_WIDTH_PIXELS / 4;
+        long height = ((long) scene.height() * 2 + 1) * PIXELS_PER_HEX / 2;
+        if (width > GpuPrintJpeg.MAX_SIDE || height > GpuPrintJpeg.MAX_SIDE) {
+            throw new IllegalArgumentException(Messages.getString("GpuBoard.print.tooLarge", width, height,
+                  GpuPrintJpeg.MAX_SIDE));
         }
-        image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        printWidth = (int) width;
+        printHeight = (int) height;
+        try {
+            jpeg = new GpuPrintJpeg(request.target(), printWidth, printHeight, DPI, DPI);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+        encoder = Executors.newSingleThreadExecutor(work -> {
+            Thread thread = new Thread(work, "board-print-jpeg");
+            thread.setDaemon(true);
+            return thread;
+        });
         terrain = new GpuTerrain(lender);
         // The live view's 3D Graphics (it is ready, so they are installed); a print keeps the fluff of the 3D view.
         terrain.setColumns(lender.columns());
@@ -114,7 +172,8 @@ final class GpuBoardPrint implements Disposable {
         atmosphere = new GpuAtmosphere();
         atmosphere.configure(lighting);
         atmosphere.setOptions(lightingOptions);
-        atmosphere.setTransparentBackground(true);
+        // Transparent SPACE hexes show the space sky they show on screen; elsewhere the empty background is the paper.
+        atmosphere.setTransparentBackground(!atmosphere.spaceBackdrop(scene));
         text = new GpuHexText();
         grid = new GpuHexGrid();
         batch = new SpriteBatch();
@@ -123,7 +182,7 @@ final class GpuBoardPrint implements Disposable {
         zoomX = BoardGeometry.width() / HEX_WIDTH_PIXELS;
         zoomY = BoardGeometry.height() / PIXELS_PER_HEX;
         // The full-board camera fixes build detail at print resolution, independently of the window and its DPI.
-        camera(width, height, 0, 0);
+        camera(printWidth, printHeight, 0, 0);
         atmosphere.updateLight(camera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
@@ -147,8 +206,16 @@ final class GpuBoardPrint implements Disposable {
         // Use the completed build's geometry even if tuning was changed while that build was pending.
         zoomX = BoardGeometry.width() / HEX_WIDTH_PIXELS;
         zoomY = BoardGeometry.height() / PIXELS_PER_HEX;
-        int width = Math.min(TILE_SIZE, image.getWidth() - x);
-        int height = Math.min(TILE_SIZE, image.getHeight() - y);
+        int width = Math.min(TILE_SIZE, printWidth - x);
+        int height = Math.min(TILE_SIZE, printHeight - y);
+        if (band == null) {
+            try {
+                band = new BufferedImage(printWidth, height, BufferedImage.TYPE_3BYTE_BGR);
+            } catch (OutOfMemoryError failure) {
+                throw new IllegalStateException(Messages.getString("GpuBoard.print.memory",
+                      2L * printWidth * TILE_SIZE * 3 >> 20), failure);
+            }
+        }
         if (target == null || target.getWidth() != width || target.getHeight() != height) {
             if (target != null) { target.dispose(); }
             target = GpuAtmosphere.buffer(width, height, true);
@@ -160,6 +227,7 @@ final class GpuBoardPrint implements Disposable {
         // No hover cutaway, editor selection, trace image or HUD belongs to a printed board.
         terrain.animate(0, List.of(), 1);
         terrain.renderShadows(List.of());
+        atmosphere.setPrintTile(x, y, width, height, printWidth, printHeight);
         atmosphere.beginPixels(width, height, 0);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
@@ -172,13 +240,17 @@ final class GpuBoardPrint implements Disposable {
             text.render(batch, camera, atmosphere.depthTexture(), 0);
             Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, width, height);
             try {
-                int[] row = new int[width];
+                ByteBuffer rgba = pixels.getPixels();
+                byte[] bgr = ((DataBufferByte) band.getRaster().getDataBuffer()).getData();
                 for (int line = 0; line < height; line++) {
-                    for (int col = 0; col < width; col++) {
-                        int rgba = pixels.getPixel(col, height - line - 1);
-                        row[col] = (rgba << 24) | (rgba >>> 8);
+                    // The framebuffer's rows run upward. A JPEG has no alpha: the straight colour lies on white paper.
+                    int from = (height - line - 1) * width * 4, to = (line * printWidth + x) * 3;
+                    for (int col = 0; col < width; col++, from += 4, to += 3) {
+                        int alpha = rgba.get(from + 3) & 0xFF;
+                        bgr[to] = paper(rgba.get(from + 2), alpha);
+                        bgr[to + 1] = paper(rgba.get(from + 1), alpha);
+                        bgr[to + 2] = paper(rgba.get(from), alpha);
                     }
-                    image.setRGB(x, y + line, width, 1, row, 0, width);
                 }
             } finally { pixels.dispose(); }
         } finally {
@@ -187,7 +259,36 @@ final class GpuBoardPrint implements Disposable {
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         }
         x += width;
-        if (x == image.getWidth()) { x = 0; y += height; }
+        tiles++;
+        if (x == printWidth) {
+            x = 0;
+            y += height;
+            finishedBand = band;
+            band = null;
+        }
+    }
+
+    /** The running step and its share done, for the view's progress bar. */
+    Progress progress() { return progress; }
+
+    /** Stops the print at its next update: its unfinished file is deleted and the request fails as cancelled. */
+    void cancel() { cancelled = true; }
+
+    private static byte paper(byte channel, int alpha) {
+        return (byte) (((channel & 0xFF) * alpha + 255 * (255 - alpha) + 127) / 255);
+    }
+
+    /** Rethrows the last band's encoding failure on the render thread. */
+    private void encoded() {
+        try {
+            encoding.get();
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(failure);
+        } catch (ExecutionException failure) {
+            throw failure.getCause() instanceof RuntimeException runtime ? runtime
+                  : new IllegalStateException(failure.getCause().getMessage(), failure.getCause());
+        }
     }
 
     /** The lender must outlive this job, including a cancelled build. */
@@ -198,7 +299,17 @@ final class GpuBoardPrint implements Disposable {
         if (grid != null) { grid.dispose(); grid = null; }
         if (batch != null) { batch.dispose(); batch = null; }
         if (target != null) { target.dispose(); target = null; }
-        image = null;
+        band = null;
+        finishedBand = null;
+        if (encoder != null) {
+            // After the band it may still encode: an unfinished print's file is deleted, a finished one stays.
+            GpuPrintJpeg file = jpeg;
+            encoder.execute(() -> {
+                try { file.close(); } catch (IOException ignored) { }
+            });
+            encoder.shutdown();
+            encoder = null;
+        }
         if (!finished) {
             finished = true;
             request.failed().accept(new CancellationException("Board print cancelled"));

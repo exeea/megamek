@@ -105,7 +105,9 @@ class BoardRoadTurnTest {
             var road = BoardRoad.of(scene, tile);
             var captured = BoardRoad.clearance(at, board.getHex(at), board::getHex);
             int exits = tile.roadExits() & 63;
-            if (Integer.bitCount(exits) == 2 && (exits & ((exits << 1) | (exits >> 5))) != 0) {
+            if (BoardRoad.climbingTurn(exits, BoardRoadGrade.ramps(scene, tile))) {
+                assertClimbing(road);
+            } else if (Integer.bitCount(exits) == 2 && (exits & ((exits << 1) | (exits >> 5))) != 0) {
                 float radius = assertBroad(road);
                 if (at.equals(new Coords(5, 7))) {
                     assertTrue(radius > BoardGeometry.height() / BoardGeometry.hexScale() / 4,
@@ -172,7 +174,7 @@ class BoardRoadTurnTest {
     }
 
     @Test
-    void mesaBridgeHairpinAndCapturedClearanceFollowTheSameBroadCourse() throws Exception {
+    void mesaBridgeHairpinAndCapturedClearanceFollowTheSameCourse() throws Exception {
         var file = new File("data/boards/unofficial/SimonLandmine/64x51/64x51 MesaCity1 N - Mesas.board");
         var board = new Board();
         board.load(file);
@@ -181,7 +183,9 @@ class BoardRoadTurnTest {
         assertEquals(3, scene.tile(at).roadExits());
         var road = BoardRoad.of(scene, scene.tile(at));
         var captured = BoardRoad.clearance(at, board.getHex(at), board::getHex);
-        assertBroad(road);
+        // The hairpin descends off the mesa towards its northern neighbour.
+        assertTrue(BoardRoad.climbingTurn(3, BoardRoadGrade.ramps(scene, scene.tile(at))));
+        assertClimbing(road);
         for (float x = -35; x <= 35; x += 1.25f) {
             for (float y = -32; y <= 32; y += 1.25f) {
                 assertEquals(road.distance(x, y), captured.distance(x, y), .002f);
@@ -203,6 +207,14 @@ class BoardRoadTurnTest {
         Vector3 delta = BoardGeometry.center(at.translated(direction), 0).sub(BoardGeometry.center(at, 0))
               .scl(.5f / BoardGeometry.hexScale());
         return new Vector2(delta.x, delta.y);
+    }
+
+    /**
+     * A climbing return turn runs in to the hex centre and turns there, keeping both ramps long; its converging ramps
+     * close the inner shoulder instead of using the whole hex as a level turn does (see {@link #assertBroad}).
+     */
+    private static void assertClimbing(BoardRoad road) {
+        assertTrue(road.distance(0, 0) < 0, "A climbing return turn runs in to the hex centre");
     }
 
     private static float assertBroad(BoardRoad road) throws Exception {

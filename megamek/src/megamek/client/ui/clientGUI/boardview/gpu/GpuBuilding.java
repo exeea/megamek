@@ -71,8 +71,7 @@ final class GpuBuilding implements Disposable {
                         require(Math.abs(bounds.getDepth() - LEVEL_HEIGHT) < .001f,
                               entry.getValue() + " must be exactly one level (18 units) high");
                     }
-                    // Authoring placement and object origins are display-only. Derive each Lego piece's
-                    // centered footprint and base from its geometry, including baked vertex translations.
+                    // Preserve the authored XY origin; only ground the piece vertically for assembly.
                     node.translation.add(moduleOffset(bounds));
                 }
                 models.get(lod).calculateTransforms();
@@ -101,7 +100,9 @@ final class GpuBuilding implements Disposable {
     /** Validate module roles before allocating GPU resources. Sparse variant numbers are supported. */
     static Map<String, String> parts(ModelData data) {
         Map<String, String> result = new LinkedHashMap<>();
-        for (var node : data.nodes) {
+        // Wall kits also use this metadata on concurrent terrain workers; libGDX's cached iterator is shared.
+        for (int index = 0; index < data.nodes.size; index++) {
+            var node = data.nodes.get(index);
             var match = PART.matcher(node.id);
             require(match.matches(), "Expected -baseN, -floorN or -roofN: " + node.id);
             require(node.parts != null && node.parts.length > 0 && (node.children == null || node.children.length == 0),
@@ -120,10 +121,9 @@ final class GpuBuilding implements Disposable {
         return tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L ^ feature.asset().hashCode();
     }
 
-    /** Authored module origins are display-only; the mesh bounds define placement for rendering and clearance. */
+    /** Keep authored XY coordinates for rendering and clearance; discard only the module's vertical placement. */
     static Vector3 moduleOffset(BoundingBox bounds) {
-        Vector3 center = bounds.getCenter(new Vector3());
-        return new Vector3(-center.x, -center.y, -bounds.min.z);
+        return new Vector3(0, 0, -bounds.min.z);
     }
 
     /** A stable per-placement seed, independent of camera, height, LOD, frame order and JVM hash randomization. */

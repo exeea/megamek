@@ -245,13 +245,19 @@ final class GpuRoads {
               HexAppearance.trafficControl(tile.appearance(), "bridgeRoad", deck.roadExits()), road.crossing(tile, true));
     }
 
+    /** Tile pixels a paved deck's asphalt stays solid past its footing on a bare bank, before fading over the apron. */
+    static float landingSetback(BoardBridge.Deck deck) {
+        boolean paved = deck.kind() == BoardRoad.Kind.PAVED || deck.kind() == BoardRoad.Kind.ALLEY;
+        return paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0;
+    }
+
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road, BoardBridgeFooting footing) {
         var patches = deckPatches(tile, deck, road);
         if (footing.bareExits() == 0) { return patches; }
         boolean paved = deck.kind() == BoardRoad.Kind.PAVED || deck.kind() == BoardRoad.Kind.ALLEY;
         float apron = BoardBridgeFooting.apronLength();
-        float setback = paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0;
+        float setback = landingSetback(deck);
         Area landing = road.endZone(apron);
         var result = new ArrayList<Patch>();
         if (paved) {
@@ -570,9 +576,9 @@ final class GpuRoads {
             float repeat = BoardRelief.detailMetres(patch.repeat()) * coverage;
             float lift = patch.lift() * BoardGeometry.hexScale();
             Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
-            Vector3 a = flat ? fallback : surface.roadNormal(t.a(), normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();
-            Vector3 b = flat ? fallback : surface.roadNormal(t.b(), normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor();
-            Vector3 c = flat ? fallback : surface.roadNormal(t.c(), normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor();
+            Vector3 a = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();
+            Vector3 b = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor();
+            Vector3 c = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor();
             MeshPartBuilder mesh = meshes.get();
             mesh.triangle(carrier(mesh, t.a(), a, repeat, mask, surface.tile, coat),
                   carrier(mesh, t.b(), b, repeat, mask, surface.tile, coat),

@@ -105,6 +105,9 @@ public final class BoardArtwork implements AutoCloseable {
         try {
             UIUtil.setHighQualityRendering(graphics);
             UIUtil.setHighQualityRendering(local);
+            // The paper around the staggered board edge, as the 3D print has.
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, width, height);
             for (int y = 0; y < board.getHeight(); y++) {
                 for (int parity = 0; parity < 2; parity++) {
                     for (int x = parity; x < board.getWidth(); x += 2) {

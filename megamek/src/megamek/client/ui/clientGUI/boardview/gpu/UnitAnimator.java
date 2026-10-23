@@ -27,6 +27,9 @@ final class UnitAnimator {
     /** A longer distance per cycle also lengthens airtime, without changing planted-foot speed. */
     static final float MEK_STRIDE_LENGTH = 1.6f;
     static final float MEK_STEP_LIFT = .16f;
+    /** A rigid meeple figure's hop: its length and height as fractions of the figure's height. */
+    private static final float MEEPLE_HOP_LENGTH = .5f;
+    private static final float MEEPLE_HOP_HEIGHT = .1f;
     private static final float ARM_AIM_LIMIT_DEGREES = 120;
     private final List<Body> bodies = new ArrayList<>();
     private final List<Joint> mounts = new ArrayList<>();
@@ -91,6 +94,8 @@ final class UnitAnimator {
         final float stepLift;
         final float memberScale;
         float wheelSteps, lastSteps;
+        /** This frame's hop of a meeple figure, in model units, added once it stands on the ground. */
+        float hop;
         long movementSequence = -1;
 
         Body(UnitRig rig, ModelInstance instance, ModelInstance rest) {
@@ -165,17 +170,30 @@ final class UnitAnimator {
         return null;
     }
 
-    /** Fit to the completed terrain rim, including corners displaced by rivers and constructed shores. */
+    /**
+     * Fit to the completed terrain rim, including corners displaced by rivers and constructed shores, and to this
+     * formation's sector of a hex it shares with other troops.
+     */
     private float[] stepRoom(BoardScene.Unit unit) {
         BoardScene board = scene.get();
         BoardScene.Tile tile = board == null || formation.isEmpty() ? null : board.tile(unit.location().coords());
         if (tile == null) { return InfantryFootprint.NO_STEPS; }
         var relief = surfaces.get(board, tile).relief;
-        float[] room = new float[6];
+        // Troop formations sharing the hex, friend or foe, each keep to their own sector of it.
+        var troops = board.units().stream().filter(other -> standsWith(other, unit)).map(BoardScene.Unit::id).sorted().toList();
+        float[] room = InfantryFootprint.sector(troops.indexOf(unit.id()), troops.size());
         for (int edge = 0; edge < room.length; edge++) {
-            room[edge] = relief.topInset(edge);
+            room[edge] = Math.max(room[edge], relief.topInset(edge));
         }
         return room;
+    }
+
+    /** Whether {@code other} is a troop formation on the ground of the unit's hex, the unit itself included. */
+    private static boolean standsWith(BoardScene.Unit other, BoardScene.Unit unit) {
+        var family = other.model() == null || other.model().state() == null ? null : other.model().state().structure().family();
+        return (family == UnitFamilyScale.INFANTRY || family == UnitFamilyScale.BATTLE_ARMOR) && !other.sensorContact()
+              && !other.airborne() && other.attachment() == null && other.location().coords().equals(unit.location().coords())
+              && other.location().elevation() == unit.location().elevation();
     }
 
     /** A material replacement rebinds nodes but keeps playback; a new/revealed unit starts directly in its pose. */
@@ -269,6 +287,11 @@ final class UnitAnimator {
                       * (bodyMotion.moving() ? 1 : 1 - smooth(bodyMotion.settledSeconds() / UnitMotion.FORMATION_SETTLE_SECONDS));
                 float bodyKneel = mek ? kneel : body.rig.trooper() && Math.floorMod(identity, 3) == 0 ? 1 - activity : 0;
                 if (body.rig.trooper()) { gait *= 1 - bodyKneel; }
+                if (body.rig.meeple()) {
+                    // Without limbs, the figure hops along its own path as a Mek token does (MeepleAnimator.bounce).
+                    float hops = distance * body.memberScale / (MEEPLE_HOP_LENGTH * body.restHeight);
+                    body.hop = Math.abs(MathUtils.sin(hops * MathUtils.PI)) * gait * MEEPLE_HOP_HEIGHT * body.restHeight;
+                }
                 float legCrouch = mek ? crouch + (quad ? fallen * .3f : 0) : 0;
                 // Absolute crouch angles must also account for the authored reverse-knee rest pose.
                 float legPose = Math.max(bodyKneel, Math.max(legCrouch, UnitConversion.vehiclePose(unit) > 0 ? 0
@@ -525,7 +548,21 @@ final class UnitAnimator {
         if (dying) { return false; }
         boolean rough = formation.roughGround(instance, scene, unit, motion, surfaces, stepRoom(unit));
         boolean contact = groundContact != null && groundContact.apply(scene, unit, motion);
-        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough;
+        boolean hops = hop();
+        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough || hops;
+    }
+
+    /** Lift hopping meeple figures off the ground they now stand on, which ground contact would otherwise settle. */
+    private boolean hop() {
+        boolean lifted = false;
+        for (Body body : bodies) {
+            if (body.hop <= 0) { continue; }
+            Node root = body.joints.get("root").node();
+            root.translation.z += body.hop / (root.getParent() == null ? 1 : root.getParent().globalTransform.getScaleZ());
+            lifted = true;
+        }
+        if (lifted) { instance.calculateTransforms(); }
+        return lifted;
     }
 
     void conversion(UnitConversion conversion, BoardScene.Unit unit) {
@@ -801,6 +838,7 @@ final class UnitAnimator {
         Joint root = body.joints.get("root");
         if (root == null) { return; }
         body.reset();
+        body.hop = 0;
         if (body.rig.mek() || body.rig.trooper() || "proto-v1".equals(body.rig.type())) {
             // Outward-looking troops fall forward, preserving space between the formation's bodies.
             root.rotate(Vector3.X, (body.rig.trooper() ? -90 : "quad-v1".equals(body.rig.type()) ? 65 : 90) * progress);

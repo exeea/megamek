@@ -95,24 +95,99 @@ are currently displayed. Terrain changes go through `GpuTerrain`; unchanged chun
 shared assets can stay installed. Camera movement changes the view and visible detail
 without asking the game to construct another scene.
 
+## Enhanced terrain coverage
+
+Legacy `.board` loading ignores explicit `none` markers: they are absent terrain,
+not a separate ground material. It retains every real terrain entry alongside
+them and reports unknown terrain names or malformed numeric fields with the
+hex and token. Empty `""` terrain remains clear ground.
+
+Enhanced draws `building:5` as solid modular walls joined by the stored building
+exits. Wall geometry is shared by rendering, picking and vegetation clearance.
+The layered GLBs in `data/models/buildings/walls/<family>/` supply straight bays,
+half-bays, piers and terminals. The game and editor select the family from pristine
+map CF (`BLDG_CF`): civilian 1–10, light 11–15, medium 16–40, heavy 41–90,
+hardened 91–150, Castle Brian 151+. Damage never changes the family. Editing map CF
+across a tier boundary rebuilds the geometry; explicit model overrides keep their artwork.
+Base and floor modules each fill one rules level, with the roof capping the complete
+stack. Tall bodies repeat floors without stretching their textures. Connecting arms
+meet the neighboring wall's roof in world space, with narrower civilian junction offsets.
+Two authored mesh levels use the existing screen-size LOD rule; distant slots reuse LOD1, and picking keeps
+the nearest mesh.
+Metal deposits use Blender-authored quartz and ore GLBs with embedded colour,
+normal and material maps, over a soft terrain-following soil splat. Each GLB has
+one detailed LOD0 and one 88-triangle LOD1; farther slots reuse LOD1. Deposit size
+and spacing use the same 1.5 scale factor, with soil and grass clearance derived
+from the resulting footprint. The authoring
+script is `mm-data/scripts/author-minerals.py`; run
+`blender --background --python scripts/author-minerals.py` from the `mm-data`
+root. Its editable scene is `mm-data/tools/minerals/minerals.blend`, and generated
+assets belong in `mm-data/data/models/board`. Screens use the native chaff volume,
+including `screen:0`. Their legacy sprites remain in Classic. Legacy `.board`
+imports discard `road:0`, retain road levels 1–4, and normalize other values to 1
+while retaining exits and fluff. Native `.board2` imports retain stored values.
+
+SPACE has no opaque ground mesh. Its selectable plane, faint grid and light
+labels remain, while bridges and platforms retain their own geometry. The
+presence of empty SPACE automatically enables a procedural star background;
+removing the last such tile restores the ordinary sky. SKY retains its opaque
+cloud background. Real pavement and liquid override aerospace ground markers.
+The space background uses the existing composite pass, with sparse stars and
+subdued dust and galaxies. Slow drift runs in every light mode. Fixed Sun uses
+the same camera-relative frame as terrain lighting; world lighting and Free
+Flight use world directions. The visible light source stays aligned with the
+actual terrain light and does not drift with the decorative stars.
+`space-sky.glsl` exposes `SPACE_DRIFT_SPEED` (radians per second, default 0.004;
+zero pauses) and `SPACE_DENSITY` (0–2, default 1). Density changes the star
+population, dust coverage and galaxy extent. These are shader constants.
+
+`EnhancedTerrainCorpusTest` is an opt-in regression for all installed maps
+(`MEGAMEK_LEGACY_CORPUS=1`). It strictly loads both board formats, converts
+legacy scenery, checks structure selections and requires native ground for
+every non-liquid hex. Liquids have their own native renderer. This verifies
+coverage; it does not render every map or judge the quality of every asset.
+
+The 2026-10-21 corpus regression passed for 2,427 installed maps and 3,771,653
+hexes, with native ground and complete structure selections. The earlier
+2026-10-20 audit also checked residual scenery paint and replaced metal/screen
+sprites; its 264 failed ground-only predicates were road/water combinations
+rendered by the native liquid path. The initial cleanup removed 970 `none`
+markers from 33 legacy maps while preserving every other byte. The later
+corpus check also found and removed two stray numeric tokens left after road
+removal in Valencia City. Focused CPU/GPU checks cover the final wall LODs,
+mixed heights, Shipyard loading, enlarged minerals and space/light behavior.
+These counts describe that installed corpus, not arbitrary future maps.
+
 ## Unit display
 
 GPU Tuning's General tab has a **Unit display** selector, applied live in both cameras:
 
-- **All Meeples** draws every visible unit as an extruded token from its existing artwork.
-- **Mek Meeples** is the default: Meks use tokens; other units use their existing 3D models.
+- **All Meeples**, the default, draws troops as meeple figures and every other visible unit as an extruded token
+  from its existing artwork.
+- **Mek Meeples**: Meks use tokens; other units use their existing 3D models.
 - **3D Models** restores the existing authored-model presentation, including flat artwork when a model is unavailable.
 
-The Defaults button restores Mek Meeples. Sensor contacts retain their anonymous markers. The Tactical View draws
-every unit as its meeple on a base, whatever the selector shows ([HUD](gpu-hud.md#5-the-tactical-view)). The token mesh reuses the libGDX branch's alpha-contour extrusion through
+The Defaults button restores All Meeples. Sensor contacts retain their anonymous markers. The Tactical View draws
+every unit, troops included, as its token on a base, whatever the selector shows ([HUD](gpu-hud.md#5-the-tactical-view)). The token mesh reuses the libGDX branch's alpha-contour extrusion through
 `GpuCutout`. Both cameras use the same posed geometry for drawing, picking, shadows, attachments and effects.
+The extrusion traces the half-alpha contour and simplifies pixel steps into panels within 0.55 source pixels.
+Caps and walls share those outlines, including holes and separate islands. Gentle wall turns share normals;
+turns of 60 degrees or more and the cap rims remain sharp. This removes pixel-scale lighting stripes at the
+geometry level; screen antialiasing alone cannot smooth independently lit wall facets.
+
+Meeple figures are a formation like the 3D troops: each formation recipe's `meeple` field names a recipe in
+`units/modular/meeples/`, which `GpuUnitModels` assembles with the same figure count, layout, transports, boarding,
+mounting, swarming and casualties. The figures are rigid silhouettes on the `meeple-v1` rig, as tall as the 3D
+trooper and battle armour suit; they hop along their path instead of moving limbs. The APC (tracked, wheeled and
+hover) and buggy (motorized) are the `Infantry/mechanized_apc.png` and `motorized_buggy.png` sprites extruded into
+GLBs; their grey pixels take the camouflage, like the 2D icon.
 
 `MeepleVisual` owns token geometry, wall paint and attachment sockets. `MeepleAnimator` supplies rigid token poses;
 `UnitAnimator` retains articulated model poses. Both sample the existing movement/combat timeline. Walkers bounce,
 vehicles rock subtly and airborne craft bank through turns; displacement slides. Push/punch/kick and the stronger
 club swing or lance thrust approach and recover on the physical attack clock. Jumps reuse flame, smoke and landing
 timing with nozzles fixed to the token's local underside. Battle Armor uses the existing boarding/release
-trajectory and grips the token's actual contour, following its final pose. In All Meeples, the BA token attaches as
+trajectory and grips the token's actual contour, following its final pose. In the Tactical View, the BA token attaches as
 one piece; hostile tokens rock about their grip while friendly riders remain steady. Ranged effects retain every reported weapon, fire from the token center, and hit varied visible surfaces
 on the incoming side instead of anatomical locations.
 
@@ -183,23 +258,31 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   `BoardRim.column`'s incline mask along each edge above a lower neighbour, or its high-incline mask where the drop
   exceeds two levels or the map marks a cliff side there. It goes into the hex's base slot of the ground atlas, which a
   water neighbour's bank borrows as in Enhanced. The tileset decals, object sprites and bridge art (`Tile.bridge`) go into
-  the decal atlas; Enhanced no longer packs or builds them.
+  the decal atlas; Enhanced no longer packs or builds them. Baked road and flat bridge
+  art are omitted because infrastructure uses the shared 3D geometry in both modes.
 - **Geometry.** A Classic chunk's worker job is `GpuTerrain.prepareColumns`: each hex's `GpuTilesetTerrain.column`, a
   plain column at its level, walled in its material down to lower neighbours or the board's floor. A road leaving a hex
   toward one of another level ramps through their shared edge to the height `BoardSurface.roadEdgeElevation` gives both,
   between banks, and the walls and rims leave that mouth open. Natural shores round into land-textured banks and sandy
-  shallows; concrete quays keep their fitted corners (`BoardConcrete`). No relief, sculpting, water or lava field, plant,
-  road or bridge footing is prepared.
+  shallows; concrete quays keep their fitted corners (`BoardConcrete`). Road and railway
+  carriers use `BoardSurface`, and `prepareInfrastructure` builds the same roads, built bridges,
+  bridge footings and tunnels as Enhanced. Natural bridges have a full hex cap over
+  their hollow arch, topped with ordinary dry tileset art matching the span's surface.
+  Flat road and rail carriers retain normal Classic tops and vertical terrain edges;
+  actual grades and tunnel openings retain their shared carrier geometry. A nearby
+  flat route does not introduce sculpted hillsides into Classic terrain.
+  Unrelated hexes retain plain columns; no water
+  or lava field or planting is prepared.
 - **Chunk.** The GL thread's collection step writes each column (`GpuTilesetTerrain.write`) into the chunk's opaque
-  layer (tops, walls, banks, sand shallows, the bridge's deck art at its deck height, molten liquid) and its liquid
+  layer (tops, walls, banks, sand shallows, molten liquid) and its liquid
   layer (open water in its animated frames, `BoardLiquid.textures`, moving with its river's current, and the falls over
   each drop into the liquid below; hazardous liquid is tinted green). Of the hex's features it builds only buildings,
-  fuel tanks, industrial plants, rail and maglev routes and placed objects other than plants
-  (`GpuTerrain.columnFeature`), standing on the column (`GpuTerrain.GroundView`); a rail lies on its carrier plane and a
-  maglev has no piers. Tileset decals and sprites, authored paint and the tactical markings lie on the columns.
+  fuel tanks, industrial plants, bridges, rail and maglev routes, road controls and placed objects other than plants
+  (`GpuTerrain.columnFeature`), standing on their shared carrier or column (`GpuTerrain.GroundView`).
+  Tileset decals and sprites, authored paint and tactical markings follow that supporting surface.
 - **Shared.** Everything else is the Enhanced path: the opaque layer draws, casts and receives shadows through the
   terrain pages and the depth snapshot, the liquid layer through the transparent pass, liquids animate with the
-  terrain's clocks, picking and overlay draping (`GpuTerrain.tacticalSurface`) read the column, the wireframe draws it,
+  terrain's clocks, picking and overlay draping (`GpuTerrain.tacticalSurface`) read the supporting carrier or column, the wireframe draws it,
   and an edit rebuilds only the chunks it touches; the change scan also notices the tileset art, bridge art, tileset
   decals and sprites, which only a Classic build reads. Classic chunks have one level of detail, so the camera never
   refines them. The board-wide biome map, ground cover and wave simulations are not created, and are released on a
@@ -216,17 +299,36 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   (`setColumns(lender.columns())`; the print starts only once the live terrain is ready), so a Classic print shows the
   columns and an Enhanced print the 3D terrain. It keeps the 3D view's fluff in the Tactical View too and draws the
   plain grid, not the ground layer, so a print strokes no cliff in either graphics; its labels give the levels.
-  `GpuBoardPrintSmokeTest` prints in Enhanced (preview and editor) and in Classic.
-- **Limits.** A Classic bridge hex is picked on its column, under the deck art (no 3D deck); placed objects, decals
-  and paint on the bridge take the plane of the deck art over the whole hex. The atmosphere (grading, fog, weather,
+  It renders 1024-pixel tiles at 200 dots per inch (a hex 1.5 by 1.3 inches) and writes a JPEG at quality 0.92 without
+  chroma subsampling, with that density in its JFIF header: on the 12 × 9 smoke board 1.9 MB against 9.5 MB as the
+  earlier PNG, its labels and grid indistinguishable at three times magnification. Each finished row of tiles (a band)
+  is encoded on one background thread while the next renders (`GpuPrintJpeg`): the JDK's encoder writes each band
+  with the same tables, and restart markers join the bands' scans into one baseline JPEG, so at most two bands are in
+  memory (2 × 1024 rows × width × 3 bytes; 177 MB for Valencia City's 28,875-pixel width). A cancelled or failed
+  print deletes its unfinished file. While it runs, the map HUD shows a Print card with a progress bar
+  (`GpuMapHud.print`, centred in the board area the editor's panels leave free): Preparing terrain (the print's own
+  terrain build), Rendering (tiles done of all tiles) and Writing file (the last band's encoding). Its Cancel stops
+  the print at the next frame (`GpuBoardPrint.cancel`): the unfinished file is deleted, no error is reported and Print
+  is offered again. Valencia City
+  printed in 754 s (28,875 × 50,050 pixels, a 557 MB JPEG). A JPEG has no alpha, so the empty
+  background is white paper; a board with SPACE hexes prints the space sky behind them instead, one sky field across
+  the whole print (`GpuAtmosphere.setPrintTile`; the stars keep their pixel size, so a large print shows them sparser
+  than the screen does). Tiles get no lens vignette (it had darkened every tile's corners by about 6 %). The only size
+  limit is the JPEG's 65,500 pixels a side: 291 columns or 252 rows. `GpuBoardPrintSmokeTest` prints in Enhanced (preview and
+  editor) and in Classic, and a SPACE board in both.
+- **Bridges.** Drawing, picking and object support use the installed deck footprint. Built bridges
+  share that footprint across graphics modes. Classic natural bridges cover the normal hex,
+  with a deck-height centre and sloped bank entrances over the lower passage; Enhanced uses the eroded span outline.
+  Tactical View retains the selected graphics mode's geometry. The atmosphere (grading, fog, weather,
   glare, lightning) applies as in Enhanced; fire and smoke particles are left out, since the tileset art shows them.
 
 Tests: `GpuGraphicsModeSmokeTest` (a game started in Classic builds no water or lava field, wave simulation, tree,
-scatter, grass, biome map or sculpted material and no sculpted shader warm-up; the building stands on its column;
+scatter, grass or biome map; infrastructure retains its shared materials; the building stands on its column;
 overlays drape on and picks hit the column tops; a switch either way shows the loading stage and retires the other
 build, also when reversed after its atlases were packed; T starts no rebuild), `GpuTilesetTerrainSmokeTest` (an edit
 rebuilds only the chunks of its hex and of the neighbours that read it; water stays inside the shore picking uses;
-review captures), `GpuTilesetTerrainTest` (column geometry), `BoardRimTest.classicColumnsBakeNoCliffStroke`. `GpuTerrainLoadBenchmarkTest` with
+review captures), `GpuTilesetTerrainTest` (column geometry), `BoardRimTest.classicColumnsBakeNoCliffStroke`,
+`BoardInfrastructureModeTest` and `GpuRoadModeTest` (shared infrastructure, support and paint). `GpuTerrainLoadBenchmarkTest` with
 `-Dmegamek.gpu.benchmarkGraphics=CLASSIC` times `prepareColumns` and digests the columns in the region's order.
 
 ## Tactical View

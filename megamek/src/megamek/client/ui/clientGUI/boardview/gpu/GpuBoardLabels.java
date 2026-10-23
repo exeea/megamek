@@ -184,7 +184,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         white = ui.skin.get("white", Texture.class);
         ramp = ramp();
         disc = disc(Math.round(2 * PIN_SIZE));
-        badgeBox = box(rgba(23, 33, 33, .92f), rgba(236, 145, 137, .7f), 4, 9);
+        badgeBox = box(rgba(23, 33, 33, .92f), UiTheme.alpha(UiTheme.CORAL, .7f), 4, 9);
         openBadgeBox = box(rgba(60, 30, 28, .95f), Color.WHITE, 4, 9);
         offBadgeBox = box(rgba(23, 33, 33, .92f), rgba(174, 187, 180, .35f), 4, 9);
         root.setName("board-labels");

@@ -320,7 +320,11 @@ final class BoardGeometry {
             float high = tile.elevation() * level();
             for (int direction = 0; direction < 6; direction++) {
                 BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-                high = Math.max(high, BoardSurface.roadEdgeElevation(tile, neighbor, direction) * level());
+                high = Math.max(high, BoardRoadGrade.edgeLevel(tile, neighbor, direction) * level());
+                // A neighbour's wide carriageway can reserve a sliver of this hex at its own grade.
+                if (neighbor != null && BoardRoad.carriageway(neighbor)) {
+                    high = Math.max(high, neighbor.elevation() * level());
+                }
             }
             high += BoardRelief.decoration(tile);
             // Sculpted cliffs, talus and rim lips can reach slightly beyond the logical footprint.

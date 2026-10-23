@@ -61,6 +61,28 @@ final class InfantryFootprint {
     }
 
     /**
+     * The room that keeps one of {@code count} troop formations sharing a hex in its own sector, a margin clear of the
+     * others: the half of the hex for two, a third for three, a sixth for more.
+     *
+     * @param index the formation's place among them, from 0, or -1 for one that does not share the hex
+     */
+    static float[] sector(int index, int count) {
+        float[] room = new float[SIDES.length];
+        if (index < 0 || count < 2) { return room; }
+        int side = index * SIDES.length / count;
+        // Ground beyond a line through the centre parallel to a closed side belongs to another formation.
+        int[] closed = switch (count) {
+            case 2 -> new int[] { side + 3 };
+            case 3 -> new int[] { side + 3, side + 4 };
+            default -> new int[] { side + 2, side + 4 };
+        };
+        for (int edge : closed) {
+            room[edge % SIDES.length] = SIDES[edge % SIDES.length].z * BoardGeometry.hexScale();
+        }
+        return room;
+    }
+
+    /**
      * How far towards each hex side a member may stand, in the formation's own units: to the side, less a margin and
      * the room, in world units, that a step takes on this hex's side of that edge.
      */
@@ -116,7 +138,11 @@ final class InfantryFootprint {
         return false;
     }
 
-    /** Draw the layout in, then move it as a whole into the available ground when a bank cuts into just one side. */
+    /**
+     * Draw the layout in, then move it as a whole into the available ground when a bank cuts into just one side. A
+     * formation too large for its {@link #sector} keeps its size and clear of the others: it stands against the split
+     * and spills over the hex's edges.
+     */
     static Layout layout(List<Vector3> positions, List<Polygon> outlines, float scale, float[] room) {
         float compression = compress(positions, outlines, scale, room);
         float[] limits = new float[SIDES.length];
@@ -130,7 +156,20 @@ final class InfantryFootprint {
             }
         }
         Vector3 offset = new Vector3();
-        fit(offset, limits);
+        boolean[] split = new boolean[SIDES.length];
+        boolean shared = false;
+        for (int side = 0; side < SIDES.length; side++) {
+            // Steps take a rim from an edge; only another formation's sector reaches the hex's centre.
+            split[side] = room[side] >= SIDES[side].z * BoardGeometry.hexScale();
+            shared |= split[side];
+        }
+        if (!fit(offset, limits.clone()) && shared) {
+            for (int side = 0; side < SIDES.length; side++) {
+                if (!split[side]) { limits[side] = Float.POSITIVE_INFINITY; }
+            }
+            offset.setZero();
+            fit(offset, limits);
+        }
         return new Layout(compression, offset);
     }
 

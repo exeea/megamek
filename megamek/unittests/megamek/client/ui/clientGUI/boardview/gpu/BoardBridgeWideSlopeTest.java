@@ -52,13 +52,14 @@ class BoardBridgeWideSlopeTest {
                             var parapet = new Vector3(point).mulAdd(across,
                                   side * (BoardRoad.CORRIDOR_HALF + BoardBridge.SHOULDER / 2) * scale);
                             assertEquals(grade(center, bank, parapet, normal) + 2.5f * scale,
-                                  BoardBridgeSlopeTest.height(shape, parapet, false), .02f,
+                                  BoardBridgeSlopeTest.height(shape, parapet, false), BoardBridgeSlopeTest.EASED,
                                   "The outer parapet follows the same grade as the center: " + context);
                             var lane = new Vector3(point).mulAdd(across, side * 19.5f * scale);
                             float grade = grade(center, bank, lane, normal);
-                            assertEquals(grade, BoardBridge.top(shape, lane.x, lane.y), .02f,
+                            assertEquals(grade, BoardBridge.top(shape, lane.x, lane.y), BoardBridgeSlopeTest.EASED,
                                   "The carrier remains planar across its entire width: " + context);
-                            assertEquals(grade, BoardBridgeSlopeTest.height(shape, lane, false), .02f,
+                            assertEquals(grade, BoardBridgeSlopeTest.height(shape, lane, false),
+                                  BoardBridgeSlopeTest.EASED,
                                   "Picking sees the drawn lane without a raised sliver: " + context);
                         }
                     }
@@ -71,7 +72,7 @@ class BoardBridgeWideSlopeTest {
     private static float grade(Vector3 center, Vector3 bank, Vector3 point, Vector3 normal) {
         float span = (bank.x - center.x) * normal.x + (bank.y - center.y) * normal.y;
         float projected = ((point.x - center.x) * normal.x + (point.y - center.y) * normal.y) / span;
-        return center.z + (bank.z - center.z) * (2 * projected - .5f)
+        return center.z + (bank.z - center.z) * BoardBridgeSlopeTest.eased(projected)
               + GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
     }
 

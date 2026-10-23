@@ -5,6 +5,7 @@ import static megamek.client.ui.design.ColorMath.hex;
 import static megamek.client.ui.design.ColorMath.over;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import megamek.client.ui.design.ColorMath;
@@ -21,6 +22,13 @@ import megamek.client.ui.design.DesignTokens.Mode;
  * components must paint opaque colors.
  */
 public final class TokenLafDefaults {
+    /** Menu row padding above and below the text, so a menu row is control.sm (28) tall like the select's rows. */
+    private static final int MENU_ROW_MARGIN = 5;
+    /** Menu bar item padding above and below the text. */
+    private static final int MENU_BAR_MARGIN = 4;
+    /** The widest a tooltip's text runs before it wraps, about 45 characters of small text. */
+    private static final int TOOLTIP_MAX_WIDTH = 280;
+
     private final DesignTokens tokens;
     private final Mode mode;
     private final Map<String, String> values = new LinkedHashMap<>();
@@ -64,8 +72,11 @@ public final class TokenLafDefaults {
         put("@selectionForeground", color("text.primary"));
         put("@selectionInactiveBackground", over(selected, input));
         put("@selectionInactiveForeground", color("text.primary"));
-        put("@menuSelectionBackground", over(selected, popover));
+        put("@menuSelectionBackground", over(hover, popover));
         put("@menuHoverBackground", over(hover, popover));
+        put("@menuCheckBackground", over(selected, popover));
+        put("@menuAcceleratorForeground", color("text.muted"));
+        put("@menuAcceleratorSelectionForeground", color("text.secondary"));
         put("@cellFocusColor", color("focus.ring"));
         put("@icon", color("text.secondary"));
         put("@buttonArrowColor", color("text.secondary"));
@@ -73,7 +84,9 @@ public final class TokenLafDefaults {
         put("@buttonHoverArrowColor", color("text.primary"));
         put("@buttonPressedArrowColor", color("text.primary"));
 
-        // Shape and focus: arcs are diameters; the ring is drawn inside the edge so no control changes size
+        // Shape and focus: arcs are diameters. The focus ring is drawn inside the edge so no control changes size;
+        // small indicators (check box, radio, slider thumb) get it around them, a gap away. Status edges give way to
+        // the ring while focused: the field's icon or message keeps the status.
         String arc = number(tokens.radius().get("md") * 2);
         values.put("Component.arc", arc);
         values.put("Button.arc", arc);
@@ -90,11 +103,38 @@ public final class TokenLafDefaults {
         put("Component.focusedBorderColor", color("focus.ring"));
         put("Component.linkColor", color("accent.primary"));
         put("Component.error.borderColor", color("status.danger"));
-        put("Component.error.focusedBorderColor", color("status.danger"));
+        put("Component.error.focusedBorderColor", color("focus.ring"));
         put("Component.warning.borderColor", color("status.warning"));
-        put("Component.warning.focusedBorderColor", color("status.warning"));
+        put("Component.warning.focusedBorderColor", color("focus.ring"));
         put("Component.success.borderColor", color("status.success"));
-        put("Component.success.focusedBorderColor", color("status.success"));
+        put("Component.success.focusedBorderColor", color("focus.ring"));
+
+        // Inputs line up with buttons: control.sm by default, control.md through TokenFields. The edge turns strong
+        // under the pointer; a read-only input has no fill and a subtle edge, but keeps primary text.
+        values.put(FieldEdge.HEIGHT, number(tokens.size().get("control.sm")));
+        put(FieldEdge.HOVER_COLOR, color("border.strong"));
+        put(FieldEdge.READ_ONLY_COLOR, color("border.subtle"));
+        put(TokenFormField.LABEL_COLOR, color("text.secondary"));
+        put(TokenFormField.HELPER_COLOR, color("text.muted"));
+        int padY = Math.round(tokens.space().get("xxs"));
+        int padX = Math.round(tokens.space().get("md"));
+        values.put("@componentMargin", padY + "," + padX + "," + padY + "," + padX);
+        values.put("TextFieldUI", FieldUIs.TextField.class.getName());
+        values.put("PasswordFieldUI", FieldUIs.PasswordField.class.getName());
+        values.put("FormattedTextFieldUI", FieldUIs.FormattedTextField.class.getName());
+        values.put("SpinnerUI", FieldUIs.Spinner.class.getName());
+        values.put("ComboBoxUI", FieldUIs.ComboBox.class.getName());
+        for (String prefix : new String[] { "TextField", "PasswordField", "FormattedTextField" }) {
+            values.put(prefix + ".border", FieldBorders.Text.class.getName());
+        }
+        values.put("Spinner.border", FieldBorders.Round.class.getName());
+        values.put("ComboBox.border", FieldBorders.Round.class.getName());
+        values.put("ScrollPane.border", FieldBorders.ScrollPane.class.getName());
+        for (String prefix : new String[] { "TextField", "PasswordField", "FormattedTextField", "TextArea", "TextPane",
+                                            "EditorPane" }) {
+            put(prefix + ".inactiveBackground", base);
+            put(prefix + ".placeholderForeground", color("text.muted"));
+        }
 
         // Secondary (default) button: raised face, control edge; hover adds a wash, a strong edge and brighter text.
         // Every kind is disabled the same way: raised face, subtle edge, disabled text.
@@ -184,7 +224,16 @@ public final class TokenLafDefaults {
         put("ToggleButton.disabledSelectedBackground",
               over(ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2), raised));
 
-        // Check boxes and radio buttons: accent fill when selected
+        // Check boxes and radio buttons: accent fill when selected. Focus never changes the box, it adds a ring around
+        // it a gap away, so a checked box still looks checked.
+        float ringAround = tokens.size().get("focus.width") + tokens.size().get("focus.gap");
+        values.put("CheckBox.icon", TokenCheckBoxIcon.class.getName());
+        values.put("RadioButton.icon", TokenRadioButtonIcon.class.getName());
+        values.put("CheckBox.icon.focusWidth", number(ringAround));
+        // The ring sits around the icon, so the label moves out of its way
+        values.put("CheckBox.iconTextGap", number(4 + ringAround));
+        values.put("RadioButton.iconTextGap", number(4 + ringAround));
+        put("CheckBox.icon.focusColor", color("focus.ring"));
         put("CheckBox.icon.borderColor", color("border.control"));
         put("CheckBox.icon.background", input);
         put("CheckBox.icon.selectedBorderColor", accent);
@@ -192,15 +241,24 @@ public final class TokenLafDefaults {
         put("CheckBox.icon.checkmarkColor", color("text.onAccent"));
         put("CheckBox.icon.disabledBorderColor", color("border.subtle"));
         put("CheckBox.icon.disabledCheckmarkColor", color("text.disabled"));
-        put("CheckBox.icon.focusedBorderColor", color("focus.ring"));
+        put("CheckBox.icon.focusedBorderColor", color("border.control"));
+        put("CheckBox.icon.focusedBackground", input);
+        put("CheckBox.icon.focusedSelectedBorderColor", accent);
+        put("CheckBox.icon.focusedSelectedBackground", accent);
+        put("CheckBox.icon.focusedCheckmarkColor", color("text.onAccent"));
         put("CheckBox.icon.hoverBorderColor", color("border.strong"));
+        put("CheckBox.icon.pressedBorderColor", color("border.strong"));
         put("CheckBox.icon.hoverBackground", over(hover, input));
         put("CheckBox.icon.pressedBackground", over(pressed, input));
-        put("CheckBox.icon.hoverSelectedBackground", over(hover, accent));
-        put("CheckBox.icon.pressedSelectedBackground", over(pressed, accent));
+        // A checked box hovers and presses like a primary button: a surface wash is invisible on the accent
+        put("CheckBox.icon.hoverSelectedBorderColor", color("border.strong"));
+        put("CheckBox.icon.pressedSelectedBorderColor", color("border.strong"));
+        put("CheckBox.icon.hoverSelectedBackground", accentHover);
+        put("CheckBox.icon.pressedSelectedBackground", accentPressed);
+        // An off switch's thumb (TokenSwitchIcon); on, it takes the check mark color
+        put("CheckBox.icon.switchThumbColor", color("text.secondary"));
 
         // Text and lists
-        put("TextField.placeholderForeground", color("text.muted"));
         put("Label.disabledForeground", color("text.disabled"));
         put("Separator.foreground", color("border.subtle"));
         put("Table.gridColor", color("border.subtle"));
@@ -209,19 +267,108 @@ public final class TokenLafDefaults {
         put("TableHeader.bottomSeparatorColor", color("border.control"));
         put("TableHeader.hoverBackground", over(hover, raised));
         put("TableHeader.pressedBackground", over(pressed, raised));
+        // Lists and trees (TokenListUI, TokenTreeUI): rows at least control.sm high, inset and rounded like the popup
+        // list. The pointer's row gets the hover wash; a selected row keeps the violet wash, focused or not, and adds a
+        // violet marker at its leading edge, so selection never relies on color alone. Text starts past the marker.
+        values.put("ListUI", TokenListUI.class.getName());
+        values.put("TreeUI", TokenTreeUI.class.getName());
+        String rowArc = number(tokens.radius().get("sm") * 2);
+        String rowInsets = "0," + Math.round(tokens.space().get("xs")) + ",0," + Math.round(tokens.space().get("xs"));
+        int markerSpace = Math.round(tokens.space().get("xs") + tokens.size().get("selection.width")
+              + tokens.space().get("sm"));
+        int textSide = Math.round(tokens.space().get("xs") + tokens.space().get("sm"));
+        values.put("List.selectionArc", rowArc);
+        values.put("List.selectionInsets", rowInsets);
+        values.put(TokenListUI.CELL_MARGINS, "1," + markerSpace + ",1," + textSide);
+        values.put(TokenLists.ROW_HEIGHT, number(tokens.size().get("control.sm")));
+        values.put(TokenLists.TWO_LINE_HEIGHT, number(tokens.size().get("control.lg")));
+        put(TokenLists.HOVER_BACKGROUND, over(hover, input));
+        put(TokenLists.MARKER_COLOR, color("selected.primary"));
+        put(TokenLists.EMPTY_FOREGROUND, color("text.muted"));
+        put(TokenLists.DETAIL_FOREGROUND, color("text.secondary"));
+        values.put("Tree.selectionArc", rowArc);
+        values.put("Tree.selectionInsets", rowInsets);
+        values.put("Tree.rowHeight", number(tokens.size().get("control.sm")));
+        // Each level indents 16, as the libGDX tree does; the leading border keeps the chevrons clear of the marker
+        int halfIndent = Math.round(tokens.space().get("md"));
+        values.put("Tree.leftChildIndent", Integer.toString(halfIndent));
+        values.put("Tree.rightChildIndent", Integer.toString(halfIndent));
+        values.put("Tree.border", "1," + markerSpace + ",1," + Math.round(tokens.space().get("xs")));
+        values.put("Tree.paintLines", "false");
+        values.put("Tree.showDefaultIcons", "false");
 
         // Containers and popups
         put("Panel.background", base);
         put("TabbedPane.background", base);
         put("TabbedPane.hoverColor", over(hover, base));
-        put("TabbedPane.focusColor", over(hover, base));
+        // Focus is a ring inside the selected tab (TokenTabbedPaneUI), not a tint that reads like hover
+        put("TabbedPane.focusColor", base);
+        values.put("TabbedPaneUI", TokenTabbedPaneUI.class.getName());
+        // Tabs: secondary labels that brighten under the pointer; the selected tab has a violet underline whether or
+        // not the strip has focus. Plain tab panes are compact; TokenTabs makes regular ones.
         put("TabbedPane.contentAreaColor", color("border.subtle"));
-        put("TabbedPane.inactiveUnderlineColor", color("border.control"));
+        put("TabbedPane.foreground", color("text.secondary"));
+        put("TabbedPane.hoverForeground", color("text.primary"));
+        put("TabbedPane.selectedForeground", color("text.primary"));
+        put("TabbedPane.disabledForeground", color("text.disabled"));
+        put("TabbedPane.underlineColor", color("selected.primary"));
+        put("TabbedPane.inactiveUnderlineColor", color("selected.primary"));
         put("TabbedPane.disabledUnderlineColor", color("border.subtle"));
-        put("PopupMenu.borderColor", color("border.subtle"));
+        values.put("TabbedPane.tabSelectionHeight", number(tokens.size().get("selection.width")));
+        values.put("TabbedPane.contentSeparatorHeight", number(tokens.size().get("border")));
+        values.put("TabbedPane.tabHeight", number(tokens.size().get("control.sm")));
+        int tabSide = Math.round(tokens.space().get("md"));
+        values.put("TabbedPane.tabInsets", "0," + tabSide + ",0," + tabSide);
+        put("PopupMenu.borderColor", color("border.control"));
+        // Select (TokenSelects): the shared popup list. Rows under the pointer or the keyboard get the hover wash, not
+        // the selection violet; the current value has a violet check instead.
+        put("ComboBox.popupBackground", popover);
+        put("ComboBox.selectionBackground", over(hover, popover));
+        put("ComboBox.selectionForeground", color("text.primary"));
+        values.put("ComboBox.selectionArc", number(tokens.radius().get("sm") * 2));
+        int rowInset = Math.round(tokens.space().get("xs"));
+        values.put("ComboBox.selectionInsets", "0," + rowInset + ",0," + rowInset);
+        // The popup pads its top and bottom as the rows inset their sides, so the highlight sits evenly inside
+        values.put("ComboBox.popupInsets", rowInset + ",0," + rowInset + ",0");
+        values.put("ComboBox.maximumRowCount", "10");
+        values.put(TokenSelects.ROW_HEIGHT, number(tokens.size().get("control.sm")));
+        put(TokenSelects.CHECK_COLOR, color("selected.primary"));
+        put(TokenSelects.INLINE_FOREGROUND, color("text.secondary"));
+        put(TokenSelects.INLINE_HOVER_FOREGROUND, color("text.primary"));
+        put(TokenSelects.PLACEHOLDER_FOREGROUND, color("text.muted"));
+        // Menus: the select's popup and rows. The row under the pointer or the keyboard gets the hover wash (the
+        // @menu* variables above), checks and radios are violet, and accelerators are muted.
+        int rowSide = Math.round(tokens.space().get("xs") + tokens.space().get("md"));
+        int border = Math.round(tokens.size().get("border"));
+        values.put("Popup.borderCornerRadius", number(tokens.radius().get("md")));
+        values.put("PopupMenu.borderInsets", (rowInset + border) + "," + border + "," + (rowInset + border) + ","
+              + border);
+        values.put("MenuItem.selectionInsets", "0," + rowInset + ",0," + rowInset);
+        values.put("MenuItem.selectionArc", number(tokens.radius().get("sm") * 2));
+        values.put("@menuItemMargin", MENU_ROW_MARGIN + "," + rowSide + "," + MENU_ROW_MARGIN + "," + rowSide);
+        values.put("MenuBar.itemMargins", MENU_BAR_MARGIN + "," + rowSide + "," + MENU_BAR_MARGIN + "," + rowSide);
+        put("CheckBoxMenuItem.icon.checkmarkColor", color("selected.primary"));
+        put("CheckBoxMenuItem.icon.disabledCheckmarkColor", color("text.disabled"));
+        put("Menu.icon.arrowColor", color("text.secondary"));
+        put("Menu.icon.disabledArrowColor", color("text.disabled"));
+        for (String item : List.of("Menu", "MenuItem", "CheckBoxMenuItem", "RadioButtonMenuItem")) {
+            put(item + ".selectionBackground", over(hover, popover));
+            put(item + ".selectionForeground", color("text.primary"));
+        }
         put("MenuBar.borderColor", color("border.subtle"));
+        // Tooltips (TokenToolTipUI): a card on the popup surface with the popup's edge and corner. Plain text wraps
+        // at the maximum width; a card's detail text and its shortcut chip are secondary.
         put("ToolTip.background", popover);
         put("ToolTip.foreground", color("text.primary"));
+        values.put("ToolTipUI", TokenToolTipUI.class.getName());
+        int tipY = Math.round(tokens.space().get("sm")) + border;
+        int tipX = Math.round(tokens.space().get("md")) + border;
+        values.put("ToolTip.border", tipY + "," + tipX + "," + tipY + "," + tipX + "," + hex(color("border.control"))
+              + "," + border + "," + number(tokens.radius().get("md") * 2));
+        values.put(TokenTooltips.MAX_WIDTH, number(TOOLTIP_MAX_WIDTH));
+        put(TokenTooltips.DETAIL_FOREGROUND, color("text.secondary"));
+        put(TokenTooltips.KEY_FOREGROUND, color("text.secondary"));
+        put(TokenTooltips.KEY_BORDER_COLOR, color("border.control"));
         put("TitlePane.background", raised);
         put("TitlePane.inactiveBackground", base);
         put("TitlePane.foreground", color("text.primary"));
@@ -234,14 +381,50 @@ public final class TokenLafDefaults {
         put("ProgressBar.foreground", accent);
         put("ProgressBar.selectionForeground", color("text.onAccent"));
         put("ProgressBar.selectionBackground", color("text.primary"));
+        // Sliders (TokenSliderUI): an accent fill up to a round icon.sm thumb on an xs pill track, the same with ticks
+        // and labels. Hover and drag lean the thumb as on a checked box and give it a strong edge; focus rings it a gap
+        // away. Ticks are tick.width pills under the track, labels small and muted.
+        values.put("SliderUI", TokenSliderUI.class.getName());
+        values.put("Slider.trackWidth", number(tokens.space().get("xs")));
+        int thumb = Math.round(tokens.size().get("icon.sm"));
+        values.put("Slider.thumbSize", thumb + "," + thumb);
+        values.put("Slider.focusWidth", number(ringAround));
+        values.put("Slider.focusRingWidth", number(tokens.size().get("focus.width")));
+        values.put("Slider.thumbBorderWidth", number(tokens.size().get("border")));
+        values.put("Slider.tickLength", number(tokens.space().get("sm")));
+        values.put("Slider.tickWidth", number(tokens.size().get("tick.width")));
         put("Slider.trackColor", color("border.control"));
         put("Slider.trackValueColor", accent);
         put("Slider.thumbColor", accent);
+        put("Slider.thumbBorderColor", accent);
+        put("Slider.hoverThumbColor", accentHover);
+        put("Slider.pressedThumbColor", accentPressed);
+        put("Slider.hoverThumbBorderColor", color("border.strong"));
+        put("Slider.focusedColor", color("focus.ring"));
+        put("Slider.tickColor", color("border.control"));
         put("Slider.disabledTrackColor", color("border.subtle"));
         put("Slider.disabledThumbColor", color("text.disabled"));
+        put("Slider.disabledThumbBorderColor", color("text.disabled"));
+        put("Slider.disabledTickColor", color("border.subtle"));
+        put("Slider.foreground", color("text.muted"));
+        // Scrollbars (TokenScrollBarUI, TokenScrollPaneUI): no track or arrows of their own, so a bar shows the content
+        // it scrolls; an sm pill thumb xxs from the bar's sides, at least control.sm long. The pointer anywhere on the
+        // bar shows the rail as a translucent wash over that content and brightens the thumb.
+        values.put("ScrollBarUI", TokenScrollBarUI.class.getName());
+        values.put("ScrollPaneUI", TokenScrollPaneUI.class.getName());
+        int thumbInset = Math.round(tokens.space().get("xxs"));
+        int thumbWidth = Math.round(tokens.space().get("sm"));
+        values.put("ScrollBar.width", number(thumbWidth + 2 * thumbInset));
+        values.put("ScrollBar.thumbInsets", thumbInset + "," + thumbInset + "," + thumbInset + "," + thumbInset);
+        values.put("ScrollBar.minimumThumbSize",
+              thumbWidth + "," + number(tokens.size().get("control.sm") - 2 * thumbInset));
+        values.put("ScrollBar.thumbArc", "999");
+        values.put("ScrollBar.trackArc", "999");
+        values.put("ScrollBar.showButtons", "false");
+        values.put("ScrollBar.hoverThumbWithTrack", "true");
         put("ScrollBar.track", base);
         put("ScrollBar.thumb", color("border.control"));
-        put("ScrollBar.hoverTrackColor", over(hover, base));
+        put("ScrollBar.hoverTrackColor", hover);
         put("ScrollBar.hoverThumbColor", color("text.muted"));
         put("ScrollBar.pressedThumbColor", color("text.secondary"));
 
@@ -256,6 +439,7 @@ public final class TokenLafDefaults {
         // Button captions use the label style's medium weight
         values.put("Button.font", medium);
         values.put("ToggleButton.font", medium);
+        values.put("TabbedPane.font", medium);
         return values;
     }
 

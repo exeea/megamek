@@ -75,7 +75,7 @@ final class BoardRoad {
     /** The largest angle between a bent road and the normal of the border it crosses. */
     private static final float MAX_BEND = (float) Math.toRadians(40);
     /** Where an approach outside a broad 120-degree bend starts its turn, holding the ramp corridor. */
-    private static final float CORRIDOR = .55f;
+    static final float CORRIDOR = .55f;
     /** Centre-line dash and gap lengths; a road fits whole dashes between the borders it crosses. */
     private static final float DASH = 7, GAP = 6;
     private final Coords coords;
@@ -88,6 +88,8 @@ final class BoardRoad {
     private record Circle(float x, float y, float radius, int lanes, Coords owner) { }
     private final Circle circle;
     private final Map<Float, Area> outlines = new HashMap<>();
+    /** The course's sections, derived once and shared by every worker that grades it; see {@link #sections()}. */
+    private volatile float[] sections;
     private RailRoute.Corridor corridor = RailRoute.Corridor.NONE;
     private Area median;
     /** Connected bends requiring a solid divider on this road's immediate approaches. */
@@ -200,7 +202,8 @@ final class BoardRoad {
         List<BoardRoad> result = new ArrayList<>();
         for (int direction = -1; direction < 6; direction++) {
             var source = direction < 0 ? tile : scene.neighbor(tile, direction);
-            if (source == null || source.elevation() != tile.elevation()
+            // A graded road's ramp and corridor reach a neighbour of another level too; drawn roads keep to their level.
+            if (source == null || !clearance && source.elevation() != tile.elevation()
                   || !(clearance ? carriageway(source) : rendered(source))) { continue; }
             // Only an actual apron entrance ends at concrete. Through-roads and roundabouts keep their full width
             // where their sides cross a fitted concrete edge, including concrete carrying another road.
@@ -232,7 +235,8 @@ final class BoardRoad {
             }
             return neighbor != null && (neighbor.roadExits() & (1 << ((direction + 3) % 6))) != 0
                   ? neighbor.road() : Kind.NONE;
-        }, bends(tile.coords(), nodes)).circulate(nodes);
+        }, bends(tile.coords(), nodes), true,
+              climbingTurn(tile.roadExits(), BoardRoadGrade.ramps(scene, tile))).circulate(nodes);
         if (tile.railExits() != 0) { road = road.solidHub(); }
         if (road.circle != null && road.circle.lanes == 2) {
             // Every member owns the complete shared geometry, including all three fitted external mouths.
@@ -270,7 +274,7 @@ final class BoardRoad {
         return this;
     }
 
-    private static boolean turning(int exits) {
+    static boolean turning(int exits) {
         return Integer.bitCount(exits & 63) == 2 && (exits & (exits >> 3)) == 0;
     }
 
@@ -444,7 +448,7 @@ final class BoardRoad {
         }
         BoardRoad hub = layout(coords, exits, Kind.PAVED,
               direction -> joins.stream().filter(join -> join.direction() == direction).map(Join::kind)
-                    .findFirst().orElse(Kind.PAVED), direction -> null, false);
+                    .findFirst().orElse(Kind.PAVED), direction -> null, false, false);
         hub.solidApproaches = solidApproaches;
         hub.apronExits = apronExits;
         hub.concreteEntrances = concreteEntrances;
@@ -557,8 +561,25 @@ final class BoardRoad {
         int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0;
         if (rails != 0) { return clearance(coords, exits | rails, RailRoute.corridor(hex, coords, board)).solidHub(); }
         Function<Coords, Node> nodes = at -> Node.of(at.equals(coords) ? hex : board.apply(at), at, board);
-        return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED,
-              bends(coords, nodes)).circulate(nodes);
+        // The ramps BoardRoadGrade#ramps finds in the scene, up or down: an exit onto dry ground at another level that
+        // carries the way on or lies within two levels. A bridge deck's approach height is not known here.
+        int ramps = 0;
+        for (int d = 0; d < 6; d++) {
+            Hex next = board.apply(coords.translated(d));
+            if (next == null || HexTile.liquid(next) || next.getLevel() == hex.getLevel()) { continue; }
+            int back = 1 << (d + 3) % 6;
+            boolean way = next.containsTerrain(Terrains.ROAD) && (next.getTerrain(Terrains.ROAD).getExits() & back) != 0
+                  || (RailRoute.groundSides(next) & back) != 0;
+            if (way || Math.abs(next.getLevel() - hex.getLevel()) <= 2) { ramps |= 1 << d; }
+        }
+        return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED, bends(coords, nodes), true,
+              climbingTurn(exits, ramps)).circulate(nodes);
+    }
+
+    /** A return turn that climbs runs straight in to the hex centre and out again, keeping both ramps long. */
+    static boolean climbingTurn(int exits, int ramps) {
+        exits &= 63;
+        return Integer.bitCount(exits) == 2 && (exits & ((exits << 1) | (exits >> 5))) != 0 && (ramps & exits) != 0;
     }
 
     /**
@@ -635,11 +656,12 @@ final class BoardRoad {
     }
 
     static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors, IntFunction<Vector2> bends) {
-        return layout(coords, exits, kind, neighbors, bends, true);
+        return layout(coords, exits, kind, neighbors, bends, true, false);
     }
 
+    /** {@code radial} runs every exit straight to the centre, as a junction's arms do. */
     private static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors,
-          IntFunction<Vector2> bends, boolean circulation) {
+          IntFunction<Vector2> bends, boolean circulation, boolean radial) {
         List<Point> ends = new ArrayList<>();
         List<Vector2> directions = new ArrayList<>();
         List<Integer> sides = new ArrayList<>();
@@ -651,7 +673,7 @@ final class BoardRoad {
             Kind neighbor = neighbors.apply(direction);
             float width = neighbor == Kind.NONE ? kind.halfWidth : (kind.halfWidth + neighbor.halfWidth) / 2;
             ends.add(new Point(x, y, width));
-            directions.add(bends.apply(direction));
+            directions.add(radial ? null : bends.apply(direction));
             sides.add(direction);
             if (neighbor != Kind.NONE && neighbor != kind) {
                 float length = (float) Math.hypot(x, y);
@@ -665,15 +687,17 @@ final class BoardRoad {
             // One circulating lane, as wide as each incoming lane of the two-way approach.
             paths.add(ring(circle, kind.halfWidth / 2));
             for (Point end : ends) { entry(paths, end, circle, kind.halfWidth); }
-        } else if (ends.size() == 2
+        } else if (ends.size() == 2 && !radial
               && RailRoute.piece(sides.get(0), sides.get(1)) >= 3
               && square(ends.get(0), directions.get(0)) && square(ends.get(1), directions.get(1))) {
             // A 120-degree connection uses the same broad course as its rail. Holding straight corridors inside
             // this bend pinches the bridge around the track, even though both reach the same border midpoints.
             paths.add(course(ends.get(0), ends.get(1)));
         } else if (ends.size() == 2) {
-            // A return turn needs the whole hex to keep its inner shoulder open at full road width.
-            boolean returnTurn = RailRoute.piece(sides.get(0), sides.get(1)) < 0;
+            // A return turn needs the whole hex to keep its inner shoulder open at full road width. A climbing one holds
+            // both ramp corridors instead; its legs converge too closely for an open inner shoulder, which closes into
+            // the wedge between the ramps.
+            boolean returnTurn = !radial && RailRoute.piece(sides.get(0), sides.get(1)) < 0;
             if (returnTurn) {
                 for (int i = 0; i < directions.size(); i++) {
                     if (directions.get(i) == null) { directions.set(i, new Vector2(ends.get(i).x, ends.get(i).y).nor()); }
@@ -1213,24 +1237,13 @@ final class BoardRoad {
         float station = 0, nearest = Float.POSITIVE_INFINITY, length = 0;
         boolean bounded = false;
         var path = paths.getFirst();
+        float[] sections = sections();
         for (int i = 1; i < path.size(); i++) {
             Point a = path.get(i - 1), b = path.get(i);
             float dx = b.x - a.x, dy = b.y - a.y, span = (float) Math.hypot(dx, dy);
             if (span == 0) { continue; }
-            float ax = dx / span, ay = dy / span, bx = ax, by = ay;
-            if (i > 1) {
-                Point before = path.get(i - 2);
-                float run = (float) Math.hypot(a.x - before.x, a.y - before.y);
-                if (run > 0) { ax += (a.x - before.x) / run; ay += (a.y - before.y) / run; }
-            }
-            if (i + 1 < path.size()) {
-                Point after = path.get(i + 1);
-                float run = (float) Math.hypot(after.x - b.x, after.y - b.y);
-                if (run > 0) { bx += (after.x - b.x) / run; by += (after.y - b.y) / run; }
-            }
-            float al = (float) Math.hypot(ax, ay), bl = (float) Math.hypot(bx, by);
-            float from = ((x - a.x) * ax + (y - a.y) * ay) / al;
-            float to = ((x - b.x) * bx + (y - b.y) * by) / bl;
+            float from = (x - a.x) * sections[2 * i - 2] + (y - a.y) * sections[2 * i - 1];
+            float to = (x - b.x) * sections[2 * i] + (y - b.y) * sections[2 * i + 1];
             boolean inside = from >= 0 && to <= 0;
             float t = inside ? from / (from - to)
                   : Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / (span * span), 0, 1);
@@ -1241,6 +1254,86 @@ final class BoardRoad {
             length += span;
         }
         return station;
+    }
+
+    /**
+     * The unit normal {x, y} of {@link #throughStation}'s section at each vertex of the course: square to the bisector of
+     * the segments meeting there. Where the course crosses a border, the section is the border itself, so both hexes
+     * measure one station all along their shared edge: the 84x72 lattice is not regular, and a square crossing is not
+     * quite square to it.
+     */
+    private float[] sections() {
+        float[] result = sections;
+        if (result != null) { return result; }
+        var path = paths.getFirst();
+        result = new float[2 * path.size()];
+        for (int i = 0; i < path.size(); i++) {
+            Point p = path.get(i);
+            float sx = 0, sy = 0;
+            if (i > 0) {
+                Point before = path.get(i - 1);
+                float run = (float) Math.hypot(p.x - before.x, p.y - before.y);
+                if (run > 0) { sx += (p.x - before.x) / run; sy += (p.y - before.y) / run; }
+            }
+            if (i + 1 < path.size()) {
+                Point after = path.get(i + 1);
+                float run = (float) Math.hypot(after.x - p.x, after.y - p.y);
+                if (run > 0) { sx += (after.x - p.x) / run; sy += (after.y - p.y) / run; }
+            }
+            float[] border = borderNormal(p, sx, sy);
+            if (border != null) { sx = border[0]; sy = border[1]; }
+            float length = (float) Math.hypot(sx, sy);
+            if (length > 0) { result[2 * i] = sx / length; result[2 * i + 1] = sy / length; }
+        }
+        sections = result;
+        return result;
+    }
+
+    /** The normal of the hex edge a course point lies on, turned along (dx, dy); null off the hex outline. */
+    private static float[] borderNormal(Point p, float dx, float dy) {
+        for (int k = 0; k < 6; k++) {
+            float ax = HexTile.cornerOffsetX(k, HexTile.WIDTH), ay = HexTile.cornerOffsetY(k, HexTile.HEIGHT);
+            float ex = HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH) - ax;
+            float ey = HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT) - ay;
+            float length = (float) Math.hypot(ex, ey), along = ((p.x - ax) * ex + (p.y - ay) * ey) / (length * length);
+            if (along < 0 || along > 1 || Math.abs((p.x - ax) * ey - (p.y - ay) * ex) > .01f * length) { continue; }
+            float nx = ey / length, ny = -ex / length, sign = nx * dx + ny * dy < 0 ? -1 : 1;
+            return new float[] { nx * sign, ny * sign };
+        }
+        return null;
+    }
+
+    /**
+     * Cross-sections of the two-exit course at the given stations and at each path vertex: station, point and unit
+     * normal in tile pixels, as {@link #throughStation} measures them. Empty without such a course.
+     */
+    List<float[]> crossSections(List<Float> stations) {
+        if (borders.size() != 2 || paths.size() != 1) { return List.of(); }
+        List<float[]> result = new ArrayList<>();
+        var path = paths.getFirst();
+        float length = 0;
+        for (int i = 1; i < path.size(); i++) {
+            Point a = path.get(i - 1), b = path.get(i);
+            float span = (float) Math.hypot(b.x - a.x, b.y - a.y);
+            if (span == 0) { continue; }
+            float nx = -(b.y - a.y) / span, ny = (b.x - a.x) / span;
+            for (float station : stations) {
+                // A station at a vertex takes the vertex's own section below, not a second one beside it.
+                if (station >= length + .05f && station < length + span - .05f) {
+                    float t = (station - length) / span;
+                    result.add(new float[] { station, a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), nx, ny });
+                }
+            }
+            length += span;
+            if (i + 1 < path.size()) {
+                Point c = path.get(i + 1);
+                float next = (float) Math.hypot(c.x - b.x, c.y - b.y);
+                if (next == 0) { continue; }
+                float mx = nx - (c.y - b.y) / next, my = ny + (c.x - b.x) / next, m = (float) Math.hypot(mx, my);
+                if (m > 0) { result.add(new float[] { length, b.x, b.y, mx / m, my / m }); }
+            }
+        }
+        return result;
     }
 
     /** The period nearest {@code period} that fits whole periods into {@code span}: road dashes, rail sleepers. */

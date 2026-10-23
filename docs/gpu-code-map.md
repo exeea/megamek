@@ -33,7 +33,9 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardSurface` | Owns a hex's finished ground, ramps, banks and beds used by rendering and support queries. |
 | `BoardRelief` | Computes canonical shared corners, cliff profiles, transition bands, shores and decorative rock placement. |
 | `BoardConcrete` | Caches the scene's fitted concrete outline (`common/board/ConcreteFit`, which the legacy conversion reads too), shared with adjoining terrain, and pins the hexes of placed objects it would cut. |
-| `BoardRampMesh` | Removes redundant ramp samples while retaining boundary vertices and bounded height error. |
+| `BoardRoadGrade` | Reserves a carriageway's ground and gives its height: edge levels, ramp shares, Classic/Enhanced profiles. |
+| `BoardRoadCut` | Meshes reserved road ground and removes the terrain over it, with cut faces; builds containment walls. |
+| `BoardRoadBank` | Enhanced: moves natural ground near roads vertically into banks and embankments. |
 | `BoardRim` | Builds CPU cliff-rim shading masks, for the 3D tops and the Classic columns, during bounded terrain preparation. |
 
 ## Roads, bridges and authored terrain
@@ -47,7 +49,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardBridgeFooting` | Shared bridge bank support and joint-pier placement, including corridor width. Bridge appearance owns Pillars; a maglev-only implicit deck uses the slim maglev kit and beam underside, ordinary built decks use the bridge pier kit. |
 | `BoardBridgeMesh` | Generates manufactured slabs and kerbs from the live road and on-deck rail footprint during chunk preparation. |
 | `BoardBridgeTruss` | Generates continuous steel chords, support panels and joined or terminal ends along the manufactured carriageway boundary. |
-| `BoardBridgeSlope` | Grades generated slabs and rails to connected decks one level apart; shares complete flat and sloped shapes with drawing, paint and picking. |
+| `BoardBridgeSlope` | Grades generated slabs and rails to connected decks one level apart; shares complete flat and sloped shapes with drawing, paint and picking; eases Enhanced solid ramps. |
 | `BoardNaturalBridge` | Builds hollow rock spans, bank contacts and underpass geometry. |
 | `BoardTunnel` | Detects cosmetic portals at eligible cliff-facing road/deck exits and supplies their placement. |
 | `BoardRocks`, `BoardShape` | Load reusable rock/scatter CPU mesh data; shape loading is separate from placement policy. |

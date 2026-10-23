@@ -121,11 +121,11 @@ public final class UiTheme implements Disposable {
           Map.entry("tactical", 0xE3B4), Map.entry("map", 0xE55B), Map.entry("report", 0xE873),
           Map.entry("help", 0xF1C0), Map.entry("settings", 0xE8B8), Map.entry("menu", 0xE5D2),
           Map.entry("chat", 0xE0B7), Map.entry("grid", 0xE9B0),
-          Map.entry("list", 0xE896), Map.entry("check", 0xE5CA), Map.entry("flame", 0xEF55),
+          Map.entry("list", 0xE896), Map.entry("check", 0xE5CA), Map.entry("remove", 0xE15B), Map.entry("flame", 0xEF55),
           Map.entry("chevron-down", 0xE5CF), Map.entry("chevron-up", 0xE5CE), Map.entry("twist-left", 0xE419),
           Map.entry("twist-right", 0xE41A), Map.entry("more", 0xE5D3), Map.entry("undo", 0xE166),
           Map.entry("locate", 0xE55C), Map.entry("play", 0xE037), Map.entry("pause", 0xE034),
-          Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("walk", 0xF87D),
+          Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("error", 0xE000), Map.entry("walk", 0xF87D),
           Map.entry("chevron-left", 0xE5CB), Map.entry("chevron-right", 0xE5CC), Map.entry("expand", 0xF1CE), Map.entry("grip", 0xE945),
           // unfold_more and unfold_less: a tree's Expand all and Collapse all, as the Client Settings sidebar draws them.
           Map.entry("unfold-more", 0xE5D7), Map.entry("unfold-less", 0xE5D6),
@@ -304,6 +304,10 @@ public final class UiTheme implements Disposable {
         tooltip.wrapWidth = 340;
         skin.add("hud", tooltip);
         icons();
+        tokenFields();
+        tokenChoices();
+        tokenOptions();
+        tokenSelects();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -583,6 +587,309 @@ public final class UiTheme implements Disposable {
         drawable.setMinHeight(height);
         drawable.setMinWidth(square ? height : 0);
         return drawable;
+    }
+
+    /**
+     * The text input variants (docs/design-system/tokens.md, Inputs): plain or search, each with a status or read-only.
+     * Each is a {@link TokenFieldStyle} named {@code input<variant>}, and {@code input<variant>-compact} at the compact
+     * size.
+     */
+    public static final List<String> INPUT_VARIANTS = List.of("", "-error", "-warning", "-readonly", "-search",
+          "-search-error", "-search-warning", "-search-readonly");
+    /** The size of an input's status and search glyphs (icon.sm). */
+    public static final float FIELD_ICON = DesignTokens.shipped().size().get("icon.sm");
+    /** The gap between an input's text and its trailing status icon (space.xs). */
+    public static final float FIELD_ICON_GAP = DesignTokens.shipped().space().get("xs");
+
+    /** A text input style built from the design tokens, with the edge under the pointer and an optional status icon. */
+    public static final class TokenFieldStyle extends TextField.TextFieldStyle {
+        /** The background under the pointer; a status edge keeps its color. */
+        public Drawable over;
+        /** The status icon drawn at the trailing edge, in {@link #iconColor}; null for none. */
+        public Drawable icon;
+        public Color iconColor;
+    }
+
+    /**
+     * The token inputs in dark mode: an input fill and control edge, strong under the pointer, the focus ring in place
+     * of the edge, a status edge and icon; read-only has no fill and a subtle edge but primary text.
+     */
+    private void tokenFields() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        Color input = token(tokens.color("surface.input", mode));
+        Color base = token(tokens.color("surface.base", mode));
+        Color danger = token(tokens.color("status.danger", mode));
+        Color warning = token(tokens.color("status.warning", mode));
+        float radius = tokens.radius().get("md");
+        float border = tokens.size().get("border");
+        box("in", input, token(tokens.color("border.control", mode)), border, radius, null, 0, 0, 0);
+        box("in-over", input, token(tokens.color("border.strong", mode)), border, radius, null, 0, 0, 0);
+        box("in-focus", input, token(tokens.color("focus.ring", mode)), tokens.size().get("focus.width"), radius, null,
+              0, 0, 0);
+        box("in-error", input, danger, border, radius, null, 0, 0, 0);
+        box("in-warning", input, warning, border, radius, null, 0, 0, 0);
+        box("in-quiet", base, token(tokens.color("border.subtle", mode)), border, radius, null, 0, 0, 0);
+        Drawable selection = skin.newDrawable("white",
+              token(ColorMath.over(tokens.color("selected.background", mode), tokens.color("surface.input", mode))));
+        Color text = token(tokens.color("text.primary", mode));
+        Drawable cursor = skin.newDrawable("white", text);
+        cursor.setMinWidth(border);
+
+        float vertical = border + tokens.space().get("xs");
+        float side = border + tokens.space().get("md");
+        float iconSpace = tokens.size().get("icon.sm") + tokens.space().get("xs");
+        for (boolean compact : new boolean[] { false, true }) {
+            float height = tokens.size().get(compact ? "control.sm" : "control.md");
+            for (String variant : INPUT_VARIANTS) {
+                boolean search = variant.startsWith("-search");
+                String state = search ? variant.substring("-search".length()) : variant;
+                boolean status = state.equals("-error") || state.equals("-warning");
+                float left = search ? side + iconSpace : side;
+                // The search field's clear button and a status icon sit at the trailing edge, the icon innermost
+                float right = (search ? side + height - 2 * vertical : side) + (status ? iconSpace : 0);
+                String rest = status ? "in" + state : "in";
+                TokenFieldStyle style = new TokenFieldStyle();
+                style.font = skin.getFont("hud-body");
+                style.fontColor = text;
+                style.focusedFontColor = text;
+                style.messageFont = style.font;
+                style.messageFontColor = token(tokens.color("text.muted", mode));
+                style.cursor = cursor;
+                style.selection = selection;
+                style.background = field(rest, vertical, left, right, height);
+                style.over = rest.equals("in") ? field("in-over", vertical, left, right, height) : style.background;
+                style.focusedBackground = field("in-focus", vertical, left, right, height);
+                // Disabled: no fill and a subtle edge; read-only is the same box with primary text
+                style.disabledBackground = field("in-quiet", vertical, left, right, height);
+                style.disabledFontColor = state.equals("-readonly") ? text
+                      : token(tokens.color("text.disabled", mode));
+                if (status) {
+                    style.icon = skin.getDrawable(state.equals("-error") ? "icon-error" : "icon-warn");
+                    style.iconColor = state.equals("-error") ? danger : warning;
+                }
+                skin.add("input" + variant + (compact ? COMPACT : ""), style, TextField.TextFieldStyle.class);
+            }
+        }
+    }
+
+    private Drawable field(String box, float vertical, float left, float right, float height) {
+        NinePatchDrawable drawable = resized(box, vertical, left, height);
+        drawable.setRightWidth(right);
+        return drawable;
+    }
+
+    /** The edge of a check box or radio button and the height of a switch's track (icon.sm). */
+    public static final float CHOICE_SIZE = DesignTokens.shipped().size().get("icon.sm");
+    /** A switch's track length, as a multiple of its height. */
+    public static final float SWITCH_LENGTH = 1.75f;
+    /** The space between a switch's track edge and its thumb. */
+    public static final float SWITCH_INSET = 2;
+    /** The diameter of the dot in a selected radio button. */
+    public static final float RADIO_DOT = 8;
+    /** The focus ring's width plus its gap from the indicator: the room a choice keeps around it. */
+    public static final float CHOICE_RING = DesignTokens.shipped().size().get("focus.width")
+          + DesignTokens.shipped().size().get("focus.gap");
+    /** The state suffixes of the choice drawables {@code choice-<shape><state>}, in {@link UiChoice}'s order. */
+    public static final List<String> CHOICE_STATES = List.of("", "-over", "-down", "-disabled", "-on", "-on-over",
+          "-on-down", "-on-disabled");
+
+    /** The colors of a choice's label and marks; its faces are the {@code choice-*} drawables. */
+    public static final class ChoiceStyle {
+        public Color text;
+        public Color disabledText;
+        /** The check, dash, dot or on-thumb on the accent fill. */
+        public Color mark;
+        /** An off switch's thumb. */
+        public Color thumb;
+        /** Every mark while disabled. */
+        public Color disabledMark;
+    }
+
+    /**
+     * The token choices in dark mode: a box, circle or pill in the input fill and control edge, strong under the
+     * pointer; on, an accent fill that hovers and presses like a primary button; disabled, no fill and a subtle edge.
+     * The focus ring sits a gap away, so it never hides the state.
+     */
+    private void tokenChoices() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        int input = tokens.color("surface.input", mode);
+        int hover = tokens.color("surface.hover", mode);
+        int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
+        int accent = tokens.color("accent.primary", mode);
+        int accentHover = ColorMath.over(ColorMath.withAlpha(tokens.color("text.onAccent", mode),
+              tokens.alpha("tint.hover")), accent);
+        int accentPressed = ColorMath.over(ColorMath.withAlpha(tokens.color("text.primary", mode),
+              tokens.alpha("tint.pressed")), accent);
+        Color base = token(tokens.color("surface.base", mode));
+        Color control = token(tokens.color("border.control", mode));
+        Color strong = token(tokens.color("border.strong", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color ring = token(tokens.color("focus.ring", mode));
+        float border = tokens.size().get("border");
+        float width = tokens.size().get("focus.width");
+        float gap = tokens.size().get("focus.gap");
+        Map<String, Float> radii = Map.of("box", tokens.radius().get("sm"), "radio", CHOICE_SIZE / 2,
+              "track", CHOICE_SIZE / 2);
+        radii.forEach((shape, radius) -> {
+            // A disc or pill is all corner, so it needs its minimum height to keep its shape
+            float height = shape.equals("box") ? 0 : CHOICE_SIZE;
+            String name = "choice-" + shape;
+            box(name, token(input), control, border, radius, null, 0, 0, height);
+            box(name + "-over", token(ColorMath.over(hover, input)), strong, border, radius, null, 0, 0, height);
+            box(name + "-down", token(ColorMath.over(pressed, input)), strong, border, radius, null, 0, 0, height);
+            box(name + "-disabled", base, subtle, border, radius, null, 0, 0, height);
+            box(name + "-on", token(accent), token(accent), border, radius, null, 0, 0, height);
+            box(name + "-on-over", token(accentHover), strong, border, radius, null, 0, 0, height);
+            box(name + "-on-down", token(accentPressed), strong, border, radius, null, 0, 0, height);
+            skin.add(name + "-on-disabled", skin.getDrawable(name + "-disabled"), Drawable.class);
+            box(name + "-focus", Color.CLEAR, ring, width, radius + gap + width, null, 0, 0,
+                  height == 0 ? 0 : height + 2 * (gap + width));
+        });
+        box("choice-dot", Color.WHITE, null, 0, RADIO_DOT / 2, null, 0, 0, RADIO_DOT);
+        float thumb = CHOICE_SIZE - 2 * SWITCH_INSET;
+        box("choice-thumb", Color.WHITE, null, 0, thumb / 2, null, 0, 0, thumb);
+        ChoiceStyle style = new ChoiceStyle();
+        style.text = token(tokens.color("text.primary", mode));
+        style.disabledText = token(tokens.color("text.disabled", mode));
+        style.mark = token(tokens.color("text.onAccent", mode));
+        style.thumb = token(tokens.color("text.secondary", mode));
+        style.disabledMark = style.disabledText;
+        skin.add("default", style);
+    }
+
+    /** The colors of tabs and segmented controls; their faces are the {@code tab-*} and {@code seg-*} drawables. */
+    public static final class OptionStyle {
+        /** An option at rest. */
+        public Color text;
+        /** An option under the pointer, pressed or selected. */
+        public Color activeText;
+        public Color disabledText;
+        /** The selected tab's underline. */
+        public Color underline;
+        public Color disabledUnderline;
+        /** The hairline under a tab strip and the dividers between unselected sections. */
+        public Color hairline;
+        /** The focus ring inside a tab. */
+        public Color ring;
+        /** A one-unit white texel, tinted for underlines and hairlines. */
+        public Drawable line;
+    }
+
+    /**
+     * Tabs and segmented controls in dark mode (docs/design-system/tokens.md, Tabs and Segmented control). A tab is a
+     * label on the window surface with a wash under the pointer and a violet underline when selected. A segmented
+     * control is one raised frame; its selected section has a violet wash and edge, like a selected toggle, drawn over
+     * the frame edge.
+     */
+    private void tokenOptions() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        int raised = tokens.color("surface.raised", mode);
+        int hover = tokens.color("surface.hover", mode);
+        int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
+        int selected = tokens.color("selected.background", mode);
+        int selectedDisabled = ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2);
+        Color control = token(tokens.color("border.control", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color violet = token(tokens.color("selected.primary", mode));
+        Color ring = token(tokens.color("focus.ring", mode));
+        float border = tokens.size().get("border");
+        float focus = tokens.size().get("focus.width");
+        float radius = tokens.radius().get("md");
+
+        // Tabs: a square wash under the pointer; pressed looks the same, as in FlatLaf
+        skin.add("tab-over", skin.newDrawable("white", token(hover)), Drawable.class);
+
+        box("seg-frame", token(raised), control, border, radius, null, 0, 0, 0);
+        box("seg-frame-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
+        // A section's wash sits inside the frame edge, so its corners follow the edge's inner radius
+        float inner = Math.max(radius - border, 0);
+        box("seg-over", token(hover), null, 0, inner, null, 0, 0, 0);
+        box("seg-down", token(pressed), null, 0, inner, null, 0, 0, 0);
+        box("seg-on", token(ColorMath.over(selected, raised)), violet, border, radius, null, 0, 0, 0);
+        box("seg-on-disabled", token(ColorMath.over(selectedDisabled, raised)), subtle, border, radius, null, 0, 0,
+              0);
+        box("seg-focus", Color.CLEAR, ring, focus, radius, null, 0, 0, 0);
+
+        OptionStyle style = new OptionStyle();
+        style.text = token(tokens.color("text.secondary", mode));
+        style.activeText = token(tokens.color("text.primary", mode));
+        style.disabledText = token(tokens.color("text.disabled", mode));
+        style.underline = violet;
+        style.disabledUnderline = subtle;
+        style.hairline = subtle;
+        style.ring = ring;
+        style.line = skin.newDrawable("white");
+        skin.add("default", style);
+    }
+
+    /** The colors and drawables of a select and its popup list ({@link UiSelect}, {@link UiListPopup}). */
+    public static final class SelectStyle {
+        /** The face at rest, under the pointer or open, with the focus ring, and disabled: the input boxes. */
+        public Drawable face;
+        public Drawable faceOver;
+        public Drawable faceFocus;
+        public Drawable faceDisabled;
+        /** The focus ring around an inline select, which has no box. */
+        public Drawable ring;
+        /** The popup list's frame. */
+        public Drawable popup;
+        /** The wash under the row at the pointer or the keyboard. */
+        public Drawable rowOver;
+        /** The inline select's dotted underline in white, tinted by the batch color per state. */
+        public Drawable line;
+        public Color text;
+        public Color placeholder;
+        /** An inline select's value at rest; under the pointer, open or focused it takes {@link #text}. */
+        public Color inlineText;
+        public Color disabledText;
+        public Color chevron;
+        /** The check before the current value in the popup list. */
+        public Color check;
+        public Color underline;
+        public Color underlineOver;
+        public Color underlineDisabled;
+    }
+
+    /**
+     * Selects and their popup list in dark mode (docs/design-system/tokens.md, Select). The face is the input box; the
+     * inline variant has a dotted underline instead. The popup list is a popover frame with a control edge: the row
+     * at the pointer or the keyboard gets the hover wash, and the current value a violet check, so violet keeps
+     * meaning selected.
+     */
+    private void tokenSelects() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        Color control = token(tokens.color("border.control", mode));
+        float border = tokens.size().get("border");
+        box("sel-ring", Color.CLEAR, token(tokens.color("focus.ring", mode)), tokens.size().get("focus.width"),
+              tokens.radius().get("md"), null, 0, 0, 0);
+        box("sel-popup", token(tokens.color("surface.popover", mode)), control, border, tokens.radius().get("md"),
+              null, 0, 0, 0);
+        box("sel-row-over", token(tokens.color("surface.hover", mode)), null, 0, tokens.radius().get("sm"), null, 0,
+              0, 0);
+
+        SelectStyle style = new SelectStyle();
+        style.face = skin.getDrawable("in");
+        style.faceOver = skin.getDrawable("in-over");
+        style.faceFocus = skin.getDrawable("in-focus");
+        style.faceDisabled = skin.getDrawable("in-quiet");
+        style.ring = skin.getDrawable("sel-ring");
+        style.popup = skin.getDrawable("sel-popup");
+        style.rowOver = skin.getDrawable("sel-row-over");
+        style.line = new Dashes(skin.get("white", Texture.class), Color.WHITE, border, 2, 2, false);
+        style.text = token(tokens.color("text.primary", mode));
+        style.placeholder = token(tokens.color("text.muted", mode));
+        style.inlineText = token(tokens.color("text.secondary", mode));
+        style.disabledText = token(tokens.color("text.disabled", mode));
+        style.chevron = token(tokens.color("text.secondary", mode));
+        style.check = token(tokens.color("selected.primary", mode));
+        style.underline = control;
+        style.underlineOver = token(tokens.color("border.strong", mode));
+        style.underlineDisabled = token(tokens.color("border.subtle", mode));
+        skin.add("default", style);
     }
 
     /** A libGDX color from a token's ARGB value. */

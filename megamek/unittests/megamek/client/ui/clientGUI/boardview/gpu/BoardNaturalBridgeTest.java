@@ -242,9 +242,30 @@ class BoardNaturalBridgeTest {
                 assertEquals(1, face.normal().len(), .001f);
             }
         }
-        // Exact bank-outline contacts add bounded triangles: the five widened surface families submit 130–170 at distance.
-        assertTrue(previous <= 180,
+        // Exact bank-outline contacts and the rim's bank shoulders add bounded triangles: the five widened surface
+        // families submit 138–178 at distance.
+        assertTrue(previous <= 190,
               "A distant span needs only its silhouette and exact bank contacts: " + family + " submitted " + previous);
+    }
+
+    @Test
+    void grassSpansAreBareRockThatTheirBanksCoverFadesOnto() {
+        var scene = scene(BoardScene.Surface.GRASS, false, true);
+        var tile = scene.tile(CENTER);
+        var deck = BoardBridge.deck(scene, tile);
+        assertEquals(BoardScene.Surface.ROCK, BoardNaturalBridge.build(scene, tile, deck, TerrainLod.FULL, new HashMap<>()).surface());
+        assertEquals(BoardScene.Surface.GRASS,
+              BoardNaturalBridge.build(scene, tile, deck, TerrainLod.FULL, new HashMap<>(), true).surface(),
+              "Classic keeps the meadow cap");
+        var bank = scene.tile(CENTER.translated(0));
+        assertTrue(BoardSurfaceBlend.boundary(scene, bank), "A uniform meadow bank still blends onto the span's rock");
+        var edge = BoardGeometry.center(CENTER, 3).lerp(BoardGeometry.center(bank.coords(), 3), .5f);
+        var inward = BoardGeometry.center(bank.coords(), 3).sub(edge).nor();
+        var sampler = new BoardSurfaceBlend.Sampler(scene, bank);
+        var lip = new Vector3(edge).mulAdd(inward, BoardRelief.metres(.5f));
+        assertTrue(sampler.sample(lip.x, lip.y, lip.z).rock() > .95f, "The bank meets the span's top as its rock");
+        var meadow = new Vector3(edge).mulAdd(inward, BoardRelief.metres(10));
+        assertEquals(1, sampler.sample(meadow.x, meadow.y, meadow.z).grass(), .001f, "The fade stays a short band");
     }
 
     @Test

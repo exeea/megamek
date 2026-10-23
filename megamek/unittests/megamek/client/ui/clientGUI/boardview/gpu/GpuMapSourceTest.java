@@ -46,6 +46,36 @@ class GpuMapSourceTest {
     @TempDir
     Path temporary;
 
+    @Test
+    void inspectorWallCfRefreshesItsFamilyWithoutRebuildingTheBoardsBuildingObjects() throws Exception {
+        onEdt(() -> {
+            var editor = new BoardEditorSession();
+            Coords at = new Coords(0, 0);
+            Board board = new Board();
+            board.newData(1, 1, new Hex[] { new Hex(0,
+                  "building:5:0;bldg_elev:2;bldg_cf:150;bldg_basement_type:1", "") }, null);
+            editor.game().setBoard(board);
+            try (var source = new GpuMapSource(editor.game(), null, editor)) {
+                var before = source.takeFrame().scene().tile(at);
+                assertEquals(BoardWall.Family.HARDENED, BoardWall.family(before));
+                long generation = source.takeFrame().boardGeneration();
+                source.editorPointer(at, 0, 0, false, generation);
+                source.endEditorStroke();
+                source.editorCommand(new Command(Action.TERRAIN, "bldg_cf", "11"), generation);
+                var after = source.takeFrame().scene().tile(at);
+                assertEquals(150, board.getBuildingAt(at).getCurrentCF(at), "Map edits leave gameplay objects untouched");
+                assertEquals(11, after.cover().pristineCF());
+                assertEquals(BoardWall.Family.LIGHT, BoardWall.family(after));
+                assertFalse(before.sameGeometry(after));
+                source.editorCommand(new Command(Action.UNDO), generation);
+                assertEquals(BoardWall.Family.HARDENED, BoardWall.family(source.takeFrame().scene().tile(at)));
+                source.editorCommand(new Command(Action.REDO), generation);
+                assertEquals(BoardWall.Family.LIGHT, BoardWall.family(source.takeFrame().scene().tile(at)));
+            }
+            return null;
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void printCapturesEveryLabelWithoutChangingTheViewOrDocument(boolean editing) throws Exception {
@@ -69,13 +99,15 @@ class GpuMapSourceTest {
                     boolean dirty = editor != null && editor.dirty();
                     var displayed = source.takeFrame().scene();
                     assertTrue(command(source, "fileBoardPrint").enabled());
-                    source.requestPrint(image -> {
+                    Path target = temporary.resolve("print.jpg");
+                    source.requestPrint(target, () -> {
                         assertTrue(SwingUtilities.isEventDispatchThread());
                         completions.incrementAndGet();
                     }, failure -> { throw new AssertionError(failure); });
                     assertFalse(command(source, "fileBoardPrint").enabled());
                     var request = source.takePrintRequest();
                     assertNotNull(request);
+                    assertEquals(target, request.target(), "The render thread writes the chosen file");
                     assertNull(source.takePrintRequest(), "The GL thread consumes a request only once");
                     assertEquals(6, request.scene().tiles().size());
                     for (var tile : request.scene().tiles()) {
@@ -92,17 +124,17 @@ class GpuMapSourceTest {
                     assertFalse(preferences.getHexTypesEnabled());
                     assertFalse(preferences.getHexLabelOutline());
                     if (editor != null) { assertEquals(dirty, editor.dirty()); }
-                    source.requestPrint(image -> { throw new AssertionError("A second print was queued"); },
+                    source.requestPrint(target, () -> { throw new AssertionError("A second print was queued"); },
                           failure -> { throw new AssertionError(failure); });
                     assertNull(source.takePrintRequest(), "Only one print runs at a time");
-                    request.completed().accept(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB));
+                    request.completed().run();
                     assertEquals(1, completions.get());
                     assertTrue(command(source, "fileBoardPrint").enabled());
-                    source.requestPrint(image -> completions.incrementAndGet(), failure -> { throw new AssertionError(failure); });
+                    source.requestPrint(target, completions::incrementAndGet, failure -> { throw new AssertionError(failure); });
                     var cancelled = source.takePrintRequest();
                     source.close();
-                    cancelled.completed().accept(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB));
-                    assertEquals(1, completions.get(), "A closed workspace cannot start saving a completed capture");
+                    cancelled.completed().run();
+                    assertEquals(1, completions.get(), "A closed workspace reports no completed print");
                     assertNull(source.takePrintRequest());
                 }
             } finally {
@@ -114,33 +146,75 @@ class GpuMapSourceTest {
         });
     }
 
+    /**
+     * 8,000 pixels wide, so that a restart interval is 512 rows: the 1,024-row band holds two and the last band one
+     * shorter interval, which the restart markers join into one picture.
+     */
     @Test
-    void printablePngKeepsItsPhysicalResolutionAndTransparency() throws Exception {
-        Path output = temporary.resolve("print.png");
-        var image = new BufferedImage(GpuBoardPrint.HEX_WIDTH_PIXELS, GpuBoardPrint.PIXELS_PER_HEX,
-              BufferedImage.TYPE_INT_ARGB);
-        image.setRGB(5, 7, 0x804A719A);
-        GpuMapSource.writePrint(image, output, GpuBoardPrint.PIXELS_PER_METRE);
-        var reader = ImageIO.getImageReadersByFormatName("png").next();
+    void printableJpegJoinsBandsAndKeepsTheMapsheetHexSizeAndFullColour() throws Exception {
+        Path output = temporary.resolve("print.jpg");
+        var image = new BufferedImage(8000, 1300, BufferedImage.TYPE_3BYTE_BGR);
+        var graphics = image.createGraphics();
+        try {
+            graphics.setColor(java.awt.Color.WHITE);
+            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+            // Squares across both interval joins (rows 512 and 1024, also the band join), on the 8-pixel JPEG blocks so
+            // that no block mixes a square and the white.
+            graphics.setColor(new java.awt.Color(0x4A719A));
+            graphics.fillRect(40, 480, 64, 64);
+            graphics.fillRect(7896, 992, 64, 64);
+            // A one-pixel red line: subsampled chroma would spread and fade it.
+            graphics.setColor(java.awt.Color.RED);
+            graphics.drawLine(150, 20, 150, 1280);
+        } finally { graphics.dispose(); }
+        try (var jpeg = new GpuPrintJpeg(output, image.getWidth(), image.getHeight(), GpuBoardPrint.DPI, GpuBoardPrint.DPI)) {
+            jpeg.write(image.getSubimage(0, 0, image.getWidth(), 1024));
+            jpeg.write(image.getSubimage(0, 1024, image.getWidth(), 276));
+        }
+        var reader = ImageIO.getImageReadersByFormatName("jpeg").next();
         try (var input = ImageIO.createImageInputStream(output.toFile())) {
             reader.setInput(input);
-            var root = (IIOMetadataNode) reader.getImageMetadata(0).getAsTree("javax_imageio_png_1.0");
-            var resolution = (IIOMetadataNode) root.getElementsByTagName("pHYs").item(0);
-            assertNotNull(resolution);
-            assertEquals(Integer.toString(GpuBoardPrint.PIXELS_PER_METRE), resolution.getAttribute("pixelsPerUnitXAxis"));
-            assertEquals(Integer.toString(GpuBoardPrint.PIXELS_PER_METRE), resolution.getAttribute("pixelsPerUnitYAxis"));
-            assertEquals("meter", resolution.getAttribute("unitSpecifier"));
+            var root = (IIOMetadataNode) reader.getImageMetadata(0).getAsTree("javax_imageio_jpeg_image_1.0");
+            var density = (IIOMetadataNode) root.getElementsByTagName("app0JFIF").item(0);
+            assertNotNull(density);
+            assertEquals("1", density.getAttribute("resUnits"), "The density is in dots per inch");
+            assertEquals(1.5, GpuBoardPrint.HEX_WIDTH_PIXELS / Double.parseDouble(density.getAttribute("Xdensity")),
+                  .00001, "Printed hex width matches official mapsheets without fit-to-page scaling");
+            assertEquals(1.3, GpuBoardPrint.PIXELS_PER_HEX / Double.parseDouble(density.getAttribute("Ydensity")),
+                  .00001, "Printed hex height matches official mapsheets without fit-to-page scaling");
+            var components = root.getElementsByTagName("componentSpec");
+            for (int index = 0; index < components.getLength(); index++) {
+                var component = (IIOMetadataNode) components.item(index);
+                assertEquals("1", component.getAttribute("HsamplingFactor"), "No chroma subsampling");
+                assertEquals("1", component.getAttribute("VsamplingFactor"), "No chroma subsampling");
+            }
             var saved = reader.read(0);
-            double pixelsPerMetreX = Double.parseDouble(resolution.getAttribute("pixelsPerUnitXAxis"));
-            double pixelsPerMetreY = Double.parseDouble(resolution.getAttribute("pixelsPerUnitYAxis"));
-            assertEquals(1.5, saved.getWidth() / pixelsPerMetreX / .0254, .00001,
-                  "Printed hex width matches official mapsheets without fit-to-page scaling");
-            assertEquals(1.3, saved.getHeight() / pixelsPerMetreY / .0254, .00001,
-                  "Printed hex height matches official mapsheets without fit-to-page scaling");
-            assertTrue(saved.getColorModel().hasAlpha(), "The printable PNG retains transparency");
-            assertEquals(0, saved.getRGB(0, 0), "The empty background remains transparent");
-            assertEquals(image.getRGB(5, 7), saved.getRGB(5, 7));
+            assertEquals(image.getWidth(), saved.getWidth());
+            assertEquals(image.getHeight(), saved.getHeight());
+            for (int y = 0; y < image.getHeight(); y += 7) {
+                for (int x : new int[] { 0, 72, 2000, 7930, 7999 }) {
+                    assertClose(image.getRGB(x, y), saved.getRGB(x, y), 6);
+                }
+                assertClose(0xFF0000, saved.getRGB(150, Math.max(20, Math.min(1280, y))), 40);
+            }
         } finally { reader.dispose(); }
+    }
+
+    @Test
+    void anUnfinishedPrintLeavesNoFile() throws Exception {
+        Path output = temporary.resolve("unfinished.jpg");
+        try (var jpeg = new GpuPrintJpeg(output, 400, 2000, GpuBoardPrint.DPI, GpuBoardPrint.DPI)) {
+            jpeg.write(new BufferedImage(400, 1024, BufferedImage.TYPE_3BYTE_BGR));
+            assertTrue(java.nio.file.Files.exists(output));
+        }
+        assertFalse(java.nio.file.Files.exists(output), "A cancelled or failed print deletes its partial JPEG");
+    }
+
+    private static void assertClose(int expected, int actual, int tolerance) {
+        for (int shift : new int[] { 16, 8, 0 }) {
+            assertTrue(Math.abs((expected >> shift & 255) - (actual >> shift & 255)) <= tolerance,
+                  String.format("%06X is not within %d of %06X", actual & 0xFFFFFF, tolerance, expected));
+        }
     }
 
     @ParameterizedTest

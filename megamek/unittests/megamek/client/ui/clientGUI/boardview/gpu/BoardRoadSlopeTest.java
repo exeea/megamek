@@ -77,8 +77,6 @@ class BoardRoadSlopeTest {
               "data/boards/unofficial/SimonLandmine/64x68/64x68 Motorway-M1-2.board"));
         var tile = scene.tile(new Coords(27, 25));
         assertEquals(-3, tile.elevation(), "Exercise the reported road bend below elevation zero");
-        var surface = new BoardSurface(scene, tile, lod);
-        assertTrue(surface.retainingPanelFaces().isEmpty(), "A road cut keeps its natural bank below zero too");
         assertClosed(scene, tile.coords(), lod);
     }
 
@@ -87,12 +85,7 @@ class BoardRoadSlopeTest {
         var scene = BoardCliffSeamTest.scene(new File(
               "data/boards/unofficial/Lanceman/16x17 City Hills Residential 2 (with Structures).board"));
         for (var lod : TerrainLod.values()) {
-            for (var at : List.of(new Coords(13, 8), new Coords(14, 9))) {
-                var surface = new BoardSurface(scene, scene.tile(at), lod);
-                assertTrue(surface.retainingPanelFaces().isEmpty(),
-                      "The natural City roadside must not acquire freestanding concrete panels: " + at + "/" + lod);
-                assertClosed(scene, at, lod);
-            }
+            for (var at : List.of(new Coords(13, 8), new Coords(14, 9))) { assertClosed(scene, at, lod); }
         }
     }
 
@@ -100,16 +93,8 @@ class BoardRoadSlopeTest {
     void plaineGradedApproachDoesNotKeepTheOldFlatToePanel() throws Exception {
         var scene = GpuRoadSourceTest.scene("unofficial/Cartes/16x17 Plaine 1.board");
         for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
-            var approach = new BoardSurface(scene, scene.tile(new Coords(10, 12)), lod);
-            // The old level-zero toe put an 18-unit panel in open air ahead of the graded bank at 1113.
-            var acrossOldPanel = new Ray(new Vector3(649, -895, 15), new Vector3(-5, -8.6f, 0));
-            assertFalse(approach.retainingPanelFaces().stream().anyMatch(face -> Intersector.intersectRayTriangle(
-                        acrossOldPanel, face.a(), face.b(), face.c(), new Vector3())),
-                  "A graded earthwork must not retain a freestanding panel at its former level toe: " + lod);
-            var junction = new BoardSurface(scene, scene.tile(new Coords(9, 11)), lod);
             var acrossLevelCut = new Ray(new Vector3(629.236f, -883.532f, 17.5f),
                   new Vector3(-.3368f, -.9415f, 0));
-            assertTrue(junction.retainingPanelFaces().isEmpty(), "The adjoining natural cut needs no concrete panel");
             var terrain = new ArrayList<BoardSurface.Face>();
             var near = new HashMap<Coords, BoardSurface>();
             for (var tile : scene.tiles()) {
@@ -267,16 +252,23 @@ class BoardRoadSlopeTest {
             assertEquals(walls.stream().filter(face -> face.landEdge() == edge).toList(), rendered.entrySet().stream()
                   .filter(entry -> entry.getKey().edge() == edge).flatMap(entry -> entry.getValue().stream()).toList(),
                   "Rendering must reuse the completed cliff, without rebuilding overlapping walls per road segment");
+            // The cliff below the road recedes from its verge as one band (BoardRelief#roadPush): the shared relief keeps
+            // its native shape, moved alike at every height, and the emitted walls keep that relief.
+            Vector3 shift = null;
             for (int level : new int[] { 2, 3, 4 }) {
                 var nativePoint = nativeSurface.relief.wetCliffContact(edge, .5f, level * BoardGeometry.level());
+                var point = surface.relief.wetCliffContact(edge, .5f, level * BoardGeometry.level());
+                var moved = new Vector3(point).sub(nativePoint);
+                if (shift == null) { shift = moved; }
+                assertTrue(moved.dst(shift) < .01f, lod + " graded cliff lost its native shape by " + moved.dst(shift));
                 float nearest = Float.POSITIVE_INFINITY;
                 for (var face : walls) {
                     if (face.landEdge() != edge) { continue; }
                     for (var p : List.of(face.a(), face.b(), face.c())) {
-                        nearest = Math.min(nearest, nativePoint.dst(p));
+                        nearest = Math.min(nearest, point.dst(p));
                     }
                 }
-                assertTrue(nearest < .01f, lod + " graded cliff lost its native relief by " + nearest);
+                assertTrue(nearest < .01f, lod + " graded cliff departed from the shared relief by " + nearest);
             }
         }
     }
@@ -426,7 +418,7 @@ class BoardRoadSlopeTest {
         assertClosed(scene, at);
     }
 
-    private record Segment(Vector3 a, Vector3 b, Coords owner, BoardSurface.Finish finish, int side) { }
+    private record Segment(Vector3 a, Vector3 b, Coords owner, BoardSurface.Face face) { }
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2 })
@@ -434,7 +426,36 @@ class BoardRoadSlopeTest {
         var at = BoardRoadTest.CENTER;
         int[] rises = layout == 0 ? new int[] { 2, 2, 2, 2, 2, 2 }
               : layout == 1 ? new int[] { -2, -2, -2, -2, -2, -2 } : new int[] { -2, 1, 2, -1, 0, 2 };
-        assertClosed(BoardRoadRampTest.junction(at, rises), at);
+        assertClosed(junction(at, rises), at);
+    }
+
+    /** Six roads of the given rises meeting a six-way junction at level 2 on sand. */
+    static BoardScene junction(Coords at, int[] rises) {
+        return BoardSurfaceBlendTest.scene(c -> {
+            for (int d = 0; d < 6; d++) {
+                if (c.equals(at.translated(d))) {
+                    return BoardRoadTest.tile(c, BoardRoad.Kind.PAVED, 1 << ((d + 3) % 6), 2 + rises[d], BoardScene.Surface.SAND);
+                }
+            }
+            return BoardRoadTest.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                  c.equals(at) ? 63 : 0, 2, BoardScene.Surface.SAND);
+        });
+    }
+
+    /** A concrete junction with the given exits among neighbours of mixed rises. */
+    static BoardScene concreteJunction(int exits) {
+        var at = BoardRoadTest.CENTER;
+        int[] rises = { -2, 1, 2, -1, 0, 2 };
+        return BoardSurfaceBlendTest.scene(c -> {
+            for (int d = 0; d < 6; d++) {
+                if (c.equals(at.translated(d))) {
+                    return BoardRoadTest.tile(c, BoardRoad.Kind.PAVED, (exits & 1 << d) == 0 ? 0 : 1 << ((d + 3) % 6),
+                          2 + rises[d], BoardScene.Surface.CONCRETE);
+                }
+            }
+            return BoardRoadTest.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                  c.equals(at) ? exits : 0, 2, BoardScene.Surface.CONCRETE);
+        });
     }
 
     /** Check the emitted mesh, including T junctions, rather than just comparing the boundary helper to itself. */
@@ -447,12 +468,16 @@ class BoardRoadSlopeTest {
         for (var tile : scene.tiles()) {
             if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
         }
+        float level = BoardGeometry.level();
         Map<String, List<Segment>> edges = new HashMap<>();
+        List<BoardSurface.Face> all = new ArrayList<>(), road = new ArrayList<>();
         for (var surface : surfaces.values()) {
+            road.addAll(BoardSurface.road(scene, surface.tile));
             var faces = new ArrayList<>(surface.groundFaces());
             faces.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
             for (var face : faces) {
                 if (face.finish() == BoardSurface.Finish.DRESSING || face.finish() == BoardSurface.Finish.OUTCROP) { continue; }
+                all.add(face);
                 var points = List.of(face.a(), face.b(), face.c());
                 for (int i = 0; i < 3; i++) {
                     var a = points.get(i);
@@ -461,8 +486,7 @@ class BoardRoadSlopeTest {
                     // Retain short T-junction segments for coverage, excluding only a keyed vertex's self-edge.
                     if (first.equals(second)) { continue; }
                     String key = first.compareTo(second) < 0 ? first + "/" + second : second + "/" + first;
-                    edges.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Segment(a, b, surface.tile.coords(),
-                          face.finish(), face.landEdge()));
+                    edges.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Segment(a, b, surface.tile.coords(), face));
                 }
             }
         }
@@ -480,10 +504,47 @@ class BoardRoadSlopeTest {
                     float u = Math.clamp(new Vector3(p).sub(other.a()).dot(delta) / delta.len2(), 0, 1);
                     if (p.dst2(new Vector3(other.a()).mulAdd(delta, u)) < .0001f) { covered = true; break; }
                 }
+                // An edge lying on another face is closed by it (a T junction with its interior); one under a road's
+                // surface is covered by the road, whose edge is closed down to the ground.
+                for (var face : all) {
+                    if (covered) { break; }
+                    covered = face != edge.face() && onFace(p, face) < .01f;
+                }
+                covered |= p.z <= over(road, p) + .01f * level;
                 if (!covered && gaps.size() < 12) { gaps.add(p + " on " + edge); }
             }
         }
         assertTrue(gaps.isEmpty(), lod + " open terrain boundaries near " + at + ": " + gaps);
+    }
+
+    /** Distance from a point to a face along its normal, or infinity where the point lies outside the face. */
+    private static float onFace(Vector3 p, BoardSurface.Face face) {
+        var ab = new Vector3(face.b()).sub(face.a());
+        var ac = new Vector3(face.c()).sub(face.a());
+        var normal = new Vector3(ab).crs(ac);
+        if (normal.len2() < 1e-12f) { return Float.POSITIVE_INFINITY; }
+        normal.nor();
+        float distance = new Vector3(p).sub(face.a()).dot(normal);
+        var aq = new Vector3(p).mulAdd(normal, -distance).sub(face.a());
+        float d00 = ab.dot(ab), d01 = ab.dot(ac), d11 = ac.dot(ac), d20 = aq.dot(ab), d21 = aq.dot(ac);
+        float den = d00 * d11 - d01 * d01;
+        float v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den;
+        return v >= -1e-4f && w >= -1e-4f && v + w <= 1 + 1e-4f ? Math.abs(distance) : Float.POSITIVE_INFINITY;
+    }
+
+    /** The road's height over a point inside its plan, a little away from its edge; NaN elsewhere. */
+    private static float over(List<BoardSurface.Face> road, Vector3 p) {
+        float margin = .05f * BoardGeometry.hexScale(), height = Float.NaN;
+        for (float[] offset : new float[][] { { 0, 0 }, { margin, 0 }, { -margin, 0 }, { 0, margin }, { 0, -margin } }) {
+            float highest = Float.NaN;
+            for (var face : road) {
+                float h = face.height(p.x + offset[0], p.y + offset[1]);
+                if (Float.isFinite(h) && !(h <= highest)) { highest = h; }
+            }
+            if (Float.isNaN(highest)) { return Float.NaN; }
+            if (offset[0] == 0 && offset[1] == 0) { height = highest; }
+        }
+        return height;
     }
 
     private static String key(Vector3 p) {

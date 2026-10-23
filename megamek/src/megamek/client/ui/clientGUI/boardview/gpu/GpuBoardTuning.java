@@ -136,6 +136,7 @@ final class GpuBoardTuning {
     private final Label terrainProgress;
     private int terrainPercent = -1;
     private final CheckBox cliffsIntoWater;
+    private final CheckBox containmentWalls;
     private final List<Control> familySizes;
     private final CheckBox zoomScaling;
     private final List<Control> zoomScale;
@@ -220,7 +221,7 @@ final class GpuBoardTuning {
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
         unitDisplayMode = choice(skin, "Unit display", "tuning-unit-display", UnitDisplayMode.values(), () -> { });
-        unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
+        unitDisplayMode.addListener(new TextTooltip("All Meeples: troops use meeple figures, every other unit an extruded artwork token. "
               + "Mek Meeples: only Meks use tokens; other units use 3D models. "
               + "3D Models: use the existing models for all units.", skin, "menu"));
         // The Display page: the window's output, from its mode to the graphics card.
@@ -635,6 +636,18 @@ final class GpuBoardTuning {
               + "continue down to the riverbed, without a dry beach. Applies to drops of three or more levels, counting "
               + "water depth. Turn off to restore the beach and rubble slope.", skin, "menu"));
         cliffsIntoWater.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyRelief(); }
+            }
+        });
+        section(skin, "Roads");
+        containmentWalls = checkbox(skin, "Containment walls", "tuning-containment-walls");
+        containmentWalls.setChecked(BoardRelief.tuning().containmentWalls());
+        containmentWalls.addListener(new TextTooltip("Where a road cuts into a natural slope, keep the slope's foot behind "
+              + "a low precast wall at the road's edge, so the slope above gives up less ground. Uncheck to let the whole "
+              + "slope recede from the road instead.", skin, "menu"));
+        containmentWalls.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 if (!syncing) { applyRelief(); }
@@ -1252,12 +1265,13 @@ final class GpuBoardTuning {
     }
 
     private void applyRelief() {
-        BoardRelief.tune(new BoardRelief.Tuning(cliffsIntoWater.isChecked()));
+        BoardRelief.tune(new BoardRelief.Tuning(cliffsIntoWater.isChecked(), containmentWalls.isChecked()));
     }
 
     private void syncRelief() {
         syncing = true;
         cliffsIntoWater.setChecked(BoardRelief.tuning().cliffsIntoWater());
+        containmentWalls.setChecked(BoardRelief.tuning().containmentWalls());
         syncing = false;
     }
 

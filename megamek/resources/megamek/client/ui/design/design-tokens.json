@@ -22,7 +22,7 @@
     "border.strong": { "dark": "#E8F1EB", "light": "#2A3533", "use": "Hovered control edge, corner ticks at full frame." },
 
     "accent.primary": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Brand accent: active state, links, progress, info." },
-    "focus.ring": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Keyboard focus indicator (2 wide, 2 offset)." },
+    "focus.ring": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Keyboard focus ring: 2 wide inside the edge, or around a small indicator with a 1 gap." },
 
     "selected.primary": { "dark": "#9982D3", "light": "#5A49C6", "use": "Selected/current item: marker, edge, map selection." },
     "selected.background": { "dark": "#9982D33D", "light": "#5A49C624", "use": "Selected row or cell wash, laid over its surface." },
@@ -54,7 +54,7 @@
   "size": {
     "control.sm": 28, "control.md": 36, "control.lg": 46,
     "icon.sm": 16, "icon.md": 20, "icon.lg": 24,
-    "border": 1, "focus.width": 2, "focus.offset": 2,
+    "border": 1, "focus.width": 2, "focus.gap": 1, "selection.width": 2,
     "tick.control": 8, "tick.panel": 13, "tick.width": 2
   },
   "opacity": { "tint.hover": 0.16, "tint.pressed": 0.28 },

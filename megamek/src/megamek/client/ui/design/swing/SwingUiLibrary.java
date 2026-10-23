@@ -17,9 +17,12 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.awt.font.TextAttribute;
+import java.awt.geom.RoundRectangle2D;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,14 +36,23 @@ import javax.swing.ButtonGroup;
 import javax.swing.DefaultButtonModel;
 import javax.swing.Icon;
 import javax.swing.JCheckBox;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayer;
+import javax.swing.JList;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JPopupMenu;
 import javax.swing.JProgressBar;
 import javax.swing.JRadioButton;
+import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
@@ -49,16 +61,26 @@ import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.JToolTip;
+import javax.swing.JTree;
 import javax.swing.JViewport;
+import javax.swing.KeyStroke;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
+import javax.swing.text.JTextComponent;
 import javax.swing.text.PlainDocument;
+import javax.swing.tree.DefaultMutableTreeNode;
 
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.ui.FlatEmptyBorder;
+import com.formdev.flatlaf.ui.FlatUIUtils;
+import com.formdev.flatlaf.util.UIScale;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
@@ -88,6 +110,8 @@ public final class SwingUiLibrary extends JFrame {
     private static final int ICON_INFO = 0xE88E;
     private static final int ICON_RADIO_CHECKED = 0xE837;
     private static final int ICON_SEARCH = 0xE8B6;
+    /** Masked in the samples; not a real password. */
+    private static final String SAMPLE_PASSWORD = "atlas-as7d";
 
     private final DesignTokens tokens = DesignTokens.shipped();
     private final VisionLayerUI visionLayer = new VisionLayerUI();
@@ -290,39 +314,46 @@ public final class SwingUiLibrary extends JFrame {
         }
 
         page.add(heading(Messages.getString("UiLibrary.controls.choices")));
+        page.add(paragraph(Messages.getString("UiLibrary.choices.note"), "small", "text.muted"));
+        page.add(choiceMatrix());
+        JPanel live = row(color("surface.base"));
+        live.add(text(Messages.getString("UiLibrary.choices.live"), "label", "text.secondary"));
+        live.add(TokenChoices.check(Messages.getString("UiLibrary.controls.checked"), true));
+        live.add(TokenChoices.mixed(TokenChoices.check(Messages.getString("UiLibrary.choices.selectAll"), false),
+              true));
+        JRadioButton standard = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionA"), true);
+        JRadioButton total = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionB"), false);
+        TokenChoices.group(standard, total);
+        live.add(standard);
+        live.add(total);
+        live.add(TokenChoices.toggleSwitch(Messages.getString("UiLibrary.choices.autosave"), true));
+        page.add(live);
         JPanel choices = row(color("surface.base"));
-        choices.add(new JCheckBox(Messages.getString("UiLibrary.controls.checked"), true));
-        choices.add(new JCheckBox(Messages.getString("UiLibrary.controls.unchecked")));
-        JCheckBox disabledCheck = new JCheckBox(Messages.getString("UiLibrary.controls.disabled"), true);
-        disabledCheck.setEnabled(false);
-        choices.add(disabledCheck);
-        ButtonGroup group = new ButtonGroup();
-        for (String key : List.of("UiLibrary.controls.optionA", "UiLibrary.controls.optionB")) {
-            JRadioButton radio = new JRadioButton(Messages.getString(key), group.getButtonCount() == 0);
-            group.add(radio);
-            choices.add(radio);
-        }
         choices.add(new JComboBox<>(new String[] { Messages.getString("UiLibrary.controls.optionA"),
               Messages.getString("UiLibrary.controls.optionB") }));
         choices.add(new JSpinner(new SpinnerNumberModel(4, 0, 12, 1)));
         page.add(choices);
 
-        page.add(heading(Messages.getString("UiLibrary.controls.text")));
-        JPanel fields = row(color("surface.base"));
-        fields.add(field(Messages.getString("UiLibrary.controls.value"), null, true));
-        JTextField placeholder = field("", null, true);
-        placeholder.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT,
-              Messages.getString("UiLibrary.controls.placeholder"));
-        fields.add(placeholder);
-        fields.add(field(Messages.getString("UiLibrary.controls.error"), FlatClientProperties.OUTLINE_ERROR, true));
-        fields.add(field(Messages.getString("UiLibrary.controls.warning"), FlatClientProperties.OUTLINE_WARNING,
-              true));
-        fields.add(field(Messages.getString("UiLibrary.controls.disabled"), null, false));
-        page.add(fields);
+        page.add(heading(Messages.getString("UiLibrary.controls.inputs")));
+        page.add(paragraph(Messages.getString("UiLibrary.inputs.note"), "small", "text.muted"));
+        for (TokenButtons.Size size : TokenButtons.Size.values()) {
+            JComponent gap = (JComponent) Box.createVerticalStrut(scaleForGUI(12));
+            gap.setAlignmentX(LEFT_ALIGNMENT);
+            page.add(gap);
+            page.add(text(Messages.getString("UiLibrary.buttons." + size.name().toLowerCase(Locale.ROOT)), "label",
+                  "text.secondary"));
+            page.add(inputMatrix(size));
+        }
+        page.add(heading(Messages.getString("UiLibrary.inputs.forms")));
+        page.add(paragraph(Messages.getString("UiLibrary.inputs.forms.note"), "small", "text.muted"));
+        page.add(formSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.sliders")));
+        page.add(paragraph(Messages.getString("UiLibrary.sliders.note"), "small", "text.muted"));
+        page.add(sliderMatrix());
 
         page.add(heading(Messages.getString("UiLibrary.controls.ranges")));
         JPanel ranges = row(color("surface.base"));
-        ranges.add(new JSlider(0, 100, 60));
         JProgressBar progress = new JProgressBar(0, 100);
         progress.setValue(60);
         progress.setStringPainted(true);
@@ -330,16 +361,40 @@ public final class SwingUiLibrary extends JFrame {
         page.add(ranges);
 
         page.add(heading(Messages.getString("UiLibrary.controls.tabs")));
-        JTabbedPane sampleTabs = new JTabbedPane();
-        for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB", "UiLibrary.controls.tabC")) {
-            JPanel tabBody = new JPanel(new BorderLayout());
-            tabBody.add(new JLabel(Messages.getString(key)), BorderLayout.CENTER);
-            tabBody.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(8), scaleForGUI(8),
-                  scaleForGUI(8)));
-            sampleTabs.addTab(Messages.getString(key), tabBody);
+        page.add(paragraph(Messages.getString("UiLibrary.tabs.note"), "small", "text.muted"));
+        for (TokenButtons.Size size : TokenButtons.Size.values()) {
+            JComponent gap = (JComponent) Box.createVerticalStrut(scaleForGUI(12));
+            gap.setAlignmentX(LEFT_ALIGNMENT);
+            page.add(gap);
+            page.add(text(Messages.getString("UiLibrary.buttons." + size.name().toLowerCase(Locale.ROOT)), "label",
+                  "text.secondary"));
+            page.add(tabSamples(size));
         }
-        sampleTabs.setAlignmentX(LEFT_ALIGNMENT);
-        page.add(sampleTabs);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.segmented")));
+        page.add(paragraph(Messages.getString("UiLibrary.segmented.note"), "small", "text.muted"));
+        page.add(segmentedMatrix());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.select")));
+        page.add(paragraph(Messages.getString("UiLibrary.select.note"), "small", "text.muted"));
+        page.add(selectMatrix());
+        page.add(selectPopupSample());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.lists")));
+        page.add(paragraph(Messages.getString("UiLibrary.lists.note"), "small", "text.muted"));
+        page.add(listSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.menus")));
+        page.add(paragraph(Messages.getString("UiLibrary.menus.note"), "small", "text.muted"));
+        page.add(menuSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
+        page.add(paragraph(Messages.getString("UiLibrary.tooltips.note"), "small", "text.muted"));
+        page.add(tooltipSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.scrollbars")));
+        page.add(paragraph(Messages.getString("UiLibrary.scrollbars.note"), "small", "text.muted"));
+        page.add(scrollbarSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         JTable table = new JTable(new Object[][] {
@@ -355,14 +410,893 @@ public final class SwingUiLibrary extends JFrame {
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setAlignmentX(LEFT_ALIGNMENT);
         page.add(tableScroll);
+
+        page.add(heading(Messages.getString("UiLibrary.controls.focus")));
+        page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
+        page.add(focusSamples());
         return page;
     }
 
-    private JTextField field(String value, String outline, boolean enabled) {
-        JTextField field = new JTextField(value, 14);
-        field.putClientProperty(FlatClientProperties.OUTLINE, outline);
-        field.setEnabled(enabled);
+    private JTextField field(String value, TokenFields.Status status) {
+        JTextField field = TokenFields.status(TokenFields.text(TokenButtons.Size.COMPACT), status);
+        field.setText(value);
+        field.setColumns(14);
         return field;
+    }
+
+    /**
+     * Every input kind at {@code size} in every state. "At rest" is live; hover and focus are frozen, and the rest are
+     * real states that stay interactive.
+     */
+    private JComponent inputMatrix(TokenButtons.Size size) {
+        List<String> states = List.of("rest", "hover", "focus", "placeholder", "error", "warning", "readOnly",
+              "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.inputs.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("TEXT", "PASSWORD", "SEARCH", "NUMBER")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.inputs.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                boolean number = kind.equals("NUMBER");
+                // A number has no placeholder, and a read-only one would still step; show it as text instead
+                if (number && (state.equals("placeholder") || state.equals("readOnly"))) {
+                    matrix.add(Box.createHorizontalStrut(0), cell);
+                    continue;
+                }
+                JComponent input = sampleInput(kind, size, state.equals("placeholder"));
+                JComponent text = input instanceof JSpinner spinner
+                      && spinner.getEditor() instanceof JSpinner.DefaultEditor editor ? editor.getTextField() : input;
+                switch (state) {
+                    case "hover" -> input.putClientProperty(FieldEdge.FROZEN_HOVER, true);
+                    case "focus" -> {
+                        focused(text);
+                        focused(input);
+                    }
+                    case "error" -> TokenFields.status(input, TokenFields.Status.ERROR);
+                    case "warning" -> TokenFields.status(input, TokenFields.Status.WARNING);
+                    case "readOnly" -> ((JTextComponent) text).setEditable(false);
+                    case "disabled" -> input.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(input, cell);
+            }
+        }
+        cell.gridx = states.size() + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    private static JComponent sampleInput(String kind, TokenButtons.Size size, boolean empty) {
+        String placeholder = kind.equals("NUMBER") ? null
+              : Messages.getString("UiLibrary.inputs.placeholder." + kind);
+        JComponent input = switch (kind) {
+            case "PASSWORD" -> {
+                JPasswordField field = TokenFields.password(size);
+                field.setText(empty ? "" : SAMPLE_PASSWORD);
+                yield field;
+            }
+            case "SEARCH" -> {
+                JTextField field = TokenFields.search(placeholder, size);
+                field.setText(empty ? "" : Messages.getString("UiLibrary.inputs.value.SEARCH"));
+                yield field;
+            }
+            case "NUMBER" -> TokenFields.number(new SpinnerNumberModel(4, 0, 8, 1), size);
+            default -> {
+                JTextField field = TokenFields.text(size);
+                field.setText(empty ? "" : Messages.getString("UiLibrary.inputs.value.TEXT"));
+                yield field;
+            }
+        };
+        if (input instanceof JTextField field) {
+            field.setColumns(8);
+            field.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, placeholder);
+        }
+        return input;
+    }
+
+    /** Form fields: a label above every input, a helper or a status message below. */
+    private JComponent formSamples() {
+        JPanel samples = column(color("surface.base"));
+        JPanel singleLine = formRow();
+        samples.add(singleLine);
+        JTextField name = TokenFields.text(TokenButtons.Size.REGULAR);
+        name.setColumns(16);
+        name.setText(Messages.getString("UiLibrary.inputs.value.TEXT"));
+        singleLine.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.name"), name)
+              .setHelper(Messages.getString("UiLibrary.inputs.form.nameHelp")));
+        singleLine.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.gunnery"),
+              TokenFields.number(new SpinnerNumberModel(9, 0, 12, 1), TokenButtons.Size.REGULAR))
+              .setError(Messages.getString("UiLibrary.inputs.form.gunneryError")));
+        singleLine.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.piloting"),
+              TokenFields.number(new SpinnerNumberModel(7, 0, 12, 1), TokenButtons.Size.REGULAR))
+              .setWarning(Messages.getString("UiLibrary.inputs.form.pilotingWarning")));
+
+        JPanel areas = formRow();
+        samples.add(areas);
+        String notes = Messages.getString("UiLibrary.inputs.form.notesText");
+        areas.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.notes"),
+              TokenFields.area(new JTextArea(notes, 3, 22)))
+              .setHelper(Messages.getString("UiLibrary.inputs.form.notesHelp")));
+        JTextArea briefing = new JTextArea(notes, 3, 22);
+        briefing.setEditable(false);
+        areas.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.briefing"),
+              TokenFields.area(briefing)));
+        JTextArea disabled = new JTextArea(notes, 3, 22);
+        disabled.setEnabled(false);
+        JScrollPane disabledScroll = TokenFields.area(disabled);
+        disabledScroll.setEnabled(false);
+        areas.add(new TokenFormField(Messages.getString("UiLibrary.inputs.form.disabled"), disabledScroll));
+        singleLine.add(Box.createHorizontalGlue());
+        areas.add(Box.createHorizontalGlue());
+        return samples;
+    }
+
+    /** A row of form fields lined up at their tops, so labels align whatever messages sit below. */
+    private JPanel formRow() {
+        JPanel row = new JPanel(new GridBagLayout()) {
+            @Override
+            public Component add(Component field) {
+                GridBagConstraints cell = new GridBagConstraints();
+                cell.anchor = GridBagConstraints.NORTHWEST;
+                cell.insets = new Insets(scaleForGUI(6), scaleForGUI(8), scaleForGUI(6), scaleForGUI(8));
+                // The trailing glue takes the spare width, so the fields stay at the left
+                cell.weightx = field instanceof TokenFormField ? 0 : 1;
+                super.add(field, cell);
+                return field;
+            }
+        };
+        row.setBackground(color("surface.base"));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        return row;
+    }
+
+    /** Controls frozen in keyboard focus, which the live samples above only show after Tab. */
+    private JComponent focusSamples() {
+        JPanel samples = column(color("surface.base"));
+        JPanel controls = row(color("surface.base"));
+        samples.add(controls);
+        controls.add(focused(field(Messages.getString("UiLibrary.controls.value"), TokenFields.Status.NONE)));
+        controls.add(focused(field(Messages.getString("UiLibrary.controls.error"),
+              TokenFields.Status.ERROR)));
+        controls.add(focused(new JComboBox<>(new String[] { Messages.getString("UiLibrary.controls.optionA") })));
+        JSpinner spinner = new JSpinner(new SpinnerNumberModel(4, 0, 12, 1));
+        if (spinner.getEditor() instanceof JSpinner.DefaultEditor editor) {
+            focused(editor.getTextField());
+        }
+        controls.add(focused(spinner));
+        JPanel indicators = row(color("surface.base"));
+        samples.add(indicators);
+        JCheckBox checked = new JCheckBox(Messages.getString("UiLibrary.controls.checked"));
+        checked.setModel(new FrozenModel(false, false, true));
+        indicators.add(focused(checked));
+        indicators.add(focused(new JCheckBox(Messages.getString("UiLibrary.controls.unchecked"))));
+        JRadioButton radio = new JRadioButton(Messages.getString("UiLibrary.controls.optionA"));
+        radio.setModel(new FrozenModel(false, false, true));
+        indicators.add(focused(radio));
+        indicators.add(focused(new JSlider(0, 100, 60)));
+        JTabbedPane tabs = new JTabbedPane();
+        for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB", "UiLibrary.controls.tabC")) {
+            tabs.addTab(Messages.getString(key), Box.createVerticalStrut(scaleForGUI(4)));
+        }
+        tabs.setAlignmentX(LEFT_ALIGNMENT);
+        samples.add(focused(tabs));
+        return samples;
+    }
+
+    /** Freezes {@code component} in the keyboard-focused look; it can't take real focus. */
+    private static <T extends JComponent> T focused(T component) {
+        component.setFocusable(false);
+        component.putClientProperty(FlatClientProperties.COMPONENT_FOCUS_OWNER,
+              (Predicate<JComponent>) c -> true);
+        return component;
+    }
+
+    /** Tab strips at {@code size}: a live one, one frozen in focus and a disabled one. */
+    private JComponent tabSamples(TokenButtons.Size size) {
+        JPanel samples = row(color("surface.base"));
+        for (String state : List.of("rest", "focus", "disabled")) {
+            JPanel sample = new JPanel(new BorderLayout());
+            sample.setOpaque(false);
+            sample.add(text(Messages.getString("UiLibrary.buttons.state." + state), "caption", "text.muted"),
+                  BorderLayout.NORTH);
+            JTabbedPane tabs = TokenTabs.tabs(size);
+            for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB",
+                  "UiLibrary.controls.tabC")) {
+                JPanel body = new JPanel(new BorderLayout());
+                body.add(new JLabel(Messages.getString(key)), BorderLayout.CENTER);
+                body.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(8), scaleForGUI(8),
+                      scaleForGUI(8)));
+                tabs.addTab(Messages.getString(key), body);
+            }
+            switch (state) {
+                case "focus" -> focused(tabs);
+                case "disabled" -> tabs.setEnabled(false);
+                default -> { }
+            }
+            // One strip, wide enough for its tabs; a wrapping tab pane in a flow row stacks them
+            tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+            tabs.setPreferredSize(new Dimension(scaleForGUI(280), tabs.getPreferredSize().height));
+            sample.add(tabs, BorderLayout.CENTER);
+            samples.add(sample);
+        }
+        return samples;
+    }
+
+    /**
+     * Segmented controls in every state, one column per size; the second section carries the frozen state and the "at
+     * rest" sample is live.
+     */
+    private JComponent segmentedMatrix() {
+        List<String> states = List.of("rest", "hover", "pressed", "focus", "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(8), scaleForGUI(4), scaleForGUI(8));
+        cell.gridy = 0;
+        matrix.add(Box.createHorizontalStrut(0), cell);
+        for (TokenButtons.Size size : TokenButtons.Size.values()) {
+            matrix.add(text(Messages.getString("UiLibrary.buttons." + size.name().toLowerCase(Locale.ROOT)),
+                  "caption", "text.muted"), cell);
+        }
+        for (String state : states) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.buttons.state." + state), "label", "text.primary"), cell);
+            for (TokenButtons.Size size : TokenButtons.Size.values()) {
+                TokenSegmented segmented = new TokenSegmented(size,
+                      Messages.getString("UiLibrary.segmented.optionA"),
+                      Messages.getString("UiLibrary.segmented.optionB"),
+                      Messages.getString("UiLibrary.segmented.optionC"));
+                switch (state) {
+                    case "hover" -> segmented.segment(1).setModel(new FrozenModel(true, false, false));
+                    case "pressed" -> segmented.segment(1).setModel(new FrozenModel(true, true, false));
+                    case "focus" -> focused(segmented.segment(1));
+                    case "disabled" -> segmented.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(segmented, cell);
+            }
+        }
+        cell.gridx = TokenButtons.Size.values().length + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    /**
+     * Lists and a tree side by side, each with a caption: hover is frozen on a row of the first list and the tree, the
+     * rest stay live.
+     */
+    private JComponent listSamples() {
+        String[] units = { "Atlas AS7-D", "Marauder MAD-3R", "Phoenix Hawk PXH-1", "Locust LCT-1V", "Wasp WSP-1A" };
+        JPanel samples = new JPanel(new GridBagLayout());
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+
+        JList<String> states = new JList<>(units);
+        states.setSelectedIndex(2);
+        states.putClientProperty(TokenLists.FROZEN_HOVER, 0);
+        addListSample(samples, 0, 0, "UiLibrary.lists.states", states);
+
+        JList<String> multi = new JList<>(units);
+        multi.setSelectedIndices(new int[] { 1, 2, 4 });
+        addListSample(samples, 1, 0, "UiLibrary.lists.multi", multi);
+
+        JList<String[]> twoLine = TokenLists.twoLine(new JList<>(new String[][] {
+              { "Atlas AS7-D", "100", "3" }, { "Marauder MAD-3R", "75", "4" }, { "Locust LCT-1V", "20", "8" } }),
+              unit -> unit[0], unit -> Messages.getString("UiLibrary.lists.detail", unit[1], unit[2]));
+        twoLine.setSelectedIndex(1);
+        addListSample(samples, 2, 0, "UiLibrary.lists.twoLine", twoLine);
+
+        DefaultMutableTreeNode company = new DefaultMutableTreeNode(Messages.getString("UiLibrary.lists.company"));
+        DefaultMutableTreeNode command = new DefaultMutableTreeNode(Messages.getString("UiLibrary.lists.commandLance"));
+        command.add(new DefaultMutableTreeNode(units[0]));
+        command.add(new DefaultMutableTreeNode(units[1]));
+        DefaultMutableTreeNode fire = new DefaultMutableTreeNode(Messages.getString("UiLibrary.lists.fireLance"));
+        fire.add(new DefaultMutableTreeNode(units[2]));
+        fire.add(new DefaultMutableTreeNode(units[3]));
+        company.add(command);
+        company.add(fire);
+        JTree tree = new JTree(company);
+        for (int row = 0; row < tree.getRowCount(); row++) {
+            tree.expandRow(row);
+        }
+        tree.setSelectionRow(3);
+        tree.putClientProperty(TokenLists.FROZEN_HOVER, 2);
+        addListSample(samples, 0, 1, "UiLibrary.lists.tree", tree);
+
+        JList<String> empty = TokenLists.emptyText(new JList<>(), Messages.getString("UiLibrary.lists.emptyText"));
+        addListSample(samples, 1, 1, "UiLibrary.lists.empty", empty);
+
+        JList<String> disabled = new JList<>(units);
+        disabled.setSelectedIndex(1);
+        disabled.setEnabled(false);
+        addListSample(samples, 2, 1, "UiLibrary.lists.disabled", disabled);
+
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 3;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
+    }
+
+    /** Adds {@code view} in its scroll pane under a caption, at {@code column} of caption row {@code row}. */
+    private JScrollPane addListSample(JPanel samples, int column, int row, String captionKey, JComponent view) {
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.NORTHWEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridx = column;
+        cell.gridy = row * 2;
+        samples.add(text(Messages.getString(captionKey), "caption", "text.muted"), cell);
+        cell.gridy++;
+        JScrollPane scroll = TokenLists.scroll(view);
+        scroll.setPreferredSize(new Dimension(scaleForGUI(210), scaleForGUI(170)));
+        samples.add(scroll, cell);
+        return scroll;
+    }
+
+    /**
+     * Scroll bars on a list in each state, and both bars on text that runs past both edges. Hover and dragging are
+     * frozen; the others stay live.
+     */
+    private JComponent scrollbarSamples() {
+        String[] units = { "Atlas AS7-D", "Awesome AWS-8Q", "BattleMaster BLR-1G", "Catapult CPLT-C1",
+                           "Commando COM-2D", "Griffin GRF-1N", "Hunchback HBK-4G", "Locust LCT-1V",
+                           "Marauder MAD-3R", "Phoenix Hawk PXH-1", "Rifleman RFL-3N", "Wasp WSP-1A" };
+        JPanel samples = new JPanel(new GridBagLayout());
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+
+        addListSample(samples, 0, 0, "UiLibrary.scrollbars.rest", new JList<>(units));
+        JScrollPane hover = addListSample(samples, 1, 0, "UiLibrary.scrollbars.hover", new JList<>(units));
+        hover.getVerticalScrollBar().putClientProperty(TokenScrollBarUI.FROZEN_STATE, TokenScrollBarUI.HOVER);
+        JScrollPane pressed = addListSample(samples, 2, 0, "UiLibrary.scrollbars.pressed", new JList<>(units));
+        pressed.getVerticalScrollBar().putClientProperty(TokenScrollBarUI.FROZEN_STATE, TokenScrollBarUI.PRESSED);
+        SwingUtilities.invokeLater(() -> pressed.getVerticalScrollBar().setValue(scaleForGUI(80)));
+
+        JTextArea log = new JTextArea(Messages.getString("UiLibrary.scrollbars.log"));
+        log.setEditable(false);
+        addListSample(samples, 3, 0, "UiLibrary.scrollbars.both", log);
+
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 4;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
+    }
+
+    /**
+     * Sliders plain and with ticks and labels in each state, hover, dragging and focus frozen, then live ones with a
+     * readout.
+     */
+    private JComponent sliderMatrix() {
+        List<String> states = List.of("rest", "hover", "dragging", "focus", "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.sliders.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("plain", "ticks")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.sliders.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                JSlider slider = sampleSlider(kind.equals("ticks"));
+                switch (state) {
+                    case "hover" -> slider.putClientProperty(TokenSliderUI.FROZEN_STATE, TokenSliderUI.HOVER);
+                    case "dragging" -> slider.putClientProperty(TokenSliderUI.FROZEN_STATE, TokenSliderUI.PRESSED);
+                    case "focus" -> focused(slider);
+                    case "disabled" -> slider.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(slider, cell);
+            }
+        }
+
+        cell.gridy++;
+        cell.anchor = GridBagConstraints.BASELINE_LEADING;
+        matrix.add(text(Messages.getString("UiLibrary.sliders.kind.readout"), "label", "text.primary"), cell);
+        JSlider opacity = new JSlider(0, 100, 75);
+        cell.gridwidth = 2;
+        cell.fill = GridBagConstraints.HORIZONTAL;
+        matrix.add(TokenSliders.withReadout(opacity, value -> value + "%"), cell);
+        JSlider scale = sampleSlider(true);
+        scale.setMinimum(7);
+        scale.setMaximum(24);
+        scale.setValue(10);
+        scale.setMajorTickSpacing(1);
+        scale.setMinorTickSpacing(0);
+        scale.setPaintLabels(false);
+        scale.setSnapToTicks(true);
+        matrix.add(TokenSliders.withReadout(scale, value -> String.format(Locale.ROOT, "%.1fx", value / 10f)), cell);
+
+        cell.gridx = states.size() + 1;
+        cell.gridwidth = 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    /** A sample slider from 0 to 10, with major ticks and labels every 5 and minor ticks every 1 when asked. */
+    private static JSlider sampleSlider(boolean ticks) {
+        JSlider slider = new JSlider(0, 10, 6);
+        if (ticks) {
+            slider.setMajorTickSpacing(5);
+            slider.setMinorTickSpacing(1);
+            slider.setPaintTicks(true);
+            slider.setPaintLabels(true);
+            slider.setSnapToTicks(true);
+        }
+        slider.setPreferredSize(new Dimension(scaleForGUI(150), slider.getPreferredSize().height));
+        return slider;
+    }
+
+    /** Selects of each kind in each state; hover and focus are frozen, the rest stay live. */
+    private JComponent selectMatrix() {
+        List<String> states = List.of("rest", "hover", "focus", "placeholder", "disabled");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.inputs.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("REGULAR", "COMPACT", "INLINE")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.select.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                JComboBox<String> select = sampleSelect(kind);
+                switch (state) {
+                    case "hover" -> select.putClientProperty(FieldEdge.FROZEN_HOVER, true);
+                    case "focus" -> focused(select);
+                    case "placeholder" -> {
+                        TokenSelects.placeholder(select, Messages.getString("UiLibrary.select.placeholder"));
+                        select.setSelectedIndex(-1);
+                    }
+                    case "disabled" -> select.setEnabled(false);
+                    default -> { }
+                }
+                matrix.add(select, cell);
+            }
+        }
+        cell.gridx = states.size() + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
+    }
+
+    private static JComboBox<String> sampleSelect(String kind) {
+        String[] items = { Messages.getString("UiLibrary.controls.optionA"),
+                           Messages.getString("UiLibrary.controls.optionB"),
+                           Messages.getString("UiLibrary.select.optionC"),
+                           Messages.getString("UiLibrary.select.optionD") };
+        return switch (kind) {
+            case "INLINE" -> TokenSelects.inline(items);
+            case "COMPACT" -> TokenSelects.select(TokenButtons.Size.COMPACT, items);
+            default -> TokenSelects.select(TokenButtons.Size.REGULAR, items);
+        };
+    }
+
+    /**
+     * The popup list drawn in place, as the open select shows it: the current value checked and the second row under
+     * the pointer. A live select sits beside it.
+     */
+    private JComponent selectPopupSample() {
+        JPanel samples = row(color("surface.base"));
+        JComboBox<String> owner = sampleSelect("REGULAR");
+        // The list and its frame take the popup colors again whenever the look and feel changes, as a real popup does
+        JList<String> list = new JList<>(owner.getModel()) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setBackground(UIManager.getColor("ComboBox.popupBackground"));
+                setSelectionBackground(UIManager.getColor("ComboBox.selectionBackground"));
+                setSelectionForeground(UIManager.getColor("ComboBox.selectionForeground"));
+            }
+        };
+        int padY = scaleForGUI(2);
+        int padX = scaleForGUI(8);
+        list.setCellRenderer((l, value, index, selected, focus) -> {
+            Component c = owner.getRenderer().getListCellRendererComponent(l, value, index, selected, focus);
+            if (c instanceof JComponent component) {
+                component.setBorder(BorderFactory.createEmptyBorder(padY, padX, padY, padX));
+            }
+            return c;
+        });
+        Insets rowInsets = UIManager.getInsets("ComboBox.selectionInsets");
+        list.putClientProperty(FlatClientProperties.STYLE, "selectionArc: " + UIManager.getInt("ComboBox.selectionArc")
+              + "; selectionInsets: " + rowInsets.top + "," + rowInsets.left + "," + rowInsets.bottom + ","
+              + rowInsets.right);
+        list.setSelectedIndex(1);
+        list.setVisibleRowCount(owner.getItemCount());
+        list.setFocusable(false);
+        // Named like a real popup list, so it keeps the select's rows rather than the plain list's
+        list.setName(TokenLists.POPUP_LIST);
+        JScrollPane scroller = new JScrollPane(list, ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+              ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setBorder(null);
+                Insets pad = UIManager.getInsets("ComboBox.popupInsets");
+                setViewportBorder(pad == null ? null : new FlatEmptyBorder(pad));
+                setOpaque(false);
+                getViewport().setOpaque(false);
+                list.setOpaque(false);
+            }
+        };
+        // Built like the real popup: the scroll pane first makes PopupMenu.border a hairline, the width leaves room for
+        // the scroll bar as FlatLaf's popup does, and the corners round as the popup window's do
+        JPanel popup = new JPanel(new BorderLayout()) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension size = super.getPreferredSize();
+                size.width += new JScrollBar(JScrollBar.VERTICAL).getPreferredSize().width;
+                size.width = Math.max(size.width, owner.getPreferredSize().width);
+                return size;
+            }
+
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setBorder(UIManager.getBorder("PopupMenu.border"));
+                setBackground(UIManager.getColor("ComboBox.popupBackground"));
+                setOpaque(false);
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                paintPopupFace(this, g);
+            }
+
+            @Override
+            protected void paintBorder(Graphics g) {
+                paintPopupEdge(this, g);
+            }
+        };
+        popup.add(scroller);
+
+        JPanel open = new JPanel(new GridBagLayout());
+        open.setOpaque(false);
+        GridBagConstraints place = new GridBagConstraints();
+        place.gridx = 0;
+        place.anchor = GridBagConstraints.WEST;
+        open.add(text(Messages.getString("UiLibrary.select.popup"), "caption", "text.muted"), place);
+        open.add(owner, place);
+        place.insets = new Insets(scaleForGUI(4), 0, 0, 0);
+        open.add(popup, place);
+        samples.add(open);
+
+        JPanel live = new JPanel();
+        live.setOpaque(false);
+        live.setLayout(new BoxLayout(live, BoxLayout.Y_AXIS));
+        JComponent caption = text(Messages.getString("UiLibrary.select.live"), "caption", "text.muted");
+        caption.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(caption);
+        JPanel controls = row(color("surface.base"));
+        controls.setAlignmentX(LEFT_ALIGNMENT);
+        controls.add(sampleSelect("REGULAR"));
+        controls.add(sampleSelect("COMPACT"));
+        controls.add(sampleSelect("INLINE"));
+        live.add(controls);
+        samples.add(live);
+        return samples;
+    }
+
+    /** Paints a popup's face with the rounded corners the popup window gets on screen. */
+    private static void paintPopupFace(JComponent popup, Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            FlatUIUtils.setRenderingHints(g2);
+            g2.setColor(popup.getBackground());
+            FlatUIUtils.paintComponentBackground(g2, 0, 0, popup.getWidth(), popup.getHeight(), 0, popupArc());
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    /** Paints a popup's edge with the rounded corners the popup window gets on screen. */
+    private static void paintPopupEdge(JComponent popup, Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            FlatUIUtils.setRenderingHints(g2);
+            g2.setColor(UIManager.getColor("PopupMenu.borderColor"));
+            FlatUIUtils.paintOutline(g2, 0, 0, popup.getWidth(), popup.getHeight(), UIScale.scale(1f), popupArc());
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private static float popupArc() {
+        return UIScale.scale(UIManager.getInt("Popup.borderCornerRadius") * 2f);
+    }
+
+    /**
+     * An open menu drawn in place with the second row under the pointer, beside a live menu bar and an area with a
+     * context menu.
+     */
+    private JComponent menuSamples() {
+        JPanel samples = row(color("surface.base"));
+
+        // A real popup menu laid out as a component; a transparent cover keeps the pointer from changing the frozen rows
+        JPopupMenu frozen = new JPopupMenu() {
+            @Override
+            public boolean isVisible() {
+                return true;
+            }
+
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setOpaque(false);
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                paintPopupFace(this, g);
+            }
+
+            @Override
+            protected void paintBorder(Graphics g) {
+                paintPopupEdge(this, g);
+            }
+        };
+        fillGameMenu(frozen);
+        ((JMenuItem) frozen.getComponent(1)).setArmed(true);
+        frozen.getComponent(2).setEnabled(false);
+        JPanel cover = new JPanel();
+        cover.setOpaque(false);
+        cover.addMouseListener(new MouseAdapter() {
+        });
+        cover.addMouseMotionListener(new MouseAdapter() {
+        });
+        JPanel shield = new JPanel(null) {
+            @Override
+            public boolean isOptimizedDrawingEnabled() {
+                return false;
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                return frozen.getPreferredSize();
+            }
+
+            @Override
+            public void doLayout() {
+                cover.setBounds(0, 0, getWidth(), getHeight());
+                frozen.setBounds(0, 0, getWidth(), getHeight());
+            }
+        };
+        shield.setOpaque(false);
+        shield.add(cover);
+        shield.add(frozen);
+        JPanel open = new JPanel(new BorderLayout(0, scaleForGUI(4)));
+        open.setOpaque(false);
+        open.add(text(Messages.getString("UiLibrary.menus.open"), "caption", "text.muted"), BorderLayout.NORTH);
+        open.add(shield, BorderLayout.CENTER);
+        samples.add(open);
+
+        JPanel live = new JPanel();
+        live.setOpaque(false);
+        live.setLayout(new BoxLayout(live, BoxLayout.Y_AXIS));
+        JComponent caption = text(Messages.getString("UiLibrary.menus.live"), "caption", "text.muted");
+        caption.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(caption);
+        JMenuBar bar = new JMenuBar();
+        JMenu game = new JMenu(Messages.getString("UiLibrary.menus.game"));
+        fillGameMenu(game.getPopupMenu());
+        bar.add(game);
+        JMenu view = new JMenu(Messages.getString("UiLibrary.menus.view"));
+        fillViewMenu(view.getPopupMenu());
+        bar.add(view);
+        JMenu help = new JMenu(Messages.getString("UiLibrary.menus.help"));
+        help.add(new JMenuItem(Messages.getString("UiLibrary.menus.about")));
+        bar.add(help);
+        bar.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(bar);
+        live.add(Box.createVerticalStrut(scaleForGUI(12)));
+
+        JLabel area = text(Messages.getString("UiLibrary.menus.context"), "body", "text.secondary");
+        area.setHorizontalAlignment(SwingConstants.CENTER);
+        area.setBorder(BorderFactory.createCompoundBorder(
+              BorderFactory.createLineBorder(color("border.subtle")),
+              BorderFactory.createEmptyBorder(scaleForGUI(24), scaleForGUI(24), scaleForGUI(24), scaleForGUI(24))));
+        JPopupMenu context = new JPopupMenu();
+        context.add(new JMenuItem(Messages.getString("UiLibrary.menus.center")));
+        context.add(new JMenuItem(Messages.getString("UiLibrary.menus.details")));
+        JMenuItem deploy = new JMenuItem(Messages.getString("UiLibrary.menus.deploy"));
+        deploy.setEnabled(false);
+        context.add(deploy);
+        context.addSeparator();
+        fillViewMenu(context);
+        area.setComponentPopupMenu(context);
+        area.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(area);
+        samples.add(live);
+        return samples;
+    }
+
+    /** New, load (the frozen sample's hover row), save, a submenu, a check, two radios and exit. */
+    private static void fillGameMenu(JPopupMenu menu) {
+        menu.add(menuItem("UiLibrary.menus.newGame", KeyEvent.VK_N));
+        menu.add(menuItem("UiLibrary.menus.loadGame", KeyEvent.VK_O));
+        menu.add(menuItem("UiLibrary.menus.saveGame", KeyEvent.VK_S));
+        JMenu recent = new JMenu(Messages.getString("UiLibrary.menus.recent"));
+        recent.add(new JMenuItem(Messages.getString("UiLibrary.menus.recentA")));
+        recent.add(new JMenuItem(Messages.getString("UiLibrary.menus.recentB")));
+        menu.add(recent);
+        menu.addSeparator();
+        fillViewMenu(menu);
+        menu.addSeparator();
+        menu.add(new JMenuItem(Messages.getString("UiLibrary.menus.exit")));
+    }
+
+    private static void fillViewMenu(JPopupMenu menu) {
+        menu.add(new JCheckBoxMenuItem(Messages.getString("UiLibrary.menus.showGrid"), true));
+        ButtonGroup zoom = new ButtonGroup();
+        for (String key : List.of("UiLibrary.menus.zoom100", "UiLibrary.menus.zoom200")) {
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(Messages.getString(key));
+            item.setSelected(zoom.getButtonCount() == 0);
+            zoom.add(item);
+            menu.add(item);
+        }
+    }
+
+    private static JMenuItem menuItem(String key, int accelerator) {
+        JMenuItem item = new JMenuItem(Messages.getString(key));
+        item.setAccelerator(KeyStroke.getKeyStroke(accelerator, InputEvent.CTRL_DOWN_MASK));
+        return item;
+    }
+
+    /** Plain, shortcut, info card and wrapped tooltips drawn in place, beside live controls to hover. */
+    private JComponent tooltipSamples() {
+        JPanel samples = row(color("surface.base"));
+
+        JPanel open = new JPanel();
+        open.setOpaque(false);
+        open.setLayout(new BoxLayout(open, BoxLayout.Y_AXIS));
+        JComponent caption = text(Messages.getString("UiLibrary.tooltips.open"), "caption", "text.muted");
+        caption.setAlignmentX(LEFT_ALIGNMENT);
+        open.add(caption);
+        JLabel plain = new JLabel();
+        plain.setToolTipText(Messages.getString("UiLibrary.tooltips.plain"));
+        for (JComponent owner : List.of(plain, keyTipOwner(new JLabel()), cardTipOwner(new JLabel()),
+              longTipOwner(new JLabel()))) {
+            open.add(Box.createVerticalStrut(scaleForGUI(8)));
+            JComponent tip = frozenTip(owner);
+            tip.setAlignmentX(LEFT_ALIGNMENT);
+            open.add(tip);
+        }
+        samples.add(open);
+
+        JPanel live = new JPanel();
+        live.setOpaque(false);
+        live.setLayout(new BoxLayout(live, BoxLayout.Y_AXIS));
+        JComponent liveCaption = text(Messages.getString("UiLibrary.tooltips.live"), "caption", "text.muted");
+        liveCaption.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(liveCaption);
+        JPanel controls = row(color("surface.base"));
+        controls.setAlignmentX(LEFT_ALIGNMENT);
+        AbstractButton search = TokenButtons.icon(ICON_SEARCH, Messages.getString("UiLibrary.tooltips.keyText"),
+              false, TokenButtons.Size.REGULAR);
+        controls.add(keyTipOwner(search));
+        controls.add(cardTipOwner(TokenButtons.button(TokenButtons.Kind.SECONDARY,
+              Messages.getString("UiLibrary.tooltips.cardButton"), TokenButtons.Size.REGULAR)));
+        JLabel hint = text(Messages.getString("UiLibrary.tooltips.longLabel"), "body", "text.secondary");
+        controls.add(longTipOwner(hint));
+        JLabel plainLive = text(Messages.getString("UiLibrary.tooltips.plainLabel"), "body", "text.secondary");
+        plainLive.setToolTipText(Messages.getString("UiLibrary.tooltips.plain"));
+        controls.add(plainLive);
+        live.add(controls);
+        samples.add(live);
+        return samples;
+    }
+
+    private static <T extends JComponent> T keyTipOwner(T owner) {
+        return TokenTooltips.withKey(owner, Messages.getString("UiLibrary.tooltips.keyText"),
+              Messages.getString("UiLibrary.tooltips.key"));
+    }
+
+    private static <T extends JComponent> T cardTipOwner(T owner) {
+        return TokenTooltips.card(owner, Messages.getString("UiLibrary.tooltips.cardTitle"),
+              Messages.getString("UiLibrary.tooltips.cardDetail"), Messages.getString("UiLibrary.tooltips.cardKey"));
+    }
+
+    private static <T extends JComponent> T longTipOwner(T owner) {
+        owner.setToolTipText(Messages.getString("UiLibrary.tooltips.long"));
+        return owner;
+    }
+
+    /** A real tooltip for {@code owner}, laid out as a component with the rounded face its popup gets on screen. */
+    private static JComponent frozenTip(JComponent owner) {
+        JToolTip tip = new JToolTip() {
+            @Override
+            public boolean isOpaque() {
+                return false;
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return getPreferredSize();
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                paintPopupFace(this, g);
+                getUI().paint(g, this);
+            }
+        };
+        tip.setComponent(owner);
+        tip.setTipText(owner.getToolTipText());
+        return tip;
+    }
+
+    /**
+     * Every choice kind in every state, frozen through the button model; the live row under it can be clicked.
+     */
+    private JComponent choiceMatrix() {
+        List<String> states = List.of("off", "on", "mixed", "hover", "hoverOn", "focus", "disabled", "disabledOn");
+        JPanel matrix = new JPanel(new GridBagLayout());
+        matrix.setBackground(color("surface.base"));
+        matrix.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridy = 0;
+        matrix.add(text(Messages.getString("UiLibrary.buttons.kind"), "caption", "text.muted"), cell);
+        for (String state : states) {
+            matrix.add(text(Messages.getString("UiLibrary.choices.state." + state), "caption", "text.muted"), cell);
+        }
+        for (String kind : List.of("CHECK", "RADIO", "SWITCH")) {
+            cell.gridy++;
+            matrix.add(text(Messages.getString("UiLibrary.choices.kind." + kind), "label", "text.primary"), cell);
+            for (String state : states) {
+                if (state.equals("mixed") && !kind.equals("CHECK")) {
+                    matrix.add(Box.createHorizontalStrut(0), cell);
+                    continue;
+                }
+                String label = Messages.getString("UiLibrary.choices.sample");
+                AbstractButton choice = switch (kind) {
+                    case "CHECK" -> TokenChoices.check(label, false);
+                    case "RADIO" -> TokenChoices.radio(label, false);
+                    default -> TokenChoices.toggleSwitch(label, false);
+                };
+                boolean on = state.equals("on") || state.endsWith("On");
+                choice.setModel(new FrozenModel(state.startsWith("hover"), false, on));
+                switch (state) {
+                    case "mixed" -> TokenChoices.mixed((JCheckBox) choice, true);
+                    case "focus" -> focused(choice);
+                    case "disabled", "disabledOn" -> choice.setEnabled(false);
+                    default -> { }
+                }
+                choice.setFocusable(false);
+                matrix.add(choice, cell);
+            }
+        }
+        cell.gridx = states.size() + 1;
+        cell.weightx = 1;
+        matrix.add(Box.createHorizontalGlue(), cell);
+        return matrix;
     }
 
     /** Every button kind at {@code size} in every state, the transient states frozen through the button model. */
@@ -575,19 +1509,7 @@ public final class SwingUiLibrary extends JFrame {
     }
 
     private Font font(String styleName) {
-        return fonts.computeIfAbsent(styleName, name -> {
-            TypeStyle style = tokens.typeStyle(name);
-            Map<TextAttribute, Object> attributes = new HashMap<>();
-            // Java2D only reaches the variable font's default (regular) instance, so medium comes from the static
-            // "Roboto Medium" face generated from it in mm-data.
-            boolean medium = style.weight() >= 500 && style.weight() < 600;
-            attributes.put(TextAttribute.FAMILY, medium ? tokens.family() + " Medium" : tokens.family());
-            attributes.put(TextAttribute.SIZE, scaleForGUI(style.size()));
-            attributes.put(TextAttribute.TRACKING, style.tracking());
-            attributes.put(TextAttribute.WEIGHT,
-                  style.weight() >= 600 ? TextAttribute.WEIGHT_BOLD : TextAttribute.WEIGHT_REGULAR);
-            return Font.getFont(attributes);
-        });
+        return fonts.computeIfAbsent(styleName, TokenFonts::font);
     }
 
     private JLabel text(String value, String style, String role) {
@@ -738,16 +1660,13 @@ public final class SwingUiLibrary extends JFrame {
                         g.drawRoundRect(0, 0, width, height, Math.round(2 * radius), Math.round(2 * radius));
                     }
                     case FOCUS -> {
-                        g.setColor(color("border.control"));
-                        g.drawRoundRect(0, 0, width, height, Math.round(2 * radius), Math.round(2 * radius));
+                        // The ring replaces the edge, drawn inside it
                         float ring = scaleForGUI(tokens.size().get("focus.width"));
-                        float offset = scaleForGUI(tokens.size().get("focus.offset"));
                         g.setColor(color("focus.ring"));
                         g.setStroke(new BasicStroke(ring));
-                        float grow = offset + ring / 2;
-                        g.drawRoundRect(Math.round(-grow), Math.round(-grow), Math.round(width + 2 * grow),
-                              Math.round(height + 2 * grow), Math.round(2 * (radius + grow)),
-                              Math.round(2 * (radius + grow)));
+                        float half = ring / 2;
+                        g.draw(new RoundRectangle2D.Float(half, half, width - ring + 1, height - ring + 1,
+                              2 * radius - half, 2 * radius - half));
                     }
                     case TICKS -> ticks(g, width, height, color("border.control"));
                     case FRAME -> {

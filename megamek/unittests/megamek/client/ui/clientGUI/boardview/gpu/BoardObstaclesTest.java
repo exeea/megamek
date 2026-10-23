@@ -229,13 +229,18 @@ class BoardObstaclesTest {
     }
 
     @Test
-    void shiftedAuthoredModuleOriginsKeepTheSameClearanceGeometry() {
+    void modularClearancePreservesAuthoredXyOffsetsAndDiscardsVerticalPlacement() {
         var data = RigidGlb.loadLods(GpuBuildingTest.file()).getFirst();
         var original = BoardShape.shapes(data, true);
-        // Valid authored modules can be baked far below their display origin.
+        // Both baked geometry and node transforms determine XY placement; only Z is normalized.
         for (var mesh : data.meshes) {
-            for (int i = 2; i < mesh.vertices.length; i += RigidGlb.STRIDE) { mesh.vertices[i] -= 100; }
+            for (int i = 0; i < mesh.vertices.length; i += RigidGlb.STRIDE) {
+                mesh.vertices[i] += 71;
+                mesh.vertices[i + 1] -= 23;
+                mesh.vertices[i + 2] -= 100;
+            }
         }
+        for (var node : data.nodes) { node.translation.add(900, -400, -257); }
         var moved = BoardShape.shapes(data, true);
         for (String name : original.keySet()) {
             var a = original.get(name);
@@ -243,7 +248,8 @@ class BoardObstaclesTest {
             assertEquals(a.height(), b.height(), .0001f);
             for (int i = 0; i < a.polygons().size(); i++) {
                 for (int j = 0; j < 3; j++) {
-                    assertTrue(a.polygons().get(i).points()[j].epsilonEquals(b.polygons().get(i).points()[j], .0001f));
+                    Vector3 expected = new Vector3(a.polygons().get(i).points()[j]).add(971, -423, 0);
+                    assertTrue(expected.epsilonEquals(b.polygons().get(i).points()[j], .0001f));
                 }
             }
         }

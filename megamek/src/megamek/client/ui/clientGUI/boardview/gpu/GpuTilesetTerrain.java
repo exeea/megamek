@@ -86,8 +86,11 @@ final class GpuTilesetTerrain {
         // Road ramps use their actual normals; the remaining column top is horizontal.
         Map<Vector3, Vector3> normals = BoardSurface.vertexNormals(surface.top());
         String rock = tile.liquid().molten() ? "terrain/classic/rock" : null;
+        // SPACE is transparent, as in Enhanced: the atmosphere's space sky shows through. Its column still picks.
+        boolean space = tile.backdrop() == BoardBackdrop.SPACE;
         for (BoardSurface.Face face : surface.faces()) {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
+            if (space) { continue; }
             if (face.finish() == BoardSurface.Finish.BANK || face.finish() == BoardSurface.Finish.BED) {
                 opaque.accept(classic(assets, rock != null ? rock : "terrain/classic/water_bed"),
                       mesh -> bank(mesh, tile, face, false));
@@ -173,7 +176,7 @@ final class GpuTilesetTerrain {
     static boolean infrastructure(BoardScene scene, BoardScene.Tile tile) {
         return tile.wayExits() != 0 || BoardBridge.feature(tile) != null
               || tile.features().stream().anyMatch(BoardRail::route)
-              || !BoardRoad.nearby(scene, tile).isEmpty() || BoardSurface.columnRamps(scene, tile) != 0
+              || !BoardRoad.nearby(scene, tile).isEmpty() || BoardSurface.ramps(scene, tile) != 0
               || !BoardBridge.approaches(scene, tile).isEmpty();
     }
 

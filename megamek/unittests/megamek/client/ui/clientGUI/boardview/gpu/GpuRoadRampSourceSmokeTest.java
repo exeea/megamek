@@ -45,6 +45,8 @@ class GpuRoadRampSourceSmokeTest {
                 List.of(new Coords(12, 11), new Coords(13, 11), new Coords(12, 12), new Coords(13, 12)), .18f),
           new Source("city-hills-2-bridge", "Map Set 3/16x17 City Hills Residential 2.board",
                 List.of(new Coords(7, 9), new Coords(6, 9), new Coords(6, 10)), .18f),
+          new Source("city-hills-2-low-bridge", "Map Set 3/16x17 City Hills Residential 2.board",
+                List.of(new Coords(7, 1), new Coords(8, 1), new Coords(6, 2)), .13f),
           new Source("city-hills-structures-barrier",
                 "unofficial/Lanceman/16x17 City Hills Residential 2 (with Structures).board",
                 List.of(new Coords(8, 1), new Coords(7, 1)), .11f),

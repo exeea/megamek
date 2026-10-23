@@ -108,7 +108,7 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuLoadingGrid loadingGrid;
     private Label loadingWaiting, loadingActive, loadingReady;
     /** The shader bar (showShaders), under the section legend. */
-    private UiKit.Meter loadingShaders;
+    private UiKit.Progress loadingShaders;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
@@ -327,7 +327,7 @@ class GpuBattleView extends ApplicationAdapter {
             legend.add(entry).padLeft(12).padRight(12);
         }
         // Hidden while no program is left to link; a hidden bar keeps its row, so the tasks below never move.
-        loadingShaders = new UiKit(skin).meter(Messages.getString("GpuBoard.loadingShaders"), false);
+        loadingShaders = new UiKit(skin).progress(Messages.getString("GpuBoard.loadingShaders"));
         loadingShaders.setName("board-loading-shaders");
         loadingShaders.setVisible(false);
         content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
@@ -343,13 +343,10 @@ class GpuBattleView extends ApplicationAdapter {
         loadingStage.addActor(content);
     }
 
-    /** The shader bar shows the programs linked of those the load needs while any is left to link. */
-    static void showShaders(UiKit.Meter bar, TerrainLoadProgress.Shaders shaders) {
+    /** The shader bar shows the share of the programs the load needs that have linked, while any is left to link. */
+    static void showShaders(UiKit.Progress bar, TerrainLoadProgress.Shaders shaders) {
         bar.setVisible(shaders.linked() < shaders.total());
-        if (bar.isVisible()) {
-            bar.set(shaders.linked() + " / " + shaders.total(), (float) shaders.linked() / shaders.total(),
-                  GpuLoadingGrid.READY);
-        }
+        if (bar.isVisible()) { bar.set((float) shaders.linked() / shaders.total()); }
     }
 
     /** The loading screen at the HUD's display scale, read each frame since a monitor change keeps the window size. */
@@ -460,6 +457,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (boardPrint != null) { boardPrint.dispose(); boardPrint = null; }
         GpuGlsl.linkOffscreen(null);
         if (offscreenLinks != null) { offscreenLinks.dispose(); offscreenLinks = null; }
+        if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         // Join the terrain worker before releasing the model buffers it borrows.
         if (terrain != null) { terrain.dispose(); terrain = null; }
         if (fireControl != null) { fireControl.dispose(); fireControl = null; }
@@ -471,7 +469,6 @@ class GpuBattleView extends ApplicationAdapter {
         if (hexText != null) { hexText.dispose(); hexText = null; }
         if (hexGrid != null) { hexGrid.dispose(); hexGrid = null; }
         if (traceOverlay != null) { traceOverlay.dispose(); traceOverlay = null; }
-        if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         if (tethers != null) { tethers.dispose(); tethers = null; }
         if (tetherShader != null) { GpuShaderManager.dispose(tetherShader); tetherShader = null; }
@@ -659,7 +656,7 @@ class GpuBattleView extends ApplicationAdapter {
               || scene.boardId() != frame.scene().boardId());
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
-        if (unitModels != null) { unitModels.setDisplayMode(displayMode()); }
+        if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
         scene = history.live(scene);
         // Apply HUD state independently of camera framing; panels overlay the full board viewport.
@@ -743,6 +740,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
         }
         if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
+        if (ui instanceof GpuMapHud map) { map.print(boardPrint); }
         scene = terrain.presentation(scene);
         tilesChangedThisFrame = scene.tiles() != lastFrameTiles;
         lastFrameTiles = scene.tiles();
@@ -879,6 +877,9 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
               ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
+        if (source.isEditor()) {
+            editorPreview.prepare(scene, terrain, editorPreviewShown() ? source.editorPreview() : GpuEditorPreview.Data.NONE);
+        }
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, units);
         renderStage("cloud transmission");

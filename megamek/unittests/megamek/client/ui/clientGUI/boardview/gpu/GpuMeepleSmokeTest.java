@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuMeepleSmokeTest {
     @Test
-    void switchesMixedUnitsInBothCamerasAndRestoresMekMeeples() throws Exception {
+    void switchesMixedUnitsInBothCamerasAndRestoresTheDefault() throws Exception {
         var failure = new AtomicReference<Throwable>();
         try (var fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
@@ -53,6 +53,7 @@ class GpuMeepleSmokeTest {
             });
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 int frame;
+                boolean started;
 
                 @Override
                 public void render() {
@@ -60,11 +61,13 @@ class GpuMeepleSmokeTest {
                         if (GpuBoardTestUi.loading(this)) { super.render(); return; }
                         var tuning = GpuBoardTestUi.tuning(this);
                         SelectBox<UnitDisplayMode> choice = GpuBoardTestUi.tuning(tuning, "tuning-unit-display");
-                        if (frame == 0) {
-                            assertEquals(UnitDisplayMode.MEK_MEEPLES, choice.getSelected());
+                        // A frame may repeat while a display change loads; only the first one sees the default.
+                        if (!started) {
+                            started = true;
+                            assertEquals(UnitDisplayMode.DEFAULT, choice.getSelected());
                             checkContourPicking(boardCamera);
                         }
-                        var expected = switch (frame % 3) {
+                        var expected = frame == 6 ? UnitDisplayMode.DEFAULT : switch (frame % 3) {
                             case 0 -> UnitDisplayMode.MEK_MEEPLES;
                             case 1 -> UnitDisplayMode.ALL_MEEPLES;
                             default -> UnitDisplayMode.MODELS;
@@ -89,7 +92,9 @@ class GpuMeepleSmokeTest {
                         for (var unit : scene.units()) {
                             var instance = instances.get(unit.id() + ":" + unit.part());
                             assertNotNull(instance);
-                            boolean token = expected == UnitDisplayMode.ALL_MEEPLES
+                            // The battle armor (4) and the platoon (5) stand as meeple formations instead of tokens.
+                            boolean troops = unit.id() >= 4;
+                            boolean token = expected == UnitDisplayMode.ALL_MEEPLES && !troops
                                   || (expected == UnitDisplayMode.MEK_MEEPLES && unit.id() == 1);
                             var authored = library.loaded(unit.model(), unit.id());
                             if (token) {
@@ -108,6 +113,8 @@ class GpuMeepleSmokeTest {
                             } else {
                                 assertNotNull(authored);
                                 assertSame(authored.instance.model, instance.model);
+                                assertEquals(troops && expected == UnitDisplayMode.ALL_MEEPLES,
+                                      authored.rigs().stream().anyMatch(UnitRig::meeple), "Each display keeps its own figures");
                             }
                             assertTrue(UnitBounds.world(instance).isValid());
                         }

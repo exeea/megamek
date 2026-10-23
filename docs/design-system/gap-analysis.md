@@ -38,6 +38,7 @@ Agreed so far:
 | MekHQ `hud` library | Folded into the new library. |
 | Launcher | Retune its colors to the tokens for now; shared controls wait for the planned monorepo. |
 | Accessibility modes | Light and dark only; no dedicated high-contrast mode. |
+| Character | A game UI, not an OS one. Where game conventions and desktop conventions differ, prefer what fits a game; desktop conventions are a fallback, not the goal. |
 | Token location | `megamek` repository, next to both theme implementations. Fonts and icons stay in `mm-data`. |
 | Ownership | Vicente owns UI decisions and presents them to the team. |
 | Review | Runnable galleries opened from MegaMek: one Swing, one libGDX. The Swing library is the complete set; libGDX is a subset that grows on demand. |
@@ -285,4 +286,37 @@ work for Swing, and item 11 is under investigation.
 - ~~Button spec~~: Primary, Secondary, Quiet, Danger, Toggle, Icon and Special in regular and compact sizes, with
   every state including focus, in Swing and libGDX; see [tokens.md](tokens.md#buttons). The Special reveal animation
   comes with the motion work.
-- Focus design for every control, then inputs, checkbox / radio / switch, tabs, segmented control and select.
+- ~~Focus~~: one keyboard-only ring inside the edge for every Swing control, and on libGDX buttons; see
+  [tokens.md](tokens.md#focus).
+- ~~Inputs~~: text, password, search, number and text area at button heights, with hover, focus, status, read-only
+  and disabled looks, plus the form field (label above, helper or status below), in Swing; libGDX has the in-game
+  subset (no number spinner yet); see [tokens.md](tokens.md#inputs).
+- ~~Choices~~: check box (with a mixed state), radio button and switch, with hover, focus and disabled looks, in
+  Swing and libGDX; see [tokens.md](tokens.md#choices).
+- ~~Tabs and segmented control~~: violet-underlined tabs and a joined segmented control with a violet selected
+  section, in two sizes, in Swing and libGDX; see [tokens.md](tokens.md#tabs).
+- ~~Select~~: an input-faced select in two sizes and an inline one with a dotted underline, sharing one popup list
+  (neutral wash, violet check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
+- ~~Lists and trees~~: inset rounded rows at least 28 high, a neutral hover wash, and a violet wash plus a leading
+  marker for the selection, with two-line rows and an empty state, in Swing; libGDX keeps hud-v3's `UiList` and
+  `UiTree` until the developers accept the system; see [tokens.md](tokens.md#lists-and-trees).
+- ~~Menus~~: menu bars, menus and context menus on the select's popup, with neutral hover rows, violet checks and
+  radios, and muted shortcuts, in Swing; see [tokens.md](tokens.md#menus).
+- ~~Tooltips~~: small cards on the popup surface that wrap at 280, with a key chip for shortcuts and a title over
+  secondary detail for info cards, in Swing; see [tokens.md](tokens.md#tooltips).
+- ~~Scrollbars~~: a thin pill thumb with no track or arrows of its own, sitting on the content it scrolls, with a
+  rail and a brighter thumb under the pointer, in Swing; see [tokens.md](tokens.md#scrollbars).
+- ~~Sliders~~: an accent fill up to a round thumb on a pill track, the same with ticks and labels, with an optional
+  value readout, in Swing; see [tokens.md](tokens.md#sliders).
+- The rest of the gallery: tables and the remaining controls, in Swing (libGDX only where the in-game UI needs
+  them).
+- Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
+  every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the
+  Swing controls still switch states instantly, which reads as a desktop app rather than a game.
+- Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
+  Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
+  can migrate to one shape.
+- A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
+  controls, so the developers can judge the system in real use.
+- If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
+  rename pass). Until then, hud-v3 code does not change.

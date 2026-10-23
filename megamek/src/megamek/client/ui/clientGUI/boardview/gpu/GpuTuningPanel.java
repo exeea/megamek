@@ -253,7 +253,8 @@ final class GpuTuningPanel implements GpuHud.Component {
 
     /**
      * The Camera page: the fixed sun, the board camera's framing animations on selection and on movement, and the
-     * model's camera rows (Free Flight, the wireframe view, the field of view).
+     * model's camera rows (Free Flight, the wireframe view, the field of view), then the camera's live
+     * {@link BoardCamera#readout() readout}.
      */
     private Table cameraPage() {
         Table page = new Table();
@@ -267,6 +268,21 @@ final class GpuTuningPanel implements GpuHud.Component {
               text("GpuBoard.cameraAnimationHelp"), () -> camera.animateOnMove,
               value -> camera.animateOnMove = value)).row();
         page.add(mirror(tuning.cameraRows())).growX().padTop(6).row();
+        // The live view as one line, which reproduces it in a report, and its Copy.
+        Label view = ui.label("", "hud-small", 11.5f, UiTheme.ACCENT);
+        view.setName("camera-view");
+        view.setWrap(true);
+        // Only while the Camera page shows: the readout picks the terrain at the view's centre.
+        shows.add(() -> {
+            if (view.getStage() != null) { view.setText(camera.readout()); }
+        });
+        UiButton copy = ui.button("hud-mini", null, text("GpuBoard.hud.log.copy"), null);
+        copy.setName("camera-view-copy");
+        onChange(copy, () -> Gdx.app.getClipboard().setContents(camera.readout()));
+        Table readout = new Table();
+        readout.add(view).growX().minWidth(0);
+        readout.add(copy).top().padLeft(8);
+        page.add(readout).growX().padTop(6).row();
         return page;
     }
 

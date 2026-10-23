@@ -45,10 +45,7 @@ copy.
 - The button kinds are FlatLaf style classes, see [Buttons](#buttons); the window's default button looks like the
   primary one.
 - The default font is Roboto at the `body` size, and FlatLaf's semibold (the `h1` to `h3` headings) is Roboto Medium.
-- Keyboard focus is drawn inside the control edge (a 1-wide inner line plus the focus-colored border, 2 wide in total)
-  instead of 2 wide with a 2 offset outside it. A focus ring outside the edge would make every Swing control 4 pixels
-  larger and move every layout. On the primary button the inner line uses `text.onAccent`, so it shows against the
-  accent fill. The final focus design is the next control to settle.
+- Keyboard focus follows [Focus](#focus): a 2-wide ring inside the edge, shown only after keyboard use.
 
 ## Color roles
 
@@ -140,13 +137,41 @@ variable font. Both platforms therefore draw the same outlines from one source.
 | Control height | sm 28, md 36, lg 46 |
 | Icon | sm 16, md 20, lg 24 |
 | Border | 1 |
-| Focus ring | 2 wide, 2 offset, `focus.ring` |
+| Selection | 2 (the selected tab's underline) |
+| Focus ring | 2 wide inside the edge; 1 gap around small indicators; `focus.ring` |
 | Corner ticks | 8 on controls, 13 on panels; 2 wide |
 | Opacity | tint.hover 0.16, tint.pressed 0.28 (a status color washed over a face) |
 | Motion | fast 120 ms, medium 200 ms, slow 320 ms; easing cubic-bezier(0.2, 0, 0, 1) |
 
 Regular frames use corner ticks. The framed button (ticks that grow into a full frame on hover) is a special
 variant for emphasis moments, not the default button.
+
+## Focus
+
+One focus look for every control, so keyboard users always find the same thing.
+
+- **Keyboard only.** The ring shows after a key press and hides again on a mouse press, like the web's
+  `:focus-visible`. Editable text always shows it, because the caret alone is easy to lose.
+- **Inside the edge.** The ring is `focus.width` (2) wide and drawn inside the control edge, so focus never changes a
+  control's size or moves a layout.
+- **Focus wins.** The ring replaces the edge, whatever the control's state. Meaning stays in the text, fill and icons:
+  a checked box stays checked, and error and warning fields carry a status icon as well as their colored edge.
+- **Primary buttons** use a `text.primary` outer line and a `text.onAccent` inner line, so the ring shows on the
+  accent face.
+- **Small indicators** (check box, radio, slider thumb) get the ring around them, `focus.gap` (1) away, so the
+  indicator keeps its look. Their label sits far enough away for the ring.
+- **Tabs** get the ring inside the selected tab. **Lists and tables** show it on their scroll pane edge.
+
+**Swing.** [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java) tracks keyboard
+use for the MegaMek themes; `FocusVisibility.shows(component)` tells custom painters whether to draw the ring.
+[`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java),
+[`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java) and
+[`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) draw the rings FlatLaf
+does not. The gallery's "Keyboard focus" section shows each control frozen in focus.
+
+**libGDX.** Buttons draw the ring now (see [Buttons](#buttons)); scene2d gives buttons keyboard focus only from the
+keyboard, so it is keyboard-only already. The other token controls get the ring as they are built. Keyboard
+navigation between libGDX controls comes later.
 
 ## Buttons
 
@@ -168,9 +193,8 @@ every state.
 - **Labels** are sentence case in Roboto Medium. Rest text is `text.secondary` and brightens to `text.primary` under
   the pointer, so the hover reads on every kind.
 - **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label.
-- **Focus** is drawn inside the edge so no button changes size: a 1-wide `focus.ring` border plus a 1-wide inner line.
-  On primary the border is `text.primary` and the inner line `text.onAccent`, so it shows on the accent face. The
-  final focus design across all controls is the next step.
+- **Focus** follows [Focus](#focus): a 1-wide `focus.ring` border plus a 1-wide inner line, inside the edge. On
+  primary the border is `text.primary` and the inner line `text.onAccent`, so it shows on the accent face.
 - **Selection** is always violet with an edge or glyph change, never a lighter face alone, so it does not depend on
   telling two greys apart.
 - The primary label keeps at least 4.5:1 against its hover and pressed faces in both modes (tested).
@@ -203,10 +227,315 @@ gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; ali
 | `hud-delete-icon`, `hud-icon` | icon |
 | `hud-mini`, `hud-utility-small` | secondary, compact |
 | `hud-utility`, `hud-utility-narrow`, `hud-utility-row` | special (the icon-above-label layout stays a HUD composition) |
-| `hud-seg`, `hud-pill`, `hud-tab`, `hud-tab-caps`, `hud-row`, `hud-menu-row`, `hud-select`, `hud-select-inline` | Not buttons: segmented control, tabs, list row, menu item and select come later |
+| `hud-tab`, `hud-tab-caps` | Not buttons: [tabs](#tabs) |
+| `hud-seg`, `hud-pill` | Not buttons: the [segmented control](#segmented-control) |
+| `hud-row`, `hud-menu-row` | Not buttons: list row and menu item come later |
+| `hud-select`, `hud-select-inline` | Not buttons: the [select](#select) |
 
 The hud-v3 styles stay until their views move; the libGDX gallery lists them under "hud-v3 button styles (to
 migrate)".
+
+## Inputs
+
+Text, password, search and number inputs, the text area and the form field. Both galleries show every kind in every
+state.
+
+| State | Look |
+| --- | --- |
+| Rest | `surface.input` fill, `border.control` edge, `text.primary` text, `text.muted` placeholder |
+| Hover | `border.strong` edge |
+| Focus | The focus ring in place of the edge (see [Focus](#focus)); editable text always shows it |
+| Error / warning | `status.danger` / `status.warning` edge and a trailing status icon; the form field adds the words |
+| Read-only | No fill, `border.subtle` edge, `text.primary` text |
+| Disabled | `text.disabled` text and a muted edge |
+
+- **Sizes** match buttons, so a field and a button side by side line up: regular `control.md` (36), compact
+  `control.sm` (28). Text sits `md` (8) inside the edge.
+- **Precedence**: focus wins over a status, and a status over hover. Under the focus ring the status icon still shows.
+- **Form field**: the label above (`text.secondary`), then the input, then a helper (`text.muted`) or a status
+  message in the status color with its icon. The message line is only there while it has text. Dense option grids
+  may keep labels on the left.
+
+**Swing.** The MegaMek themes give every `JTextField`, `JPasswordField`, `JFormattedTextField`, `JSpinner` and
+`JComboBox` the compact height and the hover and read-only edges, so existing views get them without changes; text
+areas get them through their scroll pane. [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java)
+builds regular or compact inputs: `text(size)`, `password(size)`, `search(placeholder, size)` (search glyph, clear
+button, accessible name), `number(model, size)` and `area(textArea)`; `status(input, Status.ERROR)` sets a status.
+[`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) is the form field
+(`setHelper`, `setError`, `setWarning`); its label is the input's `labelFor` and its message the input's accessible
+description. Hover comes from one AWT listener (`FieldEdge`) and custom UI delegates (`FieldUIs`, `FieldBorders`),
+because FlatLaf has no hover edge or minimum height for inputs. A read-only spinner is not offered, because its arrows
+still step.
+
+**libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `TokenFieldStyle`s
+`input<variant>` and `input<variant>-compact` (`UiTheme.INPUT_VARIANTS`: plain or search, each with error, warning or
+read-only). [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java) adds the hover scene2d lacks,
+the status icon, `status(Status)` and `readOnly(true)`; `UiTextField.Area` is the text area. `UiKit` builds them:
+`input(text, compact)`, `password(compact)`, `tokenSearch(placeholder, compact)`, `area(text, rows)` and
+`formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)). It is the
+in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD's number control), and read-only text
+can not be selected, because scene2d has no read-only field. The `hud` and `hud-search` field styles stay until their
+views move.
+
+## Choices
+
+Check box, radio button and switch, with the label on the right. A click on the indicator or its label flips it. Both
+galleries show every kind in every state, and a live row to click.
+
+| State | Look |
+| --- | --- |
+| Off | `surface.input` fill, `border.control` edge |
+| On | `accent.primary` fill and edge with a `text.onAccent` mark: a check, a dot, or the switch's thumb on the right |
+| Mixed (check box) | As on, with a dash in place of the check |
+| Hover / pressed | `border.strong` edge; off adds the `surface.hover` wash, on leans the accent as a primary button does |
+| Focus | The ring around the indicator, `focus.gap` (1) away (see [Focus](#focus)) |
+| Disabled | `surface.base` fill, `border.subtle` edge, `text.disabled` mark and label |
+
+- **Size.** The box and circle are `icon.sm` (16) in every row density; the switch's track is 16 high and 28 long,
+  with a 12 thumb. The label sits `xs` (4) beyond the ring's room.
+- **Which one.** A check box is for a choice confirmed with the rest of a form; a switch applies at once, like a
+  setting; radio buttons pick one of a few, and a group always keeps one selected.
+- **Not by color alone.** On always adds a mark or moves the thumb, so the state reads without telling colors apart.
+- **Mixed** means some of the items a check box stands for are checked. It reads as unchecked, so a click checks
+  everything; nothing clicks back into mixed.
+
+**Swing.** The MegaMek themes give every `JCheckBox` and `JRadioButton` the token look through
+[`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java) and
+[`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), so existing views
+get it without changes. [`TokenChoices`](../../megamek/src/megamek/client/ui/design/swing/TokenChoices.java) builds
+them: `check(text, checked)`, `radio(text, selected)`, `group(radios...)` and `toggleSwitch(text, on)` (a `JCheckBox`
+with [`TokenSwitchIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenSwitchIcon.java), announced as a toggle
+button); `mixed(box, true)` shows the dash through FlatLaf's indeterminate state. Swing's accessibility API has no
+mixed state, so a screen reader hears a mixed box as unchecked.
+
+**libGDX.** [`UiChoice`](../../megamek/src/megamek/client/ui/gdx/UiChoice.java) draws the `choice-<shape><state>`
+drawables [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers (`box`, `radio` and `track`, in
+the `UiTheme.CHOICE_STATES`), its mark and the focus ring. `UiKit` builds them: `check(text, checked)`,
+`radio(text, checked)`, `toggleSwitch(text, on)` and `radioGroup(radios...)`. A click, or Space or Enter while it has
+keyboard focus, fires a `ChangeEvent`; `setChecked` and `mixed(true)` from code fire none. `hovered`, `held` and
+`focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` stays until its views move.
+
+## Tabs
+
+Labels on the window surface that switch between the pages of one view.
+
+| State | Look |
+| --- | --- |
+| Rest | `text.secondary` label; a 1-wide `border.subtle` hairline runs under the whole strip |
+| Hover | `text.primary` label (libGDX adds the `surface.hover` wash) |
+| Selected | `text.primary` label and a `selection.width` (2) `selected.primary` underline, with or without focus |
+| Focus | The ring inside the selected tab (see [Focus](#focus)) |
+| Disabled | `text.disabled` labels and a `border.subtle` underline |
+
+- **Sizes.** Compact (`control.sm`, 28 high, `md` side padding) is the default for every tab pane, since most sit in
+  panels; regular (`control.md`, 36, `lg` padding) is for a window's top-level pages.
+- **Labels** are sentence case in Roboto Medium, like buttons; hud-v3's all-caps tabs go.
+- **Not by color alone.** The underline marks the selected tab as well as the brighter label.
+
+## Segmented control
+
+Two to five short, mutually exclusive options in one raised frame, for switching a view or a mode in place (map, list
+or cards). Use tabs to switch between pages, and radio buttons for a choice in a form.
+
+| State | Look |
+| --- | --- |
+| Rest | `surface.raised` frame with a `border.control` edge; `border.subtle` dividers; `text.secondary` labels |
+| Hover / pressed | The `surface.hover` wash (twice for pressed) on the section, `text.primary` label |
+| Selected | `selected.background` wash and `selected.primary` edge on the section, as a selected toggle; the dividers beside it give way |
+| Focus | The ring on the selected section, over its edge |
+| Disabled | `border.subtle` edges, `text.disabled` labels, the selected wash at half strength |
+
+- **Sizes** match buttons: regular `control.md` (36) with `lg` padding, compact `control.sm` (28) with `md`.
+- **Width.** The sections share the width equally, the widest label setting it.
+- **Keys.** Tab reaches the control as one stop; Left and Right move the selection, which applies at once.
+
+**Swing.** The MegaMek themes give every `JTabbedPane` the token tabs, compact, so existing views get them without
+changes; [`TokenTabs`](../../megamek/src/megamek/client/ui/design/swing/TokenTabs.java) makes a pane of either size
+(`tabs(size)`, `size(tabs, size)`). FlatLaf has no pressed tab color, so a pressed tab looks hovered.
+[`TokenSegmented`](../../megamek/src/megamek/client/ui/design/swing/TokenSegmented.java) is the segmented control:
+`new TokenSegmented(size, labels...)`, `getSelectedIndex()`, `setSelectedIndex(i)` (fires nothing) and
+`addActionListener` (user changes only, with the label as the command). Its sections are toggle buttons in a button
+group, announced as radio buttons.
+
+**libGDX.** [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java) and
+[`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) share
+[`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), which keeps the selection and draws the
+faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
+[`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers. `UiKit` builds them:
+`tokenTabs(compact, labels...)` and `tokenSegmented(compact, labels...)`. A click, or Left and Right while the bar has
+keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
+`focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no Tab
+traversal yet. hud-v3's `UiKit.segmented` and the `hud-tab`, `hud-seg` and `hud-pill` styles stay until their views
+move.
+
+## Select
+
+Picks one value from a list that opens below the face. Use a segmented control or radio buttons when two to five
+options should stay visible.
+
+| Part / state | Look |
+| --- | --- |
+| Face | The input box (see [Inputs](#inputs)): the value in `text.primary`, a `text.secondary` chevron, a `text.muted` placeholder while nothing is chosen |
+| Inline face | No box: `text.secondary` value that turns `text.primary` under the pointer, open or focused, over a dotted (2 on, 2 off) `border.control` underline, `border.strong` under the pointer |
+| Hover / open | `border.strong` edge |
+| Focus | The ring in place of the edge; the inline face gets the ring around it instead of the underline |
+| Disabled | As a disabled input; the inline underline turns `border.subtle` |
+| Popup list | `surface.popover` frame with a `border.control` edge, padded `xs` (4) top and bottom so the rows' highlight sits `xs` from the edge on every side, `xs` (4) below the face (above it when there is no room), at least as wide as the face; scrolls after 10 rows |
+| Rows | `control.sm` (28) high; a `surface.hover` wash, inset `xs`, on the row under the pointer or the keyboard; a `selected.primary` check before the current value, in a leading `icon.sm` slot |
+
+- **Sizes** match inputs: regular `control.md` (36), compact `control.sm` (28). The face is as wide as its widest item
+  or placeholder, so it does not jump when the value changes. The inline face is `control.sm` high.
+- **Inline** is for a value inside a header or running text, where a box would be too heavy.
+- **Violet means selected.** The check, not the wash, marks the current value, so the wash stays neutral.
+- **Keys.** Enter, Space or Down opens the list on the current value; Up and Down move, Home and End jump, Enter
+  chooses and Escape closes without a choice. The focus comes back to the face.
+
+**Swing.** The MegaMek themes give every `JComboBox` the face, the popup list (check, wash, edge, gap and 10 rows)
+through the `ComboBox` delegate in `FieldUIs`, so existing views get them without changes. The popup edge is the
+themes' `PopupMenu.borderColor`, so menus get the `border.control` edge too.
+[`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java) builds them: `select(size,
+items...)`, `inline(items...)` (or `inline(combo)`) and `placeholder(combo, text)`, shown while the selected index is
+-1. Swing's list has no disabled rows or separators.
+
+**libGDX.** [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java) is the face and
+[`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) the list, drawn from the input boxes, the
+`sel-*` drawables and the `SelectStyle` colors [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java)
+registers. `UiKit` builds them: `tokenSelect(compact, items...)` and `tokenSelectInline(items...)`. The list sits on
+the stage's root while open and closes on a press outside it. Choosing another item fires a `ChangeEvent` from the
+select; `select(i)` from code fires none, and `placeholder(text)` shows the placeholder until a choice. `hovered`,
+`focused` and `opened` freeze those states for the gallery. hud-v3's `UiKit.select`, its `hud-select` styles and the
+`UiPopover` / `UiMenuList` drop-downs stay until their views move.
+
+## Lists and trees
+
+Show many items to pick from or browse. A select is better when only the chosen value needs to stay visible; a table
+when items have several comparable columns.
+
+| Part / state | Look |
+| --- | --- |
+| Frame | The scroll pane: `surface.input` inside a `border.control` edge; it carries the keyboard focus ring |
+| Rows | At least `control.sm` (28) high, the shape inset `xs` (4) with a `radius.sm` corner, like the popup list's rows |
+| Hover | A `surface.hover` wash on the row under the pointer |
+| Selected | The `selected.background` wash, at full strength whether or not the list has focus, and a `selected.primary` marker, `selection.width` (2) by `icon.sm` (16), at the row shape's leading edge |
+| Text | `text.primary`, starting `sm` (6) past the marker; `text.disabled` when the list is disabled, which drops the hover and the marker |
+| Two-line row | At least `control.lg` (46) high: the title over a `small` detail line in `text.secondary` |
+| Empty | A `text.muted` message centered in the first row's place |
+| Tree | The list's rows with `text.secondary` chevrons and no connecting lines; each level indents 16, and the leading edge leaves room for the marker |
+
+- **Violet means selected**, and the marker keeps a selection visible without relying on its color, in multiple
+  selections too. Hover stays neutral.
+- **Keys** are Swing's: Up and Down move, Home and End jump, Shift and Ctrl extend a multiple selection; Left and Right
+  collapse and expand tree nodes.
+
+**Swing.** The MegaMek themes draw every `JList` and `JTree` this way through
+[`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java) and
+[`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java), so existing views get them without
+changes; a combo box's popup list keeps the select's rows. Lists with their own cell renderers keep their rows'
+content and get the hover and the marker, but only the stock renderer gets the rounded selection.
+[`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java) adds `emptyText(list, text)`,
+`twoLine(list, title, detail)` and `scroll(view)`.
+
+**libGDX.** Nothing new yet. hud-v3's `UiList` and `UiTree` stay until the developers accept the system.
+
+## Menus
+
+Menu bars, their menus and context menus. They share the select's popup, so every popup in the suite looks the same.
+
+| Part / state | Look |
+| --- | --- |
+| Popup | The select's popup: `surface.popover` with a `border.control` edge and a `radius.md` corner, padded `xs` (4) top and bottom |
+| Rows | `control.sm` (28) high, the highlight inset `xs` (4) with a `radius.sm` corner; text starts `xs` + `md` (12) in, after a check column when any row has one |
+| Hover / keyboard | A `surface.hover` wash on the row, `text.primary` label; the open menu in a menu bar gets the same wash |
+| Check and radio | A `selected.primary` check or dot in the check column |
+| Shortcut | `text.muted`, `text.secondary` on the hovered row, right-aligned |
+| Submenu | A `text.secondary` chevron at the end of the row |
+| Separator | A `border.subtle` line with `xs` (4) above and below |
+| Disabled | `text.disabled` label, shortcut, check and chevron |
+
+- **Hover stays neutral**, as in the select's popup and lists. Violet only marks a state that is on.
+- **Keys** are Swing's: arrows move and open submenus, Enter chooses, Escape closes, and Alt or F10 reaches the menu
+  bar.
+
+**Swing.** The MegaMek themes style every `JMenuBar`, `JMenu`, `JMenuItem`, `JCheckBoxMenuItem`,
+`JRadioButtonMenuItem` and `JPopupMenu`, so existing menus get the look without changes.
+
+**libGDX.** Nothing new yet; the in-game UI has no menus that need it.
+
+## Tooltips
+
+Tooltips are small info cards, not bare OS labels: they share the popup's surface, edge and corner, and they can
+carry a shortcut and a title.
+
+| Part | Look |
+| --- | --- |
+| Card | `surface.popover` with a `border.control` edge and a `radius.md` corner, padded `sm` (6) top and bottom and `md` (8) at the sides |
+| Plain text | `small`, `text.primary`; wraps at 280 (about 45 characters), at spaces and line breaks |
+| Info card | A `body.strong` title in `text.primary` over `small` detail in `text.secondary`, `xxs` (2) apart |
+| Shortcut | A key chip at the end of the first line: `caption` in `text.secondary` inside a `border.control` edge with a `radius.sm` corner |
+| HTML | Keeps its own layout inside the same card |
+
+- **One line of plain text is about `control.sm` (28) tall**, the height of a compact control.
+- **Delays stay user settings**: MegaMek's tooltip delay and dismiss preferences still apply. Tooltips fade in once
+  the motion step lands; until then they appear at once.
+
+**Swing.** The MegaMek themes draw every tooltip this way. `TokenTooltips.withKey(component, text, key)` adds a
+shortcut chip; `TokenTooltips.card(component, title, detail, key)` makes an info card. Both set the plain tooltip text
+too, so screen readers and other look and feels still get it.
+
+**libGDX.** Nothing new yet; hud-v3's tooltip stays until the developers accept the system.
+
+## Scrollbars
+
+Scroll bars stay quiet until they're needed: no track or arrow buttons of their own, so a bar sits on the content it
+scrolls instead of drawing a stripe beside it.
+
+| Part / state | Look |
+| --- | --- |
+| Bar | 10 wide (`sm` + 2 × `xxs`), the color of the scrolled content; the corner between two bars matches it |
+| Thumb | An `sm` (6) wide pill, `xxs` (2) from the bar's sides, at least `control.sm` (28) long; `border.control` |
+| Hover | The pointer anywhere on the bar shows the rail, a `surface.hover` pill over the content, and turns the thumb `text.muted` |
+| Dragging | The thumb turns `text.secondary` |
+| Disabled | No thumb and no rail |
+
+- **The thumb stays visible on every surface**: `border.control` keeps at least 3:1 against the base, panel, input and
+  popover surfaces in both modes.
+- **Wheel and keys** are Swing's. Smooth scrolling stays on; it follows the reduce-motion setting once the motion step
+  lands.
+
+**Swing.** The MegaMek themes draw every `JScrollBar` and `JScrollPane` this way through
+[`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java) and
+[`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java), so existing views get
+them without changes. A bar takes the color of an opaque view, otherwise the viewport's; a transparent scroll pane
+shows what's behind it.
+
+**libGDX.** Nothing new yet; hud-v3's 4-wide list knob stays until the developers accept the system.
+
+## Sliders
+
+A number picked from a range by dragging the thumb, clicking the track (the thumb jumps there) or the arrow keys.
+
+| Part / state | Look |
+| --- | --- |
+| Track | An `xs` (4) high pill: `accent.primary` up to the thumb, `border.control` past it |
+| Thumb | An `icon.sm` (16) `accent.primary` disc, with or without ticks and labels |
+| Ticks | `tick.width` (2) pills under the track in `border.control`: major ones `sm` (6) long, minor ones half that |
+| Labels | `small` type in `text.muted` under the ticks |
+| Hover / dragging | The pointer anywhere on the slider gives the thumb a `border.strong` edge and leans its face as on a checked box: toward the on-accent color on hover, toward the text color while dragging |
+| Focus | The ring around the thumb, `focus.gap` (1) away (see [Focus](#focus)) |
+| Disabled | A `border.subtle` track and ticks with no fill, and a `text.disabled` thumb |
+
+- **One look.** Ticks and labels don't change the thumb or drop the fill, so every slider reads the same way.
+- **Readout.** When the exact value matters (opacity, scale, a count), show it beside the track in `body` type. It
+  keeps the width of the longest value so the track doesn't shift as it changes.
+- **Not by color alone.** The thumb's position carries the value; the fill only repeats it.
+
+**Swing.** The MegaMek themes draw every `JSlider` this way through
+[`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), so existing views get it
+without changes, including their ticks and standard labels; a custom label table keeps the labels it was given.
+[`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java)`.withReadout(slider, format)` adds
+the readout and lines it up with the track on the slider's baseline.
+
+**libGDX.** Nothing new yet; the tuning panel's slider style stays until the developers accept the system.
 
 ## Code
 
@@ -220,10 +549,24 @@ migrate)".
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
+| [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java), [`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java), [`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), [`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) | Swing keyboard focus |
 | [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
+| [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java), [`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) | The Swing inputs and form field |
+| [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java), [`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java) | The libGDX inputs and form field |
+| [`TokenChoices`](../../megamek/src/megamek/client/ui/design/swing/TokenChoices.java), [`TokenSwitchIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenSwitchIcon.java) | The Swing check box, radio button and switch |
+| [`UiChoice`](../../megamek/src/megamek/client/ui/gdx/UiChoice.java) | The libGDX check box, radio button and switch |
+| [`TokenTabs`](../../megamek/src/megamek/client/ui/design/swing/TokenTabs.java), [`TokenSegmented`](../../megamek/src/megamek/client/ui/design/swing/TokenSegmented.java) | The Swing tabs and segmented control |
+| [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
+| [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
+| [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
+| [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
+| [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
+| [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |
+| [`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java) | The Swing sliders and their readout |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
-Outside the galleries, only the two Swing themes and the libGDX button styles read the tokens. The Swing themes are
-selectable but not the default, and no view uses the new buttons yet. Next comes the focus design for every control,
-then inputs, choices and tabs, and a `UiTheme` rename pass so hud-v3 reads the same roles.
+Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
+styles read the tokens; lists, trees, menus, tooltips, scrollbars and sliders are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
+only once the developers accept the system.

@@ -18,7 +18,7 @@ inserted into a larger program, so editing a helper can affect several materials
 | `light-model.glsl`, `surface-lighting.glsl`, `rain-surface.glsl` | Shared light response, shadow/specular terms and wet surfaces. |
 | `surface-shading.glsl` | One `Surface` description and its lighting entry `shadeSurface`: sun or moon with the caller's shadow, sky and environment reflection, local lights, with both specular lobes scaled for GGX multiple scattering (`specularMultiscatter`, so rough metals keep their brightness); sculpted ground, ground and roads, trees and plants, and imported models (`model.frag`, `model-surface.glsl`). |
 | `color-space.glsl`, `environment-lighting.glsl` | Exact sRGB boundaries and shared integrated BRDF/environment reflection; `GpuEnvironmentLighting` owns the lookup table. |
-| `water-surface.frag`, `water-fall.frag`, `water-spray.frag`, `water-cut.frag` | Separate water draw modes; assembled by `GpuTerrain`, with attributes/uniforms from `GpuWaterShader`. |
+| `water-surface.frag`, `water-fall.frag`, `water-spray.frag`, `water-cut.frag`, `water-beyond.frag` | Separate water draw modes; assembled by `GpuTerrain`, with attributes/uniforms from `GpuWaterShader`. |
 | `water-optics.glsl`, `water-lighting.glsl`, `water-interactions.glsl`, `water-pool.glsl` | Water color/transmission, illumination and local motion/contacts. |
 | `terrain-ice.glsl` | Lake ice and discovered ground/road glaze; injected and bound by `GpuIceShader`. |
 | `terrain-magma-solid.frag`, `terrain-magma-flow.frag` | Separate crust and flowing-lava programs; `GpuMagmaShader` injects `terrain-magma.glsl` and the corresponding solid/flow helpers. |
@@ -69,10 +69,11 @@ save will change.
 ## Terrain startup
 
 Terrain startup prepares the material variants found in actual chunks while CPU
-geometry is being built. The loading display's **Compiling shaders** bar counts the
-programs linked of those the load needs so far: these generic programs and their depth
-twins, then the family programs below once they start (`GpuTerrain.shaderProgress`). It
-shows only while a program is left to link; the total grows as chunks find new variants.
+geometry is being built. The loading display's **Compiling shaders** bar (the UI kit's
+progress bar, `UiKit.progress`) shows the share linked of the programs the load needs so far,
+as a percentage: these generic programs and their depth twins, then the family programs below
+once they start (`GpuTerrain.shaderProgress`). It shows only while a program is left to link;
+the total grows as chunks find new variants, so the share can fall back as well as rise.
 `GpuGlsl.Preparation` polls the driver's parallel shader
 compiler when available; otherwise a worker compiles in a private hidden shared
 context. The render thread adopts each completed program into libGDX without a

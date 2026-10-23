@@ -376,7 +376,8 @@ class BoardBridgeFootingTest {
                             }
                         }
                     }
-                    int budget = lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 440 : 248;
+                    // Both banks fall away below their landings: each abutment adds four sides, eight facets.
+                    int budget = (lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 440 : 248) + 2 * 8;
                     assertTrue(footing.shape().facets().size() <= budget, "Close LODs bevel the caps; distant LODs keep the silhouette");
                 }
             }
@@ -409,26 +410,26 @@ class BoardBridgeFootingTest {
             float top = BoardGeometry.groundZ(scene.tile(road));
             for (float z : new float[] { top, top - BoardRelief.metres(.25f), top - BoardRelief.metres(.75f), 0 }) {
                 for (float t : new float[] { 1f / 3, .5f, 2f / 3 }) {
-                    Vector3 actual = bank.relief.roadPoint(edge, t, z);
-                    assertTrue(actual.epsilonEquals(bareBank.relief.roadPoint(edge, t, z), .002f),
+                    Vector3 actual = bank.relief.outlinePoint(edge, t, z);
+                    assertTrue(actual.epsilonEquals(bareBank.relief.outlinePoint(edge, t, z), .002f),
                           "The built landing leaves the receding natural bank's profile intact");
-                    assertTrue(actual.epsilonEquals(water.relief.roadPoint(opposite, 1 - t, z), .002f),
+                    assertTrue(actual.epsilonEquals(water.relief.outlinePoint(opposite, 1 - t, z), .002f),
                           "Both sides retain one shared bank wall without a land/water crack");
-                    assertTrue(ordinaryBank.relief.roadPoint(edge, t, z)
-                          .epsilonEquals(naturalBank.relief.roadPoint(edge, t, z), .002f),
+                    assertTrue(ordinaryBank.relief.outlinePoint(edge, t, z)
+                          .epsilonEquals(naturalBank.relief.outlinePoint(edge, t, z), .002f),
                           "Ordinary road clearance and natural bridge mouths keep their existing profile");
                 }
             }
-            assertTrue(bank.relief.roadPoint(edge, .5f, top)
-                  .dst(ordinaryBank.relief.roadPoint(edge, .5f, top)) > BoardRelief.metres(2),
+            assertTrue(bank.relief.outlinePoint(edge, .5f, top)
+                  .dst(ordinaryBank.relief.outlinePoint(edge, .5f, top)) > BoardRelief.metres(2),
                   "The fixture exercises the former projecting grassy landing");
             for (float t : new float[] { 1f / 3, .5f, 2f / 3 }) {
-                assertTrue(bank.relief.roadPoint(edge, t, top)
-                      .dst(bank.relief.roadPoint(edge, t, top - .001f)) < .01f,
+                assertTrue(bank.relief.outlinePoint(edge, t, top)
+                      .dst(bank.relief.outlinePoint(edge, t, top - .001f)) < .01f,
                       "The supported bank meets its rim continuously instead of snapping under the deck");
                 float aboveRoad = top + BoardRelief.metres(1);
-                assertTrue(bank.relief.roadPoint(edge, t, aboveRoad)
-                      .epsilonEquals(ordinaryBank.relief.roadPoint(edge, t, aboveRoad), .002f),
+                assertTrue(bank.relief.outlinePoint(edge, t, aboveRoad)
+                      .epsilonEquals(ordinaryBank.relief.outlinePoint(edge, t, aboveRoad), .002f),
                       "Relief above the road retains ordinary clearance around the bridge passage");
             }
             for (int k = 0; k < 6; k++) {

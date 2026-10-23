@@ -41,6 +41,11 @@ supplies the family; concrete falls back to rock. All sections of a connected sp
 vote. An edit that changes the chosen surface or switches between natural and manufactured geometry
 rebuilds the affected span and its adjoining banks, including across chunk boundaries.
 
+In Enhanced graphics a span over grass is bare rock (`BoardNaturalBridge.shell`): a meadow does not root on a
+thin arch. Across each level passage the bank's cover gives way to the shell's rock over a broken band about six
+metres deep, entirely by the bank's edge where the span's top begins (`BoardSurfaceBlend`). The ground's material
+and its grass read the same cover, so both fade together. Classic keeps the grass cap.
+
 ## Geometry and existing terrain
 
 In Classic graphics, `BoardNaturalBridge` uses a normal six-corner hex cap whose centre
@@ -52,8 +57,8 @@ picking and road support in both normal and Tactical View. Road and rail courses
 shared with Enhanced; the natural terrain envelope is the deliberate visual difference.
 
 In Enhanced graphics, `BoardNaturalBridge` builds a separate hollow shell with curved, uneven outlines, broad bank shoulders,
-an eroded cap and a thick, asymmetric arch underneath. Rounded side strata bulge between the chipped
-top and recessed underside. Shared terrain normal smoothing joins the broad rock facets; the surface
+an eroded cap and a thick, asymmetric arch underneath. Down each exposed face, broken strata form a rounded lip
+over an undercut band and a lower ledge above the recessed underside; medium detail keeps only the lip. Shared terrain normal smoothing joins the broad rock facets; the surface
 engine supplies photographic albedo, normal maps, geology, weather response and material batches.
 It adds no texture asset, per-bridge GPU resource or piers: a rock arch never has any (see Piers below). Fine
 cracks come from the existing material maps.
@@ -80,6 +85,11 @@ eight metres there: a bank mouth reaching across that line is cut where it cross
 overlap, and a shallower mouth gets a small tongue out to the line, built apart from the centre's fan. Between
 two grounds, a lone span ends both wide mouths on the corner's ray and seats the corner there as deep as they
 reach. Shared edges have no internal walls. An open corner keeps its curved, eroded rim.
+
+A side without an exit narrows to the arch's waist. Where the ground beyond it lies below the supports on both
+sides, it keeps near the hex edge instead, as the lip of the hollow the banks continue around. Where a bank's
+cliff turns a corner onto such a lower side, the rim follows it to just inside that corner rather than cutting
+across (`BoardNaturalBridge.shoulder`), unless the bank's wide mouth already reaches past the corner.
 
 Only the exposed rim erodes. Mouths, joints and closed corners keep the plane they share, and the erosion
 fades in over the first few metres of exposed rim. The top's spokes carry the rim heights inwards blended

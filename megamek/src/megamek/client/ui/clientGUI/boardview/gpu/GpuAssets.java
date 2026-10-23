@@ -852,7 +852,7 @@ final class GpuAssets implements Disposable {
     }
 
     List<Model> wallLevels(BoardWall.Layout layout) {
-        String shape = layout.asset() + "@height-" + layout.height() + "@arms-" + layout.arms();
+        String shape = layout.asset() + "@family-" + layout.family().folder + "@height-" + layout.height() + "@arms-" + layout.arms();
         return modelLods.computeIfAbsent(shape, ignored -> {
             List<Model> result = new ArrayList<>();
             for (int lod = 0; lod < BoardWall.LODS; lod++) {

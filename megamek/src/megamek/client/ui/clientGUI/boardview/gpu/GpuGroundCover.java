@@ -51,6 +51,8 @@ final class GpuGroundCover implements Disposable {
     private static final float ICE_BORDER_REACH = 5.2f;
     /** Land-side metres over which standing grass thins to the bare bank. */
     private static final float SHORE_FADE_METRES = 3;
+    /** Metres beyond a bridge landing's solid asphalt over which standing grass thickens to the full meadow. */
+    private static final float LANDING_FADE_METRES = 5;
 
     /** Whether a hex grows grass: natural grass ground, or its neighbour within a level of a grass hex. */
     static boolean grows(BoardScene scene, BoardScene.Tile tile) {
@@ -64,6 +66,29 @@ final class GpuGroundCover implements Disposable {
                   && Math.abs(neighbor.elevation() - tile.elevation()) <= 1) { return true; }
         }
         return false;
+    }
+
+    /**
+     * A built deck's road runs on past the deck's end onto a bare bank as paint ({@link GpuRoads#deckPatches}): solid
+     * asphalt as far as these courses reach, which no blade grows through, then an apron fading into the meadow.
+     */
+    private static List<BoardRoad> deckLandings(BoardScene scene, BoardScene.Tile tile) {
+        List<BoardRoad> result = new ArrayList<>(0);
+        for (int direction = 0; direction < 6; direction++) {
+            var span = scene.neighbor(tile, direction);
+            int exit = (direction + 3) % 6;
+            if (BoardBridge.feature(span) == null || !BoardBridge.bank(span, tile, exit) || BoardBridge.road(span, tile, exit)) {
+                continue;
+            }
+            var deck = BoardBridge.deck(scene, span);
+            if (deck.natural() || (deck.roadExits() & 1 << exit) == 0) { continue; }
+            var footing = BoardBridgeFooting.build(scene, span, TerrainLod.FULL, new HashMap<>()).paint(deck);
+            if ((footing.bareExits() & 1 << exit) == 0) { continue; }
+            var reaches = new ArrayList<>(footing.lengths());
+            reaches.set(exit, reaches.get(exit) + GpuRoads.landingSetback(deck));
+            result.add(deck.road(span.coords()).extended(reaches, footing.bareExits()));
+        }
+        return result;
     }
 
     /** Only exposed ordinary depth-zero banks can extend the adjoining meadow into a water hex. */
@@ -114,6 +139,8 @@ final class GpuGroundCover implements Disposable {
             marshEdge |= BoardBiome.kind(scene.neighbor(tile, direction)) == BoardScene.Biome.MARSH;
         }
         var roads = BoardRoad.nearbyWays(scene, tile);
+        var landings = deckLandings(scene, tile);
+        float landingFade = BoardRelief.metres(LANDING_FADE_METRES) / BoardGeometry.hexScale();
         float sink = BoardGeometry.width() * .001f;
         // Frozen land's jagged border reaches across a shared edge (terrain-ice.glsl); no blade grows through it.
         List<Vector3[]> iceEdges = new ArrayList<>();
@@ -188,6 +215,10 @@ final class GpuGroundCover implements Disposable {
                 }
                 // Thin the accepted roots, not the cover input: its grass threshold would turn this fade into a cut.
                 growth *= BoardRelief.smooth(distance / shoreReach);
+            }
+            if (!landings.isEmpty()) {
+                // None on a landing's solid asphalt; the meadow thickens again across its fading apron.
+                growth *= BoardRelief.smooth((BoardRoad.distance(landings, x, y) - BoardRoad.SHOULDER - 1) / landingFade);
             }
             if (chance <= growth) {
                 roots.addAll(x, y, z - sink, rank);

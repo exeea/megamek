@@ -453,6 +453,85 @@ public final class UiKit {
         return new SearchField(placeholder);
     }
 
+    /** A token text input (docs/design-system/tokens.md, Inputs); compact is control.sm high, otherwise control.md. */
+    public UiTextField input(String text, boolean compact) {
+        return new UiTextField(text, skin, compact);
+    }
+
+    /** A token password input: the text shows as bullets. */
+    public UiTextField password(boolean compact) {
+        UiTextField field = input("", compact);
+        field.setPasswordMode(true);
+        return field;
+    }
+
+    /** A token search input: a leading search glyph, the placeholder, and a clear button while it holds text. */
+    public TokenSearch tokenSearch(String placeholder, boolean compact) {
+        return new TokenSearch(placeholder, compact);
+    }
+
+    /** A token text area, wrapping its lines, {@code rows} lines high. */
+    public UiTextField.Area area(String text, float rows) {
+        UiTextField.Area area = new UiTextField.Area(text, skin);
+        area.setPrefRows(rows);
+        return area;
+    }
+
+    /** A token form field: {@code label} above the input, and a helper or status message below it. */
+    public UiFormField formField(String label, Actor input) {
+        return new UiFormField(this, label, input);
+    }
+
+    /** A token check box (docs/design-system/tokens.md, Choices): for a choice a form confirms. */
+    public UiChoice check(String text, boolean checked) {
+        return new UiChoice(this, UiChoice.Kind.CHECK, text, checked);
+    }
+
+    /** A token radio button; put it in a {@link #radioGroup} with the others of its choice. */
+    public UiChoice radio(String text, boolean checked) {
+        return new UiChoice(this, UiChoice.Kind.RADIO, text, checked);
+    }
+
+    /** A token switch: for a setting that applies at once. */
+    public UiChoice toggleSwitch(String text, boolean on) {
+        return new UiChoice(this, UiChoice.Kind.SWITCH, text, on);
+    }
+
+    /** Makes radio buttons exclusive: exactly one stays selected, the first checked one or else the first. */
+    public com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice> radioGroup(UiChoice... radios) {
+        var group = new com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice>();
+        group.setMinCheckCount(1);
+        group.setMaxCheckCount(1);
+        group.setUncheckLast(true);
+        group.add(radios);
+        return group;
+    }
+
+    /** Token tabs (docs/design-system/tokens.md, Tabs), the first selected; compact ones are for panels. */
+    public UiTabs tokenTabs(boolean compact, String... labels) {
+        return new UiTabs(this, compact, labels);
+    }
+
+    /** A token segmented control (docs/design-system/tokens.md, Segmented control), the first option selected. */
+    public UiSegmented tokenSegmented(boolean compact, String... labels) {
+        return new UiSegmented(this, compact, labels);
+    }
+
+    /** A token select in an input box (docs/design-system/tokens.md, Select), the first item current. */
+    public UiSelect tokenSelect(boolean compact, String... items) {
+        return new UiSelect(this, compact ? UiSelect.Kind.COMPACT : UiSelect.Kind.REGULAR, items);
+    }
+
+    /** An inline token select: text with a dotted underline, for a value inside a sentence or a dense row. */
+    public UiSelect tokenSelectInline(String... items) {
+        return new UiSelect(this, UiSelect.Kind.INLINE, items);
+    }
+
+    /** A token popup list on its own, as a gallery shows it; a select makes its own. */
+    public UiListPopup tokenListPopup(String... items) {
+        return new UiListPopup(this, items);
+    }
+
     /** Shared numeric controls use the theme's track, mint fill and narrow handle. */
     public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle sliderStyle() {
         var track = skin.newDrawable("white", UiTheme.TRACK); track.setMinHeight(4); track.setMinWidth(0);
@@ -473,6 +552,11 @@ public final class UiKit {
     /** A meter's caption and value over a bar that its view draws, such as a segmented or hatched bar. */
     public Meter meter(String caption, Widget bar) {
         return new Meter(caption, false, bar);
+    }
+
+    /** A progress bar (.progress): a meter whose value is the percentage done, over the mint share of its bar. */
+    public Progress progress(String caption) {
+        return new Progress(caption);
     }
 
     /** A rectangle of the white texel in a color, at the widget's alpha. */
@@ -610,8 +694,45 @@ public final class UiKit {
         }
     }
 
+    /** The token search input and its clear button, which empties the field with a ChangeEvent from the field. */
+    public final class TokenSearch extends Stack {
+        /** The text field; its ChangeEvents report every edit, the clear button's included. */
+        public final UiTextField field;
+        /** The clear button, shown while the field holds text. */
+        public final UiButton clear;
+
+        private TokenSearch(String placeholder, boolean compact) {
+            field = new UiTextField("", skin, "-search", compact);
+            field.setMessageText(placeholder);
+            field.setProgrammaticChangeEvents(true);
+            field.hoverRoot(this);
+            clear = button("button-icon-compact", "close", null, null);
+            onChange(clear, () -> field.setText(""));
+            DesignTokens tokens = DesignTokens.shipped();
+            float inset = tokens.size().get("border") + tokens.space().get("xs");
+            float side = tokens.size().get("border") + tokens.space().get("md");
+            float height = tokens.size().get(compact ? "control.sm" : "control.md");
+            Icon glyph = icon("search", UiTheme.FIELD_ICON, field.getStyle().messageFontColor);
+            glyph.setTouchable(Touchable.disabled);
+            Table overlay = new Table();
+            overlay.add(glyph).size(UiTheme.FIELD_ICON).padLeft(side);
+            overlay.add().expandX();
+            overlay.add(clear).size(height - 2 * inset).padRight(inset);
+            add(field);
+            add(overlay);
+            clear.setVisible(false);
+        }
+
+        @Override
+        public void act(float delta) {
+            clear.setVisible(!field.getText().isEmpty() && !field.isDisabled());
+            super.act(delta);
+        }
+    }
+
     /** A caption and value over a bar; the overview card's compact form uses smaller type and a 3-unit bar. */
     public final class Meter extends Table {
+        private final Label caption;
         private final Label value;
         private final Cell<Label> valueCell;
         private final Widget bar;
@@ -620,7 +741,8 @@ public final class UiKit {
             float size = compact ? 9.5f : 10.5f;
             value = label("", compact ? "hud-caption" : "hud-button", compact ? size : 13, Color.WHITE);
             this.bar = bar;
-            Cell<Label> captionCell = add(label(UiTheme.upper(caption), "hud-caption", size, UiTheme.MUTED)).left();
+            this.caption = label(UiTheme.upper(caption), "hud-caption", size, UiTheme.MUTED);
+            Cell<Label> captionCell = add(this.caption).left();
             valueCell = add(value).right().expandX();
             if (compact) {
                 // .bars2's line box, lower than the labels' cap height and descent: 18.1 units with the bar
@@ -629,6 +751,12 @@ public final class UiKit {
             }
             row();
             add(bar).colspan(2).growX().padTop(4);
+        }
+
+        /** The caption at the left, upper-cased (.meter .l), such as the step a progress bar runs. */
+        public Meter caption(String text) {
+            caption.setText(UiTheme.upper(text));
+            return this;
         }
 
         /** The value at the right of the caption, upper-cased as the caption (.meter .l). */
@@ -654,6 +782,33 @@ public final class UiKit {
                 plain.fraction = MathUtils.clamp(fraction, 0, 1);
                 plain.fillColor = fill;
             }
+            return this;
+        }
+    }
+
+    /**
+     * A task's progress: the meter's caption, which may name the running step, and the share done as a whole percentage
+     * and the mint share of the meter's bar.
+     */
+    public final class Progress extends Table {
+        private final Meter meter;
+
+        private Progress(String caption) {
+            meter = new Meter(caption, false, new Bar(4));
+            add(meter).growX();
+            set(0);
+        }
+
+        /** The caption, such as the step that runs now. */
+        public Progress caption(String text) {
+            meter.caption(text);
+            return this;
+        }
+
+        /** The share done, from 0 to 1; the percentage rounds down, so 100% means done. */
+        public Progress set(float done) {
+            float share = MathUtils.clamp(done, 0, 1);
+            meter.set((int) (share * 100) + "%", share, UiTheme.MINT);
             return this;
         }
     }
