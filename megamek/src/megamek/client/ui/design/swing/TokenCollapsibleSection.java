@@ -3,6 +3,7 @@ package megamek.client.ui.design.swing;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -24,6 +25,7 @@ import javax.swing.Icon;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
+import javax.swing.Timer;
 import javax.swing.UIManager;
 
 import com.formdev.flatlaf.ui.FlatUIUtils;
@@ -41,13 +43,18 @@ public class TokenCollapsibleSection extends JPanel {
     /** Client property freezing the header row in its hover look, for the design gallery. */
     static final String FROZEN_HOVER = "MegaMek.section.frozenHover";
     private static final String TOGGLE = "toggle";
+    private static final String REVEAL = "section.reveal";
+    private static final String WASH = "section.wash";
+    private static final String TITLE = "section.title";
 
     private final HeaderRow header;
     private final JComponent content;
     private boolean expanded;
+    private Timer revealTimer;
 
     public TokenCollapsibleSection(String title, JComponent content, boolean expanded) {
         super(new BorderLayout());
+        setLayout(new RevealLayout());
         setOpaque(false);
         setAlignmentX(LEFT_ALIGNMENT);
         this.content = content;
@@ -56,18 +63,36 @@ public class TokenCollapsibleSection extends JPanel {
         add(header, BorderLayout.NORTH);
         add(content, BorderLayout.CENTER);
         content.setVisible(expanded);
+        TokenMotion.value(this, REVEAL, expanded, 0);
     }
 
     public boolean isExpanded() {
         return expanded;
     }
 
+    /** Opens or closes the section, sliding the content in or out over {@code medium} while the chevron turns. */
     public void setExpanded(boolean expanded) {
         if (this.expanded == expanded) {
             return;
         }
         this.expanded = expanded;
-        content.setVisible(expanded);
+        reveal();
+        // The content stays visible while it slides, clipped by the section, and hides once closed
+        content.setVisible(true);
+        if (TokenMotion.isMoving(this, REVEAL)) {
+            if (revealTimer == null) {
+                revealTimer = new Timer(16, event -> {
+                    revalidate();
+                    repaint();
+                    if (!TokenMotion.isMoving(this, REVEAL)) {
+                        settle();
+                    }
+                });
+            }
+            revealTimer.start();
+        } else {
+            settle();
+        }
         header.repaint();
         revalidate();
         repaint();
@@ -75,6 +100,50 @@ public class TokenCollapsibleSection extends JPanel {
         header.getAccessibleContext().firePropertyChange(AccessibleContext.ACCESSIBLE_STATE_PROPERTY,
               expanded ? AccessibleState.COLLAPSED : AccessibleState.EXPANDED,
               expanded ? AccessibleState.EXPANDED : AccessibleState.COLLAPSED);
+    }
+
+    @Override
+    public Dimension getPreferredSize() {
+        return revealed(super.getPreferredSize(), isPreferredSizeSet());
+    }
+
+    @Override
+    public Dimension getMinimumSize() {
+        return revealed(super.getMinimumSize(), isMinimumSizeSet());
+    }
+
+    @Override
+    public Dimension getMaximumSize() {
+        return revealed(super.getMaximumSize(), isMaximumSizeSet());
+    }
+
+    /** While the content slides, every size is the header and the shown part of the content's preferred height. */
+    private Dimension revealed(Dimension size, boolean set) {
+        if (set || !isRevealing()) {
+            return size;
+        }
+        Dimension preferred = super.getPreferredSize();
+        int headerHeight = header.getPreferredSize().height;
+        size.height = headerHeight + Math.round((preferred.height - headerHeight) * reveal());
+        return size;
+    }
+
+    /** How open the section is, 0 closed to 1 open, eased between. */
+    private float reveal() {
+        return TokenMotion.value(this, REVEAL, expanded, TokenMotion.medium());
+    }
+
+    private boolean isRevealing() {
+        return revealTimer != null && revealTimer.isRunning();
+    }
+
+    private void settle() {
+        if (revealTimer != null) {
+            revealTimer.stop();
+        }
+        content.setVisible(expanded);
+        revalidate();
+        repaint();
     }
 
     public String getTitle() {
@@ -88,6 +157,20 @@ public class TokenCollapsibleSection extends JPanel {
     /** The header row, which takes the keyboard focus. */
     public JComponent getHeader() {
         return header;
+    }
+
+    /**
+     * The border layout, except that while the content slides it keeps its full preferred height, so the section
+     * clips it instead of squeezing it.
+     */
+    private final class RevealLayout extends BorderLayout {
+        @Override
+        public void layoutContainer(Container target) {
+            super.layoutContainer(target);
+            if (isRevealing()) {
+                content.setSize(content.getWidth(), Math.max(content.getHeight(), content.getPreferredSize().height));
+            }
+        }
     }
 
     /** The header row: chevron, title and line, with the hover wash and the focus ring. */
@@ -161,8 +244,9 @@ public class TokenCollapsibleSection extends JPanel {
             return super.isEnabled() && TokenCollapsibleSection.this.isEnabled();
         }
 
+        /** The closed chevron, which turns a quarter as the section opens; the tree's open one is the same turned. */
         private Icon chevron() {
-            return UIManager.getIcon(expanded ? "Tree.expandedIcon" : "Tree.collapsedIcon");
+            return UIManager.getIcon("Tree.collapsedIcon");
         }
 
         /** The space between the row's edge and the chevron: a list row's text inset. */
@@ -191,22 +275,32 @@ public class TokenCollapsibleSection extends JPanel {
             int width = getWidth();
             int height = getHeight();
             int arc = UIManager.getInt(TokenSections.ROW_ARC);
-            if (showsHover()) {
-                TokenLists.paintWash(g, UIManager.getColor(TokenSections.HOVER_BACKGROUND), 0, 0, width, height,
-                      new Insets(0, 0, 0, 0), arc);
-            }
+            boolean hovered = showsHover();
+            TokenLists.paintWash(g, TokenMotion.color(this, WASH,
+                        hovered ? UIManager.getColor(TokenSections.HOVER_BACKGROUND) : null, TokenMotion.hover(hovered)),
+                  0, 0, width, height, new Insets(0, 0, 0, 0), arc);
             boolean leftToRight = getComponentOrientation().isLeftToRight();
             int padding = padding();
             int x = padding;
             Icon icon = chevron();
             if (icon != null) {
                 int iconX = leftToRight ? x : width - x - icon.getIconWidth();
-                icon.paintIcon(this, g, iconX, (height - icon.getIconHeight()) / 2);
+                int iconY = (height - icon.getIconHeight()) / 2;
+                // The closed chevron turns a quarter towards the content as the section opens
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.rotate((leftToRight ? 1 : -1) * Math.PI / 2 * reveal(), iconX + icon.getIconWidth() / 2.0,
+                          iconY + icon.getIconHeight() / 2.0);
+                    icon.paintIcon(this, g2, iconX, iconY);
+                } finally {
+                    g2.dispose();
+                }
                 x += icon.getIconWidth() + TokenSections.titleGap();
             }
             int textX = leftToRight ? x : padding;
-            TokenSections.paintHeader(g, this, title, getFont(), TokenSections.titleColor(this, showsHover()), textX,
-                  0, width - x - padding, height);
+            Color titleColor = TokenMotion.color(this, TITLE, TokenSections.titleColor(this, hovered),
+                  TokenMotion.hover(hovered));
+            TokenSections.paintHeader(g, this, title, getFont(), titleColor, textX, 0, width - x - padding, height);
             if (isEnabled() && FocusVisibility.shows(this)) {
                 paintFocus(g, width, height, arc);
             }

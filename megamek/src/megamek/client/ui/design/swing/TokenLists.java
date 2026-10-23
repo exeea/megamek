@@ -83,11 +83,6 @@ public final class TokenLists {
         return UIScale.scale(Math.max(0, UIManager.getInt(ROW_HEIGHT)));
     }
 
-    /** The surface wash under the pointer, inset and rounded like the selection. */
-    static void paintHover(Graphics g, int x, int y, int width, int height, Insets insets, int arc) {
-        paintWash(g, UIManager.getColor(HOVER_BACKGROUND), x, y, width, height, insets, arc);
-    }
-
     /** A row-shaped fill in {@code color}, inset and rounded like the selection; nothing when the color is null. */
     static void paintWash(Graphics g, Color color, int x, int y, int width, int height, Insets insets, int arc) {
         if (color == null) {

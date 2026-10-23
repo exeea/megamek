@@ -60,6 +60,7 @@ public final class DesignTokens {
     private final Map<String, Float> size;
     private final Map<String, Float> opacity;
     private final Map<String, Float> motion;
+    private final float[] easing;
     private final List<ContrastCheck> contrastChecks;
     private final List<DistinctCheck> distinctChecks;
 
@@ -94,6 +95,13 @@ public final class DesignTokens {
         size = numbers(root.path("size"));
         opacity = numbers(root.path("opacity"));
         motion = numbers(root.path("motion"));
+        JsonNode curve = root.path("motion").path("easing");
+        easing = new float[] { 0, 0, 1, 1 };
+        if (curve.isArray() && curve.size() == 4) {
+            for (int i = 0; i < 4; i++) {
+                easing[i] = (float) curve.get(i).asDouble();
+            }
+        }
 
         List<ContrastCheck> contrast = new ArrayList<>();
         for (JsonNode node : root.path("checks").path("contrast")) {
@@ -213,6 +221,20 @@ public final class DesignTokens {
     /** Durations in milliseconds. */
     public Map<String, Float> motion() {
         return motion;
+    }
+
+    /** The easing curve's control points x1, y1, x2, y2, as in CSS cubic-bezier(). */
+    public float[] easing() {
+        return easing.clone();
+    }
+
+    /** A duration in milliseconds, such as {@code fast}. */
+    public int duration(String name) {
+        Float value = motion.get(name);
+        if (value == null) {
+            throw new IllegalArgumentException("Unknown motion " + name);
+        }
+        return Math.round(value);
     }
 
     public List<ContrastCheck> contrastChecks() {

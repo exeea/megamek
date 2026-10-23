@@ -160,6 +160,10 @@ public final class TokenLafDefaults {
             put(prefix + "toolbar.selectedForeground", color("selected.primary"));
         }
         // Edges are shared by plain and toggle buttons; a selected toggle keeps a violet edge in every state
+        values.put("ButtonUI", TokenButtonUI.class.getName());
+        values.put("ToggleButtonUI", TokenButtonUI.Toggle.class.getName());
+        values.put("Button.border", TokenButtonUI.Border.class.getName());
+        values.put("ToggleButton.border", TokenButtonUI.Border.class.getName());
         put("Button.borderColor", color("border.control"));
         put("Button.disabledBorderColor", color("border.subtle"));
         put("Button.hoverBorderColor", color("border.strong"));

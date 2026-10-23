@@ -31,10 +31,12 @@ public class MegaMekDarkLaf extends FlatDarkLaf {
         super.initialize();
         FocusVisibility.install();
         FieldEdge.install();
+        TokenPopupFactory.install();
     }
 
     @Override
     public void uninitialize() {
+        TokenPopupFactory.uninstall();
         FieldEdge.uninstall();
         FocusVisibility.uninstall();
         super.uninitialize();

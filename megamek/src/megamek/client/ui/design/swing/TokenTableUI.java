@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.design.swing;
 
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics;
@@ -39,6 +40,7 @@ public class TokenTableUI extends FlatTableUI {
         }
     };
     private int hoverRow = -1;
+    private RowWash wash;
 
     public static ComponentUI createUI(JComponent c) {
         return new TokenTableUI();
@@ -55,6 +57,7 @@ public class TokenTableUI extends FlatTableUI {
     @Override
     protected void installListeners() {
         super.installListeners();
+        wash = new RowWash(table);
         table.addMouseListener(hoverTracker);
         table.addMouseMotionListener(hoverTracker);
     }
@@ -64,6 +67,7 @@ public class TokenTableUI extends FlatTableUI {
         table.removeMouseListener(hoverTracker);
         table.removeMouseMotionListener(hoverTracker);
         hoverRow = -1;
+        wash.clear();
         super.uninstallListeners();
     }
 
@@ -88,13 +92,15 @@ public class TokenTableUI extends FlatTableUI {
         first = first < 0 ? 0 : first;
         last = last < 0 ? table.getRowCount() - 1 : last;
         boolean marked = table.getRowSelectionAllowed() && !table.getColumnSelectionAllowed();
-        int hover = hoverRow();
+        int frozen = TokenLists.frozenHover(table);
+        Color hover = UIManager.getColor(TokenTables.HOVER_WASH);
         for (int row = first; row <= last; row++) {
             boolean selected = table.isRowSelected(row);
-            if (row == hover && !selected) {
+            Color color = selected ? null : wash.color(row, frozen, hover);
+            if (color != null) {
                 Rectangle bounds = rowBounds(row);
-                TokenLists.paintWash(g, UIManager.getColor(TokenTables.HOVER_WASH), bounds.x, bounds.y, bounds.width,
-                      bounds.height, selectionInsets, selectionArc);
+                TokenLists.paintWash(g, color, bounds.x, bounds.y, bounds.width, bounds.height, selectionInsets,
+                      selectionArc);
             }
             if (selected && marked) {
                 Rectangle bounds = rowBounds(row);
@@ -108,11 +114,6 @@ public class TokenTableUI extends FlatTableUI {
         return table.getCellRect(row, 0, true).union(table.getCellRect(row, table.getColumnCount() - 1, true));
     }
 
-    private int hoverRow() {
-        int frozen = TokenLists.frozenHover(table);
-        return frozen >= 0 ? frozen : hoverRow;
-    }
-
     private int rowAt(Point point) {
         return table.columnAtPoint(point) < 0 ? -1 : table.rowAtPoint(point);
     }
@@ -121,6 +122,7 @@ public class TokenTableUI extends FlatTableUI {
         if (row == hoverRow) {
             return;
         }
+        wash.moveTo(row);
         repaintRow(hoverRow);
         hoverRow = row;
         repaintRow(hoverRow);

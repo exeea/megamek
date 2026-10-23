@@ -24,13 +24,20 @@ import com.formdev.flatlaf.util.UIScale;
 /**
  * Sliders of the MegaMek look and feels (docs/design-system/tokens.md, Sliders): an accent fill up to a round thumb on
  * a pill track, with or without ticks and labels. The pointer anywhere over the slider gives the thumb its hover look,
- * because a click on the track moves the thumb there; keyboard focus rings the thumb a gap away, as on check boxes.
+ * because a click on the track moves the thumb there, and grows it a pixel each side; keyboard focus rings the thumb a
+ * gap away, as on check boxes.
  */
 public class TokenSliderUI extends FlatSliderUI {
     /** Client property freezing a slider in {@link #HOVER} or {@link #PRESSED}, for the design gallery. */
     static final String FROZEN_STATE = "MegaMek.slider.frozenState";
     static final String HOVER = "hover";
     static final String PRESSED = "pressed";
+
+    /** How much wider the thumb grows under the pointer, before scaling: a pixel on each side. */
+    private static final float GROWTH = 2;
+    private static final String FACE = "slider.face";
+    private static final String EDGE = "slider.edge";
+    private static final String GROW = "slider.grow";
 
     private Color hoverThumbBorderColor;
     private Color disabledTickColor;
@@ -130,23 +137,32 @@ public class TokenSliderUI extends FlatSliderUI {
               : pressed ? pressedThumbColor : hover ? hoverThumbColor : thumbColor;
         Color edge = !enabled ? disabledThumbBorderColor
               : (pressed || hover) && hoverThumbBorderColor != null ? hoverThumbBorderColor : thumbBorderColor;
+        // Press is instant; hover eases in fast and lingers out, and the thumb grows a little into its focus room
+        int duration = pressed ? 0 : TokenMotion.hover(hover);
+        Color easedFace = TokenMotion.color(slider, FACE, face, duration);
+        Color easedEdge = edge == null ? null : TokenMotion.color(slider, EDGE, edge, duration);
+        float grow = TokenMotion.value(slider, GROW, hover || pressed, duration);
         boolean focused = FlatUIUtils.isPermanentFocusOwner(slider);
         // At fractional scales the disc is painted at 1x, as FlatLaf does, so its right and bottom edges aren't clipped
         Graphics2D copy = (Graphics2D) g.create();
         try {
             HiDPIUtils.paintAtScale1x(copy, thumbRect.x, thumbRect.y, thumbRect.width, thumbRect.height,
-                  (g2, x, y, width, height, scale) -> paintDisc(g2, x, y, width, height, scale, face, edge, focused));
+                  (g2, x, y, width, height, scale) -> paintDisc(g2, x, y, width, height, scale, easedFace, easedEdge,
+                        focused, grow));
         } finally {
             copy.dispose();
         }
     }
 
-    /** The thumb centred in its rectangle, the focus room around it holding the ring when focused. */
+    /**
+     * The thumb centred in its rectangle, the focus room around it holding the ring when focused. {@code grow}, 0 to 1,
+     * widens the disc by up to {@link #GROWTH} into that room.
+     */
     private void paintDisc(Graphics2D g, int x, int y, int width, int height, double scale, Color face, Color edge,
-          boolean focused) {
+          boolean focused, float grow) {
         float room = (float) (UIScale.scale((float) focusWidth) * scale);
         float outer = Math.min(width, height);
-        float diameter = outer - 2 * room;
+        float diameter = outer - 2 * room + (float) (UIScale.scale(GROWTH) * scale) * grow;
         float centerX = x + width / 2f;
         float centerY = y + height / 2f;
         if (focused) {

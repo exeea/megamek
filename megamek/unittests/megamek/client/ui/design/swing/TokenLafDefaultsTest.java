@@ -139,6 +139,8 @@ class TokenLafDefaultsTest {
     @Test
     void inputsMatchButtonHeightsAndShowHoverAndReadOnlyEdges() throws Exception {
         String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        // The edges ease between states; with reduce motion each one shows at once
+        TokenMotion.setReduced(true);
         try {
             for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
                 UIManager.setLookAndFeel(lookAndFeel);
@@ -176,6 +178,7 @@ class TokenLafDefaultsTest {
                 assertEquals(spinner, FieldEdge.edgeOf(editor));
             }
         } finally {
+            TokenMotion.setReduced(false);
             if (previous != null) {
                 UIManager.setLookAndFeel(previous);
             }
@@ -726,6 +729,9 @@ class TokenLafDefaultsTest {
         assertTrue(defaults.getIcon("CheckBox.icon") instanceof TokenCheckBoxIcon, "CheckBox.icon");
         assertTrue(defaults.getIcon("RadioButton.icon") instanceof TokenRadioButtonIcon, "RadioButton.icon");
         assertEquals(TokenTabbedPaneUI.class.getName(), defaults.getString("TabbedPaneUI"));
+        // Buttons ease between their states
+        assertEquals(TokenButtonUI.class.getName(), defaults.getString("ButtonUI"));
+        assertEquals(TokenButtonUI.Toggle.class.getName(), defaults.getString("ToggleButtonUI"));
         // Inputs: control.sm height by default, a strong edge on hover, no fill and a subtle edge when read-only
         assertEquals(Math.round(tokens.size().get("control.sm")), defaults.getInt(FieldEdge.HEIGHT));
         assertColor(defaults, FieldEdge.HOVER_COLOR, "border.strong", mode);

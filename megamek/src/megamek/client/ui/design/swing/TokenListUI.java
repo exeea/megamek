@@ -42,6 +42,7 @@ public class TokenListUI extends FlatListUI {
         }
     };
     private int hoverRow = -1;
+    private RowWash wash;
     private Insets defaultMargins;
     private Insets tokenMargins;
 
@@ -59,6 +60,7 @@ public class TokenListUI extends FlatListUI {
     @Override
     protected void installListeners() {
         super.installListeners();
+        wash = new RowWash(list);
         list.addMouseListener(hoverTracker);
         list.addMouseMotionListener(hoverTracker);
     }
@@ -68,6 +70,7 @@ public class TokenListUI extends FlatListUI {
         list.removeMouseListener(hoverTracker);
         list.removeMouseMotionListener(hoverTracker);
         hoverRow = -1;
+        wash.clear();
         super.uninstallListeners();
     }
 
@@ -104,9 +107,10 @@ public class TokenListUI extends FlatListUI {
           ListModel dataModel, ListSelectionModel selModel, int leadIndex) {
         boolean decorated = !isPopup() && list.isEnabled();
         boolean selected = selModel.isSelectedIndex(row);
-        if (decorated && !selected && row == hoverRow()) {
-            TokenLists.paintHover(g, rowBounds.x, rowBounds.y, rowBounds.width, rowBounds.height, selectionInsets,
-                  selectionArc);
+        if (decorated && !selected) {
+            TokenLists.paintWash(g,
+                  wash.color(row, TokenLists.frozenHover(list), UIManager.getColor(TokenLists.HOVER_BACKGROUND)),
+                  rowBounds.x, rowBounds.y, rowBounds.width, rowBounds.height, selectionInsets, selectionArc);
         }
         super.paintCell(g, row, rowBounds, cellRenderer, dataModel, selModel, leadIndex);
         if (decorated && selected) {
@@ -130,11 +134,6 @@ public class TokenListUI extends FlatListUI {
         cellMargins = isPopup() ? defaultMargins : tokenMargins;
     }
 
-    private int hoverRow() {
-        int frozen = TokenLists.frozenHover(list);
-        return frozen >= 0 ? frozen : hoverRow;
-    }
-
     private int rowAt(Point point) {
         int row = list.locationToIndex(point);
         Rectangle bounds = row < 0 ? null : list.getCellBounds(row, row);
@@ -145,6 +144,7 @@ public class TokenListUI extends FlatListUI {
         if (row == hoverRow) {
             return;
         }
+        wash.moveTo(row);
         repaintRow(hoverRow);
         hoverRow = row;
         repaintRow(hoverRow);

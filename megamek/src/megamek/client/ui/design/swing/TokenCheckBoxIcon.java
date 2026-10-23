@@ -1,26 +1,102 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.design.swing;
 
+import java.awt.BasicStroke;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics2D;
 import java.awt.geom.Area;
+import java.awt.geom.Path2D;
+import java.awt.geom.Point2D;
 import java.awt.geom.RoundRectangle2D;
+import javax.swing.AbstractButton;
+import javax.swing.JComponent;
 
 import com.formdev.flatlaf.icons.FlatCheckBoxIcon;
+import com.formdev.flatlaf.ui.FlatUIUtils;
 import megamek.client.ui.design.DesignTokens;
 
 /**
  * The check box at the design-system size ({@code icon.sm}), with the design-system focus ring: a {@code focus.width}
  * ring a {@code focus.gap} away from the box, so the box keeps its checked or clear look while focused. FlatLaf's own
  * ring touches the box and merges with a checked box of the same color. {@code CheckBox.icon.focusWidth} must be the
- * ring plus the gap.
+ * ring plus the gap. The box eases between states and the mark draws itself in ({@link TokenMotion}).
  */
 public class TokenCheckBoxIcon extends FlatCheckBoxIcon {
     /** FlatCheckBoxIcon's box edge, in its own units. */
     private static final float BOX = 14;
+    static final String EDGE = "check.edge";
+    static final String FILL = "check.fill";
+    static final String MARK = "check.mark";
+    // FlatCheckBoxIcon.paintCheckmark's path
+    private static final float[] MARK_X = { 4.5f, 6.6f, 11.25f };
+    private static final float[] MARK_Y = { 7.5f, 10f, 3.5f };
+    private static final Path2D CHECKMARK = drawn(1);
 
     public TokenCheckBoxIcon() {
         setScale(size() / BOX);
+    }
+
+    @Override
+    protected Color getBorderColor(Component c, boolean selected, boolean indeterminate) {
+        return ease(c, EDGE, super.getBorderColor(c, selected, indeterminate));
+    }
+
+    @Override
+    protected Color getBackground(Component c, boolean selected, boolean indeterminate) {
+        Color base = selected ? selectedBackground : background;
+        Color target = super.getBackground(c, selected, indeterminate);
+        return ease(c, FILL, target == null || base == null ? target : FlatUIUtils.deriveColor(target, base));
+    }
+
+    @Override
+    protected void paintIcon(Component c, Graphics2D g) {
+        super.paintIcon(c, g);
+        // A cleared box fades its mark out; a checked one draws it in paintCheckmark
+        if (!isSelected(c) && !isIndeterminate(c) && c instanceof JComponent component) {
+            float mark = TokenMotion.value(component, MARK, false, TokenMotion.fast());
+            if (mark > 0) {
+                Color color = getCheckmarkColor(c, false);
+                g.setColor(TokenMotion.mix(new Color(color.getRed(), color.getGreen(), color.getBlue(), 0), color,
+                      mark));
+                g.setStroke(new BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.draw(CHECKMARK);
+            }
+        }
+    }
+
+    @Override
+    protected void paintCheckmark(Component c, Graphics2D g) {
+        float mark = c instanceof JComponent component ? TokenMotion.value(component, MARK, true, TokenMotion.fast())
+              : 1;
+        g.setStroke(new BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.draw(mark >= 1 ? CHECKMARK : drawn(mark));
+    }
+
+    /** The check mark drawn {@code part} of the way along, from its short stroke to the tip of the long one. */
+    private static Path2D drawn(float part) {
+        float first = (float) Point2D.distance(MARK_X[0], MARK_Y[0], MARK_X[1], MARK_Y[1]);
+        float second = (float) Point2D.distance(MARK_X[1], MARK_Y[1], MARK_X[2], MARK_Y[2]);
+        float length = Math.max(0.01f, part) * (first + second);
+        Path2D.Float path = new Path2D.Float();
+        path.moveTo(MARK_X[0], MARK_Y[0]);
+        if (length <= first) {
+            float t = length / first;
+            path.lineTo(MARK_X[0] + (MARK_X[1] - MARK_X[0]) * t, MARK_Y[0] + (MARK_Y[1] - MARK_Y[0]) * t);
+        } else {
+            float t = (length - first) / second;
+            path.lineTo(MARK_X[1], MARK_Y[1]);
+            path.lineTo(MARK_X[1] + (MARK_X[2] - MARK_X[1]) * t, MARK_Y[1] + (MARK_Y[2] - MARK_Y[1]) * t);
+        }
+        return path;
+    }
+
+    /** Eases a state color of the indicator ({@link TokenMotion}): a press shows at once, the rest fades. */
+    static Color ease(Component c, String key, Color target) {
+        if (!(c instanceof AbstractButton button)) {
+            return target;
+        }
+        return TokenMotion.color(button, key, target, TokenMotion.buttonState(button));
     }
 
     @Override

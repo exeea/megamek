@@ -510,6 +510,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String DEFAULT_WEAPON_SORT_ORDER = "DefaultWeaponSortOrder";
     public static final String SENSOR_PREFERENCE_ORDER = "SensorPreferenceOrder";
     public static final String UI_THEME = "UITheme";
+    public static final String REDUCE_MOTION = "ReduceMotion";
     public static final String BOARD_EDIT_LOAD_SIZE_HEIGHT = "BoardEditLoadSizeHeight";
     public static final String BOARD_EDIT_LOAD_SIZE_WIDTH = "BoardEditLoadSizeWidth";
     public static final String BOARD_EDIT_RANDOM_DIALOG_START = "BoardEditRandomDialogStart";
@@ -1081,6 +1082,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(AUTO_CENTER, true);
         store.setDefault(AUTO_SELECT_NEXT, true);
         store.setDefault(UI_THEME, "com.formdev.flatlaf.FlatDarculaLaf");
+        store.setDefault(REDUCE_MOTION, false);
 
         store.setDefault(RAT_TECH_LEVEL, 0);
         store.setDefault(RAT_BV_MIN, "5800");
@@ -2111,6 +2113,11 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public String getUITheme() {
         return store.getString(UI_THEME);
+    }
+
+    /** Whether the interface skips its transitions (hover fades, popup fades, smooth scrolling). */
+    public boolean getReduceMotion() {
+        return store.getBoolean(REDUCE_MOTION);
     }
 
     public WeaponSortOrder getDefaultWeaponSortOrder() {
@@ -3178,6 +3185,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setUITheme(String s) {
         store.setValue(UI_THEME, s);
+    }
+
+    public void setReduceMotion(boolean reduce) {
+        store.setValue(REDUCE_MOTION, reduce);
     }
 
     public void setSoftCenter(boolean b) {

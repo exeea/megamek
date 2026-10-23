@@ -146,6 +146,38 @@ variable font. Both platforms therefore draw the same outlines from one source.
 Regular frames use corner ticks. The framed button (ticks that grow into a full frame on hover) is a special
 variant for emphasis moments, not the default button.
 
+## Motion
+
+A game UI moves: controls ease between their states instead of switching, so the interface responds to the pointer.
+Every transition uses the `motion` tokens and one easing curve; nothing bounces or overshoots.
+
+| What | How |
+| --- | --- |
+| Hover | Comes in `fast` (120) and lingers on the way out, `medium` (200), so a sweep across controls leaves a short trail |
+| Press | Shows at once; the release fades back over `medium` |
+| Buttons, inputs, selects, tabs, segmented controls | Face, text and edge colors ease between states |
+| Check box, radio button, switch | Box fill and edge ease `fast`; the check draws along its stroke, the radio dot grows from the center, the switch thumb slides |
+| Special button | The corner ticks grow along the edges into the full frame, `slow` (320) in and `medium` out |
+| Popups, menus, tooltips | Fade in `fast`; they close at once |
+| Collapsible sections | The chevron turns a quarter and the content slides open or closed over `medium` |
+| List, tree and table rows | The hover wash fades in and out per row |
+| Scrollbars | The rail eases in and the thumb brightens with hover |
+| Sliders | The thumb's colors ease and it grows a pixel each side under the pointer |
+| Appearing | Nothing animates when it first shows; only changes move |
+
+- **Reduce motion** turns every transition into an instant change, including FlatLaf's own animations and smooth
+  scrolling. It is a MegaMek client setting (Client Settings, next to the theme), off by default.
+- **Popups only fade where they have their own window**, which is every popup on Windows 11 and any popup that
+  reaches past its window elsewhere. One that fits inside its window appears at once.
+
+**Swing.** [`TokenMotion`](../../megamek/src/megamek/client/ui/design/swing/TokenMotion.java) is the one animator:
+a control asks for the value it would paint for its current state and gets the value on its way there, and one shared
+timer repaints moving controls until they arrive. Custom controls use the same calls, `TokenMotion.color(...)` and
+`TokenMotion.value(...)`, with `TokenMotion.hover(...)` and `TokenMotion.buttonState(...)` for the durations above.
+`TokenMotion.setReduced(...)` applies the setting.
+
+**libGDX.** Nothing new yet; hud-v3 keeps its instant states until the developers accept the system.
+
 ## Focus
 
 One focus look for every control, so keyboard users always find the same thing.
@@ -475,8 +507,8 @@ carry a shortcut and a title.
 | HTML | Keeps its own layout inside the same card |
 
 - **One line of plain text is about `control.sm` (28) tall**, the height of a compact control.
-- **Delays stay user settings**: MegaMek's tooltip delay and dismiss preferences still apply. Tooltips fade in once
-  the motion step lands; until then they appear at once.
+- **Delays stay user settings**: MegaMek's tooltip delay and dismiss preferences still apply. Tooltips fade in `fast`
+  (see [Motion](#motion)).
 
 **Swing.** The MegaMek themes draw every tooltip this way. `TokenTooltips.withKey(component, text, key)` adds a
 shortcut chip; `TokenTooltips.card(component, title, detail, key)` makes an info card. Both set the plain tooltip text
@@ -499,8 +531,7 @@ scrolls instead of drawing a stripe beside it.
 
 - **The thumb stays visible on every surface**: `border.control` keeps at least 3:1 against the base, panel, input and
   popover surfaces in both modes.
-- **Wheel and keys** are Swing's. Smooth scrolling stays on; it follows the reduce-motion setting once the motion step
-  lands.
+- **Wheel and keys** are Swing's. Smooth scrolling is on unless reduce motion is set (see [Motion](#motion)).
 
 **Swing.** The MegaMek themes draw every `JScrollBar` and `JScrollPane` this way through
 [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java) and
@@ -651,6 +682,7 @@ without changes.
 | [`Vision`](../../megamek/src/megamek/client/ui/design/Vision.java) | Typical vision and the three simulated deficiencies |
 | [`TokenChecks`](../../megamek/src/megamek/client/ui/design/TokenChecks.java) | Runs the JSON `checks` |
 | [`SwingUiLibrary`](../../megamek/src/megamek/client/ui/design/swing/SwingUiLibrary.java) | The Swing gallery |
+| [`TokenMotion`](../../megamek/src/megamek/client/ui/design/swing/TokenMotion.java), [`TokenButtonUI`](../../megamek/src/megamek/client/ui/design/swing/TokenButtonUI.java), [`TokenPopupFactory`](../../megamek/src/megamek/client/ui/design/swing/TokenPopupFactory.java), [`RowWash`](../../megamek/src/megamek/client/ui/design/swing/RowWash.java) | Swing motion: the animator, eased buttons, popup fade-in and row hover |
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
@@ -677,6 +709,6 @@ without changes.
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections and split
-panes are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
-Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
-only once the developers accept the system.
+panes are Swing-only for now, and so is motion. The Swing themes are selectable but not the default, and no view uses
+the new controls yet. Next come dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves only once
+the developers accept the system.

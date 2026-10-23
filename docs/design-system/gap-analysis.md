@@ -148,8 +148,8 @@ should propose a step scale (for example 2/4/6/8/12/16/24) and map existing valu
   springs, ~150 ms settle).
 - Immersive dialogs have text reveal and distortion effects (bespoke; stay custom).
 - Interstellar map animates at 16 ms steps; zoom settles after 180 ms.
-- FlatLaf has no state transitions, so instant state changes are the natural shared rule. Motion tokens only need
-  durations for the few things that animate.
+- FlatLaf has no state transitions of its own, so the Swing themes add them: one shared animator eases every control
+  between states on the `motion` tokens, with a reduce-motion setting; see [tokens.md](tokens.md#motion).
 
 ### Scaling
 
@@ -284,8 +284,7 @@ work for Swing, and item 11 is under investigation.
   [tokens.md](tokens.md#swing-themes). Making them the default and hiding the stock themes behind a classic option
   comes after the controls are settled.
 - ~~Button spec~~: Primary, Secondary, Quiet, Danger, Toggle, Icon and Special in regular and compact sizes, with
-  every state including focus, in Swing and libGDX; see [tokens.md](tokens.md#buttons). The Special reveal animation
-  comes with the motion work.
+  every state including focus, in Swing and libGDX; see [tokens.md](tokens.md#buttons).
 - ~~Focus~~: one keyboard-only ring inside the edge for every Swing control, and on libGDX buttons; see
   [tokens.md](tokens.md#focus).
 - ~~Inputs~~: text, password, search, number and text area at button heights, with hover, focus, status, read-only
@@ -315,9 +314,9 @@ work for Swing, and item 11 is under investigation.
   panels, collapsible sections and separators share one upper-case header with a line) and split panes (a subtle line
   that turns accent under the pointer), in Swing; see [tokens.md](tokens.md#progress-bars),
   [Sections](tokens.md#sections) and [Split panes](tokens.md#split-panes). No view uses a toolbar, so there is none.
-- Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
-  every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the
-  Swing controls still switch states instantly, which reads as a desktop app rather than a game.
+- ~~Motion~~: hover that comes in fast and lingers out, instant presses with fading releases, drawn checks, sliding
+  switches, the Special button's closing ticks, fading popups and tooltips, opening sections and per-row hover washes,
+  from one shared animator with a reduce-motion client setting, in Swing; see [tokens.md](tokens.md#motion).
 - Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
   Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
   can migrate to one shape.

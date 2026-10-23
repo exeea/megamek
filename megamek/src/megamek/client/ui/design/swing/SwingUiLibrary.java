@@ -297,6 +297,7 @@ public final class SwingUiLibrary extends JFrame {
         for (Map.Entry<String, Float> entry : tokens.motion().entrySet()) {
             page.add(text(entry.getKey() + "  " + trim(entry.getValue()) + " ms", "body", "text.secondary"));
         }
+        page.add(paragraph(Messages.getString("UiLibrary.shape.motionRules"), "small", "text.muted"));
         return page;
     }
 
@@ -306,6 +307,13 @@ public final class SwingUiLibrary extends JFrame {
         JPanel page = column(color("surface.base"));
         page.add(paragraph(Messages.getString("UiLibrary.controls.intro",
               mode == Mode.DARK ? MegaMekDarkLaf.NAME : MegaMekLightLaf.NAME), "small", "text.muted"));
+        JPanel motion = row(color("surface.base"));
+        TokenChoices.Switch reduce = TokenChoices.toggleSwitch(Messages.getString("UiLibrary.controls.reduceMotion"),
+              TokenMotion.isReduced());
+        reduce.addItemListener(event -> TokenMotion.setReduced(reduce.isSelected()));
+        motion.add(reduce);
+        motion.add(text(Messages.getString("UiLibrary.controls.reduceMotionNote"), "small", "text.muted"));
+        page.add(motion);
 
         page.add(heading(Messages.getString("UiLibrary.controls.buttons")));
         page.add(paragraph(Messages.getString("UiLibrary.buttons.note"), "small", "text.muted"));
