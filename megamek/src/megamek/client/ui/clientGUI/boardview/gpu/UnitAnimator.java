@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -15,9 +14,7 @@ import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
-import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.ProneCause;
 
@@ -44,7 +41,7 @@ final class UnitAnimator {
     private UnitGroundContact groundContact;
     private final BoardSurface.Cache surfaces;
     private final Supplier<BoardScene> scene;
-    private final Function<Coords, List<Polygon>> occupied;
+    private final HexCrowds crowds;
     private boolean dying;
     private boolean initialized;
     private ProneCause posture = ProneCause.NONE;
@@ -55,17 +52,16 @@ final class UnitAnimator {
 
     UnitAnimator(BoardSurface.Cache surfaces) { this(surfaces, () -> null); }
 
-    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene) { this(surfaces, scene, coords -> List.of()); }
+    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene) { this(surfaces, scene, new HexCrowds()); }
 
     /**
-     * @param scene    the board the unit stands on, so that a formation stays clear of the steps around its hex
-     * @param occupied the ground, in world units, of the units other than troops standing in a hex, which troops there
-     *                 step around
+     * @param scene  the board the unit stands on, so that a formation stays clear of the steps around its hex
+     * @param crowds the view's packing of the troops in hexes they share with other units
      */
-    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene, Function<Coords, List<Polygon>> occupied) {
+    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene, HexCrowds crowds) {
         this.surfaces = surfaces;
         this.scene = scene;
-        this.occupied = occupied;
+        this.crowds = crowds;
     }
 
     private record Joint(Node node, Vector3 translation, Quaternion rotation, Vector3 scale) {
@@ -181,29 +177,17 @@ final class UnitAnimator {
         return null;
     }
 
-    /**
-     * Fit to the completed terrain rim, including corners displaced by rivers and constructed shores, and to this
-     * formation's sector of a hex it shares with other troops.
-     */
+    /** Fit to the completed terrain rim, including corners displaced by rivers and constructed shores. */
     private float[] stepRoom(BoardScene.Unit unit) {
         BoardScene board = scene.get();
         BoardScene.Tile tile = board == null || formation.isEmpty() ? null : board.tile(unit.location().coords());
         if (tile == null) { return InfantryFootprint.NO_STEPS; }
         var relief = surfaces.get(board, tile).relief;
-        // Troop formations sharing the hex, friend or foe, each keep to their own sector of it.
-        var troops = board.units().stream().filter(other -> standsWith(other, unit)).map(BoardScene.Unit::id).sorted().toList();
-        float[] room = InfantryFootprint.sector(troops.indexOf(unit.id()), troops.size());
+        float[] room = new float[6];
         for (int edge = 0; edge < room.length; edge++) {
-            room[edge] = Math.max(room[edge], relief.topInset(edge));
+            room[edge] = relief.topInset(edge);
         }
         return room;
-    }
-
-    /** Whether {@code other} is a troop formation on the ground of the unit's hex, the unit itself included. */
-    private static boolean standsWith(BoardScene.Unit other, BoardScene.Unit unit) {
-        return troops(other) && !other.sensorContact() && !other.airborne() && other.attachment() == null
-              && other.location().coords().equals(unit.location().coords())
-              && other.location().elevation() == unit.location().elevation();
     }
 
     /** Conventional infantry or battle armor: drawn as a formation of figures, with or without transports. */
@@ -266,7 +250,7 @@ final class UnitAnimator {
         airborne = approach(airborne, motion.airborne(unit) ? 1 : 0, seconds, snap);
         bodies.forEach(Body::reset);
         mounts.forEach(Joint::reset);
-        formation.apply(model, unit, motion, stepRoom(unit), occupied.apply(unit.location().coords()), seconds, snap);
+        formation.apply(model, unit, motion, stepRoom(unit), crowds, seconds, snap);
         for (Body body : bodies) {
             boolean mek = body.rig.mek() && unit.model().state().structure().anatomy() != null;
             var bodyMotion = motion.member(unit.id(), body.rig.container());

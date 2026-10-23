@@ -158,6 +158,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, UnitAnimator> animators = new HashMap<>();
     /** The ground of the units other than troops, as last drawn, by the hexes they occupy; troops step around it. */
     private final Map<Coords, List<Polygon>> occupiedGround = new HashMap<>();
+    private final HexCrowds crowds = new HexCrowds();
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
@@ -1603,10 +1604,11 @@ class GpuBattleView extends ApplicationAdapter {
             var ground = new Polygon(java.util.Arrays.copyOf(hull.items, hull.size - 2));
             unit.footprint().forEach(coords -> occupiedGround.computeIfAbsent(coords, ignored -> new ArrayList<>()).add(ground));
         }
+        crowds.pack(occupiedGround);
     }
 
     private UnitAnimator newAnimator() {
-        return new UnitAnimator(groundSurfaces, () -> scene, coords -> occupiedGround.getOrDefault(coords, List.of()));
+        return new UnitAnimator(groundSurfaces, () -> scene, crowds);
     }
 
     /** Frame an action before its clock advances, including when one large frame reaches several queued actions. */
