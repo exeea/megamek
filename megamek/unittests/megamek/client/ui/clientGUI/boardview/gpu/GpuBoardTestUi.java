@@ -104,7 +104,7 @@ final class GpuBoardTestUi {
     }
 
     /**
-     * The window's stage: the HUD's, or while the window loads its loading screen's, which follows the Alt+Enter key
+     * The window's stage: the HUD's, or while the window loads its loading screen's, which follows the fullscreen key
      * ({@code GpuBattleView.FullscreenKey}) among the input processors.
      */
     static Stage stage() {
