@@ -100,7 +100,7 @@ class GpuBoardLabelsSmokeTest {
             contacts = new GpuContactsPanel(hud.kit, source, state, mock(GpuContextMenu.class),
                   id -> state.inspected = id);
             plates = new GpuNameplates(hud.kit, source, state);
-            labels = new GpuBoardLabels(hud.kit, source, state, camera, contacts);
+            labels = new GpuBoardLabels(hud.kit, source, state, camera, contacts, plates);
             root = (Table) labels.actor();
             panel = (Table) contacts.actor();
             for (Actor layer : List.of(labels.fx(), plates.actor(), root)) {
@@ -152,13 +152,14 @@ class GpuBoardLabelsSmokeTest {
             return root.findActor("pin-flat-" + number);
         }
 
-        /** The shown TN badges' texts by the unit under each, found by its head. */
+        /** The shown TN badges' texts by the unit under each, found 4 units over its nameplate. */
         Map<Integer, List<String>> badges(GpuHud.HudView view) {
             Map<Integer, List<String>> badges = new HashMap<>();
             for (Actor actor : all(root, "tn-badge")) {
                 Rectangle bounds = GpuHudTestStage.bounds(actor);
                 view.unitHeads().forEach((id, head) -> {
-                    if (Math.abs(bounds.x + bounds.width / 2 - head.x) <= 1 && Math.abs(bounds.y - 4 - head.y) <= 1) {
+                    if (Math.abs(bounds.x + bounds.width / 2 - head.x) <= 1
+                          && Math.abs(bounds.y - 4 - plates.top(id, head.y)) <= 1) {
                         badges.put(id, texts(actor));
                     }
                 });

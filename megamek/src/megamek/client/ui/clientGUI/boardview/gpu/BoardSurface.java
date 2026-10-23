@@ -2328,10 +2328,12 @@ final class BoardSurface {
         for (int d = 0; d < 6; d++) {
             var next = scene.neighbor(tile, d);
             // Only arms along an edge that ends at one of this hex's corners can reach past it into this hex. Otherwise
-            // any carriageway beside this hex counts, and a roadless apron where a step between them reaches into it.
+            // any carriageway beside this hex counts, and a roadless apron where a step between them reaches into it, or
+            // where this hex's road runs on into it: this hex's ground can reach under the apron's lane at their edge.
             if (next == null) { continue; }
             int arms = corners ? 1 << (d + 2) % 6 | 1 << (d + 4) % 6 : 63;
-            if ((next.wayExits() & arms) == 0 && (corners || next.elevation() == tile.elevation())) { continue; }
+            if ((next.wayExits() & arms) == 0 && (corners
+                  || next.elevation() == tile.elevation() && !BoardRoadGrade.apron(tile, next, d))) { continue; }
             var grade = BoardRoadGrade.of(scene, next, eased);
             if (grade != null) { grades.add(grade); }
         }
@@ -2776,6 +2778,9 @@ final class BoardSurface {
             if (mouth(edge) && neighbor != null && neighbor.elevation() == tile.elevation()) {
                 continue; // Beds of one level share their mouth's profile and their banks' top: nothing stands between.
             }
+            // Water at this dry hex's level owns the bank between them: its sculpted shore rises to this hex's top.
+            if (!columns && neighbor != null && neighbor.liquid().present() && !tile.liquid().present()
+                  && neighbor.elevation() == tile.elevation() && relief.sculpted()) { continue; }
             BoardSurface adjacent = neighbor == null ? null : neighbors.get(neighbor.coords());
             if (neighbor != null && (adjacent == null || columns && !adjacent.columns)) {
                 adjacent = columns ? columns(scene, neighbor, lod) : new BoardSurface(scene, neighbor, false, lod);

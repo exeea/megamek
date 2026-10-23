@@ -42,7 +42,7 @@ final class BoardRail {
     private static final float SLEEPER_HALF = 3.8f * RailRoute.CONVENTIONAL_SCALE,
           SLEEPER_HALF_LENGTH = .4f * RailRoute.CONVENTIONAL_SCALE, SLEEPER_TOP = .9f * RailRoute.CONVENTIONAL_SCALE,
           SLEEPER_PITCH = 3 * RailRoute.CONVENTIONAL_SCALE;
-    private static final float GAUGE_HALF = 2.1f * RailRoute.CONVENTIONAL_SCALE,
+    static final float GAUGE_HALF = 2.1f * RailRoute.CONVENTIONAL_SCALE,
           RAIL_HALF = .25f * RailRoute.CONVENTIONAL_SCALE, RAIL_HEIGHT = RailRoute.RAIL_TOP - SLEEPER_TOP;
     /** The top of a rail set into a road, above the road. */
     static final float STREET_TOP = .15f * RailRoute.CONVENTIONAL_SCALE;

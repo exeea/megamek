@@ -71,9 +71,10 @@ final class BoardRoadBank {
     /**
      * A poured or wet hex within reach, whose ground keeps its shape: its centre, the room its steps keep past its edges,
      * whether it is poured, and by corner, as HexTile's outline runs, the edges it meets natural ground at its own level
-     * by, without a step, and those it casts a step down to natural ground from.
+     * by, without a step, and those it casts a step down to natural ground from; for a roadless apron a road ramps into,
+     * its top (NaN otherwise).
      */
-    private record Kept(float x, float y, float room, boolean poured, int level, int down) { }
+    private record Kept(float x, float y, float room, boolean poured, int level, int down, float apron) { }
 
     /** The poured and wet hexes within reach. */
     private final List<Kept> kept = new ArrayList<>();
@@ -94,9 +95,11 @@ final class BoardRoadBank {
                 // natural ground beside it; a wet hex's shore eases as that ground does.
                 float cx = BoardGeometry.centerX(other.coords()), cy = BoardGeometry.centerY(other.coords());
                 if (other.liquid().present()) {
-                    kept.add(new Kept(cx, cy, 0, false, 0, 0));
+                    kept.add(new Kept(cx, cy, 0, false, 0, 0, Float.NaN));
                 } else if (other.surface() == BoardScene.Surface.CONCRETE) {
-                    kept.add(new Kept(cx, cy, BoardRelief.stepRoom(), true, edges(scene, other, 0), edges(scene, other, -1)));
+                    float apron = grade != null && !BoardRoad.carriageway(other) ? other.elevation() * level : Float.NaN;
+                    kept.add(new Kept(cx, cy, BoardRelief.stepRoom(), true, edges(scene, other, 0), edges(scene, other, -1),
+                          apron));
                 }
             }
         }
@@ -171,12 +174,10 @@ final class BoardRoadBank {
         boolean[] inside = new boolean[grades.size()];
         boolean reserved = false;
         for (int i = 0; i < inside.length; i++) { reserved |= inside[i] = grades.get(i).contains(x, y); }
-        float cutWeight = weight(x, y, true), fillWeight = weight(x, y, false);
-        if (cutWeight == 0 && fillWeight == 0) { return z; }
         int count = banks.size();
         float[] beds = new float[count], limits = new float[count], distances = new float[count], nearby = new float[2 * count];
         // Reserved ground follows only the roads reserving it: a bank beside another road never lifts it over this one.
-        float nearest = Float.POSITIVE_INFINITY;
+        float nearest = Float.POSITIVE_INFINITY, lowest = Float.POSITIVE_INFINITY;
         for (int i = 0; i < count; i++) {
             Bank bank = banks.get(i);
             limits[i] = Float.NaN;
@@ -191,7 +192,10 @@ final class BoardRoadBank {
             nearby[2 * i] = q[0];
             nearby[2 * i + 1] = q[1];
             nearest = Math.min(nearest, d);
+            lowest = Math.min(lowest, beds[i]);
         }
+        float cutWeight = weight(x, y, lowest), fillWeight = weight(x, y, Float.NaN);
+        if (cutWeight == 0 && fillWeight == 0) { return z; }
         float cut = z;
         for (int i = 0; i < count; i++) {
             if (Float.isNaN(limits[i])) { continue; }
@@ -233,13 +237,17 @@ final class BoardRoadBank {
      * on reserved ground too, whose top gives way to the road anyway (BoardRoadCut#clip), so a step down to the water
      * under a bridge's landing keeps its face. A {@code cut} keeps only the paving's cast steps' room in front of them, and
      * beside its edges at its own level eases into a road nearer than a full fade by the road's verge: ground over the
-     * road slopes from the paving's edge down to it instead of standing cut beside it. A fill keeps the room all round,
-     * as cast steps wrap round their corners into the natural slopes beside them.
+     * road slopes from the paving's edge down to it instead of standing cut beside it; ground over an apron below the
+     * road ramping into it, {@code bed} the lowest road around (NaN for a fill), gives way whatever the apron, which a cut
+     * never reaches. A fill keeps the room all round, as cast steps wrap round their corners into the natural slopes
+     * beside them.
      */
-    private float weight(float x, float y, boolean cut) {
+    private float weight(float x, float y, float bed) {
+        boolean cut = !Float.isNaN(bed);
         float result = 1, fade = FADE * scale, road = Float.NaN;
         for (Kept hex : kept) {
-            if (Math.hypot(x - hex.x(), y - hex.y()) >= BoardGeometry.width() / 2 + hex.room() + fade) { continue; }
+            if (Math.hypot(x - hex.x(), y - hex.y()) >= BoardGeometry.width() / 2 + hex.room() + fade
+                  || cut && hex.apron() <= bed) { continue; }
             boolean inside = true;
             for (int k = 0; k < 6; k++) {
                 float ax = hex.x() + HexTile.cornerOffsetX(k, HexTile.WIDTH) * scale;

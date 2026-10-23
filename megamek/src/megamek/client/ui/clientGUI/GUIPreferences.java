@@ -43,6 +43,7 @@ import java.util.StringJoiner;
 import javax.swing.*;
 
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
@@ -523,6 +524,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_PLANETARY_CONDITIONS_OVERLAY = "ShowPlanetaryConditionsOverlay";
     public static final String SHOW_TRACE_OVERLAY = "ShowTraceOverlay";
     public static final String UNIT_LABEL_STYLE = "UnitLabelStyle";
+    public static final String NAMEPLATE_MODE = "NameplateMode";
     public static final String RULER_DIAGRAM_VISIBLE = "RulerDiagramVisible";
     public static final String RULER_COMPARE_VISIBLE = "RulerCompareVisible";
 
@@ -890,6 +892,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(ENTITY_OWNER_LABEL_COLOR, true);
         store.setDefault(UNIT_LABEL_BORDER, true);
         store.setDefault(UNIT_LABEL_STYLE, LabelDisplayStyle.NICKNAME_AND_ABBREVIATED.name());
+        store.setDefault(NAMEPLATE_MODE, NameplateMode.ALWAYS.name());
         store.setDefault(FIRING_SOLUTIONS, true);
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
@@ -4301,6 +4304,18 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setUnitLabelStyle(LabelDisplayStyle style) {
         store.setValue(UNIT_LABEL_STYLE, style.name());
+    }
+
+    public NameplateMode getNameplateMode() {
+        try {
+            return NameplateMode.valueOf(store.getString(NAMEPLATE_MODE));
+        } catch (Exception e) {
+            return NameplateMode.ALWAYS;
+        }
+    }
+
+    public void setNameplateMode(NameplateMode mode) {
+        store.setValue(NAMEPLATE_MODE, mode.name());
     }
 
     public Color getColor(String name) {

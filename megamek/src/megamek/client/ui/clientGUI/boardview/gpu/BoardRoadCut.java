@@ -377,10 +377,10 @@ final class BoardRoadCut {
             Vector3[] corners = { a, b, c };
             boolean top = face.finish() == BoardSurface.Finish.TOP && !shore, pouredTop = !natural && top;
             // Natural slopes are cut just under the road's surface, which covers their cut edge; at the surface itself
-            // the board's cut, which has no ground beyond it, and an upright face, which never lies along the road.
-            // Poured ground keeps a band beneath the road.
+            // the board's cut, which has no ground beyond it, and an upright face, which never lies along the road, as a
+            // cast step's face standing on the edge under a road's mouth. Poured ground keeps a band beneath the road.
             boolean boardCut = !top && face.landEdge() >= 0 && (boardEdges & 1 << face.landEdge()) != 0;
-            float band = boardCut || natural && nudge > 0 ? 0 : natural ? UNDER : ON_SURFACE;
+            float band = boardCut || nudge > 0 ? 0 : natural ? UNDER : ON_SURFACE;
             for (int i = 0; i < 3; i++) {
                 if (pouredTop) {
                     under[i] = Float.MAX_VALUE;
@@ -742,7 +742,8 @@ final class BoardRoadCut {
         // Beside a road built in concrete the cut is cast as well. Beside a bridge's ramp, which has no natural bank,
         // only the fill under the road is: a cut above it stays the bank's own, as the rest of the cut is.
         boolean cast = grade.poured() || grade.bridgeRamp();
-        if (grade.poured()) { wall = concrete; }
+        // A road built in concrete has concrete cut faces; ground cut by a roadless apron's ramp shows its own face.
+        if (grade.poured() && BoardRoad.carriageway(grade.tile())) { wall = concrete; }
         WallBuilder fillWall = grade.bridgeRamp() ? concrete : wall;
         // Natural ground beside a natural road closes up to it only from a fill's depth: further down the road passes
         // over it, as it does at a bridge's landing, and the ground keeps its shape.

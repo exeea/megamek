@@ -104,7 +104,7 @@ class GpuTargetCardsSmokeTest {
         Layer(GpuHudTestStage hud, GpuBoardSource source, BoardCamera camera) {
             menu = new GpuContextMenu(hud.kit, source, state, id -> { });
             plates = new GpuNameplates(hud.kit, source, state);
-            labels = new GpuBoardLabels(hud.kit, source, state, camera, null);
+            labels = new GpuBoardLabels(hud.kit, source, state, camera, null, plates);
             cards = new GpuTargetCards(hud.kit, source, state, menu);
             for (Actor layer : List.of(labels.fx(), plates.actor(), labels.actor(), cards.actor(), menu.actor())) {
                 hud.window.addActor(layer);

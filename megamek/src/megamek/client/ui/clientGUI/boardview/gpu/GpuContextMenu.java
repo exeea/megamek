@@ -39,7 +39,7 @@ import megamek.common.units.Entity;
 final class GpuContextMenu implements GpuHud.Component {
     /** The dock's More opens this far left of its button (app.js pop:more). */
     private static final float MORE_SHIFT = -150;
-    private static final String SEPARATOR = " \u00B7 ";
+    static final String SEPARATOR = " \u00B7 ";
 
     private final UiKit ui;
     private final GpuBoardSource source;
@@ -52,7 +52,7 @@ final class GpuContextMenu implements GpuHud.Component {
     private GpuHud.Inputs inputs;
     /**
      * The hex whose menu is open, or the hex of the unit whose menu is open; its map menu, and a hex menu's terrain
-     * line, come with later frames. Null otherwise.
+     * and structure lines, come with later frames. Null otherwise.
      */
     private Coords hex;
     /** The unit whose open menu lists MegaMek's map menu of its hex; null for a hex menu or none. */
@@ -104,6 +104,11 @@ final class GpuContextMenu implements GpuHud.Component {
                 showHex();
             }
         }
+    }
+
+    /** Whether a menu or select list is open. */
+    boolean isOpen() {
+        return popover.isVisible();
     }
 
     /** A press outside it, or another menu: closes the open menu with its submenus; true when one was open. */
@@ -268,11 +273,19 @@ final class GpuContextMenu implements GpuHud.Component {
             if (menuUnit != null) {
                 return;
             }
-            BoardScene scene = inputs.frame().scene();
-            BoardScene.Tile tile = scene == null ? null : scene.tile(hex);
-            popover.header(text("GpuBoard.hud.context.hex", hex.getBoardNum()),
-                  tile == null ? null : subtitle(tooltip, hex, tile.elevation()));
+            popover.header(text("GpuBoard.hud.context.hex", hex.getBoardNum()), hexLines(inputs.frame(), hex));
         }
+    }
+
+    /**
+     * The hex's lines in its menu's header and its hover card: the terrain line ({@link #subtitle}), then the hex
+     * tooltip's lines of the hex below its terrain (structures with their CF, minefields, works), which the same
+     * capture publishes. Null while the frame's tooltip shows another hex or no terrain line.
+     */
+    static String hexLines(BoardSource.Frame frame, Coords hex) {
+        BoardScene.Tile tile = frame.scene() == null ? null : frame.scene().tile(hex);
+        String terrain = tile == null ? null : subtitle(frame.tooltip(), hex, tile.elevation());
+        return terrain == null || frame.hexDetails().isEmpty() ? terrain : terrain + "\n" + frame.hexDetails();
     }
 
     /** MegaMek's map menu of the open hex (M10), once the source captured that hex's context. */

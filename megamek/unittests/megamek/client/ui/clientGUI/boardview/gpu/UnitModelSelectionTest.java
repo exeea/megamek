@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -14,6 +15,7 @@ import java.util.Set;
 
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.battleArmor.BattleArmor;
+import megamek.common.equipment.EquipmentType;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
@@ -24,6 +26,35 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class UnitModelSelectionTest {
+    @Test
+    void resolvedIconAndActualSurvivingFieldGunsTravelInTheImmutableSelection() throws Exception {
+        var infantry = new ConvInfantry();
+        infantry.setChassis("Arbitrary custom name");
+        infantry.initializeInternal(28, ConvInfantry.LOC_INFANTRY);
+        var tileset = mock(MekTileset.class);
+        when(tileset.modelFor(infantry, -1)).thenReturn("units/modular/infantry.json");
+        when(tileset.entryFor(infantry, -1)).thenReturn(tileset.new MekEntry("Infantry/Horse.png"));
+        var first = UnitModelSelection.capture(infantry, -1, false, tileset).state().structure();
+        assertEquals("Infantry/Horse.png", first.unitIcon());
+        assertEquals(0, first.fieldGuns());
+        var gun = infantry.addEquipment(EquipmentType.get("ISAC5"), ConvInfantry.LOC_FIELD_GUNS);
+        infantry.addEquipment(EquipmentType.get("ISAC5"), ConvInfantry.LOC_FIELD_GUNS);
+        infantry.addEquipment(EquipmentType.get("ISAC5 Ammo"), ConvInfantry.LOC_FIELD_GUNS);
+        infantry.addEquipment(EquipmentType.get("InfantryAssaultRifle"), ConvInfantry.LOC_INFANTRY);
+        var armed = UnitModelSelection.capture(infantry, -1, false, tileset).state().structure();
+        assertEquals(2, armed.fieldGuns());
+        assertNotEquals(first, armed, "Assembly cache must see changed field guns");
+        gun.setDestroyed(true);
+        var damaged = UnitModelSelection.capture(infantry, -1, false, tileset).state().structure();
+        assertEquals(1, damaged.fieldGuns());
+        assertEquals(2, armed.fieldGuns(), "A previously captured snapshot remains immutable");
+        assertNotEquals(armed, damaged);
+        when(tileset.entryFor(infantry, -1)).thenReturn(tileset.new MekEntry("Infantry/Elephant.png"));
+        var changedIcon = UnitModelSelection.capture(infantry, -1, false, tileset).state().structure();
+        assertEquals("Infantry/Elephant.png", changedIcon.unitIcon());
+        assertNotEquals(damaged, changedIcon, "Assembly cache must also see changed icon overrides");
+    }
+
     /**
      * The whole-body overlay follows the damage level that the board label's damage tile and the unit card show, not
      * the share of armor and structure lost (the user's decision of 2026-10-07).

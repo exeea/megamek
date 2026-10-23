@@ -35,6 +35,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiTheme;
@@ -89,6 +90,7 @@ class GpuNameplatesSmokeTest {
         final GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         final GpuNameplates nameplates;
         final Table root;
+        GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
 
         Plates(GpuHudTestStage hud) {
             nameplates = new GpuNameplates(hud.kit, mock(GpuBoardSource.class), state);
@@ -103,7 +105,7 @@ class GpuNameplatesSmokeTest {
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
             nameplates.update(new GpuHud.Inputs(GpuHudInputTest.frame(status, panels),
                   new GpuHud.HudView(tactical, false, Map.of(), heads, Map.of(), null, hovered, 0), null,
-                  GpuHudInputTest.preferences(), GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
+                  preferences, GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
         }
 
         Table tag(int id) {
@@ -324,7 +326,7 @@ class GpuNameplatesSmokeTest {
 
                 // The cost of one frame's update, with the pips and with every tag (the nameplate key held).
                 for (boolean all : new boolean[] { false, true }) {
-                    plates.state.altHeld = all;
+                    plates.state.allNameplates = all;
                     plates.update(hud, moving, none, heads, false, hovered);
                     long start = System.nanoTime();
                     for (int frame = 0; frame < 100; frame++) {
@@ -355,7 +357,7 @@ class GpuNameplatesSmokeTest {
             Plates plates = new Plates(hud);
 
             // The nameplate key held: every unit's tag, with its model and status words.
-            plates.state.altHeld = true;
+            plates.state.allNameplates = true;
             plates.update(hud, moving, none, heads, false, Entity.NONE);
             assertEquals(allTags(), plates.markers(roster));
             plates.assertOnHeads(heads);
@@ -364,7 +366,7 @@ class GpuNameplatesSmokeTest {
             hud.capture("nameplates-alt").dispose();
 
             // Released: the pips return, a destroyed unit's at .3.
-            plates.state.altHeld = false;
+            plates.state.allNameplates = false;
             plates.update(hud, moving, none, heads, false, Entity.NONE);
             Map<Integer, List<String>> expected = pips(roster);
             expected.put(ATLAS, List.of("Atlas", ""));
@@ -373,6 +375,13 @@ class GpuNameplatesSmokeTest {
             assertEquals(.3f, plates.pip(ENEMY_LOCUST).getColor().a, 1e-6, "A destroyed unit's pip is faint");
             assertEquals(UiTheme.CORAL.r, plates.pip(TIMBER_WOLF).getColor().r, 1e-6);
             assertEquals(UiTheme.MINT.g, plates.pip(WARHAMMER).getColor().g, 1e-6);
+
+            // The Always setting shows every tag without the key.
+            plates.preferences = GpuHudInputTest.with(GpuHudInputTest.preferences(),
+                  Map.of("nameplates", NameplateMode.ALWAYS));
+            plates.update(hud, moving, none, heads, false, Entity.NONE);
+            assertEquals(allTags(), plates.markers(roster));
+            plates.preferences = GpuHudInputTest.preferences();
 
             // Hovering an enemy in the movement phase gives its distance from the focus unit; a friend, its model.
             plates.update(hud, moving, none, heads, false, TIMBER_WOLF);
@@ -471,7 +480,7 @@ class GpuNameplatesSmokeTest {
             heads.put(TIMBER_WOLF, new Vector2(900, 500));
             heads.put(KING_CRAB, new Vector2(930, 506));
             Plates plates = new Plates(hud);
-            plates.state.altHeld = true;
+            plates.state.allNameplates = true;
             plates.update(hud, moving, none, heads, false, Entity.NONE);
             Table wolf = plates.tag(TIMBER_WOLF);
             Table crab = plates.tag(KING_CRAB);
