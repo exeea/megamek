@@ -23,27 +23,38 @@ final class InfantryVisual {
     }
 
     static List<Part> parts(UnitModelState.Structure state, JsonValue components, int count) {
+        JsonValue icons = components.get("troopersByIcon");
+        String iconTrooper = icons == null || state.iconKey() == null ? null : icons.getString(state.iconKey(), null);
         JsonValue vehicles = components.get("vehicles");
-        String vehicle = vehicles == null ? null : vehicles.getString(state.movement().name(), null);
-        String trooper = state.movement() == EntityMovementMode.INF_JUMP
+        // A mounted figure already includes its transport; e.g. a cycle must not also acquire a buggy.
+        String vehicle = vehicles == null || iconTrooper != null ? null : vehicles.getString(state.movement().name(), null);
+        String trooper = iconTrooper != null ? iconTrooper : state.movement() == EntityMovementMode.INF_JUMP
               ? components.getString("jumpTrooper", components.getString("trooper")) : components.getString("trooper");
+        String fieldGun = components.getString("fieldGun", null);
+        int guns = fieldGun == null ? 0 : Math.min(state.fieldGuns(), state.activeTroopers());
+        count = Math.max(count, guns);
         if (vehicle == null) {
             List<Part> result = new ArrayList<>();
             for (int slot = 0; slot < count; slot++) {
-                result.add(figure(slot, slot, trooper));
+                result.add(figure(slot, slot, slot < guns ? fieldGun : trooper));
             }
             return List.copyOf(result);
         }
-        int transports = count == 0 ? 0 : count <= 4 ? 1 : 2;
+        // Keep one slot per gun even in a tiny motorized detachment.
+        int transports = Math.min(count == 0 ? 0 : count <= 4 ? 1 : 2, count - guns);
         List<Part> result = new ArrayList<>();
         for (int slot = 0; slot < transports; slot++) {
             float[] place = VEHICLE_SLOTS[slot];
             result.add(new Part("vehicle-" + slot, vehicle, place[0], place[1], place[2], 2));
         }
         for (int slot = 0; slot < count - transports; slot++) {
-            float[] place = PASSENGER_SLOTS[slot];
-            result.add(new Part("trooper-" + slot, trooper,
-                  place[0], place[1], place[2], 1));
+            String asset = slot < guns ? fieldGun : trooper;
+            if (slot < PASSENGER_SLOTS.length) {
+                float[] place = PASSENGER_SLOTS[slot];
+                result.add(new Part("trooper-" + slot, asset, place[0], place[1], place[2], 1));
+            } else {
+                result.add(figure(slot, slot, asset));
+            }
         }
         return List.copyOf(result);
     }

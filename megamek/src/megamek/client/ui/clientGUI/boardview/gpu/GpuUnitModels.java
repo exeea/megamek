@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -188,7 +189,8 @@ final class GpuUnitModels implements Disposable {
         if (selection.state() != null && cached != null && cached.matches(selection, meeple)) {
             return cached.model();
         }
-        GpuUnitModel model = load(selection.asset(), selection, meeple);
+        GpuUnitModel model = meeple ? singleMeeple(selection) : null;
+        if (model == null) { model = load(selection.asset(), selection, meeple); }
         if (model == null && !java.util.Objects.equals(selection.asset(), selection.fallback())) {
             model = load(selection.fallback(), selection, meeple);
         }
@@ -200,6 +202,27 @@ final class GpuUnitModels implements Disposable {
                   selection.figures(), meeple, selection.state().structure(), model));
         }
         return model;
+    }
+
+    /** A rider and motorcycle form one vehicle, regardless of the infantry transport/compression recipe. */
+    private GpuUnitModel singleMeeple(BoardScene.UnitModel selection) {
+        var state = selection.state();
+        if (state == null || state.structure().iconKey() == null) { return null; }
+        String catalog = "units/modular/meeples/single-units.json";
+        Path path = root.resolve(catalog);
+        if (failed.contains(path) || !Files.isRegularFile(path)) { return null; }
+        try {
+            String component = descriptor(catalog).getString(state.structure().iconKey(), null);
+            if (component == null) { return null; }
+            List<InfantryVisual.Part> parts = selection.figures() == 0 ? List.of()
+                  : List.of(new InfantryVisual.Part("vehicle-0", component, 0, 0, 0, 1));
+            // The rider shares the human reference scale used by the other authored meeples.
+            return formation(parts, Map.of(), UnitFamilyScale.INFANTRY);
+        } catch (RuntimeException error) {
+            failed.add(path);
+            LOGGER.warn("Cannot load single-unit meeple {}; using its normal model: {}", catalog, error.getMessage());
+            return null;
+        }
     }
 
     private GpuUnitModel load(String asset, BoardScene.UnitModel selection, boolean meeple) {
