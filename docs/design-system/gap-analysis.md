@@ -38,6 +38,7 @@ Agreed so far:
 | MekHQ `hud` library | Folded into the new library. |
 | Launcher | Retune its colors to the tokens for now; shared controls wait for the planned monorepo. |
 | Accessibility modes | Light and dark only; no dedicated high-contrast mode. |
+| Character | A game UI, not an OS one. Where game conventions and desktop conventions differ, prefer what fits a game; desktop conventions are a fallback, not the goal. |
 | Token location | `megamek` repository, next to both theme implementations. Fonts and icons stay in `mm-data`. |
 | Ownership | Vicente owns UI decisions and presents them to the team. |
 | Review | Runnable galleries opened from MegaMek: one Swing, one libGDX. The Swing library is the complete set; libGDX is a subset that grows on demand. |
