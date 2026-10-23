@@ -261,12 +261,6 @@ public final class TokenLafDefaults {
         // Text and lists
         put("Label.disabledForeground", color("text.disabled"));
         put("Separator.foreground", color("border.subtle"));
-        put("Table.gridColor", color("border.subtle"));
-        put("TableHeader.background", raised);
-        put("TableHeader.separatorColor", color("border.subtle"));
-        put("TableHeader.bottomSeparatorColor", color("border.control"));
-        put("TableHeader.hoverBackground", over(hover, raised));
-        put("TableHeader.pressedBackground", over(pressed, raised));
         // Lists and trees (TokenListUI, TokenTreeUI): rows at least control.sm high, inset and rounded like the popup
         // list. The pointer's row gets the hover wash; a selected row keeps the violet wash, focused or not, and adds a
         // violet marker at its leading edge, so selection never relies on color alone. Text starts past the marker.
@@ -296,6 +290,40 @@ public final class TokenLafDefaults {
         values.put("Tree.border", "1," + markerSpace + ",1," + Math.round(tokens.space().get("xs")));
         values.put("Tree.paintLines", "false");
         values.put("Tree.showDefaultIcons", "false");
+
+        // Tables (TokenTableUI, TokenTableHeaderUI): the list's rows stretched across every column, with faint zebra
+        // stripes for reading along wide rows. The hover wash is translucent and goes over the cells, so it shows on
+        // stripes and on rows whose renderers paint their own background. No grid and no lead-cell rectangle; the
+        // outer columns leave room for the marker and the row shape's inset. Headers sit on the table's surface:
+        // upper-case overline labels, primary under the pointer and on the sorted column.
+        values.put("TableUI", TokenTableUI.class.getName());
+        values.put("TableHeaderUI", TokenTableHeaderUI.class.getName());
+        values.put("Table.rowHeight", number(tokens.size().get("control.sm")));
+        values.put("Table.selectionArc", rowArc);
+        values.put("Table.selectionInsets", rowInsets);
+        int cellSide = Math.round(tokens.space().get("sm"));
+        values.put("Table.cellMargins", "1," + cellSide + ",1," + cellSide);
+        values.put(TokenTables.EDGE_MARGINS, "0," + markerSpace + ",0," + textSide);
+        values.put("Table.cellNoFocusBorder", TokenTableCellBorder.Plain.class.getName());
+        values.put("Table.focusCellHighlightBorder", TokenTableCellBorder.Plain.class.getName());
+        values.put("Table.focusSelectedCellHighlightBorder", TokenTableCellBorder.Selected.class.getName());
+        put("Table.gridColor", color("border.subtle"));
+        put("Table.alternateRowColor", over(ColorMath.withAlpha(hover, ColorMath.alpha(hover) / 2), input));
+        put(TokenTables.HOVER_WASH, hover);
+        put("Table.sortIconColor", color("text.primary"));
+        put("TableHeader.background", input);
+        put("TableHeader.foreground", color("text.secondary"));
+        put("TableHeader.hoverBackground", input);
+        put("TableHeader.hoverForeground", color("text.primary"));
+        put("TableHeader.pressedBackground", over(hover, input));
+        put("TableHeader.pressedForeground", color("text.primary"));
+        put("TableHeader.separatorColor", input);
+        put("TableHeader.bottomSeparatorColor", color("border.control"));
+        values.put("TableHeader.height", number(tokens.size().get("control.sm")));
+        values.put("TableHeader.cellMargins", "0," + cellSide + ",0," + cellSide);
+        values.put("TableHeader.cellBorder", TokenTableCellBorder.Header.class.getName());
+        // Swing measures text without its tracking, so the overline labels run about 2px into this gap
+        values.put(TokenTables.SORT_ICON_GAP, number(tokens.space().get("sm")));
 
         // Containers and popups
         put("Panel.background", base);

@@ -537,6 +537,39 @@ the readout and lines it up with the track on the slider's baseline.
 
 **libGDX.** Nothing new yet; the tuning panel's slider style stays until the developers accept the system.
 
+## Tables
+
+Items with several comparable columns, such as units with their tonnage, movement and armor. A list is better when
+each item is one line of text.
+
+| Part / state | Look |
+| --- | --- |
+| Frame | The scroll pane, as for lists |
+| Rows | The list's rows stretched across every column: `control.sm` (28) high, inset `xs` (4) with a `radius.sm` corner. No grid lines |
+| Zebra | Every other row gets `surface.hover` at half strength, so the eye can follow a wide row |
+| Hover | A `surface.hover` wash over the row under the pointer, painted on top so it also shows on stripes and on custom cells |
+| Selected | The list's selection: the `selected.background` wash and the `selected.primary` marker at the row's leading edge |
+| Cells | `sm` (6) apart; the first column's text starts past the marker and the last one ends `sm` (6) inside the row shape. Numbers align right |
+| Header | `overline` labels (upper case) in `text.secondary` on `surface.input`, over a `border.control` line. Each label aligns like its column |
+| Header hover / sorted | `text.primary`; the sorted column adds a `text.primary` chevron `sm` (6) after its label. Dragging a column gives it a `surface.hover` fill |
+| Empty | A `text.muted` message centered in the first row's place |
+| Disabled | `text.disabled` text and headers, with no hover or marker |
+
+- **Violet means selected**, as in lists. A selected cell has no rectangle of its own: the row is the cursor.
+- **Sorting.** Click a header to sort by it and again to reverse; the chevron shows the direction.
+- **Keys** are Swing's: Up and Down move, Page Up and Page Down scroll, Shift and Ctrl extend a multiple selection.
+
+**Swing.** The MegaMek themes draw every `JTable` and its header this way through
+[`TokenTableUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableUI.java),
+[`TokenTableHeaderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableHeaderUI.java) and
+[`TokenTableCellBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTableCellBorder.java), so existing views
+get them without changes. Tables with their own renderers keep their cells' content and get the hover and the marker;
+headers take their alignment from the column's renderer.
+[`TokenTables`](../../megamek/src/megamek/client/ui/design/swing/TokenTables.java)`.emptyText(table, text)` adds the
+empty message.
+
+**libGDX.** Nothing new yet; hud-v3 has no table.
+
 ## Code
 
 | Class | Role |
@@ -563,6 +596,7 @@ the readout and lines it up with the track on the slider's baseline.
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
 | [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |
 | [`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java) | The Swing sliders and their readout |
+| [`TokenTables`](../../megamek/src/megamek/client/ui/design/swing/TokenTables.java), [`TokenTableUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableUI.java), [`TokenTableHeaderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableHeaderUI.java), [`TokenTableCellBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTableCellBorder.java) | The Swing tables |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 

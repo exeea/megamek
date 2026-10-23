@@ -65,14 +65,17 @@ import javax.swing.JToolTip;
 import javax.swing.JTree;
 import javax.swing.JViewport;
 import javax.swing.KeyStroke;
+import javax.swing.RowSorter;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
+import javax.swing.SortOrder;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
+import javax.swing.table.DefaultTableModel;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.PlainDocument;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -397,19 +400,8 @@ public final class SwingUiLibrary extends JFrame {
         page.add(scrollbarSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
-        JTable table = new JTable(new Object[][] {
-              { "Atlas AS7-D", "100", "3/5/0", "54" },
-              { "Marauder MAD-3R", "75", "4/6/0", "42" },
-              { "Phoenix Hawk PXH-1", "45", "6/9/6", "38" },
-              { "Locust LCT-1V", "20", "8/12/0", "21" },
-        }, new Object[] { Messages.getString("UiLibrary.controls.unit"),
-              Messages.getString("UiLibrary.controls.tons"), Messages.getString("UiLibrary.controls.movement"),
-              Messages.getString("UiLibrary.controls.armor") });
-        table.setRowSelectionInterval(1, 1);
-        table.setPreferredScrollableViewportSize(new Dimension(scaleForGUI(520), table.getRowHeight() * 4));
-        JScrollPane tableScroll = new JScrollPane(table);
-        tableScroll.setAlignmentX(LEFT_ALIGNMENT);
-        page.add(tableScroll);
+        page.add(paragraph(Messages.getString("UiLibrary.tables.note"), "small", "text.muted"));
+        page.add(tableSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.focus")));
         page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
@@ -774,6 +766,89 @@ public final class SwingUiLibrary extends JFrame {
         glue.weightx = 1;
         samples.add(Box.createHorizontalGlue(), glue);
         return samples;
+    }
+
+    /**
+     * Tables in each state: hover is frozen on a row of the first table and on a header of the second; sorting,
+     * selecting and the rest stay live.
+     */
+    private JComponent tableSamples() {
+        JPanel samples = new JPanel(new GridBagLayout());
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+
+        JTable states = sampleTable(true);
+        states.getRowSorter().setSortKeys(List.of(new RowSorter.SortKey(1, SortOrder.DESCENDING)));
+        states.setRowSelectionInterval(3, 3);
+        states.putClientProperty(TokenLists.FROZEN_HOVER, 1);
+        addTableSample(samples, 0, 0, "UiLibrary.tables.states", states);
+
+        JTable multi = sampleTable(true);
+        multi.getSelectionModel().setSelectionInterval(1, 2);
+        multi.getSelectionModel().addSelectionInterval(4, 4);
+        multi.getTableHeader().putClientProperty(TokenTables.FROZEN_HEADER_HOVER, 2);
+        addTableSample(samples, 1, 0, "UiLibrary.tables.multi", multi);
+
+        JTable empty = TokenTables.emptyText(sampleTable(false), Messages.getString("UiLibrary.tables.emptyText"));
+        addTableSample(samples, 0, 1, "UiLibrary.tables.empty", empty);
+
+        JTable disabled = sampleTable(true);
+        disabled.setRowSelectionInterval(1, 1);
+        disabled.setEnabled(false);
+        disabled.getTableHeader().setEnabled(false);
+        addTableSample(samples, 1, 1, "UiLibrary.tables.disabled", disabled);
+
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 2;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
+    }
+
+    /** A sortable unit table, filled or with no rows. Numbers are right-aligned by their column class. */
+    private static JTable sampleTable(boolean filled) {
+        Object[][] rows = filled ? new Object[][] {
+              { "Atlas AS7-D", 100, "3/5/0", 304 },
+              { "Marauder MAD-3R", 75, "4/6/0", 184 },
+              { "Phoenix Hawk PXH-1", 45, "6/9/6", 120 },
+              { "Hunchback HBK-4G", 50, "4/6/0", 160 },
+              { "Locust LCT-1V", 20, "8/12/0", 64 },
+              { "Wasp WSP-1A", 20, "6/9/6", 48 },
+              { "Griffin GRF-1N", 55, "5/8/5", 152 },
+        } : new Object[0][];
+        String[] columns = { Messages.getString("UiLibrary.controls.unit"),
+                             Messages.getString("UiLibrary.controls.tons"),
+                             Messages.getString("UiLibrary.controls.movement"),
+                             Messages.getString("UiLibrary.controls.armor") };
+        DefaultTableModel model = new DefaultTableModel(rows, columns) {
+            @Override
+            public Class<?> getColumnClass(int column) {
+                return column == 1 || column == 3 ? Integer.class : String.class;
+            }
+
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        JTable table = new JTable(model);
+        table.setAutoCreateRowSorter(true);
+        table.getColumnModel().getColumn(0).setPreferredWidth(scaleForGUI(150));
+        return table;
+    }
+
+    /** Adds {@code table} in its scroll pane under a caption, at {@code column} of caption row {@code row}. */
+    private void addTableSample(JPanel samples, int column, int row, String captionKey, JTable table) {
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.NORTHWEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridx = column;
+        cell.gridy = row * 2;
+        samples.add(text(Messages.getString(captionKey), "caption", "text.muted"), cell);
+        cell.gridy++;
+        JScrollPane scroll = new JScrollPane(table);
+        scroll.setPreferredSize(new Dimension(scaleForGUI(430), scaleForGUI(190)));
+        samples.add(scroll, cell);
     }
 
     /**

@@ -308,8 +308,11 @@ work for Swing, and item 11 is under investigation.
   rail and a brighter thumb under the pointer, in Swing; see [tokens.md](tokens.md#scrollbars).
 - ~~Sliders~~: an accent fill up to a round thumb on a pill track, the same with ticks and labels, with an optional
   value readout, in Swing; see [tokens.md](tokens.md#sliders).
-- The rest of the gallery: tables and the remaining controls, in Swing (libGDX only where the in-game UI needs
-  them).
+- ~~Tables~~: the list's rows across every column with faint zebra stripes, a hover wash over the cells, the violet
+  selection and marker, and upper-case overline headers aligned like their column, in Swing; see
+  [tokens.md](tokens.md#tables).
+- The rest of the gallery: the remaining controls (progress bar, separators, titled borders, split panes, toolbars),
+  in Swing (libGDX only where the in-game UI needs them).
 - Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
   every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the
   Swing controls still switch states instantly, which reads as a desktop app rather than a game.

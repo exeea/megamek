@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Insets;
@@ -21,6 +22,7 @@ import java.util.Set;
 import javax.accessibility.AccessibleRole;
 import javax.accessibility.AccessibleState;
 import javax.swing.AbstractButton;
+import javax.swing.CellRendererPane;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -64,7 +66,7 @@ class TokenLafDefaultsTest {
     /** Keys FlatLaf styles through the component's own setters rather than the UI delegate. */
     private static final Set<String> COMPONENT_KEYS = Set.of("background", "foreground", "margin", "font");
     /** Washes painted over whatever content lies under them rather than as a component's background. */
-    private static final Set<String> TRANSLUCENT_KEYS = Set.of("ScrollBar.hoverTrackColor");
+    private static final Set<String> TRANSLUCENT_KEYS = Set.of("ScrollBar.hoverTrackColor", TokenTables.HOVER_WASH);
 
     private final DesignTokens tokens = DesignTokens.shipped();
 
@@ -337,6 +339,51 @@ class TokenLafDefaultsTest {
                 assertEquals(UIScale.scale(indent * 2), ((TokenTreeUI) tree.getUI()).getLeftChildIndent()
                       + ((TokenTreeUI) tree.getUI()).getRightChildIndent());
                 assertEquals(UIScale.scale(markerSpace), tree.getInsets().left, "chevrons clear the marker");
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void tablesFollowTheListRows() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+
+                JTable table = new JTable(new Object[][] { { "Atlas", 100 } }, new Object[] { "Unit", "Tons" });
+                assertTrue(table.getUI() instanceof TokenTableUI);
+                assertTrue(table.getTableHeader().getUI() instanceof TokenTableHeaderUI);
+                assertEquals(UIScale.scale(Math.round(tokens.size().get("control.sm"))), table.getRowHeight());
+                assertEquals(defaults.get("List.selectionArc"), defaults.get("Table.selectionArc"));
+                assertEquals(defaults.get("List.selectionInsets"), defaults.get("Table.selectionInsets"));
+                assertNotNull(defaults.getColor("Table.alternateRowColor"));
+                assertFalse(new Color(defaults.getColor("Table.alternateRowColor").getRGB())
+                      .equals(new Color(table.getBackground().getRGB())), "zebra rows differ from the others");
+                assertColor(defaults, "TableHeader.foreground", "text.secondary", mode);
+                assertEquals(TokenFonts.font("overline").getSize(), table.getTableHeader().getFont().getSize());
+                assertEquals(Math.round(tokens.space().get("sm")), UIManager.getInt(TokenTables.SORT_ICON_GAP));
+
+                int markerSpace = Math.round(tokens.space().get("xs") + tokens.size().get("selection.width")
+                      + tokens.space().get("sm"));
+                table.setSize(table.getPreferredSize());
+                table.doLayout();
+                // Renderers sit in the table's renderer pane while they paint
+                CellRendererPane rendererPane = new CellRendererPane();
+                table.add(rendererPane);
+                Component cell = table.prepareRenderer(table.getCellRenderer(0, 0), 0, 0);
+                rendererPane.add(cell);
+                cell.setBounds(table.getCellRect(0, 0, false));
+                assertEquals(UIScale.scale(markerSpace), ((JComponent) cell).getInsets().left,
+                      "the first column clears the marker");
+                cell.setBounds(table.getCellRect(0, 1, false));
+                assertEquals(UIScale.scale(Math.round(tokens.space().get("xs") + tokens.space().get("sm"))),
+                      ((JComponent) cell).getInsets().right, "the last column clears the row's inset");
             }
         } finally {
             if (previous != null) {
