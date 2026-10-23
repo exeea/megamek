@@ -17,6 +17,9 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.geom.RoundRectangle2D;
@@ -29,19 +32,26 @@ import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.DefaultButtonModel;
 import javax.swing.Icon;
 import javax.swing.JCheckBox;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayer;
 import javax.swing.JList;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
+import javax.swing.JPopupMenu;
 import javax.swing.JProgressBar;
 import javax.swing.JRadioButton;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
@@ -53,6 +63,7 @@ import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.JTree;
 import javax.swing.JViewport;
+import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
@@ -367,6 +378,10 @@ public final class SwingUiLibrary extends JFrame {
         page.add(heading(Messages.getString("UiLibrary.controls.lists")));
         page.add(paragraph(Messages.getString("UiLibrary.lists.note"), "small", "text.muted"));
         page.add(listSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.menus")));
+        page.add(paragraph(Messages.getString("UiLibrary.menus.note"), "small", "text.muted"));
+        page.add(menuSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         JTable table = new JTable(new Object[][] {
@@ -836,30 +851,12 @@ public final class SwingUiLibrary extends JFrame {
 
             @Override
             protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                try {
-                    FlatUIUtils.setRenderingHints(g2);
-                    g2.setColor(getBackground());
-                    FlatUIUtils.paintComponentBackground(g2, 0, 0, getWidth(), getHeight(), 0, arc());
-                } finally {
-                    g2.dispose();
-                }
+                paintPopupFace(this, g);
             }
 
             @Override
             protected void paintBorder(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                try {
-                    FlatUIUtils.setRenderingHints(g2);
-                    g2.setColor(UIManager.getColor("PopupMenu.borderColor"));
-                    FlatUIUtils.paintOutline(g2, 0, 0, getWidth(), getHeight(), UIScale.scale(1f), arc());
-                } finally {
-                    g2.dispose();
-                }
-            }
-
-            private float arc() {
-                return UIScale.scale(UIManager.getInt("Popup.borderCornerRadius") * 2f);
+                paintPopupEdge(this, g);
             }
         };
         popup.add(scroller);
@@ -889,6 +886,151 @@ public final class SwingUiLibrary extends JFrame {
         live.add(controls);
         samples.add(live);
         return samples;
+    }
+
+    /** Paints a popup's face with the rounded corners the popup window gets on screen. */
+    private static void paintPopupFace(JComponent popup, Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            FlatUIUtils.setRenderingHints(g2);
+            g2.setColor(popup.getBackground());
+            FlatUIUtils.paintComponentBackground(g2, 0, 0, popup.getWidth(), popup.getHeight(), 0, popupArc());
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    /** Paints a popup's edge with the rounded corners the popup window gets on screen. */
+    private static void paintPopupEdge(JComponent popup, Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            FlatUIUtils.setRenderingHints(g2);
+            g2.setColor(UIManager.getColor("PopupMenu.borderColor"));
+            FlatUIUtils.paintOutline(g2, 0, 0, popup.getWidth(), popup.getHeight(), UIScale.scale(1f), popupArc());
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private static float popupArc() {
+        return UIScale.scale(UIManager.getInt("Popup.borderCornerRadius") * 2f);
+    }
+
+    /**
+     * An open menu drawn in place with the second row under the pointer, beside a live menu bar and an area with a
+     * context menu.
+     */
+    private JComponent menuSamples() {
+        JPanel samples = row(color("surface.base"));
+
+        // A real popup menu laid out as a component; a glass pane keeps the pointer from changing the frozen rows
+        JPopupMenu frozen = new JPopupMenu() {
+            @Override
+            public boolean isVisible() {
+                return true;
+            }
+
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setOpaque(false);
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                paintPopupFace(this, g);
+            }
+
+            @Override
+            protected void paintBorder(Graphics g) {
+                paintPopupEdge(this, g);
+            }
+        };
+        fillGameMenu(frozen);
+        ((JMenuItem) frozen.getComponent(1)).setArmed(true);
+        frozen.getComponent(2).setEnabled(false);
+        JLayer<JComponent> shield = new JLayer<>(frozen);
+        shield.getGlassPane().setVisible(true);
+        shield.getGlassPane().addMouseListener(new MouseAdapter() {
+        });
+        shield.getGlassPane().addMouseMotionListener(new MouseAdapter() {
+        });
+        JPanel open = new JPanel(new BorderLayout(0, scaleForGUI(4)));
+        open.setOpaque(false);
+        open.add(text(Messages.getString("UiLibrary.menus.open"), "caption", "text.muted"), BorderLayout.NORTH);
+        open.add(shield, BorderLayout.CENTER);
+        samples.add(open);
+
+        JPanel live = new JPanel();
+        live.setOpaque(false);
+        live.setLayout(new BoxLayout(live, BoxLayout.Y_AXIS));
+        JComponent caption = text(Messages.getString("UiLibrary.menus.live"), "caption", "text.muted");
+        caption.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(caption);
+        JMenuBar bar = new JMenuBar();
+        JMenu game = new JMenu(Messages.getString("UiLibrary.menus.game"));
+        fillGameMenu(game.getPopupMenu());
+        bar.add(game);
+        JMenu view = new JMenu(Messages.getString("UiLibrary.menus.view"));
+        fillViewMenu(view.getPopupMenu());
+        bar.add(view);
+        JMenu help = new JMenu(Messages.getString("UiLibrary.menus.help"));
+        help.add(new JMenuItem(Messages.getString("UiLibrary.menus.about")));
+        bar.add(help);
+        bar.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(bar);
+        live.add(Box.createVerticalStrut(scaleForGUI(12)));
+
+        JLabel area = text(Messages.getString("UiLibrary.menus.context"), "body", "text.secondary");
+        area.setHorizontalAlignment(SwingConstants.CENTER);
+        area.setBorder(BorderFactory.createCompoundBorder(
+              BorderFactory.createLineBorder(color("border.subtle")),
+              BorderFactory.createEmptyBorder(scaleForGUI(24), scaleForGUI(24), scaleForGUI(24), scaleForGUI(24))));
+        JPopupMenu context = new JPopupMenu();
+        context.add(new JMenuItem(Messages.getString("UiLibrary.menus.center")));
+        context.add(new JMenuItem(Messages.getString("UiLibrary.menus.details")));
+        JMenuItem deploy = new JMenuItem(Messages.getString("UiLibrary.menus.deploy"));
+        deploy.setEnabled(false);
+        context.add(deploy);
+        context.addSeparator();
+        fillViewMenu(context);
+        area.setComponentPopupMenu(context);
+        area.setAlignmentX(LEFT_ALIGNMENT);
+        live.add(area);
+        samples.add(live);
+        return samples;
+    }
+
+    /** New, load (the frozen sample's hover row), save, a submenu, a check, two radios and exit. */
+    private static void fillGameMenu(JPopupMenu menu) {
+        menu.add(menuItem("UiLibrary.menus.newGame", KeyEvent.VK_N));
+        menu.add(menuItem("UiLibrary.menus.loadGame", KeyEvent.VK_O));
+        menu.add(menuItem("UiLibrary.menus.saveGame", KeyEvent.VK_S));
+        JMenu recent = new JMenu(Messages.getString("UiLibrary.menus.recent"));
+        recent.add(new JMenuItem(Messages.getString("UiLibrary.menus.recentA")));
+        recent.add(new JMenuItem(Messages.getString("UiLibrary.menus.recentB")));
+        menu.add(recent);
+        menu.addSeparator();
+        fillViewMenu(menu);
+        menu.addSeparator();
+        menu.add(new JMenuItem(Messages.getString("UiLibrary.menus.exit")));
+    }
+
+    private static void fillViewMenu(JPopupMenu menu) {
+        menu.add(new JCheckBoxMenuItem(Messages.getString("UiLibrary.menus.showGrid"), true));
+        ButtonGroup zoom = new ButtonGroup();
+        for (String key : List.of("UiLibrary.menus.zoom100", "UiLibrary.menus.zoom200")) {
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(Messages.getString(key));
+            item.setSelected(zoom.getButtonCount() == 0);
+            zoom.add(item);
+            menu.add(item);
+        }
+    }
+
+    private static JMenuItem menuItem(String key, int accelerator) {
+        JMenuItem item = new JMenuItem(Messages.getString(key));
+        item.setAccelerator(KeyStroke.getKeyStroke(accelerator, InputEvent.CTRL_DOWN_MASK));
+        return item;
     }
 
     /**

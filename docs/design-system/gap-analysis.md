@@ -300,7 +300,9 @@ work for Swing, and item 11 is under investigation.
 - ~~Lists and trees~~: inset rounded rows at least 28 high, a neutral hover wash, and a violet wash plus a leading
   marker for the selection, with two-line rows and an empty state, in Swing; libGDX keeps hud-v3's `UiList` and
   `UiTree` until the developers accept the system; see [tokens.md](tokens.md#lists-and-trees).
-- The rest of the gallery: tables, menus, tooltips, scrollbars, sliders and the remaining controls, in Swing (libGDX
+- ~~Menus~~: menu bars, menus and context menus on the select's popup, with neutral hover rows, violet checks and
+  radios, and muted shortcuts, in Swing; see [tokens.md](tokens.md#menus).
+- The rest of the gallery: tables, tooltips, scrollbars, sliders and the remaining controls, in Swing (libGDX
   only where the in-game UI needs them).
 - Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
   every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the

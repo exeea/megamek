@@ -437,6 +437,30 @@ content and get the hover and the marker, but only the stock renderer gets the r
 
 **libGDX.** Nothing new yet. hud-v3's `UiList` and `UiTree` stay until the developers accept the system.
 
+## Menus
+
+Menu bars, their menus and context menus. They share the select's popup, so every popup in the suite looks the same.
+
+| Part / state | Look |
+| --- | --- |
+| Popup | The select's popup: `surface.popover` with a `border.control` edge and a `radius.md` corner, padded `xs` (4) top and bottom |
+| Rows | `control.sm` (28) high, the highlight inset `xs` (4) with a `radius.sm` corner; text starts `xs` + `md` (12) in, after a check column when any row has one |
+| Hover / keyboard | A `surface.hover` wash on the row, `text.primary` label; the open menu in a menu bar gets the same wash |
+| Check and radio | A `selected.primary` check or dot in the check column |
+| Shortcut | `text.muted`, `text.secondary` on the hovered row, right-aligned |
+| Submenu | A `text.secondary` chevron at the end of the row |
+| Separator | A `border.subtle` line with `xs` (4) above and below |
+| Disabled | `text.disabled` label, shortcut, check and chevron |
+
+- **Hover stays neutral**, as in the select's popup and lists. Violet only marks a state that is on.
+- **Keys** are Swing's: arrows move and open submenus, Enter chooses, Escape closes, and Alt or F10 reaches the menu
+  bar.
+
+**Swing.** The MegaMek themes style every `JMenuBar`, `JMenu`, `JMenuItem`, `JCheckBoxMenuItem`,
+`JRadioButtonMenuItem` and `JPopupMenu`, so existing menus get the look without changes.
+
+**libGDX.** Nothing new yet; the in-game UI has no menus that need it.
+
 ## Code
 
 | Class | Role |
@@ -464,6 +488,6 @@ content and get the hover and the marker, but only the stock renderer gets the r
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens; lists and trees are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
+styles read the tokens; lists, trees and menus are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
 Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
 only once the developers accept the system.

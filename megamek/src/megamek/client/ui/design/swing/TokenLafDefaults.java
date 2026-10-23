@@ -5,6 +5,7 @@ import static megamek.client.ui.design.ColorMath.hex;
 import static megamek.client.ui.design.ColorMath.over;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import megamek.client.ui.design.ColorMath;
@@ -21,6 +22,11 @@ import megamek.client.ui.design.DesignTokens.Mode;
  * components must paint opaque colors.
  */
 public final class TokenLafDefaults {
+    /** Menu row padding above and below the text, so a menu row is control.sm (28) tall like the select's rows. */
+    private static final int MENU_ROW_MARGIN = 5;
+    /** Menu bar item padding above and below the text. */
+    private static final int MENU_BAR_MARGIN = 4;
+
     private final DesignTokens tokens;
     private final Mode mode;
     private final Map<String, String> values = new LinkedHashMap<>();
@@ -64,8 +70,11 @@ public final class TokenLafDefaults {
         put("@selectionForeground", color("text.primary"));
         put("@selectionInactiveBackground", over(selected, input));
         put("@selectionInactiveForeground", color("text.primary"));
-        put("@menuSelectionBackground", over(selected, popover));
+        put("@menuSelectionBackground", over(hover, popover));
         put("@menuHoverBackground", over(hover, popover));
+        put("@menuCheckBackground", over(selected, popover));
+        put("@menuAcceleratorForeground", color("text.muted"));
+        put("@menuAcceleratorSelectionForeground", color("text.secondary"));
         put("@cellFocusColor", color("focus.ring"));
         put("@icon", color("text.secondary"));
         put("@buttonArrowColor", color("text.secondary"));
@@ -325,6 +334,25 @@ public final class TokenLafDefaults {
         put(TokenSelects.INLINE_FOREGROUND, color("text.secondary"));
         put(TokenSelects.INLINE_HOVER_FOREGROUND, color("text.primary"));
         put(TokenSelects.PLACEHOLDER_FOREGROUND, color("text.muted"));
+        // Menus: the select's popup and rows. The row under the pointer or the keyboard gets the hover wash (the
+        // @menu* variables above), checks and radios are violet, and accelerators are muted.
+        int rowSide = Math.round(tokens.space().get("xs") + tokens.space().get("md"));
+        int border = Math.round(tokens.size().get("border"));
+        values.put("Popup.borderCornerRadius", number(tokens.radius().get("md")));
+        values.put("PopupMenu.borderInsets", (rowInset + border) + "," + border + "," + (rowInset + border) + ","
+              + border);
+        values.put("MenuItem.selectionInsets", "0," + rowInset + ",0," + rowInset);
+        values.put("MenuItem.selectionArc", number(tokens.radius().get("sm") * 2));
+        values.put("@menuItemMargin", MENU_ROW_MARGIN + "," + rowSide + "," + MENU_ROW_MARGIN + "," + rowSide);
+        values.put("MenuBar.itemMargins", MENU_BAR_MARGIN + "," + rowSide + "," + MENU_BAR_MARGIN + "," + rowSide);
+        put("CheckBoxMenuItem.icon.checkmarkColor", color("selected.primary"));
+        put("CheckBoxMenuItem.icon.disabledCheckmarkColor", color("text.disabled"));
+        put("Menu.icon.arrowColor", color("text.secondary"));
+        put("Menu.icon.disabledArrowColor", color("text.disabled"));
+        for (String item : List.of("Menu", "MenuItem", "CheckBoxMenuItem", "RadioButtonMenuItem")) {
+            put(item + ".selectionBackground", over(hover, popover));
+            put(item + ".selectionForeground", color("text.primary"));
+        }
         put("MenuBar.borderColor", color("border.subtle"));
         put("ToolTip.background", popover);
         put("ToolTip.foreground", color("text.primary"));

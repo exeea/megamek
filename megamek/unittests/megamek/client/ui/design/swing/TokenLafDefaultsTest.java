@@ -24,7 +24,9 @@ import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JList;
+import javax.swing.JMenuItem;
 import javax.swing.JPasswordField;
+import javax.swing.JPopupMenu;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
@@ -325,6 +327,39 @@ class TokenLafDefaultsTest {
                 assertEquals(UIScale.scale(indent * 2), ((TokenTreeUI) tree.getUI()).getLeftChildIndent()
                       + ((TokenTreeUI) tree.getUI()).getRightChildIndent());
                 assertEquals(UIScale.scale(markerSpace), tree.getInsets().left, "chevrons clear the marker");
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void menusShareTheSelectPopup() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                // The hover wash, never the selection violet, on every kind of menu row
+                Color wash = defaults.getColor("ComboBox.selectionBackground");
+                for (String item : List.of("Menu", "MenuItem", "CheckBoxMenuItem", "RadioButtonMenuItem")) {
+                    assertEquals(new Color(wash.getRGB()),
+                          new Color(defaults.getColor(item + ".selectionBackground").getRGB()), item);
+                }
+                assertColor(defaults, "CheckBoxMenuItem.icon.checkmarkColor", "selected.primary", mode);
+                assertColor(defaults, "MenuItem.acceleratorForeground", "text.muted", mode);
+                assertEquals(defaults.getInsets("ComboBox.selectionInsets"), defaults.getInsets("MenuItem.selectionInsets"));
+                assertEquals(defaults.getInt("ComboBox.selectionArc"), defaults.getInt("MenuItem.selectionArc"));
+
+                JPopupMenu menu = new JPopupMenu();
+                JMenuItem item = menu.add(new JMenuItem("Load game"));
+                assertEquals(UIScale.scale(Math.round(tokens.size().get("control.sm"))), item.getPreferredSize().height,
+                      "menu rows are control.sm high");
+                int pad = Math.round(tokens.space().get("xs") + tokens.size().get("border"));
+                assertEquals(UIScale.scale(pad), menu.getInsets().top, "the popup is padded like the select's");
             }
         } finally {
             if (previous != null) {
