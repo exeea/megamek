@@ -13,7 +13,6 @@ import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Polygon;
-import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 
@@ -169,7 +168,7 @@ final class InfantryMotion {
      * @param seconds  the frame's animation time, which members spend walking to new spots
      * @param instant  whether members take new spots at once
      */
-    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room, List<Rectangle> occupied,
+    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room, List<Polygon> occupied,
           float seconds, boolean instant) {
         position(model, unit, motion, room);
         settle(unit, motion, occupied, model.horizontalScale(unit), room, seconds, instant);
@@ -263,7 +262,7 @@ final class InfantryMotion {
      * A resting formation stands clear of the other units in its hex, a Mek in its centre for one, and walks to new
      * spots instead of jumping there, as when another unit enters or leaves the hex.
      */
-    private void settle(BoardScene.Unit unit, UnitMotion.Sample motion, List<Rectangle> occupied, float scale, float[] room,
+    private void settle(BoardScene.Unit unit, UnitMotion.Sample motion, List<Polygon> occupied, float scale, float[] room,
           float seconds, boolean instant) {
         var travel = motion.boarding();
         boolean still = !motion.moving()
@@ -271,10 +270,13 @@ final class InfantryMotion {
         List<Polygon> obstacles = new ArrayList<>();
         if (still) {
             Vector3 center = BoardGeometry.center(unit.location().coords(), 0);
-            for (var area : occupied) {
-                float left = (area.x - center.x) / scale, bottom = (area.y - center.y) / scale;
-                float right = left + area.width / scale, top = bottom + area.height / scale;
-                obstacles.add(new Polygon(new float[] { left, bottom, right, bottom, right, top, left, top }));
+            for (var ground : occupied) {
+                float[] vertices = ground.getVertices().clone();
+                for (int v = 0; v < vertices.length; v += 2) {
+                    vertices[v] = (vertices[v] - center.x) / scale;
+                    vertices[v + 1] = (vertices[v + 1] - center.y) / scale;
+                }
+                obstacles.add(new Polygon(vertices));
             }
         }
         boolean clear = !obstacles.isEmpty();
@@ -287,8 +289,9 @@ final class InfantryMotion {
             if (resting && !member.rested) { member.shown.set(spot); }
             member.rested = resting;
             if (clear && resting) {
-                // Each member placed also keeps the next ones from stepping onto it.
-                var outline = member.outline(member.heading);
+                // Each member placed also keeps the next ones from stepping onto it. A trooper takes the ground of its
+                // watch heading, which it keeps once there, not the room it would need to turn.
+                var outline = InfantryFootprint.polygon(member.footprint, member.heading);
                 InfantryFootprint.avoid(spot, outline, obstacles, scale, room);
                 outline.setPosition(spot.x, spot.y);
                 obstacles.add(outline);

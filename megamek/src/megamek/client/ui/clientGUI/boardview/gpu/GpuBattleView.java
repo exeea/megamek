@@ -35,8 +35,10 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ImmediateModeRenderer20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.ConvexHull;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -153,7 +155,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, ArmFlip> armFlips = new HashMap<>();
     private final Map<String, UnitAnimator> animators = new HashMap<>();
     /** The ground of the units other than troops, as last drawn, by the hexes they occupy; troops step around it. */
-    private final Map<Coords, List<Rectangle>> occupiedGround = new HashMap<>();
+    private final Map<Coords, List<Polygon>> occupiedGround = new HashMap<>();
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
@@ -1585,10 +1587,18 @@ class GpuBattleView extends ApplicationAdapter {
             var instance = unitInstances.get(unit.id() + ":" + unit.part());
             if (instance == null || UnitAnimator.troops(unit) || unit.sensorContact() || unit.airborne()
                   || unit.attachment() != null) { continue; }
-            // Whole world units, so idle animation does not keep nudging the troops beside a unit.
-            var bounds = UnitBounds.world(instance);
-            float left = MathUtils.floor(bounds.min.x), bottom = MathUtils.floor(bounds.min.y);
-            var ground = new Rectangle(left, bottom, MathUtils.ceil(bounds.max.x) - left, MathUtils.ceil(bounds.max.y) - bottom);
+            // The outline of its turned box seen from above, in whole world units so idle animation does not keep
+            // nudging the troops beside it.
+            var box = UnitBounds.local(instance);
+            float[] corners = new float[16];
+            for (int corner = 0; corner < 8; corner++) {
+                var point = new Vector3((corner & 1) == 0 ? box.min.x : box.max.x, (corner & 2) == 0 ? box.min.y : box.max.y,
+                      (corner & 4) == 0 ? box.min.z : box.max.z).mul(instance.transform);
+                corners[2 * corner] = Math.round(point.x);
+                corners[2 * corner + 1] = Math.round(point.y);
+            }
+            var hull = new ConvexHull().computePolygon(corners, false);
+            var ground = new Polygon(java.util.Arrays.copyOf(hull.items, hull.size - 2));
             unit.footprint().forEach(coords -> occupiedGround.computeIfAbsent(coords, ignored -> new ArrayList<>()).add(ground));
         }
     }

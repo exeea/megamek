@@ -15,7 +15,7 @@ import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
-import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
@@ -44,7 +44,7 @@ final class UnitAnimator {
     private UnitGroundContact groundContact;
     private final BoardSurface.Cache surfaces;
     private final Supplier<BoardScene> scene;
-    private final Function<Coords, List<Rectangle>> occupied;
+    private final Function<Coords, List<Polygon>> occupied;
     private boolean dying;
     private boolean initialized;
     private ProneCause posture = ProneCause.NONE;
@@ -62,7 +62,7 @@ final class UnitAnimator {
      * @param occupied the ground, in world units, of the units other than troops standing in a hex, which troops there
      *                 step around
      */
-    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene, Function<Coords, List<Rectangle>> occupied) {
+    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene, Function<Coords, List<Polygon>> occupied) {
         this.surfaces = surfaces;
         this.scene = scene;
         this.occupied = occupied;
