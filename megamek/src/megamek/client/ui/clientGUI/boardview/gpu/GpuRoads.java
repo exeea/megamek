@@ -488,8 +488,11 @@ final class GpuRoads {
         float scale = BoardGeometry.hexScale();
         float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
         var bounds = patch.shape().getBounds2D();
+        // A neighbour's ground road at another level paints only the road surface it reserves here; a bridge's deck
+        // carries its apron onto the bank on purpose.
+        boolean apart = tile.elevation() != surface.tile.elevation() && BoardBridge.feature(tile) == null;
         for (var face : surface.groundFaces()) {
-            if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+            if (face.finish() != BoardSurface.Finish.TOP || apart && !surface.carries(face, tile)) { continue; }
             float area = (face.b().x - face.a().x) * (face.c().y - face.a().y)
                   - (face.b().y - face.a().y) * (face.c().x - face.a().x);
             // Nearly vertical slivers can remain where terrain strips meet. They have no paintable footprint.

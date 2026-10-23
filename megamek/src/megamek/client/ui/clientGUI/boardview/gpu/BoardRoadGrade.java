@@ -307,6 +307,15 @@ final class BoardRoadGrade {
               && BoardSurface.connectingBridge(road, apron, direction) == null;
     }
 
+    /**
+     * Whether a road leaving a hex at d ends there on a cliff's top: towards roadless dry ground further down than a road
+     * ramps (#graded), and no bridge's deck carries it on.
+     */
+    static boolean overDrop(BoardScene.Tile tile, BoardScene.Tile next, int d) {
+        return next != null && !next.liquid().present() && !BoardRoad.carriageway(next)
+              && next.groundLevel() < tile.groundLevel() - 2 && BoardSurface.connectingBridge(tile, next, d) == null;
+    }
+
     BoardScene.Tile tile() { return tile; }
 
     /** The reserved ground, in world coordinates; callers receive their own copy. */
