@@ -656,7 +656,7 @@ class GpuBattleView extends ApplicationAdapter {
               || scene.boardId() != frame.scene().boardId());
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
-        if (unitModels != null) { unitModels.setDisplayMode(displayMode()); }
+        if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
         scene = history.live(scene);
         // Apply HUD state independently of camera framing; panels overlay the full board viewport.

@@ -86,7 +86,7 @@ class GpuMeepleAnimationSmokeTest {
                         verifyDamage(model, unit, renderer, camo, damage);
                         verifyJump(model, instance, unit, renderer, jets);
                         verifyAttachments(model, instance, unit, renderer, library);
-                        library.setDisplayMode(UnitDisplayMode.MEK_MEEPLES);
+                        library.setDisplayMode(UnitDisplayMode.MEK_MEEPLES, false);
                         verifyCombat(model, instance, unit, renderer, library, effects, fixture);
                     } catch (Throwable error) { failure.set(error); }
                     finally {

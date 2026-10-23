@@ -220,7 +220,7 @@ final class GpuBoardTuning {
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
         unitDisplayMode = choice(skin, "Unit display", "tuning-unit-display", UnitDisplayMode.values(), () -> { });
-        unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
+        unitDisplayMode.addListener(new TextTooltip("All Meeples: troops use meeple figures, every other unit an extruded artwork token. "
               + "Mek Meeples: only Meks use tokens; other units use 3D models. "
               + "3D Models: use the existing models for all units.", skin, "menu"));
         // The Display page: the window's output, from its mode to the graphics card.

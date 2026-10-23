@@ -42,9 +42,12 @@ final class GpuUnitModels implements Disposable {
     private Texture bark;
     // Asset previews use authored models. The board supplies its window's selection before each frame.
     private UnitDisplayMode displayMode = UnitDisplayMode.MODELS;
+    private boolean tactical;
 
-    void setDisplayMode(UnitDisplayMode mode) {
+    /** @param tactical whether the window shows the Tactical View, where every unit is its artwork token */
+    void setDisplayMode(UnitDisplayMode mode, boolean tactical) {
         displayMode = mode;
+        this.tactical = tactical;
     }
 
     GpuUnitModels() {
@@ -64,10 +67,10 @@ final class GpuUnitModels implements Disposable {
         int triangles(int level) { return triangleCounts.get(level); }
     }
 
-    private record Assembly(String asset, String fallback, String variant, int figures,
+    private record Assembly(String asset, String fallback, String variant, int figures, boolean meeple,
           UnitModelState.Structure structure, GpuUnitModel model) {
-        boolean matches(BoardScene.UnitModel selection) {
-            return java.util.Objects.equals(asset, selection.asset())
+        boolean matches(BoardScene.UnitModel selection, boolean meeple) {
+            return this.meeple == meeple && java.util.Objects.equals(asset, selection.asset())
                   && java.util.Objects.equals(fallback, selection.fallback())
                   && java.util.Objects.equals(variant, selection.variant()) && figures == selection.figures()
                   && structure.equals(selection.state().structure());
@@ -170,34 +173,36 @@ final class GpuUnitModels implements Disposable {
     /** Effects may use a displayed assembly, but must never rebuild a past loadout during recovery after a refit. */
     GpuUnitModel loaded(BoardScene.UnitModel selection, int unitId) {
         var assembly = assemblies.get(unitId);
-        return selection != null && !displayMode.meeple(selection) && selection.state() != null
-              && assembly != null && assembly.matches(selection)
+        return selection != null && !tactical && selection.state() != null
+              && assembly != null && assembly.matches(selection, displayMode.meeple(selection))
               ? assembly.model() : null;
     }
 
+    /** @return the unit's assembly, or {@code null} for its artwork token or sprite */
     GpuUnitModel get(BoardScene.UnitModel selection, int unitId) {
-        if (selection == null || displayMode.meeple(selection)) {
+        if (selection == null || tactical) {
             return null;
         }
+        boolean meeple = displayMode.meeple(selection);
         Assembly cached = assemblies.get(unitId);
-        if (selection.state() != null && cached != null && cached.matches(selection)) {
+        if (selection.state() != null && cached != null && cached.matches(selection, meeple)) {
             return cached.model();
         }
-        GpuUnitModel model = load(selection.asset(), selection);
+        GpuUnitModel model = load(selection.asset(), selection, meeple);
         if (model == null && !java.util.Objects.equals(selection.asset(), selection.fallback())) {
-            model = load(selection.fallback(), selection);
+            model = load(selection.fallback(), selection, meeple);
         }
         if (selection.state() != null) {
             if (cached != null) {
                 cached.dispose();
             }
             assemblies.put(unitId, new Assembly(selection.asset(), selection.fallback(), selection.variant(),
-                  selection.figures(), selection.state().structure(), model));
+                  selection.figures(), meeple, selection.state().structure(), model));
         }
         return model;
     }
 
-    private GpuUnitModel load(String asset, BoardScene.UnitModel selection) {
+    private GpuUnitModel load(String asset, BoardScene.UnitModel selection, boolean meeple) {
         if (asset == null) {
             return null;
         }
@@ -216,6 +221,11 @@ final class GpuUnitModels implements Disposable {
             failed.add(descriptor);
             LOGGER.warn("Cannot load 3D unit asset {}; using its fallback: {}", descriptor, error.getMessage());
             return null;
+        }
+        if (meeple) {
+            // Troops stand as their recipe's meeple formation; every other unit is its artwork token.
+            String figures = value.getString("meeple", null);
+            return figures == null ? null : load(figures, selection, false);
         }
         if (selection.state() == null) {
             return null;
