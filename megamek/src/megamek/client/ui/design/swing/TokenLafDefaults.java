@@ -317,6 +317,8 @@ public final class TokenLafDefaults {
         values.put("ComboBox.selectionArc", number(tokens.radius().get("sm") * 2));
         int rowInset = Math.round(tokens.space().get("xs"));
         values.put("ComboBox.selectionInsets", "0," + rowInset + ",0," + rowInset);
+        // The popup pads its top and bottom as the rows inset their sides, so the highlight sits evenly inside
+        values.put("ComboBox.popupInsets", rowInset + ",0," + rowInset + ",0");
         values.put("ComboBox.maximumRowCount", "10");
         values.put(TokenSelects.ROW_HEIGHT, number(tokens.size().get("control.sm")));
         put(TokenSelects.CHECK_COLOR, color("selected.primary"));

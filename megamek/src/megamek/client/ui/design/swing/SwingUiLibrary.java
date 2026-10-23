@@ -65,6 +65,7 @@ import javax.swing.text.PlainDocument;
 import javax.swing.tree.DefaultMutableTreeNode;
 
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.ui.FlatEmptyBorder;
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.UIScale;
 import megamek.client.ui.Messages;
@@ -807,6 +808,8 @@ public final class SwingUiLibrary extends JFrame {
             public void updateUI() {
                 super.updateUI();
                 setBorder(null);
+                Insets pad = UIManager.getInsets("ComboBox.popupInsets");
+                setViewportBorder(pad == null ? null : new FlatEmptyBorder(pad));
                 setOpaque(false);
                 getViewport().setOpaque(false);
                 list.setOpaque(false);

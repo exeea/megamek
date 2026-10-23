@@ -380,7 +380,7 @@ options should stay visible.
 | Hover / open | `border.strong` edge |
 | Focus | The ring in place of the edge; the inline face gets the ring around it instead of the underline |
 | Disabled | As a disabled input; the inline underline turns `border.subtle` |
-| Popup list | `surface.popover` frame with a `border.control` edge, `xs` (4) below the face (above it when there is no room), at least as wide as the face; scrolls after 10 rows |
+| Popup list | `surface.popover` frame with a `border.control` edge, padded `xs` (4) top and bottom so the rows' highlight sits `xs` from the edge on every side, `xs` (4) below the face (above it when there is no room), at least as wide as the face; scrolls after 10 rows |
 | Rows | `control.sm` (28) high; a `surface.hover` wash, inset `xs`, on the row under the pointer or the keyboard; a `selected.primary` check before the current value, in a leading `icon.sm` slot |
 
 - **Sizes** match inputs: regular `control.md` (36), compact `control.sm` (28). The face is as wide as its widest item
