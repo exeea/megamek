@@ -2778,6 +2778,9 @@ final class BoardSurface {
             if (mouth(edge) && neighbor != null && neighbor.elevation() == tile.elevation()) {
                 continue; // Beds of one level share their mouth's profile and their banks' top: nothing stands between.
             }
+            // Water at this dry hex's level owns the bank between them: its sculpted shore rises to this hex's top.
+            if (!columns && neighbor != null && neighbor.liquid().present() && !tile.liquid().present()
+                  && neighbor.elevation() == tile.elevation() && relief.sculpted()) { continue; }
             BoardSurface adjacent = neighbor == null ? null : neighbors.get(neighbor.coords());
             if (neighbor != null && (adjacent == null || columns && !adjacent.columns)) {
                 adjacent = columns ? columns(scene, neighbor, lod) : new BoardSurface(scene, neighbor, false, lod);

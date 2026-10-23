@@ -377,10 +377,10 @@ final class BoardRoadCut {
             Vector3[] corners = { a, b, c };
             boolean top = face.finish() == BoardSurface.Finish.TOP && !shore, pouredTop = !natural && top;
             // Natural slopes are cut just under the road's surface, which covers their cut edge; at the surface itself
-            // the board's cut, which has no ground beyond it, and an upright face, which never lies along the road.
-            // Poured ground keeps a band beneath the road.
+            // the board's cut, which has no ground beyond it, and an upright face, which never lies along the road, as a
+            // cast step's face standing on the edge under a road's mouth. Poured ground keeps a band beneath the road.
             boolean boardCut = !top && face.landEdge() >= 0 && (boardEdges & 1 << face.landEdge()) != 0;
-            float band = boardCut || natural && nudge > 0 ? 0 : natural ? UNDER : ON_SURFACE;
+            float band = boardCut || nudge > 0 ? 0 : natural ? UNDER : ON_SURFACE;
             for (int i = 0; i < 3; i++) {
                 if (pouredTop) {
                     under[i] = Float.MAX_VALUE;
