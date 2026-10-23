@@ -20,6 +20,7 @@ import megamek.common.battlefieldSupport.OverlayStyle;
 import megamek.common.battlefieldSupport.StripeDirection;
 import megamek.common.icons.Camouflage;
 import megamek.common.options.OptionsConstants;
+import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityWeightClass;
@@ -36,7 +37,12 @@ import megamek.common.units.TripodMek;
 record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
     record Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
           int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm,
-          UnitFamilyScale family) {
+          UnitFamilyScale family, String infantryIcon, int fieldGuns) {
+        Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
+              int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm,
+              UnitFamilyScale family) {
+            this(movement, equipment, members, activeTroopers, externalSearchlight, anatomy, bodyForm, family, null, 0);
+        }
         Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
               int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm) {
             this(movement, equipment, members, activeTroopers, externalSearchlight, anatomy, bodyForm,
@@ -137,6 +143,11 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
     }
 
     static UnitModelState capture(Entity entity) {
+        return capture(entity, null);
+    }
+
+    /** The Swing-owned tileset supplies the icon identity; the renderer only receives this immutable snapshot. */
+    static UnitModelState capture(Entity entity, String infantryIcon) {
         List<UnitModelEquipment.Mount> equipment = new ArrayList<>();
         Set<Integer> inoperable = new TreeSet<>();
         for (var mount : entity.getEquipment()) {
@@ -196,7 +207,8 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
         boolean externalLamp = entity.hasExternalSearchlight() && (!entity.getsAutoExternalSearchlight()
               || entity.getQuirks().booleanOption(OptionsConstants.QUIRK_POS_SEARCHLIGHT));
         return new UnitModelState(new Structure(movement, equipment, members, troopers,
-              externalLamp, anatomy, form, UnitFamilyScale.forEntity(entity)),
+              externalLamp, anatomy, form, UnitFamilyScale.forEntity(entity), infantryIcon,
+              entity instanceof ConvInfantry infantry ? infantry.activeFieldWeapons().size() : 0),
               new Appearance(inoperable, entity.isUsingSearchlight(), appearance, fighterAppearances,
                     UnitModelSelection.bodyStage(entity)),
               new Pose(entity instanceof Mek ? entity.getProneCause() : ProneCause.NONE,
