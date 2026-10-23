@@ -30,6 +30,8 @@ import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.units.ConvInfantry;
+import megamek.common.units.EntityMovementMode;
+import megamek.common.units.SupportTank;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -108,7 +110,25 @@ class GpuInfantryMeepleSmokeTest {
                     var cycleSelection = UnitModelSelection.capture(infantry, -1, false, customTileset);
                     var cycles = library.get(cycleSelection, id);
                     assertNotNull(cycles);
-                    assertEquals(6 * library.modular(ROOT + "motorcycle-rider.json").triangles(), triangles(cycles.instance.nodes));
+                    assertEquals(1, cycles.instance.nodes.size, "One complete cycle, with no additional transport");
+                    assertEquals(library.modular(ROOT + "motorcycle-rider.json").triangles(), triangles(cycles.instance.nodes));
+                    for (String variant : List.of("", "(SRM)")) {
+                        var cycle = new SupportTank();
+                        cycle.setChassis("Minigun Cycle");
+                        cycle.setModel(variant);
+                        cycle.setWeight(.35);
+                        cycle.setMovementMode(EntityMovementMode.WHEELED);
+                        var selectedCycle = UnitModelSelection.capture(cycle, -1, false, tileset);
+                        assertEquals("vehicles/miniguncycle.png", selectedCycle.state().structure().iconKey());
+                        assertEquals(1, selectedCycle.figures());
+                        var vehicle = library.get(selectedCycle, ++id);
+                        assertNotNull(vehicle);
+                        assertEquals(1, vehicle.instance.nodes.size);
+                        assertNotNull(vehicle.instance.getNode("vehicle-0"));
+                        assertEquals(library.modular(ROOT + "motorcycle-rider.json").triangles(), triangles(vehicle.instance.nodes));
+                        assertSame(vehicle, library.get(selectedCycle, id));
+                    }
+                    id++;
                     when(customTileset.entryFor(infantry, -1)).thenReturn(customTileset.new MekEntry("Infantry/fieldgun.png"));
                     var gun = infantry.addEquipment(EquipmentType.get("ISAC5"), ConvInfantry.LOC_FIELD_GUNS);
                     infantry.addEquipment(EquipmentType.get("ISAC5"), ConvInfantry.LOC_FIELD_GUNS);
@@ -124,6 +144,12 @@ class GpuInfantryMeepleSmokeTest {
                     assertNotNull(damaged);
                     assertNotSame(armed, damaged);
                     assertEquals(gunTriangles + 5 * reference.triangles(), triangles(damaged.instance.nodes));
+                    // The single-unit icon override belongs only to the meeple display mode.
+                    library.setDisplayMode(UnitDisplayMode.MODELS, false);
+                    var ordinary = library.get(cycleSelection, ++id);
+                    assertNotNull(ordinary);
+                    assertEquals(6, ordinary.instance.nodes.size);
+                    assertTrue(ordinary.rigs().stream().noneMatch(UnitRig::meeple));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);

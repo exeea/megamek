@@ -35,7 +35,7 @@ class UnitModelSelectionTest {
         when(tileset.modelFor(infantry, -1)).thenReturn("units/modular/infantry.json");
         when(tileset.entryFor(infantry, -1)).thenReturn(tileset.new MekEntry("Infantry/Horse.png"));
         var first = UnitModelSelection.capture(infantry, -1, false, tileset).state().structure();
-        assertEquals("Infantry/Horse.png", first.infantryIcon());
+        assertEquals("Infantry/Horse.png", first.unitIcon());
         assertEquals(0, first.fieldGuns());
         var gun = infantry.addEquipment(EquipmentType.get("ISAC5"), ConvInfantry.LOC_FIELD_GUNS);
         infantry.addEquipment(EquipmentType.get("ISAC5"), ConvInfantry.LOC_FIELD_GUNS);
@@ -51,7 +51,7 @@ class UnitModelSelectionTest {
         assertNotEquals(armed, damaged);
         when(tileset.entryFor(infantry, -1)).thenReturn(tileset.new MekEntry("Infantry/Elephant.png"));
         var changedIcon = UnitModelSelection.capture(infantry, -1, false, tileset).state().structure();
-        assertEquals("Infantry/Elephant.png", changedIcon.infantryIcon());
+        assertEquals("Infantry/Elephant.png", changedIcon.unitIcon());
         assertNotEquals(damaged, changedIcon, "Assembly cache must also see changed icon overrides");
     }
 

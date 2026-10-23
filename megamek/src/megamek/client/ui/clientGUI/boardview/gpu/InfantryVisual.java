@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 import com.badlogic.gdx.utils.JsonValue;
 import megamek.common.units.EntityMovementMode;
@@ -25,8 +24,7 @@ final class InfantryVisual {
 
     static List<Part> parts(UnitModelState.Structure state, JsonValue components, int count) {
         JsonValue icons = components.get("troopersByIcon");
-        String iconTrooper = icons == null || state.infantryIcon() == null ? null
-              : icons.getString(state.infantryIcon().replace('\\', '/').toLowerCase(Locale.ROOT), null);
+        String iconTrooper = icons == null || state.iconKey() == null ? null : icons.getString(state.iconKey(), null);
         JsonValue vehicles = components.get("vehicles");
         // A mounted figure already includes its transport; e.g. a cycle must not also acquire a buggy.
         String vehicle = vehicles == null || iconTrooper != null ? null : vehicles.getString(state.movement().name(), null);

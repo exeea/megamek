@@ -40,7 +40,7 @@ class InfantryVisualTest {
           "Infantry/Elephant.png, elephant-rider", "Infantry/Orcainfy.png, orca-rider",
           "Infantry/Infantry_VTOL_Squad.png, vtol-trooper", "Infantry/Infantry_VTOL_Platoon.png, vtol-trooper",
           // CHECKSTYLE IGNORE ForbiddenWords FOR 1 LINES - literal icon and asset filenames
-          "Infantry/mechwarrior.png, mechwarrior", "Infantry/Miniguncycle.png, motorcycle-rider",
+          "Infantry/mechwarrior.png, mechwarrior",
           "INFANTRY\\HORSE.PNG, camel-horse-rider"
     })
     void specializedIconsSupplyWholeMountedFiguresWithoutExtraTransports(String icon, String mesh) {

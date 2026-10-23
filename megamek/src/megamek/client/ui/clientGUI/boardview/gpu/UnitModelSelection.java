@@ -27,7 +27,7 @@ final class UnitModelSelection {
         var captured = new UnitModelState(new UnitModelState.Structure(movement, structure.equipment(),
               structure.members(), structure.activeTroopers(), structure.externalSearchlight(), structure.anatomy(),
               body == null ? null : new UnitModelState.BodyForm(movement.name(), body.size(), body.turrets(), body.fighters()),
-              structure.family(), structure.infantryIcon(), structure.fieldGuns()),
+              structure.family(), structure.unitIcon(), structure.fieldGuns()),
               state.appearance(), new UnitModelState.Pose(pose.proneCause(), pose.facing(), pose.secondaryFacing(), form,
                     pose.dead(), pose.armsFlipped(), pose.hullDown()));
         return new BoardScene.UnitModel(tileset.modelFor(entity, part, form), tileset.genericModelFor(entity, part, form),
@@ -49,7 +49,7 @@ final class UnitModelSelection {
         String asset = tileset.modelFor(entity, part);
         // Meeples need the captured family, equipment and camouflage even without an authored asset.
         // Support assets may reuse an infantry tileset entry without exposing a personnel count.
-        var icon = entity instanceof Infantry && !(entity instanceof BattleArmor) ? tileset.entryFor(entity, part) : null;
+        var icon = tileset.entryFor(entity, part);
         UnitModelState state = UnitModelState.capture(entity, icon == null ? null : icon.getImageFile());
         int count = 1;
         String variant = entity instanceof Mek ? UnitModelKey.forEntity(entity) : entity.getShortNameRaw();
