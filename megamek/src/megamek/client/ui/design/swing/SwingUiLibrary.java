@@ -923,7 +923,7 @@ public final class SwingUiLibrary extends JFrame {
     private JComponent menuSamples() {
         JPanel samples = row(color("surface.base"));
 
-        // A real popup menu laid out as a component; a glass pane keeps the pointer from changing the frozen rows
+        // A real popup menu laid out as a component; a transparent cover keeps the pointer from changing the frozen rows
         JPopupMenu frozen = new JPopupMenu() {
             @Override
             public boolean isVisible() {
@@ -949,12 +949,32 @@ public final class SwingUiLibrary extends JFrame {
         fillGameMenu(frozen);
         ((JMenuItem) frozen.getComponent(1)).setArmed(true);
         frozen.getComponent(2).setEnabled(false);
-        JLayer<JComponent> shield = new JLayer<>(frozen);
-        shield.getGlassPane().setVisible(true);
-        shield.getGlassPane().addMouseListener(new MouseAdapter() {
+        JPanel cover = new JPanel();
+        cover.setOpaque(false);
+        cover.addMouseListener(new MouseAdapter() {
         });
-        shield.getGlassPane().addMouseMotionListener(new MouseAdapter() {
+        cover.addMouseMotionListener(new MouseAdapter() {
         });
+        JPanel shield = new JPanel(null) {
+            @Override
+            public boolean isOptimizedDrawingEnabled() {
+                return false;
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                return frozen.getPreferredSize();
+            }
+
+            @Override
+            public void doLayout() {
+                cover.setBounds(0, 0, getWidth(), getHeight());
+                frozen.setBounds(0, 0, getWidth(), getHeight());
+            }
+        };
+        shield.setOpaque(false);
+        shield.add(cover);
+        shield.add(frozen);
         JPanel open = new JPanel(new BorderLayout(0, scaleForGUI(4)));
         open.setOpaque(false);
         open.add(text(Messages.getString("UiLibrary.menus.open"), "caption", "text.muted"), BorderLayout.NORTH);
