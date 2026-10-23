@@ -3,6 +3,13 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.gdx.UiKit.text;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.ToDoubleFunction;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -18,8 +25,8 @@ import megamek.common.board.Coords;
 /**
  * The hovered hex's card, shown as a tooltip: once the pointer rests on a hex of the board for {@link #DELAY} seconds,
  * the hex and the lines its menu's header shows ({@link GpuContextMenu#hexLines}), in small text on a faint plate
- * beside the pointer. It goes when the pointer leaves that hex or the board, at a press, and while a menu or a dialog
- * is open. It never takes input.
+ * beside the pointer; a long terrain line breaks between its terms, never inside one. It goes when the pointer leaves
+ * that hex or the board, at a press, and while a menu or a dialog is open. It never takes input.
  */
 final class GpuHexTip implements GpuHud.Component {
     /** Seconds the pointer rests on a hex before its card shows: Swing's default tooltip delay. */
@@ -28,7 +35,7 @@ final class GpuHexTip implements GpuHud.Component {
     private static final float DRIFT = 3;
     /** The card's corner right of and below the pointer, clear of the cursor. */
     private static final float OFFSET_X = 14, OFFSET_Y = 20;
-    /** Lines longer than this wrap, as the HUD's widget tooltips do. */
+    /** The card's widest line, as wide as the HUD's widget tooltips. */
     private static final float WRAP = 340;
 
     private final GpuHudState state;
@@ -37,6 +44,8 @@ final class GpuHexTip implements GpuHud.Component {
     private final Table card = new Table();
     private final Label head;
     private final Label body;
+    /** Measures lines in the card's text; never shown. */
+    private final Label measure;
     private final Cell<Label> headCell;
     private final Cell<Label> bodyCell;
     private final Vector2 pointer = new Vector2();
@@ -56,6 +65,7 @@ final class GpuHexTip implements GpuHud.Component {
         card.setVisible(false);
         head = ui.label("", "hud-small", 11.5f, UiTheme.TEXT);
         body = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        measure = ui.label("", "hud-small", 11.5f, UiTheme.TEXT);
         headCell = card.add(head).left();
         card.row();
         bodyCell = card.add(body).left();
@@ -91,19 +101,32 @@ final class GpuHexTip implements GpuHud.Component {
         rested += Gdx.graphics.getDeltaTime();
         String lines = rested < DELAY ? null : GpuContextMenu.hexLines(inputs.frame(), hex);
         if (lines != null) {
-            show(text("GpuBoard.hud.context.hex", hex.getBoardNum()) + GpuContextMenu.SEPARATOR + lines, stage);
+            show(text("GpuBoard.hud.context.hex", hex.getBoardNum()), lines, stage);
         }
     }
 
-    /** Shows the card's text, its first line in the head, at the resting point; laid out again only when it changes. */
-    private void show(String text, Stage stage) {
+    /**
+     * Shows the hex's {@code title} and {@code lines} at the resting point; laid out again only when they change. The
+     * head, the title and the terrain line, breaks only between its terms ({@link #balance}); MegaMek's lines below it
+     * stay as they are.
+     */
+    private void show(String title, String lines, Stage stage) {
+        String text = title + "\n" + lines;
         if (!text.equals(shown)) {
             shown = text;
-            int newline = text.indexOf('\n');
-            head.setText(newline < 0 ? text : text.substring(0, newline));
-            body.setText(newline < 0 ? "" : text.substring(newline + 1));
-            bodyCell.setActor(newline < 0 ? null : body);
-            float width = Math.min(WRAP, Math.max(natural(head), newline < 0 ? 0 : natural(body)));
+            int newline = lines.indexOf('\n');
+            List<String> terms = new ArrayList<>(List.of(title));
+            terms.addAll(List.of((newline < 0 ? lines : lines.substring(0, newline))
+                  .split(Pattern.quote(GpuContextMenu.SEPARATOR))));
+            List<String> headLines = balance(terms, this::width, WRAP);
+            List<String> bodyLines = newline < 0 ? List.of() : lines.substring(newline + 1).lines().toList();
+            head.setText(String.join("\n", headLines));
+            body.setText(String.join("\n", bodyLines));
+            bodyCell.setActor(bodyLines.isEmpty() ? null : body);
+            // Only a term or a line wider than the card on its own still wraps, between its words.
+            double widest = Stream.concat(headLines.stream(), bodyLines.stream()).mapToDouble(this::width).max()
+                  .orElse(0);
+            float width = (float) Math.min(WRAP, widest) + 1;
             fit(headCell, head, width);
             fit(bodyCell, body, width);
             card.pack();
@@ -120,10 +143,53 @@ final class GpuHexTip implements GpuHud.Component {
         card.setVisible(false);
     }
 
-    /** A label's width on one line. */
-    private static float natural(Label label) {
-        label.setWrap(false);
-        return label.getPrefWidth();
+    /** A line's width in the card's text, which the head and the body share but for its colour. */
+    private double width(String line) {
+        measure.setText(line);
+        return measure.getPrefWidth();
+    }
+
+    /**
+     * The terms joined into lines that break only between terms: the fewest lines no wider than {@code max} (a term
+     * wider than that keeps a line of its own), and of those breaks the one whose widest line is narrowest, so the
+     * lines come out even, as CSS "text-wrap: balance" evens a heading.
+     */
+    static List<String> balance(List<String> terms, ToDoubleFunction<String> width, double max) {
+        double[] widths = terms.stream().mapToDouble(width).toArray();
+        double gap = width.applyAsDouble(GpuContextMenu.SEPARATOR);
+        int fewest = breaks(widths, gap, max).size();
+        double low = Arrays.stream(widths).max().orElse(0);
+        double high = Math.max(low, max);
+        // The narrowest limit that keeps that many lines; 30 halvings settle it far below a unit.
+        for (int step = 0; step < 30; step++) {
+            double limit = (low + high) / 2;
+            if (breaks(widths, gap, limit).size() <= fewest) { high = limit; } else { low = limit; }
+        }
+        List<String> lines = new ArrayList<>();
+        int start = 0;
+        for (int end : breaks(widths, gap, high)) {
+            lines.add(String.join(GpuContextMenu.SEPARATOR, terms.subList(start, end)));
+            start = end;
+        }
+        return lines;
+    }
+
+    /** Where each line ends (exclusive) when the terms fill each line up to {@code limit} in turn. */
+    private static List<Integer> breaks(double[] widths, double gap, double limit) {
+        List<Integer> ends = new ArrayList<>();
+        int start = 0;
+        double line = 0;
+        for (int index = 0; index < widths.length; index++) {
+            double next = index == start ? widths[index] : line + gap + widths[index];
+            if (index > start && next > limit) {
+                ends.add(index);
+                start = index;
+                next = widths[index];
+            }
+            line = next;
+        }
+        ends.add(widths.length);
+        return ends;
     }
 
     /** A label wrapped at {@code width}, so a long line breaks instead of widening the card. */
