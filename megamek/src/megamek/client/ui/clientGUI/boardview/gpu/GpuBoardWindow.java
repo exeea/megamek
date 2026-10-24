@@ -6,6 +6,7 @@ import java.awt.BorderLayout;
 import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Frame;
+import java.awt.HeadlessException;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
@@ -250,8 +251,9 @@ public final class GpuBoardWindow {
             return;
         }
         if (event.getID() == ComponentEvent.COMPONENT_SHOWN
-              && event.getSource() instanceof Dialog dialog && belongsToSwingWindow(dialog)) {
-            if (asksPrompts() && !allowedOverBattle(dialog)) {
+              && event.getSource() instanceof Dialog dialog && belongsToClient(dialog)) {
+            // A modal dialog left behind the native window would block the client unseen, so it rises regardless.
+            if (asksPrompts() && !allowedOverBattle(dialog) && !dialog.isModal()) {
                 return;
             }
             raise(dialog);
@@ -1093,6 +1095,31 @@ public final class GpuBoardWindow {
         return false;
     }
 
+    /**
+     * A dialog of the Swing window, or, unless this is a preview whose owner stays visible, a modal one without an owner
+     * of its own ({@code JOptionPane.showConfirmDialog(null, ...)}), which Swing gives its hidden shared frame. Such a
+     * dialog blocks the whole application, so it must not hide behind the native window, whichever client opened it.
+     */
+    private boolean belongsToClient(Dialog dialog) {
+        if (belongsToSwingWindow(dialog)) {
+            return true;
+        }
+        if (preview || !dialog.isModal()) {
+            return false;
+        }
+        try {
+            Frame shared = JOptionPane.getRootFrame();
+            for (Window current = dialog.getOwner(); current != null; current = current.getOwner()) {
+                if (current == shared) {
+                    return true;
+                }
+            }
+        } catch (HeadlessException headless) {
+            return false;
+        }
+        return false;
+    }
+
     private boolean closeWithPreviewOwner(AWTEvent event) {
         if (preview && !closing && event.getSource() == swingWindow
               && (event.getID() == ComponentEvent.COMPONENT_HIDDEN || event.getID() == WindowEvent.WINDOW_CLOSED)) {
@@ -1181,6 +1208,19 @@ public final class GpuBoardWindow {
     /** Includes preparation: Legacy 2D panels must not open while the native window is starting. */
     public static synchronized boolean isActiveFor(ClientGUI gui) {
         return active != null && active.gui == gui;
+    }
+
+    /** Whether the active window keeps the dialog above itself: natively owned on Windows, otherwise on top. */
+    static boolean raisedOverBoard(Dialog dialog) {
+        GpuBoardWindow window = active;
+        GpuNativeDialogOwner owner = window == null ? null : window.nativeOwner;
+        for (Dialog current = dialog; current != null;
+              current = current.getOwner() instanceof Dialog parent ? parent : null) {
+            if (owner != null && owner.owns(current)) {
+                return true;
+            }
+        }
+        return dialog.isAlwaysOnTop();
     }
 
     /** EDT: the View menu and its shortcut open the native ruler while this client's board is native. */
