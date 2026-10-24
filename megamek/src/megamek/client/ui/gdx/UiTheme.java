@@ -328,6 +328,7 @@ public final class UiTheme implements Disposable {
         tokenChoices();
         tokenOptions();
         tokenSelects();
+        tokenSelection();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -447,6 +448,8 @@ public final class UiTheme implements Disposable {
         /** The focus ring's outer and inner one-unit lines; the inner one is drawn one unit inside the outer. */
         public Drawable focusOuter;
         public Drawable focusInner;
+        /** The details' color (null: hud-v3's muted one); disabled details take the disabled font color. */
+        public Color detailFontColor;
     }
 
     /** The token button set in dark mode, the only mode native views have for now. */
@@ -908,8 +911,126 @@ public final class UiTheme implements Disposable {
         style.check = token(tokens.color("selected.primary", mode));
         style.underline = control;
         style.underlineOver = token(tokens.color("border.strong", mode));
-        style.underlineDisabled = token(tokens.color("border.subtle", mode));
         skin.add("default", style);
+    }
+
+    /** The token look of hud-v3's segmented control ({@code UiKit.segmented}); add {@link #COMPACT} for 28 high. */
+    public static final String TOKEN_SEGMENT = "token-segment";
+    /** The token look of hud-v3's underline tabs ({@code UiKit.segmented}); add {@link #COMPACT} for 28 high. */
+    public static final String TOKEN_TAB = "token-tab";
+    /** The token look of hud-v3's drop-down face ({@code UiKit.select}). */
+    public static final String TOKEN_SELECT = "token-select";
+    /** The token look of hud-v3's inline drop-down face. */
+    public static final String TOKEN_SELECT_INLINE = "token-select-inline";
+    /** The token look of hud-v3's menu row ({@code UiKit.menuRow}, {@code UiMenuList}). */
+    public static final String TOKEN_MENU_ROW = "token-menu-row";
+
+    /**
+     * Token v0 styles for hud-v3's own selection widgets, so migrating restyles them rather than replacing them
+     * (docs/design-system/tokens.md, Segmented control, Tabs, Select, Choices and Menus). The widgets also read the
+     * {@code token-tabs}, {@code token-divider}, {@code token-popup} and {@code choice-box} drawables.
+     */
+    private void tokenSelection() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        Texture white = skin.get("white", Texture.class);
+        Color text = token(tokens.color("text.primary", mode));
+        Color secondaryText = token(tokens.color("text.secondary", mode));
+        Color disabledText = token(tokens.color("text.disabled", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color violet = token(tokens.color("selected.primary", mode));
+        float xs = tokens.space().get("xs");
+        float border = tokens.size().get("border");
+        float underline = tokens.size().get("selection.width");
+
+        skin.add("token-tabs", new Dashes(white, subtle, border, 0, 0, false), Drawable.class);
+        skin.add("token-divider", skin.newDrawable("white", subtle), Drawable.class);
+        skin.add("token-popup", resized("sel-popup", xs, xs, 0), Drawable.class);
+        for (boolean compact : new boolean[] { false, true }) {
+            float height = tokens.size().get(compact ? "control.sm" : "control.md");
+            float side = tokens.space().get(compact ? "md" : "lg");
+            String suffix = compact ? COMPACT : "";
+
+            TokenButtonStyle segment = new TokenButtonStyle();
+            segment.font = skin.getFont("hud-medium");
+            segment.fontColor = secondaryText;
+            segment.overFontColor = text;
+            segment.downFontColor = text;
+            segment.checkedFontColor = text;
+            segment.disabledFontColor = disabledText;
+            segment.up = sized(flat(Color.CLEAR, 0, 0), 0, side, height, false);
+            segment.over = sized(resized("seg-over", 0, 0, 0), 0, side, height, false);
+            segment.down = sized(resized("seg-down", 0, 0, 0), 0, side, height, false);
+            segment.checked = sized(resized("seg-on", 0, 0, 0), 0, side, height, false);
+            segment.checkedOver = segment.checked;
+            segment.checkedDown = segment.checked;
+            segment.disabled = segment.up;
+            skin.add(TOKEN_SEGMENT + suffix, segment, TextButton.TextButtonStyle.class);
+
+            TokenButtonStyle tab = new TokenButtonStyle();
+            tab.font = skin.getFont("hud-medium");
+            tab.fontColor = secondaryText;
+            tab.overFontColor = text;
+            tab.downFontColor = text;
+            tab.checkedFontColor = text;
+            tab.disabledFontColor = disabledText;
+            tab.up = sized(flat(Color.CLEAR, 0, 0), 0, side, height, false);
+            tab.over = sized(skin.newDrawable("tab-over"), 0, side, height, false);
+            tab.down = tab.over;
+            tab.checked = sized(new Dashes(white, violet, underline, 0, 0, false), 0, side, height, false);
+            tab.checkedOver = tab.checked;
+            tab.checkedDown = tab.checked;
+            tab.disabled = tab.up;
+            skin.add(TOKEN_TAB + suffix, tab, TextButton.TextButtonStyle.class);
+        }
+
+        TokenButtonStyle select = new TokenButtonStyle();
+        select.font = skin.getFont("hud-body");
+        select.fontColor = text;
+        select.disabledFontColor = disabledText;
+        float faceLeft = border + tokens.space().get("md");
+        float faceRight = border + tokens.space().get("sm");
+        float regular = tokens.size().get("control.md");
+        select.up = resized("in", 0, faceLeft, regular);
+        select.up.setRightWidth(faceRight);
+        select.over = resized("in-over", 0, faceLeft, regular);
+        select.over.setRightWidth(faceRight);
+        select.down = select.over;
+        select.disabled = resized("in-quiet", 0, faceLeft, regular);
+        select.disabled.setRightWidth(faceRight);
+        skin.add(TOKEN_SELECT, select, TextButton.TextButtonStyle.class);
+        TokenButtonStyle inline = new TokenButtonStyle();
+        inline.font = skin.getFont("hud-small");
+        inline.fontColor = secondaryText;
+        inline.overFontColor = text;
+        inline.downFontColor = text;
+        inline.disabledFontColor = disabledText;
+        // The dotted underline hugs the text, as an inline link's does
+        float underlineGap = tokens.space().get("xxs");
+        inline.up = sized(new Dashes(white, token(tokens.color("border.control", mode)), border, 2, 2, false),
+              underlineGap, 0, 0, false);
+        inline.over = sized(new Dashes(white, token(tokens.color("border.strong", mode)), border, 2, 2, false),
+              underlineGap, 0, 0, false);
+        inline.down = inline.over;
+        inline.disabled = sized(new Dashes(white, subtle, border, 2, 2, false), underlineGap, 0, 0, false);
+        skin.add(TOKEN_SELECT_INLINE, inline, TextButton.TextButtonStyle.class);
+
+        // The popup's xs padding insets the rows' wash; text starts xs + md from the popup's edge
+        TokenButtonStyle row = new TokenButtonStyle();
+        row.font = skin.getFont("hud-body");
+        row.fontColor = text;
+        row.disabledFontColor = disabledText;
+        row.detailFontColor = token(tokens.color("text.muted", mode));
+        float rowSide = tokens.space().get("md") - xs;
+        float compactHeight = tokens.size().get("control.sm");
+        row.up = sized(flat(Color.CLEAR, 0, 0), 0, rowSide, compactHeight, false);
+        row.over = sized(resized("sel-row-over", 0, 0, 0), 0, rowSide, compactHeight, false);
+        row.down = row.over;
+        row.checked = row.over;
+        row.checkedOver = row.over;
+        row.checkedDown = row.over;
+        row.disabled = row.up;
+        skin.add(TOKEN_MENU_ROW, row, TextButton.TextButtonStyle.class);
     }
 
     /** A libGDX color from a token's ARGB value. */

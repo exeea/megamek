@@ -432,33 +432,51 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     }
 
     private void selection(Table page) {
+        String all = text("UiLibrary.gdx.segAll");
+        String mine = text("UiLibrary.gdx.segMine");
+        String critical = text("UiLibrary.gdx.segCritical");
+        String friendly = text("UiLibrary.gdx.tabFriendly");
+        String contacts = text("UiLibrary.gdx.tabContacts");
+        String combat = text("UiLibrary.gdx.tabCombat");
+        String chat = text("UiLibrary.gdx.tabChat");
+        String compact = UiTheme.COMPACT;
         heading(page, "UiLibrary.gdx.segmented");
-        compare(page, "hud-seg", kit.segmented("hud-seg", false, text("UiLibrary.gdx.segAll"),
-              text("UiLibrary.gdx.segMine"), text("UiLibrary.gdx.segCritical")).select(0), null);
-        compare(page, "hud-pill", kit.segmented("hud-pill", false, text("UiLibrary.gdx.segAll"),
-              text("UiLibrary.gdx.segMine"), text("UiLibrary.gdx.segCritical")).select(1), null);
-        compare(page, "hud-tab", kit.segmented("hud-tab", false, text("UiLibrary.gdx.tabFriendly"),
-              text("UiLibrary.gdx.tabContacts")).select(0), null);
-        compare(page, "hud-tab-caps", kit.segmented("hud-tab-caps", false, text("UiLibrary.gdx.segAll"),
-              text("UiLibrary.gdx.tabCombat"), text("UiLibrary.gdx.tabChat")).select(0), null);
+        compare(page, "hud-seg", kit.segmented("hud-seg", false, all, mine, critical).select(0),
+              kit.segmented(UiTheme.TOKEN_SEGMENT, false, all, mine, critical).select(0));
+        compare(page, "hud-pill", kit.segmented("hud-pill", false, all, mine, critical).select(1),
+              kit.segmented(UiTheme.TOKEN_SEGMENT + compact, false, all, mine, critical).select(1));
+        compare(page, "hud-tab", kit.segmented("hud-tab", false, friendly, contacts).select(0),
+              kit.segmented(UiTheme.TOKEN_TAB + compact, false, friendly, contacts).select(0));
+        compare(page, "hud-tab-caps", kit.segmented("hud-tab-caps", false, all, combat, chat).select(0),
+              kit.segmented(UiTheme.TOKEN_TAB + compact, false, all, combat, chat).select(0));
         heading(page, "UiLibrary.gdx.selects");
-        compare(page, "hud-select", new Container<>(kit.select(text("UiLibrary.gdx.selectValue"), false)).width(220),
-              null);
-        compare(page, "hud-select-inline", kit.select(text("UiLibrary.gdx.selectValue"), true), null);
+        String value = text("UiLibrary.gdx.selectValue");
+        compare(page, "hud-select", new Container<>(kit.select(value, false)).width(220),
+              new Container<>(kit.select(value, false, true)).width(220));
+        compare(page, "hud-select-inline", kit.select(value, true), kit.select(value, true, true));
+        compare(page, "UiKit.checkbox", checkboxes(false), checkboxes(true));
+        heading(page, "UiLibrary.gdx.menus");
+        compare(page, "hud-menu-row", menuRows("hud-menu-row"), menuRows(UiTheme.TOKEN_MENU_ROW));
+        compare(page, "UiMenuList", new Container<>(menuPanel()).width(280),
+              new Container<>(tokenMenuPanel()).width(280));
+    }
+
+    private Table checkboxes(boolean token) {
         Table checks = new Table();
         checks.defaults().padRight(20);
-        checks.add(kit.checkbox(text("UiLibrary.gdx.ticked"), true));
-        checks.add(kit.checkbox(text("UiLibrary.gdx.clear"), false));
-        compare(page, "UiKit.checkbox", checks, null);
-        heading(page, "UiLibrary.gdx.menus");
+        checks.add(kit.checkbox(text("UiLibrary.gdx.ticked"), true, token));
+        checks.add(kit.checkbox(text("UiLibrary.gdx.clear"), false, token));
+        return checks;
+    }
+
+    private Table menuRows(String style) {
         Table rows = new Table();
         rows.defaults().growX().width(280);
-        rows.add(kit.menuRow(text("UiLibrary.gdx.menuShortcut"), "Ctrl+K", null, false)).row();
-        rows.add(kit.menuRow(text("UiLibrary.gdx.menuChecked"), null, true, false)).row();
-        rows.add(kit.menuRow(text("UiLibrary.gdx.menuGroup"), null, null, true)).row();
-        rows.add(kit.menuRow(text("UiLibrary.gdx.menuHighlighted"), null, false, false).pressed(true));
-        compare(page, "hud-menu-row", rows, null);
-        compare(page, "UiMenuList", new Container<>(menuPanel()).width(280), null);
+        rows.add(kit.menuRow(style, text("UiLibrary.gdx.menuShortcut"), "Ctrl+K", null, false)).row();
+        rows.add(kit.menuRow(style, text("UiLibrary.gdx.menuChecked"), null, true, false)).row();
+        rows.add(kit.menuRow(style, text("UiLibrary.gdx.menuGroup"), null, null, true)).row();
+        rows.add(kit.menuRow(style, text("UiLibrary.gdx.menuHighlighted"), null, false, false).pressed(true));
+        return rows;
     }
 
     private void inputs(Table page) {
@@ -732,12 +750,24 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         Table popover = new Table();
         popover.setBackground(kit.skin.getDrawable("panel-pop"));
         popover.pad(8, 2, 8, 2);
-        popover.add(menuList()).growX();
+        popover.add(menuList("hud-menu-row")).growX();
+        return popover;
+    }
+
+    /** The menu list in the Token v0 look: the select's popup frame, whose padding insets the rows' wash. */
+    private Table tokenMenuPanel() {
+        Table popover = new Table();
+        popover.setBackground(kit.skin.getDrawable("token-popup"));
+        popover.add(menuList(UiTheme.TOKEN_MENU_ROW)).growX();
         return popover;
     }
 
     private UiMenuList menuList() {
-        UiMenuList list = new UiMenuList(kit);
+        return menuList("hud-menu-row");
+    }
+
+    private UiMenuList menuList(String style) {
+        UiMenuList list = new UiMenuList(kit, style);
         list.item(text("UiLibrary.gdx.menuShortcut"), "Ctrl+K", false, false, true, () -> { });
         list.item(text("UiLibrary.gdx.menuChecked"), null, true, false, true, () -> { });
         list.separator();

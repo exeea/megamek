@@ -12,6 +12,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.Pools;
+import megamek.client.ui.design.DesignTokens;
 
 /**
  * A menu's items and separators (.pop .it, .pop .sep), in a popover or a panel. Up and Down (wrapping), Home and End
@@ -22,12 +23,25 @@ public final class UiMenuList extends Table {
     /** A one-line item's height: the padding of 8 units around one line of the 13-unit body at its 1.35 line height. */
     private static final float ITEM_HEIGHT = 8 + 13 * 1.35f + 8;
     private final UiKit kit;
+    private final String style;
+    private final float itemHeight;
     private final List<UiButton> items = new ArrayList<>();
     private UiButton highlighted;
 
     /** An empty list of the kit's menu rows. */
     public UiMenuList(UiKit kit) {
+        this(kit, "hud-menu-row");
+    }
+
+    /**
+     * An empty list of menu rows in {@code style}: hud-menu-row, or {@link UiTheme#TOKEN_MENU_ROW} for the Token v0
+     * look, whose rows are control.sm high and whose separators are border.subtle hairlines.
+     */
+    public UiMenuList(UiKit kit, String style) {
         this.kit = kit;
+        this.style = style;
+        itemHeight = style.equals(UiTheme.TOKEN_MENU_ROW) ? DesignTokens.shipped().size().get("control.sm")
+              : ITEM_HEIGHT;
         top();
         // Items keep their fractional height, so a long list stays on the prototype's 33.55-unit rhythm.
         setRound(false);
@@ -46,17 +60,18 @@ public final class UiMenuList extends Table {
      * taller. Returns the item's row; its view may change its enabled state.
      */
     public UiButton item(String text, String detail, Boolean checked, boolean group, boolean enabled, Runnable action) {
-        UiButton row = kit.menuRow(text, detail, checked, group);
+        UiButton row = kit.menuRow(style, text, detail, checked, group);
         row.setDisabled(!enabled);
         UiKit.onChange(row, action);
         items.add(row);
-        add(row).growX().minHeight(ITEM_HEIGHT).row();
+        add(row).growX().minHeight(itemHeight).row();
         return row;
     }
 
     /** A hairline between two groups of items. */
     public void separator() {
-        add(new Image(kit.skin.getDrawable("rule"))).growX().height(1).pad(4, 0, 4, 0).row();
+        String rule = style.equals(UiTheme.TOKEN_MENU_ROW) ? "token-divider" : "rule";
+        add(new Image(kit.skin.getDrawable(rule))).growX().height(1).pad(4, 0, 4, 0).row();
     }
 
     /**

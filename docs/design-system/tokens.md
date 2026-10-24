@@ -392,7 +392,8 @@ drawables [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) regi
 the `UiTheme.CHOICE_STATES`), its mark and the focus ring. `UiKit` builds them: `check(text, checked)`,
 `radio(text, checked)`, `toggleSwitch(text, on)` and `radioGroup(radios...)`. A click, or Space or Enter while it has
 keyboard focus, fires a `ChangeEvent`; `setChecked` and `mixed(true)` from code fire none. `hovered`, `held` and
-`focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` stays until its views move.
+`focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` takes the Token v0 look with
+`checkbox(text, ticked, true)`: the `choice-box` faces and a `text.onAccent` check over the accent fill when ticked.
 
 ## Tabs
 
@@ -444,8 +445,13 @@ faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
 `tokenTabs(compact, labels...)` and `tokenSegmented(compact, labels...)`. A click, or Left and Right while the bar has
 keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
 `focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no Tab
-traversal yet. hud-v3's `UiKit.segmented` and the `hud-tab`, `hud-seg` and `hud-pill` styles stay until their views
-move.
+traversal yet.
+
+hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
+`-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and
+`hud-tab-caps` compact tabs in sentence case. Segments share one width inside the `seg-frame`, with `border.subtle`
+hairlines that hide beside the selected section; tabs sit on a `border.subtle` hairline with a violet underline under
+the selected one.
 
 ## Select
 
@@ -482,8 +488,9 @@ items...)`, `inline(items...)` (or `inline(combo)`) and `placeholder(combo, text
 registers. `UiKit` builds them: `tokenSelect(compact, items...)` and `tokenSelectInline(items...)`. The list sits on
 the stage's root while open and closes on a press outside it. Choosing another item fires a `ChangeEvent` from the
 select; `select(i)` from code fires none, and `placeholder(text)` shows the placeholder until a choice. `hovered`,
-`focused` and `opened` freeze those states for the gallery. hud-v3's `UiKit.select`, its `hud-select` styles and the
-`UiPopover` / `UiMenuList` drop-downs stay until their views move.
+`focused` and `opened` freeze those states for the gallery. hud-v3's own `UiKit.select(text, inline, true)` takes the
+Token v0 look: the `token-select` style is the input box with a `text.secondary` chevron, and `token-select-inline` a
+dotted `border.control` underline that turns `border.strong` on hover.
 
 ## Lists and trees
 
@@ -538,7 +545,12 @@ Menu bars, their menus and context menus. They share the select's popup, so ever
 **Swing.** The MegaMek themes style every `JMenuBar`, `JMenu`, `JMenuItem`, `JCheckBoxMenuItem`,
 `JRadioButtonMenuItem` and `JPopupMenu`, so existing menus get the look without changes.
 
-**libGDX.** Nothing new yet; the in-game UI has no menus that need it.
+**libGDX.** hud-v3's menu rows take the Token v0 look from the `token-menu-row` style: `UiKit.menuRow(style, ...)`
+and `new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW)`. Rows are `control.sm` high with the `sel-row-over` wash for the
+pointer and the keyboard highlight, a violet check, a `text.muted` shortcut and a `text.secondary` chevron. The list
+sits in the `token-popup` frame (the select's popup with `xs` padding, which insets the wash) and its separators are
+`border.subtle` hairlines. `UiButton.iconColors` keeps an icon in its own color rather than the text's, and
+`TokenButtonStyle.detailFontColor` sets the details' color.
 
 ## Tooltips
 

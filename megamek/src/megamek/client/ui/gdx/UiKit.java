@@ -394,21 +394,45 @@ public final class UiKit {
 
     /** A drop-down's face (.fsel; inline: .amsel): the current choice and a chevron. Its view opens the list. */
     public UiButton select(String text, boolean inline) {
-        UiButton select = new UiButton(this, inline ? "hud-select-inline" : "hud-select");
+        return select(text, inline, false);
+    }
+
+    /**
+     * A drop-down's face as {@link #select(String, boolean)}; with {@code token}, in the Token v0 look (the input box,
+     * or a dotted underline when inline, and a text.secondary chevron).
+     */
+    public UiButton select(String text, boolean inline, boolean token) {
+        String style = inline ? token ? UiTheme.TOKEN_SELECT_INLINE : "hud-select-inline"
+              : token ? UiTheme.TOKEN_SELECT : "hud-select";
+        UiButton select = new UiButton(this, style);
         select.setText(text);
         size(select.getLabel(), inline ? "hud-small" : "hud-body", inline ? 11 : 12);
         select.getLabel().setAlignment(Align.left);
         select.getLabel().setEllipsis(true);
         select.add(select.getLabel()).growX().minWidth(0);
-        Icon chevron = icon("chevron-down", 12, Color.WHITE);
-        select.icons.add(chevron);
-        select.add(chevron).padLeft(inline ? 2 : 6);
+        if (token) {
+            Icon chevron = icon("chevron-down", UiTheme.FIELD_ICON, Color.WHITE);
+            select.iconColors.put(chevron, skin.get(UiTheme.SelectStyle.class).chevron);
+            select.add(chevron).size(UiTheme.FIELD_ICON).padLeft(DesignTokens.shipped().space().get("xs"));
+        } else {
+            Icon chevron = icon("chevron-down", 12, Color.WHITE);
+            select.icons.add(chevron);
+            select.add(chevron).padLeft(inline ? 2 : 6);
+        }
         return select;
     }
 
     /** A checkbox (.tog): the box, mint while ticked, and its label; a click on either flips it. */
     public Checkbox checkbox(String text, boolean ticked) {
-        return new Checkbox(text, ticked);
+        return new Checkbox(text, ticked, false);
+    }
+
+    /**
+     * A checkbox as {@link #checkbox(String, boolean)}; with {@code token}, in the Token v0 look (an input box with a
+     * control edge, an accent fill and an onAccent check when ticked).
+     */
+    public Checkbox checkbox(String text, boolean ticked, boolean token) {
+        return new Checkbox(text, ticked, token);
     }
 
     /**
@@ -416,12 +440,27 @@ public final class UiKit {
      * as a shortcut, and a chevron when the item opens a group. The keyboard highlight is the pressed state.
      */
     public UiButton menuRow(String text, String detail, Boolean checked, boolean group) {
-        UiButton row = new UiButton(this, "hud-menu-row");
+        return menuRow("hud-menu-row", text, detail, checked, group);
+    }
+
+    /**
+     * A menu item as {@link #menuRow(String, String, Boolean, boolean)} in {@code style}: hud-menu-row, or
+     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a violet check and a text.secondary chevron.
+     */
+    public UiButton menuRow(String style, String text, String detail, Boolean checked, boolean group) {
+        UiButton row = new UiButton(this, style);
+        boolean token = style.equals(UiTheme.TOKEN_MENU_ROW);
+        UiTheme.SelectStyle colors = token ? skin.get(UiTheme.SelectStyle.class) : null;
+        float gap = token ? DesignTokens.shipped().space().get("sm") : 10;
         if (checked != null) {
             Icon mark = icon("check", 16, Color.WHITE);
             mark.setVisible(checked);
-            row.icons.add(mark);
-            row.add(mark).padRight(10);
+            if (token) {
+                row.iconColors.put(mark, colors.check);
+            } else {
+                row.icons.add(mark);
+            }
+            row.add(mark).padRight(gap);
         }
         row.setText(text);
         row.getLabel().setAlignment(Align.left);
@@ -429,12 +468,16 @@ public final class UiKit {
         if (detail != null && !detail.isEmpty()) {
             Label shortcut = label(detail, "hud-small", 11, Color.WHITE);
             row.details.add(shortcut);
-            row.add(shortcut).padLeft(10);
+            row.add(shortcut).padLeft(gap);
         }
         if (group) {
             Icon chevron = icon("chevron-right", 12, Color.WHITE);
-            row.icons.add(chevron);
-            row.add(chevron).padLeft(10);
+            if (token) {
+                row.iconColors.put(chevron, colors.chevron);
+            } else {
+                row.icons.add(chevron);
+            }
+            row.add(chevron).padLeft(gap);
         }
         return row;
     }
@@ -587,7 +630,14 @@ public final class UiKit {
         /** The segments or tabs, in the order of their labels. */
         public final List<UiButton> buttons = new ArrayList<>();
 
+        /** The hairlines between two sections of a token segmented control, hidden beside the selected one. */
+        private final List<Image> dividers = new ArrayList<>();
+
         private Segmented(String style, boolean flex, String... labels) {
+            if (style.startsWith(UiTheme.TOKEN_SEGMENT) || style.startsWith(UiTheme.TOKEN_TAB)) {
+                tokenSections(style, flex, labels);
+                return;
+            }
             boolean tabs = style.startsWith("hud-tab");
             // A pill ("hud-pill"): one frame whose sections touch, a hairline between two of them.
             boolean pill = style.equals("hud-pill");
@@ -612,10 +662,43 @@ public final class UiKit {
             }
         }
 
+        /**
+         * The Token v0 look: tabs side by side on a border.subtle hairline, or segments of one width in a raised
+         * frame with hairlines between them (docs/design-system/tokens.md, Tabs and Segmented control).
+         */
+        private void tokenSections(String style, boolean flex, String... labels) {
+            boolean tabs = style.startsWith(UiTheme.TOKEN_TAB);
+            float border = DesignTokens.shipped().size().get("border");
+            if (tabs) {
+                setBackground(skin.getDrawable("token-tabs"));
+            } else {
+                setBackground(skin.getDrawable("seg-frame"));
+                pad(border);
+            }
+            for (String text : labels) {
+                if (!tabs && !buttons.isEmpty()) {
+                    Image divider = new Image(skin.getDrawable("token-divider"));
+                    dividers.add(divider);
+                    add(divider).width(border).fillY().padTop(6).padBottom(6);
+                }
+                UiButton button = button(style, null, text, null);
+                Cell<UiButton> cell = add(button).fillY();
+                if (flex) {
+                    cell.growX().uniformX();
+                } else if (!tabs) {
+                    cell.uniformX().fillX();
+                }
+                buttons.add(button);
+            }
+        }
+
         /** Presses the segment at {@code index} and releases the others; -1 releases all. */
         public Segmented select(int index) {
             for (int i = 0; i < buttons.size(); i++) {
                 buttons.get(i).pressed(i == index);
+            }
+            for (int i = 0; i < dividers.size(); i++) {
+                dividers.get(i).setVisible(i != index && i + 1 != index);
             }
             return this;
         }
@@ -626,20 +709,44 @@ public final class UiKit {
      * fires a ChangeEvent; its view's own change ({@link #ticked}) fires none.
      */
     public final class Checkbox extends Table {
-        private final Icon box = icon("checkbox-off", 18, UiTheme.MUTED);
+        private final Icon box;
+        /** The Token v0 look's check over the box; null in the hud-v3 look. */
+        private final Icon mark;
+        private final ClickListener click;
         private boolean ticked;
 
-        private Checkbox(String text, boolean initial) {
-            add(box).padRight(8);
-            add(label(text, "hud-body", 13, UiTheme.TEXT));
-            setTouchable(Touchable.enabled);
-            addListener(new ClickListener() {
+        private Checkbox(String text, boolean initial, boolean token) {
+            click = new ClickListener() {
                 @Override
                 public void clicked(InputEvent event, float x, float y) {
                     toggle();
                 }
-            });
+            };
+            if (token) {
+                UiTheme.ChoiceStyle colors = skin.get(UiTheme.ChoiceStyle.class);
+                box = new Icon(skin.getDrawable("choice-box"), UiTheme.CHOICE_SIZE);
+                mark = icon("check", UiTheme.CHOICE_SIZE, colors.mark);
+                Stack indicator = new Stack(box, mark);
+                add(indicator).size(UiTheme.CHOICE_SIZE).padRight(DesignTokens.shipped().space().get("sm"));
+                add(label(text, "hud-body", 13, colors.text));
+            } else {
+                box = icon("checkbox-off", 18, UiTheme.MUTED);
+                mark = null;
+                add(box).padRight(8);
+                add(label(text, "hud-body", 13, UiTheme.TEXT));
+            }
+            setTouchable(Touchable.enabled);
+            addListener(click);
             ticked(initial);
+        }
+
+        @Override
+        public void act(float delta) {
+            if (mark != null) {
+                String state = click.isPressed() ? "-down" : click.isOver() ? "-over" : "";
+                box.setDrawable(skin.getDrawable("choice-box" + (ticked ? "-on" : "") + state));
+            }
+            super.act(delta);
         }
 
         /** Whether the box is ticked. */
@@ -650,6 +757,11 @@ public final class UiKit {
         /** Ticks or clears the box without an event. */
         public Checkbox ticked(boolean value) {
             ticked = value;
+            if (mark != null) {
+                box.setDrawable(skin.getDrawable(value ? "choice-box-on" : "choice-box"));
+                mark.setVisible(value);
+                return this;
+            }
             box.setDrawable(skin.getDrawable(value ? "icon-checkbox-on" : "icon-checkbox-off"));
             box.setColor(value ? UiTheme.MINT : UiTheme.MUTED);
             return this;

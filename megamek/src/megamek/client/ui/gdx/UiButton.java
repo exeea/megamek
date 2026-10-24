@@ -2,7 +2,9 @@
 package megamek.client.ui.gdx;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -25,6 +27,8 @@ public class UiButton extends TextButton {
     public final List<Actor> icons = new ArrayList<>();
     /** The sub-labels and details, muted, darker on a filled face. */
     public final List<Label> details = new ArrayList<>();
+    /** Icons in a color of their own rather than the text's; a token style's disabled color while disabled. */
+    public final Map<Actor, Color> iconColors = new HashMap<>();
     private final UiKit kit;
     private boolean pressed, hovered, held, focused;
     private Label badge;
@@ -149,12 +153,20 @@ public class UiButton extends TextButton {
         if (text != null) {
             icons.forEach(icon -> icon.setColor(text));
         }
-        Color detail = isDisabled() ? DISABLED_DETAIL
-              : UiTheme.FILL_INK.equals(text) ? UiTheme.FILL_MUTED : UiTheme.MUTED;
+        UiTheme.TokenButtonStyle token = getStyle() instanceof UiTheme.TokenButtonStyle style ? style : null;
+        for (Map.Entry<Actor, Color> entry : iconColors.entrySet()) {
+            entry.getKey().setColor(isDisabled() && token != null ? token.disabledFontColor : entry.getValue());
+        }
+        Color detail;
+        if (token != null && token.detailFontColor != null) {
+            detail = isDisabled() ? token.disabledFontColor : token.detailFontColor;
+        } else {
+            detail = isDisabled() ? DISABLED_DETAIL
+                  : UiTheme.FILL_INK.equals(text) ? UiTheme.FILL_MUTED : UiTheme.MUTED;
+        }
         details.forEach(label -> label.setColor(detail));
         super.draw(batch, parentAlpha);
-        if (!isDisabled() && (focused || hasKeyboardFocus())
-              && getStyle() instanceof UiTheme.TokenButtonStyle token && token.focusOuter != null) {
+        if (!isDisabled() && (focused || hasKeyboardFocus()) && token != null && token.focusOuter != null) {
             Color color = getColor();
             batch.setColor(color.r, color.g, color.b, color.a * parentAlpha);
             token.focusOuter.draw(batch, getX(), getY(), getWidth(), getHeight());
