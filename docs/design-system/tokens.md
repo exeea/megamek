@@ -98,6 +98,26 @@ Why these values:
 The `checks` block in the JSON lists every rule: text contrast 4.5:1, control contrast 3:1, and minimum distances
 between statuses, selection and accent for typical vision and the three simulated deficiencies. All 154 checks pass.
 
+### Migrating hud-v3 colors
+
+| hud-v3 color (`UiTheme`) | Token |
+| --- | --- |
+| `TEXT`, `ACCENT`, `MUTED`, `DISABLED` | `text.primary`, `text.secondary`, `text.muted`, `text.disabled` |
+| `PANEL`, `PANEL2` | `surface.panel`, `surface.raised` (overlay values) |
+| `POP` | `surface.popover` |
+| `FILL`, `MAIN` | `surface.inverse` |
+| `FILL_INK` | `text.onInverse` |
+| `FILL_MUTED` | `surface.raised` |
+| `LINE`, `TRACK`, `QUIET` | `border.subtle` |
+| `TICK`, `RAIL` | `border.control` |
+| `CORNER`, `HOVER` | `border.strong` |
+| `MINT` | `accent.primary`; its success uses move to `status.success` |
+| `CORAL`, `AMBER`, `VIOLET` | `status.danger`, `status.warning`, `selected.primary` |
+| `BLIP` | No token: it stays a HUD game color, like unit and team colors |
+
+No hud-v3 color becomes `surface.base`, `surface.input`, `surface.hover`, `surface.scrim`, `text.onAccent`,
+`focus.ring`, `selected.background` or `status.info`; the libGDX gallery lists them as new in Token v0.
+
 ## Typography
 
 One family, Roboto, on both platforms; icons are Material Symbols Rounded. Both ship in `mm-data`.
@@ -129,6 +149,22 @@ every instance. So `mm-data` also ships `Roboto/Roboto-Medium.ttf`, a static ins
 [make_static_roboto.py](make_static_roboto.py) generates from the variable font. Its family name is "Roboto Medium",
 which is how Swing asks for medium; regular comes from the variable font's default instance. libGDX keeps reading the
 variable font. Both platforms therefore draw the same outlines from one source.
+
+libGDX registers each style as a Label style named `type-` plus the style (`UiTheme.TYPE_STYLES`), beside the hud-v3
+fonts it replaces.
+
+### Migrating hud-v3 fonts
+
+| hud-v3 font | Style |
+| --- | --- |
+| `hud-body`, `hud-small` | `body`, `small` |
+| `hud-medium`, `hud-utility`, `hud-mini`, `hud-button`, `hud-main` | `label` (button and tab text) |
+| `hud-sub` | `caption` |
+| `hud-caption` | `overline` |
+| `hud-name` | `body.strong` |
+| `hud-title`, `hud-heading`, `hud-phase` | `title`, `headline`, `display` |
+
+The libGDX gallery's Colors and type tab shows each hud-v3 color and font beside the token that replaces it.
 
 ## Spacing, shape and motion
 

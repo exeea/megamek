@@ -5,7 +5,7 @@ import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -80,8 +80,6 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private static final float TODAY_WIDTH = 420;
     private static final float MIGRATED_WIDTH = 400;
     private static final float COLUMN_GAP = 14;
-    private static final int TODAY_SWATCHES_PER_ROW = 3;
-    private static final int MIGRATED_SWATCHES_PER_ROW = 2;
     private static final String SAMPLE_SPRITE = "defaults/default_heavy.png";
     /** The token button style each hud-v3 button style migrates to (tokens.md, "Migrating hud-v3 styles"). */
     private static final Map<String, String> MIGRATED_BUTTONS = Map.ofEntries(
@@ -92,6 +90,45 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
           Map.entry("hud-utility-small", "button-secondary" + UiTheme.COMPACT),
           Map.entry("hud-utility", "button-special"), Map.entry("hud-utility-narrow", "button-special"),
           Map.entry("hud-utility-row", "button-special"));
+
+    /** A hud-v3 color and the token that replaces it, or null when it stays a HUD game color. */
+    private record ColorMove(String name, Color today, String token) { }
+
+    /** Each hud-v3 color in UiTheme and its token (tokens.md, "Migrating hud-v3 colors"). */
+    private static final List<ColorMove> COLOR_MOVES = List.of(
+          new ColorMove("TEXT", UiTheme.TEXT, "text.primary"),
+          new ColorMove("ACCENT", UiTheme.ACCENT, "text.secondary"),
+          new ColorMove("MUTED", UiTheme.MUTED, "text.muted"),
+          new ColorMove("DISABLED", UiTheme.DISABLED, "text.disabled"),
+          new ColorMove("PANEL", UiTheme.PANEL, "surface.panel"),
+          new ColorMove("PANEL2", UiTheme.PANEL2, "surface.raised"),
+          new ColorMove("POP", UiTheme.POP, "surface.popover"),
+          new ColorMove("FILL", UiTheme.FILL, "surface.inverse"),
+          new ColorMove("MAIN", UiTheme.MAIN, "surface.inverse"),
+          new ColorMove("FILL_INK", UiTheme.FILL_INK, "text.onInverse"),
+          new ColorMove("FILL_MUTED", UiTheme.FILL_MUTED, "surface.raised"),
+          new ColorMove("LINE", UiTheme.LINE, "border.subtle"),
+          new ColorMove("TRACK", UiTheme.TRACK, "border.subtle"),
+          new ColorMove("QUIET", UiTheme.QUIET, "border.subtle"),
+          new ColorMove("TICK", UiTheme.TICK, "border.control"),
+          new ColorMove("RAIL", UiTheme.RAIL, "border.control"),
+          new ColorMove("CORNER", UiTheme.CORNER, "border.strong"),
+          new ColorMove("HOVER", UiTheme.HOVER, "border.strong"),
+          new ColorMove("MINT", UiTheme.MINT, "accent.primary"),
+          new ColorMove("CORAL", UiTheme.CORAL, "status.danger"),
+          new ColorMove("AMBER", UiTheme.AMBER, "status.warning"),
+          new ColorMove("VIOLET", UiTheme.VIOLET, "selected.primary"),
+          new ColorMove("BLIP", UiTheme.BLIP, null));
+    /** Mint meant both active and success; its success uses move to their own token. */
+    private static final String MINT_SUCCESS = "status.success";
+
+    /** The Token v0 type style each hud-v3 font becomes (tokens.md, "Migrating hud-v3 fonts"). */
+    private static final Map<String, String> FONT_MOVES = Map.ofEntries(
+          Map.entry("hud-body", "body"), Map.entry("hud-small", "small"), Map.entry("hud-medium", "label"),
+          Map.entry("hud-utility", "label"), Map.entry("hud-sub", "caption"), Map.entry("hud-caption", "overline"),
+          Map.entry("hud-mini", "label"), Map.entry("hud-button", "label"), Map.entry("hud-name", "body.strong"),
+          Map.entry("hud-title", "title"), Map.entry("hud-heading", "headline"), Map.entry("hud-phase", "display"),
+          Map.entry("hud-main", "label"));
 
     /** The open gallery; read and written on the EDT. */
     private static GpuUiLibraryWindow open;
@@ -318,9 +355,42 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     private void colors(Table page) {
         heading(page, "UiLibrary.gdx.colors");
-        compare(page, "UiTheme", currentSwatches(), tokenSwatches());
+        Set<String> used = new HashSet<>();
+        used.add(MINT_SUCCESS);
+        for (ColorMove move : COLOR_MOVES) {
+            Actor migrated;
+            if (move.token() == null) {
+                migrated = kit.label(text("UiLibrary.gdx.gameColor"), "hud-small", 11.5f, UiTheme.MUTED);
+            } else {
+                used.add(move.token());
+                Table token = new Table();
+                token.left().top();
+                token.add(tokenSwatch(move.token())).left().row();
+                if ("MINT".equals(move.name())) {
+                    token.add(kit.label(text("UiLibrary.gdx.successUses", MINT_SUCCESS), "hud-small", 11,
+                          UiTheme.MUTED)).left().padTop(6).row();
+                    token.add(tokenSwatch(MINT_SUCCESS)).left().padTop(4);
+                }
+                migrated = token;
+            }
+            compare(page, move.name(), swatch(null, "#" + move.today().toString().toUpperCase(Locale.ROOT),
+                  move.today()), migrated);
+        }
+        Table added = new Table();
+        added.defaults().left().padBottom(8);
+        for (ColorToken token : tokens.colors().values()) {
+            if (!used.contains(token.name())) {
+                added.add(tokenSwatch(token.name())).row();
+            }
+        }
+        compare(page, text("UiLibrary.gdx.newTokens"),
+              kit.label(text("UiLibrary.gdx.noHudColor"), "hud-small", 11.5f, UiTheme.MUTED), added);
         heading(page, "UiLibrary.gdx.fonts");
-        compare(page, "UiTheme.HUD_FONTS", fonts(), null);
+        for (UiTheme.HudFont font : UiTheme.HUD_FONTS) {
+            UiTheme.HudFont type = typeStyle(FONT_MOVES.get(font.name()));
+            compare(page, font.name(), fontSample(font.name(), font, font.name(), TODAY_WIDTH),
+                  fontSample(type.name(), type, UiTheme.TYPE + type.name(), MIGRATED_WIDTH));
+        }
     }
 
     private void buttons(Table page) {
@@ -813,91 +883,59 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return row;
     }
 
-    private Table tokenSwatches() {
-        List<Table> cells = new ArrayList<>();
+    /** A token's swatch as the gallery draws it on a panel, with its name and dark value. */
+    private Table tokenSwatch(String name) {
+        ColorToken token = tokens.colors().get(name);
         int panel = tokens.color("surface.panel", Mode.DARK);
-        for (ColorToken token : tokens.colors().values()) {
-            int value = token.overlay() != null ? token.overlay() : token.dark();
-            // Translucent roles show as they sit on a panel.
-            int shown = ColorMath.alpha(value) == 0xFF ? value : ColorMath.over(value, panel);
-            String hex = ColorMath.hex(value) + (token.overlay() != null ? "  " + text("UiLibrary.gdx.overlay") : "");
-            cells.add(swatch(token.name(), hex, color(shown), 160));
-        }
-        return grid(cells, MIGRATED_SWATCHES_PER_ROW);
+        int value = token.overlay() != null ? token.overlay() : token.dark();
+        // Translucent roles show as they sit on a panel.
+        int shown = ColorMath.alpha(value) == 0xFF ? value : ColorMath.over(value, panel);
+        String hex = ColorMath.hex(value) + (token.overlay() != null ? "  " + text("UiLibrary.gdx.overlay") : "");
+        return swatch(token.name(), hex, color(shown));
     }
 
-    private Table currentSwatches() {
-        Map<String, Color> current = new LinkedHashMap<>();
-        current.put("TEXT", UiTheme.TEXT);
-        current.put("ACCENT", UiTheme.ACCENT);
-        current.put("MUTED", UiTheme.MUTED);
-        current.put("DISABLED", UiTheme.DISABLED);
-        current.put("PANEL", UiTheme.PANEL);
-        current.put("PANEL2", UiTheme.PANEL2);
-        current.put("POP", UiTheme.POP);
-        current.put("LINE", UiTheme.LINE);
-        current.put("RAIL", UiTheme.RAIL);
-        current.put("QUIET", UiTheme.QUIET);
-        current.put("TICK", UiTheme.TICK);
-        current.put("CORNER", UiTheme.CORNER);
-        current.put("MINT", UiTheme.MINT);
-        current.put("CORAL", UiTheme.CORAL);
-        current.put("AMBER", UiTheme.AMBER);
-        current.put("VIOLET", UiTheme.VIOLET);
-        current.put("BLIP", UiTheme.BLIP);
-        current.put("FILL", UiTheme.FILL);
-        current.put("FILL_INK", UiTheme.FILL_INK);
-        current.put("FILL_MUTED", UiTheme.FILL_MUTED);
-        current.put("MAIN", UiTheme.MAIN);
-        current.put("HOVER", UiTheme.HOVER);
-        current.put("TRACK", UiTheme.TRACK);
-        List<Table> cells = new ArrayList<>();
-        current.forEach((name, value) -> cells.add(swatch(name, "#" + value.toString().toUpperCase(Locale.ROOT),
-              value, 124)));
-        return grid(cells, TODAY_SWATCHES_PER_ROW);
-    }
-
-    private Table swatch(String name, String detail, Color fill, float width) {
+    /** A color chip with its name, when it has one, and its value beside it. */
+    private Table swatch(String name, String detail, Color fill) {
         Table cell = new Table();
-        cell.defaults().left();
+        cell.left().top();
         Image chip = new Image(kit.skin.newDrawable("white", fill));
         // A subtle outline keeps colors that sit close to the background visible.
         Table outline = new Table();
         outline.setBackground(kit.skin.newDrawable("white", color(tokens.color("border.subtle", Mode.DARK))));
-        outline.add(chip).size(width, 28);
+        outline.add(chip).size(110, 26);
         outline.pad(1);
-        cell.add(outline).row();
-        cell.add(kit.label(name, "hud-medium", 12, UiTheme.TEXT)).padTop(4).row();
-        cell.add(kit.label(detail, "hud-small", 10.5f, UiTheme.MUTED)).row();
+        cell.add(outline).padRight(12);
+        Table labels = new Table();
+        labels.defaults().left();
+        if (name != null) {
+            labels.add(kit.label(name, "hud-medium", 12, UiTheme.TEXT)).row();
+        }
+        labels.add(kit.label(detail, "hud-small", 10.5f, UiTheme.MUTED));
+        cell.add(labels).left();
         return cell;
     }
 
-    private static Table grid(List<Table> cells, int perRow) {
-        Table grid = new Table();
-        grid.top().left();
-        grid.defaults().left().top().padRight(12).padBottom(10);
-        for (int index = 0; index < cells.size(); index++) {
-            grid.add(cells.get(index));
-            if ((index + 1) % perRow == 0) {
-                grid.row();
+    private static UiTheme.HudFont typeStyle(String name) {
+        for (UiTheme.HudFont type : UiTheme.TYPE_STYLES) {
+            if (type.name().equals(name)) {
+                return type;
             }
         }
-        return grid;
+        throw new IllegalArgumentException(name);
     }
 
-    private Table fonts() {
-        Table fonts = new Table();
-        fonts.defaults().left().padBottom(6);
-        for (UiTheme.HudFont font : UiTheme.HUD_FONTS) {
-            fonts.add(kit.label(String.format(Locale.ROOT, "%s  %s / %s", font.name(), trim(font.size()),
-                  weight(font.instance())), "hud-small", 11, UiTheme.MUTED)).width(200);
-            Label sample = new Label(text("UiLibrary.type.sample"), kit.skin, font.name());
-            sample.setEllipsis(true);
-            fonts.add(sample).width(TODAY_WIDTH - 200).row();
-        }
-        return fonts;
+    /** A font's spec over a sample line drawn in its Label style; overline is the one upper-case style. */
+    private Table fontSample(String name, UiTheme.HudFont font, String style, float width) {
+        Table sample = new Table();
+        sample.left().top();
+        sample.add(kit.label(String.format(Locale.ROOT, "%s  %s / %s", name, trim(font.size()),
+              weight(font.instance())), "hud-small", 11, UiTheme.MUTED)).left().row();
+        String line = text("UiLibrary.type.sample");
+        Label label = new Label("overline".equals(name) ? UiTheme.upper(line) : line, kit.skin, style);
+        label.setEllipsis(true);
+        sample.add(label).width(width).left().padTop(2);
+        return sample;
     }
-
     // ---- Helpers
 
     private static String text(String key, Object... arguments) {

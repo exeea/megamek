@@ -100,6 +100,21 @@ public final class UiTheme implements Disposable {
           new HudFont("hud-phase", CONDENSED_BOLD, 23, .02f, TEXT),
           new HudFont("hud-main", CONDENSED_BOLD, 17, .1f, TEXT));
 
+    /** The prefix of a Token v0 type style's Label style name, such as {@code type-body}. */
+    public static final String TYPE = "type-";
+
+    /** Token v0's type scale in regular-width Roboto; each entry is registered as a Label style named TYPE + name. */
+    public static final List<HudFont> TYPE_STYLES = List.of(
+          new HudFont("display", MEDIUM, 23, 0, TEXT),
+          new HudFont("headline", MEDIUM, 20, 0, TEXT),
+          new HudFont("title", MEDIUM, 16, 0, TEXT),
+          new HudFont("body", REGULAR, 13, 0, TEXT),
+          new HudFont("body.strong", MEDIUM, 13, 0, TEXT),
+          new HudFont("label", MEDIUM, 12.5f, 0, TEXT),
+          new HudFont("small", REGULAR, 11.5f, 0, TEXT),
+          new HudFont("caption", REGULAR, 10.5f, 0, TEXT),
+          new HudFont("overline", MEDIUM, 10.5f, .06f, TEXT));
+
     private static final String ICON_FONT = "Icons/MaterialSymbolsRounded[FILL,GRAD,opsz,wght].ttf";
     private static final int ICON_SIZE = 48;
     private static final int ICON_CELL = 64;
@@ -216,6 +231,11 @@ public final class UiTheme implements Disposable {
         for (HudFont hud : HUD_FONTS) {
             BitmapFont face = font(hud.name(), ROBOTO, hud.instance(), hud.size(), hud.tracking(), 0, hudGlyphs);
             skin.add(hud.name(), new Label.LabelStyle(face, hud.color()));
+        }
+        for (HudFont type : TYPE_STYLES) {
+            BitmapFont face = font(TYPE + type.name(), ROBOTO, type.instance(), type.size(), type.tracking(), 0,
+                  hudGlyphs);
+            skin.add(TYPE + type.name(), new Label.LabelStyle(face, type.color()));
         }
         hudGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture(), false));
 
