@@ -53,7 +53,7 @@ import megamek.common.Configuration;
 import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
-import megamek.common.board.BoardIssue;
+import megamek.common.board.HexIssue;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
 
@@ -177,7 +177,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /** An issue's hex waiting to be framed until its selection has applied, and when that wait ends (nanoTime). */
     private megamek.common.board.Coords pendingFrame;
     private long pendingFrameUntil;
-    private List<BoardIssue> shownIssues, sessionIssues;
+    private List<HexIssue> shownIssues, sessionIssues;
     /** The installed fit's objects inside the walls of Fitted pavement hexes; listed after the session's issues. */
     private List<BoardConcrete.Cut> shownCuts = List.of();
     private final Label status, documentName;
@@ -2476,9 +2476,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      */
     private void issuesChanged() {
         if (sessionIssues == null) { return; }
-        List<BoardIssue> merged = new ArrayList<>(sessionIssues);
+        List<HexIssue> merged = new ArrayList<>(sessionIssues);
         for (var cut : shownCuts) {
-            merged.add(new BoardIssue(cut.at(), cut.object(), UiKit.text("BoardEditor.issueInsideWall", assetLabel(cut.asset()))));
+            merged.add(new HexIssue(cut.at(), cut.object(), UiKit.text("BoardEditor.issueInsideWall", assetLabel(cut.asset()))));
         }
         shownIssues = List.copyOf(merged);
         issues.setVisible(!shownIssues.isEmpty());

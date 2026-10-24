@@ -222,6 +222,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private JComboBox<String> unitStartChar;
     private JSpinner maxPathfinderTime;
     private final JCheckBox getFocus = new JCheckBox(Messages.getString("CommonSettingsDialog.getFocus"));
+    private final JCheckBox expandOptionSections = new JCheckBox(
+          Messages.getString("CommonSettingsDialog.expandOptionSections"));
     private JSlider guiScale;
     private ColourSelectorButton csbWarningColor;
     private ColourSelectorButton csbCautionColor;
@@ -267,6 +269,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private final MMComboBox<NameplateMode> nameplateMode = new MMComboBox<>("nameplateMode", NameplateMode.values());
     private final JCheckBox showAutoResolvePanel = new JCheckBox(Messages.getString(
           "CommonSettingsDialog.showAutoResolvePanel"));
+    private final JCheckBox pauseBotGamesAtStart = new JCheckBox(Messages.getString(
+          "CommonSettingsDialog.pauseBotGamesAtStart"));
     private JComboBox<String> favoritePrincessBehaviorSetting;
     private JComboBox<String> displayLocale;
     private final SettingsCheckBox showIPAddressesInChat = createShowIpAddressesInChatCheckBox();
@@ -2580,6 +2584,11 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         row.add(createGuiScaleControl());
         comps.add(row);
 
+        configureCheckBox(expandOptionSections,
+              Messages.getString("CommonSettingsDialog.expandOptionSections.tooltip"));
+        expandOptionSections.setSelected(GUIP.getExpandOptionSections());
+        comps.add(List.of(expandOptionSections));
+
         addLineSpacer(comps);
 
         JLabel userDirLabel = new JLabel(Messages.getString("CommonSettingsDialog.userDir"));
@@ -2589,6 +2598,13 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         String userFilesChooserTitle = Messages.getString("CommonSettingsDialog.userDir.chooser.title");
         JButton userFilesChooser = applicationIconButton("btnUserDirChooser", 0xE2C8, userFilesChooserTitle);
         userFilesChooser.addActionListener(e -> fileChooseUserDir(userDir, getFrame()));
+        if (CLIENT_PREFERENCES.isUserDirOverridden()) {
+            String overridden = Messages.getString("CommonSettingsDialog.userDir.launcherOverride");
+            userDir.setEnabled(false);
+            userDir.setToolTipText(overridden);
+            userFilesChooser.setEnabled(false);
+            userFilesChooser.setToolTipText(overridden);
+        }
         JButton userFilesHelp = createUserFilesHelpButton();
         row = new ArrayList<>();
         row.add(userDirLabel);
@@ -2793,6 +2809,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     public void setVisible(boolean visible) {
         // Initialize the dialog when it's being shown
         if (visible) {
+            expandOptionSections.setSelected(GUIP.getExpandOptionSections());
             guiScale.setValue((int) (GUIP.getGUIScale() * 10));
             autoEndFiring.setSelected(GUIP.getAutoEndFiring());
             autoDeclareSearchlight.setSelected(GUIP.getAutoDeclareSearchlight());
@@ -2871,6 +2888,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             generateNames.setSelected(CLIENT_PREFERENCES.generateNames());
             showUnitId.setSelected(CLIENT_PREFERENCES.getShowUnitId());
             showAutoResolvePanel.setSelected(CLIENT_PREFERENCES.getShowAutoResolvePanel());
+            pauseBotGamesAtStart.setSelected(GUIP.getBotCommandsPauseAtStart());
             //            favoritePrincessBehaviorSetting.setSelectedItem(CLIENT_PREFERENCES.getFavoritePrincessBehaviorSetting());
 
             int index = 0;
@@ -3341,6 +3359,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setTooltipDistSuppression((int) tooltipDistSuppression.getValue());
 
         GUIP.setValue(GUIPreferences.GUI_SCALE, (float) (guiScale.getValue()) / 10);
+        GUIP.setExpandOptionSections(expandOptionSections.isSelected());
 
         Object unitSelected = unitStartChar.getSelectedItem();
         if (unitSelected instanceof String unitStart) {
@@ -3384,6 +3403,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         CLIENT_PREFERENCES.setGenerateNames(generateNames.isSelected());
         CLIENT_PREFERENCES.setShowUnitId(showUnitId.isSelected());
         CLIENT_PREFERENCES.setShowAutoResolvePanel(showAutoResolvePanel.isSelected());
+        GUIP.setBotCommandsPauseAtStart(pauseBotGamesAtStart.isSelected());
         CLIENT_PREFERENCES.setFavoritePrincessBehaviorSetting(
             (String) favoritePrincessBehaviorSetting.getSelectedItem());
         saveAdvancedSettingsControls();
@@ -3999,6 +4019,12 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             "CommonSettingsDialog.favoritePrincessBehaviorSettingTooltip"));
           comps.add(List.of(createAiDisplayGrid(showAutoResolvePanel, enableExperimentalBotFeatures,
               favoriteBehaviorLabel, favoritePrincessBehaviorSetting)));
+        configureCheckBox(pauseBotGamesAtStart,
+            Messages.getString("CommonSettingsDialog.pauseBotGamesAtStart.tooltip"));
+        SettingsFormPanel botOrdersGrid = new SettingsFormPanel("CommonSettingsBotOrdersGrid",
+              SettingsFormPanel.DEFAULT_LABEL_WIDTH, 0);
+        botOrdersGrid.addCheckBox(pauseBotGamesAtStart);
+        comps.add(List.of(botOrdersGrid));
 
         return createSettingsPanel(comps);
     }

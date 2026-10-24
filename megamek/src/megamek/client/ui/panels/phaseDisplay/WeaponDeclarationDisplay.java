@@ -34,11 +34,11 @@ package megamek.client.ui.panels.phaseDisplay;
 
 import java.util.List;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.IClientGUI;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.ToHitData;
 import megamek.common.actions.EntityAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.units.Entity;

@@ -1,6 +1,6 @@
 /*
   Copyright (C) 2000-2003 Ben Mazur (bmazur@sev.org)
- * Copyright (C) 2002-2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2002-2026 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -209,6 +209,15 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
     public List<Integer> getKeptDice(int index) {
         int[] dice = ((keptDice == null) || (index >= keptDice.size())) ? null : keptDice.elementAt(index);
         return (dice == null) ? List.of() : List.of(dice[0], dice[1]);
+    }
+
+    /**
+     * @param index which roll in the sequence (later entries are tie-break rolls)
+     *
+     * @return the total bonus added to that roll, so the dice alone are {@code getRoll(index) - getBonus(index)}
+     */
+    public int getBonus(int index) {
+        return bonuses.elementAt(index).total();
     }
 
     /**

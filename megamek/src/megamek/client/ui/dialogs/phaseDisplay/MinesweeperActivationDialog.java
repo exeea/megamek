@@ -57,6 +57,7 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 
+import jakarta.annotation.Nullable;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -66,7 +67,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Player;
-import megamek.common.annotations.Nullable;
 import megamek.common.equipment.MiscMounted;
 import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;

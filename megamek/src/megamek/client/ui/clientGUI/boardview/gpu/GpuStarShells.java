@@ -16,7 +16,7 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
-import megamek.common.annotations.Nullable;
+import jakarta.annotation.Nullable;
 import megamek.common.board.Coords;
 import megamek.logging.MMLogger;
 

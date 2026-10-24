@@ -39,13 +39,13 @@ import java.util.Map;
 import javax.swing.JFrame;
 import javax.swing.JToggleButton;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.enums.DialogResult;
-import megamek.common.annotations.Nullable;
 import megamek.common.equipment.EquipmentActivation;
 import megamek.common.equipment.MiscMounted;
 import megamek.common.units.Entity;

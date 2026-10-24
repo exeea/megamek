@@ -34,7 +34,7 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
-import megamek.common.board.BoardIssue;
+import megamek.common.board.HexIssue;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
@@ -191,7 +191,7 @@ public final class BoardEditorSession {
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
           List<Property> properties, Map<String, HexAppearance> appearance, List<BoardDecoration> objects,
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
-          List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<BoardIssue> issues,
+          List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
           int copies) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
@@ -291,7 +291,7 @@ public final class BoardEditorSession {
         public boolean refused() { return surface == WaySurface.REFUSED; }
     }
     /** A resize's two boards and the import issues of each; its undo and redo install one of them as a whole. */
-    private record Resize(Board before, Board after, List<BoardIssue> importsBefore, List<BoardIssue> importsAfter) { }
+    private record Resize(Board before, Board after, List<HexIssue> importsBefore, List<HexIssue> importsAfter) { }
     private final Game game = new Game();
     private final BoardEditorBlueprint blueprint;
     private final ArrayDeque<Edit> undo = new ArrayDeque<>(), redo = new ArrayDeque<>();
@@ -373,15 +373,15 @@ public final class BoardEditorSession {
     /** A whole group's members as a relative group edit found them; a live value drag transforms from them. */
     private Map<Selection, BoardDecoration> groupBase = Map.of();
     /** Problems per hex, re-validated for the hexes of every committed edit, undo and redo; never during a stroke. */
-    private final Map<Coords, List<BoardIssue>> issues = new java.util.HashMap<>();
+    private final Map<Coords, List<HexIssue>> issues = new java.util.HashMap<>();
     /** The identical copies ({@link #stacks}) per hex that holds any, validated with {@link #issues}. */
     private final Map<Coords, Integer> copies = new java.util.HashMap<>();
-    private List<BoardIssue> issueList = List.of();
+    private List<HexIssue> issueList = List.of();
     /**
      * What the document's conversions (at open and at each edit's commit) could not decode exactly; each stays listed
      * while its object stays in its hex.
      */
-    private List<BoardIssue> importIssues = List.of();
+    private List<HexIssue> importIssues = List.of();
     /** Whether an object model file exists, per asset, so validation reads the disk once per asset. */
     private final Map<String, Boolean> modelFiles = new java.util.HashMap<>();
     /** The random map settings, kept between uses of Random map as the old editor kept them; made on first use. */
@@ -547,7 +547,7 @@ public final class BoardEditorSession {
      * document is exactly what its saved .board2 holds, and its 2D Preview shows what a 2D player of that file sees.
      */
     private void replace(Board board, Path path) {
-        List<BoardIssue> converted = BoardSceneryLayouts.convert(board);
+        List<HexIssue> converted = BoardSceneryLayouts.convert(board);
         List<Coords> every = new ArrayList<>();
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) { every.add(new Coords(x, y)); }
@@ -1099,7 +1099,7 @@ public final class BoardEditorSession {
         if (north == 0 && east == 0 && south == 0 && west == 0) { message = Messages.getString("BoardEditor.nothingChanged"); return; }
         Board before = board(), after = BoardUtilities.resize(before, north, east, south, west);
         // An import issue stays with its object, which moved with its hex.
-        List<BoardIssue> imports = importIssues.stream().map(issue -> new BoardIssue(BoardUtilities.resized(issue.coords(), north, west),
+        List<HexIssue> imports = importIssues.stream().map(issue -> new HexIssue(BoardUtilities.resized(issue.coords(), north, west),
               issue.object(), issue.text())).filter(issue -> after.contains(issue.coords())).toList();
         long id = ++nextId;
         undo.push(new Edit(Map.of(), Map.of(), currentId, id, new Resize(before, after, importIssues, imports)));
@@ -1911,7 +1911,7 @@ public final class BoardEditorSession {
     private record Saved(Coords selected, String selectedObject, String component, String message, String strokeNotice,
           long revision, List<Selection> selection, Set<Coords> painted, Map<Coords, WayLayer> wayLayers,
           Map<Coords, String> wayReceivers, Coords routePaintFrom, double routeEntryX, double routeEntryY, boolean placed,
-          Map<Coords, Hex> stroke, List<BoardIssue> importIssues, RoutePath drawing) { }
+          Map<Coords, Hex> stroke, List<HexIssue> importIssues, RoutePath drawing) { }
 
     private Saved save() {
         // Hash copies, not Set.copyOf or Map.copyOf, whose probing is slow for runs of Coords (finishStroke).
@@ -2266,7 +2266,7 @@ public final class BoardEditorSession {
               .filter(at -> BoardSceneryLayouts.withoutTakenTokens(board().getHex(at)) != board().getHex(at)).toList();
         if (typed.isEmpty()) { return; }
         typed.forEach(this::beginHexEdit);
-        List<BoardIssue> found = BoardSceneryLayouts.convert(board(), typed);
+        List<HexIssue> found = BoardSceneryLayouts.convert(board(), typed);
         dropTakenTokens(board(), typed);
         if (!found.isEmpty()) { importIssues = java.util.stream.Stream.concat(importIssues.stream(), found.stream()).toList(); }
     }
@@ -2611,21 +2611,21 @@ public final class BoardEditorSession {
     private void validate(java.util.Collection<Coords> cells) {
         for (Coords at : cells) {
             if (!board().contains(at)) { continue; }
-            List<BoardIssue> found = new ArrayList<>();
-            board().hexErrors(at).forEach(text -> found.add(new BoardIssue(at, "", text)));
+            List<HexIssue> found = new ArrayList<>();
+            board().hexErrors(at).forEach(text -> found.add(new HexIssue(at, "", text)));
             Hex hex = board().getHex(at);
             for (BoardDecoration object : hex.getDecorations()) {
-                if (!assetExists(object)) { found.add(new BoardIssue(at, object.id(), Messages.getString("BoardEditor.issueArtMissing", object.asset()))); }
+                if (!assetExists(object)) { found.add(new HexIssue(at, object.id(), Messages.getString("BoardEditor.issueArtMissing", object.asset()))); }
                 var receiver = object.placement().receiver();
                 if (receiver != null && !supports(hex, receiver.terrain())) {
                     String support = blueprint.components().stream().filter(definition -> definition.receiver().equals(receiver.terrain()))
                           .map(definition -> definition.label().toLowerCase(java.util.Locale.ROOT)).findFirst().orElse(receiver.terrain());
-                    found.add(new BoardIssue(at, object.id(), Messages.getString("BoardEditor.issueNoSupport", receiver.surface(), support)));
+                    found.add(new HexIssue(at, object.id(), Messages.getString("BoardEditor.issueNoSupport", receiver.surface(), support)));
                 }
             }
             int copied = 0;
             for (List<BoardDecoration> stack : stacks(hex)) {
-                found.add(new BoardIssue(at, stack.getFirst().id(),
+                found.add(new HexIssue(at, stack.getFirst().id(),
                       Messages.getString("BoardEditor.issueCopies", stack.size() - 1, label(stack.getFirst()))));
                 copied += stack.size() - 1;
             }
@@ -2635,7 +2635,7 @@ public final class BoardEditorSession {
         var imported = importIssues.stream().filter(issue -> board().contains(issue.coords()) && board().getHex(issue.coords())
               .getDecorations().stream().anyMatch(object -> object.id().equals(issue.object())));
         issueList = java.util.stream.Stream.concat(issues.values().stream().flatMap(List::stream), imported)
-              .sorted(Comparator.comparingInt((BoardIssue issue) -> issue.coords().getX()).thenComparingInt(issue -> issue.coords().getY()))
+              .sorted(Comparator.comparingInt((HexIssue issue) -> issue.coords().getX()).thenComparingInt(issue -> issue.coords().getY()))
               .toList();
     }
 

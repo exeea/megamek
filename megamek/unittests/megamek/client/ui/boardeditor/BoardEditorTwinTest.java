@@ -13,7 +13,7 @@ import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.client.ui.boardeditor.BoardEditorSession.Selection;
 import megamek.common.board.BoardDecoration;
-import megamek.common.board.BoardIssue;
+import megamek.common.board.HexIssue;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
@@ -111,10 +111,10 @@ class BoardEditorTwinTest {
 
         var snapshot = session.snapshot();
         assertEquals(2 + stamp.size(), snapshot.copies());
-        assertTrue(snapshot.issues().contains(new BoardIssue(east, beacon,
+        assertTrue(snapshot.issues().contains(new HexIssue(east, beacon,
               Messages.getString("BoardEditor.issueCopies", 2, "Hex landing beacon"))), "One issue at the first beacon");
         assertEquals(stamp.stream().map(BoardDecoration::id).toList(), snapshot.issues().stream()
-              .filter(issue -> issue.coords().equals(at)).map(BoardIssue::object).toList(), "One issue per copied tree");
+              .filter(issue -> issue.coords().equals(at)).map(HexIssue::object).toList(), "One issue per copied tree");
 
         send(session, Action.REMOVE_COPIES, "", "");
         assertEquals(stamp, objects(session, at), "The first stamp stays, in its group");

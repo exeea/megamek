@@ -6,12 +6,12 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.common.Player;
-import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.compute.ComputeECM;

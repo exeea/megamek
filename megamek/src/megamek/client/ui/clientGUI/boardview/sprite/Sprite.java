@@ -41,9 +41,9 @@ import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
 import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.common.annotations.Nullable;
 
 /**
  * Everything in the main map view is either the board or it's a sprite displayed on top of the board. Most sprites

@@ -315,7 +315,13 @@ public enum PacketCommand {
     /** Server-confirmed, visibility-filtered attack presentation; never an attack order. */
     ENTITY_ATTACK_RESOLVED,
     /** Server-confirmed scheduled nuclear strike, including custom resolved blast parameters. */
-    NUCLEAR_DETONATION;
+    NUCLEAR_DETONATION,
+    /**
+     * A Server to Client packet carrying every team's initiative roll, as a map from player id to the roll of that
+     * player's team. Team rolls decide who wins initiative but are not part of a player update, so without this a
+     * client only knows each player's roll for ordering within their own team.
+     */
+    TEAM_INITIATIVE;
     //endregion Enum Declarations
 
     //region Boolean Comparison Methods
