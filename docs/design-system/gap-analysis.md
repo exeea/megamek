@@ -33,7 +33,7 @@ Agreed so far:
 | libGDX light mode | Deferred; the HUD is dark only for now. The Java2D board has no light/dark theming either. |
 | Accent | hud-v3 mint, retuned as needed; it stops doubling as the success color. |
 | Migration | The stock themes stay behind a hidden "classic" option until migration is done. |
-| Text case | **Final.** Two modes, chosen per screen: **game** and **app**. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token. Both galleries have a switch between the modes. See [tokens.md](tokens.md#text-case). |
+| Text case | **Final.** Two modes, chosen per screen: **game** and **app**. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token (values signed off: display .04, headline .05, title .06, label .08, overline .1 em). Both galleries have a switch between the modes. See [tokens.md](tokens.md#text-case). |
 | Framed button | Corner ticks that become a full frame on hover (hud-v3 bracket, Immersive `FramedCommandButton`) are one shared special-purpose variant. |
 | MekHQ `hud` library | Folded into the new library. |
 | Launcher | Retune its colors to the tokens for now; shared controls wait for the planned monorepo. |
@@ -340,8 +340,8 @@ work for Swing, and item 11 is under investigation.
 - ~~Toasts~~: short notices at the top centre of a view, a bar and an icon in the level's color (the Game Master in
   violet with a shield), the newest on top and at most five, paused by the pointer, closed by their ✕, with clicks
   passing through, in Swing; see [tokens.md](tokens.md#toasts).
-- All-caps: decide whether HUD labels, section overlines and the libGDX status card stay in capitals or move to
-  sentence case, before the trial so nothing is restyled twice.
+- ~~All-caps~~: a game and an app text case mode, chosen per screen, with signed-off caps tracking for upper-case
+  text, in Swing and libGDX; see [tokens.md](tokens.md#text-case).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
