@@ -391,6 +391,7 @@ final class GpuTerrain implements Disposable {
                 private final int biomeSoilTileUniform = register("u_biomeSoilTile");
                 private final int mudMaterialUniform = register("u_mudMaterial");
                 private final int bankMaterialsUniform = register("u_bankMaterials");
+                private final int flatRockUniform = register("u_flatRock");
                 private final int surfaceLayersUniform = register("u_surfaceLayers");
                 // Upload before render-time texture-unit assignment, like the other shared maps.
                 private final GpuAssets.FinishArrays finishArrays = program.hasUniform("u_finishSurface[0]")
@@ -529,6 +530,10 @@ final class GpuTerrain implements Disposable {
                     if (has(bankMaterialsUniform)) {
                         set(bankMaterialsUniform, 2f * SCULPT_LAYERS.indexOf("soil-contact"), assets.sculptTile("soil-contact"),
                               2f * SCULPT_LAYERS.indexOf("gravel"), assets.sculptTile("gravel"));
+                    }
+                    if (has(flatRockUniform)) {
+                        set(flatRockUniform, 2f * SCULPT_LAYERS.indexOf("granite-contact"), 2f * SCULPT_LAYERS.indexOf("rock"),
+                              assets.sculptTile("rock"));
                     }
                     if (finishArrays != null) {
                         float[] surface = finishArrays.surface(), tint = finishArrays.tint(), glow = finishArrays.glow();

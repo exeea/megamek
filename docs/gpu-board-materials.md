@@ -160,11 +160,10 @@ reads the parameters and renders these materials with its own shaders (`terrain-
 `magma-flow.glsl`, `magma-solid.glsl`, `terrain-ice.glsl`), which add the board's flow, banks,
 floes and edges.
 
-Material Maker cannot write a `ShaderMaterial`. Its projects export the standard maps, plus
-the extra map from a stock Export node, and `export.py` turns Material Maker's
-`StandardMaterial3D` into the `ShaderMaterial` (see `mm-data/tools/materials/README.md`). A
-`StandardMaterial3D` with a `<name>.gdshader` beside it, which an editor export leaves, is
-refused with an error naming `export.py --wrap`.
+Their Material Maker projects carry their own export target, *Godot 4 ShaderMaterial*: the
+standard maps, the extra map from a stock Export node, and the `ShaderMaterial` itself (see
+`mm-data/tools/materials/README.md`). A `StandardMaterial3D` with a `<name>.gdshader` beside it,
+which a *Godot 4 Standard* export of them leaves, is refused with an error naming that target.
 
 ## How the renderer packs them
 
@@ -262,12 +261,12 @@ flat (mm-data's `tools/materials/README.md`, which also says how to edit these v
 | `terrain/lava/crust`, `terrain/lava/lava` | 1024 | – |
 | `terrain/surfaces/tree-pit-mulch` | 512 | 1 |
 | `terrain/surfaces/gravel`, `pavement` | 512 | 3 |
-| `terrain/surfaces/grass`, `lunar-scree`, `scree`, `soil-contact`, `tropical-ground` | 512 | 4 |
+| `terrain/surfaces/grass`, `lunar-scree`, `scree`, `tropical-ground` | 512 | 4 |
 | `terrain/surfaces/dirt` | 512 | 5 |
 | `terrain/surfaces/concrete`, `desert-hardpan`, `mars-hardpan`, `sand`, `volcano-ground` | 512 | 6 |
-| `terrain/surfaces/basalt-cap`, `cast`, `fungus-mat`, `granite-contact`, `lunar`, `mars-cap`, `rock`, `sandstone-cap`, `snow` | 512 | 8 |
+| `terrain/surfaces/basalt-cap`, `cast`, `fungus-mat`, `lunar`, `mars-cap`, `sandstone-cap`, `snow` | 512 | 8 |
 | `terrain/surfaces/fungus-fibres`, `granite`, `mars-bedrock` | 512 | 10 |
-| `terrain/surfaces/fungus-cliff`, `loose-sand`, `lunar-cliff`, `sandstone`, `volcano-basalt` | 512 | 12 |
+| `terrain/surfaces/fungus-cliff`, `granite-contact`, `loose-sand`, `lunar-cliff`, `rock`, `sandstone`, `soil-contact`, `volcano-basalt` | 512 | 12 |
 | `terrain/surfaces/earth` | 512 | 20 |
 | `terrain/surfaces/fungus-ground` | 512 | 22 |
 | `terrain/surfaces/tundra-earth`, `tundra-earth-variant`, `tundra-fungus` | 512 | 24 |

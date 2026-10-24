@@ -119,7 +119,7 @@ final class GodotMaterial {
             File shader = new File(file.getParentFile(), material.name() + ".gdshader");
             if (shader.isFile()) {
                 throw new IllegalArgumentException(file + " is a StandardMaterial3D, but " + shader.getName() + " beside it"
-                      + " makes it a ShaderMaterial; an editor export replaced it: run tools/materials/export.py --wrap");
+                      + " makes it a ShaderMaterial: export it with its project's Godot 4 ShaderMaterial target");
             }
             return material;
         }

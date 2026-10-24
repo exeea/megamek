@@ -4,6 +4,7 @@
 
 uniform float u_terrainWear; // 0: no ambient weathering; 1: full material weathering and cover erosion
 uniform vec4 u_bankMaterials; // existing soil-contact and gravel: colour layer / repeat in metres
+uniform vec3 u_flatRock; // the shared cliff's colour layer, then the rock tops' colour layer and repeat in metres
 bool riverBank = false; // set by the water-owned ground, before evaluating its material roles
 float shallowSediment = -1.0; // Halfway depth-zero arid shore profile; negative on deeper water and dry land.
 
@@ -1070,6 +1071,11 @@ float familyDust(float f) {
 TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim,
       float rock, float hardness, float broad, float fine, float region, float sediment, float familyId,
       vec4 tiles, vec4 layers, bool sides, bool single) {
+    // The shared cliff's joints stand upright: level bedrock of its families shows the rock tops' map instead.
+    if (!sides && abs(layers.z - u_flatRock.x) < .5) {
+        layers.z = u_flatRock.y;
+        tiles.z = u_flatRock.z;
+    }
     // Desert/Mars depth-zero bars blend the original soft deposit edge halfway toward the broader shore deposit.
     if (shallowSediment >= 0.0 && (abs(familyId - DESERT_FAMILY) < .5 || abs(familyId - MARS_FAMILY) < .5)) {
         sediment = shallowSediment;

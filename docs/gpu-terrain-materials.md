@@ -463,7 +463,7 @@ scans.
 
 Concrete planting pits use `tree-pit-mulch` for their interiors and the existing
 authored concrete for their kerbs. The mulch project exposes bark-chip placement,
-palette and relief controls, reuses the soil-contact source for the soil substrate,
+palette and relief controls, takes its dark soil substrate from its own photographic source,
 and exports registered colour/height and normal/AO maps. The catalogue gives its 1 m
 repeat, its 1.5 cm relief shapes its normal, and its material's `roughness` of 0.92
 is its scalar roughness. The shader applies no
@@ -486,10 +486,17 @@ its normal gradient by 2.37, rather than exaggerating the same relief over a lon
 distance.
 Slope and height-aware blending determine how cover gives way to mantle, rock and scree.
 
-Dirt repeats at 5 m. Exposed grass banks use `soil-contact` rather than dirt: cohesive
-eroded subsoil, not loose gravel, repeating at 4 m with 9.5 cm of estimated relief.
-Sandstone repeats at 12 m with 16 cm of estimated relief and `granite-contact` at 8 m
-with 8 cm; both have broad rock planes and discontinuous fractures. `sand`, `grass`
+Dirt repeats at 5 m with 6 cm of estimated relief: dry compact soil with embedded and loose
+stones of 1 to 10 cm. Exposed grass banks use `soil-contact` rather than dirt: dry crumbly
+loam with small clods and stones and no direction (parallel rills combed every bank), repeating
+at 12 m with 12 cm of estimated relief.
+Sandstone repeats at 12 m with 16 cm of estimated relief, in broad rock planes and discontinuous
+fractures. `granite-contact` (cliff walls) repeats at 12 m with 16 cm: pale karst limestone in
+jointed blocks with water streaks and lichen; the `rock` tops (12 m, 42 cm) are the same limestone
+as a weathered plateau of slabs with grass and soil in its fissures, and `scree` is its talus of
+angular blocks. Level bedrock of the families whose wall is `granite-contact` reads the `rock`
+map instead (`u_flatRock`), as the cliff's joints stand upright. Dirt, soil-contact, grass,
+rock, granite-contact, scree and the mulch's soil come from photographic studies. `sand`, `grass`
 and `scree` repeat at 6, 4 and 4 metres with 2.5, 2.5 and 10 cm of relief; lunar has
 its own `lunar-scree`. See [terrain realism](gpu-terrain-realism.md) for the visual
 references and acceptance rules.

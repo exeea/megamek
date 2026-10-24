@@ -51,7 +51,7 @@ final class BoardMaterialFiles {
     }
 
     /**
-     * Lava's heat, which turns a {@link #relief} material into the ShaderMaterial export.py makes of it: Material Maker's
+     * Lava's heat, which turns a {@link #relief} material into the ShaderMaterial its project exports: Material Maker's
      * emission map and the shader's extra map, molten RGB with its coverage or crust R with its glow.
      */
     static void heat(Path textures, String material, BufferedImage heat, float energy) throws IOException {

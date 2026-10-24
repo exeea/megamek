@@ -163,7 +163,7 @@ class GpuBoardMaterialsTest {
               """);
         error = assertThrows(IllegalArgumentException.class,
               () -> GodotMaterial.read(folder.resolve("sheet.tres").toFile(), textures.toFile()));
-        assertTrue(error.getMessage().contains("export.py --wrap"), error.getMessage());
+        assertTrue(error.getMessage().contains("Godot 4 ShaderMaterial target"), error.getMessage());
     }
 
     @Test
