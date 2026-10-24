@@ -227,7 +227,7 @@ public final class GpuBoardWindow {
     private JDialog preview2D;
     private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
-    /** Natively owned raised dialogs (Windows, macOS, Linux on X11) instead of floating them on top. Else null. */
+    /** Natively owned raised dialogs (Windows, macOS, Linux on X11) instead of floating them on top. Else {@code null}. */
     private volatile GpuNativeDialogOwner nativeOwner;
     /** EDT: natively owned modal dialogs; while any is open the board window is disabled, as a blocked frame is. */
     private final Set<Dialog> modalDialogs = Collections.newSetFromMap(new IdentityHashMap<>());

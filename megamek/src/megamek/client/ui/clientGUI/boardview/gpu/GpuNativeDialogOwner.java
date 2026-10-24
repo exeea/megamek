@@ -71,7 +71,7 @@ abstract class GpuNativeDialogOwner {
         this.ownerHandle = ownerHandle;
     }
 
-    /** The owner for a GLFW window, or null where native ownership is unavailable and dialogs must float on top. */
+    /** The owner for a GLFW window, or {@code null} where native ownership is unavailable and dialogs must float on top. */
     static GpuNativeDialogOwner forGlfwWindow(long glfwWindow) {
         try {
             return switch (SharedLibraryLoader.os) {
@@ -86,12 +86,12 @@ abstract class GpuNativeDialogOwner {
         }
     }
 
-    /** Windows owner for a native window handle; null where Windows ownership is unavailable. */
+    /** Windows owner for a native window handle; {@code null} where Windows ownership is unavailable. */
     static GpuNativeDialogOwner forWindows(long hwnd) {
         return Win32.supported() && hwnd != 0 ? new Win32(hwnd) : null;
     }
 
-    /** Tests: an owner whose board is a showing Swing window standing in for the GLFW window, or null. */
+    /** Tests: an owner whose board is a showing Swing window standing in for the GLFW window, or {@code null}. */
     static GpuNativeDialogOwner forSwingWindow(Window board) {
         return switch (SharedLibraryLoader.os) {
             case Windows -> Win32.supported() ? forWindows(FlatNativeWindowsLibrary.getHWND(board)) : null;
@@ -180,9 +180,9 @@ abstract class GpuNativeDialogOwner {
     /**
      * Swing thread, under the adoption lock: makes the dialog's native window owned by the board window.
      *
-     * @param previous the dialog's adoption before it was last hidden, or null
+     * @param previous the dialog's adoption before it was last hidden, or {@code null}
      *
-     * @return the adoption to remember, or null when the dialog could not be owned
+     * @return the adoption to remember, or {@code null} when the dialog could not be owned
      */
     abstract Adoption attach(Dialog dialog, Adoption previous);
 
