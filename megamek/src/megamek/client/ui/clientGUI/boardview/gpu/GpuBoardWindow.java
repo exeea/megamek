@@ -1378,6 +1378,7 @@ public final class GpuBoardWindow {
         @Override
         public void created(Lwjgl3Window window) {
             GpuGlsl.detect();
+            GpuNativeDialogOwner.Win32.useWindowIconsForClass(window.getWindowHandle());
         }
 
         @Override
