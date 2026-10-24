@@ -201,7 +201,7 @@ layer-control buttons. Roughly six visual families.
 | List row / tree | `UiList`, `UiTree` | — | `JList`, `JTree` | |
 | Popover / menu | `UiPopover`, `UiMenuList` | map popup colors | `JPopupMenu` | |
 | Tooltip | `panel` frame, `hud-small`, wraps at 340 | — | yes | |
-| Dialog / modal | `UiModal`, `UiKit.dialog` (620 wide), `UiConfirmation` | `ImmersiveDialog*` | `JDialog` | Cut-corner frame vs corner-tick frame: pick one. |
+| Dialog / modal | `UiModal`, `UiKit.dialog` (620 wide), `UiConfirmation` | `ImmersiveDialog*` | `JDialog` | Decided: corner ticks; a modal card over a scrim, or a window. See [Dialogs](tokens.md#dialogs). |
 | Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Corner ticks need a custom Swing border. |
 | Scrollbar | 4-wide thin knob | `ImmersiveScrollBarStyle` | yes | FlatLaf thin-scrollbar properties cover it. |
 | Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Custom Swing components. |
@@ -261,7 +261,8 @@ work for Swing, and item 11 is under investigation.
 4. **Orange "selected".** The map and Immersive controls use orange for the selected/current item; hud-v3 uses mint
    or a white fill. Decide whether `accent.selected` exists or maps to `accent.primary`.
 5. **Frame language.** hud-v3 corner ticks vs Immersive cut corners. Pick one for panels and dialogs; the other can
-   stay as a decorative variant of Immersive dialogs.
+   stay as a decorative variant of Immersive dialogs. *Decided: corner ticks for panels and dialogs; cut corners stay
+   in the Immersive dialogs.*
 6. **Focus state.** hud-v3 has none; add a focus ring to the spec.
 7. **Border contrast.** See Accessibility.
 8. **Danger hue / colorblind cues.** See Accessibility.
@@ -317,9 +318,9 @@ work for Swing, and item 11 is under investigation.
 - ~~Motion~~: hover that comes in fast and lingers out, instant presses with fading releases, drawn checks, sliding
   switches, the Special button's closing ticks, fading popups and tooltips, opening sections and per-row hover washes,
   from one shared animator with a reduce-motion client setting, in Swing; see [tokens.md](tokens.md#motion).
-- Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
-  Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
-  can migrate to one shape.
+- ~~Dialogs~~: a corner-ticked modal card over a scrim for messages, confirmations and short forms, and a themed window
+  for tools, with centred equal-width buttons (main action last), Enter and Escape, Cancel-first destructive
+  confirmations and restyled `JOptionPane` dialogs, in Swing; see [tokens.md](tokens.md#dialogs).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`

@@ -703,6 +703,32 @@ class TokenLafDefaultsTest {
         }
     }
 
+    @Test
+    void optionPanesCentreTheirButtonsWithTokenIcons() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                UIDefaults defaults = UIManager.getDefaults();
+                assertEquals(0, defaults.getInt("OptionPane.buttonOrientation"));
+                assertTrue(defaults.getBoolean("OptionPane.isYesLast"));
+                assertTrue(defaults.getBoolean("OptionPane.sameSizeButtons"));
+                List<TokenDialogPane.Status> statuses = List.of(TokenDialogPane.Status.ERROR,
+                      TokenDialogPane.Status.WARNING, TokenDialogPane.Status.INFO, TokenDialogPane.Status.QUESTION);
+                List<String> keys = List.of("OptionPane.errorIcon", "OptionPane.warningIcon",
+                      "OptionPane.informationIcon", "OptionPane.questionIcon");
+                for (int i = 0; i < keys.size(); i++) {
+                    Icon icon = assertInstanceOf(Icon.class, defaults.get(keys.get(i)), keys.get(i));
+                    assertEquals(statuses.get(i).icon().getIconWidth(), icon.getIconWidth(), keys.get(i));
+                }
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
     private static void press(JComponent component, String action) {
         component.getActionMap().get(action).actionPerformed(new ActionEvent(component,
               ActionEvent.ACTION_PERFORMED, action));

@@ -7,12 +7,15 @@ import static megamek.client.ui.design.ColorMath.over;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import javax.swing.Icon;
 import javax.swing.UIDefaults;
 import javax.swing.plaf.FontUIResource;
+import javax.swing.plaf.IconUIResource;
 
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
+import megamek.client.ui.design.swing.TokenDialogPane.Status;
 
 /**
  * Turns {@link DesignTokens} into FlatLaf properties, so the MegaMek look and feels take every color, the font and the
@@ -435,6 +438,19 @@ public final class TokenLafDefaults {
         put("TitlePane.inactiveForeground", color("text.muted"));
         put("RootPane.activeBorderColor", color("border.subtle"));
         put("RootPane.inactiveBorderColor", color("border.subtle"));
+        // Option panes take the dialog card's layout: panel surface, xxl padding, the buttons centred with the main
+        // one last and all as wide as the widest; their status icons come from putIcons
+        int dialogPadding = Math.round(tokens.space().get("xxl"));
+        put("OptionPane.background", panel);
+        values.put("OptionPane.border",
+              dialogPadding + "," + dialogPadding + "," + dialogPadding + "," + dialogPadding);
+        values.put("OptionPane.buttonAreaBorder", dialogPadding + ",0,0,0");
+        values.put("OptionPane.buttonPadding", number(tokens.space().get("md")));
+        values.put("OptionPane.buttonMinimumWidth", "{scaledInteger}" + TokenDialogPane.BUTTON_MIN_WIDTH);
+        values.put("OptionPane.sameSizeButtons", "true");
+        values.put("OptionPane.buttonOrientation", "0");
+        values.put("OptionPane.isYesLast", "true");
+        values.put("OptionPane.iconMessageGap", number(tokens.space().get("lg")));
 
         // Indicators
         // Progress bars (TokenProgressBarUI): an accent pill on the slider's xs track, the text above it in small
@@ -525,6 +541,24 @@ public final class TokenLafDefaults {
      */
     static void putFonts(UIDefaults defaults) {
         defaults.put("TitledBorder.font", new FontUIResource(TokenFonts.font("label")));
+    }
+
+    /**
+     * Puts the option pane's status icons: the dialog card's Material Symbols glyphs in their status colors, made when
+     * first used so the theme and the fonts are in place.
+     */
+    static void putIcons(UIDefaults defaults) {
+        defaults.put("OptionPane.errorIcon", statusIcon(Status.ERROR));
+        defaults.put("OptionPane.warningIcon", statusIcon(Status.WARNING));
+        defaults.put("OptionPane.informationIcon", statusIcon(Status.INFO));
+        defaults.put("OptionPane.questionIcon", statusIcon(Status.QUESTION));
+    }
+
+    private static UIDefaults.LazyValue statusIcon(Status status) {
+        return table -> {
+            Icon icon = status.icon();
+            return icon == null ? null : new IconUIResource(icon);
+        };
     }
 
     private void put(String key, int argb) {

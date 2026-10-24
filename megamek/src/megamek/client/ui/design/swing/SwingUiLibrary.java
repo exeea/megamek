@@ -14,6 +14,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -49,6 +50,7 @@ import javax.swing.JList;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
@@ -571,6 +573,10 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.splitPanes.note"), "small", "text.muted"));
         page.add(splitPaneSamples());
 
+        page.add(heading(Messages.getString("UiLibrary.controls.dialogs")));
+        page.add(paragraph(Messages.getString("UiLibrary.dialogs.note"), "small", "text.muted"));
+        page.add(dialogSamples());
+        page.add(dialogLauncher());
         page.add(heading(Messages.getString("UiLibrary.controls.focus")));
         page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
         page.add(focusSamples());
@@ -1114,6 +1120,113 @@ public final class SwingUiLibrary extends JFrame {
         rest.weightx = 1;
         content.add(Box.createHorizontalGlue(), rest);
         return content;
+    }
+
+    /** Dialog cards as they show over a window: a message, a confirmation, a destructive one and a short form. */
+    private JComponent dialogSamples() {
+        JPanel samples = sampleGrid();
+        TokenDialogPane info = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.messageTitle"))
+              .status(TokenDialogPane.Status.INFO).message(Messages.getString("UiLibrary.dialogs.messageText"));
+        info.primary(Messages.getString("Okay"));
+        addSample(samples, 0, 0, "UiLibrary.dialogs.message", onScrim(info));
+
+        addSample(samples, 1, 0, "UiLibrary.dialogs.confirm", onScrim(confirmPane()));
+        addSample(samples, 0, 1, "UiLibrary.dialogs.danger", onScrim(dangerPane()));
+        addSample(samples, 1, 1, "UiLibrary.dialogs.form", onScrim(formPane()));
+        return samples;
+    }
+
+    private TokenDialogPane confirmPane() {
+        TokenDialogPane pane = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.confirmTitle"))
+              .status(TokenDialogPane.Status.QUESTION).message(Messages.getString("UiLibrary.dialogs.confirmText"));
+        pane.extra(TokenChoices.check(Messages.getString("UiLibrary.dialogs.dontAsk"), false));
+        pane.cancel(Messages.getString("Cancel"));
+        pane.primary(Messages.getString("UiLibrary.dialogs.confirmAction"));
+        return pane;
+    }
+
+    private TokenDialogPane dangerPane() {
+        TokenDialogPane pane = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.dangerTitle"))
+              .status(TokenDialogPane.Status.WARNING).message(Messages.getString("UiLibrary.dialogs.dangerText"));
+        pane.cancel(Messages.getString("Cancel"));
+        pane.danger(Messages.getString("UiLibrary.dialogs.dangerAction"));
+        return pane;
+    }
+
+    private TokenDialogPane formPane() {
+        JPanel form = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(12)));
+        form.setOpaque(false);
+        JTextField name = TokenFields.text(TokenButtons.Size.REGULAR);
+        name.setText("Kell Hounds");
+        form.add(new TokenFormField(Messages.getString("UiLibrary.dialogs.formName"), name));
+        JComboBox<String> skill = new JComboBox<>(new String[] { "Green", "Regular", "Veteran", "Elite" });
+        skill.setSelectedIndex(1);
+        form.add(new TokenFormField(Messages.getString("UiLibrary.dialogs.formSkill"), skill)
+              .setHelper(Messages.getString("UiLibrary.dialogs.formSkillHelp")));
+        TokenDialogPane pane = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.formTitle")).body(form);
+        pane.help(() -> { });
+        pane.cancel(Messages.getString("Cancel"));
+        pane.primary(Messages.getString("UiLibrary.dialogs.formAction"));
+        return pane;
+    }
+
+    /** {@code pane} as a card on a patch of scrim, as it shows over a window. */
+    private JComponent onScrim(TokenDialogPane pane) {
+        pane.assemble(true, button -> { });
+        JPanel backdrop = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0)) {
+            @Override
+            protected void paintComponent(Graphics graphics) {
+                super.paintComponent(graphics);
+                graphics.setColor(color("surface.scrim"));
+                graphics.fillRect(0, 0, getWidth(), getHeight());
+            }
+        };
+        backdrop.setBackground(color("surface.base"));
+        int margin = scaleForGUI(24);
+        backdrop.setBorder(BorderFactory.createEmptyBorder(margin, margin, margin, margin));
+        backdrop.add(pane);
+        return unstretched(backdrop);
+    }
+
+    /** Buttons that open live dialogs in each tier, and what the last one gave back. */
+    private JComponent dialogLauncher() {
+        JPanel launcher = row(color("surface.base"));
+        launcher.add(text(Messages.getString("UiLibrary.dialogs.live"), "label", "text.secondary"));
+        JLabel result = text(" ", "small", "text.muted");
+        JButton message = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openMessage"));
+        message.addActionListener(event -> {
+            TokenDialogs.message(launcher, TokenDialogPane.Status.SUCCESS,
+                  Messages.getString("UiLibrary.dialogs.savedTitle"), Messages.getString("UiLibrary.dialogs.savedText"));
+            result.setText(Messages.getString("UiLibrary.dialogs.closed"));
+        });
+        JButton confirm = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openConfirm"));
+        confirm.addActionListener(event -> showResult(result, launcher, confirmPane(), false));
+        JButton danger = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openDanger"));
+        danger.addActionListener(event -> showResult(result, launcher, dangerPane(), false));
+        JButton form = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openForm"));
+        form.addActionListener(event -> showResult(result, launcher, formPane(), false));
+        JButton window = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openWindow"));
+        window.addActionListener(event -> showResult(result, launcher,
+              formPane().width(TokenDialogPane.Width.MEDIUM), true));
+        JButton option = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openOptionPane"));
+        option.addActionListener(event -> {
+            int answer = JOptionPane.showConfirmDialog(this, Messages.getString("UiLibrary.dialogs.confirmText"),
+                  Messages.getString("UiLibrary.dialogs.confirmTitle"), JOptionPane.OK_CANCEL_OPTION,
+                  JOptionPane.QUESTION_MESSAGE);
+            result.setText(Messages.getString(answer == JOptionPane.OK_OPTION ? "UiLibrary.dialogs.okay"
+                  : "UiLibrary.dialogs.closed"));
+        });
+        for (JButton button : List.of(message, confirm, danger, form, window, option)) {
+            launcher.add(button);
+        }
+        launcher.add(result);
+        return launcher;
+    }
+
+    private void showResult(JLabel result, JComponent owner, TokenDialogPane pane, boolean window) {
+        JButton pressed = window ? TokenDialogs.window(owner, pane) : TokenDialogs.show(owner, pane);
+        result.setText(pressed == null ? Messages.getString("UiLibrary.dialogs.closed")
+              : Messages.getString("UiLibrary.dialogs.pressed", pressed.getText()));
     }
 
     /** Split panes side by side and stacked; hover is frozen on one, the others are live. */

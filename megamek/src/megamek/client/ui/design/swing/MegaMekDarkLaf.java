@@ -23,6 +23,7 @@ public class MegaMekDarkLaf extends FlatDarkLaf {
     public UIDefaults getDefaults() {
         UIDefaults defaults = super.getDefaults();
         TokenLafDefaults.putFonts(defaults);
+        TokenLafDefaults.putIcons(defaults);
         return defaults;
     }
 

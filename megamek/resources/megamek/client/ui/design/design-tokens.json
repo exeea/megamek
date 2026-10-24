@@ -9,6 +9,7 @@
     "surface.input": { "dark": "#1D2426", "light": "#FFFFFF", "use": "Text fields, selects, spinners." },
     "surface.hover": { "dark": "#FFFFFF0F", "light": "#16201E0D", "use": "Hover wash laid over any surface." },
     "surface.inverse": { "dark": "#F0F2EE", "light": "#1C2426", "use": "Inverted faces: primary button, checked toggle." },
+    "surface.scrim": { "dark": "#0D1112A3", "light": "#16201E66", "use": "Dims the window behind a modal card." },
 
     "text.primary": { "dark": "#F1F4F0", "light": "#16201E", "use": "Body text, values, titles." },
     "text.secondary": { "dark": "#CBD3D0", "light": "#3A4542", "use": "Button labels, secondary values (hud-v3 ACCENT)." },
@@ -55,7 +56,8 @@
     "control.sm": 28, "control.md": 36, "control.lg": 46,
     "icon.sm": 16, "icon.md": 20, "icon.lg": 24,
     "border": 1, "focus.width": 2, "focus.gap": 1, "selection.width": 2,
-    "tick.control": 8, "tick.panel": 13, "tick.width": 2
+    "tick.control": 8, "tick.panel": 13, "tick.width": 2,
+    "dialog.sm": 420, "dialog.md": 620, "dialog.lg": 800
   },
   "opacity": { "tint.hover": 0.16, "tint.pressed": 0.28 },
   "motion": { "fast": 120, "medium": 200, "slow": 320, "easing": [0.2, 0.0, 0.0, 1.0] },

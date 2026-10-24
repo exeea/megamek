@@ -23,6 +23,7 @@ public class MegaMekLightLaf extends FlatLightLaf {
     public UIDefaults getDefaults() {
         UIDefaults defaults = super.getDefaults();
         TokenLafDefaults.putFonts(defaults);
+        TokenLafDefaults.putIcons(defaults);
         return defaults;
     }
 

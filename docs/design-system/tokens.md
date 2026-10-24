@@ -61,6 +61,7 @@ Names describe a role, not a hue, so each name has one meaning in both modes. Su
 | `surface.input` | `#1D2426` | `#FFFFFF` | Fields, selects |
 | `surface.hover` | `#FFFFFF0F` | `#16201E0D` | Hover wash |
 | `surface.inverse` | `#F0F2EE` | `#1C2426` | Primary button, checked toggle |
+| `surface.scrim` | `#0D1112A3` | `#16201E66` | Dims the window behind a modal card |
 | `text.primary` | `#F1F4F0` | `#16201E` | Body text |
 | `text.secondary` | `#CBD3D0` | `#3A4542` | Button labels, secondary values |
 | `text.muted` | `#9AA6A3` | `#596562` | Captions, hints |
@@ -136,6 +137,7 @@ variable font. Both platforms therefore draw the same outlines from one source.
 | Radius | sm 2, md 3 |
 | Control height | sm 28, md 36, lg 46 |
 | Icon | sm 16, md 20, lg 24 |
+| Dialog width | sm 420, md 620, lg 800 |
 | Border | 1 |
 | Selection | 2 (the selected tab's underline) |
 | Focus ring | 2 wide inside the edge; 1 gap around small indicators; `focus.ring` |
@@ -674,6 +676,49 @@ without changes.
 
 **libGDX.** Nothing new yet.
 
+## Dialogs
+
+Two tiers. Messages, confirmations and short forms open as a **modal card** over the window; tools and longer forms
+that the user moves around or keeps open beside the game open as a **window** with the theme's title bar.
+
+| Part / state | Look |
+| --- | --- |
+| Scrim | `surface.scrim` over the whole window; it takes every click, and the window's keys stand down |
+| Card | `surface.panel` with a 1px `border.subtle` edge and `border.strong` corner ticks, `tick.panel` (13) long and `tick.width` (2) wide; centred in the window |
+| Width | `dialog.sm` (420) for messages and confirmations, `dialog.md` (620) for forms, `dialog.lg` (800) for the largest cards |
+| Padding | `xl` (16) above the header, `xxl` (24) elsewhere; a window has `xxl` all round |
+| Header | An optional status icon at `icon.lg` (24), the title in `headline`, then help and close icon buttons in the compact size |
+| Status | Info `status.info`, success `status.success`, warning `status.warning`, error `status.danger`, question `accent.primary`; always with the icon, never the color alone |
+| Body | `body` text in `text.primary` wrapping at the card's width, or any content such as form fields; an optional extra row (for example "Don't ask again") `xl` (16) below it |
+| Footer | `xxl` (24) below the content: the buttons centred, `md` (8) apart, all as wide as the widest and at least 88; the main action last (first in right-to-left) |
+| Motion | The card and its scrim fade in over `fast` (120 ms); they close at once. Reduce motion skips the fade |
+
+- **One main action.** A dialog has at most one primary or danger button, and it goes last; Cancel and other choices
+  sit before it.
+- **Keys.** Enter presses the focused button or else the main one; Escape and the close button cancel. Tab stays in the
+  card.
+- **Destructive actions.** With a danger button the focus starts on Cancel, and Enter only presses the danger button
+  when the user has moved the focus to it.
+- **First focus.** Otherwise the first input of the body takes the focus, then the main action.
+- **No stacking by habit.** A card can open over another card, but a flow that needs that is a sign it wants a window.
+
+**Swing.** Build the content as a
+[`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java): `status`, `width`,
+`message` or `body`, `extra` and `help`, then the buttons with `cancel`, `secondary` and one of `primary` or `danger`.
+[`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java)`.show(owner, pane)` opens it as a
+card (a [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) in the window's layered
+pane) and returns the pressed button, or null when cancelled; it waits like a modal dialog. When the window has no
+room for the card it opens a window instead, which `TokenDialogs.window(owner, pane)` also does on request. The
+shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. While a card is open
+`UIUtil.isModalDialogDisplayed()` is true, so MegaMek's hotkeys stand down as they do for a modal dialog.
+
+Existing `JOptionPane` dialogs keep their windows but take the footer's layout through the MegaMek themes: the token
+status icons, `xxl` padding, buttons centred, as wide as each other, at least 88 and with the main one last. Their
+titles stay in the title bar. Moving them to `TokenDialogs` gives them the card.
+
+**libGDX.** Spec only for now: hud-v3's `UiModal` already draws a scrim and `GpuModalDialog` a 620-wide panel with 88
+by 36 buttons. Moving them to the card's frame, centred footer and keys is the developers' work.
+
 ## Code
 
 | Class | Role |
@@ -705,11 +750,12 @@ without changes.
 | [`TokenProgressBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenProgressBarUI.java) | The Swing progress bars |
 | [`TokenSections`](../../megamek/src/megamek/client/ui/design/swing/TokenSections.java), [`TokenTitledBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTitledBorder.java), [`TokenCollapsibleSection`](../../megamek/src/megamek/client/ui/design/swing/TokenCollapsibleSection.java) | The Swing section headers, titled panels and collapsible sections |
 | [`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java) | The Swing split panes |
+| [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java), [`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java), [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) | The Swing dialogs: content, opening and the modal card |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections and split
-panes are Swing-only for now, and so is motion. The Swing themes are selectable but not the default, and no view uses
-the new controls yet. Next come dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves only once
-the developers accept the system.
+styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
+panes and dialogs are Swing-only for now, and so is motion. The Swing themes are selectable but not the default, and no
+view uses the new controls yet. Next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
+developers accept the system.
