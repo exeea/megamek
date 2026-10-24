@@ -279,7 +279,7 @@ public class TokenStatusCard extends JPanel {
         add(error, c);
         c.gridy++;
         // Below the error, the bar keeps the gap its own text line has
-        c.insets = new Insets(error.isVisible() ? TokenDialogPane.space("xs") : 0, 0, 0, 0);
+        c.insets = new Insets(TokenDialogPane.space(error.isVisible() ? "xs" : "lg"), 0, 0, 0);
         add(bar, c);
         c.gridy++;
         c.insets = new Insets(0, 0, 0, 0);

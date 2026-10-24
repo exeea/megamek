@@ -108,8 +108,8 @@ import megamek.logging.MMLogger;
 /**
  * The developer gallery of the Swing side of the design system, opened from Help in the lobby: every color role in
  * both modes, the accessibility checks, the text styles, spacing and shape, all painted from {@link DesignTokens}
- * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The Controls tab
- * shows real Swing controls drawn by {@link MegaMekDarkLaf} or {@link MegaMekLightLaf}, which the gallery applies to
+ * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The last three
+ * tabs show real Swing controls drawn by {@link MegaMekDarkLaf} or {@link MegaMekLightLaf}, which the gallery applies to
  * the app while it is open. The Swing control library grows here, control by control.
  */
 public final class SwingUiLibrary extends JFrame {
@@ -219,7 +219,9 @@ public final class SwingUiLibrary extends JFrame {
         tabs.addTab(Messages.getString("UiLibrary.tab.checks"), page(checksPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.type"), page(typePage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.shape"), page(shapePage()));
-        tabs.addTab(Messages.getString("UiLibrary.tab.controls"), page(controlsPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.inputs"), page(inputsPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.navigation"), page(navigationPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.feedback"), page(feedbackPage()));
         tabs.setSelectedIndex(Math.min(selectedTab, tabs.getTabCount() - 1));
         content.add(tabs, BorderLayout.CENTER);
         content.revalidate();
@@ -462,7 +464,8 @@ public final class SwingUiLibrary extends JFrame {
 
     // ---- Samples
 
-    private JComponent controlsPage() {
+    /** A controls page that opens with the theme's name and the reduce motion switch, shared by all three. */
+    private JPanel controlsPage() {
         JPanel page = column(color("surface.base"));
         page.add(paragraph(Messages.getString("UiLibrary.controls.intro",
               mode == Mode.DARK ? MegaMekDarkLaf.NAME : MegaMekLightLaf.NAME), "small", "text.muted"));
@@ -470,6 +473,12 @@ public final class SwingUiLibrary extends JFrame {
         motion.add(reduceMotionSwitch());
         motion.add(text(Messages.getString("UiLibrary.controls.reduceMotionNote"), "small", "text.muted"));
         page.add(motion);
+        return page;
+    }
+
+    /** Buttons, choices, inputs, sliders and the keyboard focus. */
+    private JComponent inputsPage() {
+        JPanel page = controlsPage();
 
         page.add(heading(Messages.getString("UiLibrary.controls.buttons")));
         page.add(paragraph(Messages.getString("UiLibrary.buttons.note"), "small", "text.muted"));
@@ -521,10 +530,15 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.sliders.note"), "small", "text.muted"));
         page.add(sliderMatrix());
 
-        page.add(heading(Messages.getString("UiLibrary.controls.progress")));
-        page.add(paragraph(Messages.getString("UiLibrary.progress.note"), "small", "text.muted"));
-        page.add(progressSamples());
+        page.add(heading(Messages.getString("UiLibrary.controls.focus")));
+        page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
+        page.add(focusSamples());
+        return page;
+    }
 
+    /** Tabs, segmented controls, selects, lists, menus, scrollbars and tables. */
+    private JComponent navigationPage() {
+        JPanel page = controlsPage();
         page.add(heading(Messages.getString("UiLibrary.controls.tabs")));
         page.add(paragraph(Messages.getString("UiLibrary.tabs.note"), "small", "text.muted"));
         for (TokenButtons.Size size : TokenButtons.Size.values()) {
@@ -553,10 +567,6 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.menus.note"), "small", "text.muted"));
         page.add(menuSamples());
 
-        page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
-        page.add(paragraph(Messages.getString("UiLibrary.tooltips.note"), "small", "text.muted"));
-        page.add(tooltipSamples());
-
         page.add(heading(Messages.getString("UiLibrary.controls.scrollbars")));
         page.add(paragraph(Messages.getString("UiLibrary.scrollbars.note"), "small", "text.muted"));
         page.add(scrollbarSamples());
@@ -564,6 +574,19 @@ public final class SwingUiLibrary extends JFrame {
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
         page.add(paragraph(Messages.getString("UiLibrary.tables.note"), "small", "text.muted"));
         page.add(tableSamples());
+        return page;
+    }
+
+    /** Tooltips, progress, sections, split panes, dialogs and status cards. */
+    private JComponent feedbackPage() {
+        JPanel page = controlsPage();
+        page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
+        page.add(paragraph(Messages.getString("UiLibrary.tooltips.note"), "small", "text.muted"));
+        page.add(tooltipSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.progress")));
+        page.add(paragraph(Messages.getString("UiLibrary.progress.note"), "small", "text.muted"));
+        page.add(progressSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.sections")));
         page.add(paragraph(Messages.getString("UiLibrary.sections.note"), "small", "text.muted"));
@@ -582,9 +605,6 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.statusCards.note"), "small", "text.muted"));
         page.add(statusCardSamples());
         page.add(statusCardLauncher());
-        page.add(heading(Messages.getString("UiLibrary.controls.focus")));
-        page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
-        page.add(focusSamples());
         return page;
     }
 
@@ -1263,6 +1283,7 @@ public final class SwingUiLibrary extends JFrame {
     private JComponent statusCardLauncher() {
         JPanel holder = new JPanel(new BorderLayout());
         holder.setOpaque(false);
+        holder.setAlignmentX(LEFT_ALIGNMENT);
         JPanel launcher = row(color("surface.base"));
         launcher.add(text(Messages.getString("UiLibrary.statusCards.live"), "label", "text.secondary"));
         JLabel result = text(" ", "small", "text.muted");
