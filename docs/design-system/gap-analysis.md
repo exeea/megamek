@@ -325,6 +325,13 @@ work for Swing, and item 11 is under investigation.
 - ~~Status cards~~: the progress of a long task in the dialog's frame, beside the view or over a scrim, with Cancel in
   the header, a percentage on the bar and a failed state with Close and Retry, in Swing; see
   [tokens.md](tokens.md#status-cards).
+- Panels and frames: the corner-ticked panel for anything that isn't a dialog (sidebars, unit cards, grouped
+  areas), reusing the dialog card's frame. The trial needs it.
+- Chips and badges: small status labels and counts, from hud-v3's `chip`, `chip-warn`, `chip-bad` and amber badge;
+  MekHQ would use them heavily.
+- Toasts: short notices that come and go, separate from status cards; the existing `ToastOverlay` has its own look.
+- All-caps: decide whether HUD labels, section overlines and the libGDX status card stay in capitals or move to
+  sentence case, before the trial so nothing is restyled twice.
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`

@@ -798,6 +798,7 @@ instead of mint, the failed state with Close and Retry, and the modal form for t
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
-panes, dialogs and status cards are Swing-only for now, and so is motion. The Swing themes are selectable but not the default, and no
-view uses the new controls yet. Next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
-developers accept the system.
+panes, dialogs and status cards are Swing-only for now, and so is motion. The Swing themes are selectable but not the
+default, and no view uses the new controls yet. Next come panels, chips and badges, toasts and the all-caps decision
+(see the gap analysis), then a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the developers
+accept the system.
