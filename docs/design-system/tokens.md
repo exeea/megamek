@@ -586,7 +586,10 @@ carry a shortcut and a title.
 shortcut chip; `TokenTooltips.card(component, title, detail, key)` makes an info card. Both set the plain tooltip text
 too, so screen readers and other look and feels still get it.
 
-**libGDX.** Nothing new yet; hud-v3's tooltip stays until the developers accept the system.
+**libGDX.** `UiKit.tip(actor, true)` gives a hud-v3 tooltip the card: the `token` `TextTooltipStyle` in
+[`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), `small` text in `text.primary` on the `token-tip`
+box (`surface.popover`, a `border.control` edge, a `radius.md` corner, padded `sm` by `md`), wrapping at 280. The info
+card and the shortcut chip aren't there yet: hud-v3's tooltips are plain text.
 
 ## Scrollbars
 
@@ -798,8 +801,14 @@ Existing `JOptionPane` dialogs keep their windows but take the footer's layout t
 status icons, `xxl` padding, buttons centred, as wide as each other, at least 88 and with the main one first. Their
 titles stay in the title bar. Moving them to `TokenDialogs` gives them the card.
 
-**libGDX.** Spec only for now: hud-v3's `UiModal` already draws a scrim and `GpuModalDialog` a 620-wide panel with 88
-by 36 buttons. Moving them to the card's frame, centred footer and keys is the developers' work.
+**libGDX.** `UiKit.dialog(title, close, true)` is the card: the token panel frame padded `xl` above the header and
+`xxl` elsewhere, the title in `headline`, sentence case, and the compact icon button for close, `xl` above the body. Its
+owner sets the width (`dialog.sm`) and adds the body and the footer, centred, the buttons `md` apart, as wide as each
+other and at least 88, the main one first. `UiModal.fadeIn(seconds)` fades the layer in over `fast` when it opens; its
+scrim is already `surface.scrim`. `new UiConfirmation(kit, name, dismissed, UiTheme.TOKEN)` puts the confirmation
+beside its trigger in the token popover: a `status.warning` icon, the question in `body.strong` over `text.secondary`
+detail, then compact danger and secondary buttons with the focus on Cancel. The dialog keys and `GpuModalDialog` are
+still the developers' work.
 
 ## Status cards
 
@@ -872,9 +881,14 @@ an existing panel without changing its layout, `TokenFrameBorder.apply(panel, To
 [`TokenFrame`](../../megamek/src/megamek/client/ui/design/swing/TokenFrame.java) is the painter that dialogs, status
 cards and panels share.
 
-**libGDX.** Spec only for now. hud-v3's `panel` drawable (`UiTheme.HudFrame`) draws rails along the edge and the
-ticks, and `panel-foe` coral ticks. Moving them to this spec means dropping the rails, status ticks with the header icon
-instead of a colored frame alone, the selectable states for unit cards, and the overlay surface token.
+**libGDX.** hud-v3's panels take the frame through `UiTheme.HudFrame`, whose outline can now be thinner than its
+ticks. `UiKit.panel(true)` is the `token-panel` frame padded `lg`; `UiKit.header(title, count, true, tools...)` the
+header, with `closeButton(action, true)` as a tool; `UiKit.footer(panel, true)` a `border.subtle` hairline and a foot
+row, each `md` below the one before. `token-panel-danger` replaces `panel-foe` (its header carries the error icon),
+`token-frame` replaces `panel-rails` as the plain frame, `token-panel-overlay` is the panel on the overlay surface over
+the board, and `token-divider` replaces `rule`. `new UiPopover(kit, dismissed, UiTheme.TOKEN)` is the popover in the
+`token-popup` frame, with a `body.strong` title over `small` detail in `text.secondary` and a `border.subtle` divider.
+The selectable states for unit cards aren't there yet.
 
 ## Chips and badges
 

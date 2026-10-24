@@ -80,6 +80,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private static final float TODAY_WIDTH = 420;
     private static final float MIGRATED_WIDTH = 400;
     private static final float COLUMN_GAP = 14;
+    /** A dialog footer button's least width (docs/design-system/tokens.md, Dialogs). */
+    private static final float BUTTON_MIN_WIDTH = 88;
     private static final String SAMPLE_SPRITE = "defaults/default_heavy.png";
     /** The token button style each hud-v3 button style migrates to (tokens.md, "Migrating hud-v3 styles"). */
     private static final Map<String, String> MIGRATED_BUTTONS = Map.ofEntries(
@@ -148,7 +150,9 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private UiKit.Segmented tabs;
     private ScrollPane scroll;
     private UiModal modal;
+    private UiModal tokenModal;
     private UiConfirmation confirmation;
+    private UiConfirmation tokenConfirmation;
     private BoardScene.Pixels sprite;
 
     private GpuUiLibraryWindow(float preference) {
@@ -268,12 +272,18 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         root.add(scroll).grow();
         stage.addActor(root);
 
-        modal = modal();
+        modal = modal(false);
         stage.addActor(modal);
+        tokenModal = modal(true);
+        stage.addActor(tokenModal);
         confirmation = new UiConfirmation(kit, "library-confirm", () -> { });
         confirmation.text(text("UiLibrary.gdx.confirmHeading"), text("UiLibrary.gdx.confirmDetail"),
               text("UiLibrary.gdx.confirmYes"), text("UiLibrary.gdx.confirmNo"));
         stage.addActor(confirmation.actor());
+        tokenConfirmation = new UiConfirmation(kit, "library-token-confirm", () -> { }, UiTheme.TOKEN);
+        tokenConfirmation.text(text("UiLibrary.gdx.confirmHeading"), text("UiLibrary.gdx.confirmDetail"),
+              text("UiLibrary.gdx.confirmYes"), text("UiLibrary.gdx.confirmNo"));
+        stage.addActor(tokenConfirmation.actor());
         selectTab(0);
         if (closeRequested) {
             Gdx.app.exit();
@@ -286,6 +296,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         confirmation.resize(stage.getWidth(), stage.getHeight());
+        tokenConfirmation.resize(stage.getWidth(), stage.getHeight());
     }
 
     @Override
@@ -597,40 +608,67 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     private void containers(Table page) {
         heading(page, "UiLibrary.gdx.panels");
-        compare(page, "panel + header + footer", new Container<>(listPanel()).width(320), null);
+        compare(page, "panel + header + footer", new Container<>(listPanel(false)).width(320),
+              new Container<>(listPanel(true)).width(320));
         Table foe = kit.panel();
         foe.setBackground(kit.skin.getDrawable("panel-foe"));
         foe.add(kit.header(text("UiLibrary.gdx.foePanel"), null)).growX().row();
         foe.add(kit.label(text("UiLibrary.sample.row"), "hud-body", 12.5f, UiTheme.TEXT)).left().pad(0, 14, 12, 14);
-        compare(page, "panel-foe", new Container<>(foe).width(320), null);
+        Table tokenFoe = kit.panel(true);
+        tokenFoe.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_PANEL_DANGER));
+        Table foeHeader = kit.header(text("UiLibrary.gdx.foePanel"), null, true);
+        foeHeader.padBottom(0);
+        Table foeTitle = new Table();
+        foeTitle.add(kit.icon("error", tokens.size().get("icon.md"), UiTheme.tokenColor("status.danger")))
+              .padRight(tokens.space().get("sm"));
+        foeTitle.add(foeHeader).growX();
+        tokenFoe.add(foeTitle).growX().padBottom(tokens.space().get("md")).row();
+        tokenFoe.add(kit.typeLabel(text("UiLibrary.sample.row"), "body", "text.primary")).left();
+        compare(page, "panel-foe", new Container<>(foe).width(320), new Container<>(tokenFoe).width(320));
         Table rails = new Table();
         rails.setBackground(kit.skin.getDrawable("panel-rails"));
         rails.add(kit.label(text("UiLibrary.gdx.tacticalView"), "hud-medium", 12, UiTheme.TEXT));
-        compare(page, "panel-rails", rails, null);
-        compare(page, "rule", new Container<>(new Image(kit.skin.getDrawable("rule"))).size(320, 1), null);
+        Table frame = new Table();
+        frame.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_FRAME));
+        frame.add(kit.typeLabel(text("UiLibrary.gdx.tacticalView"), "body", "text.primary"));
+        compare(page, "panel-rails", rails, topLeft(frame));
+        compare(page, "rule", new Container<>(new Image(kit.skin.getDrawable("rule"))).size(320, 1),
+              new Container<>(new Image(kit.skin.getDrawable("token-divider"))).size(320, 1));
         heading(page, "UiLibrary.gdx.overlays");
-        compare(page, "UiPopover (panel-pop)", popover(), null);
-        Table dialog = kit.dialog(text("UiLibrary.gdx.dialogTitle"), () -> { });
-        dialog.add(dialogBody()).growX();
-        compare(page, "UiKit.dialog", new Container<>(dialog).width(400), null);
+        compare(page, "UiPopover (panel-pop)", popover(false), popover(true));
+        compare(page, "UiKit.dialog", new Container<>(dialog(false, () -> { })).width(400),
+              new Container<>(dialog(true, () -> { })).width(MIGRATED_WIDTH));
         UiButton openModal = kit.button("hud", null, text("UiLibrary.gdx.openModal"), null);
         UiKit.onChange(openModal, () -> {
             modal.open(true);
             modal.focus();
         });
-        compare(page, "UiModal", openModal, null);
+        UiButton openTokenModal = kit.button("button-secondary", null, text("UiLibrary.gdx.openModal"), null);
+        UiKit.onChange(openTokenModal, () -> {
+            tokenModal.open(true);
+            tokenModal.focus();
+        });
+        compare(page, "UiModal", openModal, topLeft(openTokenModal));
         UiButton ask = kit.button("hud", null, text("UiLibrary.gdx.askConfirm"), null);
         UiKit.onChange(ask, () -> confirmation.toggle(ask, () -> { }));
-        compare(page, "UiConfirmation", ask, null);
+        UiButton tokenAsk = kit.button("button-secondary", null, text("UiLibrary.gdx.askConfirm"), null);
+        UiKit.onChange(tokenAsk, () -> tokenConfirmation.toggle(tokenAsk, () -> { }));
+        compare(page, "UiConfirmation", ask, topLeft(tokenAsk));
         UiButton tipped = kit.button("hud", "info", text("UiLibrary.gdx.hoverTip"), null);
         kit.tip(tipped).getActor().setText(text("UiLibrary.gdx.tipText"));
-        compare(page, "UiKit.tip", tipped, null);
+        UiButton tokenTipped = kit.button("button-secondary", "info", text("UiLibrary.gdx.hoverTip"), null);
+        kit.tip(tokenTipped, true).getActor().setText(text("UiLibrary.gdx.tokenTipText"));
+        compare(page, "UiKit.tip", tipped, topLeft(tokenTipped));
         heading(page, "UiLibrary.gdx.text");
         UiFlow flow = new UiFlow(kit, 12.5f, 17);
         flow.run(text("UiLibrary.gdx.flowLead"), "hud-body", UiTheme.MUTED)
               .run(text("UiLibrary.gdx.flowValue"), "hud-button", UiTheme.TEXT)
               .run(text("UiLibrary.gdx.flowRest"), "hud-body", UiTheme.MUTED);
-        compare(page, "UiFlow", new Container<>(flow).width(360), null);
+        UiFlow tokenFlow = new UiFlow(kit, 13, 17.5f);
+        tokenFlow.run(text("UiLibrary.gdx.flowLead"), "hud-body", UiTheme.tokenColor("text.secondary"))
+              .run(text("UiLibrary.gdx.flowValue"), "hud-medium", UiTheme.tokenColor("text.primary"))
+              .run(text("UiLibrary.gdx.flowRest"), "hud-body", UiTheme.tokenColor("text.secondary"));
+        compare(page, "UiFlow", new Container<>(flow).width(360), new Container<>(tokenFlow).width(360));
     }
 
     private void status(Table page) {
@@ -830,10 +868,10 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return list;
     }
 
-    private UiPopover popover() {
-        UiPopover popover = new UiPopover(kit);
+    private UiPopover popover(boolean token) {
+        UiPopover popover = new UiPopover(kit, () -> { }, token ? UiTheme.TOKEN : null);
         popover.header(text("UiLibrary.gdx.popoverTitle"), text("UiLibrary.gdx.popoverDetail"));
-        popover.content(menuList());
+        popover.content(token ? menuList(UiTheme.TOKEN_MENU_ROW) : menuList());
         popover.setVisible(true);
         return popover;
     }
@@ -874,24 +912,56 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return kit.scrollList(grid);
     }
 
-    private Table listPanel() {
-        Table panel = kit.panel();
-        panel.add(kit.header(text("UiLibrary.gdx.panel"), "3", kit.closeButton(() -> { }))).growX().row();
+    /** A panel with a header, three rows and a footer; in the token look, token rows in the token panel. */
+    private Table listPanel(boolean token) {
+        Table panel = kit.panel(token);
+        panel.add(kit.header(text("UiLibrary.gdx.panel"), "3", token, kit.closeButton(() -> { }, token))).growX()
+              .row();
         Table list = new Table();
         list.top();
         for (int index = 0; index < 3; index++) {
-            UiButton row = kit.button("hud-row", null,
+            UiButton row = kit.button(token ? UiTheme.TOKEN_ROW : "hud-row", null,
                   text(index == 1 ? "UiLibrary.sample.selectedRow" : "UiLibrary.sample.row"), null);
             row.getLabel().setAlignment(Align.left);
             row.getCell(row.getLabel()).growX();
             row.pressed(index == 1);
-            list.add(row).growX().pad(0, 10, 6, 10).row();
+            if (token) {
+                list.add(row).growX().row();
+            } else {
+                list.add(row).growX().pad(0, 10, 6, 10).row();
+            }
         }
         panel.add(list).growX().row();
-        Table foot = kit.footer(panel);
-        foot.add(kit.label(text("UiLibrary.sample.detail"), "hud-small", 11.5f, UiTheme.MUTED)).growX().left();
-        foot.add(kit.button("hud-mini", null, text("UiLibrary.gdx.sampleAction"), null));
+        Table foot = kit.footer(panel, token);
+        if (token) {
+            foot.add(kit.typeLabel(text("UiLibrary.sample.detail"), "small", "text.secondary")).growX().left();
+            foot.add(kit.button("button-secondary" + UiTheme.COMPACT, null, text("UiLibrary.gdx.sampleAction"),
+                  null));
+        } else {
+            foot.add(kit.label(text("UiLibrary.sample.detail"), "hud-small", 11.5f, UiTheme.MUTED)).growX().left();
+            foot.add(kit.button("hud-mini", null, text("UiLibrary.gdx.sampleAction"), null));
+        }
         return panel;
+    }
+
+    /** The dialog sample; in the token look its footer centres equal buttons, the main (danger) one first. */
+    private Table dialog(boolean token, Runnable close) {
+        Table dialog = kit.dialog(text("UiLibrary.gdx.dialogTitle"), close, token);
+        if (!token) {
+            dialog.add(dialogBody()).growX();
+            return dialog;
+        }
+        Label message = kit.typeLabel(text("UiLibrary.gdx.dialogBody"), "body", "text.primary");
+        message.setWrap(true);
+        dialog.add(message).growX().row();
+        UiButton remove = kit.button("button-danger", null, text("UiLibrary.gdx.confirmYes"), null);
+        UiButton cancel = kit.button("button-secondary", null, text("UiLibrary.gdx.confirmNo"), null);
+        float width = Math.max(BUTTON_MIN_WIDTH, Math.max(remove.getPrefWidth(), cancel.getPrefWidth()));
+        Table footer = new Table();
+        footer.add(remove).width(width);
+        footer.add(cancel).width(width).padLeft(tokens.space().get("md"));
+        dialog.add(footer).padTop(tokens.space().get("xxl"));
+        return dialog;
     }
 
     private Table dialogBody() {
@@ -905,12 +975,16 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return body;
     }
 
-    private UiModal modal() {
-        UiModal layer = new UiModal(kit, () -> modal.open(false));
+    private UiModal modal(boolean token) {
+        Runnable close = () -> (token ? tokenModal : modal).open(false);
+        UiModal layer = new UiModal(kit, close);
         layer.setFillParent(true);
-        Table dialog = kit.dialog(text("UiLibrary.gdx.dialogTitle"), () -> modal.open(false));
-        dialog.add(dialogBody()).growX();
-        layer.add(dialog).width(400);
+        if (token) {
+            layer.fadeIn(tokens.duration("fast") / 1000f);
+            layer.add(dialog(true, close)).width(tokens.size().get("dialog.sm"));
+        } else {
+            layer.add(dialog(false, close)).width(400);
+        }
         return layer;
     }
 

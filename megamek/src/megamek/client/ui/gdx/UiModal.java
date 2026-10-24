@@ -10,6 +10,7 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 
@@ -25,9 +26,19 @@ import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 public final class UiModal extends Table {
     private static final Color SCRIM = UiTheme.rgba(13, 17, 18, .64f);
     private final UiKit ui;
+    private float fade;
 
     public UiModal(UiKit ui, Runnable dismiss) {
         this(ui, dismiss, true);
+    }
+
+    /**
+     * Fades the scrim and its dialogs in over {@code seconds} when the layer opens (Token v0's {@code fast} motion);
+     * 0, the default, opens it at once. It always closes at once.
+     */
+    public UiModal fadeIn(float seconds) {
+        fade = seconds;
+        return this;
     }
 
     /** A modal may require an explicit answer instead of dismissing when its backdrop is clicked. */
@@ -75,6 +86,14 @@ public final class UiModal extends Table {
         Stage stage = getStage();
         if (open && !isVisible() && stage != null) {
             stage.cancelTouchFocus();
+        }
+        if (open && !isVisible() && fade > 0) {
+            clearActions();
+            getColor().a = 0;
+            addAction(Actions.fadeIn(fade));
+        } else if (!open) {
+            clearActions();
+            getColor().a = 1;
         }
         setVisible(open);
         if (!open && stage != null) {

@@ -13,6 +13,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
+import megamek.client.ui.design.DesignTokens;
 
 /**
  * A popover (.panel.pop with its .hd): the opaque frame, at least 240 units wide, with an optional header of an
@@ -45,6 +47,7 @@ public final class UiPopover extends Table {
     private final Cell<Table> headCell;
     private final Cell<Image> headRuleCell;
     private final Runnable dismissed;
+    private final boolean token;
     private Actor anchor;
     private float anchoredWidth;
     /** The control that opened it, such as a drop-down's face, or null. */
@@ -87,10 +90,24 @@ public final class UiPopover extends Table {
 
     /** Runs {@code dismissed} after closing and releasing its input listeners and focus. */
     public UiPopover(UiKit kit, Runnable dismissed) {
+        this(kit, dismissed, null);
+    }
+
+    /**
+     * A popover in hud-v3's {@code panel-pop} look, or with {@code style} {@link UiTheme#TOKEN} in the Token v0 look:
+     * the {@code token-popup} frame, and a header with a body.strong title over text.secondary detail and a
+     * border.subtle divider.
+     */
+    public UiPopover(UiKit kit, Runnable dismissed, String style) {
         this.dismissed = dismissed;
-        setBackground(kit.skin.getDrawable("panel-pop"));
-        // The 2-unit rails and the popover's own 6 above and below; the side borders are 2 transparent units.
-        pad(8, 2, 8, 2);
+        token = UiTheme.TOKEN.equals(style);
+        if (token) {
+            setBackground(kit.skin.getDrawable("token-popup"));
+        } else {
+            setBackground(kit.skin.getDrawable("panel-pop"));
+            // The 2-unit rails and the popover's own 6 above and below; the side borders are 2 transparent units.
+            pad(8, 2, 8, 2);
+        }
         top();
         // Fractional line heights add up as in the prototype's CSS; the frame snaps its own edges to pixels.
         setRound(false);
@@ -98,13 +115,19 @@ public final class UiPopover extends Table {
         setTouchable(Touchable.enabled);
         setVisible(false);
         // .pop .hd: the title (700 13 condensed, .08em) over the subtitle, padding 6 14 8, a rule and 4 below it.
-        title = kit.label("", "hud-title", 13, UiTheme.TEXT);
-        subtitle = kit.label("", "hud-small", 11.5f, UiTheme.MUTED);
-        head.pad(6, 14, 8, 14);
+        title = token ? kit.typeLabel("", "body.strong", "text.primary") : kit.label("", "hud-title", 13, UiTheme.TEXT);
+        subtitle = token ? kit.typeLabel("", "small", "text.secondary")
+              : kit.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        float side = token ? DesignTokens.shipped().space().get("md") : 14;
+        head.pad(6, side, 8, side);
         head.left().defaults().left();
-        head.add(title).height(TITLE_LINE).row();
+        Cell<Label> titleCell = head.add(title);
+        if (!token) {
+            titleCell.height(TITLE_LINE);
+        }
+        head.row();
         head.add(subtitle);
-        headRule = new Image(kit.skin.getDrawable("rule"));
+        headRule = new Image(kit.skin.getDrawable(token ? "token-divider" : "rule"));
         scroll = kit.scrollList(null);
         // The scroll pane holding the content stays in its cell, so the content keeps the keyboard focus.
         headCell = add(head).growX();
@@ -121,9 +144,16 @@ public final class UiPopover extends Table {
      */
     public UiPopover header(String text, String detail) {
         boolean shown = text != null && !text.isBlank();
-        title.setText(shown ? UiTheme.upper(text) : "");
+        title.setText(!shown ? "" : token ? text : UiTheme.upper(text));
         subtitle.setText(detail == null ? "" : detail);
-        head.getCell(subtitle).height(detail == null ? 0 : BODY_LINE);
+        Cell<Label> detailCell = head.getCell(subtitle);
+        if (detail == null) {
+            detailCell.height(0);
+        } else if (token) {
+            detailCell.height(Value.prefHeight).padTop(DesignTokens.shipped().space().get("xxs"));
+        } else {
+            detailCell.height(BODY_LINE);
+        }
         head.invalidate();
         headCell.setActor(shown ? head : null);
         headRuleCell.setActor(shown ? headRule : null).height(shown ? 1 : 0).padBottom(shown ? 4 : 0);

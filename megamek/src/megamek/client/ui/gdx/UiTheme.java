@@ -332,6 +332,7 @@ public final class UiTheme implements Disposable {
         tokenSelection();
         tokenInputs();
         tokenLists();
+        tokenContainers();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -1359,6 +1360,50 @@ public final class UiTheme implements Disposable {
         skin.add("token-split-active", splitLine(accent, active, band), Drawable.class);
     }
 
+    /** The token look of hud-v3's panel ({@code panel}): the edge, the corner ticks and lg padding. */
+    public static final String TOKEN_PANEL = "token-panel";
+    /** The token panel with status.danger ticks, which replaces {@code panel-foe}; its header carries the icon. */
+    public static final String TOKEN_PANEL_DANGER = "token-panel-danger";
+    /** The plain frame, the edge only, which replaces {@code panel-rails} and frames panels inside panels. */
+    public static final String TOKEN_FRAME = "token-frame";
+
+    /**
+     * Token v0 styles for hud-v3's containers (docs/design-system/tokens.md, Panels, Dialogs and Tooltips): the panel
+     * and dialog card frame, its danger variant, the plain frame, the panel over the board
+     * ({@code token-panel-overlay}, on the translucent overlay surface) and the {@code token} tooltip card.
+     */
+    private void tokenContainers() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        Texture white = skin.get("white", Texture.class);
+        Color panel = token(tokens.color("surface.panel", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color strong = token(tokens.color("border.strong", mode));
+        float border = tokens.size().get("border");
+        float tick = tokens.size().get("tick.panel");
+        float sm = tokens.space().get("sm");
+        float md = tokens.space().get("md");
+        float lg = tokens.space().get("lg");
+
+        skin.add(TOKEN_PANEL, pad(new HudFrame(white, panel, null, strong, tick, subtle, border), lg, lg),
+              Drawable.class);
+        skin.add(TOKEN_PANEL_DANGER, pad(new HudFrame(white, panel, null,
+              token(tokens.color("status.danger", mode)), tick, subtle, border), lg, lg), Drawable.class);
+        Integer overlay = tokens.colorToken("surface.panel").overlay();
+        skin.add(TOKEN_PANEL + "-overlay", pad(new HudFrame(white, overlay == null ? panel : token(overlay), null,
+              strong, tick, subtle, border), lg, lg), Drawable.class);
+        skin.add(TOKEN_FRAME, pad(new HudFrame(white, Color.CLEAR, null, null, 0, subtle, border), sm, md),
+              Drawable.class);
+
+        Label.LabelStyle tipText = new Label.LabelStyle(skin.get(TYPE + "small", Label.LabelStyle.class));
+        tipText.fontColor = token(tokens.color("text.primary", mode));
+        TextTooltip.TextTooltipStyle tip = new TextTooltip.TextTooltipStyle(tipText, box("token-tip",
+              token(tokens.color("surface.popover", mode)), token(tokens.color("border.control", mode)), border,
+              tokens.radius().get("md"), null, sm, md, 0));
+        tip.wrapWidth = 280;
+        skin.add(TOKEN, tip);
+    }
+
     /** Pads a row drawable {@code leading} units before its content and {@code trailing} after; control height. */
     private static Drawable rowPadding(Drawable drawable, float leading, float trailing, float height) {
         drawable.setLeftWidth(leading);
@@ -1891,16 +1936,24 @@ public final class UiTheme implements Disposable {
         private final Color corner;
         private final float cornerLength;
         private final Color outline;
+        private final float edge;
         private final Color tint = new Color();
 
         /** The fill, then rails, an outline and corner strokes of {@code cornerLength} units; each may be null. */
         public HudFrame(Texture white, Color fill, Color rail, Color corner, float cornerLength, Color outline) {
+            this(white, fill, rail, corner, cornerLength, outline, STROKE);
+        }
+
+        /** A frame as above whose outline is {@code edge} units wide; rails and corner strokes stay 2 units. */
+        public HudFrame(Texture white, Color fill, Color rail, Color corner, float cornerLength, Color outline,
+              float edge) {
             this.white = white;
             this.fill = fill;
             this.rail = rail;
             this.corner = corner;
             this.cornerLength = cornerLength;
             this.outline = outline;
+            this.edge = edge;
         }
 
         @Override
@@ -1919,10 +1972,11 @@ public final class UiTheme implements Disposable {
                 rect(batch, rail, left, bottom, right - left, line);
             }
             if (outline != null) {
-                rect(batch, outline, left, top - line, right - left, line);
-                rect(batch, outline, left, bottom, right - left, line);
-                rect(batch, outline, left, bottom + line, line, top - bottom - 2 * line);
-                rect(batch, outline, right - line, bottom + line, line, top - bottom - 2 * line);
+                float stroke = Math.max(1, Math.round(edge * scale)) / scale;
+                rect(batch, outline, left, top - stroke, right - left, stroke);
+                rect(batch, outline, left, bottom, right - left, stroke);
+                rect(batch, outline, left, bottom + stroke, stroke, top - bottom - 2 * stroke);
+                rect(batch, outline, right - stroke, bottom + stroke, stroke, top - bottom - 2 * stroke);
             }
             if (corner != null) {
                 float length = Math.min(snap(cornerLength, scale), Math.min(right - left, top - bottom) / 2);

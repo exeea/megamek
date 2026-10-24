@@ -116,7 +116,12 @@ public final class UiKit {
      * pointer, which then stays stuck. Its label acts only while it shows.
      */
     public TextTooltip tip(Actor actor) {
-        TextTooltip tip = new TextTooltip("", skin, "hud");
+        return tip(actor, false);
+    }
+
+    /** A tooltip as {@link #tip(Actor)}; with {@code token}, the Token v0 tooltip card ({@link UiTheme#TOKEN}). */
+    public TextTooltip tip(Actor actor, boolean token) {
+        TextTooltip tip = new TextTooltip("", skin, token ? UiTheme.TOKEN : "hud");
         actor.addListener(tip);
         tip.getActor().addAction(Actions.forever(Actions.run(() -> {
             if (!actor.ascendantsVisible()) {
@@ -312,6 +317,13 @@ public final class UiKit {
         label.setFontScale(label.getStyle().font.getScaleX() * size / tableSize);
     }
 
+    /** A label in a Token v0 type style ({@link UiTheme#TYPE_STYLES}) in the color of {@code role}. */
+    public Label typeLabel(String text, String type, String role) {
+        Label.LabelStyle style = new Label.LabelStyle(skin.get(UiTheme.TYPE + type, Label.LabelStyle.class));
+        style.fontColor = UiTheme.tokenColor(role);
+        return new Label(text, style);
+    }
+
     /** The prototype's caption (.cap): upper-case condensed muted text. */
     public Label caption(String text) {
         return new Label(UiTheme.upper(text), skin, "hud-caption");
@@ -355,6 +367,20 @@ public final class UiKit {
     }
 
     /**
+     * A panel as {@link #panel()}; with {@code token}, the Token v0 panel ({@link UiTheme#TOKEN_PANEL}): the edge and
+     * corner ticks, padded lg all round, so its header, body and footer bring no padding of their own.
+     */
+    public Table panel(boolean token) {
+        if (!token) {
+            return panel();
+        }
+        Table panel = new Table();
+        panel.setBackground(skin.getDrawable(UiTheme.TOKEN_PANEL));
+        panel.top();
+        return panel;
+    }
+
+    /**
      * A panel header (.phd): the upper-case title, an optional muted count (.n) beside it, and tools at the right:
      * buttons, or a count that a panel shows there.
      */
@@ -377,9 +403,45 @@ public final class UiKit {
         return header;
     }
 
+    /**
+     * A panel header as {@link #header(String, String, Actor...)}; with {@code token}, the Token v0 header for a token
+     * panel: the sentence-case title in the {@code title} type and text.primary, the count in text.muted, the tools
+     * xs apart, and md above the body.
+     */
+    public Table header(String title, String count, boolean token, Actor... tools) {
+        return token ? tokenHeader(title, count, "title", tools) : header(title, count, tools);
+    }
+
+    private Table tokenHeader(String title, String count, String type, Actor... tools) {
+        Table header = new Table();
+        header.padBottom(space("md"));
+        Label heading = typeLabel(title, type, "text.primary");
+        heading.setEllipsis(true);
+        header.add(heading).minWidth(0);
+        if (count != null) {
+            Label counted = typeLabel(count, "body", "text.muted");
+            counted.setName(HEADER_COUNT);
+            header.add(counted).padLeft(space("sm"));
+        }
+        header.add().expandX();
+        for (Actor tool : tools) {
+            header.add(tool).padLeft(space("xs"));
+        }
+        return header;
+    }
+
+    private static float space(String name) {
+        return DesignTokens.shipped().space().get(name);
+    }
+
     /** A close button (.b.ib with the close icon), as a header's tool, which runs {@code action}. */
     public UiButton closeButton(Runnable action) {
-        UiButton close = button("hud-icon", "close", null, null);
+        return closeButton(action, false);
+    }
+
+    /** A close button as {@link #closeButton(Runnable)}; with {@code token}, the compact icon button. */
+    public UiButton closeButton(Runnable action, boolean token) {
+        UiButton close = button(token ? "button-icon" + UiTheme.COMPACT : "hud-icon", "close", null, null);
         onChange(close, action);
         return close;
     }
@@ -400,6 +462,23 @@ public final class UiKit {
     }
 
     /**
+     * A dialog as {@link #dialog(String, Runnable)}; with {@code token}, the Token v0 dialog card: the token panel
+     * padded xl above the header and xxl elsewhere, and a header with the sentence-case title in the {@code headline}
+     * type and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or wider.
+     */
+    public Table dialog(String title, Runnable close, boolean token) {
+        if (!token) {
+            return dialog(title, close);
+        }
+        Table dialog = panel(true);
+        dialog.pad(space("xl"), space("xxl"), space("xxl"), space("xxl"));
+        Table header = tokenHeader(title, null, "headline", closeButton(close, true));
+        header.padBottom(space("xl"));
+        dialog.add(header).growX().row();
+        return dialog;
+    }
+
+    /**
      * Ends {@code panel} with its footer (.pfoot): the rule, then a foot row padded 8 14 9 14, which it returns for the
      * panel's line and actions.
      */
@@ -407,6 +486,22 @@ public final class UiKit {
         panel.add(new Image(skin.getDrawable("rule"))).growX().height(1).row();
         Table foot = new Table();
         foot.pad(8, 14, 9, 14);
+        panel.add(foot).growX();
+        return foot;
+    }
+
+    /**
+     * Ends {@code panel} with its footer as {@link #footer(Table)}; with {@code token}, a border.subtle hairline md
+     * below the body, then the foot row md below it, inside the token panel's padding.
+     */
+    public Table footer(Table panel, boolean token) {
+        if (!token) {
+            return footer(panel);
+        }
+        panel.add(new Image(skin.getDrawable("token-divider"))).growX()
+              .height(DesignTokens.shipped().size().get("border")).padTop(space("md")).row();
+        Table foot = new Table();
+        foot.padTop(space("md"));
         panel.add(foot).growX();
         return foot;
     }
