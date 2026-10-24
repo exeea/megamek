@@ -893,7 +893,18 @@ row, each `md` below the one before. `token-panel-danger` replaces `panel-foe` (
 `token-frame` replaces `panel-rails` as the plain frame, `token-panel-overlay` is the panel on the overlay surface over
 the board, and `token-divider` replaces `rule`. `new UiPopover(kit, dismissed, UiTheme.TOKEN)` is the popover in the
 `token-popup` frame, with a `body.strong` title over `small` detail in `text.secondary` and a `border.subtle` divider.
-The selectable states for unit cards aren't there yet.
+
+The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`
+is the unit row as a selectable plain panel: the `token-unit-row` style has a `border.subtle` edge at rest,
+`border.control` on hover, and the `selected.background` wash with a `selected.primary` edge when selected; an
+inspected row takes a `status.danger` edge for an enemy and `accent.primary` for a friend. Its model is in `small`
+`text.muted`, the name in `body.strong` `text.primary` in sentence case, and the status line in `small` in its tone's
+status color (`text.secondary` for a plain line); an enemy's sprite turns `status.danger`. `letter(letter, card, true)`
+keeps the target's color on a `radius.sm` square, icon.md in a pill and icon.lg on a card, with the letter in `label`
+`text.onAccent`. `damageTile(color, true)` keeps the damage color inside a `border.control` frame. The log's
+`token-disc` and `token-disc-foe` are `control.sm` discs on `surface.raised` with an `accent.primary` or
+`status.danger` edge, and the dock's `token-waiting` is a plain frame `control.lg` high. Target, sprite and damage
+colors are game data and stay as they are.
 
 ## Chips and badges
 
@@ -943,7 +954,9 @@ error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `T
 button in a token style (`button-*`) draws `UiButton.badge` as the count badge, in the `token-badge` face and frame
 with its ring in `surface.panel`, and `UiButton.dot` as the dot; hud-v3's buttons keep the amber pill. About 25 calls in
 the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips, in capitals (the sentence case
-question is open for the whole HUD). hud-v3 has no filter or tag chips.
+question is open for the whole HUD). hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
+they take the filter chip's look: `token-pill`, `token-pill-over` and `token-pill-on` in `GpuBoardSkin`, with the
+check before the target's letter square when on.
 
 ## Toasts
 

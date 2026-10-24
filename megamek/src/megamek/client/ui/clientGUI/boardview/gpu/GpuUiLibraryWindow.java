@@ -753,47 +753,76 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         note.setWrap(true);
         page.add(note).colspan(3).width(NAME_WIDTH + TODAY_WIDTH + MIGRATED_WIDTH).padTop(10).row();
         heading(page, "UiLibrary.gdx.targets");
-        Table letters = new Table();
-        letters.defaults().padRight(8);
-        for (char letter = 'A'; letter <= 'F'; letter++) {
-            letters.add(hud.letter(letter, false));
-        }
-        for (char letter = 'A'; letter <= 'C'; letter++) {
-            letters.add(hud.letter(letter, true));
-        }
-        compare(page, "GpuHudKit.letter", letters, null);
+        compare(page, "GpuHudKit.letter", letters(false), letters(true));
         Table pills = new Table();
         pills.defaults().padRight(8);
         pills.add(pill('A', "pill", UiTheme.TEXT));
         pills.add(pill('B', "pill-on", UiTheme.FILL_INK));
-        compare(page, "pill, pill-on", pills, null);
+        Table tokenPills = new Table();
+        tokenPills.defaults().padRight(8);
+        tokenPills.add(tokenPill('A', ""));
+        tokenPills.add(tokenPill('B', "-over"));
+        tokenPills.add(tokenPill('C', "-on"));
+        compare(page, "pill, pill-on", pills, tokenPills);
         heading(page, "UiLibrary.gdx.units");
-        Table rows = new Table();
-        rows.defaults().width(340).padBottom(6);
-        rows.add(hud.unitRow(40, 34).set(sprite, GpuHudKit.FRIEND_SPRITE, text("UiLibrary.gdx.unitModel"),
-              text("UiLibrary.gdx.unitName"), text("UiLibrary.gdx.unitStatus"), Tone.NORMAL)).row();
-        rows.add(hud.unitRow(40, 34).set(sprite, UiTheme.CORAL, text("UiLibrary.gdx.foeModel"),
-              text("UiLibrary.gdx.foeName"), text("UiLibrary.gdx.foeStatus"), Tone.BAD).inspected(true)).row();
-        rows.add(hud.unitRow(40, 34).set(null, UiTheme.BLIP, text("GpuBoard.hud.common.unidentified"),
-              text("GpuBoard.hud.common.sensorContact"), text("UiLibrary.gdx.contactStatus"), Tone.WARN));
-        compare(page, "GpuHudKit.unitRow", rows, null);
-        Table damage = new Table();
-        damage.defaults().left().padBottom(4);
-        damage.add(damageLabel(UiTheme.MINT, "UiLibrary.gdx.damageLight")).row();
-        damage.add(damageLabel(UiTheme.AMBER, "UiLibrary.gdx.damageHeavy")).row();
-        damage.add(damageLabel(Color.BLACK, "UiLibrary.gdx.damageCrippled"));
-        compare(page, "GpuHudKit.damageTile", damage, null);
+        compare(page, "GpuHudKit.unitRow", unitRows(false), unitRows(true));
+        compare(page, "GpuHudKit.damageTile", damageTiles(false), damageTiles(true));
         heading(page, "UiLibrary.gdx.hudBoxes");
         Table discs = new Table();
         discs.defaults().padRight(8);
         discs.add(disc("disc", "3", UiTheme.MINT));
         discs.add(disc("disc-foe", "4", UiTheme.CORAL));
-        compare(page, "disc, disc-foe", discs, null);
+        Table tokenDiscs = new Table();
+        tokenDiscs.defaults().padRight(8);
+        tokenDiscs.add(tokenDisc(GpuBoardSkin.TOKEN_DISC, "3"));
+        tokenDiscs.add(tokenDisc(GpuBoardSkin.TOKEN_DISC + "-foe", "4"));
+        compare(page, "disc, disc-foe", discs, tokenDiscs);
         Container<Label> waiting = new Container<>(kit.label(text("UiLibrary.gdx.waiting"), "hud-small", 11.5f,
               UiTheme.MUTED));
         waiting.setBackground(kit.skin.getDrawable("waiting"));
         waiting.pad(0, 14, 0, 14);
-        compare(page, "waiting", waiting, null);
+        Container<Label> tokenWaiting = new Container<>(kit.typeLabel(text("UiLibrary.gdx.waiting"), "body",
+              "text.secondary"));
+        tokenWaiting.setBackground(kit.skin.getDrawable("token-waiting"));
+        compare(page, "waiting", waiting, tokenWaiting);
+    }
+
+    /** Six target letters in pill size and three in card size. */
+    private Table letters(boolean token) {
+        Table letters = new Table();
+        letters.defaults().padRight(8);
+        for (char letter = 'A'; letter <= 'F'; letter++) {
+            letters.add(hud.letter(letter, false, token));
+        }
+        for (char letter = 'A'; letter <= 'C'; letter++) {
+            letters.add(hud.letter(letter, true, token));
+        }
+        return letters;
+    }
+
+    /** A friend, the same friend selected, an inspected foe and a sensor contact. */
+    private Table unitRows(boolean token) {
+        Table rows = new Table();
+        rows.defaults().width(340).padBottom(6);
+        rows.add(hud.unitRow(40, 34, token).set(sprite, GpuHudKit.FRIEND_SPRITE, text("UiLibrary.gdx.unitModel"),
+              text("UiLibrary.gdx.unitName"), text("UiLibrary.gdx.unitStatus"), Tone.NORMAL)).row();
+        rows.add(hud.unitRow(40, 34, token).set(sprite, GpuHudKit.FRIEND_SPRITE, text("UiLibrary.gdx.unitModel"),
+              text("UiLibrary.gdx.unitName"), text("UiLibrary.gdx.unitStatus"), Tone.NORMAL).pressed(true)).row();
+        rows.add(hud.unitRow(40, 34, token).set(sprite, UiTheme.CORAL, text("UiLibrary.gdx.foeModel"),
+              text("UiLibrary.gdx.foeName"), text("UiLibrary.gdx.foeStatus"), Tone.BAD).inspected(true)).row();
+        rows.add(hud.unitRow(40, 34, token).set(null, UiTheme.BLIP, text("GpuBoard.hud.common.unidentified"),
+              text("GpuBoard.hud.common.sensorContact"), text("UiLibrary.gdx.contactStatus"), Tone.WARN));
+        return rows;
+    }
+
+    /** The light, heavy and crippled damage tiles; their colours are game data in both looks. */
+    private Table damageTiles(boolean token) {
+        Table damage = new Table();
+        damage.defaults().left().padBottom(4);
+        damage.add(damageLabel(UiTheme.MINT, "UiLibrary.gdx.damageLight", token)).row();
+        damage.add(damageLabel(UiTheme.AMBER, "UiLibrary.gdx.damageHeavy", token)).row();
+        damage.add(damageLabel(Color.BLACK, "UiLibrary.gdx.damageCrippled", token));
+        return damage;
     }
 
     // ---- Samples
@@ -1023,10 +1052,26 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return pill;
     }
 
-    private Label damageLabel(Color tile, String key) {
-        Label label = kit.label(text(key), "hud-small", 11.5f, UiTheme.TEXT);
+    /** A token target pill: the filter chip at rest, hovered ("-over") or on ("-on", with its check). */
+    private Table tokenPill(char letter, String state) {
+        boolean on = "-on".equals(state);
+        Table pill = new Table();
+        pill.setBackground(kit.skin.getDrawable(GpuBoardSkin.TOKEN_PILL + state));
+        if (on) {
+            pill.add(kit.icon("check", DesignTokens.shipped().size().get("icon.sm"), UiTheme.tokenColor(
+                  "text.primary"))).padRight(DesignTokens.shipped().space().get("xs"));
+        }
+        pill.add(hud.letter(letter, false, true)).padRight(DesignTokens.shipped().space().get("sm"));
+        pill.add(kit.typeLabel(text("UiLibrary.gdx.foeName"), "label", state.isEmpty() ? "text.secondary"
+              : "text.primary"));
+        return pill;
+    }
+
+    private Label damageLabel(Color tile, String key, boolean token) {
+        Label label = token ? kit.typeLabel(text(key), "small", "text.primary")
+              : kit.label(text(key), "hud-small", 11.5f, UiTheme.TEXT);
         Label.LabelStyle style = new Label.LabelStyle(label.getStyle());
-        style.background = hud.damageTile(tile);
+        style.background = hud.damageTile(tile, token);
         label.setStyle(style);
         return label;
     }
@@ -1035,6 +1080,15 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         Label label = kit.label(number, "hud-medium", 12, ink);
         label.setAlignment(Align.center);
         Container<Label> disc = new Container<>(label).size(28);
+        disc.setBackground(kit.skin.getDrawable(background));
+        return disc;
+    }
+
+    /** A token log disc: control.sm across, the number in label/text.primary. */
+    private Container<Label> tokenDisc(String background, String number) {
+        Label label = kit.typeLabel(number, "label", "text.primary");
+        label.setAlignment(Align.center);
+        Container<Label> disc = new Container<>(label).size(DesignTokens.shipped().size().get("control.sm"));
         disc.setBackground(kit.skin.getDrawable(background));
         return disc;
     }
