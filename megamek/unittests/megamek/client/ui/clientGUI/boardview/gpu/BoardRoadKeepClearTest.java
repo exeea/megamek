@@ -82,7 +82,7 @@ class BoardRoadKeepClearTest {
                     when(tile.appearance()).thenReturn(Map.of("road", HexAppearance.withTrafficControl(null, control)));
                     var road = BoardRoad.layout(AT, exits, kind, d -> kind).control(control);
                     boolean yellow = GpuRoads.patches(tile, road).stream()
-                          .anyMatch(patch -> patch.texture().equals("concrete") && patch.tint().b < .2f);
+                          .anyMatch(patch -> patch.texture().equals("concrete-ground") && patch.tint().b < .2f);
                     assertEquals(exits == 27 && kind == BoardRoad.Kind.PAVED && control != HexAppearance.TrafficControl.STOPS,
                           yellow, "Only an actual signal-controlled paved crossing receives the box");
                 }

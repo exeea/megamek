@@ -168,7 +168,7 @@ class BoardRoadJunctionTest {
             var tile = BoardRoadTest.tile(at, kind, 27, 0, BoardScene.Surface.GRASS);
             var patches = GpuRoads.patches(tile, BoardRoad.layout(at, 27, kind, direction -> kind));
             assertEquals(kind == BoardRoad.Kind.PAVED,
-                  patches.stream().anyMatch(patch -> patch.texture().equals("concrete") && patch.shape().contains(x, y)),
+                  patches.stream().anyMatch(patch -> patch.texture().equals("concrete-ground") && patch.shape().contains(x, y)),
                   "Only painted roads get stop-line material");
         }
     }

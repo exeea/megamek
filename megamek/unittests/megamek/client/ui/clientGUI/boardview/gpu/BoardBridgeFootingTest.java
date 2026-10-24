@@ -208,7 +208,7 @@ class BoardBridgeFootingTest {
         var patches = GpuRoads.deckPatches(tile, deck, road, painted);
         var asphalt = patches.stream().filter(p -> p.texture().equals("roads/asphalt") && p.fade() == null)
               .findFirst().orElseThrow();
-        var marks = patches.stream().filter(p -> p.texture().equals("concrete")).findFirst().orElseThrow();
+        var marks = patches.stream().filter(p -> p.texture().equals("concrete-ground")).findFirst().orElseThrow();
         var coat = GpuRoads.deck(tile, BoardBridge.feature(tile), asphalt, painted, surfaces, shape);
         var paint = GpuRoads.deck(tile, BoardBridge.feature(tile), marks, painted, surfaces, shape);
         float scale = BoardGeometry.hexScale();
@@ -276,7 +276,7 @@ class BoardBridgeFootingTest {
         var concrete = Files.createDirectories(target.resolve("textures/terrain/surfaces"));
         Files.copy(source.resolve("textures/materials.json"), target.resolve("textures/materials.json"));
         try (var files = Files.list(source.resolve("textures/terrain/surfaces"))) {
-            for (Path file : files.filter(path -> path.getFileName().toString().matches("concrete(\\.tres|_.*\\.png)")).toList()) {
+            for (Path file : files.filter(path -> path.getFileName().toString().matches("concrete-ground(\\.tres|_.*\\.png)")).toList()) {
                 Files.copy(file, concrete.resolve(file.getFileName()));
             }
         }
@@ -908,7 +908,7 @@ class BoardBridgeFootingTest {
         var mask = GpuRoads.mask(road, asphalt);
         assertTrue(mask.y() < -BoardGeometry.TILE_HEIGHT / 2 - reach + 1);
         int painted = 0, gaps = 0;
-        var marks = patches.stream().filter(p -> p.texture().equals("concrete")).findFirst().orElseThrow();
+        var marks = patches.stream().filter(p -> p.texture().equals("concrete-ground")).findFirst().orElseThrow();
         float paintEnd = -BoardGeometry.TILE_HEIGHT / 2 - reach
               + BoardRelief.metres(1.8f) / BoardGeometry.hexScale();
         for (float y = -BoardGeometry.TILE_HEIGHT / 2 - .25f; y > -BoardGeometry.TILE_HEIGHT / 2 - reach + .25f; y -= .25f) {

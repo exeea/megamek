@@ -3,7 +3,7 @@
 // Inserted after the lighting helpers.
 
 uniform float u_terrainWear; // 0: no ambient weathering; 1: full material weathering and cover erosion
-uniform vec4 u_bankMaterials; // existing soil-contact and gravel: colour layer / repeat in metres
+uniform vec4 u_bankMaterials; // existing temperate-bank and dirt-debris: colour layer / repeat in metres
 uniform vec3 u_flatRock; // the shared cliff's colour layer, then the rock tops' colour layer and repeat in metres
 bool riverBank = false; // set by the water-owned ground, before evaluating its material roles
 float shallowSediment = -1.0; // Halfway depth-zero arid shore profile; negative on deeper water and dry land.

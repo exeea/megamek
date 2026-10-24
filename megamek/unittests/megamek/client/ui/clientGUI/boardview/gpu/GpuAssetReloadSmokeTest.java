@@ -124,7 +124,7 @@ class GpuAssetReloadSmokeTest {
                             originalMagma = assets().magma(true);
                             originalEmission = assets().lavaEmission();
                             originalRoughness = assets().finishArrays(surfaces(sculptLayers), sculptLayers.size()).maps();
-                            sculptTile = assets().sculptTile("grass");
+                            sculptTile = assets().sculptTile("grassland-ground");
                             asphaltCoverage = assets().roadCoverage("roads/asphalt");
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
@@ -158,17 +158,17 @@ class GpuAssetReloadSmokeTest {
                             // texel density one repeat now covers 1.25 times the ground. Deliberately distinct
                             // height/AO values expose accidental sRGB conversion of numerical data.
                             Path surfaces = textures.resolve("terrain/surfaces");
-                            square(surfaces.resolve("grass_albedo.png"), 640, 0x1080e0, false);
-                            square(surfaces.resolve("grass_heightmap.png"), 640, 0x404040, true);
+                            square(surfaces.resolve("grassland-ground_albedo.png"), 640, 0x1080e0, false);
+                            square(surfaces.resolve("grassland-ground_heightmap.png"), 640, 0x404040, true);
                             // Godot's normal: the board's 0x40c0f0 with green flipped (+G up the image).
-                            square(surfaces.resolve("grass_normal.png"), 640, 0x403ff0, false);
+                            square(surfaces.resolve("grassland-ground_normal.png"), 640, 0x403ff0, false);
                             // ORM: occlusion 0x60 and a roughness map that varies, so it is authored (times 0.5).
                             var orm = new java.awt.image.BufferedImage(640, 640, java.awt.image.BufferedImage.TYPE_INT_RGB);
                             for (int y = 0; y < 640; y++) {
                                 for (int x = 0; x < 640; x++) { orm.setRGB(x, y, x == 639 ? 0x60ff00 : 0x608000); }
                             }
-                            assertTrue(javax.imageio.ImageIO.write(orm, "png", surfaces.resolve("grass_orm.png").toFile()));
-                            Path grass = surfaces.resolve("grass.tres");
+                            assertTrue(javax.imageio.ImageIO.write(orm, "png", surfaces.resolve("grassland-ground_orm.png").toFile()));
+                            Path grass = surfaces.resolve("grassland-ground.tres");
                             Files.writeString(grass, Files.readString(grass).replace("roughness = 1.0", "roughness = 0.5"));
                             Path lava = textures.resolve("terrain/lava");
                             GpuAssetReloadTest.png(lava.resolve("lava_emission.png"), 0xff204080);
@@ -181,7 +181,7 @@ class GpuAssetReloadSmokeTest {
                             var catalogMapper = new ObjectMapper();
                             var entries = (ObjectNode) catalogMapper.readTree(catalog.toFile());
                             var loose = (ObjectNode) entries.get("loose");
-                            var grassEntry = (ObjectNode) loose.get("terrain/surfaces/grass");
+                            var grassEntry = (ObjectNode) loose.get("terrain/surfaces/grassland-ground");
                             grassEntry.put("metres", grassEntry.get("metres").floatValue() * 2);
                             var asphaltEntry = (ObjectNode) loose.get("roads/asphalt");
                             asphaltEntry.put("pixels", asphaltEntry.get("pixels").intValue() / 2);
@@ -217,11 +217,11 @@ class GpuAssetReloadSmokeTest {
                             assertEquals(0, originalSculpt.data().getTextureObjectHandle(), "Old numerical array must be released");
                             var sculpt = assets().sculptArray(sculptLayers);
                             assertNotSame(originalSculpt, sculpt);
-                            assertEquals(sculptTile * 2 * 1.25f, assets().sculptTile("grass"), .0001f,
+                            assertEquals(sculptTile * 2 * 1.25f, assets().sculptTile("grassland-ground"), .0001f,
                                   "Reload must re-read the catalogue and the material's width as well as its maps");
                             assertEquals(asphaltCoverage * 2, assets().roadCoverage("roads/asphalt"),
                                   "A catalogue edit reaches the road's repeat after Reload assets");
-                            int grassLayer = sculptLayers.indexOf("grass") * 2;
+                            int grassLayer = sculptLayers.indexOf("grassland-ground") * 2;
                             assertTrue(grassLayer >= 0);
                             // FBO readback returns stored bytes: RGB is now encoded sRGB; height, normal and AO stay raw.
                             assertArrayEquals(new float[] { 16f / 255f, 128f / 255f, 224f / 255f, 64f / 255f },
@@ -431,8 +431,8 @@ class GpuAssetReloadSmokeTest {
         var authored = assets.finishArrays(surfaces(layers), layers.size());
         Path textures = data.resolve("models/board/textures");
         var catalog = GpuMaterialCatalog.read(textures.resolve("materials.json").toFile());
-        assertEquals(34, layers.size(), "Current main terrain roles; granite scatter and sand verge are separate");
-        assertTrue(layers.contains("tundra-earth-variant"), "The current array includes the second terrestrial tundra material");
+        assertEquals(34, layers.size(), "Current main terrain roles; scatter-stone and sand-verge are separate");
+        assertTrue(layers.contains("tundra-ground-variant"), "The current array includes the second terrestrial tundra material");
         for (int index = 0; index < layers.size(); index++) {
             String name = layers.get(index), material = "terrain/surfaces/" + name;
             var definition = GodotMaterial.read(textures.resolve(material + ".tres").toFile(), textures.toFile());
@@ -460,7 +460,7 @@ class GpuAssetReloadSmokeTest {
             assertEquals(finish.emission() != null, authored.tint()[index * 4 + 3] >= 0,
                   name + " has an emission layer exactly when its emission map varies");
         }
-        for (String name : List.of("granite", "sand")) {
+        for (String name : List.of("scatter-stone", "sand-verge")) {
             String material = "terrain/surfaces/" + name;
             var definition = GodotMaterial.read(textures.resolve(material + ".tres").toFile(), textures.toFile());
             assertEquals(catalogued(catalog, material, definition), assets.sculpt(name).tile(), .000001f, name);

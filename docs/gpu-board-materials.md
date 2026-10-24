@@ -9,8 +9,8 @@ files. No custom export target or packed files remain.
 
 ## Files
 
-A material named `terrain/surfaces/grass` is
-`mm-data/data/models/board/textures/terrain/surfaces/grass.tres` plus its maps beside it:
+A material named `terrain/surfaces/grassland-ground` is
+`mm-data/data/models/board/textures/terrain/surfaces/grassland-ground.tres` plus its maps beside it:
 
 | File | Content |
 | --- | --- |
@@ -190,8 +190,9 @@ the previous bytes exactly, except crust heat's G and B, which no shader reads.
 | `CRUST_HEAT` | Heat, –, –, glow | Solid crust |
 
 `heightmap_scale` is Godot's parallax depth in texture coordinates times 100: 10 is the
-full range, 0.1 of a repeat. Magma's relief takes it too. For sculpted terrain it is
-100 × relief metres ÷ repeat metres: a 2 m repeat at 2.5 lifts its white 5 cm above its black.
+full range, 0.1 of a repeat. Magma's relief takes it too. For sculpted terrain it is the
+project's *Relief*, a percentage of the repeat: at 2.5, a 2 m repeat lifts its white 5 cm above
+its black.
 
 Models (`.glb`) name these maps directly: a base colour `<name>_albedo.png`, a normal
 `<name>_normal.png`, and an occlusion or metallic-roughness `<name>_orm.png`.
@@ -225,8 +226,8 @@ keep their roughness in their own normal maps, which their shaders read.
   plant cutouts. Their size never changes what they cover.
 
 A loose material keeps its texel density. Exported wider than catalogued, it covers
-proportionally more ground before it repeats: grass catalogued at 512 pixels and 4 m
-covers 8 m at 1024 pixels. `GpuAssets.coverage` gives that factor (texture width ÷
+proportionally more ground before it repeats: grass catalogued at 512 pixels and 12 m
+covers 24 m at 1024 pixels. `GpuAssets.coverage` gives that factor (texture width ÷
 `pixels`), and each world-space renderer multiplies its repeat by it, including the
 enlarged secondary sample that breaks up terrain repetition. A loose material's maps
 must be square. A terrain array holding a wider material takes its grid, and the
@@ -247,9 +248,11 @@ patterns (wear, mud, loose clumps) are anchored to the ground in metres (`u_worl
 ground a road texture covers. Road paint that lays a sculpted material takes that material's
 catalogued metres too (`GpuAssets.sculptCoverage`), times the paint's own factor
 (`GpuRoads.Patch.repeat`): a sandy or snowy verge meets the sand or snow beside it at the same
-scale; markings take concrete at 1.5 times, a metal deposit's halo earth at 0.3 times. A material's Material Maker project must agree with its catalogue:
-its *RepeatMetres* is the ground its exported tile covers, or its normals are too steep or too
-flat (mm-data's `tools/materials/README.md`, which also says how to edit these values safely).
+scale; markings take concrete at 1.5 times, a metal deposit's halo earth at 0.3 times. A terrain
+surface's Material Maker project measures its relief and crack shading per repeat, so the catalogue
+alone sets its size. A road project gives its *RepeatMetres*, the ground its exported tile covers,
+which must agree with the catalogue, or its normals are too steep or too flat (mm-data's
+`tools/materials/README.md`, which also says how to edit these values safely).
 
 ### Loose (47)
 
@@ -259,19 +262,13 @@ flat (mm-data's `tools/materials/README.md`, which also says how to edit these v
 | `structures/industrial/paint`, `structures/industrial/steel` | 1024 | – |
 | `terrain/ice/sheet` | 1024 | – |
 | `terrain/lava/crust`, `terrain/lava/lava` | 1024 | – |
-| `terrain/surfaces/tree-pit-mulch` | 512 | 1 |
-| `terrain/surfaces/gravel`, `pavement` | 512 | 3 |
-| `terrain/surfaces/grass`, `lunar-scree`, `scree`, `tropical-ground` | 512 | 4 |
-| `terrain/surfaces/dirt` | 512 | 5 |
-| `terrain/surfaces/concrete`, `desert-hardpan`, `mars-hardpan`, `sand`, `volcano-ground` | 512 | 6 |
-| `terrain/surfaces/basalt-cap`, `cast`, `fungus-mat`, `lunar`, `mars-cap`, `sandstone-cap`, `snow` | 512 | 8 |
-| `terrain/surfaces/fungus-fibres`, `granite`, `mars-bedrock` | 512 | 10 |
-| `terrain/surfaces/fungus-cliff`, `granite-contact`, `loose-sand`, `lunar-cliff`, `rock`, `sandstone`, `soil-contact`, `volcano-basalt` | 512 | 12 |
-| `terrain/surfaces/earth` | 512 | 20 |
+| `terrain/surfaces/concrete-mulch` | 512 | 1 |
+| `terrain/surfaces/arid-cliff`, `arid-debris`, `concrete-bank`, `concrete-ground`, `desert-cap`, `desert-ground`, `dirt-debris`, `dirt-ground`, `fungus-bank`, `fungus-cliff`, `fungus-debris`, `grassland-ground`, `lunar-cliff`, `lunar-debris`, `lunar-ground`, `mars-cap`, `mars-cliff`, `mars-ground`, `rock-ground`, `sand-ground`, `sand-verge`, `scatter-stone`, `snow-ground`, `temperate-bank`, `temperate-cliff`, `temperate-debris`, `tropical-ground`, `volcano-cap`, `volcano-cliff`, `volcano-ground` | 512 | 12 |
+| `terrain/surfaces/biome-soil` | 512 | 20 |
 | `terrain/surfaces/fungus-ground` | 512 | 22 |
-| `terrain/surfaces/tundra-earth`, `tundra-earth-variant`, `tundra-fungus` | 512 | 24 |
+| `terrain/surfaces/tundra-ground`, `tundra-ground-variant`, `tundra-mat` | 512 | 24 |
 | `terrain/surfaces/tundra-crust` | 512 | 28 |
-| `terrain/surfaces/mud`, `scorched` | 512 | 64 |
+| `terrain/surfaces/biome-mud`, `ground-scorch` | 512 | 64 |
 
 ### Constrained (71)
 
@@ -298,9 +295,8 @@ Each material's Material Maker project is
 the material, and its Size is the export size. Export with *File > Export material >
 Godot > Godot 4 Standard* into `data/models/board/textures/<folder>`. Alternatively, run
 `python tools/materials/export.py [relative/path.ptex]` from the mm-data root, which
-exports with Material Maker's command line (see `mm-data/tools/materials/README.md`).
-The command line renders every map at 2048 pixels whatever the node's Size, so the
-script resamples each map to its node's Size. *Reload assets* in the Tuning panel picks
+exports with Material Maker's command line at each node's Size and writes only the files
+whose content changed (see `mm-data/tools/materials/README.md`). *Reload assets* in the Tuning panel picks
 up a new export, and any catalogue change, without restarting.
 
 `GpuBoardMaterialsTest` checks that every shipped material reads, that its maps exist,

@@ -10,8 +10,8 @@ cover, visibility or picking.
 The surface has four material roles:
 
 - Open plain: mauve mineral skin and irregular blue mycelial marbling, 22 m span.
-- Ridge crowns and lips: lobed cyan crust, 8 m span.
-- Slopes: a separate purple fibrous mantle, 10 m span.
+- Ridge crowns and lips: lobed cyan crust, 12 m span.
+- Slopes: a separate purple fibrous mantle, 12 m span.
 - Exposed cliffs: dark violet rock with sparse cyan fissures, 12 m span.
 
 `terrain-materials.glsl` evaluates these roles with the shared physical projection.
@@ -22,8 +22,8 @@ repeating landmarks. Normal-map relief is an artistic estimate from source
 luminance, not measured displacement or new terrain geometry.
 
 The four color/height and normal/AO pairs are layers of the sculpt texture array.
-Their Material Maker projects are `fungus-ground`, `fungus-mat`, `fungus-cliff` and
-`fungus-fibres` under `mm-data/tools/materials/terrain/surfaces/`;
+Their Material Maker projects are `fungus-ground`, `fungus-debris`, `fungus-cliff` and
+`fungus-bank` under `mm-data/tools/materials/terrain/surfaces/`;
 `python tools/materials/export.py`, run from the mm-data root, exports all projects as
 Godot 4 Standard materials ([board materials](gpu-board-materials.md)).
 

@@ -95,7 +95,7 @@ class GpuMaterialLodSmokeTest {
                 java.nio.file.Files.writeString(file, text.replaceAll("(?m)^roughness = .*$", "roughness = 1.0"));
             }
         }
-        var names = List.of("grass", "rock", "scree", "granite-contact", "soil-contact");
+        var names = List.of("grassland-ground", "rock-ground", "temperate-debris", "temperate-cliff", "temperate-bank");
         for (int role = 0; role < names.size(); role++) {
             String name = names.get(role);
             assertTrue(java.nio.file.Files.exists(sculpt.resolve(name + ".tres")), "The actual grass/rock material role exists: " + name);

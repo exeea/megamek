@@ -278,10 +278,10 @@ class GpuBoardMaterialsTest {
               GpuMaterialMaps.Layout.MOLTEN_HEAT), "molten heat");
 
         // Mud keeps roughness in its normal's blue channel; the file's normal is complete.
-        BoardMaterialFiles.sculpt(textures, "mud", color, normal, 64);
+        BoardMaterialFiles.sculpt(textures, "biome-mud", color, normal, 64);
         Path mud = textures.resolve("terrain/surfaces");
-        BoardMaterialFiles.write(mud, "mud_orm.png", BoardMaterialFiles.channels(normal, 3, 2, -2, -3));
-        assertPixels(normal, GpuMaterialMaps.pack(new GpuAssets().definition("terrain/surfaces/mud"),
+        BoardMaterialFiles.write(mud, "biome-mud_orm.png", BoardMaterialFiles.channels(normal, 3, 2, -2, -3));
+        assertPixels(normal, GpuMaterialMaps.pack(new GpuAssets().definition("terrain/surfaces/biome-mud"),
               GpuMaterialMaps.Layout.NORMAL_ROUGHNESS), "mud's packed roughness");
     }
 

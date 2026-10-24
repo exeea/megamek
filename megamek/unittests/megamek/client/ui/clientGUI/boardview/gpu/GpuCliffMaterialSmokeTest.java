@@ -25,9 +25,9 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuCliffMaterialSmokeTest {
     private static final int PERIOD = 64;
-    private static final List<String> MATERIALS = List.of("soil-contact", "granite-contact", "sandstone",
-          "mars-bedrock", "volcano-basalt", "lunar-cliff", "fungus-cliff", "fungus-fibres", "dirt", "snow",
-          "volcano-ground", "mars-hardpan");
+    private static final List<String> MATERIALS = List.of("temperate-bank", "temperate-cliff", "arid-cliff",
+          "mars-cliff", "volcano-cliff", "lunar-cliff", "fungus-cliff", "fungus-bank", "dirt-ground", "snow-ground",
+          "volcano-ground", "mars-ground");
 
     @Test
     void tallNaturalFacesDoNotRepeatAtTheSourceMapPeriod() {

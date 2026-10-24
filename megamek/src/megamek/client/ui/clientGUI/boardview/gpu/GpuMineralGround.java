@@ -30,7 +30,7 @@ final class GpuMineralGround {
             shape.add(new Area(new Ellipse2D.Float(feature.x() - radius, feature.y() - radius, radius * 2, radius * 2)));
         }
         // A halo on other ground: earth's grain at 6 m, finer than earth ground's 20 m.
-        var patch = new GpuRoads.Patch(shape, "earth", new Color(.88f, .75f, .62f, 1),
+        var patch = new GpuRoads.Patch(shape, "biome-soil", new Color(.88f, .75f, .62f, 1),
               .3f, .02f, new GpuRoads.Fade(0, 0, 0));
         var triangles = GpuRoads.drape(tile, surface, patch);
         if (triangles.isEmpty()) { return null; }

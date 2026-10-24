@@ -72,7 +72,7 @@ uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
 
 bool family(float f) { return abs(sculptFamily - f) < .5; }
 
-// Grey lunar/volcanic sand reuses the shared loose-sand relief. Derive the colour from the supporting covers,
+// Grey lunar/volcanic sand reuses the shared sand-ground relief. Derive the colour from the supporting covers,
 // so a theme boundary interpolates in world space instead of changing abruptly at a hex edge.
 float greySand() {
 #ifdef terrainBlendFlag

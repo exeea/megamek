@@ -151,7 +151,7 @@ class BoardRoadControlTest {
               .map(BoardRoad.StopApproach::direction).toList());
         var captured = BoardRoad.layout(AT, 15, BoardRoad.Kind.PAVED, direction -> BoardRoad.Kind.NONE)
               .control(HexAppearance.TrafficControl.GANTRY).aprons(1);
-        var paint = GpuRoads.patches(tile, road).stream().filter(patch -> patch.texture().equals("concrete")).toList();
+        var paint = GpuRoads.patches(tile, road).stream().filter(patch -> patch.texture().equals("concrete-ground")).toList();
         for (var approach : captured.stopApproaches(15)) {
             float across = (approach.inner() + approach.outer()) / 2;
             float x = approach.x() - approach.ny() * across, y = approach.y() + approach.nx() * across;
@@ -505,7 +505,7 @@ class BoardRoadControlTest {
         var north = road.stopApproaches(tile.roadExits()).stream().filter(arm -> arm.direction() == 0).findFirst().orElseThrow();
         float across = (north.inner() + north.outer()) / 2;
         float x = north.x() - north.ny() * across, y = north.y() + north.nx() * across;
-        assertTrue(GpuRoads.patches(tile, road).stream().filter(patch -> patch.texture().equals("concrete"))
+        assertTrue(GpuRoads.patches(tile, road).stream().filter(patch -> patch.texture().equals("concrete-ground"))
                     .anyMatch(patch -> patch.shape().contains(x, y)),
               "The integrated stop-bar paint reaches the same bridge approach");
     }

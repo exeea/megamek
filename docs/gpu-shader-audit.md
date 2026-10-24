@@ -849,8 +849,8 @@ optimization target from this single sequence.
 The source explains where to investigate next:
 
 * `GpuTerrain.SCULPT_MATERIALS` supplies Dome's ordinary `VOLCANO` family with
-  `volcano-ground` for ground/debris, `basalt-cap` for caps and `volcano-basalt`
-  for walls. Lunar uses `lunar`, `lunar-scree` and `lunar-cliff`; the measured
+  `volcano-ground` for ground/debris, `volcano-cap` for caps and `volcano-cliff`
+  for walls. Lunar uses `lunar-ground`, `lunar-debris` and `lunar-cliff`; the measured
   Dome mixed program specializes ordinary family 10 (volcanic ground), not lunar.
 * In `terrain-materials.glsl`, `naturalMaterialFor` samples candidate role
   color/height at lines 400–408, calculates height competition, then samples

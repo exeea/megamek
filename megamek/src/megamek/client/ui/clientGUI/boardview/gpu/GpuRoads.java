@@ -289,7 +289,7 @@ final class GpuRoads {
             float scale = BoardGeometry.hexScale();
             Area base = grade.region().createTransformedArea(new AffineTransform(1 / scale, 0, 0, 1 / scale,
                   -BoardGeometry.centerX(tile.coords()) / scale, -BoardGeometry.centerY(tile.coords()) / scale));
-            patches.add(new Patch(base, "concrete", Color.WHITE, 1, CAST_LIFT, null));
+            patches.add(new Patch(base, "concrete-ground", Color.WHITE, 1, CAST_LIFT, null));
         }
         return painted == road ? patches : bare(patches, painted, paved(tile.road()));
     }
@@ -380,7 +380,7 @@ final class GpuRoads {
         }
         for (var patch : patches) {
             Area head = new Area(patch.shape());
-            if (patch.texture().equals("concrete")) {
+            if (patch.texture().equals("concrete-ground")) {
                 head.subtract(road.endZone(apron
                       + BoardBridgeFooting.terminalLength() + BoardRelief.metres(.3f) / BoardGeometry.hexScale()));
                 result.add(new Patch(head, patch.texture(), patch.tint(), patch.repeat(), patch.lift(), patch.fade()));
@@ -419,7 +419,7 @@ final class GpuRoads {
             Area verge = road.footprint(BoardRoad.SHOULDER);
             verge.subtract(road.footprint(-FEATHER));
             // Snow and sand verges fade into the same ground beside the road, so they keep its scale.
-            patches.add(new Patch(verge, snow ? "snow" : sand ? "sand" : "roads/gravel", Color.WHITE,
+            patches.add(new Patch(verge, snow ? "snow-ground" : sand ? "sand-verge" : "roads/gravel", Color.WHITE,
                   1, .025f, new Fade(BoardRoad.SHOULDER, -.2f, endFade)));
         }
         patches.add(new Patch(core, texture, tint, repeat, SURFACE_LIFT, null));
@@ -460,7 +460,7 @@ final class GpuRoads {
                 Area box = keepClear(road, exits, approaches);
                 box.subtract(crossing.clearance());
                 if (!box.isEmpty()) {
-                    patches.add(new Patch(box, "concrete", new Color(1, .78f, .08f, 1), 1.5f, .065f, null));
+                    patches.add(new Patch(box, "concrete-ground", new Color(1, .78f, .08f, 1), 1.5f, .065f, null));
                 }
             }
             var divider = markings(road, coords, exits);
@@ -471,12 +471,12 @@ final class GpuRoads {
             stops.add(road.flowMarkings());
             stops.subtract(crossing.clearance());
             if (!stops.isEmpty()) {
-                patches.add(new Patch(stops, "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
+                patches.add(new Patch(stops, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
             }
             Area median = road.medianLines();
             median.subtract(crossing.clearance());
             if (!median.isEmpty()) {
-                patches.add(new Patch(median, "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
+                patches.add(new Patch(median, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
             }
         } else if (!paved) {
             Area tracks = road.tracks(exits);
@@ -492,7 +492,7 @@ final class GpuRoads {
         Area concrete = road.concreteClearance();
         if (!concrete.isEmpty()) {
             for (var patch : patches) {
-                if (patch.texture().equals("concrete")) { patch.shape().subtract(concrete); }
+                if (patch.texture().equals("concrete-ground")) { patch.shape().subtract(concrete); }
             }
         }
         // Rails bound a deck: loose margins and wear must never float outside its carriageway.
@@ -549,7 +549,8 @@ final class GpuRoads {
     }
 
     static Patch markings(BoardRoad road, Coords coords, int exits) {
-        return new Patch(road.markings(coords, exits), "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null);
+        return new Patch(road.markings(coords, exits), "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, .065f,
+              null);
     }
 
     /** Flat carriers clip deck materials at the hex edges without draping them onto the riverbed. */

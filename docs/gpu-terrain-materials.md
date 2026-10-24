@@ -356,10 +356,10 @@ changes the field. Equal neighbouring severities stay constant. Shading uses the
 stronger of authored and nuclear severity. Disabling combat scars does not hide authored scorch. Erasing
 the appearance clears A without erasing combat history.
 
-The editable source is `mm-data/tools/materials/terrain/surfaces/scorched/scorched.ptex`.
+The editable source is `mm-data/tools/materials/terrain/surfaces/ground-scorch/ground-scorch.ptex`.
 Its procedural deposits, cinders, ash and fused fissures export as a Godot 4 Standard
 material ([board materials](gpu-board-materials.md)) with stock Material Maker, or through
-`tools/materials/export.py terrain/surfaces/scorched/scorched.ptex`.
+`tools/materials/export.py terrain/surfaces/ground-scorch/ground-scorch.ptex`.
 The authoring-only `preview_s` control previews severity; exports always contain
 the fixed material basis. Its 512-square maps cover a 64-metre square, wider
 than a hex. Deposits span metres while the re-authored grain remains sub-metre.
@@ -461,7 +461,7 @@ with Material Maker's stock Godot 4 Standard target; an optional path relative t
 into `megamek/data`. Their height, normal and AO are artistic estimates, not measured
 scans.
 
-Concrete planting pits use `tree-pit-mulch` for their interiors and the existing
+Concrete planting pits use `concrete-mulch` for their interiors and the existing
 authored concrete for their kerbs. The mulch project exposes bark-chip placement,
 palette and relief controls, takes its dark soil substrate from its own photographic source,
 and exports registered colour/height and normal/AO maps. The catalogue gives its 1 m
@@ -470,10 +470,10 @@ is its scalar roughness. The shader applies no
 separate brown palette or fixed kerb brightness boost. Bare stone beneath snow caps
 likewise keeps its authored granite pigment; snow coverage and per-rock population
 variation remain separate material effects.
-LUNAR has its own `lunar`, `lunar-scree` and `lunar-cliff` map pairs (neutral
+LUNAR has its own `lunar-ground`, `lunar-debris` and `lunar-cliff` map pairs (neutral
 regolith, angular scree and fractured bedrock) and its own geology profile,
 independent of terrestrial rock. Editing either family must leave the other alone.
-The lunar pairs are 512 pixels square, span 8, 4 and 12 metres, and carry 2.5, 8 and
+The lunar pairs are 512 pixels square, span 12 metres each, and carry 3.75, 24 and
 12 centimetres of estimated shading relief.
 World-space projections keep coordinates continuous across hexes. Two differently
 oriented ground samples reduce repetition; walls use compatible vertical projections.
@@ -486,19 +486,25 @@ its normal gradient by 2.37, rather than exaggerating the same relief over a lon
 distance.
 Slope and height-aware blending determine how cover gives way to mantle, rock and scree.
 
-Dirt repeats at 5 m with 6 cm of estimated relief: dry compact soil with embedded and loose
-stones of 1 to 10 cm. Exposed grass banks use `soil-contact` rather than dirt: dry crumbly
-loam with small clods and stones and no direction (parallel rills combed every bank), repeating
-at 12 m with 12 cm of estimated relief.
-Sandstone repeats at 12 m with 16 cm of estimated relief, in broad rock planes and discontinuous
-fractures. `granite-contact` (cliff walls) repeats at 12 m with 16 cm: pale karst limestone in
-jointed blocks with water streaks and lichen; the `rock` tops (12 m, 42 cm) are the same limestone
-as a weathered plateau of slabs with grass and soil in its fissures, and `scree` is its talus of
-angular blocks. Level bedrock of the families whose wall is `granite-contact` reads the `rock`
-map instead (`u_flatRock`), as the cliff's joints stand upright. Dirt, soil-contact, grass,
-rock, granite-contact, scree and the mulch's soil come from photographic studies. `sand`, `grass`
-and `scree` repeat at 6, 4 and 4 metres with 2.5, 2.5 and 10 cm of relief; lunar has
-its own `lunar-scree`. See [terrain realism](gpu-terrain-realism.md) for the visual
+Terrain surface materials are named `<surface>-<role>`: the ground type, then what it does there
+(`ground`, `debris` at cliff feet, rims and slopes, `cliff` walls and bedrock, a soil `bank`, or mesa
+`cap` plates). `temperate-*` is shared by grassland, dirt, rock, concrete, snow and tropical ground, and
+`arid-*` by sand and desert. Every one but `concrete-mulch` repeats every 12 m or more, so a 30 m hex
+shows few repeats; their features are enlarged to that scale, as on a diorama.
+
+`dirt-ground` repeats at 12 m with 14 cm of estimated relief: dry compact soil with embedded and loose
+stones of about 2 to 25 cm. Exposed grass banks use `temperate-bank` rather than dirt: dry crumbly loam
+with small clods and stones and no direction (parallel rills combed every bank), 12 m with 12 cm.
+`arid-cliff` (sandstone) repeats at 12 m with 16 cm, in broad rock planes and discontinuous fractures.
+`temperate-cliff` repeats at 12 m with 24 cm: pale karst limestone in jointed blocks with water streaks
+and lichen; `rock-ground` (12 m, 63 cm) is the same limestone as a weathered plateau of slabs with grass
+and soil in its fissures, and `temperate-debris` is its talus of angular blocks. Level bedrock of the
+families whose wall is `temperate-cliff` reads the `rock-ground` map instead (`u_flatRock`), as the
+cliff's joints stand upright. `arid-debris` is varnished pebbles and red sandstone chips of about 25 to
+55 cm on a warm sandy crust, its hue shifted to the desert ground's in its project, 12 m with 15 cm:
+debris must read as big, distinct stones at board zoom. These, `grassland-ground` and the mulch's soil
+come from photographic studies. `sand-verge`, `grassland-ground` and `temperate-debris` have 5, 7.5 and
+30 cm of relief; lunar has its own `lunar-debris`. See [terrain realism](gpu-terrain-realism.md) for the visual
 references and acceptance rules.
 
 `terrain-materials.glsl` owns that common evaluation.
@@ -543,13 +549,11 @@ the strata tint.
 
 | Material | Base source span in metres |
 | --- | --- |
-| Grass / dirt / desert hardpan / Mars hardpan | 4 / 5 / 6 / 6 |
-| Loose SAND / rock / snow / lunar / concrete tops | 12 / 8 / 8 / 8 / 6 |
-| Soil banks / scree / gravel | 4 / 4 / 3 |
-| Granite / sandstone / Martian / lunar cliff maps | 8 / 12 / 10 / 12 |
-| Cast concrete wall map | 8; panel joints have their own constructed dimensions |
-| Fungal ground / mat / cliff / fibrous slope | 22 / 8 / 12 / 10 |
-| Volcanic ash ground / basalt cliff | 6 / 12 |
+| Every ground, debris, bank, cliff and cap map not listed below | 12 |
+| Cast concrete wall map | 12; panel joints have their own constructed dimensions |
+| Fungal ground | 22 |
+| Tundra ground / mat / crust | 24 / 24 / 28 |
+| Tree-pit mulch / mud / ground scorch | 1 / 64 / 64 |
 | Wetland earth | 9; the shared earth map sampled at 45% of its 20 m source span |
 | Road and bridge deck maps | 6 for the ordinary repeat of one legacy detail unit |
 | Ice / solid volcanic crust / flowing lava | 24 / 12 / 24 |
@@ -624,7 +628,7 @@ rust-red hardpan and darker iron-rich bedrock maps; it does not darken the dirt 
 Neither theme implies `Terrains.SAND`.
 
 `BoardSurfaceBlend.capture` derives one shared SAND cover from that gameplay flag.
-Its pale loose-sand material is the same in desert, Mars and grassland. The tile
+Its pale sand-ground material is the same in desert, Mars and grassland. The tile
 keeps its theme's geology, vegetation selection and coexisting rough/swamp data.
 Its palette retains a small share of the substrate. A continuous metre-based field
 opens sparse patches through the sand, exposing the substrate's complete material:
@@ -637,7 +641,7 @@ and magma retain their established material precedence. Buildings block neighbou
 cover without discarding their own authored SAND; water keeps its bed treatment.
 Authored `ground_fluff` gradients mix themes (including Desert and Mars), not SAND.
 
-The shared loose-sand source has broad branching waves and finer cross-ripples.
+The shared sand-ground source has broad branching waves and finer cross-ripples.
 Its 512-square color/height and normal/AO pair repeats over 12 metres. Its
 22-centimetre relief is an artistic estimate for normals, not mesh displacement.
 The shader translates source windows instead of rotating or resizing them, retaining
@@ -677,7 +681,7 @@ suppress it; fields, marsh, quicksand and mud keep their biome precedence. Expli
 SAND or SNOW also covers it. A Snow *theme* can show exposed tundra between snow
 remnants. None of these appearance choices changes the board's terrain or rules.
 
-The `tundra-earth`, `tundra-earth-variant`, `tundra-fungus` and `tundra-crust` color/height and normal/AO
+The `tundra-ground`, `tundra-ground-variant`, `tundra-mat` and `tundra-crust` color/height and normal/AO
 maps are 512 pixels square. Living mats repeat over 24 metres and mineral crust over
 28 metres. Both earth variants contain the same moss, pale lichen, humus and sparse
 rust-coloured vegetation palette, with different local arrangements. A world-space
@@ -701,10 +705,10 @@ flowing lava; ordinary volcanic rock does not become emissive. Shared SAND keeps
 its terrain identity and wave detail, with a grey mineral tint over lunar or
 volcanic substrates. The tint follows the existing cover weights at contacts.
 
-`volcano-ground` and `volcano-basalt` use the existing sculpt array, world-space
+`volcano-ground` and `volcano-cliff` use the existing sculpt array, world-space
 projection, material LOD and native slope/cliff builders. Their aligned 512-square
-color/height and normal/AO maps repeat over 6 and 12 metres. Estimated relief is
-4.5 and 14 cm respectively; this is shading relief, not extra mesh subdivision.
+color/height and normal/AO maps repeat over 12 metres. Estimated relief is
+9 and 14 cm respectively; this is shading relief, not extra mesh subdivision.
 Scatter reuses the basalt map in its shared atlas. No per-hex texture or draw pass
 is added.
 
@@ -791,8 +795,8 @@ sediment still removes the dry cap. Mars uses its own mantle behavior.
 
 The three mineral caps use their families' mantle slots: pale sandstone,
 salmon Martian plates and cool basalt. Their aligned 512-square color/height and
-normal/cavity pairs repeat at 8 metres, with estimated shading relief of 10, 10
-and 12 cm. Their six RGBA16F layers of the texture array take about 16 MiB with
+normal/cavity pairs repeat at 12 metres, with estimated shading relief of 15, 15
+and 18 cm. Their six RGBA16F layers of the texture array take about 16 MiB with
 mipmaps; they need no extra sampler, draw batch or geometry subdivision.
 
 Dirt and rocky ground expose pale bedrock; lunar regolith exposes darker stone.
@@ -834,11 +838,11 @@ resource boundaries described here.
 
 ## Shared mud
 
-`mm-data/tools/materials/terrain/surfaces/mud/mud.ptex` is the shared procedural mud
+`mm-data/tools/materials/terrain/surfaces/biome-mud/biome-mud.ptex` is the shared procedural mud
 material for MUD ground hexes and BRIDGE_MUD on natural arches. Its author controls
 cover clod size, basin size and coverage, pigment, roughness, repeat size and relief.
 Stock Material Maker exports it as a Godot 4 Standard material, also with
-`tools/materials/export.py terrain/surfaces/mud/mud.ptex`. Its 512-square maps
+`tools/materials/export.py terrain/surfaces/biome-mud/biome-mud.ptex`. Its 512-square maps
 repeat every 64 metres (wider than two hexes). On the GPU they become colour with height,
 and the normal XY/roughness/AO format described above.
 

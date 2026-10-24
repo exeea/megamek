@@ -27,7 +27,7 @@ Hummocks change shading normals, not physical terrain or the board's water flags
 Fields and reed marshes retain their theme's natural surface family, usually
 grass. Mud and quicksand classify as dirt. Cultivation fades before a steep face;
 the bank retains its grass/soil mantle and normal relief.
-`terrain-biome.glsl` borrows the `terrain/surfaces/earth` material's
+`terrain-biome.glsl` borrows the `terrain/surfaces/biome-soil` material's
 colour/height and normal/occlusion layers for soil. On horizontal surfaces,
 colour mixes two repeats of the earth map; relief reads only the first. Steep faces
 blend the two wall projections instead. Peat, moss,

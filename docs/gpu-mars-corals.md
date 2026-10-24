@@ -25,7 +25,7 @@ hexes. The bottom six percent of the uneven mineral base is embedded, with unifo
 scale adjusted to preserve the exposed foliage height. Root radii are derived once
 per model during chunk construction; upper branches do not enlarge that footprint.
 This prevents the colony from balancing on one low vertex or a raised ground point.
-Mars scatter stones use the same `mars-bedrock` texture as larger rocks in the
+Mars scatter stones use the same `mars-cliff` texture as larger rocks in the
 sixth slot of the existing scatter atlas, without the old red sandstone tint.
 
 The sibling `mm-data` repository contains:

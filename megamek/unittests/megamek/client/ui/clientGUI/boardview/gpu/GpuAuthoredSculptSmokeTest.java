@@ -97,7 +97,7 @@ class GpuAuthoredSculptSmokeTest {
             apply(manager, Map.of("terrain-sculpt.frag", diagnostic(source)));
             File textures = GpuMaterialMaps.boardTextures();
             float mulchRoughness = GpuAssets.authoredFinish(GodotMaterial.read(
-                  new File(textures, "terrain/surfaces/tree-pit-mulch.tres"), textures)).surface()[0];
+                  new File(textures, "terrain/surfaces/concrete-mulch.tres"), textures)).surface()[0];
             var checks = new ArrayList<Executable>();
             for (int index = 0; index < specimens.size(); index++) {
                 var specimen = specimens.get(index);
@@ -277,19 +277,19 @@ class GpuAuthoredSculptSmokeTest {
         var program = ((BaseShader) GpuShaderProvider.unwrap(shader)).program;
         var values = BufferUtils.newFloatBuffer(4);
         Gdx.gl.glGetUniformfv(program.getHandle(), program.getUniformLocation("u_treePitMaterial"), values);
-        assertTrue(layers.contains("tree-pit-mulch"));
-        assertEquals(2f * layers.indexOf("tree-pit-mulch"), values.get(0), 0, "Actual mulch layer identity");
+        assertTrue(layers.contains("concrete-mulch"));
+        assertEquals(2f * layers.indexOf("concrete-mulch"), values.get(0), 0, "Actual mulch layer identity");
         var catalogued = new GpuAssets();
-        float tile = catalogued.sculptTile("tree-pit-mulch");
+        float tile = catalogued.sculptTile("concrete-mulch");
         catalogued.dispose();
         assertEquals(tile, values.get(1), 0, "Actual authored mulch repeat in metres");
         values.clear();
         Gdx.gl.glGetUniformfv(program.getHandle(), program.getUniformLocation("u_sculptLayers"), values);
-        String ground = specimen.name().equals("snow-rock") ? "snow" : "concrete";
+        String ground = specimen.name().equals("snow-rock") ? "snow-ground" : "concrete-ground";
         assertEquals(2f * layers.indexOf(ground), values.get(0), 0, "Actual ground/kerb pigment identity");
-        assertEquals(2f * layers.indexOf("granite-contact"), values.get(2), 0, "Actual unpainted stone identity");
+        assertEquals(2f * layers.indexOf("temperate-cliff"), values.get(2), 0, "Actual unpainted stone identity");
         System.out.println("Authored sculpt bindings " + specimen.name() + ": " + ground
-              + "/granite-contact; mulch=" + 2 * layers.indexOf("tree-pit-mulch") + " tile=" + tile);
+              + "/temperate-cliff; mulch=" + 2 * layers.indexOf("concrete-mulch") + " tile=" + tile);
     }
 
     /** Real production geometry and vertex encoding, isolated from unrelated scene models and their loading. */

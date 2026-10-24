@@ -61,8 +61,9 @@ class GpuCliffMaterialsSmokeTest {
     private static void checkMaterials() {
         GpuAssets assets = new GpuAssets();
         try {
-            for (String name : List.of("grass", "dirt", "sand", "rock", "concrete", "snow", "scree", "gravel",
-                  "pavement", "granite-contact", "sandstone", "soil-contact", "cast")) {
+            for (String name : List.of("grassland-ground", "dirt-ground", "sand-verge", "rock-ground", "concrete-ground", "snow-ground",
+                  "temperate-debris", "dirt-debris", "arid-debris", "temperate-cliff", "arid-cliff", "temperate-bank",
+                  "concrete-bank")) {
                 GpuAssets.Sculpt maps = assets.sculpt(name);
                 assertNotNull(maps.normal(), name);
                 assertSame(maps, assets.sculpt(name), "All hexes borrow one material set");

@@ -29,7 +29,7 @@ class GpuOpaqueSorterTest {
         base.material.set(new BlendingAttribute(true, 1), new TextureAttribute(GpuRoads.Mask.TYPE, mock(Texture.class)),
               GpuRoads.attribute(new GpuRoads.Patch(new Area(), "roads/asphalt", Color.WHITE, 1, .04f, null)));
         paint.material.set(new BlendingAttribute(true, 1), new TextureAttribute(GpuRoads.Mask.TYPE, mock(Texture.class)),
-              GpuRoads.attribute(new GpuRoads.Patch(new Area(), "concrete", Color.WHITE, 1, .065f, null)));
+              GpuRoads.attribute(new GpuRoads.Patch(new Area(), "concrete-ground", Color.WHITE, 1, .065f, null)));
         // ModelInstance copies must retain coat ordering as well as the shader's transition value.
         paint.material = new Material(paint.material);
         Renderable near = part(a, 3), far = part(b, 30);

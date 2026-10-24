@@ -105,7 +105,7 @@ soil/gravel margin above the waterline, with a narrower damp strip inside it.
 The material fade spans the full exposed bank with linear coverage, rather than
 stacked height smoothsteps that compress it into a sharp strip. Both effects
 fade below the dry rim to preserve the adjoining land's material. This
-uses the existing soil-contact and gravel material roles, so snow, dune sand and
+uses the existing bank and debris material roles, so snow, dune sand and
 turf give way to exposed sediment before reaching the water. Depth-zero grass
 and tropical shores retain turf farther down the exposed bank, with the same
 sediment at the wet toe and below water. Their grass roots use the finished bank

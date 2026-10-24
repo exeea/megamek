@@ -96,12 +96,12 @@ class GpuConcreteProjectionSmokeTest {
             Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDisable(GL20.GL_BLEND);
-            var maps = assets.sculptArray(List.of("cast"));
+            var maps = assets.sculptArray(List.of("concrete-bank"));
             maps.color().bind(0);
             maps.data().bind(3);
             noise.bind(1);
             if (source.isBlank()) {
-                assets.finishArrays(List.of("terrain/surfaces/cast"), 1).maps().bind(2);
+                assets.finishArrays(List.of("terrain/surfaces/concrete-bank"), 1).maps().bind(2);
             }
             shader.bind();
             shader.setUniformi("u_terrainLayers", 0);

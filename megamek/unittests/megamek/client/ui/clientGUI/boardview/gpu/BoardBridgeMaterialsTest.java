@@ -36,9 +36,9 @@ class BoardBridgeMaterialsTest {
                 assertTrue(road.joins().isEmpty());
                 var patches = GpuRoads.deckPatches(tile, deck, road);
                 assertEquals(kind == BoardRoad.Kind.PAVED, patches.stream()
-                      .anyMatch(p -> p.texture().equals("concrete") && !p.shape().isEmpty()));
+                      .anyMatch(p -> p.texture().equals("concrete-ground") && !p.shape().isEmpty()));
                 assertTrue(patches.stream().filter(p -> !p.shape().isEmpty()).allMatch(p ->
-                      p.texture().equals(GpuRoads.texture(kind)) || p.texture().equals("concrete")));
+                      p.texture().equals(GpuRoads.texture(kind)) || p.texture().equals("concrete-ground")));
                 assertFalse(patches.stream().anyMatch(p -> p.fade() != null && p.fade().outer() > 0),
                       "Decks must not grow loose shoulders outside their rails");
             }
@@ -92,7 +92,7 @@ class BoardBridgeMaterialsTest {
             var deck = BoardBridge.deck(scene, tile);
             assertEquals(BoardRoad.Kind.PAVED, deck.kind());
             assertTrue(GpuRoads.deckPatches(tile, deck, deck.road(at)).stream()
-                  .anyMatch(p -> p.texture().equals("concrete") && !p.shape().isEmpty()));
+                  .anyMatch(p -> p.texture().equals("concrete-ground") && !p.shape().isEmpty()));
         }
     }
 
@@ -120,7 +120,7 @@ class BoardBridgeMaterialsTest {
         assertEquals("gravel", GpuRoads.material(tile, false, "roads/asphalt"));
         assertEquals("dirt", GpuRoads.material(tile, true, "roads/asphalt"));
         assertEquals("gravel", GpuRoads.material(tile, true, "roads/gravel"), "Transition and shoulder coats stay distinct");
-        assertNull(GpuRoads.material(tile, true, "concrete"), "Markings retain their own material");
+        assertNull(GpuRoads.material(tile, true, "concrete-ground"), "Markings retain their own material");
     }
 
     /** b13 ways: a deck's road is painted on its own sides only; the slab still spans every bridge exit. */

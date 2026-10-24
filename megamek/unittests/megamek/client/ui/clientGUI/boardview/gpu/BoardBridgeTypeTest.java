@@ -225,10 +225,10 @@ class BoardBridgeTypeTest {
         var deck = BoardBridge.deck(alley, alley.tile(AT));
         assertTrue(deck.paved());
         assertTrue(GpuRoads.deckPatches(alley.tile(AT), deck, deck.road(AT)).stream()
-              .noneMatch(p -> p.texture().equals("concrete") && !p.shape().isEmpty()), "No centre markings without a road");
+              .noneMatch(p -> p.texture().equals("concrete-ground") && !p.shape().isEmpty()), "No centre markings without a road");
         var marked = BoardBridge.deck(paved, paved.tile(AT));
         assertTrue(GpuRoads.deckPatches(paved.tile(AT), marked, marked.road(AT)).stream()
-              .anyMatch(p -> p.texture().equals("concrete") && !p.shape().isEmpty()));
+              .anyMatch(p -> p.texture().equals("concrete-ground") && !p.shape().isEmpty()));
     }
 
     /**

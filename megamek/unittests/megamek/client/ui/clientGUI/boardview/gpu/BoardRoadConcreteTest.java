@@ -161,7 +161,7 @@ class BoardRoadConcreteTest {
             var road = BoardRoad.of(scene, tile);
             assertTrue(road.stopApproaches(tile.roadExits()).isEmpty(),
                   "The open apron entrance is not a stopped road junction at " + at.getBoardNum());
-            var paint = GpuRoads.patches(tile, road).stream().filter(patch -> patch.texture().equals("concrete"))
+            var paint = GpuRoads.patches(tile, road).stream().filter(patch -> patch.texture().equals("concrete-ground"))
                   .map(patch -> GpuRoads.mask(road, patch)).toList();
             var edges = new ArrayList<Vector3[]>();
             var concrete = BoardConcrete.of(scene);
@@ -208,7 +208,7 @@ class BoardRoadConcreteTest {
         assertFalse(GpuRoads.patches(scene.tile(at), roads.getFirst()).isEmpty());
         var approach = scene.tile(at.translated(0));
         var paint = GpuRoads.patches(approach, BoardRoad.of(scene, approach)).stream()
-              .filter(patch -> patch.texture().equals("concrete")).toList();
+              .filter(patch -> patch.texture().equals("concrete-ground")).toList();
         boolean marked = false;
         for (int y = -20; y >= -34; y--) {
             for (var patch : paint) { marked |= patch.shape().contains(0, y); }

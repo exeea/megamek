@@ -100,7 +100,7 @@ class GpuTerrainContactSmokeTest {
                         try {
                             sentinel.setColor(0xff00ffff);
                             sentinel.fill();
-                            for (String name : List.of("grass", "loose-sand")) {
+                            for (String name : List.of("grassland-ground", "sand-ground")) {
                                 int layer = names.indexOf(name);
                                 assertTrue(layer >= 0, "Sentinel must replace a real material: " + name);
                                 Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer,

@@ -517,23 +517,27 @@ final class GpuTerrain implements Disposable {
                         set(iceBoardUniform, (float) biomes.iceWidth(), (float) biomes.iceHeight());
                     }
                     if (has(biomeSoilUniform)) {
-                        set(biomeSoilUniform, 2f * SCULPT_LAYERS.indexOf("earth"));
-                        set(biomeSoilTileUniform, assets.sculptTile("earth") * .45f);
+                        set(biomeSoilUniform, 2f * SCULPT_LAYERS.indexOf("biome-soil"));
+                        set(biomeSoilTileUniform, assets.sculptTile("biome-soil") * .45f);
                     }
                     if (has(meadowFinishUniform)) {
-                        float tile = assets.sculptTile("grass");
-                        set(meadowFinishUniform, SCULPT_LAYERS.indexOf("grass"), tile, tile * BoardRelief.metres(1));
+                        float tile = assets.sculptTile("grassland-ground");
+                        set(meadowFinishUniform, SCULPT_LAYERS.indexOf("grassland-ground"), tile,
+                              tile * BoardRelief.metres(1));
                     }
                     if (has(mudMaterialUniform)) {
-                        set(mudMaterialUniform, 2f * SCULPT_LAYERS.indexOf("mud"), assets.sculptTile("mud"));
+                        set(mudMaterialUniform, 2f * SCULPT_LAYERS.indexOf("biome-mud"),
+                              assets.sculptTile("biome-mud"));
                     }
                     if (has(bankMaterialsUniform)) {
-                        set(bankMaterialsUniform, 2f * SCULPT_LAYERS.indexOf("soil-contact"), assets.sculptTile("soil-contact"),
-                              2f * SCULPT_LAYERS.indexOf("gravel"), assets.sculptTile("gravel"));
+                        set(bankMaterialsUniform, 2f * SCULPT_LAYERS.indexOf("temperate-bank"),
+                              assets.sculptTile("temperate-bank"),
+                              2f * SCULPT_LAYERS.indexOf("dirt-debris"), assets.sculptTile("dirt-debris"));
                     }
                     if (has(flatRockUniform)) {
-                        set(flatRockUniform, 2f * SCULPT_LAYERS.indexOf("granite-contact"), 2f * SCULPT_LAYERS.indexOf("rock"),
-                              assets.sculptTile("rock"));
+                        set(flatRockUniform, 2f * SCULPT_LAYERS.indexOf("temperate-cliff"),
+                              2f * SCULPT_LAYERS.indexOf("rock-ground"),
+                              assets.sculptTile("rock-ground"));
                     }
                     if (finishArrays != null) {
                         float[] surface = finishArrays.surface(), tint = finishArrays.tint(), glow = finishArrays.glow();
@@ -552,19 +556,20 @@ final class GpuTerrain implements Disposable {
                         program.setUniform4fv("u_roadRelief[0]", relief, 0, relief.length);
                     }
                     if (has(tundraLayersUniform)) {
-                        set(tundraLayersUniform, (float) SCULPT_LAYERS.indexOf("tundra-earth") * 2,
-                              (float) SCULPT_LAYERS.indexOf("tundra-fungus") * 2,
+                        set(tundraLayersUniform, (float) SCULPT_LAYERS.indexOf("tundra-ground") * 2,
+                              (float) SCULPT_LAYERS.indexOf("tundra-mat") * 2,
                               (float) SCULPT_LAYERS.indexOf("tundra-crust") * 2,
-                              (float) SCULPT_LAYERS.indexOf("tundra-earth-variant") * 2);
-                        set(tundraTilesUniform, assets.sculptTile("tundra-earth"), assets.sculptTile("tundra-fungus"),
-                              assets.sculptTile("tundra-crust"), assets.sculptTile("tundra-earth-variant"));
+                              (float) SCULPT_LAYERS.indexOf("tundra-ground-variant") * 2);
+                        set(tundraTilesUniform, assets.sculptTile("tundra-ground"), assets.sculptTile("tundra-mat"),
+                              assets.sculptTile("tundra-crust"), assets.sculptTile("tundra-ground-variant"));
                     }
                     if (has(treePitMaterialUniform)) {
-                        set(treePitMaterialUniform, 2f * SCULPT_LAYERS.indexOf("tree-pit-mulch"),
-                              assets.sculptTile("tree-pit-mulch"));
+                        set(treePitMaterialUniform, 2f * SCULPT_LAYERS.indexOf("concrete-mulch"),
+                              assets.sculptTile("concrete-mulch"));
                     }
                     if (has(scorchedMaterialUniform)) {
-                        set(scorchedMaterialUniform, 2f * SCULPT_LAYERS.indexOf("scorched"), assets.sculptTile("scorched"));
+                        set(scorchedMaterialUniform, 2f * SCULPT_LAYERS.indexOf("ground-scorch"),
+                              assets.sculptTile("ground-scorch"));
                     }
                     // BaseShader skips uniforms absent from a program. All lit surfaces share the same rain clock.
                     set(rainScaleUniform, 1f / BoardGeometry.width());
@@ -1658,23 +1663,24 @@ final class GpuTerrain implements Disposable {
      * {@code textures/terrain/surfaces}.
      */
     private static final String[][] SCULPT_MATERIALS = {
-          { "grass", "scree", "granite-contact", "soil-contact" },
-          { "dirt", "gravel", "granite-contact", "soil-contact" },
-          { "loose-sand", "pavement", "sandstone", "sandstone" },
-          { "rock", "scree", "granite-contact", "granite-contact" },
-          { "concrete", "scree", "granite-contact", "cast" },
-          { "snow", "scree", "granite-contact", "snow" },
-          { "lunar", "lunar-scree", "lunar-cliff", "lunar-cliff" },
-          { "fungus-ground", "fungus-mat", "fungus-cliff", "fungus-fibres" },
-          { "desert-hardpan", "pavement", "sandstone", "sandstone-cap" },
-          { "mars-hardpan", "mars-hardpan", "mars-bedrock", "mars-cap" },
-          { "volcano-ground", "volcano-ground", "volcano-basalt", "basalt-cap" },
-          { "tropical-ground", "dirt", "granite-contact", "soil-contact" },
+          { "grassland-ground", "temperate-debris", "temperate-cliff", "temperate-bank" },
+          { "dirt-ground", "dirt-debris", "temperate-cliff", "temperate-bank" },
+          { "sand-ground", "arid-debris", "arid-cliff", "arid-cliff" },
+          { "rock-ground", "temperate-debris", "temperate-cliff", "temperate-cliff" },
+          { "concrete-ground", "temperate-debris", "temperate-cliff", "concrete-bank" },
+          { "snow-ground", "temperate-debris", "temperate-cliff", "snow-ground" },
+          { "lunar-ground", "lunar-debris", "lunar-cliff", "lunar-cliff" },
+          { "fungus-ground", "fungus-debris", "fungus-cliff", "fungus-bank" },
+          { "desert-ground", "arid-debris", "arid-cliff", "desert-cap" },
+          { "mars-ground", "mars-ground", "mars-cliff", "mars-cap" },
+          { "volcano-ground", "volcano-ground", "volcano-cliff", "volcano-cap" },
+          { "tropical-ground", "dirt-ground", "temperate-cliff", "temperate-bank" },
     };
     private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.concat(
           Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream),
-          java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus", "earth", "tundra-earth-variant",
-                "tree-pit-mulch", "scorched", "mud"))
+          java.util.stream.Stream.of("tundra-crust", "tundra-ground", "tundra-mat", "biome-soil",
+                "tundra-ground-variant",
+                "concrete-mulch", "ground-scorch", "biome-mud"))
           .distinct().toList();
     /**
      * The board materials whose finish the terrain reads from arrays (finish-arrays.glsl): the sculpt layers, at their
@@ -3987,8 +3993,8 @@ final class GpuTerrain implements Disposable {
                   mesh -> sculptedFaces(mesh, surface, wallFaces, Float.NaN, scene, surfaces));
         }
         if (!bridgeSupports.isEmpty()) {
-            float coverage = assets.coverage("terrain/surfaces/concrete");
-            solid.addTriangles(material(assets.material("terrain/surfaces/concrete"), false), meshes -> {
+            float coverage = assets.coverage("terrain/surfaces/concrete-ground");
+            solid.addTriangles(material(assets.material("terrain/surfaces/concrete-ground"), false), meshes -> {
                 for (var face : bridgeSupports) {
                     var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
                     bridgeFace(meshes.get(), face.a(), face.b(), face.c(), normal, Color.WHITE, coverage);
@@ -4278,10 +4284,11 @@ final class GpuTerrain implements Disposable {
                     // Terrain scenery shares the ground's lighting and weather response.
                     material.set(new Ground(.15f));
                     if (material.id.equals("rubble-concrete")) {
-                        material.set(TextureAttribute.createNormal(assets.materialNormal("terrain/surfaces/concrete")));
+                        material.set(TextureAttribute.createNormal(
+                              assets.materialNormal("terrain/surfaces/concrete-ground")));
                     } else if (material.id.equals("geyser-rock")) {
                         material.set(TextureAttribute.createNormal(assets.materialNormal(feature.asset().endsWith("magma")
-                              ? "terrain/surfaces/volcano-basalt" : "terrain/surfaces/rock")));
+                              ? "terrain/surfaces/volcano-cliff" : "terrain/surfaces/rock-ground")));
                     } else if (material.id.equals("geyser-lava")) {
                         Material lava = GpuMagmaShader.material(assets, GpuMagmaShader.LAVA, null);
                         if (lava != null) { for (Attribute attribute : lava) { material.set(attribute.copy()); } }
@@ -5427,7 +5434,7 @@ final class GpuTerrain implements Disposable {
      */
     private void builtBridge(Layer solid, BoardBridge.Shape shape, BoardBridge.Deck bridge,
           BoardScene scene, BoardScene.Tile tile) {
-        Material concrete = material(assets.material("terrain/surfaces/concrete"), false);
+        Material concrete = material(assets.material("terrain/surfaces/concrete-ground"), false);
         if (BoardBridge.guideway(tile)) {
             // The route model draws the beam; these same bridge facets own its picking and its piers.
             var piers = BoardBridge.shape(shape.surface(), shape.level(),
@@ -5451,7 +5458,7 @@ final class GpuTerrain implements Disposable {
      * the standard kit and piers) in its facets' recoloured colour, everything else in the structure's concrete.
      */
     private void bridgeFooting(Layer solid, BoardBridge.Shape shape, Material deck, Material structure, Material steel) {
-        float coverage = assets.coverage("terrain/surfaces/concrete");
+        float coverage = assets.coverage("terrain/surfaces/concrete-ground");
         for (var part : List.of(BoardBridge.Part.TOP, BoardBridge.Part.STRUCTURE, BoardBridge.Part.STEEL)) {
             if (part == BoardBridge.Part.STEEL && (steel == null || shape.facets().stream().noneMatch(f -> f.part() == part))) {
                 continue;

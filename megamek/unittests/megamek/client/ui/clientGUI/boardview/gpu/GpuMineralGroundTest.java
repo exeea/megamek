@@ -30,7 +30,7 @@ class GpuMineralGroundTest {
         var surface = new BoardSurface(scene, tile);
         var paint = GpuMineralGround.prepare(scene, tile, surface);
         assertNotNull(paint);
-        assertEquals("earth", paint.patch().texture());
+        assertEquals("biome-soil", paint.patch().texture());
         assertTrue(paint.triangles().size() > 0);
         for (var triangle : paint.triangles()) {
             for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {

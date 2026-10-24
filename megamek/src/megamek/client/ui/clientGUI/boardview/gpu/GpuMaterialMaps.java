@@ -52,7 +52,7 @@ final class GpuMaterialMaps {
     }
 
     /** Mud and scorch keep roughness in their normal map's blue channel; their shaders rebuild the normal's Z. */
-    static final Set<String> PACKED_ROUGHNESS = Set.of("terrain/surfaces/mud", "terrain/surfaces/scorched");
+    static final Set<String> PACKED_ROUGHNESS = Set.of("terrain/surfaces/biome-mud", "terrain/surfaces/ground-scorch");
     /** The glTF metallic-roughness role and the heightmap's, which libGDX's ModelTexture usages lack. */
     static final int METALLIC_ROUGHNESS_USAGE = -1, HEIGHT_USAGE = -2;
 
