@@ -9,11 +9,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.tileset.EquipmentModelPolicy;
 import megamek.client.ui.tileset.UnitModelEquipment;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.alphaStrike.conversion.ASConverter;
-import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.battlefieldSupport.BFSAssetType;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;

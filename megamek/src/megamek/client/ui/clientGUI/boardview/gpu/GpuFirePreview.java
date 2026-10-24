@@ -10,10 +10,10 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import javax.swing.SwingUtilities;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.common.ToHitData;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;

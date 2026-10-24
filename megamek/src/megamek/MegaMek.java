@@ -55,6 +55,7 @@ import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 
 import io.sentry.Sentry;
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.ButtonOrderPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.design.swing.MegaMekDarkLaf;
@@ -62,7 +63,6 @@ import megamek.client.ui.design.swing.MegaMekLightLaf;
 import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.preferences.SuitePreferences;
 import megamek.client.ui.util.FontHandler;
-import megamek.common.annotations.Nullable;
 import megamek.common.commandLine.AbstractCommandLineParser;
 import megamek.common.commandLine.ClientServerCommandLineParser;
 import megamek.common.commandLine.MegaMekCommandLineFlag;
@@ -83,7 +83,7 @@ public class MegaMek {
     private static final SuitePreferences mmPreferences = new SuitePreferences();
     private static final MMOptions mmOptions = new MMOptions();
 
-    private static final NumberFormat numberFormatter = NumberFormat.getInstance();
+    private static final NumberFormat numberFormatter = NumberFormat.getInstance(SuiteOptions.getNumberFormatLocale());
 
     private static final MMLogger LOGGER = MMLogger.create(MegaMek.class);
     private static final SanityInputFilter sanityInputFilter = new SanityInputFilter();
@@ -92,6 +92,7 @@ public class MegaMek {
     private static String originProject = "Unknown";
 
     public static void main(String... args) {
+        Locale.setDefault(Locale.Category.FORMAT, SuiteOptions.getNumberFormatLocale());
         originProject = MMConstants.PROJECT_NAME;
         ObjectInputFilter.Config.setSerialFilter(sanityInputFilter);
 

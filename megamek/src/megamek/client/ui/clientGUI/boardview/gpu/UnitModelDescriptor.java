@@ -17,7 +17,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import megamek.common.annotations.Nullable;
+import jakarta.annotation.Nullable;
 
 /** Schema 2: independent rigid assets, +Y forward / +Z up, with no legacy Z compression. No GL resources. */
 record UnitModelDescriptor(int schema, String kind, String family, String mesh, Bounds bounds, String rig,

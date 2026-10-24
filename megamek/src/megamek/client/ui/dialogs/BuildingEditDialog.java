@@ -62,6 +62,7 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.WindowConstants;
 
+import jakarta.annotation.Nullable;
 import megamek.MegaMek;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -71,7 +72,6 @@ import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BuildingEditSpec;
 import megamek.common.board.Coords;

@@ -38,6 +38,7 @@ import java.io.Serial;
 import java.util.List;
 import javax.swing.AbstractAction;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
@@ -45,7 +46,6 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.client.ui.widget.SkinSpecification;
-import megamek.common.annotations.Nullable;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.preference.PreferenceChangeEvent;

@@ -32,7 +32,8 @@
  */
 package megamek.client.ui.clientGUI;
 
-import megamek.common.annotations.Nullable;
+import jakarta.annotation.Nullable;
+
 
 /**
  * How the 3D board draws its terrain, a user preference that applies at once in the game, the map preview and the

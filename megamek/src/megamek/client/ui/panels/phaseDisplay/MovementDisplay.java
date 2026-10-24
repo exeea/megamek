@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.stream.Stream;
 import javax.swing.*;
 
+import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.SharedUtility;
@@ -82,7 +83,6 @@ import megamek.common.actions.AirMekRamAttackAction;
 import megamek.common.actions.ChargeAttackAction;
 import megamek.common.actions.DfaAttackAction;
 import megamek.common.actions.RamAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.battleArmor.ProtoMekClampMount;
 import megamek.common.bays.BattleArmorBay;
@@ -713,7 +713,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
                 BoardLocation location = new BoardLocation(coords, game.getBoard().getBoardId(), false);
                 clientgui.centerOnHex(location);
             }
-
         }
 
         initializeStatusBarText(selectedEntity);
@@ -967,6 +966,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         setJumpEnabled(!isAero &&
               !selectedUnit.isImmobileForJump() &&
               !selectedUnit.isProne() &&
+              !MoveStep.isGroundedWiGEVehicle(selectedUnit) &&
               (hasJumpMP() &&
                     (!selectedUnit.isConventionalInfantry() ||
                           selectedUnit.getMovementMode().isJumpInfantry()) &&
@@ -2469,6 +2469,8 @@ public class MovementDisplay extends ActionPhaseDisplay {
             String body = Messages.getString("MovementDisplay.ConfirmWiGECrashLanding",
                   currentlySelectedEntity.getShortName());
             if (checkNagForDoomedMove(title, body)) {
+                // Declining the crash throws away the plotted move so the player starts the move again
+                clear();
                 return true;
             }
             warnedOfCrashLanding = true;
@@ -3027,6 +3029,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
                                                     coords.getBoardNum());
                     clientgui.addToast(ToastLevel.ERROR, msg, currentlySelectedEntity);
                 }
+                computeMovementEnvelope(currentlySelectedEntity);
                 clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentlySelectedEntity));
                 clientgui.updateFiringArc(currentlySelectedEntity);
                 clientgui.showSensorRanges(currentlySelectedEntity);
@@ -3535,7 +3538,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
 
     private synchronized void updateProneButtons() {
         final Entity currentEntity = currentEntity();
-        if (currentEntity == null) {
+        if (currentEntity == null || !currentEntity().isDeployed()) {
             setGetUpEnabled(false);
             setGoProneEnabled(false);
             setHullDownEnabled(false);
@@ -3543,12 +3546,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
         }
 
         boolean isMek = currentEntity instanceof Mek;
-
-        if (cmd.getFinalProne()) {
+        if ((cmd != null) && cmd.getFinalProne()) {
             setGetUpEnabled(!currentEntity.isImmobile() && !currentEntity.isStuck());
             setGoProneEnabled(false);
             setHullDownEnabled(true);
-        } else if (cmd.getFinalHullDown()) {
+        } else if ((cmd != null) && cmd.getFinalHullDown()) {
             if (isMek) {
                 setGetUpEnabled(!currentEntity.isImmobile()
                                 && !currentEntity.isStuck()
@@ -3571,7 +3573,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             } else {
                 // So that the vehicle can move and go hull-down, we have to check if it's moved into a fortified
                 // position
-                if (cmd.getLastStep() != null) {
+                if ((cmd != null) && cmd.getLastStep() != null) {
                     boolean hullDownEnabled = game
                             .getOptions()
                             .booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_HULL_DOWN);
@@ -3625,7 +3627,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
                 .getPlanetaryConditions()
                 .getLight()
                 .isDuskOrFullMoonOrMoonlessOrPitchBack();
-        setSearchlightEnabled(isNight && currentEntity.hasSearchlight() && !cmd.contains(MoveStepType.SEARCHLIGHT),
+        setSearchlightEnabled(isNight &&
+                              currentEntity.hasSearchlight() &&
+                              !cmd.contains(MoveStepType.SEARCHLIGHT) &&
+                              currentEntity.getPosition() != null,
                               currentEntity.isUsingSearchlight());
     }
 
@@ -7033,6 +7038,9 @@ public class MovementDisplay extends ActionPhaseDisplay {
      * @param suggestion The suggested Entity to use to compute the movement envelope.
      */
     public void computeMovementEnvelope(Entity suggestion) {
+        if (!suggestion.isDeployed()) {
+            return;
+        }
         if (suggestion.isAero()) {
             computeAeroMovementEnvelope(suggestion);
         } else {
@@ -7111,13 +7119,34 @@ public class MovementDisplay extends ActionPhaseDisplay {
             return;
         }
 
-        MovePath movePath = (start == null) ? new MovePath(game, entity) : start.clone();
+        MovePath movePath;
+        if (start != null) {
+            movePath = start.clone();
+        } else {
+            movePath = new MovePath(game, entity);
+            // If we are using WoD, clone the deployment step and possible jump steps.
+            if (cmd.contains(MoveStepType.DEPLOY)) {
+                if (cmd.getStep(0).getType() == MoveStepType.START_JUMP) {
+                    movePath.addStep(cmd.getStep(0));
+                    if (jumpSubGear == GEAR_SUB_MEK_BOOSTERS) {
+                        movePath.addStep(cmd.getStep(1));
+                        movePath.addStep(cmd.getStep(2));
+                    } else {
+                        movePath.addStep(cmd.getStep(1));
+                    }
+                } else {
+                    movePath.addStep(cmd.getStep(0));
+                }
+            }
+        }
 
         MoveStepType stepType = (movementGear == GEAR_BACKUP) ? MoveStepType.BACKWARDS : MoveStepType.FORWARDS;
         if ((start == null) && (movementGear == GEAR_JUMP || movementGear == GEAR_DFA)) {
-            movePath.addStep(MoveStepType.START_JUMP);
-            if (jumpSubGear == GEAR_SUB_MEK_BOOSTERS) {
-                movePath.addStep(MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER);
+            if (!movePath.contains(MoveStepType.START_JUMP)) {
+                movePath.addStep(MoveStepType.START_JUMP);
+                if (jumpSubGear == GEAR_SUB_MEK_BOOSTERS) {
+                    movePath.addStep(MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER);
+                }
             }
         }
 
@@ -9671,6 +9700,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         deployTrain(entity);
         cmd = new MovePath(game, entity);
         addDeploymentToMovePath();
+        computeMovementEnvelope(entity);
         clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);

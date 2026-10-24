@@ -24,7 +24,7 @@ import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
-import megamek.common.annotations.Nullable;
+import jakarta.annotation.Nullable;
 
 /** One owned unit model with shared placement and annotation geometry. */
 final class GpuUnitModel implements Disposable {

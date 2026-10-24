@@ -11,8 +11,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import jakarta.annotation.Nullable;
 import megamek.common.Configuration;
-import megamek.common.annotations.Nullable;
 import megamek.logging.MMLogger;
 
 /**

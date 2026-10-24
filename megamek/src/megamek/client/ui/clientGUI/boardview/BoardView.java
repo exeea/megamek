@@ -55,6 +55,7 @@ import javax.swing.*;
 import javax.swing.plaf.metal.DefaultMetalTheme;
 import javax.swing.plaf.metal.MetalTheme;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.TimerSingleton;
 import megamek.client.bot.princess.MinefieldDeploymentPlanner;
@@ -88,7 +89,6 @@ import megamek.common.Hex;
 import megamek.common.KeyBindParser;
 import megamek.common.Player;
 import megamek.common.actions.AttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardLocation;
