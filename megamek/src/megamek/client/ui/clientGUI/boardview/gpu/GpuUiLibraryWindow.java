@@ -2,11 +2,15 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Window;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -17,47 +21,67 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import com.badlogic.gdx.scenes.scene2d.ui.SplitPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.ColorToken;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.gdx.DisplayScale;
+import megamek.client.ui.gdx.UiAngleDial;
 import megamek.client.ui.gdx.UiButton;
-import megamek.client.ui.gdx.UiChoice;
+import megamek.client.ui.gdx.UiCardGrid;
+import megamek.client.ui.gdx.UiChoiceGrid;
+import megamek.client.ui.gdx.UiConfirmation;
+import megamek.client.ui.gdx.UiFlow;
+import megamek.client.ui.gdx.UiHexSides;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
-import megamek.client.ui.gdx.UiListPopup;
+import megamek.client.ui.gdx.UiList;
 import megamek.client.ui.gdx.UiMenuList;
-import megamek.client.ui.gdx.UiSegmented;
-import megamek.client.ui.gdx.UiSelect;
-import megamek.client.ui.gdx.UiTabs;
-import megamek.client.ui.gdx.UiTextField;
+import megamek.client.ui.gdx.UiModal;
+import megamek.client.ui.gdx.UiNumber;
+import megamek.client.ui.gdx.UiPopover;
+import megamek.client.ui.gdx.UiSliderInput;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.gdx.UiTree;
 import megamek.common.Configuration;
 import megamek.logging.MMLogger;
 
 /**
- * The developer gallery of the native (libGDX) side of the design system, opened from Help in the lobby: the dark
- * Token v0 colors beside the hud-v3 colors the toolkit uses today, every hud font, every button style at rest, pressed
- * and disabled, and the toolkit's other controls. It is the subset of the Swing library that in-game views need, and it
- * shows the toolkit as it is until its styles move onto the tokens. Only one native window may run at a time (GLFW is
- * process-wide), so it frees a map preview first, refuses beside a board or editor, and closes for a board that opens.
+ * The developer gallery of the native (libGDX) side of the design system, opened from Help in the lobby. It shows
+ * every hud-v3 toolkit element as the game draws it today, one tab per group, each beside the column where its
+ * migrated (Token v0) look will go, so the team can discuss the migration element by element. Only one native window
+ * may run at a time (GLFW is process-wide), so it frees a map preview first, refuses beside a board or editor, and
+ * closes for a board that opens.
  */
 public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private static final MMLogger LOGGER = MMLogger.create(GpuUiLibraryWindow.class);
-    private static final int SWATCHES_PER_ROW = 6;
-    private static final String SAMPLE_PASSWORD = "atlas-as7d";
+    private static final String[] TABS = { "colors", "buttons", "selection", "inputs", "lists", "containers",
+                                           "status", "hud" };
+    /** Button styles whose own tab shows them in their control; the Buttons tab names them only. */
+    private static final Set<String> SHOWN_ELSEWHERE = Set.of("hud-seg", "hud-pill", "hud-tab", "hud-tab-caps",
+          "hud-select", "hud-select-inline", "hud-menu-row", "hud-row");
+    private static final float NAME_WIDTH = 140;
+    private static final float TODAY_WIDTH = 460;
+    private static final float MIGRATED_WIDTH = 360;
+    private static final float COLUMN_GAP = 14;
+    private static final int TODAY_SWATCHES_PER_ROW = 3;
+    private static final int MIGRATED_SWATCHES_PER_ROW = 2;
+    private static final String SAMPLE_SPRITE = "defaults/default_heavy.png";
 
     /** The open gallery; read and written on the EDT. */
     private static GpuUiLibraryWindow open;
@@ -65,13 +89,20 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private final float preference;
     private final DesignTokens tokens = DesignTokens.shipped();
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
+    private final Table[] pages = new Table[TABS.length];
     private volatile Lwjgl3Application application;
     private volatile boolean closeRequested;
     /** What runs on the EDT once the native window is gone: a board window waiting for it. */
     private Runnable afterClose;
-    private UiTheme theme;
+    private GpuBoardSkin boardSkin;
+    private GpuHudKit hud;
     private UiKit kit;
     private Stage stage;
+    private UiKit.Segmented tabs;
+    private ScrollPane scroll;
+    private UiModal modal;
+    private UiConfirmation confirmation;
+    private BoardScene.Pixels sprite;
 
     private GpuUiLibraryWindow(float preference) {
         this.preference = preference;
@@ -114,7 +145,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         try {
             Lwjgl3ApplicationConfiguration configuration = GpuBoardWindow.configuration(true);
             configuration.setTitle(Messages.getString("UiLibrary.gdx.title"));
-            configuration.setWindowedMode(1280, 860);
+            configuration.setWindowedMode(1660, 1000);
             new Lwjgl3Application(this, configuration);
         } catch (RuntimeException | LinkageError failure) {
             LOGGER.error(failure, "The native UI library window failed");
@@ -157,14 +188,46 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     @Override
     public void create() {
         application = (Lwjgl3Application) Gdx.app;
-        theme = new UiTheme(Configuration.fontsDir());
-        kit = new UiKit(theme.skin);
+        boardSkin = new GpuBoardSkin();
+        hud = new GpuHudKit(boardSkin.skin);
+        kit = hud.ui;
         stage = new Stage(new ScreenViewport());
         Gdx.input.setInputProcessor(stage);
-        ScrollPane scroll = kit.scrollList(content());
-        scroll.setFillParent(true);
-        stage.addActor(scroll);
-        stage.setScrollFocus(scroll);
+        sprite = loadSprite();
+
+        Table root = new Table();
+        root.setFillParent(true);
+        root.top().left();
+        Table head = new Table();
+        head.left().pad(20, 24, 10, 24);
+        head.defaults().left();
+        head.add(kit.label(text("UiLibrary.gdx.title"), "hud-heading", 20, UiTheme.TEXT)).row();
+        Label note = kit.label(text("UiLibrary.gdx.note"), "hud-small", 11.5f, UiTheme.MUTED);
+        note.setWrap(true);
+        head.add(note).width(NAME_WIDTH + TODAY_WIDTH + MIGRATED_WIDTH + 2 * COLUMN_GAP).padTop(4);
+        root.add(head).growX().row();
+        String[] labels = new String[TABS.length];
+        for (int index = 0; index < TABS.length; index++) {
+            labels[index] = text("UiLibrary.gdx.tab." + TABS[index]);
+        }
+        tabs = kit.segmented("hud-tab", false, labels);
+        tabs.left().pad(2, 24, 0, 24);
+        for (int index = 0; index < TABS.length; index++) {
+            int tab = index;
+            UiKit.onChange(tabs.buttons.get(index), () -> selectTab(tab));
+        }
+        root.add(tabs).growX().row();
+        scroll = kit.scrollList(null);
+        root.add(scroll).grow();
+        stage.addActor(root);
+
+        modal = modal();
+        stage.addActor(modal);
+        confirmation = new UiConfirmation(kit, "library-confirm", () -> { });
+        confirmation.text(text("UiLibrary.gdx.confirmHeading"), text("UiLibrary.gdx.confirmDetail"),
+              text("UiLibrary.gdx.confirmYes"), text("UiLibrary.gdx.confirmNo"));
+        stage.addActor(confirmation.actor());
+        selectTab(0);
         if (closeRequested) {
             Gdx.app.exit();
         }
@@ -175,12 +238,14 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         float scale = DisplayScale.read(preference, displayScale.contentScale());
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
+        confirmation.resize(stage.getWidth(), stage.getHeight());
     }
 
     @Override
     public void render() {
         ScreenUtils.clear(color(tokens.color("surface.base", Mode.DARK)));
         stage.act(Gdx.graphics.getDeltaTime());
+        hud.update(sprite == null ? Set.of() : Set.of(sprite));
         stage.draw();
     }
 
@@ -189,549 +254,404 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         if (stage != null) {
             stage.dispose();
         }
-        if (theme != null) {
-            theme.dispose();
+        if (hud != null) {
+            hud.dispose();
+        }
+        if (boardSkin != null) {
+            boardSkin.dispose();
         }
     }
 
-    // ---- Content
-
-    private Table content() {
-        Table content = new Table();
-        content.top().left().pad(20, 24, 32, 24);
-        content.defaults().left();
-        content.add(kit.label(text("UiLibrary.gdx.title"), "hud-heading", 20, UiTheme.TEXT)).row();
-        Label note = kit.label(text("UiLibrary.gdx.note"), "hud-small", 11.5f, UiTheme.MUTED);
-        note.setWrap(true);
-        content.add(note).width(1100).padTop(4).row();
-
-        section(content, "UiLibrary.gdx.tokenColors");
-        content.add(tokenSwatches()).row();
-        section(content, "UiLibrary.gdx.currentColors");
-        content.add(currentSwatches()).row();
-        section(content, "UiLibrary.gdx.fonts");
-        content.add(fonts()).row();
-        section(content, "UiLibrary.controls.buttons");
-        Label buttonNote = kit.label(text("UiLibrary.buttons.note"), "hud-small", 11.5f, UiTheme.MUTED);
-        buttonNote.setWrap(true);
-        content.add(buttonNote).width(1100).padBottom(8).row();
-        for (boolean compact : new boolean[] { false, true }) {
-            content.add(kit.label(text(compact ? "UiLibrary.buttons.compact" : "UiLibrary.buttons.regular"),
-                  "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6).padBottom(6).row();
-            content.add(buttonMatrix(compact)).row();
+    /** Shows tab {@code index}; each page is built when first shown and keeps its state afterwards. */
+    private void selectTab(int index) {
+        tabs.select(index);
+        if (pages[index] == null) {
+            pages[index] = page(index);
         }
-        section(content, "UiLibrary.controls.inputs");
-        Label inputNote = kit.label(text("UiLibrary.gdx.inputs.note"), "hud-small", 11.5f, UiTheme.MUTED);
-        inputNote.setWrap(true);
-        content.add(inputNote).width(1100).padBottom(8).row();
-        for (boolean compact : new boolean[] { false, true }) {
-            content.add(kit.label(text(compact ? "UiLibrary.buttons.compact" : "UiLibrary.buttons.regular"),
-                  "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6).padBottom(6).row();
-            content.add(inputMatrix(compact)).row();
-        }
-        content.add(kit.label(text("UiLibrary.inputs.forms"), "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6)
-              .padBottom(6).row();
-        content.add(formSamples()).row();
-        section(content, "UiLibrary.controls.choices");
-        Label choiceNote = kit.label(text("UiLibrary.choices.note"), "hud-small", 11.5f, UiTheme.MUTED);
-        choiceNote.setWrap(true);
-        content.add(choiceNote).width(1100).padBottom(8).row();
-        content.add(choiceMatrix()).row();
-        content.add(choiceSamples()).padTop(6).row();
-        section(content, "UiLibrary.controls.tabs");
-        Label tabNote = kit.label(text("UiLibrary.tabs.note"), "hud-small", 11.5f, UiTheme.MUTED);
-        tabNote.setWrap(true);
-        content.add(tabNote).width(1100).padBottom(8).row();
-        for (boolean compact : new boolean[] { false, true }) {
-            content.add(kit.label(text(compact ? "UiLibrary.buttons.compact" : "UiLibrary.buttons.regular"),
-                  "hud-medium", 12.5f, UiTheme.ACCENT)).padTop(6).padBottom(6).row();
-            content.add(tabSamples(compact)).row();
-        }
-        section(content, "UiLibrary.controls.segmented");
-        Label segmentedNote = kit.label(text("UiLibrary.segmented.note"), "hud-small", 11.5f, UiTheme.MUTED);
-        segmentedNote.setWrap(true);
-        content.add(segmentedNote).width(1100).padBottom(8).row();
-        content.add(segmentedMatrix()).row();
-        section(content, "UiLibrary.controls.select");
-        Label selectNote = kit.label(text("UiLibrary.select.note"), "hud-small", 11.5f, UiTheme.MUTED);
-        selectNote.setWrap(true);
-        content.add(selectNote).width(1100).padBottom(8).row();
-        content.add(selectMatrix()).row();
-        content.add(selectSamples()).padTop(6).row();
-        section(content, "UiLibrary.gdx.buttons");
-        content.add(buttons()).row();
-        section(content, "UiLibrary.gdx.controls");
-        content.add(controls()).row();
-        return content;
+        scroll.setActor(pages[index]);
+        scroll.setScrollY(0);
+        stage.setScrollFocus(scroll);
     }
 
-    private void section(Table content, String key) {
-        content.add(kit.label(text(key), "hud-title", 16, UiTheme.TEXT)).padTop(24).padBottom(10).row();
-    }
-
-    private Table tokenSwatches() {
-        List<Table> cells = new ArrayList<>();
-        int panel = tokens.color("surface.panel", Mode.DARK);
-        for (ColorToken token : tokens.colors().values()) {
-            int value = token.overlay() != null ? token.overlay() : token.dark();
-            // Translucent roles show as they sit on a panel.
-            int shown = ColorMath.alpha(value) == 0xFF ? value : ColorMath.over(value, panel);
-            String hex = ColorMath.hex(value) + (token.overlay() != null ? "  " + text("UiLibrary.gdx.overlay") : "");
-            cells.add(swatch(token.name(), hex, color(shown)));
+    /** A unit sprite for the unit rows and toasts; without mm-data's image they show a sensor contact's "?". */
+    private static BoardScene.Pixels loadSprite() {
+        try {
+            var image = ImageIO.read(new File(Configuration.unitImagesDir(), SAMPLE_SPRITE));
+            return image == null ? null : new BoardScene.Pixels(image);
+        } catch (IOException failure) {
+            LOGGER.warn(failure, "The UI library's sample sprite failed to load");
+            return null;
         }
-        return grid(cells);
     }
 
-    private Table currentSwatches() {
-        Map<String, Color> current = new LinkedHashMap<>();
-        current.put("TEXT", UiTheme.TEXT);
-        current.put("ACCENT", UiTheme.ACCENT);
-        current.put("MUTED", UiTheme.MUTED);
-        current.put("DISABLED", UiTheme.DISABLED);
-        current.put("PANEL", UiTheme.PANEL);
-        current.put("PANEL2", UiTheme.PANEL2);
-        current.put("POP", UiTheme.POP);
-        current.put("TICK", UiTheme.TICK);
-        current.put("CORNER", UiTheme.CORNER);
-        current.put("MINT", UiTheme.MINT);
-        current.put("CORAL", UiTheme.CORAL);
-        current.put("AMBER", UiTheme.AMBER);
-        current.put("VIOLET", UiTheme.VIOLET);
-        current.put("BLIP", UiTheme.BLIP);
-        current.put("FILL", UiTheme.FILL);
-        current.put("MAIN", UiTheme.MAIN);
-        List<Table> cells = new ArrayList<>();
-        current.forEach((name, value) -> cells.add(swatch(name, "#" + value.toString().toUpperCase(Locale.ROOT),
-              value)));
-        return grid(cells);
-    }
+    // ---- Pages
 
-    private Table swatch(String name, String detail, Color fill) {
-        Table cell = new Table();
-        cell.defaults().left();
-        Image chip = new Image(kit.skin.newDrawable("white", fill));
-        // A subtle outline keeps colors that sit close to the background visible.
-        Table outline = new Table();
-        outline.setBackground(kit.skin.newDrawable("white", color(tokens.color("border.subtle", Mode.DARK))));
-        outline.add(chip).size(148, 32);
-        outline.pad(1);
-        cell.add(outline).row();
-        cell.add(kit.label(name, "hud-medium", 12, UiTheme.TEXT)).padTop(4).row();
-        cell.add(kit.label(detail, "hud-small", 10.5f, UiTheme.MUTED)).row();
-        return cell;
-    }
-
-    private static Table grid(List<Table> cells) {
-        Table grid = new Table();
-        grid.top().left();
-        grid.defaults().left().top().padRight(14).padBottom(12);
-        for (int index = 0; index < cells.size(); index++) {
-            grid.add(cells.get(index));
-            if ((index + 1) % SWATCHES_PER_ROW == 0) {
-                grid.row();
-            }
+    private Table page(int index) {
+        Table page = new Table();
+        page.top().left().pad(16, 24, 40, 24);
+        page.defaults().left().top();
+        page.add(columnTitle("UiLibrary.gdx.element")).width(NAME_WIDTH).padRight(COLUMN_GAP);
+        page.add(columnTitle("UiLibrary.gdx.today")).width(TODAY_WIDTH).padRight(COLUMN_GAP);
+        page.add(columnTitle("UiLibrary.gdx.migrated")).width(MIGRATED_WIDTH).row();
+        switch (TABS[index]) {
+            case "colors" -> colors(page);
+            case "buttons" -> buttons(page);
+            case "selection" -> selection(page);
+            case "inputs" -> inputs(page);
+            case "lists" -> lists(page);
+            case "containers" -> containers(page);
+            case "status" -> status(page);
+            default -> hudParts(page);
         }
-        return grid;
+        return page;
     }
 
-    private Table fonts() {
-        Table fonts = new Table();
-        fonts.defaults().left().padBottom(6);
-        for (UiTheme.HudFont font : UiTheme.HUD_FONTS) {
-            fonts.add(kit.label(String.format(Locale.ROOT, "%s  %s / %s", font.name(), trim(font.size()),
-                  weight(font.instance())), "hud-small", 11, UiTheme.MUTED)).width(260);
-            fonts.add(new Label(text("UiLibrary.type.sample"), theme.skin, font.name())).row();
-        }
-        return fonts;
+    private void colors(Table page) {
+        heading(page, "UiLibrary.gdx.colors");
+        compare(page, "UiTheme", currentSwatches(), tokenSwatches());
+        heading(page, "UiLibrary.gdx.fonts");
+        compare(page, "UiTheme.HUD_FONTS", fonts(), null);
     }
 
-    /** Every token button kind at one size in every state; transient states are frozen through UiButton. */
-    private Table buttonMatrix(boolean compact) {
-        List<String> states = List.of("rest", "hover", "pressed", "focus", "selected", "disabled");
-        Table matrix = new Table();
-        matrix.defaults().left().padRight(16).padBottom(8);
-        matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(110);
-        for (String state : states) {
-            matrix.add(kit.label(text("UiLibrary.buttons.state." + state), "hud-small", 11, UiTheme.MUTED));
-        }
-        matrix.row();
-        for (String kind : UiTheme.BUTTON_KINDS) {
-            String upper = kind.toUpperCase(Locale.ROOT);
-            matrix.add(kit.label(text("UiLibrary.buttons.kind." + upper), "hud-medium", 12.5f, UiTheme.TEXT));
-            boolean selectable = kind.equals("toggle") || kind.equals("icon") || kind.equals("special");
-            String style = "button-" + kind + (compact ? UiTheme.COMPACT : "");
-            for (String state : states) {
-                if (state.equals("selected") && !selectable) {
-                    matrix.add();
-                    continue;
-                }
-                UiButton button = kind.equals("icon")
-                      ? kit.button(style, "search", null, null)
-                      : kit.button(style, null, text("UiLibrary.buttons.label." + upper), null);
-                switch (state) {
-                    case "hover" -> button.hovered(true);
-                    case "pressed" -> button.held(true);
-                    case "focus" -> button.focused(true);
-                    case "selected" -> button.pressed(true);
-                    case "disabled" -> button.setDisabled(true);
-                    default -> { }
-                }
-                if (!state.equals("rest")) {
-                    button.setTouchable(Touchable.disabled);
-                }
-                matrix.add(button);
-            }
-            matrix.row();
-        }
-        return matrix;
-    }
-
-    /**
-     * Every token input kind at one size in every state, in two blocks of four states to fit the window; hover and
-     * focus are frozen through UiTextField.
-     */
-    private Table inputMatrix(boolean compact) {
-        Table matrix = new Table();
-        matrix.defaults().left().padRight(12).padBottom(8);
-        List<List<String>> blocks = List.of(List.of("rest", "hover", "focus", "placeholder"),
-              List.of("error", "warning", "readOnly", "disabled"));
-        for (List<String> states : blocks) {
-            matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(80)
-                  .padTop(states == blocks.get(0) ? 0 : 6);
-            for (String state : states) {
-                matrix.add(kit.label(text("UiLibrary.inputs.state." + state), "hud-small", 11, UiTheme.MUTED))
-                      .padTop(states == blocks.get(0) ? 0 : 6);
-            }
-            matrix.row();
-            for (String kind : List.of("TEXT", "PASSWORD", "SEARCH")) {
-                matrix.add(kit.label(text("UiLibrary.inputs.kind." + kind), "hud-medium", 12.5f, UiTheme.TEXT));
-                for (String state : states) {
-                    matrix.add(sampleInput(kind, state, compact)).width(160);
-                }
-                matrix.row();
-            }
-        }
-        return matrix;
-    }
-
-    private Actor sampleInput(String kind, String state, boolean compact) {
-        boolean empty = state.equals("placeholder");
-        UiTextField field;
-        Actor cell;
-        if (kind.equals("SEARCH")) {
-            UiKit.TokenSearch search = kit.tokenSearch(text("UiLibrary.inputs.placeholder.SEARCH"), compact);
-            field = search.field;
-            cell = search;
-        } else {
-            field = kind.equals("PASSWORD") ? kit.password(compact) : kit.input("", compact);
-            field.setMessageText(text("UiLibrary.inputs.placeholder." + kind));
-            cell = field;
-        }
-        if (!empty) {
-            field.setText(kind.equals("PASSWORD") ? SAMPLE_PASSWORD : text("UiLibrary.inputs.value." + kind));
-        }
-        switch (state) {
-            case "hover" -> field.hovered(true);
-            case "focus" -> field.focused(true);
-            case "error" -> field.status(UiTextField.Status.ERROR);
-            case "warning" -> field.status(UiTextField.Status.WARNING);
-            case "readOnly" -> field.readOnly(true);
-            case "disabled" -> field.setDisabled(true);
-            default -> { }
-        }
-        if (!state.equals("rest") && !empty) {
-            cell.setTouchable(Touchable.disabled);
-        }
-        return cell;
-    }
-
-    /** Form fields: label above, helper or status below; a text area with a helper, read-only and disabled. */
-    private Table formSamples() {
-        Table forms = new Table();
-        forms.top().left();
-        forms.defaults().left().top().padRight(16).padBottom(12);
-        forms.add(kit.formField(text("UiLibrary.inputs.form.name"), kit.input(text("UiLibrary.inputs.value.TEXT"),
-              false)).helper(text("UiLibrary.inputs.form.nameHelp"))).width(220);
-        forms.add(kit.formField(text("UiLibrary.inputs.form.gunnery"), kit.input("9", false))
-              .error(text("UiLibrary.inputs.form.gunneryError"))).width(220);
-        forms.add(kit.formField(text("UiLibrary.inputs.form.piloting"), kit.input("7", false))
-              .warning(text("UiLibrary.inputs.form.pilotingWarning"))).width(220).row();
-        String notes = text("UiLibrary.inputs.form.notesText");
-        forms.add(kit.formField(text("UiLibrary.inputs.form.notes"), kit.area(notes, 3))
-              .helper(text("UiLibrary.inputs.form.notesHelp"))).width(220);
-        forms.add(kit.formField(text("UiLibrary.inputs.form.briefing"), kit.area(notes, 3).readOnly(true)))
-              .width(220);
-        UiTextField.Area disabled = kit.area(notes, 3);
-        disabled.setDisabled(true);
-        forms.add(kit.formField(text("UiLibrary.inputs.form.disabled"), disabled)).width(220);
-        return forms;
-    }
-
-    /** Every choice kind in every state; transient states are frozen through UiChoice. */
-    private Table choiceMatrix() {
-        List<String> states = List.of("off", "on", "mixed", "hover", "hoverOn", "focus", "disabled", "disabledOn");
-        Table matrix = new Table();
-        matrix.defaults().left().padRight(16).padBottom(8);
-        matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(110);
-        for (String state : states) {
-            matrix.add(kit.label(text("UiLibrary.choices.state." + state), "hud-small", 11, UiTheme.MUTED));
-        }
-        matrix.row();
-        for (UiChoice.Kind kind : UiChoice.Kind.values()) {
-            matrix.add(kit.label(text("UiLibrary.choices.kind." + kind.name()), "hud-medium", 12.5f, UiTheme.TEXT));
-            for (String state : states) {
-                if (state.equals("mixed") && kind != UiChoice.Kind.CHECK) {
-                    matrix.add();
-                    continue;
-                }
-                String sample = text("UiLibrary.choices.sample");
-                boolean on = state.equals("on") || state.endsWith("On");
-                UiChoice choice = switch (kind) {
-                    case CHECK -> kit.check(sample, on);
-                    case RADIO -> kit.radio(sample, on);
-                    case SWITCH -> kit.toggleSwitch(sample, on);
-                };
-                switch (state) {
-                    case "mixed" -> choice.mixed(true);
-                    case "hover", "hoverOn" -> choice.hovered(true);
-                    case "focus" -> choice.focused(true);
-                    case "disabled", "disabledOn" -> choice.setDisabled(true);
-                    default -> { }
-                }
-                choice.setTouchable(Touchable.disabled);
-                matrix.add(choice);
-            }
-            matrix.row();
-        }
-        return matrix;
-    }
-
-    /** Live choices to click: a check box, a mixed one, two grouped radio buttons and a switch. */
-    private Table choiceSamples() {
-        Table live = new Table();
-        live.defaults().left().padRight(16);
-        live.add(kit.label(text("UiLibrary.choices.live"), "hud-medium", 12.5f, UiTheme.MUTED));
-        live.add(kit.check(text("UiLibrary.controls.checked"), true));
-        live.add(kit.check(text("UiLibrary.choices.selectAll"), false).mixed(true));
-        UiChoice standard = kit.radio(text("UiLibrary.controls.optionA"), true);
-        UiChoice total = kit.radio(text("UiLibrary.controls.optionB"), false);
-        kit.radioGroup(standard, total);
-        live.add(standard);
-        live.add(total);
-        live.add(kit.toggleSwitch(text("UiLibrary.choices.autosave"), true));
-        return live;
-    }
-
-    /** One tab strip per state at one size: at rest (live), focused (frozen) and disabled. */
-    private Table tabSamples(boolean compact) {
-        Table samples = new Table();
-        samples.defaults().left().top().padRight(24);
-        for (String state : List.of("rest", "focus", "disabled")) {
-            Table sample = new Table();
-            sample.defaults().left();
-            sample.add(kit.label(text("UiLibrary.buttons.state." + state), "hud-small", 11, UiTheme.MUTED))
-                  .padBottom(4).row();
-            UiTabs tabs = kit.tokenTabs(compact, text("UiLibrary.controls.tabA"), text("UiLibrary.controls.tabB"),
-                  text("UiLibrary.controls.tabC"));
-            switch (state) {
-                case "focus" -> tabs.option(0).focused(true);
-                case "disabled" -> tabs.setDisabled(true);
-                default -> { }
-            }
-            if (!state.equals("rest")) {
-                tabs.setTouchable(Touchable.disabled);
-            }
-            sample.add(tabs).width(280);
-            samples.add(sample);
-        }
-        return samples;
-    }
-
-    /** Segmented controls in every state, one column per size; the second section carries the frozen state. */
-    private Table segmentedMatrix() {
-        List<String> states = List.of("rest", "hover", "pressed", "focus", "disabled");
-        Table matrix = new Table();
-        matrix.defaults().left().padRight(24).padBottom(8);
-        matrix.add().width(110);
-        matrix.add(kit.label(text("UiLibrary.buttons.regular"), "hud-small", 11, UiTheme.MUTED));
-        matrix.add(kit.label(text("UiLibrary.buttons.compact"), "hud-small", 11, UiTheme.MUTED));
-        matrix.row();
-        for (String state : states) {
-            matrix.add(kit.label(text("UiLibrary.buttons.state." + state), "hud-medium", 12.5f, UiTheme.TEXT));
-            for (boolean compact : new boolean[] { false, true }) {
-                UiSegmented segmented = kit.tokenSegmented(compact, text("UiLibrary.segmented.optionA"),
-                      text("UiLibrary.segmented.optionB"), text("UiLibrary.segmented.optionC"));
-                switch (state) {
-                    case "hover" -> segmented.option(1).hovered(true);
-                    case "pressed" -> segmented.option(1).held(true);
-                    case "focus" -> segmented.option(1).focused(true);
-                    case "disabled" -> segmented.setDisabled(true);
-                    default -> { }
-                }
-                if (!state.equals("rest")) {
-                    segmented.setTouchable(Touchable.disabled);
-                }
-                matrix.add(segmented);
-            }
-            matrix.row();
-        }
-        return matrix;
-    }
-
-    /** Every select kind in every state; transient states are frozen through UiSelect. */
-    private Table selectMatrix() {
-        List<String> states = List.of("rest", "hover", "focus", "placeholder", "disabled");
-        Table matrix = new Table();
-        matrix.defaults().left().padRight(16).padBottom(8);
-        matrix.add(kit.label(text("UiLibrary.buttons.kind"), "hud-small", 11, UiTheme.MUTED)).width(110);
-        for (String state : states) {
-            matrix.add(kit.label(text("UiLibrary.inputs.state." + state), "hud-small", 11, UiTheme.MUTED));
-        }
-        matrix.row();
-        for (UiSelect.Kind kind : UiSelect.Kind.values()) {
-            matrix.add(kit.label(text("UiLibrary.select.kind." + kind.name()), "hud-medium", 12.5f, UiTheme.TEXT));
-            for (String state : states) {
-                UiSelect select = sampleSelect(kind);
-                switch (state) {
-                    case "hover" -> select.hovered(true);
-                    case "focus" -> select.focused(true);
-                    case "placeholder" -> select.placeholder(text("UiLibrary.select.placeholder"));
-                    case "disabled" -> select.setDisabled(true);
-                    default -> { }
-                }
-                if (!state.equals("rest") && !state.equals("placeholder")) {
-                    select.setTouchable(Touchable.disabled);
-                }
-                matrix.add(select);
-            }
-            matrix.row();
-        }
-        return matrix;
-    }
-
-    private UiSelect sampleSelect(UiSelect.Kind kind) {
-        String[] items = selectItems();
-        return kind == UiSelect.Kind.INLINE ? kit.tokenSelectInline(items)
-              : kit.tokenSelect(kind == UiSelect.Kind.COMPACT, items);
-    }
-
-    private String[] selectItems() {
-        return new String[] { text("UiLibrary.controls.optionA"), text("UiLibrary.controls.optionB"),
-                              text("UiLibrary.select.optionC"), text("UiLibrary.select.optionD") };
-    }
-
-    /**
-     * The popup list drawn in place under a face frozen open, the current value checked and the second row under the
-     * pointer; live selects to click beside it.
-     */
-    private Table selectSamples() {
-        Table samples = new Table();
-        samples.top().left();
-        samples.defaults().left().top().padRight(32);
-        Table open = new Table();
-        open.defaults().left();
-        open.add(kit.label(text("UiLibrary.select.popup"), "hud-small", 11, UiTheme.MUTED)).padBottom(4).row();
-        UiSelect owner = sampleSelect(UiSelect.Kind.REGULAR).opened(true);
-        owner.setTouchable(Touchable.disabled);
-        open.add(owner).row();
-        UiListPopup list = kit.tokenListPopup(selectItems()).current(0).active(1);
-        list.setTouchable(Touchable.disabled);
-        open.add(list).minWidth(owner.getPrefWidth()).padTop(tokens.space().get("xs")).row();
-        samples.add(open);
-
-        Table live = new Table();
-        live.defaults().left().padRight(16);
-        live.add(kit.label(text("UiLibrary.select.live"), "hud-small", 11, UiTheme.MUTED)).colspan(3).padBottom(4)
-              .row();
-        live.add(sampleSelect(UiSelect.Kind.REGULAR));
-        live.add(sampleSelect(UiSelect.Kind.COMPACT));
-        live.add(sampleSelect(UiSelect.Kind.INLINE));
-        samples.add(live);
-        return samples;
-    }
-
-    private Table buttons() {
-        Table buttons = new Table();
-        buttons.defaults().left().padBottom(8);
-        buttons.add(kit.label(text("UiLibrary.gdx.style"), "hud-small", 11, UiTheme.MUTED)).width(200);
-        buttons.add(kit.label(text("UiLibrary.gdx.rest"), "hud-small", 11, UiTheme.MUTED)).width(200);
-        buttons.add(kit.label(text("UiLibrary.gdx.pressed"), "hud-small", 11, UiTheme.MUTED)).width(200);
-        buttons.add(kit.label(text("UiLibrary.gdx.disabled"), "hud-small", 11, UiTheme.MUTED)).width(200).row();
+    private void buttons(Table page) {
+        heading(page, "UiLibrary.gdx.buttonStyles");
+        page.add();
+        page.add(stateRow(text("UiLibrary.gdx.rest"), text("UiLibrary.gdx.hover"), text("UiLibrary.gdx.held"),
+              text("UiLibrary.gdx.pressed"), text("UiLibrary.gdx.disabled"))).padRight(COLUMN_GAP);
+        page.add().row();
         List<String> styles = new ArrayList<>();
-        theme.skin.getAll(TextButton.TextButtonStyle.class).keys().forEach(style -> {
+        List<String> elsewhere = new ArrayList<>();
+        kit.skin.getAll(TextButton.TextButtonStyle.class).keys().forEach(style -> {
             if (style.startsWith("hud")) {
-                styles.add(style);
+                (SHOWN_ELSEWHERE.contains(style) ? elsewhere : styles).add(style);
             }
         });
         styles.sort(String::compareTo);
+        elsewhere.sort(String::compareTo);
         for (String style : styles) {
-            buttons.add(kit.label(style, "hud-medium", 12, UiTheme.TEXT));
-            for (int state = 0; state < 3; state++) {
+            Table states = new Table();
+            states.defaults().left().width(84).padRight(8);
+            for (int state = 0; state < 5; state++) {
                 UiButton button = sampleButton(style);
-                if (state == 1) {
-                    button.pressed(true);
-                } else if (state == 2) {
-                    button.setDisabled(true);
+                switch (state) {
+                    case 1 -> button.hovered(true);
+                    case 2 -> button.held(true);
+                    case 3 -> button.pressed(true);
+                    case 4 -> button.setDisabled(true);
+                    default -> { }
                 }
-                buttons.add(button).minHeight(30);
+                states.add(new Container<>(button).left());
             }
-            buttons.row();
+            compare(page, style, states, null);
         }
-        Label count = kit.label(text("UiLibrary.gdx.styleCount", styles.size()), "hud-small", 11.5f,
-              UiTheme.AMBER);
-        buttons.add(count).colspan(4).padTop(4);
-        return buttons;
+        Label note = kit.label(text("UiLibrary.gdx.shownElsewhere", String.join(", ", elsewhere)), "hud-small",
+              11.5f, UiTheme.MUTED);
+        note.setWrap(true);
+        page.add(note).colspan(3).width(NAME_WIDTH + TODAY_WIDTH + MIGRATED_WIDTH).padTop(4).row();
+
+        heading(page, "UiLibrary.gdx.buttonParts");
+        Table badges = new Table();
+        badges.defaults().padRight(12);
+        badges.add(kit.button("hud-utility", "report", text("UiLibrary.gdx.sampleLog"), null).badge("3"));
+        badges.add(kit.button("hud-icon", "chat", null, null).badge("12"));
+        compare(page, "UiButton.badge", badges, null);
+        Table dots = new Table();
+        dots.defaults().padRight(12);
+        dots.add(kit.button("hud-utility", "settings", text("UiLibrary.gdx.sampleSettings"), null).dot(true));
+        dots.add(kit.button("hud-icon", "chat", null, null).dot(true));
+        compare(page, "UiButton.dot", dots, null);
+        compare(page, "UiKit.closeButton", kit.closeButton(() -> { }), null);
     }
 
-    private UiButton sampleButton(String style) {
-        return switch (style) {
-            case "hud-icon" -> kit.button(style, "search", null, null);
-            case "hud-utility", "hud-utility-row" -> kit.button(style, "map", text("UiLibrary.gdx.sampleMap"), null);
-            default -> kit.button(style, null, text("UiLibrary.gdx.sampleAction"), null);
-        };
+    private void selection(Table page) {
+        heading(page, "UiLibrary.gdx.segmented");
+        compare(page, "hud-seg", kit.segmented("hud-seg", false, text("UiLibrary.gdx.segAll"),
+              text("UiLibrary.gdx.segMine"), text("UiLibrary.gdx.segCritical")).select(0), null);
+        compare(page, "hud-pill", kit.segmented("hud-pill", false, text("UiLibrary.gdx.segAll"),
+              text("UiLibrary.gdx.segMine"), text("UiLibrary.gdx.segCritical")).select(1), null);
+        compare(page, "hud-tab", kit.segmented("hud-tab", false, text("UiLibrary.gdx.tabFriendly"),
+              text("UiLibrary.gdx.tabContacts")).select(0), null);
+        compare(page, "hud-tab-caps", kit.segmented("hud-tab-caps", false, text("UiLibrary.gdx.segAll"),
+              text("UiLibrary.gdx.tabCombat"), text("UiLibrary.gdx.tabChat")).select(0), null);
+        heading(page, "UiLibrary.gdx.selects");
+        compare(page, "hud-select", new Container<>(kit.select(text("UiLibrary.gdx.selectValue"), false)).width(220),
+              null);
+        compare(page, "hud-select-inline", kit.select(text("UiLibrary.gdx.selectValue"), true), null);
+        Table checks = new Table();
+        checks.defaults().padRight(20);
+        checks.add(kit.checkbox(text("UiLibrary.gdx.ticked"), true));
+        checks.add(kit.checkbox(text("UiLibrary.gdx.clear"), false));
+        compare(page, "UiKit.checkbox", checks, null);
+        heading(page, "UiLibrary.gdx.menus");
+        Table rows = new Table();
+        rows.defaults().growX().width(280);
+        rows.add(kit.menuRow(text("UiLibrary.gdx.menuShortcut"), "Ctrl+K", null, false)).row();
+        rows.add(kit.menuRow(text("UiLibrary.gdx.menuChecked"), null, true, false)).row();
+        rows.add(kit.menuRow(text("UiLibrary.gdx.menuGroup"), null, null, true)).row();
+        rows.add(kit.menuRow(text("UiLibrary.gdx.menuHighlighted"), null, false, false).pressed(true));
+        compare(page, "hud-menu-row", rows, null);
+        compare(page, "UiMenuList", new Container<>(menuPanel()).width(280), null);
     }
 
-    private Table controls() {
-        Table controls = new Table();
-        controls.top().left();
-        controls.defaults().left().top().padBottom(12);
+    private void inputs(Table page) {
+        heading(page, "UiLibrary.gdx.fields");
+        compare(page, "hud-search", new Container<>(kit.search(text("UiLibrary.gdx.search"))).width(320), null);
+        compare(page, "hud (TextField)",
+              new Container<>(new TextField(text("UiLibrary.gdx.fieldValue"), kit.skin, "hud")).width(220).height(29),
+              null);
+        compare(page, "UiNumber", new Container<>(new UiNumber(kit, stage, text("UiLibrary.gdx.elevation"), 2, 0,
+              10, 1, (value, done) -> { })).width(340), null);
+        Slider slider = new Slider(0, 100, 1, false, kit.sliderStyle());
+        slider.setValue(40);
+        slider.addListener(new UiSliderInput(slider));
+        compare(page, "UiKit.sliderStyle", new Container<>(slider).width(300), null);
+        heading(page, "UiLibrary.gdx.pickers");
+        UiAngleDial[] dial = new UiAngleDial[1];
+        dial[0] = new UiAngleDial(kit, value -> dial[0].value(value), () -> { });
+        dial[0].value(60);
+        compare(page, "UiAngleDial", new Container<>(dial[0]).size(132), null);
+        UiHexSides[] sides = new UiHexSides[1];
+        sides[0] = new UiHexSides(kit, 0b000011, side -> sides[0].selected(sides[0].selected() ^ (1 << side)));
+        compare(page, "UiHexSides", new Container<>(sides[0]).size(150), null);
+    }
 
-        Table row = new Table();
-        row.defaults().padRight(12);
-        row.add(kit.segmented("hud-seg", false, text("UiLibrary.gdx.segAll"), text("UiLibrary.gdx.segMine"),
-              text("UiLibrary.gdx.segCritical")).select(0));
-        row.add(kit.segmented("hud-tab", false, text("UiLibrary.gdx.tabFriendly"), text("UiLibrary.gdx.tabContacts"))
-              .select(0));
-        row.add(kit.select(text("UiLibrary.gdx.selectValue"), false)).width(180);
-        row.add(kit.select(text("UiLibrary.gdx.selectValue"), true));
-        controls.add(row).row();
+    private void lists(Table page) {
+        heading(page, "UiLibrary.gdx.lists");
+        UiList list = new UiList(kit);
+        for (int index = 0; index < 3; index++) {
+            UiButton row = kit.button("hud-row", null,
+                  text(index == 1 ? "UiLibrary.sample.selectedRow" : "UiLibrary.sample.row"), null);
+            row.getLabel().setAlignment(Align.left);
+            row.getCell(row.getLabel()).growX();
+            row.pressed(index == 1);
+            list.add(row, row);
+        }
+        list.reorderable((from, to) -> { });
+        compare(page, "UiList + hud-row", new Container<>(list).width(320), null);
+        compare(page, "UiTree", new Container<>(tree()).width(320), null);
+        Table items = new Table();
+        items.top().left();
+        for (int index = 1; index <= 12; index++) {
+            items.add(kit.label(text("UiLibrary.gdx.listItem", index), "hud-body", 12.5f, UiTheme.TEXT)).left()
+                  .pad(3, 10, 3, 10).row();
+        }
+        compare(page, "hud-list (ScrollPane)", new Container<>(kit.scrollList(items)).size(300, 110), null);
+        Table empty = kit.panel();
+        kit.empty(empty, text("UiLibrary.gdx.empty"));
+        compare(page, "UiKit.empty", new Container<>(empty).width(320), null);
+        heading(page, "UiLibrary.gdx.grids");
+        compare(page, "UiCardGrid", new Container<>(cardGrid()).size(440, 330), null);
+        UiChoiceGrid choices = kit.choiceGrid(120, 8);
+        for (int index = 1; index <= 5; index++) {
+            choices.addActor(kit.button("hud", null, text("UiLibrary.gdx.choice", index), null));
+        }
+        choices.fit(440, 200);
+        compare(page, "UiChoiceGrid", new Container<>(choices).width(440), null);
+        Table top = new Table();
+        top.add(kit.label(text("UiLibrary.gdx.splitTop"), "hud-body", 12.5f, UiTheme.TEXT));
+        Table bottom = new Table();
+        bottom.add(kit.label(text("UiLibrary.gdx.splitBottom"), "hud-body", 12.5f, UiTheme.TEXT));
+        compare(page, "hud-split", new Container<>(new SplitPane(top, bottom, true, kit.skin, "hud-split"))
+              .size(320, 120), null);
+    }
 
+    private void containers(Table page) {
+        heading(page, "UiLibrary.gdx.panels");
+        compare(page, "panel + header + footer", new Container<>(listPanel()).width(320), null);
+        Table foe = kit.panel();
+        foe.setBackground(kit.skin.getDrawable("panel-foe"));
+        foe.add(kit.header(text("UiLibrary.gdx.foePanel"), null)).growX().row();
+        foe.add(kit.label(text("UiLibrary.sample.row"), "hud-body", 12.5f, UiTheme.TEXT)).left().pad(0, 14, 12, 14);
+        compare(page, "panel-foe", new Container<>(foe).width(320), null);
+        Table rails = new Table();
+        rails.setBackground(kit.skin.getDrawable("panel-rails"));
+        rails.add(kit.label(text("UiLibrary.gdx.tacticalView"), "hud-medium", 12, UiTheme.TEXT));
+        compare(page, "panel-rails", rails, null);
+        compare(page, "rule", new Container<>(new Image(kit.skin.getDrawable("rule"))).size(320, 1), null);
+        heading(page, "UiLibrary.gdx.overlays");
+        compare(page, "UiPopover (panel-pop)", popover(), null);
+        Table dialog = kit.dialog(text("UiLibrary.gdx.dialogTitle"), () -> { });
+        dialog.add(dialogBody()).growX();
+        compare(page, "UiKit.dialog", new Container<>(dialog).width(400), null);
+        UiButton openModal = kit.button("hud", null, text("UiLibrary.gdx.openModal"), null);
+        UiKit.onChange(openModal, () -> {
+            modal.open(true);
+            modal.focus();
+        });
+        compare(page, "UiModal", openModal, null);
+        UiButton ask = kit.button("hud", null, text("UiLibrary.gdx.askConfirm"), null);
+        UiKit.onChange(ask, () -> confirmation.toggle(ask, () -> { }));
+        compare(page, "UiConfirmation", ask, null);
+        UiButton tipped = kit.button("hud", "info", text("UiLibrary.gdx.hoverTip"), null);
+        kit.tip(tipped).getActor().setText(text("UiLibrary.gdx.tipText"));
+        compare(page, "UiKit.tip", tipped, null);
+        heading(page, "UiLibrary.gdx.text");
+        UiFlow flow = new UiFlow(kit, 12.5f, 17);
+        flow.run(text("UiLibrary.gdx.flowLead"), "hud-body", UiTheme.MUTED)
+              .run(text("UiLibrary.gdx.flowValue"), "hud-button", UiTheme.TEXT)
+              .run(text("UiLibrary.gdx.flowRest"), "hud-body", UiTheme.MUTED);
+        compare(page, "UiFlow", new Container<>(flow).width(360), null);
+    }
+
+    private void status(Table page) {
+        heading(page, "UiLibrary.gdx.chipsBadges");
         Table chips = new Table();
         chips.defaults().padRight(8);
         chips.add(kit.chip(text("UiLibrary.status.info"), Tone.NORMAL));
+        chips.add(kit.chip(text("UiLibrary.status.success"), Tone.OK));
         chips.add(kit.chip(text("UiLibrary.status.warning"), Tone.WARN));
         chips.add(kit.chip(text("UiLibrary.status.danger"), Tone.BAD));
-        chips.add(kit.checkbox(text("UiLibrary.gdx.ticked"), true)).padLeft(12);
-        chips.add(kit.checkbox(text("UiLibrary.gdx.clear"), false));
-        controls.add(chips).row();
-
-        controls.add(kit.search(text("UiLibrary.gdx.search"))).width(360).row();
-
+        compare(page, "UiKit.chip", chips, null);
+        Table marks = new Table();
+        marks.defaults().padRight(12);
+        marks.add(new Container<>(kit.label("3", "hud-caption", 10, UiTheme.FILL_INK))
+              .background(kit.skin.getDrawable("badge")));
+        marks.add(new Image(kit.skin.getDrawable("dot")));
+        compare(page, "badge, dot", marks, null);
+        heading(page, "UiLibrary.gdx.meters");
         Table meters = kit.panel();
         meters.pad(14, 16, 14, 16);
         meters.defaults().growX().uniformX().padRight(12);
         meters.add(kit.meter(text("UiLibrary.gdx.armor"), false).set("91%", .91f, UiTheme.MINT));
         meters.add(kit.meter(text("UiLibrary.gdx.structure"), false).set("40%", .4f, UiTheme.AMBER));
         meters.add(kit.meter(text("UiLibrary.gdx.heat"), false).set("12", .4f, UiTheme.CORAL));
-        controls.add(meters).width(460).row();
+        compare(page, "UiKit.meter", new Container<>(meters).width(460), null);
+        Table compact = kit.panel();
+        compact.pad(10, 14, 10, 14);
+        compact.defaults().growX().uniformX().padRight(12);
+        compact.add(kit.meter(text("UiLibrary.gdx.armor"), true).set("91%", .91f, UiTheme.MINT));
+        compact.add(kit.meter(text("UiLibrary.gdx.structure"), true).set("40%", .4f, UiTheme.AMBER));
+        compare(page, "UiKit.meter (compact)", new Container<>(compact).width(320), null);
+        Table heat = new Table();
+        heat.defaults().left().width(300).height(8).padBottom(12);
+        heat.add(hud.heatBar(false).set(12, 18, 30, List.of(8, 13, 17, 24))).row();
+        heat.add(hud.heatBar(true).set(12, 18, 30, List.of(8, 13, 17, 24)));
+        compare(page, "GpuHudKit.heatBar", heat, null);
+        heading(page, "UiLibrary.gdx.toasts");
+        GpuToastStack stack = new GpuToastStack(hud, null, null);
+        Table toasts = new Table();
+        toasts.defaults().left().padBottom(6);
+        long id = 0;
+        for (ToastLevel level : ToastLevel.values()) {
+            String key = "UiLibrary.gdx.toast." + level.name().toLowerCase(Locale.ROOT);
+            Actor toast = stack.toast(new GpuToasts.Toast(id++, level, text(key),
+                  level == ToastLevel.SUCCESS ? sprite : null, 1000));
+            toast.clearActions();
+            toast.getColor().a = 1;
+            toasts.add(toast).row();
+        }
+        compare(page, "GpuToastStack", toasts, null);
+    }
 
-        Table panels = new Table();
-        panels.top().left();
-        panels.defaults().top().padRight(16);
-        panels.add(listPanel()).width(300);
-        panels.add(menuPanel()).width(260);
-        controls.add(panels).row();
-        return controls;
+    private void hudParts(Table page) {
+        Label note = kit.label(text("UiLibrary.gdx.hudNote"), "hud-small", 11.5f, UiTheme.MUTED);
+        note.setWrap(true);
+        page.add(note).colspan(3).width(NAME_WIDTH + TODAY_WIDTH + MIGRATED_WIDTH).padTop(10).row();
+        heading(page, "UiLibrary.gdx.targets");
+        Table letters = new Table();
+        letters.defaults().padRight(8);
+        for (char letter = 'A'; letter <= 'F'; letter++) {
+            letters.add(hud.letter(letter, false));
+        }
+        for (char letter = 'A'; letter <= 'C'; letter++) {
+            letters.add(hud.letter(letter, true));
+        }
+        compare(page, "GpuHudKit.letter", letters, null);
+        Table pills = new Table();
+        pills.defaults().padRight(8);
+        pills.add(pill('A', "pill", UiTheme.TEXT));
+        pills.add(pill('B', "pill-on", UiTheme.FILL_INK));
+        compare(page, "pill, pill-on", pills, null);
+        heading(page, "UiLibrary.gdx.units");
+        Table rows = new Table();
+        rows.defaults().width(340).padBottom(6);
+        rows.add(hud.unitRow(40, 34).set(sprite, GpuHudKit.FRIEND_SPRITE, text("UiLibrary.gdx.unitModel"),
+              text("UiLibrary.gdx.unitName"), text("UiLibrary.gdx.unitStatus"), Tone.NORMAL)).row();
+        rows.add(hud.unitRow(40, 34).set(sprite, UiTheme.CORAL, text("UiLibrary.gdx.foeModel"),
+              text("UiLibrary.gdx.foeName"), text("UiLibrary.gdx.foeStatus"), Tone.BAD).inspected(true)).row();
+        rows.add(hud.unitRow(40, 34).set(null, UiTheme.BLIP, text("GpuBoard.hud.common.unidentified"),
+              text("GpuBoard.hud.common.sensorContact"), text("UiLibrary.gdx.contactStatus"), Tone.WARN));
+        compare(page, "GpuHudKit.unitRow", rows, null);
+        Table damage = new Table();
+        damage.defaults().left().padBottom(4);
+        damage.add(damageLabel(UiTheme.MINT, "UiLibrary.gdx.damageLight")).row();
+        damage.add(damageLabel(UiTheme.AMBER, "UiLibrary.gdx.damageHeavy")).row();
+        damage.add(damageLabel(Color.BLACK, "UiLibrary.gdx.damageCrippled"));
+        compare(page, "GpuHudKit.damageTile", damage, null);
+        heading(page, "UiLibrary.gdx.hudBoxes");
+        Table discs = new Table();
+        discs.defaults().padRight(8);
+        discs.add(disc("disc", "3", UiTheme.MINT));
+        discs.add(disc("disc-foe", "4", UiTheme.CORAL));
+        compare(page, "disc, disc-foe", discs, null);
+        Container<Label> waiting = new Container<>(kit.label(text("UiLibrary.gdx.waiting"), "hud-small", 11.5f,
+              UiTheme.MUTED));
+        waiting.setBackground(kit.skin.getDrawable("waiting"));
+        waiting.pad(0, 14, 0, 14);
+        compare(page, "waiting", waiting, null);
+    }
+
+    // ---- Samples
+
+    private UiButton sampleButton(String style) {
+        return switch (style) {
+            case "hud-icon", "hud-delete-icon" -> kit.button(style, "search", null, null);
+            case "hud-utility", "hud-utility-row" -> kit.button(style, "map", text("UiLibrary.gdx.sampleMap"), null);
+            default -> kit.button(style, null, text("UiLibrary.gdx.sampleAction"), null);
+        };
+    }
+
+    private Table menuPanel() {
+        Table popover = new Table();
+        popover.setBackground(kit.skin.getDrawable("panel-pop"));
+        popover.pad(8, 2, 8, 2);
+        popover.add(menuList()).growX();
+        return popover;
+    }
+
+    private UiMenuList menuList() {
+        UiMenuList list = new UiMenuList(kit);
+        list.item(text("UiLibrary.gdx.menuShortcut"), "Ctrl+K", false, false, true, () -> { });
+        list.item(text("UiLibrary.gdx.menuChecked"), null, true, false, true, () -> { });
+        list.separator();
+        list.item(text("UiLibrary.gdx.menuGroup"), null, false, true, true, () -> { });
+        list.item(text("UiLibrary.gdx.menuDisabled"), null, false, false, false, () -> { });
+        return list;
+    }
+
+    private UiPopover popover() {
+        UiPopover popover = new UiPopover(kit);
+        popover.header(text("UiLibrary.gdx.popoverTitle"), text("UiLibrary.gdx.popoverDetail"));
+        popover.content(menuList());
+        popover.setVisible(true);
+        return popover;
+    }
+
+    private UiTree tree() {
+        UiTree tree = new UiTree(kit);
+        tree.nodes(List.of(
+              new UiTree.Node("display", text("UiLibrary.gdx.treeDisplay")).icon("tune").children(List.of(
+                    new UiTree.Node("display.labels", text("UiLibrary.gdx.treeLabels")),
+                    new UiTree.Node("display.shadows", text("UiLibrary.gdx.treeShadows"))
+                          .detail(text("UiLibrary.gdx.treeShadowsDetail")))),
+              new UiTree.Node("board", text("UiLibrary.gdx.treeBoard")).icon("map").children(List.of(
+                    new UiTree.Node("board.terrain", text("UiLibrary.gdx.treeTerrain")))),
+              new UiTree.Node("units", text("UiLibrary.gdx.treeUnits")).icon("unit")));
+        tree.expand("display", true);
+        tree.select("display.labels");
+        return tree;
+    }
+
+    private ScrollPane cardGrid() {
+        UiCardGrid grid = new UiCardGrid(3, 56, 24, 8);
+        grid.items(List.of(new UiCardGrid.Section(kit.caption(text("UiLibrary.gdx.cardsLight")), 4),
+              new UiCardGrid.Section(kit.caption(text("UiLibrary.gdx.cardsHeavy")), 5)), index -> {
+                  Table card = kit.panel();
+                  card.add(kit.label(text("UiLibrary.gdx.card", index + 1), "hud-medium", 12, UiTheme.TEXT))
+                        .expand();
+                  return card;
+              });
+        return kit.scrollList(grid);
     }
 
     private Table listPanel() {
@@ -754,18 +674,166 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return panel;
     }
 
-    private Table menuPanel() {
-        Table popover = new Table();
-        popover.setBackground(kit.skin.getDrawable("panel-pop"));
-        popover.pad(8, 2, 8, 2);
-        UiMenuList list = new UiMenuList(kit);
-        list.item(text("UiLibrary.gdx.menuShortcut"), "Ctrl+K", false, false, true, () -> { });
-        list.item(text("UiLibrary.gdx.menuChecked"), null, true, false, true, () -> { });
-        list.separator();
-        list.item(text("UiLibrary.gdx.menuGroup"), null, false, true, true, () -> { });
-        list.item(text("UiLibrary.gdx.menuDisabled"), null, false, false, false, () -> { });
-        popover.add(list).growX();
-        return popover;
+    private Table dialogBody() {
+        Table body = new Table();
+        Label message = kit.label(text("UiLibrary.gdx.dialogBody"), "hud-body", 12.5f, UiTheme.TEXT);
+        message.setWrap(true);
+        body.add(message).growX().colspan(3).padBottom(14).row();
+        body.add().expandX();
+        body.add(kit.button("hud-mini", null, text("UiLibrary.gdx.confirmNo"), null)).padRight(8);
+        body.add(kit.button("hud-main", null, text("UiLibrary.gdx.confirmYes"), null));
+        return body;
+    }
+
+    private UiModal modal() {
+        UiModal layer = new UiModal(kit, () -> modal.open(false));
+        layer.setFillParent(true);
+        Table dialog = kit.dialog(text("UiLibrary.gdx.dialogTitle"), () -> modal.open(false));
+        dialog.add(dialogBody()).growX();
+        layer.add(dialog).width(400);
+        return layer;
+    }
+
+    private Table pill(char letter, String background, Color ink) {
+        Table pill = new Table();
+        pill.setBackground(kit.skin.getDrawable(background));
+        pill.add(hud.letter(letter, false)).padRight(6);
+        pill.add(kit.label(text("UiLibrary.gdx.foeName"), "hud-medium", 12, ink));
+        return pill;
+    }
+
+    private Label damageLabel(Color tile, String key) {
+        Label label = kit.label(text(key), "hud-small", 11.5f, UiTheme.TEXT);
+        Label.LabelStyle style = new Label.LabelStyle(label.getStyle());
+        style.background = hud.damageTile(tile);
+        label.setStyle(style);
+        return label;
+    }
+
+    private Container<Label> disc(String background, String number, Color ink) {
+        Label label = kit.label(number, "hud-medium", 12, ink);
+        label.setAlignment(Align.center);
+        Container<Label> disc = new Container<>(label).size(28);
+        disc.setBackground(kit.skin.getDrawable(background));
+        return disc;
+    }
+
+    // ---- Layout
+
+    private Label columnTitle(String key) {
+        return kit.label(UiTheme.upper(text(key)), "hud-caption", 10.5f, UiTheme.MUTED);
+    }
+
+    private void heading(Table page, String key) {
+        page.add(kit.label(text(key), "hud-title", 15, UiTheme.TEXT)).colspan(3).padTop(22).padBottom(8).row();
+    }
+
+    /** One element: its code name, today's look and its migrated look, or a placeholder while it has none. */
+    private void compare(Table page, String name, Actor today, Actor migrated) {
+        page.add(new Image(kit.skin.getDrawable("rule"))).colspan(3).growX().height(1).padBottom(10).row();
+        Label label = kit.label(name, "hud-medium", 12, UiTheme.ACCENT);
+        label.setWrap(true);
+        page.add(label).width(NAME_WIDTH).padRight(COLUMN_GAP).padBottom(12);
+        Table holder = new Table();
+        holder.left().top();
+        holder.add(today);
+        page.add(holder).width(TODAY_WIDTH).padRight(COLUMN_GAP).padBottom(12);
+        page.add(migrated != null ? migrated : kit.label(text("UiLibrary.gdx.notMigrated"), "hud-small", 11.5f,
+              UiTheme.DISABLED)).padBottom(12).row();
+    }
+
+    private Table stateRow(String... states) {
+        Table row = new Table();
+        row.defaults().left().width(84).padRight(8);
+        for (String state : states) {
+            row.add(kit.label(state, "hud-small", 11, UiTheme.MUTED));
+        }
+        return row;
+    }
+
+    private Table tokenSwatches() {
+        List<Table> cells = new ArrayList<>();
+        int panel = tokens.color("surface.panel", Mode.DARK);
+        for (ColorToken token : tokens.colors().values()) {
+            int value = token.overlay() != null ? token.overlay() : token.dark();
+            // Translucent roles show as they sit on a panel.
+            int shown = ColorMath.alpha(value) == 0xFF ? value : ColorMath.over(value, panel);
+            String hex = ColorMath.hex(value) + (token.overlay() != null ? "  " + text("UiLibrary.gdx.overlay") : "");
+            cells.add(swatch(token.name(), hex, color(shown), 160));
+        }
+        return grid(cells, MIGRATED_SWATCHES_PER_ROW);
+    }
+
+    private Table currentSwatches() {
+        Map<String, Color> current = new LinkedHashMap<>();
+        current.put("TEXT", UiTheme.TEXT);
+        current.put("ACCENT", UiTheme.ACCENT);
+        current.put("MUTED", UiTheme.MUTED);
+        current.put("DISABLED", UiTheme.DISABLED);
+        current.put("PANEL", UiTheme.PANEL);
+        current.put("PANEL2", UiTheme.PANEL2);
+        current.put("POP", UiTheme.POP);
+        current.put("LINE", UiTheme.LINE);
+        current.put("RAIL", UiTheme.RAIL);
+        current.put("QUIET", UiTheme.QUIET);
+        current.put("TICK", UiTheme.TICK);
+        current.put("CORNER", UiTheme.CORNER);
+        current.put("MINT", UiTheme.MINT);
+        current.put("CORAL", UiTheme.CORAL);
+        current.put("AMBER", UiTheme.AMBER);
+        current.put("VIOLET", UiTheme.VIOLET);
+        current.put("BLIP", UiTheme.BLIP);
+        current.put("FILL", UiTheme.FILL);
+        current.put("FILL_INK", UiTheme.FILL_INK);
+        current.put("FILL_MUTED", UiTheme.FILL_MUTED);
+        current.put("MAIN", UiTheme.MAIN);
+        current.put("HOVER", UiTheme.HOVER);
+        current.put("TRACK", UiTheme.TRACK);
+        List<Table> cells = new ArrayList<>();
+        current.forEach((name, value) -> cells.add(swatch(name, "#" + value.toString().toUpperCase(Locale.ROOT),
+              value, 134)));
+        return grid(cells, TODAY_SWATCHES_PER_ROW);
+    }
+
+    private Table swatch(String name, String detail, Color fill, float width) {
+        Table cell = new Table();
+        cell.defaults().left();
+        Image chip = new Image(kit.skin.newDrawable("white", fill));
+        // A subtle outline keeps colors that sit close to the background visible.
+        Table outline = new Table();
+        outline.setBackground(kit.skin.newDrawable("white", color(tokens.color("border.subtle", Mode.DARK))));
+        outline.add(chip).size(width, 28);
+        outline.pad(1);
+        cell.add(outline).row();
+        cell.add(kit.label(name, "hud-medium", 12, UiTheme.TEXT)).padTop(4).row();
+        cell.add(kit.label(detail, "hud-small", 10.5f, UiTheme.MUTED)).row();
+        return cell;
+    }
+
+    private static Table grid(List<Table> cells, int perRow) {
+        Table grid = new Table();
+        grid.top().left();
+        grid.defaults().left().top().padRight(12).padBottom(10);
+        for (int index = 0; index < cells.size(); index++) {
+            grid.add(cells.get(index));
+            if ((index + 1) % perRow == 0) {
+                grid.row();
+            }
+        }
+        return grid;
+    }
+
+    private Table fonts() {
+        Table fonts = new Table();
+        fonts.defaults().left().padBottom(6);
+        for (UiTheme.HudFont font : UiTheme.HUD_FONTS) {
+            fonts.add(kit.label(String.format(Locale.ROOT, "%s  %s / %s", font.name(), trim(font.size()),
+                  weight(font.instance())), "hud-small", 11, UiTheme.MUTED)).width(200);
+            Label sample = new Label(text("UiLibrary.type.sample"), kit.skin, font.name());
+            sample.setEllipsis(true);
+            fonts.add(sample).width(TODAY_WIDTH - 200).row();
+        }
+        return fonts;
     }
 
     // ---- Helpers

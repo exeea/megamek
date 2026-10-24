@@ -115,7 +115,7 @@ final class GpuToastStack implements GpuHud.Component {
      * One toast: the unit's sprite when it has one, and its text, on one line up to the stack's width and wrapped
      * beyond it. It fades in, stays for the toast's duration, fades out and leaves the stack.
      */
-    private Actor toast(GpuToasts.Toast toast) {
+    Actor toast(GpuToasts.Toast toast) {
         Table row = new Table();
         row.setBackground(backgrounds.get(toast.level()));
         float room = MAX_WIDTH - BAR - 2 * PAD_X;
