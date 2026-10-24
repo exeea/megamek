@@ -26,9 +26,13 @@ public final class UiHexSides extends WidgetGroup {
     private final float[] band = new float[20];
     private int selected;
     private int hover = -1;
+    private UiTheme.PickerStyle colors;
+    private final UiKit ui;
 
     public UiHexSides(UiKit ui, int selected, IntConsumer toggle) {
         this.selected = selected;
+        this.ui = ui;
+        colors = ui.skin.get(UiTheme.PickerStyle.class);
         white = ui.skin.get("white", Texture.class);
         setTransform(false);
         for (int side = 0; side < 6; side++) {
@@ -57,6 +61,12 @@ public final class UiHexSides extends WidgetGroup {
 
     public void selected(int mask) { selected = mask; }
     public int selected() { return selected; }
+
+    /** Draws the hex in the skin's {@link UiTheme.PickerStyle} {@code name}: default (hud-v3) or token. */
+    public UiHexSides style(String name) {
+        colors = ui.skin.get(name, UiTheme.PickerStyle.class);
+        return this;
+    }
 
     @Override public float getPrefWidth() { return 216; }
     @Override public float getPrefHeight() { return 170; }
@@ -103,7 +113,7 @@ public final class UiHexSides extends WidgetGroup {
         for (int side = 0; side < 6; side++) {
             Vector2 a = corners[side], b = corners[(side + 1) % 6];
             boolean chosen = (selected & (1 << side)) != 0;
-            Color color = chosen ? UiTheme.MINT : hover == side ? UiTheme.TEXT : UiTheme.MUTED;
+            Color color = chosen ? colors.accent : hover == side ? colors.hover : colors.line;
             if (chosen || hover == side) {
                 float packed = Color.toFloatBits(color.r, color.g, color.b, alpha * (hover == side ? .28f : .16f));
                 point(0, cx + a.x * .86f, cy + a.y * .86f, packed);
@@ -116,7 +126,7 @@ public final class UiHexSides extends WidgetGroup {
             float line = chosen ? 4 : hover == side ? 3 : 1.5f;
             batch.draw(white, cx + a.x, cy + a.y - line / 2, 0, line / 2,
                   a.dst(b), line, 1, 1, (float) Math.toDegrees(Math.atan2(b.y - a.y, b.x - a.x)), 0, 0, 1, 1, false, false);
-            labels[side].setColor(color);
+            labels[side].setColor(hover == side ? colors.hover : chosen ? colors.labelOn : colors.label);
         }
         batch.setPackedColor(previous);
         super.draw(batch, parentAlpha);

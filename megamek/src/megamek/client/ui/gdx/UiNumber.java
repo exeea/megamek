@@ -216,6 +216,24 @@ public final class UiNumber extends Table {
         getCell(field).size(width, height);
         return this;
     }
+
+    /**
+     * The Token v0 look: a text.secondary caption, the compact token input with its hover edge, the token slider and,
+     * for an angle, the token dial. Call it after {@link #angle} and {@link #withCheckbox}.
+     */
+    public UiNumber tokenLook() {
+        Label.LabelStyle secondary = new Label.LabelStyle(caption.getStyle());
+        secondary.fontColor = UiTheme.tokenColor("text.secondary");
+        caption.setStyle(secondary);
+        field.setStyle(ui.skin.get("input" + UiTheme.COMPACT, TextField.TextFieldStyle.class));
+        UiKit.hoverEdge(field, field);
+        getCell(field).height(field.getStyle().background.getMinHeight());
+        slider.setStyle(ui.tokenSliderStyle());
+        if (dial != null) {
+            dial.style(UiTheme.TOKEN);
+        }
+        return this;
+    }
     /** Axis triplets share their rotation heading, so each caption can be just X, Y or Z. */
     public UiNumber compactCaption() {
         caption.setText(label); getCell(caption).padRight(4); return this;

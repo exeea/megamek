@@ -481,24 +481,46 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     private void inputs(Table page) {
         heading(page, "UiLibrary.gdx.fields");
-        compare(page, "hud-search", new Container<>(kit.search(text("UiLibrary.gdx.search"))).width(320), null);
+        compare(page, "hud-search", new Container<>(kit.search(text("UiLibrary.gdx.search"))).width(320),
+              new Container<>(kit.search(text("UiLibrary.gdx.search"), true)).width(320));
+        TextField tokenField = new TextField(text("UiLibrary.gdx.fieldValue"), kit.skin, "input");
         compare(page, "hud (TextField)",
               new Container<>(new TextField(text("UiLibrary.gdx.fieldValue"), kit.skin, "hud")).width(220).height(29),
-              null);
-        compare(page, "UiNumber", new Container<>(new UiNumber(kit, stage, text("UiLibrary.gdx.elevation"), 2, 0,
-              10, 1, (value, done) -> { })).width(340), null);
-        Slider slider = new Slider(0, 100, 1, false, kit.sliderStyle());
+              new Container<>(UiKit.hoverEdge(tokenField, tokenField)).width(220));
+        compare(page, "UiNumber", new Container<>(number()).width(340),
+              new Container<>(number().tokenLook()).width(340));
+        compare(page, "UiKit.sliderStyle", new Container<>(slider(kit.sliderStyle())).width(300),
+              new Container<>(slider(kit.tokenSliderStyle())).width(300));
+        heading(page, "UiLibrary.gdx.pickers");
+        compare(page, "UiAngleDial", new Container<>(dial("default")).size(132),
+              new Container<>(dial(UiTheme.TOKEN)).size(132));
+        compare(page, "UiHexSides", new Container<>(hexSides("default")).size(150),
+              new Container<>(hexSides(UiTheme.TOKEN)).size(150));
+    }
+
+    private UiNumber number() {
+        return new UiNumber(kit, stage, text("UiLibrary.gdx.elevation"), 2, 0, 10, 1, (value, done) -> { });
+    }
+
+    private Slider slider(Slider.SliderStyle style) {
+        Slider slider = new Slider(0, 100, 1, false, style);
         slider.setValue(40);
         slider.addListener(new UiSliderInput(slider));
-        compare(page, "UiKit.sliderStyle", new Container<>(slider).width(300), null);
-        heading(page, "UiLibrary.gdx.pickers");
+        return slider;
+    }
+
+    private UiAngleDial dial(String style) {
         UiAngleDial[] dial = new UiAngleDial[1];
-        dial[0] = new UiAngleDial(kit, value -> dial[0].value(value), () -> { });
+        dial[0] = new UiAngleDial(kit, value -> dial[0].value(value), () -> { }).style(style);
         dial[0].value(60);
-        compare(page, "UiAngleDial", new Container<>(dial[0]).size(132), null);
+        return dial[0];
+    }
+
+    private UiHexSides hexSides(String style) {
         UiHexSides[] sides = new UiHexSides[1];
-        sides[0] = new UiHexSides(kit, 0b000011, side -> sides[0].selected(sides[0].selected() ^ (1 << side)));
-        compare(page, "UiHexSides", new Container<>(sides[0]).size(150), null);
+        sides[0] = new UiHexSides(kit, 0b000011, side -> sides[0].selected(sides[0].selected() ^ (1 << side)))
+              .style(style);
+        return sides[0];
     }
 
     private void lists(Table page) {

@@ -29,6 +29,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
@@ -329,6 +330,7 @@ public final class UiTheme implements Disposable {
         tokenOptions();
         tokenSelects();
         tokenSelection();
+        tokenInputs();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -1040,6 +1042,11 @@ public final class UiTheme implements Disposable {
         return color;
     }
 
+    /** The shipped token color {@code role} (such as text.secondary) in dark mode, the only mode native views have. */
+    public static Color tokenColor(String role) {
+        return token(DesignTokens.shipped().color(role, Mode.DARK));
+    }
+
     /** Pads a drawable: {@code vertical} units above and below its content, {@code horizontal} beside it. */
     public static <T extends Drawable> T pad(T drawable, float vertical, float horizontal) {
         drawable.setTopHeight(vertical);
@@ -1177,6 +1184,96 @@ public final class UiTheme implements Disposable {
         box("dial-hub", rgba(8, 12, 13, .96f), alpha(MINT, .5f), 1.5f, hub / 2, null, 0, 0, hub);
         box("dial-knob", MINT, POP, 2, grip / 2, null, 0, 0, grip);
         box("dial-stroke", Color.WHITE, null, 0, UiAngleDial.STROKE / 2, null, 0, 0, UiAngleDial.STROKE);
+        PickerStyle picker = new PickerStyle();
+        picker.discs = "dial";
+        picker.accent = MINT;
+        picker.major = ACCENT;
+        picker.minor = TICK;
+        picker.line = MUTED;
+        picker.hover = TEXT;
+        picker.label = MUTED;
+        picker.labelOn = MINT;
+        skin.add("default", picker);
+    }
+
+    /**
+     * The colors of {@link UiAngleDial} and {@link UiHexSides}: {@code default} is hud-v3's, {@link #TOKEN} Token
+     * v0's. The dial's discs are the {@code <discs>-face}, {@code -well}, {@code -hub} and {@code -knob} drawables.
+     */
+    public static final class PickerStyle {
+        public String discs;
+        /** The dial's zero tick, turn and needle, and the chosen hex sides. */
+        public Color accent;
+        /** The dial's ticks every 30 degrees and every 10. */
+        public Color major;
+        public Color minor;
+        /** A hex side at rest and under the pointer. */
+        public Color line;
+        public Color hover;
+        /** A hex side's direction at rest and while chosen; under the pointer it takes {@link #hover}. */
+        public Color label;
+        public Color labelOn;
+    }
+
+    /** The name of the Token v0 styles of hud-v3's own inputs: the slider style and the pickers' colors. */
+    public static final String TOKEN = "token";
+
+    /**
+     * Token v0 styles for hud-v3's own inputs (docs/design-system/tokens.md, Inputs and Sliders): the slider's pill
+     * track and accent disc, and the pickers' discs and colors. The text fields use the {@code input} styles.
+     */
+    private void tokenInputs() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        int accent = tokens.color("accent.primary", mode);
+        Color control = token(tokens.color("border.control", mode));
+        Color strong = token(tokens.color("border.strong", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        float border = tokens.size().get("border");
+        float track = tokens.space().get("xs");
+        float thumb = tokens.size().get("icon.sm");
+        int accentHover = ColorMath.over(ColorMath.withAlpha(tokens.color("text.onAccent", mode),
+              tokens.alpha("tint.hover")), accent);
+        int accentPressed = ColorMath.over(ColorMath.withAlpha(tokens.color("text.primary", mode),
+              tokens.alpha("tint.pressed")), accent);
+
+        Slider.SliderStyle slider = new Slider.SliderStyle();
+        slider.background = box("slider-track", control, null, 0, track / 2, null, 0, 0, track);
+        slider.background.setMinWidth(0);
+        slider.knobBefore = box("slider-fill", token(accent), null, 0, track / 2, null, 0, 0, track);
+        slider.knobBefore.setMinWidth(0);
+        slider.knob = box("slider-thumb", token(accent), token(accent), border, thumb / 2, null, 0, 0, thumb);
+        slider.knob.setMinWidth(thumb);
+        slider.knobOver = box("slider-thumb-over", token(accentHover), strong, border, thumb / 2, null, 0, 0, thumb);
+        slider.knobOver.setMinWidth(thumb);
+        slider.knobDown = box("slider-thumb-down", token(accentPressed), strong, border, thumb / 2, null, 0, 0,
+              thumb);
+        slider.knobDown.setMinWidth(thumb);
+        slider.disabledBackground = box("slider-track-disabled", subtle, null, 0, track / 2, null, 0, 0, track);
+        slider.disabledBackground.setMinWidth(0);
+        slider.disabledKnob = box("slider-thumb-disabled", token(tokens.color("text.disabled", mode)), null, 0,
+              thumb / 2, null, 0, 0, thumb);
+        slider.disabledKnob.setMinWidth(thumb);
+        skin.add(TOKEN, slider);
+
+        float dial = UiAngleDial.SIZE, well = UiAngleDial.WELL, hub = UiAngleDial.HUB, grip = UiAngleDial.KNOB;
+        Color base = token(tokens.color("surface.base", mode));
+        box("token-dial-face", token(tokens.color("surface.raised", mode)), control, border, dial / 2, null, 0, 0,
+              dial);
+        box("token-dial-well", token(tokens.color("surface.input", mode)), control, border, well / 2, null, 0, 0,
+              well);
+        box("token-dial-hub", base, strong, border, hub / 2, null, 0, 0, hub);
+        box("token-dial-knob", token(accent), base, 2, grip / 2, null, 0, 0, grip);
+        PickerStyle picker = new PickerStyle();
+        picker.discs = "token-dial";
+        picker.accent = token(accent);
+        picker.major = strong;
+        picker.minor = control;
+        picker.line = control;
+        picker.hover = token(tokens.color("text.primary", mode));
+        picker.label = token(tokens.color("text.muted", mode));
+        picker.labelOn = token(tokens.color("text.secondary", mode));
+        skin.add(TOKEN, picker);
     }
 
     /**

@@ -493,7 +493,49 @@ public final class UiKit {
 
     /** A search field (.field) with its placeholder, and a clear button while it holds text. */
     public SearchField search(String placeholder) {
-        return new SearchField(placeholder);
+        return new SearchField(placeholder, false);
+    }
+
+    /**
+     * A search field as {@link #search(String)}; with {@code token}, in the Token v0 look: the {@code input-search}
+     * style with a leading search glyph and a compact icon button to clear it.
+     */
+    public SearchField search(String placeholder, boolean token) {
+        return new SearchField(placeholder, token);
+    }
+
+    /**
+     * Gives a field in a token {@code input} style the {@code border.strong} edge under the pointer anywhere over
+     * {@code root} (the field, or a stack that draws parts over it), which scene2d's TextField lacks. Returns the field.
+     */
+    public static <T extends TextField> T hoverEdge(T field, Actor root) {
+        if (!(field.getStyle() instanceof UiTheme.TokenFieldStyle rest) || rest.over == null) {
+            return field;
+        }
+        TextField.TextFieldStyle over = new TextField.TextFieldStyle(rest);
+        over.background = rest.over;
+        root.addListener(new InputListener() {
+            @Override
+            public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
+                if (pointer == -1) {
+                    field.setStyle(over);
+                }
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
+                if (pointer == -1 && (toActor == null || !toActor.isDescendantOf(root))) {
+                    field.setStyle(rest);
+                }
+            }
+        });
+        return field;
+    }
+
+    /** The token slider (docs/design-system/tokens.md, Sliders): a pill track, the accent fill and an accent disc. */
+    public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle tokenSliderStyle() {
+        return new com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle(
+              skin.get(UiTheme.TOKEN, com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle.class));
     }
 
     /** A token text input (docs/design-system/tokens.md, Inputs); compact is control.sm high, otherwise control.md. */
@@ -783,13 +825,28 @@ public final class UiKit {
         /** The clear button, shown while the field holds text. */
         public final UiButton clear;
 
-        private SearchField(String placeholder) {
-            field = new TextField("", skin, "hud-search");
+        private SearchField(String placeholder, boolean token) {
+            field = new TextField("", skin, token ? "input-search" : "hud-search");
             field.setMessageText(placeholder);
             field.setProgrammaticChangeEvents(true);
-            clear = closeButton(() -> field.setText(""));
             Table overlay = new Table();
-            overlay.right().add(clear).size(26).padRight(3);
+            if (token) {
+                clear = button("button-icon-compact", "close", null, null);
+                onChange(clear, () -> field.setText(""));
+                DesignTokens tokens = DesignTokens.shipped();
+                float inset = tokens.size().get("border") + tokens.space().get("xs");
+                float side = tokens.size().get("border") + tokens.space().get("md");
+                float height = tokens.size().get("control.md");
+                Icon glyph = icon("search", UiTheme.FIELD_ICON, field.getStyle().messageFontColor);
+                glyph.setTouchable(Touchable.disabled);
+                overlay.add(glyph).size(UiTheme.FIELD_ICON).padLeft(side);
+                overlay.add().expandX();
+                overlay.add(clear).size(height - 2 * inset).padRight(inset);
+                hoverEdge(field, this);
+            } else {
+                clear = closeButton(() -> field.setText(""));
+                overlay.right().add(clear).size(26).padRight(3);
+            }
             add(field);
             add(overlay);
         }

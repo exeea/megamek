@@ -353,8 +353,13 @@ the status icon, `status(Status)` and `readOnly(true)`; `UiTextField.Area` is th
 `input(text, compact)`, `password(compact)`, `tokenSearch(placeholder, compact)`, `area(text, rows)` and
 `formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)). It is the
 in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD's number control), and read-only text
-can not be selected, because scene2d has no read-only field. The `hud` and `hud-search` field styles stay until their
-views move.
+can not be selected, because scene2d has no read-only field. hud-v3's own fields take the look without new controls:
+`UiKit.search(placeholder, true)` builds the search field on `input-search` with a leading glyph and a compact icon
+clear button; a plain `TextField` takes the `input` style and `UiKit.hoverEdge(field, root)` for the hover edge; and
+`UiNumber.tokenLook()` gives the scrub a text.secondary caption, an `input-compact` field and the token slider. The
+dial and hex pickers (`UiAngleDial`, `UiHexSides`) only recolour: `style("token")` reads the token `PickerStyle`
+(discs, border.control and border.strong ticks, accent value, text.muted labels that turn text.secondary when chosen
+and text.primary on hover). The `hud` and `hud-search` field styles stay as hud-v3 draws them today.
 
 ## Choices
 
@@ -625,7 +630,10 @@ without changes, including their ticks and standard labels; a custom label table
 [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java)`.withReadout(slider, format)` adds
 the readout and lines it up with the track on the slider's baseline.
 
-**libGDX.** Nothing new yet; the tuning panel's slider style stays until the developers accept the system.
+**libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token` `SliderStyle`:
+a 4-high pill track, an accent fill and a 16 accent disc thumb that gains a border.strong edge on hover or press.
+`UiKit.tokenSliderStyle()` returns a copy for one slider; the tuning panel's `UiKit.sliderStyle()` stays as hud-v3
+draws it.
 
 ## Tables
 
