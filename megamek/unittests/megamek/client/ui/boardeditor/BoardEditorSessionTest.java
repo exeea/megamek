@@ -1020,6 +1020,21 @@ class BoardEditorSessionTest {
               session.snapshot().issues());
     }
 
+    /** A road or bridge that does not join up is an issue with its recommended fix; games do not refuse it. */
+    @Test void aRoadIntoNothingIsAnIssueWithItsFixButNoRulesError() throws Exception {
+        var board = megamek.common.board.Board.createEmptyBoard(3, 3);
+        board.setRoadsAutoExit(false);
+        Coords road = new Coords(1, 1);
+        board.setHex(road, new Hex(0, "road:1:1", ""));
+        Path file = directory.resolve("road.board2"); BoardFile.save(board, file);
+        var session = new BoardEditorSession();
+        session.open(file);
+        assertEquals(java.util.List.of(new megamek.common.board.HexIssue(road, "",
+              "Road at 0202 exits N into 0201, which has no road, pavement, bridge or building\n"
+                    + "Recommended fix: Remove this road's N exit, or continue the road into 0201")), session.snapshot().issues());
+        assertEquals(Messages.getString("BoardEditor.opened", "road.board2"), session.snapshot().message());
+    }
+
     private Map<BoardEditorSession.Selection, megamek.common.board.BoardDecoration> placedObjects(BoardEditorSession session) {
         var result = new java.util.LinkedHashMap<BoardEditorSession.Selection, megamek.common.board.BoardDecoration>();
         for (int x = 0; x < session.board().getWidth(); x++) {

@@ -55,6 +55,7 @@ import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.BoardHexPick;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
@@ -75,7 +76,7 @@ import megamek.common.util.Distractable;
  *
  * @author HammerGS
  */
-public class HexTargetPicker {
+public class HexTargetPicker implements BoardHexPick {
 
     // bitmask for drawing all six hex edges of the highlight sprite
     private static final int ALL_HEX_BORDERS = 63;
@@ -122,6 +123,8 @@ public class HexTargetPicker {
      * Starts picking: suppresses the current phase display, hooks the board view, and shows the control dialog.
      */
     public void start() {
+        // first, as it ends a running pick, which lets the phase display go
+        boardView.startHexPick(this);
         if (clientGUI.getCurrentPanel() instanceof Distractable distractable) {
             suppressedDisplay = distractable;
             suppressedDisplay.setIgnoringEvents(true);
@@ -156,11 +159,13 @@ public class HexTargetPicker {
     }
 
     /** @return the instructions: which order the clicked hexes are for */
+    @Override
     public String instructions() {
         return Messages.getString("BotCommandPanel.HexPicker.instructions", orderDescription);
     }
 
     /** @return the status: how many hexes are picked and their hex numbers, in the order they were picked */
+    @Override
     public String status() {
         String hexNumbers = pickedHexes.keySet().stream()
               .map(Coords::getBoardNum)
@@ -168,22 +173,19 @@ public class HexTargetPicker {
         return Messages.getString("BotCommandPanel.HexPicker.status", pickedHexes.size(), hexNumbers);
     }
 
-    /** @return whether a hex is picked */
+    @Override
     public boolean hasHexes() {
         return !pickedHexes.isEmpty();
     }
 
-    /** @return true until Done, Cancel or a phase change ends the pick */
-    public boolean isPicking() {
-        return !finished;
-    }
-
     /** Ends the pick as Done does: the order goes out with the picked hexes, if any. */
+    @Override
     public void done() {
         finish(true);
     }
 
     /** Ends the pick as Cancel does: no order goes out. */
+    @Override
     public void cancel() {
         finish(false);
     }
@@ -287,6 +289,7 @@ public class HexTargetPicker {
             return;
         }
         finished = true;
+        boardView.endHexPick(this);
         boardView.removeBoardViewListener(hexClickListener);
         clientGUI.getClient().getGame().removeGameListener(phaseChangeListener);
         if (suppressedDisplay != null) {

@@ -71,7 +71,6 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.audio.AudioService;
 import megamek.client.ui.clientGUI.audio.SoundType;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.buttonDialogs.BotTargetPickerDialog;
 import megamek.client.ui.enums.DialogResult;
@@ -125,8 +124,6 @@ public class BotCommandsPanel extends JPanel {
     private MegaMekButton pauseContinue;
     /** The popup buttons in the panel's order, each with its popup's factory for the bots that pass a test. */
     private final Map<MegaMekButton, Function<Predicate<Player>, JPopupMenu>> popups = new LinkedHashMap<>();
-    /** The hex pick of the last order that picks hexes; it may have ended. */
-    private HexTargetPicker hexPicker;
 
     /**
      * One popup button for a view that shows the panel's commands itself, such as the GPU battle view's players panel:
@@ -565,13 +562,12 @@ public class BotCommandsPanel extends JPanel {
         }
         Entity firstUnit = client.getGame().getInGameObject(group.unitIds().get(0))
               .filter(Entity.class::isInstance).map(Entity.class::cast).orElse(null);
-        BoardView boardView = (firstUnit != null) && (clientGUI.getBoardView(firstUnit.getBoardId())
-              instanceof BoardView unitBoardView) ? unitBoardView : null;
-        if (boardView == null) {
+        BoardClientState board = (firstUnit == null) ? null : clientGUI.getBoardState(firstUnit.getBoardId());
+        if (board == null) {
             clientGUI.addToast(ToastLevel.WARNING, Messages.getString("BotCommandPanel.MoveOrder.noBoard"));
             return;
         }
-        new BotMoveOrderDialog(clientGUI, boardView, botPlayer, group,
+        new BotMoveOrderDialog(clientGUI, board, botPlayer, group,
               () -> ordersMenuBuilder.unitsByLance(botPlayer), this::acknowledgeOrder).setVisible(true);
     }
 
@@ -1376,21 +1372,8 @@ public class BotCommandsPanel extends JPanel {
             }
             return;
         }
-        if (hexPicker != null) {
-            // one pick at a time: the clicks of a pick still running would go to both
-            hexPicker.cancel();
-        }
-        hexPicker = new HexTargetPicker(clientGUI, boardView, orderDescription, singleHex, maxHexes,
-              onTargetsSelected);
-        hexPicker.start();
-    }
-
-    /**
-     * @return the hex pick of a bot order while it runs, else null. The GPU battle window shows it on its HUD and
-     *       ends it with its Done and Cancel keys.
-     */
-    public @Nullable HexTargetPicker hexPicker() {
-        return ((hexPicker != null) && hexPicker.isPicking()) ? hexPicker : null;
+        // the board's running pick, which the GPU battle window shows on its HUD (BoardClientState#getHexPick)
+        new HexTargetPicker(clientGUI, boardView, orderDescription, singleHex, maxHexes, onTargetsSelected).start();
     }
 
     /**

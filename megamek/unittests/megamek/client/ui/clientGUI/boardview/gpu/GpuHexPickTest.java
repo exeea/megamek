@@ -6,12 +6,13 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dis
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
@@ -39,9 +40,11 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
+import megamek.client.ui.dialogs.BotCommands.BotMoveOrderDialog;
 import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.AfterAll;
@@ -152,17 +155,67 @@ class GpuHexPickTest {
                 assertTrue(game.view().getWeaponRangeSprites().isEmpty());
 
                 nativeStrategicTarget(game);
-                var first = onSwing(() -> game.gui().getBotCommandsPanel().hexPicker());
+                var first = onSwing(() -> game.view().getHexPick());
                 nativeStrategicTarget(game);
-                assertFalse(first.isPicking(), "one pick at a time: a new order's pick ends the running one");
+                assertNotSame(first, onSwing(() -> game.view().getHexPick()),
+                      "one pick at a time: a new order's pick ends the running one");
+                game.source().click(FIRST, false, 0);
+                assertEquals(1, onSwing(() -> game.view().getWeaponRangeSprites().size()),
+                      "and the ended pick takes no clicks");
                 assertNotNull(pick(game));
                 onSwing(() -> {
                     game.source().close();
                     return null;
                 });
-                assertNull(onSwing(() -> game.gui().getBotCommandsPanel().hexPicker()),
-                      "the closing window ends the pick its HUD showed");
+                assertNull(onSwing(() -> game.view().getHexPick()), "the closing window ends the pick its HUD showed");
                 assertTrue(game.sent().stream().noneMatch(line -> line.startsWith("chat: ")));
+            } finally {
+                dismiss();
+            }
+        }
+    }
+
+    @Test
+    void theMoveOrderEditorPicksWaypointsOnTheNativeBoardAndTheHudEndsItsPick() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "The Move Order editor is a Swing dialog");
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session game = onSwing(() -> session(fixture))) {
+            present(game.gui(), game.view(), game.source());
+            try {
+                BotMoveOrderDialog editor = onSwing(() -> {
+                    moveOrder(game).doClick(0);
+                    return Arrays.stream(Window.getWindows()).filter(BotMoveOrderDialog.class::isInstance)
+                          .map(BotMoveOrderDialog.class::cast).filter(Window::isShowing).findFirst().orElseThrow();
+                });
+                try {
+                    // An editor without a route opens picking.
+                    String instructions = Messages.getString("BotCommandPanel.MoveOrder.pickHint");
+                    assertEquals(new GpuPlayers.Pick(instructions, ""), pick(game), "the HUD shows the editor's pick");
+                    // The HUD's left clicks during a pick (GpuHud.boardClick).
+                    game.source().click(FIRST, false, 0);
+                    assertEquals(new GpuPlayers.Pick(instructions,
+                          Messages.getString("BotCommandPanel.HexPicker.status", 1, FIRST.getBoardNum())), pick(game),
+                          "a board click adds a waypoint");
+                    game.source().players().endPick(true);
+                    assertNull(pick(game), "the HUD's Done stops picking");
+                    assertEquals(1, onSwing(() -> game.view().getWeaponRangeSprites().size()),
+                          "the draft route stays on the board while the editor is open");
+                    onSwing(() -> {
+                        button(editor, Messages.getString("BotCommandPanel.MoveOrder.pick")).doClick(0);
+                        return null;
+                    });
+                    assertNotNull(pick(game), "the editor's pick button picks again");
+                    onSwing(() -> {
+                        fixture.game.setPhase(GamePhase.FIRING);
+                        return null;
+                    });
+                    assertNull(pick(game), "a new phase, with its own display under the board, ends the pick");
+                } finally {
+                    onSwing(() -> {
+                        editor.dispose();
+                        return null;
+                    });
+                }
+                assertTrue(onSwing(() -> game.view().getWeaponRangeSprites().isEmpty()), "and goes with the editor");
             } finally {
                 dismiss();
             }
@@ -201,6 +254,7 @@ class GpuHexPickTest {
         BoardClientState view = new BoardClientState(fixture.game, null, gui, 0, null);
         view.setLocalPlayer(fixture.player.getId());
         when(gui.getCurrentBoardState()).thenReturn(Optional.of(view));
+        when(gui.getBoardState(anyInt())).thenReturn(view);
         GpuBoardSource source = new GpuBoardSource(view, JPanel::new);
         return new Session(gui, view, source, princess, sent);
     }
@@ -218,6 +272,19 @@ class GpuHexPickTest {
         return Arrays.stream(items).filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast)
               .filter(item -> item.getText().equals(Messages.getString("BotCommandPanel.StrategicTarget.title")))
               .findFirst().orElseThrow();
+    }
+
+    /** EDT: the Move Order editor's item for Princess's lance in the panel's Move Order popup. */
+    private static JMenuItem moveOrder(Session game) {
+        String title = Messages.getString("BotCommandPanel.MoveOrder.title");
+        BotCommandsPanel.PopupCommand command = game.gui().getBotCommandsPanel().popupCommands(game.princess())
+              .stream().filter(popup -> popup.button().getText().equals(title)).findFirst().orElseThrow();
+        Component[] items = command.popup().get().getComponents();
+        if (items.length == 1 && items[0] instanceof JMenu menu) {
+            items = menu.getMenuComponents();
+        }
+        return Arrays.stream(items).filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast).findFirst()
+              .orElseThrow();
     }
 
     /** The players panel's Strategic Target command of Princess, run as the HUD runs it. */

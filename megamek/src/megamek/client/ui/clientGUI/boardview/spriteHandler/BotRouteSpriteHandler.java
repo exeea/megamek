@@ -42,8 +42,7 @@ import java.util.Set;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.HexFlagSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.RouteDotSprite;
 import megamek.common.Player;
@@ -207,47 +206,47 @@ public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
         return steps;
     }
 
+    /**
+     * Draws the routes on the board states, which both board views show: the 3D board draws the flags as its flag
+     * markers and the dots on the hexes.
+     */
     private void renewSprites() {
         clear();
         List<Entity> units = new ArrayList<>(game.getEntitiesVector());
         units.sort(Comparator.comparingInt(Entity::getId));
         for (TrailDot dot : routeTrails(units, localPlayer())) {
-            if (clientGUI.getBoardView(dot.boardId()) instanceof BoardView tacticalBoardView) {
-                RouteDotSprite sprite = new RouteDotSprite(tacticalBoardView, dot.hex(),
+            BoardClientState board = clientGUI.getBoardState(dot.boardId());
+            if (board != null) {
+                RouteDotSprite sprite = new RouteDotSprite(board, dot.hex(),
                       ROUTE_COLORS.get(dot.colorIndex() % ROUTE_COLORS.size()), RouteDotSprite.TRAIL_DIAMETER);
                 currentSprites.add(sprite);
-                tacticalBoardView.addSprites(List.of(sprite));
+                board.addSprites(List.of(sprite));
             }
         }
         for (RouteFlag flag : routeFlags(units, localPlayer())) {
-            IBoardView boardView = clientGUI.getBoardView(flag.boardId());
-            if (flag.isPlanned() && (boardView instanceof BoardView tacticalBoardView)) {
-                // a turning point the bot planned is a dot on the way, not a flag of its own
-                RouteDotSprite sprite = new RouteDotSprite(tacticalBoardView, flag.hex(),
-                      ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()), RouteDotSprite.TURN_DIAMETER);
-                currentSprites.add(sprite);
-                tacticalBoardView.addSprites(List.of(sprite));
+            BoardClientState board = clientGUI.getBoardState(flag.boardId());
+            if (board == null) {
                 continue;
             }
-            if (boardView instanceof BoardView tacticalBoardView) {
-                int arrowFacing = (flag.facing() == UnitOrders.FACING_AUTO) ? HexFlagSprite.NO_FACING
-                      : flag.facing();
-                HexFlagSprite sprite = new HexFlagSprite(tacticalBoardView, flag.hex(),
-                      ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()), flag.label(), flag.progressText(),
-                      arrowFacing);
+            if (flag.isPlanned()) {
+                // a turning point the bot planned is a dot on the way, not a flag of its own
+                RouteDotSprite sprite = new RouteDotSprite(board, flag.hex(),
+                      ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()), RouteDotSprite.TURN_DIAMETER);
                 currentSprites.add(sprite);
-                tacticalBoardView.addSprites(List.of(sprite));
+                board.addSprites(List.of(sprite));
+                continue;
             }
+            int arrowFacing = (flag.facing() == UnitOrders.FACING_AUTO) ? HexFlagSprite.NO_FACING : flag.facing();
+            HexFlagSprite sprite = new HexFlagSprite(board, flag.hex(),
+                  ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()), flag.label(), flag.progressText(),
+                  arrowFacing);
+            currentSprites.add(sprite);
+            board.addSprites(List.of(sprite));
         }
     }
 
     private @Nullable Player localPlayer() {
-        for (IBoardView boardView : clientGUI.boardViews()) {
-            if (boardView instanceof BoardView tacticalBoardView) {
-                return tacticalBoardView.getLocalPlayer();
-            }
-        }
-        return null;
+        return clientGUI.boardStates().stream().findFirst().map(BoardClientState::getLocalPlayer).orElse(null);
     }
 
     /**

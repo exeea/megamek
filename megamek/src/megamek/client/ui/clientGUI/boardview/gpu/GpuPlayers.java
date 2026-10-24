@@ -4,9 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.Comparator;
 import java.util.List;
 
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
-import megamek.client.ui.dialogs.BotCommands.HexTargetPicker;
+import megamek.client.ui.clientGUI.boardview.BoardHexPick;
 import megamek.common.Player;
 
 /**
@@ -15,8 +13,9 @@ import megamek.common.Player;
  */
 final class GpuPlayers {
     /**
-     * A bot order's hex pick (HexTargetPicker) while it runs: its instructions, and its status once a hex is picked
-     * ("" before). The board's left clicks pick hexes; the Done key ends it with the order, Esc without.
+     * The board's hex pick (a bot order's targets, or the Move Order editor's waypoints) while it runs: its
+     * instructions, and its status once a hex is picked ("" before). The board's left clicks pick hexes; the Done key
+     * ends it as its Done does (a bot order goes out), Esc as its Cancel does.
      */
     record Pick(String instructions, String status) { }
 
@@ -99,7 +98,7 @@ final class GpuPlayers {
         if (pause != null && snapshot.pause() != null) {
             pause = unchanged(List.of(pause), List.of(snapshot.pause())).getFirst();
         }
-        HexTargetPicker picker = picker();
+        BoardHexPick picker = picker();
         Pick pick = picker == null ? null
               : new Pick(picker.instructions(), picker.hasHexes() ? picker.status() : "");
         Snapshot next = new Snapshot(rows, pause, pick);
@@ -112,7 +111,7 @@ final class GpuPlayers {
     /** GL thread: ends the hex pick that runs, as its Done ({@code send}: the order goes out) or Cancel does. */
     void endPick(boolean send) {
         source.command(() -> {
-            HexTargetPicker picker = picker();
+            BoardHexPick picker = picker();
             if (picker != null && send) {
                 picker.done();
             } else if (picker != null) {
@@ -123,17 +122,15 @@ final class GpuPlayers {
 
     /** EDT: the closing window cancels the hex pick, whose Done and Cancel it showed. */
     void close() {
-        HexTargetPicker picker = picker();
+        BoardHexPick picker = picker();
         if (picker != null) {
             picker.cancel();
         }
     }
 
-    /** EDT: the bot order's hex pick while it runs, else null. */
-    private HexTargetPicker picker() {
-        ClientGUI gui = source.currentView().getClientgui();
-        BotCommandsPanel bots = gui == null ? null : gui.getBotCommandsPanel();
-        return bots == null ? null : bots.hexPicker();
+    /** EDT: the board's hex pick while it runs (a bot order's, or the Move Order editor's), else null. */
+    private BoardHexPick picker() {
+        return source.currentView().getHexPick();
     }
 
     /** {@code previous} while it shows what {@code next} shows, else {@code next}. */

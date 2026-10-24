@@ -185,6 +185,8 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private Set<Integer> lastTagged = Set.of();
     public static final int BOARD_HEX_CLICK = 1, BOARD_HEX_DOUBLE_CLICK = 2, BOARD_HEX_DRAG = 3, BOARD_HEX_POPUP = 4;
     final List<BoardViewListener> listeners = new ArrayList<>();
+    /** EDT: the hex pick that takes this board's clicks, or null. */
+    private BoardHexPick hexPick;
     final LinkedHashSet<IDisplayable> overlays = new LinkedHashSet<>();
     final TreeSet<Sprite> allSprites = new TreeSet<>();
     final TreeSet<Sprite> overTerrainSprites = new TreeSet<>();
@@ -372,6 +374,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         overlays.forEach(IDisplayable::dispose);
         overlays.clear();
         hexDrawPlugins.clear();
+        if (hexPick != null) { hexPick.cancel(); }
         listeners.clear();
         releasePlanarCapture();
         if (ownsTileset) { tileManager.close(); }
@@ -431,6 +434,29 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void setShowLobbyPlayerDeployment(boolean show) { showLobbyPlayerDeployment = show; repaint(); }
     public void addBoardViewListener(BoardViewListener listener) { if (!listeners.contains(listener)) { listeners.add(listener); } }
     public void removeBoardViewListener(BoardViewListener listener) { listeners.remove(listener); }
+
+    /**
+     * EDT: makes {@code pick} the board's running hex pick. One pick at a time on all the client's boards, as each holds
+     * the one phase display still: a running one is cancelled.
+     */
+    public void startHexPick(BoardHexPick pick) {
+        Set<BoardClientState> boards = new LinkedHashSet<>(List.of(this));
+        if (clientgui != null) { boards.addAll(clientgui.boardStates()); }
+        for (BoardClientState board : boards) {
+            BoardHexPick running = board.hexPick;
+            board.hexPick = null;
+            if ((running != null) && (running != pick)) { running.cancel(); }
+        }
+        hexPick = pick;
+    }
+
+    /** EDT: {@code pick} has ended; another pick that has started since stays. */
+    public void endHexPick(BoardHexPick pick) {
+        if (hexPick == pick) { hexPick = null; }
+    }
+
+    /** EDT: the running hex pick, or null. */
+    public @Nullable BoardHexPick getHexPick() { return hexPick; }
     public void addOverlay(IDisplayable overlay) { overlays.add(overlay); }
     public void removeOverlay(IDisplayable overlay) { overlays.remove(overlay); }
     private final List<HexDrawPlugin> hexDrawPlugins = new ArrayList<>();

@@ -64,7 +64,6 @@ import megamek.client.bot.princess.ChatCommands;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.BotCommands.BotMoveOrderDialog;
 import megamek.client.ui.dialogs.BotCommands.BotOrderFacingDialog;
@@ -497,12 +496,13 @@ public class MapMenu extends JPopupMenu {
      * Opens the Move Order editor for the units following a route, on this board.
      */
     private void openBotRouteEditor(Player botPlayer, BotOrdersMenuBuilder.OrderGroup group) {
-        if (!(gui.getBoardView(boardLocation.boardId()) instanceof BoardView boardView)) {
+        BoardClientState board = gui.getBoardState(boardLocation.boardId());
+        if (board == null) {
             return;
         }
         BotOrdersMenuBuilder unitsSource = new BotOrdersMenuBuilder(client, (orderDescription, singleHex,
               onPicked) -> {}, (orderedBot, orderText) -> {});
-        new BotMoveOrderDialog(gui, boardView, botPlayer, group, () -> unitsSource.unitsByLance(botPlayer),
+        new BotMoveOrderDialog(gui, board, botPlayer, group, () -> unitsSource.unitsByLance(botPlayer),
               (orderedBot, orderText) -> gui.addToast(ToastLevel.SUCCESS,
                     Messages.getString("BotCommandPanel.toast.orderSent", orderedBot.getName(), orderText)))
               .setVisible(true);

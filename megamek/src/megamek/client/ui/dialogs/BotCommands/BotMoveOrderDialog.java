@@ -76,7 +76,7 @@ import megamek.SuiteConstants;
 import megamek.client.bot.princess.RoutePlanner;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.BotCommands.BotOrdersMenuBuilder.OrderGroup;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractButtonDialog;
 import megamek.client.ui.enums.DialogResult;
@@ -121,7 +121,7 @@ public class BotMoveOrderDialog extends AbstractButtonDialog {
     private static final int ROLE_TAB = 1;
 
     private final ClientGUI clientGUI;
-    private final BoardView boardView;
+    private final BoardClientState boardView;
     private final Player botPlayer;
     private final Supplier<Map<String, List<OrderGroup>>> unitsByLance;
     private final BiConsumer<Player, String> acknowledger;
@@ -168,7 +168,7 @@ public class BotMoveOrderDialog extends AbstractButtonDialog {
      * @param unitsByLance  the bot's units by lance, for choosing other units
      * @param acknowledger  shows the player that the order was sent
      */
-    public BotMoveOrderDialog(ClientGUI clientGUI, BoardView boardView, Player botPlayer, OrderGroup group,
+    public BotMoveOrderDialog(ClientGUI clientGUI, BoardClientState boardView, Player botPlayer, OrderGroup group,
           Supplier<Map<String, List<OrderGroup>>> unitsByLance, BiConsumer<Player, String> acknowledger) {
         super(clientGUI.getFrame(), false, "BotMoveOrderDialog", "BotCommandPanel.MoveOrder.dialogTitle");
         this.clientGUI = clientGUI;
@@ -178,7 +178,8 @@ public class BotMoveOrderDialog extends AbstractButtonDialog {
         this.unitsByLance = unitsByLance;
         this.acknowledger = acknowledger;
         // a waypoint's flag can be dragged to another hex while the editor is open (HammerGS, 2026-10-03)
-        this.routeEditor = new BoardRouteEditor(clientGUI, boardView, waypoints, this::hexPicked, this::selectRow);
+        this.routeEditor = new BoardRouteEditor(clientGUI, boardView, waypoints, this::hexPicked, this::selectRow,
+              () -> pickMode(false, false));
         initialize();
         setTitle(Messages.getString("BotCommandPanel.MoveOrder.dialogTitleFor", botPlayer.getName()));
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -582,7 +583,8 @@ public class BotMoveOrderDialog extends AbstractButtonDialog {
 
     /** Starts adding a waypoint at each hex the player clicks on the board. */
     private void startPicking() {
-        if (!routeEditor.startPicking()) {
+        if (!routeEditor.startPicking(Messages.getString(isAutoRouting ? "BotCommandPanel.MoveOrder.autoRouting"
+              : "BotCommandPanel.MoveOrder.pickHint"))) {
             return;
         }
         if (isAutoRouting) {

@@ -38,16 +38,24 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.BoardHexPick;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
+import megamek.common.event.GameListenerAdapter;
+import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.util.Distractable;
 import megamek.logging.MMLogger;
 
@@ -55,18 +63,21 @@ import megamek.logging.MMLogger;
  * The board side of the Move Order editor: takes the hexes the player clicks while picking, lets a waypoint be dragged
  * to another hex while the editor is open, holds the display under the board still meanwhile so clicks select and move
  * nothing there, and draws the draft route. Split out of {@link BotMoveOrderDialog}, which decides what a picked hex
- * does.
+ * does. While it picks it is the board's hex pick, which the GPU battle window's HUD shows and ends; that window takes
+ * no waypoint drags (see {@link #dragWaypoint}).
  */
-final class BoardRouteEditor {
+final class BoardRouteEditor implements BoardHexPick {
 
     private static final MMLogger LOGGER = MMLogger.create(BoardRouteEditor.class);
     private static final int ALL_HEX_BORDERS = 63;
 
     private final ClientGUI clientGUI;
-    private final BoardView boardView;
+    private final BoardClientState boardView;
     private final WaypointTableModel waypoints;
     private final Consumer<Coords> onHexPicked;
     private final IntConsumer onRowChanged;
+    private final Runnable onPickEnded;
+    private String instructions = "";
     private final List<Sprite> routeSprites = new ArrayList<>();
     // dragging a waypoint on the board: its row, or -1; whether it has moved; the display held still while it drags,
     // when picking was not already holding it; and the release that ended the last drag, which is no click
@@ -81,6 +92,16 @@ final class BoardRouteEditor {
     private Distractable dragHeldDisplay;
     private BoardViewEvent dragEndingClick;
     private BoardViewListenerAdapter hexClickListener;
+    // a new phase has a new display under the board, which picking would not hold still: picking ends, as a bot
+    // order's pick does
+    private final GameListenerAdapter phaseChangeListener = new GameListenerAdapter() {
+        @Override
+        public void gamePhaseChange(GamePhaseChangeEvent event) {
+            if (event.getNewPhase() != GamePhase.UNKNOWN) {
+                onPickEnded.run();
+            }
+        }
+    };
     private Distractable suppressedDisplay;
 
     /**
@@ -91,26 +112,33 @@ final class BoardRouteEditor {
      * @param waypoints    the draft route
      * @param onHexPicked  what a hex clicked while picking does
      * @param onRowChanged told the row of a waypoint dragged to another hex
+     * @param onPickEnded  told that the HUD's Done or Cancel, or another pick, ended the picking
      */
-    BoardRouteEditor(ClientGUI clientGUI, BoardView boardView, WaypointTableModel waypoints,
-          Consumer<Coords> onHexPicked, IntConsumer onRowChanged) {
+    BoardRouteEditor(ClientGUI clientGUI, BoardClientState boardView, WaypointTableModel waypoints,
+          Consumer<Coords> onHexPicked, IntConsumer onRowChanged, Runnable onPickEnded) {
         this.clientGUI = clientGUI;
         this.boardView = boardView;
         this.waypoints = waypoints;
         this.onHexPicked = onHexPicked;
         this.onRowChanged = onRowChanged;
+        this.onPickEnded = onPickEnded;
         boardView.addBoardViewListener(dragListener);
     }
 
     /**
      * Starts taking each hex the player clicks on the board, holding the display under the board still.
      *
+     * @param instructions what the clicked hexes do, which the GPU battle window's HUD shows
+     *
      * @return {@code true} if picking started; {@code false} if it was already on
      */
-    boolean startPicking() {
+    boolean startPicking(String instructions) {
+        this.instructions = instructions;
         if (hexClickListener != null) {
             return false;
         }
+        // first, as it ends a running pick, which lets the display under the board go
+        boardView.startHexPick(this);
         if (clientGUI.getCurrentPanel() instanceof Distractable distractable) {
             suppressedDisplay = distractable;
             suppressedDisplay.setIgnoringEvents(true);
@@ -130,14 +158,17 @@ final class BoardRouteEditor {
             }
         };
         boardView.addBoardViewListener(hexClickListener);
+        clientGUI.getClient().getGame().addGameListener(phaseChangeListener);
         return true;
     }
 
     /** Stops taking clicked hexes and lets the display under the board go. */
     void stopPicking() {
+        boardView.endHexPick(this);
         if (hexClickListener != null) {
             boardView.removeBoardViewListener(hexClickListener);
             hexClickListener = null;
+            clientGUI.getClient().getGame().removeGameListener(phaseChangeListener);
         }
         if (suppressedDisplay != null) {
             suppressedDisplay.setIgnoringEvents(false);
@@ -159,11 +190,13 @@ final class BoardRouteEditor {
 
     /**
      * Drags a waypoint: pressed on one of the route's hexes, it follows the mouse hex by hex, and the release leaves
-     * it there. The display under the board is held still while it drags, so the drag selects and moves nothing.
+     * it there. The display under the board is held still while it drags, so the drag selects and moves nothing. The
+     * GPU battle window reports its hover as a drag (GpuBoardSource#hover) and no drags of its own, so there a waypoint
+     * is moved by removing it and picking its new hex.
      */
     private void dragWaypoint(BoardViewEvent event) {
         Coords hex = event.getCoords();
-        if (hex == null) {
+        if ((hex == null) || GpuBoardWindow.isActiveFor(clientGUI)) {
             return;
         }
         if (event.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) {
@@ -209,6 +242,36 @@ final class BoardRouteEditor {
             dragHeldDisplay.setIgnoringEvents(false);
             dragHeldDisplay = null;
         }
+    }
+
+    @Override
+    public String instructions() {
+        return instructions;
+    }
+
+    /** @return the waypoints in route order, as the bot order's pick lists its hexes */
+    @Override
+    public String status() {
+        return Messages.getString("BotCommandPanel.HexPicker.status", waypoints.getRowCount(),
+              IntStream.range(0, waypoints.getRowCount()).mapToObj(row -> waypoints.getHex(row).getBoardNum())
+                    .collect(Collectors.joining(", ")));
+    }
+
+    @Override
+    public boolean hasHexes() {
+        return waypoints.getRowCount() > 0;
+    }
+
+    /** The HUD's Done: picking stops; the route stays in the editor, whose Send sends it. */
+    @Override
+    public void done() {
+        onPickEnded.run();
+    }
+
+    /** The HUD's Esc, or another pick: picking stops too, as the editor's pick button does; the waypoints stay. */
+    @Override
+    public void cancel() {
+        onPickEnded.run();
     }
 
     /** Stops all board editing and takes the draft route off the board, as the editor closes. */

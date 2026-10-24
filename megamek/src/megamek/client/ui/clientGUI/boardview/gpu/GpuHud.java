@@ -941,6 +941,11 @@ final class GpuHud implements GpuBoardHud {
             } else {
                 select(unit.id());
             }
+        } else if (phase.isFiring() && shift) {
+            // Shift+click twists the torso toward the hex, also one a unit stands in, as MegaMek's Shift+click does
+            // (FiringDisplay.hexMoused): it selects and targets nothing, and the armed weapon stays armed.
+            source.hover(coords, modifiers);
+            source.click(coords, false, modifiers);
         } else if (phase.isFiring() && unit != null) {
             if (own) {
                 select(unit.id());

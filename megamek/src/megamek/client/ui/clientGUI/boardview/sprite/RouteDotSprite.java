@@ -37,16 +37,19 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Ellipse2D;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
+import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 
 /**
  * A dot in a route's colour at the middle of a hex: a small one for each hex of the way between waypoints, so a route
- * reads as a line, and a larger one for a turning point the bot planned (HammerGS, 2026-10-03).
+ * reads as a line, and a larger one for a turning point the bot planned (HammerGS, 2026-10-03). The 3D board draws the
+ * same dot on the hex.
  */
-public class RouteDotSprite extends HexSprite {
+public class RouteDotSprite extends HexSprite implements TacticalSprite {
 
     /** The dot size of a hex on the way between waypoints, in unscaled hex pixels. */
     public static final double TRAIL_DIAMETER = 7;
@@ -66,7 +69,7 @@ public class RouteDotSprite extends HexSprite {
      * @param dotColor  the route's colour
      * @param diameter  {@link #TRAIL_DIAMETER} or {@link #TURN_DIAMETER}
      */
-    public RouteDotSprite(BoardView boardView, Coords location, Color dotColor, double diameter) {
+    public RouteDotSprite(BoardGlyphContext boardView, Coords location, Color dotColor, double diameter) {
         super(boardView, location);
         this.dotColor = dotColor;
         this.diameter = diameter;
@@ -79,6 +82,27 @@ public class RouteDotSprite extends HexSprite {
         Graphics2D graph = (Graphics2D) image.getGraphics();
         UIUtil.setHighQualityRendering(graph);
         graph.scale(bv.getScale(), bv.getScale());
+        paintDot(graph);
+        graph.dispose();
+    }
+
+    @Override
+    public void drawTactical(Graphics2D graphics) {
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
+        try {
+            paintDot(local);
+        } finally {
+            local.dispose();
+        }
+    }
+
+    /** The route stays on the board while units move, as its flags do. */
+    @Override
+    public BoardTactical.Playback playback() {
+        return BoardTactical.Playback.LIVE;
+    }
+
+    private void paintDot(Graphics2D graph) {
         Ellipse2D.Double dot = new Ellipse2D.Double((HexTileset.HEX_W - diameter) / 2.0,
               (HexTileset.HEX_H - diameter) / 2.0, diameter, diameter);
         graph.setColor(dotColor);
@@ -86,7 +110,6 @@ public class RouteDotSprite extends HexSprite {
         graph.setColor(OUTLINE_COLOR);
         graph.setStroke(OUTLINE_STROKE);
         graph.draw(dot);
-        graph.dispose();
     }
 
     /** A route is drawn on top of buildings and bridges in isometric view, as its flags are. */

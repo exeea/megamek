@@ -61,8 +61,6 @@ class GpuBotCommandsTest {
     private static final Set<String> PROMPTS = Set.of(Messages.getString("BotCommandPanel.ScootToHex.title"),
           Messages.getString("BotCommandPanel.StrategicTarget.title"),
           Messages.getString("BotCommandPanel.PriorityTargetPicker.title"),
-          Messages.getString("BotCommandPanel.SetWaypoints.title"),
-          Messages.getString("BotCommandPanel.AddWaypoint.title"),
           Messages.getString("BotCommandPanel.ArtillerySingle.title"),
           Messages.getString("BotCommandPanel.ArtilleryVolley.title"),
           Messages.getString("BotCommandPanel.ArtilleryBarrage.title"));

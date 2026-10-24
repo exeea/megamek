@@ -31,6 +31,7 @@ import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.IndustrialElevator;
 import megamek.common.board.Board;
+import megamek.common.board.BoardConnectivityCheck;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
@@ -604,8 +605,8 @@ public final class BoardEditorSession {
         // The editor saves only .board2, so another file is never Save's target; the conversion decides by content.
         boolean legacy = !BoardFile.isNativeName(file.toString());
         replace(loaded, legacy ? null : file);
-        // The rules errors are the issues of a hex, not of an object (validate).
-        long errors = issueList.stream().filter(issue -> issue.object().isEmpty()).count();
+        // Games refuse only the rules errors, not the hex's road and bridge issues or its objects' issues (validate).
+        long errors = issues.keySet().stream().mapToLong(at -> board().hexErrors(at).size()).sum();
         String rules = errors == 0 ? "" : " " + Messages.getString("BoardEditor.rulesErrors", errors);
         if (!legacy) { message = Messages.getString("BoardEditor.opened", file.getFileName().toString()) + rules; return; }
         suggested = file.resolveSibling(BoardFile.withoutExtension(file.getFileName().toString()) + BoardFile.EXTENSION);
@@ -2605,14 +2606,18 @@ public final class BoardEditorSession {
 
     /**
      * Re-validates {@code cells}: the game's own hex and building-exit rules ({@link Board#hexErrors}, the per-hex step
-     * of the board validation), each placed object's art and support, and identical copies ({@link #stacks}), one issue
-     * per copied object at that object. Issues never block saving.
+     * of the board validation), the roads and bridges that do not join up ({@link BoardConnectivityCheck}, each with its
+     * recommended fix), each placed object's art and support, and identical copies ({@link #stacks}), one issue per
+     * copied object at that object. Both checks read only the hex and its neighbours. Issues never block saving.
      */
     private void validate(java.util.Collection<Coords> cells) {
         for (Coords at : cells) {
             if (!board().contains(at)) { continue; }
             List<HexIssue> found = new ArrayList<>();
             board().hexErrors(at).forEach(text -> found.add(new HexIssue(at, "", text)));
+            for (var issue : BoardConnectivityCheck.findIssuesAt(board(), at)) {
+                found.add(new HexIssue(at, "", Messages.getString("BoardEditor.issueRoadBridge", issue.message(), issue.fix())));
+            }
             Hex hex = board().getHex(at);
             for (BoardDecoration object : hex.getDecorations()) {
                 if (!assetExists(object)) { found.add(new HexIssue(at, object.id(), Messages.getString("BoardEditor.issueArtMissing", object.asset()))); }
