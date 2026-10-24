@@ -143,7 +143,7 @@ public abstract class UiOptionBar extends Table {
             super(new ButtonStyle());
             this.index = index;
             // White style color: the label's own color, set per state, is then the token color exactly
-            label = kit.label(text, "hud-medium", 13, Color.WHITE);
+            label = kit.roleLabel("tab", text, 13, Color.WHITE);
             add(label).padLeft(side).padRight(side);
             // The bar fires the one event its listeners hear; the button's own stops here
             addListener(new ChangeListener() {

@@ -6,9 +6,13 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +33,15 @@ public final class DesignTokens {
         LIGHT
     }
 
+    /**
+     * A screen's text case mode (docs/design-system/tokens.md, Text case): app screens upper-case only overline tags,
+     * game screens also the short framing labels. The mode belongs to a screen, not to an app.
+     */
+    public enum TextMode {
+        APP,
+        GAME
+    }
+
     /** A color role with a value per mode; {@code overlay} is the translucent board-overlay value, or null. */
     public record ColorToken(String name, int dark, int light, Integer overlay, String use) {
         public int value(Mode mode) {
@@ -36,8 +49,20 @@ public final class DesignTokens {
         }
     }
 
-    /** A text style: size in logical pixels, CSS weight, upper case or sentence case, tracking in em. */
-    public record TypeStyle(String name, float size, int weight, boolean upperCase, float tracking, String use) {
+    /**
+     * A text style: size in logical pixels, CSS weight, tracking in em for sentence case, and {@code capsTracking} in
+     * em for upper case, or null for a style that is never upper case.
+     */
+    public record TypeStyle(String name, float size, int weight, float tracking, Float capsTracking, String use) {
+        /** Whether a text role may show this style in upper case. */
+        public boolean hasCaps() {
+            return capsTracking != null;
+        }
+
+        /** The tracking for the given case. */
+        public float tracking(boolean upperCase) {
+            return upperCase ? capsTracking : tracking;
+        }
     }
 
     /** Every listed foreground must reach {@code min} contrast on every listed background, in both modes. */
@@ -55,6 +80,8 @@ public final class DesignTokens {
     private final String iconFamily;
     private final String caseRule;
     private final Map<String, TypeStyle> typeStyles;
+    private final Map<String, String> textRoles;
+    private final Map<TextMode, Set<String>> upperRoles;
     private final Map<String, Float> space;
     private final Map<String, Float> radius;
     private final Map<String, Float> size;
@@ -84,11 +111,41 @@ public final class DesignTokens {
         Map<String, TypeStyle> styles = new LinkedHashMap<>();
         for (Map.Entry<String, JsonNode> entry : fields(typography.path("styles"))) {
             JsonNode node = entry.getValue();
+            JsonNode caps = node.get("capsTracking");
             styles.put(entry.getKey(), new TypeStyle(entry.getKey(), (float) node.path("size").asDouble(),
-                  node.path("weight").asInt(400), "upper".equals(node.path("case").asText()),
-                  (float) node.path("tracking").asDouble(), node.path("use").asText()));
+                  node.path("weight").asInt(400), (float) node.path("tracking").asDouble(),
+                  caps == null ? null : (float) caps.asDouble(), node.path("use").asText()));
         }
         typeStyles = Collections.unmodifiableMap(styles);
+
+        JsonNode textCase = typography.path("case");
+        Map<String, String> roles = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> entry : fields(textCase.path("roles"))) {
+            String style = entry.getValue().asText();
+            if (!styles.containsKey(style)) {
+                throw new IllegalArgumentException("Text role " + entry.getKey() + " names no text style " + style);
+            }
+            roles.put(entry.getKey(), style);
+        }
+        textRoles = Collections.unmodifiableMap(roles);
+        Map<TextMode, Set<String>> upper = new EnumMap<>(TextMode.class);
+        for (TextMode textMode : TextMode.values()) {
+            Set<String> upperInMode = new LinkedHashSet<>();
+            for (JsonNode role : textCase.path("upper").path(textMode.name().toLowerCase(Locale.ROOT))) {
+                String name = role.asText();
+                String style = roles.get(name);
+                if (style == null) {
+                    throw new IllegalArgumentException("Upper-case role " + name + " is not a text role");
+                }
+                if (!styles.get(style).hasCaps()) {
+                    throw new IllegalArgumentException("Text style " + style + " of upper-case role " + name
+                          + " has no capsTracking");
+                }
+                upperInMode.add(name);
+            }
+            upper.put(textMode, Collections.unmodifiableSet(upperInMode));
+        }
+        upperRoles = Collections.unmodifiableMap(upper);
 
         space = numbers(root.path("space"));
         radius = numbers(root.path("radius"));
@@ -190,6 +247,37 @@ public final class DesignTokens {
             throw new IllegalArgumentException("Unknown text style " + name);
         }
         return style;
+    }
+
+    /** Every text role (button, tab, title...) and the text style it uses, in file order. */
+    public Map<String, String> textRoles() {
+        return textRoles;
+    }
+
+    /** The text style of {@code role}. */
+    public TypeStyle roleStyle(String role) {
+        String style = textRoles.get(role);
+        if (style == null) {
+            throw new IllegalArgumentException("Unknown text role " + role);
+        }
+        return typeStyles.get(style);
+    }
+
+    /** Whether text of {@code role} is upper case on a screen in {@code textMode}. */
+    public boolean upperCase(String role, TextMode textMode) {
+        roleStyle(role);
+        return upperRoles.get(textMode).contains(role);
+    }
+
+    /**
+     * {@code text} as a {@code role} shows it in {@code textMode}: upper-cased by the rules of {@code locale}, or as
+     * is. Strings stay sentence case in their bundles; only the drawn text changes. HTML text is never changed.
+     */
+    public String cased(String role, TextMode textMode, String text, Locale locale) {
+        if (text == null || !upperCase(role, textMode) || text.regionMatches(true, 0, "<html>", 0, 6)) {
+            return text;
+        }
+        return text.toUpperCase(locale);
     }
 
     public Map<String, Float> space() {

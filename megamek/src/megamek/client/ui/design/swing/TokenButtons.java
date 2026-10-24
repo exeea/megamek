@@ -115,17 +115,18 @@ public final class TokenButtons {
     public static SpecialButton special(String text, Size size) {
         SpecialButton button = new SpecialButton(text, size);
         button.putClientProperty(FlatClientProperties.STYLE_CLASS, size.styleClass);
-        return button;
+        return TokenTextCase.role(button, "button");
     }
 
     /**
      * Gives an existing button the look and padding of {@code kind} at {@code size}, for migrating a view. The height
      * is not enforced: buttons from the factories grow to the size's height, restyled ones keep their natural height.
+     * Labelled buttons follow their screen's text case mode ({@link TokenTextCase}); icon buttons show a glyph.
      */
     public static <T extends AbstractButton> T style(T button, Kind kind, Size size) {
         String classes = kind.styleClass == null ? size.styleClass : kind.styleClass + " " + size.styleClass;
         button.putClientProperty(FlatClientProperties.STYLE_CLASS, classes);
-        return button;
+        return kind == Kind.ICON ? button : TokenTextCase.role(button, "button");
     }
 
     /**

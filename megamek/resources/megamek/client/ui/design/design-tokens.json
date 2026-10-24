@@ -37,17 +37,24 @@
     "family": "Roboto",
     "iconFamily": "Material Symbols Rounded",
     "fallbackFamilies": ["Noto Sans Symbols 2", "Bitter"],
-    "caseRule": "Sentence case everywhere. Only the 'overline' style is upper case, and only for labels of one or two words.",
+    "caseRule": "Each screen is in app or game mode. App mode upper-cases only overline tags. Game mode also upper-cases the short framing labels of one to three words: the phase banner, headlines, titles and section headers, buttons and tabs. Body text, values, tables, tooltips and field labels stay sentence case in both modes. Strings stay sentence case; case is applied when the text is drawn.",
     "styles": {
-      "display": { "size": 23, "weight": 500, "case": "sentence", "tracking": 0, "use": "Phase banner, splash titles." },
-      "headline": { "size": 20, "weight": 500, "case": "sentence", "tracking": 0, "use": "Page and dialog headings." },
-      "title": { "size": 16, "weight": 500, "case": "sentence", "tracking": 0, "use": "Panel and section titles." },
-      "body": { "size": 13, "weight": 400, "case": "sentence", "tracking": 0, "use": "Default text." },
-      "body.strong": { "size": 13, "weight": 500, "case": "sentence", "tracking": 0, "use": "Emphasis, names, values." },
-      "label": { "size": 12.5, "weight": 500, "case": "sentence", "tracking": 0.01, "use": "Buttons, tabs, field labels." },
-      "small": { "size": 11.5, "weight": 400, "case": "sentence", "tracking": 0, "use": "Dense tables, secondary lines." },
-      "caption": { "size": 10.5, "weight": 400, "case": "sentence", "tracking": 0.01, "use": "Hints, units, timestamps." },
-      "overline": { "size": 10.5, "weight": 500, "case": "upper", "tracking": 0.08, "use": "Short section eyebrows and tags." }
+      "display": { "size": 23, "weight": 500, "tracking": 0, "capsTracking": 0.04, "use": "Phase banner, splash titles." },
+      "headline": { "size": 20, "weight": 500, "tracking": 0, "capsTracking": 0.05, "use": "Page and dialog headings." },
+      "title": { "size": 16, "weight": 500, "tracking": 0, "capsTracking": 0.06, "use": "Panel and section titles." },
+      "body": { "size": 13, "weight": 400, "tracking": 0, "use": "Default text." },
+      "body.strong": { "size": 13, "weight": 500, "tracking": 0, "use": "Emphasis, names, values." },
+      "label": { "size": 12.5, "weight": 500, "tracking": 0.01, "capsTracking": 0.08, "use": "Buttons, tabs, field labels." },
+      "small": { "size": 11.5, "weight": 400, "tracking": 0, "use": "Dense tables, secondary lines." },
+      "caption": { "size": 10.5, "weight": 400, "tracking": 0.01, "use": "Hints, units, timestamps." },
+      "overline": { "size": 10.5, "weight": 500, "tracking": 0.01, "capsTracking": 0.1, "use": "Short section eyebrows and tags." }
+    },
+    "case": {
+      "roles": { "display": "display", "headline": "headline", "title": "title", "button": "label", "tab": "label", "overline": "overline" },
+      "upper": {
+        "app": ["overline"],
+        "game": ["display", "headline", "title", "button", "tab", "overline"]
+      }
     }
   },
   "space": { "xxs": 2, "xs": 4, "sm": 6, "md": 8, "lg": 12, "xl": 16, "xxl": 24, "xxxl": 32 },

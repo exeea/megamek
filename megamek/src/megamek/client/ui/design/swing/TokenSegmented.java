@@ -74,6 +74,8 @@ public class TokenSegmented extends JPanel {
             group.add(segment);
             segments.add(segment);
             add(segment);
+            // A section reads as a tab: it follows the screen's text case mode
+            TokenTextCase.role(segment, "tab");
         }
         for (int i = 0; i < segments.size(); i++) {
             bindKeys(i);

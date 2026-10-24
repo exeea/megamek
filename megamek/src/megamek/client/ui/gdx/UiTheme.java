@@ -85,6 +85,12 @@ public final class UiTheme implements Disposable {
     /** One step of the type scale: Roboto instance, size in stage units, CSS tracking (em), label color. */
     public record HudFont(String name, int instance, float size, float tracking, Color color) { }
 
+    /**
+     * hud-medium upper-cased: the font of the token buttons' and tabs' labels in game mode (docs/design-system/
+     * tokens.md, Text case). Fonts bake their letter spacing in, so caps text at its own tracking needs its own font.
+     */
+    public static final String CAPS_FONT = "hud-medium-caps";
+
     /** The single font table; each entry is also registered as a Label style of the same name. */
     public static final List<HudFont> HUD_FONTS = List.of(
           new HudFont("hud-body", REGULAR, 13, 0, TEXT),
@@ -99,22 +105,32 @@ public final class UiTheme implements Disposable {
           new HudFont("hud-title", CONDENSED_BOLD, 16, .07f, TEXT),
           new HudFont("hud-heading", CONDENSED_BOLD, 20, .04f, TEXT),
           new HudFont("hud-phase", CONDENSED_BOLD, 23, .02f, TEXT),
-          new HudFont("hud-main", CONDENSED_BOLD, 17, .1f, TEXT));
+          new HudFont("hud-main", CONDENSED_BOLD, 17, .1f, TEXT),
+          // The token buttons' and tabs' label in game mode: upper case at the label style's caps tracking
+          new HudFont(CAPS_FONT, MEDIUM, 12.5f, DesignTokens.shipped().roleStyle("button").tracking(true), TEXT));
 
     /** The prefix of a Token v0 type style's Label style name, such as {@code type-body}. */
     public static final String TYPE = "type-";
 
-    /** Token v0's type scale in regular-width Roboto; each entry is registered as a Label style named TYPE + name. */
-    public static final List<HudFont> TYPE_STYLES = List.of(
-          new HudFont("display", MEDIUM, 23, 0, TEXT),
-          new HudFont("headline", MEDIUM, 20, 0, TEXT),
-          new HudFont("title", MEDIUM, 16, 0, TEXT),
-          new HudFont("body", REGULAR, 13, 0, TEXT),
-          new HudFont("body.strong", MEDIUM, 13, 0, TEXT),
-          new HudFont("label", MEDIUM, 12.5f, 0, TEXT),
-          new HudFont("small", REGULAR, 11.5f, 0, TEXT),
-          new HudFont("caption", REGULAR, 10.5f, 0, TEXT),
-          new HudFont("overline", MEDIUM, 10.5f, .06f, TEXT));
+    /**
+     * Token v0's type scale in regular-width Roboto, read from the tokens; each entry is registered as a Label style
+     * named TYPE + name.
+     */
+    public static final List<HudFont> TYPE_STYLES = DesignTokens.shipped().typeStyles().values().stream()
+          .map(UiTheme::typeFont).toList();
+
+    /** A type style as a Roboto instance; a style upper case even in app mode (overline) at its caps tracking. */
+    private static HudFont typeFont(DesignTokens.TypeStyle style) {
+        DesignTokens tokens = DesignTokens.shipped();
+        int instance = switch (style.weight()) {
+            case 400 -> REGULAR;
+            case 500 -> MEDIUM;
+            default -> throw new IllegalStateException("No Roboto instance for weight " + style.weight());
+        };
+        boolean upper = tokens.textRoles().containsKey(style.name())
+              && tokens.upperCase(style.name(), DesignTokens.TextMode.APP);
+        return new HudFont(style.name(), instance, style.size(), style.tracking(upper), TEXT);
+    }
 
     private static final String ICON_FONT = "Icons/MaterialSymbolsRounded[FILL,GRAD,opsz,wght].ttf";
     private static final int ICON_SIZE = 48;
@@ -239,6 +255,13 @@ public final class UiTheme implements Disposable {
             BitmapFont face = font(TYPE + type.name(), ROBOTO, type.instance(), type.size(), type.tracking(), 0,
                   hudGlyphs);
             skin.add(TYPE + type.name(), new Label.LabelStyle(face, type.color()));
+            DesignTokens.TypeStyle style = DesignTokens.shipped().typeStyles().get(type.name());
+            // Game mode's upper-case headings: the style at its caps tracking (overline is upper case already)
+            if (style != null && style.hasCaps() && !"overline".equals(type.name())) {
+                BitmapFont caps = font(TYPE + type.name() + CAPS, ROBOTO, type.instance(), type.size(),
+                      style.tracking(true), 0, hudGlyphs);
+                skin.add(TYPE + type.name() + CAPS, new Label.LabelStyle(caps, type.color()));
+            }
         }
         // A count badge's digits: caption's size in label's medium face
         skin.add(TOKEN_BADGE, new Label.LabelStyle(font(TOKEN_BADGE, ROBOTO, MEDIUM, 10.5f, 0, 0, hudGlyphs),
@@ -454,6 +477,8 @@ public final class UiTheme implements Disposable {
           "icon", "special");
     /** The suffix of a button style's compact size. */
     public static final String COMPACT = "-compact";
+    /** The suffix of a labelled button style's game mode copy, which draws its label in {@link #CAPS_FONT}. */
+    public static final String CAPS = "-caps";
 
     /** A button style built from the design tokens, with the focus ring its button draws over its face. */
     public static final class TokenButtonStyle extends TextButton.TextButtonStyle {
@@ -462,6 +487,17 @@ public final class UiTheme implements Disposable {
         public Drawable focusInner;
         /** The details' color (null: hud-v3's muted one); disabled details take the disabled font color. */
         public Color detailFontColor;
+
+        public TokenButtonStyle() {
+        }
+
+        /** A copy of {@code style}, focus ring and details' color included. */
+        public TokenButtonStyle(TokenButtonStyle style) {
+            super(style);
+            focusOuter = style.focusOuter;
+            focusInner = style.focusInner;
+            detailFontColor = style.detailFontColor;
+        }
     }
 
     /** The token button set in dark mode, the only mode native views have for now. */
@@ -583,6 +619,11 @@ public final class UiTheme implements Disposable {
                     default -> { }
                 }
                 skin.add("button-" + kind + suffix, style, TextButton.TextButtonStyle.class);
+                if (!square) {
+                    TokenButtonStyle caps = new TokenButtonStyle(style);
+                    caps.font = skin.getFont(CAPS_FONT);
+                    skin.add("button-" + kind + suffix + CAPS, caps, TextButton.TextButtonStyle.class);
+                }
             }
         }
     }
@@ -995,6 +1036,12 @@ public final class UiTheme implements Disposable {
             tab.checkedDown = tab.checked;
             tab.disabled = tab.up;
             skin.add(TOKEN_TAB + suffix, tab, TextButton.TextButtonStyle.class);
+            for (TokenButtonStyle section : List.of(segment, tab)) {
+                TokenButtonStyle caps = new TokenButtonStyle(section);
+                caps.font = skin.getFont(CAPS_FONT);
+                skin.add((section == tab ? TOKEN_TAB : TOKEN_SEGMENT) + suffix + CAPS, caps,
+                      TextButton.TextButtonStyle.class);
+            }
         }
 
         TokenButtonStyle select = new TokenButtonStyle();

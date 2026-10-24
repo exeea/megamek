@@ -33,7 +33,7 @@ Agreed so far:
 | libGDX light mode | Deferred; the HUD is dark only for now. The Java2D board has no light/dark theming either. |
 | Accent | hud-v3 mint, retuned as needed; it stops doubling as the success color. |
 | Migration | The stock themes stay behind a hidden "classic" option until migration is done. |
-| Text case | Reduce all caps on both platforms; case, weight and size rules are shared. |
+| Text case | **Final.** Two modes, chosen per screen: **game** and **app**. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token. Both galleries have a switch between the modes. See [tokens.md](tokens.md#text-case). |
 | Framed button | Corner ticks that become a full frame on hover (hud-v3 bracket, Immersive `FramedCommandButton`) are one shared special-purpose variant. |
 | MekHQ `hud` library | Folded into the new library. |
 | Launcher | Retune its colors to the tokens for now; shared controls wait for the planned monorepo. |
@@ -112,10 +112,14 @@ Gaps:
 - Swing needs to load Roboto (variable font) at runtime. Java2D does not select variable-font named instances;
   static Roboto/Roboto Condensed weights may need to ship alongside, or FlatLaf's bundled Roboto font extension used.
   To investigate in step 4.
-- Swing has no letter-spacing beyond `TextAttribute.TRACKING`; verify it is good enough for the condensed caps styles.
+- Swing has no letter-spacing beyond `TextAttribute.TRACKING`. **Resolved:** the tokens give each style a tracking
+  and, where it can be upper case, a wider caps tracking; Swing applies them through `TextAttribute.TRACKING`
+  (`TokenFonts`), libGDX bakes them into the font.
 - 13 sizes is a HUD scale; desktop forms need a body size that reads well at 100% scaling. Decide whether Swing uses
   the same scale or a subset.
 - Uppercase-at-display is a style rule both platforms must apply the same way (and it must be locale-aware for i18n).
+  **Resolved:** the [text case](tokens.md#text-case) modes; both platforms read the same role rules from the tokens
+  and upper-case with the player's locale when the text is drawn.
 
 ### Shape, spacing and size
 

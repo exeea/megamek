@@ -13,12 +13,14 @@ In a dev build, open the lobby and use **Help > UI library (developer)**. The su
 
 - **Swing controls...** opens the Swing gallery: every color role in both modes, the accessibility checks, the text
   styles, spacing and shape, and five tabs of real Swing controls drawn by the MegaMek look and feel. A
-  toolbar toggles light mode and simulates deuteranopia, protanopia and tritanopia over the whole window. While the
+  toolbar toggles light mode and [game text mode](#text-case), and simulates deuteranopia, protanopia and tritanopia
+  over the whole window. While the
   gallery is open the whole app uses MegaMek Dark or Light, and closing it restores the previous theme. This is the
   complete library; Swing controls are added here as they are built.
 - **libGDX controls...** opens the native gallery: one tab per group of hud-v3 toolkit elements (colors and type,
   buttons, selection, inputs, lists, containers, status and HUD parts), each shown as the game draws it today beside
-  its migrated Token v0 look, filled in tab by tab. The migration restyles these elements and adds no new controls.
+  its migrated Token v0 look, filled in tab by tab. The migration restyles these elements and adds no new controls. A
+  **Game mode** switch rebuilds the Token v0 controls in app mode, to compare.
   Only one native window can run at a time, so it closes before a board or the board editor opens, and it will not
   open next to one.
 
@@ -122,25 +124,67 @@ No hud-v3 color becomes `surface.base`, `surface.input`, `surface.hover`, `surfa
 
 One family, Roboto, on both platforms; icons are Material Symbols Rounded. Both ship in `mm-data`.
 
-| Style | Size | Weight | Use |
-| --- | ---: | ---: | --- |
-| `display` | 23 | 500 | Phase banner, splash titles |
-| `headline` | 20 | 500 | Page and dialog headings |
-| `title` | 16 | 500 | Panel and section titles |
-| `body` | 13 | 400 | Default text |
-| `body.strong` | 13 | 500 | Emphasis, names, values |
-| `label` | 12.5 | 500 | Buttons, tabs, field labels |
-| `small` | 11.5 | 400 | Dense tables, secondary lines |
-| `caption` | 10.5 | 400 | Hints, units, timestamps |
-| `overline` | 10.5 | 500 | Short eyebrows and tags; the only upper-case style |
+| Style | Size | Weight | Tracking | Caps tracking | Use |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `display` | 23 | 500 | 0 | .04 | Phase banner, splash titles |
+| `headline` | 20 | 500 | 0 | .05 | Page and dialog headings |
+| `title` | 16 | 500 | 0 | .06 | Panel and section titles |
+| `body` | 13 | 400 | 0 | | Default text |
+| `body.strong` | 13 | 500 | 0 | | Emphasis, names, values |
+| `label` | 12.5 | 500 | .01 | .08 | Buttons, tabs, field labels |
+| `small` | 11.5 | 400 | 0 | | Dense tables, secondary lines |
+| `caption` | 10.5 | 400 | .01 | | Hints, units, timestamps |
+| `overline` | 10.5 | 500 | .01 | .1 | Short eyebrows and tags; upper case in both modes |
+
+Tracking is letter spacing in em. **Caps tracking** is the spacing a style uses when its text is upper case: capitals
+set at sentence spacing look cramped, so they get more, and small text more than large. Only styles that can be
+upper case have it, and the tokens fail to load if a role is upper case in a style without it.
 
 Rules:
 
-- **Sentence case everywhere.** Only `overline` is upper case, and only for labels of one or two words. Buttons and
-  tabs are no longer all caps.
+- **Case depends on the screen's mode**; see [Text case](#text-case).
 - **Two weights**, regular (400) and medium (500). Hierarchy comes from size and weight, not case or condensed faces.
   hud-v3's condensed bold styles are retired.
 - Sizes are logical pixels at scale 1; both platforms multiply by the user's UI scale.
+
+### Text case
+
+Each screen is in one of two modes. The mode belongs to the screen, not to the app, so MekHQ or MegaMek can mix both.
+
+| Text | App mode | Game mode |
+| --- | --- | --- |
+| Phase banner (`display`), panel and dialog titles, section headers, tab labels, button labels | Sentence case | UPPER CASE |
+| `overline` tags, chips and badges | UPPER CASE | UPPER CASE |
+| Body text, values, tables, tooltips, field labels, helper text | Sentence case | Sentence case |
+
+- Upper case is for short framing labels of one to three words; anything longer stays sentence case in either mode.
+- **Game screens to start with:** the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the
+  interstellar map. Every other screen starts in app mode, and may move to game mode when it is reviewed during
+  migration.
+- **Strings stay sentence case** in the resource bundles. Case is applied only when the text is drawn, with the
+  current locale (`toUpperCase(locale)`), so translators never write upper case and changing a screen's mode never
+  touches strings.
+- **The mode is set once, on the screen's root** (window or top-level panel). Controls inherit it from their nearest
+  ancestor, and app is the default, so moving a screen to game mode is a one-line change. Popups follow the component
+  that opened them. Hand-painted text (Java2D, libGDX `draw` code) must use the same case helper to follow the mode.
+- libGDX in-game UI is always game mode.
+
+Case follows the text's **role**, not its style: field labels share `label` with buttons and tabs but stay sentence
+case. The tokens' `typography.case` block maps each role to its style (`display`, `headline`, `title`, `button` and
+`tab` on `label`, `overline`) and lists the roles each mode upper-cases; `DesignTokens.upperCase(role, mode)` and
+`cased(role, mode, text, locale)` read it.
+
+- **Swing:** `TokenTextCase.setMode(root, TextMode.GAME)` marks a screen; a dialog follows its owner window, whose
+  mode may be set on its root pane. The button, tab and segmented factories give their controls the `button` or `tab`
+  role (icon buttons get none: their text is a glyph), and `TokenPanel`, `TokenDialogPane` and `TokenStatusCard` give
+  their headings the `title` or `headline` role; `TokenTextCase.role` gives one to another button, label or tab pane.
+  A control keeps its sentence-case text and shows it upper-cased in the caps-tracked font, so views keep calling
+  `setText`, `setTitleAt` and `setFont`; screen readers get the sentence-case text.
+- **libGDX:** fonts bake their spacing in, so caps text has its own fonts: `hud-medium-caps` with a `-caps` copy of
+  each labelled token button, tab and segment style, and `type-<style>-caps` for display, headline and title.
+  `UiKit.textMode` (game by default) picks them for the buttons, tabs, segmented controls and token panel and dialog
+  headers it builds; `UiKit.roleLabel`, `roleTypeLabel` and `cased` do the same for other text. The kit depends on no
+  game options, so its view passes in the player's locale (`UiKit.locale`).
 
 ### Fonts
 
@@ -262,7 +306,8 @@ every state.
 
 - **Sizes.** Regular is `control.md` (36) high with `lg` side padding, for dialogs and forms; compact is `control.sm`
   (28) with `md` padding, for dense tables and toolbars. Icon glyphs are `icon.md` / `icon.sm`.
-- **Labels** are sentence case in Roboto Medium. Rest text is `text.secondary` and brightens to `text.primary` under
+- **Labels** are Roboto Medium, sentence case in app mode and upper case in game mode (see [Text case](#text-case)).
+  Rest text is `text.secondary` and brightens to `text.primary` under
   the pointer, so the hover reads on every kind.
 - **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label.
 - **Focus** follows [Focus](#focus): a 1-wide `focus.ring` border plus a 1-wide inner line, inside the edge. On
@@ -414,7 +459,7 @@ Labels on the window surface that switch between the pages of one view.
 
 - **Sizes.** Compact (`control.sm`, 28 high, `md` side padding) is the default for every tab pane, since most sit in
   panels; regular (`control.md`, 36, `lg` padding) is for a window's top-level pages.
-- **Labels** are sentence case in Roboto Medium, like buttons; hud-v3's all-caps tabs go.
+- **Labels** are Roboto Medium, like buttons, and follow the screen's [text case](#text-case) mode.
 - **Not by color alone.** The underline marks the selected tab as well as the brighter label.
 
 ## Segmented control
@@ -1017,6 +1062,7 @@ newest on top and the hover pause are the developers' work.
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
+| [`TokenTextCase`](../../megamek/src/megamek/client/ui/design/swing/TokenTextCase.java), [`TokenFonts`](../../megamek/src/megamek/client/ui/design/swing/TokenFonts.java) | A Swing screen's text case mode, and the caps-tracked fonts |
 | [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java), [`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java), [`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), [`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) | Swing keyboard focus |
 | [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
 | [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java), [`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) | The Swing inputs and form field |
@@ -1046,6 +1092,6 @@ newest on top and the hover pause are the developers' work.
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
 panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. The Swing
-themes are selectable but not the default, and no view uses the new controls yet. Next comes the all-caps decision
-(see the gap analysis), then a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the developers
-accept the system.
+themes are selectable but not the default, and no view uses the new controls yet. The all-caps decision is final
+([Text case](#text-case)); next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
+developers accept the system.

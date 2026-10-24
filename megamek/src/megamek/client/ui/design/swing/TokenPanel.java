@@ -106,7 +106,7 @@ public class TokenPanel extends JPanel {
             tools = null;
             header = null;
         } else {
-            heading = new JLabel(title, JLabel.LEADING);
+            heading = TokenTextCase.role(new JLabel(title, JLabel.LEADING), "title");
             tools = new JPanel(new FlowLayout(FlowLayout.TRAILING, TokenDialogPane.space("xs"), 0));
             tools.setOpaque(false);
             header = new JPanel(new BorderLayout(TokenDialogPane.space("md"), 0));

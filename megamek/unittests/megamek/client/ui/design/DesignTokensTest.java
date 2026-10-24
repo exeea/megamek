@@ -8,11 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 import megamek.client.ui.design.DesignTokens.ContrastCheck;
 import megamek.client.ui.design.DesignTokens.DistinctCheck;
 import megamek.client.ui.design.DesignTokens.Mode;
+import megamek.client.ui.design.DesignTokens.TextMode;
 import org.junit.jupiter.api.Test;
 
 class DesignTokensTest {
@@ -77,8 +79,29 @@ class DesignTokensTest {
             check.colors().forEach(tokens::colorToken);
         }
         assertTrue(tokens.typeStyles().containsKey("body"));
-        assertEquals(1, tokens.typeStyles().values().stream().filter(DesignTokens.TypeStyle::upperCase).count(),
-              "Only one upper-case text style");
+    }
+
+    @Test
+    void appModeUpperCasesOnlyOverlinesAndGameModeTheFramingLabels() {
+        DesignTokens tokens = DesignTokens.shipped();
+        for (String role : tokens.textRoles().keySet()) {
+            assertEquals(role.equals("overline"), tokens.upperCase(role, TextMode.APP), role + " in app mode");
+            if (tokens.upperCase(role, TextMode.APP)) {
+                assertTrue(tokens.upperCase(role, TextMode.GAME), role + " is upper case in game mode too");
+            }
+        }
+        for (String role : List.of("display", "headline", "title", "button", "tab")) {
+            assertTrue(tokens.upperCase(role, TextMode.GAME), role + " in game mode");
+        }
+        assertFalse(tokens.typeStyle("body").hasCaps(), "Body text is never upper case");
+        assertFalse(tokens.typeStyle("small").hasCaps(), "Table text is never upper case");
+        assertTrue(tokens.roleStyle("button").capsTracking() > tokens.roleStyle("button").tracking(),
+              "Upper case is tracked wider");
+        assertEquals("END TURN", tokens.cased("button", TextMode.GAME, "End turn", Locale.ROOT));
+        assertEquals("End turn", tokens.cased("button", TextMode.APP, "End turn", Locale.ROOT));
+        assertEquals("<html>End turn", tokens.cased("button", TextMode.GAME, "<html>End turn", Locale.ROOT));
+        assertEquals("\u0130PTAL", tokens.cased("button", TextMode.GAME, "iptal", Locale.forLanguageTag("tr")));
+        assertThrows(IllegalArgumentException.class, () -> tokens.upperCase("no.such", TextMode.GAME));
     }
 
     @Test

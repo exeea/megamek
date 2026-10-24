@@ -26,6 +26,7 @@ public final class UiConfirmation {
     private final UiButton yes;
     private final UiButton no;
     private final Runnable dismissed;
+    private final UiKit ui;
     private final boolean token;
     private Runnable action;
     private int activationKey = -1;
@@ -37,10 +38,11 @@ public final class UiConfirmation {
     /**
      * A confirmation in hud-v3's look, or with {@code style} {@link UiTheme#TOKEN} in the Token v0 look: the token
      * popover holding a warning icon and a body.strong question over body detail in text.secondary, then a compact
-     * danger button before a compact secondary one, in sentence case.
+     * danger button before a compact secondary one, cased by the kit's text mode.
      */
     public UiConfirmation(UiKit ui, String name, Runnable dismissed, String style) {
         this.dismissed = dismissed;
+        this.ui = ui;
         token = UiTheme.TOKEN.equals(style);
         root.setName(name + "-layer");
         popup = new UiPopover(ui, this::closed, style);
@@ -155,8 +157,9 @@ public final class UiConfirmation {
     public void text(String heading, String detail, String affirmative, String negative) {
         title.setText(token ? heading : UiTheme.upper(heading));
         message.setText(detail);
-        yes.setText(token ? affirmative : UiTheme.upper(affirmative));
-        no.setText(token ? negative : UiTheme.upper(negative));
+        // The token buttons were built in the kit's text mode, in the caps font when it upper-cases them
+        yes.setText(token ? ui.cased("button", affirmative) : UiTheme.upper(affirmative));
+        no.setText(token ? ui.cased("button", negative) : UiTheme.upper(negative));
         popup.reposition();
     }
 

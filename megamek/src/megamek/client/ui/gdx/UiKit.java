@@ -3,6 +3,7 @@ package megamek.client.ui.gdx;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import com.badlogic.gdx.graphics.Color;
@@ -23,6 +24,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.SplitPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
@@ -33,6 +35,7 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.design.DesignTokens.TextMode;
 
 /**
  * The hud-v3 widgets that native views build from a UiTheme's skin (rebuild plan C.3), and the helpers they all use: a
@@ -67,11 +70,55 @@ public final class UiKit {
     /** The skin the widgets are built from: a UiTheme's, or one that a view's own skin composes with it. */
     public final Skin skin;
     private final Texture white;
+    private TextMode textMode = TextMode.GAME;
+    private Locale locale = Locale.getDefault();
 
     /** A kit over {@code skin}, which holds a UiTheme's styles; the kit only reads it. */
     public UiKit(Skin skin) {
         this.skin = skin;
         white = skin.get("white", Texture.class);
+    }
+
+    /**
+     * The text case mode of the token controls the kit builds (docs/design-system/tokens.md, Text case): game, as the
+     * in-game HUD is, unless a view sets app.
+     */
+    public TextMode textMode() {
+        return textMode;
+    }
+
+    /** Builds the following token controls in {@code mode}; controls already built keep theirs. */
+    public UiKit textMode(TextMode mode) {
+        textMode = mode;
+        return this;
+    }
+
+    /**
+     * Upper-cases the following text in {@code value}, the player's language; the kit depends on no game options, so
+     * its view passes it in. The system's locale until then.
+     */
+    public UiKit locale(Locale value) {
+        locale = value;
+        return this;
+    }
+
+    /** Whether text role {@code role} ("button", "tab"...) is upper case in the kit's text mode. */
+    public boolean upperCase(String role) {
+        return DesignTokens.shipped().upperCase(role, textMode);
+    }
+
+    /** {@code text} in the case of text role {@code role} in the kit's text mode and locale. */
+    public String cased(String role, String text) {
+        return DesignTokens.shipped().cased(role, textMode, text, locale);
+    }
+
+    /**
+     * A label for a token control's text role {@code role}, "button" or "tab", at {@code size}: hud-medium, or
+     * {@link UiTheme#CAPS_FONT} with upper-cased text when the role is upper case in the kit's text mode.
+     */
+    public Label roleLabel(String role, String text, float size, Color color) {
+        return upperCase(role) ? label(cased(role, text), UiTheme.CAPS_FONT, size, color)
+              : label(text, "hud-medium", size, color);
     }
 
     /** A message; a pattern only with arguments, so that plain texts keep their apostrophes. */
@@ -324,6 +371,18 @@ public final class UiKit {
         return new Label(text, style);
     }
 
+    /**
+     * A label for heading text role {@code textRole} ("title", "headline", "display") in its type style and the color
+     * of {@code colorRole}: upper case in the style's caps font when the role is upper case in the kit's text mode.
+     */
+    public Label roleTypeLabel(String textRole, String text, String colorRole) {
+        String type = DesignTokens.shipped().roleStyle(textRole).name();
+        if (upperCase(textRole) && skin.has(UiTheme.TYPE + type + UiTheme.CAPS, Label.LabelStyle.class)) {
+            return typeLabel(cased(textRole, text), type + UiTheme.CAPS, colorRole);
+        }
+        return typeLabel(text, type, colorRole);
+    }
+
     /** The prototype's caption (.cap): upper-case condensed muted text. */
     public Label caption(String text) {
         return new Label(UiTheme.upper(text), skin, "hud-caption");
@@ -405,8 +464,8 @@ public final class UiKit {
 
     /**
      * A panel header as {@link #header(String, String, Actor...)}; with {@code token}, the Token v0 header for a token
-     * panel: the sentence-case title in the {@code title} type and text.primary, the count in text.muted, the tools
-     * xs apart, and md above the body.
+     * panel: the title in the {@code title} type (upper case in game mode) and text.primary, the count in text.muted,
+     * the tools xs apart, and md above the body.
      */
     public Table header(String title, String count, boolean token, Actor... tools) {
         return token ? tokenHeader(title, count, "title", tools) : header(title, count, tools);
@@ -415,7 +474,7 @@ public final class UiKit {
     private Table tokenHeader(String title, String count, String type, Actor... tools) {
         Table header = new Table();
         header.padBottom(space("md"));
-        Label heading = typeLabel(title, type, "text.primary");
+        Label heading = roleTypeLabel(type, title, "text.primary");
         heading.setEllipsis(true);
         header.add(heading).minWidth(0);
         if (count != null) {
@@ -463,8 +522,9 @@ public final class UiKit {
 
     /**
      * A dialog as {@link #dialog(String, Runnable)}; with {@code token}, the Token v0 dialog card: the token panel
-     * padded xl above the header and xxl elsewhere, and a header with the sentence-case title in the {@code headline}
-     * type and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or wider.
+     * padded xl above the header and xxl elsewhere, and a header with the title in the {@code headline} type (upper
+     * case in game mode) and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or
+     * wider.
      */
     public Table dialog(String title, Runnable close, boolean token) {
         if (!token) {
@@ -535,10 +595,13 @@ public final class UiKit {
      * caption on one line. Styles: hud (quiet, .b), hud-plain (normal-case .brow .b), hud-main (commit), hud-mini,
      * hud-icon (30-unit .b.ib), hud-seg, hud-utility (icon over label), hud-utility-row (.b.util.row) and
      * hud-utility-small (.b.brk.sm); and the token button set, button-&lt;kind&gt; and button-&lt;kind&gt;-compact
-     * ({@link UiTheme#BUTTON_KINDS}), in sentence case, which new views use.
+     * ({@link UiTheme#BUTTON_KINDS}), which new views use: their labels follow the kit's {@link #textMode()}.
      */
     public UiButton button(String style, String icon, String text, String sub) {
-        UiButton button = new UiButton(this, style);
+        // Labelled token buttons, tabs and segments have a caps copy; icon buttons show a glyph and have none
+        String role = style.startsWith(UiTheme.TOKEN_TAB) || style.startsWith(UiTheme.TOKEN_SEGMENT) ? "tab" : "button";
+        boolean tokenCaps = skin.has(style + UiTheme.CAPS, TextButton.TextButtonStyle.class) && upperCase(role);
+        UiButton button = new UiButton(this, tokenCaps ? style + UiTheme.CAPS : style);
         boolean column = style.equals("hud-utility") || sub != null;
         float gap = gap(style, column);
         if (icon != null) {
@@ -550,7 +613,11 @@ public final class UiKit {
             }
         }
         if (text != null) {
-            button.setText(UPPER_CASE.contains(style) ? UiTheme.upper(text) : text);
+            if (tokenCaps) {
+                button.setText(cased(role, text));
+            } else {
+                button.setText(UPPER_CASE.contains(style) ? UiTheme.upper(text) : text);
+            }
             if (style.equals("hud-plain")) {
                 // .brow .b is 12 units, half a unit smaller than hud-medium.
                 size(button.getLabel(), "hud-medium", 12);

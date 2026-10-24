@@ -21,11 +21,14 @@ public final class TokenTabs {
         return size(new JTabbedPane(), size);
     }
 
-    /** Gives a tab pane the tab height and side padding of {@code size}. */
+    /**
+     * Gives a tab pane the tab height and side padding of {@code size}; its titles follow their screen's text case
+     * mode ({@link TokenTextCase}).
+     */
     public static <T extends JTabbedPane> T size(T tabs, Size size) {
         int side = Math.round(DesignTokens.shipped().space().get(size == Size.REGULAR ? "lg" : "md"));
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_HEIGHT, size.height());
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_INSETS, new Insets(0, side, 0, side));
-        return tabs;
+        return TokenTextCase.role(tabs, "tab");
     }
 }

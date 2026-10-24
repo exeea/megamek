@@ -32,6 +32,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.BaseDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.MegaMek;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.design.DesignTokens;
@@ -88,7 +89,7 @@ final class GpuHudKit implements Disposable {
 
     /** The skin belongs to the window's GpuBoardSkin; the kit only reads it. */
     GpuHudKit(Skin skin) {
-        ui = new UiKit(skin);
+        ui = new UiKit(skin).locale(MegaMek.getMMOptions().getLocale());
     }
 
     /** The colour of target {@code letter} (A, B, ...). */
