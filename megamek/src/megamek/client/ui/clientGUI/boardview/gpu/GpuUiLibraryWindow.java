@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
@@ -76,12 +77,21 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private static final Set<String> SHOWN_ELSEWHERE = Set.of("hud-seg", "hud-pill", "hud-tab", "hud-tab-caps",
           "hud-select", "hud-select-inline", "hud-menu-row", "hud-row");
     private static final float NAME_WIDTH = 140;
-    private static final float TODAY_WIDTH = 460;
-    private static final float MIGRATED_WIDTH = 360;
+    private static final float TODAY_WIDTH = 420;
+    private static final float MIGRATED_WIDTH = 400;
     private static final float COLUMN_GAP = 14;
     private static final int TODAY_SWATCHES_PER_ROW = 3;
     private static final int MIGRATED_SWATCHES_PER_ROW = 2;
     private static final String SAMPLE_SPRITE = "defaults/default_heavy.png";
+    /** The token button style each hud-v3 button style migrates to (tokens.md, "Migrating hud-v3 styles"). */
+    private static final Map<String, String> MIGRATED_BUTTONS = Map.ofEntries(
+          Map.entry("hud", "button-secondary"), Map.entry("hud-plain", "button-secondary"),
+          Map.entry("hud-main", "button-primary"), Map.entry("hud-danger", "button-danger"),
+          Map.entry("hud-icon", "button-icon"), Map.entry("hud-delete-icon", "button-icon"),
+          Map.entry("hud-mini", "button-secondary" + UiTheme.COMPACT),
+          Map.entry("hud-utility-small", "button-secondary" + UiTheme.COMPACT),
+          Map.entry("hud-utility", "button-special"), Map.entry("hud-utility-narrow", "button-special"),
+          Map.entry("hud-utility-row", "button-special"));
 
     /** The open gallery; read and written on the EDT. */
     private static GpuUiLibraryWindow open;
@@ -316,9 +326,10 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private void buttons(Table page) {
         heading(page, "UiLibrary.gdx.buttonStyles");
         page.add();
-        page.add(stateRow(text("UiLibrary.gdx.rest"), text("UiLibrary.gdx.hover"), text("UiLibrary.gdx.held"),
-              text("UiLibrary.gdx.pressed"), text("UiLibrary.gdx.disabled"))).padRight(COLUMN_GAP);
-        page.add().row();
+        String[] states = {text("UiLibrary.gdx.rest"), text("UiLibrary.gdx.hover"), text("UiLibrary.gdx.held"),
+              text("UiLibrary.gdx.pressed"), text("UiLibrary.gdx.disabled")};
+        page.add(stateRow(76, 6, states)).left().padRight(COLUMN_GAP);
+        page.add(stateRow(70, 6, states)).left().row();
         List<String> styles = new ArrayList<>();
         List<String> elsewhere = new ArrayList<>();
         kit.skin.getAll(TextButton.TextButtonStyle.class).keys().forEach(style -> {
@@ -329,20 +340,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         styles.sort(String::compareTo);
         elsewhere.sort(String::compareTo);
         for (String style : styles) {
-            Table states = new Table();
-            states.defaults().left().width(84).padRight(8);
-            for (int state = 0; state < 5; state++) {
-                UiButton button = sampleButton(style);
-                switch (state) {
-                    case 1 -> button.hovered(true);
-                    case 2 -> button.held(true);
-                    case 3 -> button.pressed(true);
-                    case 4 -> button.setDisabled(true);
-                    default -> { }
-                }
-                states.add(new Container<>(button).left());
-            }
-            compare(page, style, states, null);
+            compare(page, style, buttonStates(() -> sampleButton(style), 76, 6), migratedButton(style));
         }
         Label note = kit.label(text("UiLibrary.gdx.shownElsewhere", String.join(", ", elsewhere)), "hud-small",
               11.5f, UiTheme.MUTED);
@@ -440,13 +438,13 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         kit.empty(empty, text("UiLibrary.gdx.empty"));
         compare(page, "UiKit.empty", new Container<>(empty).width(320), null);
         heading(page, "UiLibrary.gdx.grids");
-        compare(page, "UiCardGrid", new Container<>(cardGrid()).size(440, 330), null);
+        compare(page, "UiCardGrid", new Container<>(cardGrid()).size(420, 330), null);
         UiChoiceGrid choices = kit.choiceGrid(120, 8);
         for (int index = 1; index <= 5; index++) {
             choices.addActor(kit.button("hud", null, text("UiLibrary.gdx.choice", index), null));
         }
-        choices.fit(440, 200);
-        compare(page, "UiChoiceGrid", new Container<>(choices).width(440), null);
+        choices.fit(420, 200);
+        compare(page, "UiChoiceGrid", new Container<>(choices).width(420), null);
         Table top = new Table();
         top.add(kit.label(text("UiLibrary.gdx.splitTop"), "hud-body", 12.5f, UiTheme.TEXT));
         Table bottom = new Table();
@@ -515,7 +513,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         meters.add(kit.meter(text("UiLibrary.gdx.armor"), false).set("91%", .91f, UiTheme.MINT));
         meters.add(kit.meter(text("UiLibrary.gdx.structure"), false).set("40%", .4f, UiTheme.AMBER));
         meters.add(kit.meter(text("UiLibrary.gdx.heat"), false).set("12", .4f, UiTheme.CORAL));
-        compare(page, "UiKit.meter", new Container<>(meters).width(460), null);
+        compare(page, "UiKit.meter", new Container<>(meters).width(420), null);
         Table compact = kit.panel();
         compact.pad(10, 14, 10, 14);
         compact.defaults().growX().uniformX().padRight(12);
@@ -595,9 +593,68 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     private UiButton sampleButton(String style) {
         return switch (style) {
-            case "hud-icon", "hud-delete-icon" -> kit.button(style, "search", null, null);
+            case "hud-icon" -> kit.button(style, "search", null, null);
+            case "hud-delete-icon" -> kit.button(style, "close", null, null);
             case "hud-utility", "hud-utility-row" -> kit.button(style, "map", text("UiLibrary.gdx.sampleMap"), null);
             default -> kit.button(style, null, text("UiLibrary.gdx.sampleAction"), null);
+        };
+    }
+
+    /** A button's five states side by side: at rest, hovered, held, pressed and disabled. */
+    private static Table buttonStates(Supplier<UiButton> sample, float width, float gap) {
+        return buttonStates(sample, sample, width, gap);
+    }
+
+    /** As {@link #buttonStates(Supplier, float, float)}, with the pressed state drawn by its own sample. */
+    private static Table buttonStates(Supplier<UiButton> sample, Supplier<UiButton> pressedSample, float width,
+          float gap) {
+        Table states = new Table();
+        states.defaults().left().minWidth(width).padRight(gap);
+        for (int state = 0; state < 5; state++) {
+            UiButton button = state == 3 ? pressedSample.get() : sample.get();
+            switch (state) {
+                case 1 -> button.hovered(true);
+                case 2 -> button.held(true);
+                case 3 -> button.pressed(true);
+                case 4 -> button.setDisabled(true);
+                default -> { }
+            }
+            states.add(new Container<>(button).left());
+        }
+        return states;
+    }
+
+    /** The token button a hud-v3 style migrates to, in its five states, over the token style's name. */
+    private Table migratedButton(String style) {
+        String token = MIGRATED_BUTTONS.get(style);
+        if (token == null) {
+            return null;
+        }
+        Table migrated = new Table();
+        migrated.left().top();
+        // Secondary has no selected look: a button the game holds pressed becomes a toggle.
+        String pressed = token.replace("button-secondary", "button-toggle");
+        migrated.add(buttonStates(() -> tokenButton(style, token), () -> tokenButton(style, pressed), 70, 6))
+              .left().row();
+        String caption = pressed.equals(token) ? token : text("UiLibrary.gdx.heldPressed", token, pressed);
+        migrated.add(kit.label(caption, "hud-small", 11, UiTheme.MUTED)).left().padTop(6);
+        return migrated;
+    }
+
+    private UiButton tokenButton(String style, String token) {
+        return switch (style) {
+            case "hud-icon" -> kit.button(token, "search", null, null);
+            case "hud-delete-icon" -> kit.button(token, "close", null, null);
+            case "hud-utility-row" -> kit.button(token, "map", text("UiLibrary.gdx.sampleMap"), null);
+            case "hud-utility" -> {
+                // The icon-above-label layout stays a HUD composition on top of the special kind.
+                UiButton button = kit.button(token, "map", null, null);
+                button.row();
+                button.setText(text("UiLibrary.gdx.sampleMap"));
+                button.add(button.getLabel()).padTop(4);
+                yield button;
+            }
+            default -> kit.button(token, null, text("UiLibrary.gdx.sampleAction"), null);
         };
     }
 
@@ -734,17 +791,22 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         Label label = kit.label(name, "hud-medium", 12, UiTheme.ACCENT);
         label.setWrap(true);
         page.add(label).width(NAME_WIDTH).padRight(COLUMN_GAP).padBottom(12);
-        Table holder = new Table();
-        holder.left().top();
-        holder.add(today);
-        page.add(holder).width(TODAY_WIDTH).padRight(COLUMN_GAP).padBottom(12);
-        page.add(migrated != null ? migrated : kit.label(text("UiLibrary.gdx.notMigrated"), "hud-small", 11.5f,
-              UiTheme.DISABLED)).padBottom(12).row();
+        page.add(topLeft(today)).width(TODAY_WIDTH).padRight(COLUMN_GAP).padBottom(12);
+        page.add(topLeft(migrated != null ? migrated : kit.label(text("UiLibrary.gdx.notMigrated"), "hud-small", 11.5f,
+              UiTheme.DISABLED))).width(MIGRATED_WIDTH).padBottom(12).row();
     }
 
-    private Table stateRow(String... states) {
+    /** Holds a sample at the top left of its column; a filled cell would center the sample's own content. */
+    private static Table topLeft(Actor sample) {
+        Table holder = new Table();
+        holder.left().top();
+        holder.add(sample);
+        return holder;
+    }
+
+    private Table stateRow(float width, float gap, String... states) {
         Table row = new Table();
-        row.defaults().left().width(84).padRight(8);
+        row.defaults().left().width(width).padRight(gap);
         for (String state : states) {
             row.add(kit.label(state, "hud-small", 11, UiTheme.MUTED));
         }
@@ -791,7 +853,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         current.put("TRACK", UiTheme.TRACK);
         List<Table> cells = new ArrayList<>();
         current.forEach((name, value) -> cells.add(swatch(name, "#" + value.toString().toUpperCase(Locale.ROOT),
-              value, 134)));
+              value, 124)));
         return grid(cells, TODAY_SWATCHES_PER_ROW);
     }
 

@@ -16,10 +16,11 @@ In a dev build, open the lobby and use **Help > UI library (developer)**. The su
   toolbar toggles light mode and simulates deuteranopia, protanopia and tritanopia over the whole window. While the
   gallery is open the whole app uses MegaMek Dark or Light, and closing it restores the previous theme. This is the
   complete library; Swing controls are added here as they are built.
-- **libGDX controls...** opens the native gallery: the Token v0 dark colors beside the hud-v3 colors in use today,
-  the hud fonts, all 19 current button styles in rest, pressed and disabled states, and the other toolkit controls. It
-  is a subset of the Swing library and grows only when the game needs a control. Only one native window can run at a
-  time, so it closes before a board or the board editor opens, and it will not open next to one.
+- **libGDX controls...** opens the native gallery: one tab per group of hud-v3 toolkit elements (colors and type,
+  buttons, selection, inputs, lists, containers, status and HUD parts), each shown as the game draws it today beside
+  its migrated Token v0 look, filled in tab by tab. The migration restyles these elements and adds no new controls.
+  Only one native window can run at a time, so it closes before a board or the board editor opens, and it will not
+  open next to one.
 
 The same checks run as a unit test, along with a test that the Swing themes pick the tokens up:
 
@@ -267,8 +268,15 @@ gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; ali
 | `hud-row`, `hud-menu-row` | Not buttons: list row and menu item come later |
 | `hud-select`, `hud-select-inline` | Not buttons: the [select](#select) |
 
-The hud-v3 styles stay until their views move; the libGDX gallery lists them under "hud-v3 button styles (to
-migrate)".
+The hud-v3 styles stay until their views move. Two rules come with the mapping:
+
+- **A secondary button the game holds pressed becomes a toggle.** Secondary has no selected look, so a `hud`,
+  `hud-plain`, `hud-mini` or `hud-utility-small` button that stays checked moves to toggle (compact for the compact
+  ones). Secondary stays for plain actions.
+- **`hud-delete-icon` becomes a plain icon button.** Token v0 has no danger icon color; the `close` glyph and a tooltip
+  carry that it deletes.
+
+The libGDX gallery's Buttons tab shows each hud-v3 style in its five states beside the token kind it becomes.
 
 ## Inputs
 
