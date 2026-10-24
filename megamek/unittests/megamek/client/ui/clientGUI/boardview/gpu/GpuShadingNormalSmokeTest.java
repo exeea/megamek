@@ -496,7 +496,7 @@ class GpuShadingNormalSmokeTest {
             // All map/provider setup remains real; this does not pretend to test a particular asset's normal value.
             String normalBoundary = "normal = shadingNormal(normal, geometric, view);";
             assertEquals(1, sculpt.split(java.util.regex.Pattern.quote(normalBoundary), -1).length - 1);
-            sculpt = sculpt.replace(normalBoundary, "normal = vec3(0,0,1); film = 0.0; roughness = .85;"
+            sculpt = sculpt.replace(normalBoundary, "normal = vec3(0,0,1); film = 0.0; finish = Finish(.85, 0.0, 0.0, vec3(0.0));"
                   + " cavity = 1.0; volcanic = 0.0; " + normalBoundary);
             // shadeSurface (surface-shading.glsl) returns the direct light alone; this material emits nothing.
             String shading = GpuShaderSource.readDisk("surface-shading.glsl");

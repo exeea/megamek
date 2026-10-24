@@ -163,7 +163,7 @@ class GpuShaderReloadTest {
                 String fragment = name.equals("terrain-vegetation.frag")
                       ? GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(GpuShaderSource.read(name)))
                       : GpuTerrain.litFragment(name);
-                assertTrue(fragment.contains("u_sculptRoughness[SCULPT_MATERIAL_COUNT]"), name);
+                assertTrue(fragment.contains("u_finishSurface[FINISH_COUNT]"), name);
                 assertNotEquals(materialKey(35, vertex, fragment), materialKey(36, vertex, fragment),
                       "Keep conditional roughness dependencies conservatively: " + name);
             }
@@ -171,7 +171,7 @@ class GpuShaderReloadTest {
             session.run(() -> {
                 var original = session.capture(() -> GpuTerrain.litFragment("water-surface.frag"));
                 String draft = water.replace("void main() {",
-                      "uniform float reviewMaterials[SCULPT_MATERIAL_COUNT];\nvoid main() {");
+                      "uniform float reviewMaterials[FINISH_COUNT];\nvoid main() {");
                 assertNotEquals(water, draft, "Exercise a real editor source change");
                 assertTrue(session.apply(Map.of("water-surface.frag", draft)).success());
                 var changed = session.capture(() -> GpuTerrain.litFragment("water-surface.frag"));
@@ -181,13 +181,13 @@ class GpuShaderReloadTest {
                 assertTrue(session.apply(Map.of()).success());
                 assertEquals(original.value(), GpuTerrain.litFragment("water-surface.frag"), "Restore exact assembly");
             });
-            assertNotEquals(materialKey(35, "float values[SCULPT_MATERIAL_COUNT];", depth),
-                  materialKey(36, "float values[SCULPT_MATERIAL_COUNT];", depth), "Either stage may need the count");
+            assertNotEquals(materialKey(35, "float values[FINISH_COUNT];", depth),
+                  materialKey(36, "float values[FINISH_COUNT];", depth), "Either stage may need the count");
         } finally { session.close(); Gdx.files = previousFiles; Configuration.setDataDir(data); }
     }
 
     private static String materialKey(int count, String vertex, String fragment) {
-        String prefix = GpuShaderSource.sculptMaterialPrefix(count, vertex, fragment);
+        String prefix = GpuShaderSource.finishPrefix(count, count - 3, vertex, fragment);
         return GpuProgramCache.key("fixed driver", GpuGlsl.source(prefix, vertex, 330), GpuGlsl.source(prefix, fragment, 330));
     }
 

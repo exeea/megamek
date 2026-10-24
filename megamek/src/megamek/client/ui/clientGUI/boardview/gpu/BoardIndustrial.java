@@ -129,8 +129,14 @@ final class BoardIndustrial {
     }
 
     /** The same triangles feed GPU upload, physical picking and cosmetic obstacle clearance. */
-    static ModelData model(Layout layout) {
-        Mesh mesh = new Mesh();
+    static ModelData model(Layout layout) { return model(layout, 1, 1); }
+
+    /**
+     * {@code paintCoverage} and {@code steelCoverage} widen the paint and steel textures' planar repeats with their
+     * textures (GpuAssets.coverage); 1 keeps the authored repeat.
+     */
+    static ModelData model(Layout layout, float paintCoverage, float steelCoverage) {
+        Mesh mesh = new Mesh(paintCoverage, steelCoverage);
         for (Equipment equipment : layout.equipment()) { machine(mesh, equipment); }
         for (Connection connection : layout.connections()) {
             Vector3 a = attachment(connection.from(), connection.height()), b = attachment(connection.to(), connection.height());
@@ -375,6 +381,12 @@ final class BoardIndustrial {
         final ShortArray paintIndices = new ShortArray();
         final ShortArray metalIndices = new ShortArray();
         final ShortArray fanIndices = new ShortArray();
+        final float paintCoverage, steelCoverage;
+
+        Mesh(float paintCoverage, float steelCoverage) {
+            this.paintCoverage = paintCoverage;
+            this.steelCoverage = steelCoverage;
+        }
 
         void vertex(Vector3 p, Vector3 normal, Color color) {
             vertex(p, normal, color, textureU(p, normal), textureV(p, normal));
@@ -385,7 +397,7 @@ final class BoardIndustrial {
             if (index >= 65_535) { throw new IllegalArgumentException("Industrial mesh exceeds rigid vertex limit"); }
             boolean paint = color == IVORY || color == TEAL || color == YELLOW;
             (color == FAN ? fanIndices : paint ? paintIndices : metalIndices).add((short) index);
-            float tile = color == FAN ? 1 : paint ? 32 : 10;
+            float tile = color == FAN ? 1 : paint ? 32 * paintCoverage : 10 * steelCoverage;
             vertices.addAll(p.x, p.y, p.z, normal.x, normal.y, normal.z, color.r, color.g, color.b, 1,
                   u / tile, v / tile);
         }

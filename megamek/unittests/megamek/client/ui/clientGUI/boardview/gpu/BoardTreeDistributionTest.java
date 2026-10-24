@@ -164,7 +164,7 @@ class BoardTreeDistributionTest {
                     assertEquals(.5f, ((RigidGlb.Data) model).alphaTests.get(material.id), .0001f);
                     var texture = ((RigidGlb.Data) model).images.get(material.textures.first().fileName);
                     assertTrue(texture.file().endsWith((tree.startsWith("pine") ? "conifer" : "broadleaf")
-                          + (snow ? "-snow" : "") + "-cutout.png"), "Variants borrow the existing texture");
+                          + (snow ? "-snow" : "") + "-cutout_albedo.png"), "Variants borrow the existing texture");
                 }
             }
         }

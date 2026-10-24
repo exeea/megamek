@@ -128,7 +128,10 @@ final class GpuSurfaceScars implements Disposable {
         source = GpuShaderSource.replaceOnce(source, MODEL_SURFACE, helpers + "\n" + MODEL_SURFACE, "scar model");
         source = GpuShaderSource.replaceOnce(source, SHADING_NORMAL, "float scarCavity = 1.0;\n"
               + "scarMaterial(surfaceScarMask, modelVertexNormal(geometric), albedo, 1.0, albedo, normal, scarCavity,"
-              + " roughness);\n" + SHADING_NORMAL, "scar model");
+              + " roughness);\n"
+              // Churned soil and char keep none of the receiver's metal, scattering or glow.
+              + "metallic *= 1.0 - surfaceScarMask.r; scatter *= 1.0 - surfaceScarMask.r; emission *= 1.0 - surfaceScarMask.r;\n"
+              + SHADING_NORMAL, "scar model");
         // The helpers exist in lit programs only (model-surface.glsl), the only ones a patch draws with.
         return GpuShaderSource.replaceOnce(source, FRAME_READY, FRAME_READY
               + "\n#ifdef lightingFlag\nif (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }\n#endif\n",

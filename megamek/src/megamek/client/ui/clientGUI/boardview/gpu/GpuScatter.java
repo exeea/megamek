@@ -1,10 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.io.File;
-
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
@@ -35,16 +32,16 @@ final class GpuScatter {
     }
 
     /** Uploaded once and owned by GpuAssets; source height/coverage alpha never makes scatter transparent. */
-    static Texture atlas(File root) {
+    static Texture atlas(GpuAssets assets) {
         var atlas = new GpuLinearImage(WIDTH, HEIGHT);
         atlas.fill(1, 1, 1, 1);
         int interior = CELL - 2 * BORDER;
         for (int index = 0; index < MATERIALS.length; index++) {
             if (MATERIALS[index] == null) { continue; }
-            FileHandle file = new FileHandle(new File(root, "textures/" + MATERIALS[index] + ".png"));
             GpuLinearImage source;
-            if (file.exists()) {
-                Pixmap pixels = GpuColorTexture.decode(file);
+            if (assets.hasMaterial(MATERIALS[index])) {
+                // Only the albedo: the atlas ignores the sculpted materials' heights.
+                Pixmap pixels = GpuMaterialMaps.pack(assets.definition(MATERIALS[index]), GpuMaterialMaps.Layout.COLOR);
                 try { source = new GpuLinearImage(pixels); }
                 finally { pixels.dispose(); }
             } else {

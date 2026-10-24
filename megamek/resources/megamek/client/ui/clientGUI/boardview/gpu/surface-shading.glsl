@@ -41,12 +41,22 @@ struct Surface {
     float heat;              // lava's matte hot share, lit like the crust programs; 0 elsewhere
     vec3 bounce;             // albedo of the sunlit ground below, which the sky reflects into undersides
     vec3 emission;           // radiance the light does not scale
+    float scatter;           // subsurface scattering (Godot's subsurf_scatter), 0 to 1: light wraps past the terminator
 };
 
-// An opaque dielectric over GROUND_ALBEDO, without occlusion, transmission, heat or emission; callers set what they have.
+// An opaque dielectric over GROUND_ALBEDO, without occlusion, transmission, heat, emission or scattering; callers set
+// what they have.
 Surface opaqueSurface(vec3 albedo, vec3 normal, vec3 geometric, float roughness, float film, float visibility) {
     return Surface(albedo, normal, geometric, roughness, film, vec3(.04), 0.0, 1.0, 1.0, 1.0, visibility, vec3(1.0),
-          vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0));
+          vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0), 0.0);
+}
+
+// Godot's metallic workflow, on a surface whose albedo is the material's colour: the metallic share reflects that colour
+// and diffuses none.
+void metallicShare(inout Surface s, float metallic) {
+    s.f0 = s.albedo;
+    s.albedo *= 1.0 - metallic;
+    s.metallic = metallic;
 }
 
 // Thin tissue, per channel: of the colour R it reflects from the front it passes T = min(share * R, 1 - R) from the
@@ -67,6 +77,10 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
         Scorched deposit = scorched(scorch, SCORCH_SITES, .28, .5);
         s.albedo = mix(s.albedo, deposit.albedo, deposit.coverage);
         s.roughness = sqrt(mix(s.roughness * s.roughness, deposit.roughness * deposit.roughness, deposit.coverage));
+        // The deposit buries the material: none of its metal, scattering or glow shows through.
+        s.metallic *= 1.0 - deposit.coverage;
+        s.scatter *= 1.0 - deposit.coverage;
+        s.emission *= 1.0 - deposit.coverage;
     }
 #endif
     vec3 view = -viewDirection();
@@ -93,6 +107,12 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     vec3 sun = sunColor() * s.visibility * screen.y;
     bool lit = dot(s.geometric, light) > 0.0;
     vec3 incidence = lit ? diffuseReflectance(normal, light, view, roughness, f0) : vec3(0.0);
+    if (s.scatter > 0.0) {
+        // Light entering a translucent body (snow, wax, fungal flesh) leaves it further on: its matte share wraps past
+        // the terminator (normalized wrap lighting), softening the shading as much as the material scatters.
+        float wrapped = max(0.0, (dot(normal, light) + s.scatter) / (1.0 + s.scatter));
+        incidence = mix(incidence, diffuseBudget * wrapped, s.scatter);
+    }
     vec3 incident = incidence * s.front;
     if (tissue) {
         vec3 through = dot(s.geometric, light) < 0.0

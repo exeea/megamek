@@ -1,7 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.util.HashSet;
+import java.io.File;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiFunction;
 
@@ -19,12 +20,19 @@ final class ModelTextures {
     private ModelTextures() { }
 
     static Model create(ModelData data, Map<String, Texture> cache, BiFunction<String, Boolean, Texture> external) {
-        BiFunction<String, Boolean, Texture> load = (key, color) -> {
+        File textures = GpuMaterialMaps.boardTextures();
+        // A glTF role (a ModelTexture usage, or GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE or HEIGHT_USAGE) decides a board
+        // material map's layout.
+        BiFunction<String, Integer, Texture> load = (key, usage) -> {
+            boolean color = color(usage);
             var image = data instanceof RigidGlb.Data glb ? glb.images.get(key) : null;
             if (image == null) { return external.apply(key, color); }
-            return cache.computeIfAbsent((color ? "color:" : "data:") + key, ignored -> {
+            var map = image.encoded() == null ? GpuMaterialMaps.modelMap(new File(image.file()), usage, textures) : null;
+            return cache.computeIfAbsent((color ? "color:" : "data:") + key + (map == null ? "" : map.suffix()), ignored -> {
                 Texture texture;
-                if (image.encoded() == null) {
+                if (map != null) {
+                    texture = GpuColorTexture.create(map.pixels(), true, color);
+                } else if (image.encoded() == null) {
                     var file = new com.badlogic.gdx.files.FileHandle(image.file());
                     texture = color ? GpuColorTexture.create(file, true) : GpuColorTexture.createData(file, true);
                 } else if (color) {
@@ -37,21 +45,22 @@ final class ModelTextures {
                 return texture;
             });
         };
-        var colors = new HashSet<String>();
+        var usages = new HashMap<String, Integer>();
         // Decode first, so an invalid image cannot strand meshes inside a partially constructed Model.
         for (var material : data.materials) {
             if (material.textures == null) { continue; }
             for (var texture : material.textures) {
-                boolean color = color(texture.usage);
-                if (color) { colors.add(texture.fileName); }
-                load.apply(texture.fileName, color);
+                usages.putIfAbsent(texture.fileName, texture.usage);
+                load.apply(texture.fileName, texture.usage);
             }
         }
         if (data instanceof RigidGlb.Data glb) {
             glb.surfaces.values().stream().map(RigidGlb.Surface::map).filter(java.util.Objects::nonNull)
-                  .forEach(key -> load.apply(key, false));
+                  .forEach(key -> load.apply(key, GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE));
+            glb.surfaces.values().stream().map(RigidGlb.Surface::relief).filter(java.util.Objects::nonNull)
+                  .forEach(relief -> load.apply(relief.map(), GpuMaterialMaps.HEIGHT_USAGE));
         }
-        Model model = new Model(data, key -> load.apply(key, colors.contains(key)));
+        Model model = new Model(data, key -> load.apply(key, usages.getOrDefault(key, ModelTexture.USAGE_UNKNOWN)));
         // glTF permits one source image in both a color and a data role. Each role needs its own GPU storage.
         for (var source : data.materials) {
             if (source.textures == null) { continue; }
@@ -68,13 +77,23 @@ final class ModelTextures {
                     default -> 0;
                 };
                 var attribute = material.get(TextureAttribute.class, type);
-                if (attribute != null) { attribute.textureDescription.texture = load.apply(texture.fileName, color(texture.usage)); }
+                if (attribute != null) { attribute.textureDescription.texture = load.apply(texture.fileName, texture.usage); }
             }
         }
         if (data instanceof RigidGlb.Data glb) {
             model.materials.forEach(material -> material.set(new GpuLinearColors()));
-            glb.surfaces.forEach((id, surface) -> model.getMaterial(id).set(new GpuModelMaterial(
-                  surface.roughness(), surface.metallic(), surface.map() == null ? null : load.apply(surface.map(), false))));
+            glb.surfaces.forEach((id, surface) -> {
+                var material = model.getMaterial(id);
+                var relief = surface.relief();
+                material.set(new GpuModelMaterial(surface.roughness(), surface.metallic(), surface.scatter(),
+                      surface.map() == null ? null : load.apply(surface.map(), GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE),
+                      surface.tint(), surface.glow(), surface.board(), relief == null ? new float[4]
+                            : new float[] { relief.depthU(), relief.depthV(), relief.minimumLayers(), relief.maximumLayers() }));
+                // The heightmap is the material's bump texture (GpuModelMaterial).
+                if (relief != null) {
+                    material.set(TextureAttribute.createBump(load.apply(relief.map(), GpuMaterialMaps.HEIGHT_USAGE)));
+                }
+            });
             glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
                   new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
                   new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));

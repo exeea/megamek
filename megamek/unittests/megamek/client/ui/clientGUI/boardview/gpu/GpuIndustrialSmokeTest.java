@@ -82,8 +82,9 @@ class GpuIndustrialSmokeTest {
                         if (material.id.equals("fan")) {
                             assertSame(fan, material.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture,
                                   "All fans share one small asset-owned texture");
-                            assertEquals(ColorAttribute.Diffuse | TextureAttribute.Diffuse, material.getMask(),
-                                  "Opaque fan panels remain eligible for the static prop batch");
+                            // Its finish (GpuModelMaterial) is one of the attributes the prop batch takes.
+                            assertEquals(ColorAttribute.Diffuse | TextureAttribute.Diffuse | GpuModelMaterial.TYPE,
+                                  material.getMask(), "Opaque fan panels remain eligible for the static prop batch");
                         }
                     }
                     int fanIndices = 0;

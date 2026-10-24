@@ -44,7 +44,7 @@ vec3 biomeSoilNormal(MaterialProjection p, vec3 face, float mixer) {
 }
 
 void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight, float sand,
-      float deckMud, float region, inout vec3 color, inout vec3 normal, inout float cavity, inout float roughness,
+      float deckMud, float region, inout vec3 color, inout vec3 normal, inout float cavity, inout Finish finish,
       inout float grass, inout vec3 bounce, out float pool, out float damp) {
     pool = 0.0; damp = 0.0;
     // Capture every quad derivative before any spatial return/branch. Projection already contains world XYZ.
@@ -59,7 +59,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     vec4 cover, fringe;
     float tundra;
     biomeCoverage(world, 14.0, length(abs(worldDx.xy) + abs(worldDy.xy)), cover, fringe, tundra);
-    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, grass, bounce); }
+    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, finish, grass, bounce); }
     if (family(4.0)) return;
     cover.yzw *= min(3.0, 1.0 / max(dot(cover.yzw, vec3(1.0)), .0001));
     // Broad reach on level ground connects shore patches. On a draining face retain the graded coverage;
@@ -112,6 +112,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float amount = materialWeights(vec4(1.0 - fringe.x, fringe.x, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
         color = mix(color, mix(earth, crop, canopy * planted * .95), amount);
+        finish = mixFinish(finish, planarFinish(u_biomeSoilLayer, projection.top, projection.topGradient, u_biomeSoilTile,
+              broad), amount);
         if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
             vec3 soilNormal = upNormal(biomePlanar(u_biomeSoilLayer + 1.0, projection, broad, true).rgb, face);
             soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
@@ -173,7 +175,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         // Saturated peat is porous and fibrous, not a continuous glossy water coating. Moss and duckweed
         // retain their rough surface; only the exposed pool mask below receives the water BRDF.
         float peatRoughness = mix(.80, .72, quick) + (grain - .5) * .06;
-        roughness = mix(roughness, mix(peatRoughness, .93, max(hummock, algae * water)), wetland);
+        finish.roughness = mix(finish.roughness, mix(peatRoughness, .93, max(hummock, algae * water)), wetland);
+        coverFinish(finish, wetland);
         // Low hummocks alter the shading normal without moving the shared picking/support surface.
         float bumpT = clamp((wet - .45) / (.64 - .45), 0.0, 1.0);
         vec2 bumpGradient = wetness.yz * (.23 * 6.0 * bumpT * (1.0 - bumpT) / (.64 - .45));
@@ -218,7 +221,9 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
             vec3 detail;
             vec2 surface = packedTopSurface(u_mudMaterial.x, uv, detail);
             color = mix(color, mud.rgb, amount);
-            roughness = sqrt(mix(roughness * roughness, surface.x * surface.x, amount));
+            float roughness = sqrt(mix(finish.roughness * finish.roughness, surface.x * surface.x, amount));
+            finish = mixFinish(finish, packedTopFinish(u_mudMaterial.x, uv), amount);
+            finish.roughness = roughness;
             cavity = mix(cavity, surface.y, amount);
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                 normal = normalize(mix(normal, upNormal(detail, face), amount * terrainNormalDetail));

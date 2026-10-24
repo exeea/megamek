@@ -106,7 +106,7 @@ class GpuSamplerBudgetSmokeTest {
               "Reach the volcanic terrain programs: " + used.keySet());
         assertTrue(used.keySet().stream().anyMatch(program -> program.contains("ambientOcclusionFlag")),
               "Reach the programs with ambient occlusion: " + used.keySet());
-        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_roughnessLayers", "u_magmaMaps", "u_terrainData", "u_roadData", "u_environmentLut")) {
+        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_surfaceLayers", "u_magmaMaps", "u_terrainData", "u_roadData", "u_environmentLut")) {
             assertTrue(used.keySet().stream().anyMatch(program -> program.contains(feature)),
                   "Reach the material-array consumer: " + feature);
         }

@@ -33,6 +33,20 @@ uniform float u_normalMaps;
 // Stored in glTF occlusionTexture (whose standard red channel remains valid).
 uniform sampler2D u_ambientTexture;
 #endif
+#ifdef modelSurfaceFlag
+// The plant material's finish (GpuModelMaterial, from its .tres): roughness, metallic and scattering over its map, and
+// its emission map's tint and constant glow.
+uniform vec4 u_modelSurface;
+uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
+uniform vec3 u_modelEmission, u_modelGlow;
+uniform float u_modelBoard; // 1 for a board material's .tres, 0 for the GLB's own material
+#endif
+#ifdef emissiveTextureFlag
+uniform sampler2D u_emissiveTexture;
+#endif
+#ifdef emissiveColorFlag
+uniform vec4 u_emissiveColor;
+#endif
 #ifdef blendedFlag
 coverageIn float v_opacity;
 #ifdef alphaTestFlag
@@ -66,7 +80,6 @@ void main() {
 #ifdef diffuseTextureFlag
     diffuse = texture(u_diffuseTexture, v_diffuseUV);
 #endif
-    vec3 tissue = diffuse.rgb;
     // How much of the surface is leaves, which scatter light around, rather than bark, cactus or snow.
     float leaves = abs(u_foliage - 1.0) < .5 ? 1.0 : 0.0;
 #ifdef impostorFlag
@@ -182,39 +195,51 @@ void main() {
     if (u_clay > .5) albedo = toLinear(vec3(.52));
     albedo = wetAlbedo(albedo, u_wetness * (1.0 - snow) * .2);
     albedo = materialReflectance(albedo);
+    // Godot's emission: the map times its tint, plus the constant glow.
     vec3 emission = vec3(0.0);
-    if (u_foliage > 2.5 && u_clay < .5) {
-        // The authored atlas already separates skin, lips, gills/pores and spore bodies. Emission follows those
-        // surfaces at every model LOD, including scatter; bark-like stems keep their natural opaque shading.
-#ifdef diffuseTextureFlag
-        vec2 panel = step(vec2(.5), v_diffuseUV);
-        float lip = panel.x * (1.0 - panel.y);
-        float gills = (1.0 - panel.x) * panel.y;
-        float spore = panel.x * panel.y;
-        float grain = smoothstep(toLinear(vec3(.16)).r, toLinear(vec3(.62)).r, tissue.r);
-        float lamella = pow(smoothstep(toLinear(vec3(.16)).r, toLinear(vec3(.49)).r, tissue.r), 3.0);
-        emission = vec3(1.0, .31, .085) * lip * (.06 + .48 * grain * grain)
-              + mix(vec3(.8, .07, .20), vec3(1.0, .35, .16), lamella) * gills * (.015 + .38 * lamella)
-              + vec3(.48, .06, .15) * spore * grain * .035;
+#if defined(emissiveTextureFlag) && defined(diffuseTextureFlag) && defined(emissiveColorFlag)
+    emission = texture(u_emissiveTexture, v_diffuseUV).rgb * u_emissiveColor.rgb;
+#elif defined(emissiveTextureFlag) && defined(diffuseTextureFlag)
+    emission = texture(u_emissiveTexture, v_diffuseUV).rgb;
+#elif defined(emissiveColorFlag)
+    emission = u_emissiveColor.rgb;
 #endif
-        if (u_foliage > 3.5) emission = diffuse.rgb * 1.3;
-        float breath = .94 + .06 * sin(u_rainTime * .65 + dot(v_cloudPosition.xy, vec2(.073, .051)));
-        emission *= breath;
-    }
+#ifdef modelSurfaceFlag
+    emission = emission * u_modelEmission + u_modelGlow;
+#endif
+    // Untextured mycelium is no board material: it glows its own vertex colour.
+    if (u_foliage > 3.5) emission = diffuse.rgb * 1.3;
+    // Fungal tissue breathes: its glow swells and fades slowly across a colony.
+    if (u_foliage > 2.5) emission *= .94 + .06 * sin(u_rainTime * .65 + dot(v_cloudPosition.xy, vec2(.073, .051)));
+    if (u_clay > .5) emission = vec3(0.0);
 #ifdef lightingFlag
+    // A plant material of the GLB's own and an impostor card (its plant's baked bark and leaves) take their role's
+    // response. Leaves pass their scattering through as thin tissue (below); solid bodies wrap it past the terminator.
+    float roughness = mix(mix(.90, .95, snow), surface.g, leaves), metallic = 0.0, scatter = surface.b, wrap = 0.0;
 #ifdef impostorMaterialFlag
-    float roughness = surface.g;
-#else
-    float roughness = mix(mix(.90, .95, snow), surface.g, leaves);
+    roughness = surface.g;
 #endif
+#if defined(modelSurfaceFlag) && !defined(impostorFlag)
+    // A board material's finish, as its .tres gives it.
+    if (u_modelBoard > .5) {
+        vec3 finish = vec3(1.0);
+#ifdef diffuseTextureFlag
+        if (u_modelSurface.w > .5) finish = texture(u_modelSurfaceMap, v_diffuseUV).rgb;
+#endif
+        scatter = u_modelSurface.z * finish.r;
+        roughness = u_modelSurface.x * finish.g;
+        metallic = u_modelSurface.y * finish.b;
+        wrap = (1.0 - leaves) * clamp(scatter, 0.0, 1.0);
+    }
+#endif
+    roughness = clamp(roughness, MIN_ROUGHNESS, 1.0);
+    metallic = clamp(metallic, 0.0, 1.0);
+    scatter = clamp(scatter, 0.0, 1.0);
 #ifndef impostorMaterialFlag
     // A branch card or impostor carries its crown's envelope normal, about which the leaves it stands for face every
     // way: widen the authored lobe by that spread, as specular antialiasing widens it by a pixel's normal variance.
     // Real leaf geometry and the pilot's baked source normals keep their authored roughness.
     if (proxy) roughness = sqrt(sqrt(min(pow(roughness, 4.0) + CROWN_NORMAL_VARIANCE, 1.0)));
-#endif
-#if defined(normalTextureFlag) && !defined(ambientTextureFlag)
-    roughness = .65;
 #endif
     float film = (1.0 - snow) * u_wetness * .15;
     vec3 view = -viewDirection();
@@ -232,6 +257,8 @@ void main() {
     // Bark and snow scatter a broad reflection, as does a crown's card (widened above); real leaves keep their
     // authored lobe. Rain smooths bark and leaves; separately marked snow keeps its dry response like the ground.
     Surface plant = opaqueSurface(albedo, face, geometric, roughness, film, visibility);
+    metallicShare(plant, metallic);
+    plant.scatter = wrap;
 #if defined(impostorFlag) && !defined(impostorMaterialFlag)
     // A card's leaves face every way about its crown: each side takes the light that reaches it.
     plant.geometric = face;
@@ -242,9 +269,9 @@ void main() {
     plant.visibility = surfaceVisibility();
 #else
 #ifdef impostorMaterialFlag
-    float transmitted = clamp(surface.b, 0.0, 1.0);
+    float transmitted = scatter;
 #else
-    float transmitted = leaves * clamp(surface.b, 0.0, 1.0);
+    float transmitted = leaves * scatter;
 #endif
     // Actual thin tissue reflects on the visible side and transmits from the opposite side (thinTransmission).
     // Canopy occlusion attenuates the incoming sky alone; the leaf cavity map also its reflection.

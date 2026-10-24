@@ -799,7 +799,7 @@ class GpuTerrainRealismSmokeTest {
                   : "TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,";
             result.add(new Variant("diagnostic-no-material-maps", null, Map.of(
                   "terrain-materials.glsl", functionBody(materials, evaluator,
-                        "return TerrainMaterial(vec3(.2), face, 1.0, .5, vec3(0.0), .85, 0.0);"),
+                        "return TerrainMaterial(vec3(.2), face, 1.0, .5, Finish(.85, 0.0, 0.0, vec3(0.0)), 0.0);"),
                   "terrain-magma.glsl", functionBody(GpuShaderSource.readDisk("terrain-magma.glsl"),
                         "vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy)", """
                               if (map == MAGMA_COLOR) return vec4(.2, .2, .2, 1.0);
@@ -861,7 +861,7 @@ class GpuTerrainRealismSmokeTest {
             materialProbe(result, "ordinary-material", Map.of("terrain-materials.glsl",
                   functionBody(GpuShaderSource.readDisk("terrain-materials.glsl"),
                         "TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, vec3 world, vec3 face,",
-                        "return TerrainMaterial(vec3(.2), face, 1.0, .5, vec3(0.0), .92, 0.0);")));
+                        "return TerrainMaterial(vec3(.2), face, 1.0, .5, Finish(.92, 0.0, 0.0, vec3(0.0)), 0.0);")));
             report.append("Ordinary-material bypasses the full ordinary evaluator, retaining volcanic evaluation. ")
                   .append("Neutral height/normal/cavity also change height competition and downstream lighting; ")
                   .append("this is a family-work ablation, not isolated texture bandwidth.\n");

@@ -32,6 +32,8 @@ final class GpuCloudShadow extends Attribute {
               + (diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture) ? "#define linearTextureFlag\n" : "")
               + (renderable.material.has(GpuLinearColors.TYPE) ? "#define linearColorsFlag\n" : "")
               + (renderable.material.has(GpuModelMaterial.TYPE) ? "#define modelSurfaceFlag\n" : "")
+              + (renderable.material.has(GpuModelMaterial.TYPE) && renderable.material.has(TextureAttribute.Bump)
+                    ? "#define modelReliefFlag\n" : "")
               + (RigidGlb.colourSlotted(renderable.meshPart.mesh.getVertexAttributes()) ? "#define colourSlotsFlag\n" : "")
               + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
                     ? "#define environmentLightingFlag\n" : "")

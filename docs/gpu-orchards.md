@@ -44,5 +44,5 @@ shared across parts and LODs through the existing texture cache.
 Assets live in the sibling `mm-data` repository:
 
 - `data/models/board/orchard-*.glb`: twelve models, three LOD nodes per file.
-- `data/models/board/textures/vegetation/orchard/orchard-*.png`: six opaque
+- `data/models/board/textures/vegetation/orchard/orchard-*_albedo.png`: six opaque
   1254×1254 atlases with canopy, leaf, bark and fruit panels.

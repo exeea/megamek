@@ -756,6 +756,7 @@ class GpuTuningPanelSmokeTest {
                 hud.click("tuning-defaults");
                 assertEquals(1, BoardGeometry.tuning().hexScale(), NEAR);
                 assertTrue(hud.tuning.normalMaps());
+                assertTrue(hud.tuning.terrainParallax());
                 for (UnitFamilyScale family : UnitFamilyScale.values()) {
                     assertEquals(family.defaultUnitScale, family.UNIT_SCALE, NEAR, family.label);
                 }

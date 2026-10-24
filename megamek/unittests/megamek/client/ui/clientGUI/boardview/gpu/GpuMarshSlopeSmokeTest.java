@@ -161,7 +161,7 @@ class GpuMarshSlopeSmokeTest {
         String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
         assertTrue(sculpt.contains(result), "The diagnostic must read the completed material");
         String probe = sculpt.replace(result,
-              "vec3 result = vec3(dielectricRoughness(film, roughness), biomePool, biomeDamp > .27 ? 4.0 : 0.0);");
+              "vec3 result = vec3(dielectricRoughness(film, finish.roughness), biomePool, biomeDamp > .27 ? 4.0 : 0.0);");
         assertTrue(manager.apply(Map.of("terrain-sculpt.frag", probe)).success());
         try (var surface = new GpuSceneTestOutput()) {
             surface.draw(terrain, camera.camera, false);

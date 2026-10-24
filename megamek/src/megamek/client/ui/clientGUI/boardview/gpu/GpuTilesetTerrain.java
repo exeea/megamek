@@ -92,7 +92,7 @@ final class GpuTilesetTerrain {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
             if (space) { continue; }
             if (face.finish() == BoardSurface.Finish.BANK || face.finish() == BoardSurface.Finish.BED) {
-                opaque.accept(material(assets.material(rock != null ? rock : "terrain/classic/water_bed")),
+                opaque.accept(classic(assets, rock != null ? rock : "terrain/classic/water_bed"),
                       mesh -> bank(mesh, tile, face, false));
                 continue;
             }
@@ -101,7 +101,7 @@ final class GpuTilesetTerrain {
             opaque.accept(material(region == null ? null : region.getTexture()),
                   mesh -> artTriangle(mesh, coords, face, region, normals));
             if (face.finish() == BoardSurface.Finish.SHORE) {
-                Material sand = material(assets.material(rock != null ? rock : "terrain/classic/sand"));
+                Material sand = classic(assets, rock != null ? rock : "terrain/classic/sand");
                 sand.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
                       new DepthTestAttribute(GL20.GL_LEQUAL, false));
                 opaque.accept(sand, mesh -> bank(mesh, tile, face, true));
@@ -110,7 +110,7 @@ final class GpuTilesetTerrain {
         for (BoardSurface.Face face : surface.top()) { bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
         for (BoardSurface.Face face : surface.walls()) {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
-            opaque.accept(material(assets.material(side(tile.surface(), face.finish()))), mesh -> wall(mesh, face));
+            opaque.accept(classic(assets, side(tile.surface(), face.finish())), mesh -> wall(mesh, face));
         }
         if (deck != null && !BoardBridge.guideway(tile)) {
             Material material = material(deck.getTexture());
@@ -403,6 +403,11 @@ final class GpuTilesetTerrain {
         mesh.triangle(topVertex(face.a(), coords, region).setNor(normals.getOrDefault(face.a(), Vector3.Z)),
               topVertex(face.b(), coords, region).setNor(normals.getOrDefault(face.b(), Vector3.Z)),
               topVertex(face.c(), coords, region).setNor(normals.getOrDefault(face.c(), Vector3.Z)));
+    }
+
+    /** A classic board material with its finish (its .tres, GpuAssets.finish). */
+    private static Material classic(GpuAssets assets, String name) {
+        return assets.finish(name, material(assets.material(name)));
     }
 
     /** One fixed id: equal materials share one draw in their chunk layer. */

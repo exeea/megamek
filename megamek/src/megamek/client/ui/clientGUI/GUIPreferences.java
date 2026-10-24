@@ -338,6 +338,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_SPECULAR_ANTI_ALIASING = "BoardSpecularAntiAliasing";
     /** Whether the 3D board shades surfaces with their materials' normal maps. */
     public static final String BOARD_NORMAL_MAPS = "BoardNormalMaps";
+    /** Whether the 3D board's sculpted terrain takes its materials' heightmap parallax. */
+    public static final String BOARD_TERRAIN_PARALLAX = "BoardTerrainParallax";
     /** Whether the 3D board darkens the sky light in creases by screen-space ambient occlusion. */
     public static final String BOARD_AMBIENT_OCCLUSION = "BoardAmbientOcclusion";
     /** The 3D board's UI scale, a choice of its Tuning panel: the share (0.5 to 1) of the scale the window sets. */
@@ -909,6 +911,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_ANTI_ALIASING, "OFF");
         store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
         store.setDefault(BOARD_NORMAL_MAPS, true);
+        store.setDefault(BOARD_TERRAIN_PARALLAX, true);
         store.setDefault(BOARD_AMBIENT_OCCLUSION, false);
         store.setDefault(BOARD_UI_SCALE, 1f);
         store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
@@ -1996,6 +1999,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardNormalMaps(boolean enabled) {
         store.setValue(BOARD_NORMAL_MAPS, enabled);
+    }
+
+    /** Whether the 3D board's terrain parallax is on. */
+    public boolean getBoardTerrainParallax() {
+        return store.getBoolean(BOARD_TERRAIN_PARALLAX);
+    }
+
+    public void setBoardTerrainParallax(boolean enabled) {
+        store.setValue(BOARD_TERRAIN_PARALLAX, enabled);
     }
 
     /** Whether the 3D board's ambient occlusion is on. */

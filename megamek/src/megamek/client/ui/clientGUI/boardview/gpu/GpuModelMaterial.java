@@ -1,25 +1,51 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.Arrays;
+
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 
-/** Authored glTF surface parameters. The model library owns the optional linear G-roughness/B-metalness map. */
+/**
+ * A model's finish (RigidGlb.Surface): roughness, metallic and subsurface scattering factors over an optional map
+ * (R scattering, G roughness, B metallic; the model library owns it), the linear tint of its emission map with its
+ * constant glow, and the parallax of its heightmap, which is the material's bump texture (TextureAttribute.Bump: its
+ * own attribute type, so a program compiled with the parallax, modelReliefFlag, is never reused for a model without).
+ */
 final class GpuModelMaterial extends Attribute {
     static final long TYPE = register("boardModelSurface");
+    private static final float[] WHITE = { 1, 1, 1 }, BLACK = new float[3];
     final float roughness;
     final float metallic;
+    final float scatter;
     final Texture map;
+    final float[] tint;
+    final float[] glow;
+    /** A board material's .tres gave it; otherwise the GLB's own glTF material did. */
+    final boolean board;
+    /** Depth along U and V in UV units; the deep parallax's minimum and maximum layers, 0 for one step. */
+    final float[] relief;
 
     GpuModelMaterial(float roughness, float metallic, Texture map) {
+        this(roughness, metallic, 0, map, WHITE, BLACK, false, new float[4]);
+    }
+
+    GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
+          boolean board, float[] relief) {
         super(TYPE);
         this.roughness = roughness;
         this.metallic = metallic;
+        this.scatter = scatter;
         this.map = map;
+        this.tint = tint.clone();
+        this.glow = glow.clone();
+        this.board = board;
+        this.relief = relief.clone();
     }
 
     static void register(DefaultShader shader) {
@@ -27,7 +53,41 @@ final class GpuModelMaterial extends Attribute {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var surface = attributes.get(GpuModelMaterial.class, TYPE);
-                target.set(id, surface.roughness, surface.metallic, surface.map == null ? 0f : 1f);
+                target.set(id, surface.roughness, surface.metallic, surface.scatter, surface.map == null ? 0f : 1f);
+            }
+        });
+        shader.register("u_modelEmission", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var surface = attributes.get(GpuModelMaterial.class, TYPE);
+                target.set(id, surface.tint[0], surface.tint[1], surface.tint[2]);
+            }
+        });
+        shader.register("u_modelRelief", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                float[] relief = attributes.get(GpuModelMaterial.class, TYPE).relief;
+                target.set(id, relief[0], relief[1], relief[2], relief[3]);
+            }
+        });
+        shader.register("u_modelHeight", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var height = attributes.get(TextureAttribute.class, TextureAttribute.Bump);
+                if (height != null) { target.set(id, height.textureDescription); }
+            }
+        });
+        shader.register("u_modelBoard", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, attributes.get(GpuModelMaterial.class, TYPE).board ? 1f : 0f);
+            }
+        });
+        shader.register("u_modelGlow", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var surface = attributes.get(GpuModelMaterial.class, TYPE);
+                target.set(id, surface.glow[0], surface.glow[1], surface.glow[2]);
             }
         });
         shader.register("u_modelSurfaceMap", new BaseShader.LocalSetter() {
@@ -63,7 +123,7 @@ final class GpuModelMaterial extends Attribute {
     }
 
     @Override
-    public Attribute copy() { return new GpuModelMaterial(roughness, metallic, map); }
+    public Attribute copy() { return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief); }
 
     @Override
     protected boolean equals(Attribute other) { return compareTo(other) == 0; }
@@ -72,6 +132,11 @@ final class GpuModelMaterial extends Attribute {
     public int hashCode() {
         int result = 31 * super.hashCode() + Float.floatToIntBits(roughness);
         result = 31 * result + Float.floatToIntBits(metallic);
+        result = 31 * result + Float.floatToIntBits(scatter);
+        result = 31 * result + Arrays.hashCode(tint);
+        result = 31 * result + Arrays.hashCode(glow);
+        result = 31 * result + Boolean.hashCode(board);
+        result = 31 * result + Arrays.hashCode(relief);
         return 31 * result + (map == null ? 0 : map.getTextureObjectHandle());
     }
 
@@ -81,6 +146,11 @@ final class GpuModelMaterial extends Attribute {
         var surface = (GpuModelMaterial) other;
         int order = Float.compare(roughness, surface.roughness);
         if (order == 0) { order = Float.compare(metallic, surface.metallic); }
+        if (order == 0) { order = Float.compare(scatter, surface.scatter); }
+        if (order == 0) { order = Arrays.compare(tint, surface.tint); }
+        if (order == 0) { order = Arrays.compare(glow, surface.glow); }
+        if (order == 0) { order = Boolean.compare(board, surface.board); }
+        if (order == 0) { order = Arrays.compare(relief, surface.relief); }
         if (order == 0) {
             order = Integer.compare(map == null ? 0 : map.getTextureObjectHandle(),
                   surface.map == null ? 0 : surface.map.getTextureObjectHandle());

@@ -87,38 +87,38 @@ class GpuMaterialLodSmokeTest {
             }
         }
         var sculpt = target.resolve("textures/terrain/surfaces");
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        // Only these five ordinary roles participate. Unrelated authored maps may have different resolutions.
+        // Only these five ordinary roles appear in the scene; every factor is Godot's default 1, so each role's
+        // roughness is its ORM map alone. Unrelated authored maps may have different resolutions.
         try (var files = java.nio.file.Files.list(sculpt)) {
-            for (var file : files.filter(path -> path.toString().endsWith(".json")).toList()) {
-                var entry = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(file.toFile());
-                entry.remove(List.of("roughness", "roughness_map"));
-                mapper.writeValue(file.toFile(), entry);
+            for (var file : files.filter(path -> path.toString().endsWith(".tres")).toList()) {
+                String text = java.nio.file.Files.readString(file);
+                java.nio.file.Files.writeString(file, text.replaceAll("(?m)^roughness = .*$", "roughness = 1.0"));
             }
         }
         var names = List.of("grass", "rock", "scree", "granite-contact", "soil-contact");
         for (int role = 0; role < names.size(); role++) {
             String name = names.get(role);
-            var color = new BufferedImage(512, 512, BufferedImage.TYPE_INT_ARGB);
-            var roughness = new BufferedImage(512, 512, BufferedImage.TYPE_INT_RGB);
+            assertTrue(java.nio.file.Files.exists(sculpt.resolve(name + ".tres")), "The actual grass/rock material role exists: " + name);
+            var color = new BufferedImage(512, 512, BufferedImage.TYPE_INT_RGB);
+            var height = new BufferedImage(512, 512, BufferedImage.TYPE_BYTE_GRAY);
+            var shipped = javax.imageio.ImageIO.read(sculpt.resolve(name + "_orm.png").toFile());
+            // The ORM map keeps its occlusion (R) and metallic (B); its roughness (G) becomes the varying review map.
+            var orm = new BufferedImage(512, 512, BufferedImage.TYPE_INT_RGB);
             // Distinct two-axis dyadic checker patterns. Every mip is binary until one averaging step
             // makes it uniformly 1/2; later levels average that same constant (no cumulative UNORM error).
             int xShift = 4 + role % 3, yShift = 4 + (role + 1) % 3;
             for (int y = 0; y < 512; y++) {
                 for (int x = 0; x < 512; x++) {
                     int value = (((x >> xShift) ^ (y >> yShift) ^ (role / 3)) & 1) * 255;
-                    color.setRGB(x, y, (value << 24) | 0x789064);
-                    roughness.setRGB(x, y, value * 0x010101);
+                    color.setRGB(x, y, 0x789064);
+                    height.getRaster().setSample(x, y, 0, value);
+                    orm.setRGB(x, y, (shipped.getRGB(x, y) & 0xff00ff) | value << 8);
                 }
             }
-            assertTrue(javax.imageio.ImageIO.write(color, "png", sculpt.resolve(name + ".png").toFile()));
-            assertTrue(javax.imageio.ImageIO.write(roughness, "png", sculpt.resolve(name + "-review-roughness.png").toFile()));
-            var definition = sculpt.resolve(name + ".json");
-            assertTrue(java.nio.file.Files.exists(definition), "The actual grass/rock material role exists: " + name);
-            var entry = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(definition.toFile());
-            entry.put("tile", 12 + role * 4).put("roughness", .93)
-                  .put("roughness_map", name + "-review-roughness.png");
-            mapper.writeValue(definition.toFile(), entry);
+            assertTrue(javax.imageio.ImageIO.write(color, "png", sculpt.resolve(name + "_albedo.png").toFile()));
+            assertTrue(javax.imageio.ImageIO.write(height, "png", sculpt.resolve(name + "_heightmap.png").toFile()));
+            assertTrue(javax.imageio.ImageIO.write(orm, "png", sculpt.resolve(name + "_orm.png").toFile()));
+            BoardMaterialFiles.loose(target.resolve("textures"), "terrain/surfaces/" + name, 512, 12 + role * 4);
         }
     }
 
@@ -135,7 +135,7 @@ class GpuMaterialLodSmokeTest {
                   "The probe must read the actual completed ordinary material: " + anchor);
         }
         sculpt = sculpt.replace(begin, begin + "\n    vec3 reviewBase = vec3(0.0);\n")
-              .replace(boundary, "        reviewBase = vec3(roughness, materialHeight, grass);\n" + boundary)
+              .replace(boundary, "        reviewBase = vec3(finish.roughness, materialHeight, grass);\n" + boundary)
               .replace(output, "fragColor = natural && (ground || cliff)"
                     + " ? vec4(reviewBase, ground ? .25 : .5) : vec4(0.0, 0.0, 0.0, 1.0);");
         var changed = manager.apply(Map.of("terrain-sculpt.frag", sculpt));
@@ -359,8 +359,9 @@ class GpuMaterialLodSmokeTest {
             // Ground fines and exposed granite may have similar pigment. Read the final production role
             // weights instead of requiring an authored color gain, a light direction or a display contrast.
             // The third channel also verifies that the bound cover and bedrock use distinct map layers.
-            String emission = "result.emission = vec3(0.0);";
-            String roles = "result.emission = vec3(weights.w, weights.x, layers.z != layers.x ? 1.0 : 0.0);";
+            String emission = "materialFinish(layers.z, tiles.z, weights.w, pd, broad, fungus, false), weights);";
+            String roles = emission
+                  + "\n    result.finish.emission = vec3(weights.w, weights.x, layers.z != layers.x ? 1.0 : 0.0);";
             assertTrue(material.contains(emission), "The probe reads completed natural-material roles");
             String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
             String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
@@ -368,7 +369,7 @@ class GpuMaterialLodSmokeTest {
             assertTrue(sculpt.contains(result) && sculpt.contains(output), "The role probe uses the final scene writer");
             // Ground rock is opaque. An exact alpha tag excludes boulders, cliffs, clear color and other props;
             // alpha is not scaled, while linearPixels restores the production RGB storage units once.
-            sculpt = sculpt.replace(result, "vec3 result = emission;")
+            sculpt = sculpt.replace(result, "vec3 result = finish.emission;")
                   .replace(output, "fragColor = vec4(result, ground ? .25 : 1.0);");
             assertTrue(manager.apply(Map.of("terrain-sculpt.frag", sculpt,
                   "terrain-materials.glsl", material.replace(emission, roles))).success());

@@ -54,11 +54,11 @@ class GpuConcreteProjectionSmokeTest {
         String source = System.getProperty("megamek.gpu.concreteProjectionSource", "");
         String concrete = source.isBlank() ? GpuShaderSource.read("terrain-concrete.glsl") : Files.readString(Path.of(source))
               .replace("mapTexel(u_sculptLayers.w + 1.0,", "normalTexel(u_sculptLayers.w + 1.0,");
-        String roughness = source.isBlank() ? "#define SCULPT_MATERIAL_COUNT 1\n"
-              + GpuShaderSource.read("terrain-roughness.glsl") : "";
+        String roughness = source.isBlank() ? "#define FINISH_COUNT 1\n#define ROAD_FINISH 1\n"
+              + GpuShaderSource.read("material-finish.glsl") + GpuShaderSource.read("finish-arrays.glsl") : "";
         String call = source.isBlank()
               ? "concreteSlab(world, dFdx(world), dFdy(world), face, vec3(u_direction, 0.0), local.y, 12.0 - local.y, "
-                    + "albedo, normal, occlusion, cavity, roughness);"
+                    + "albedo, normal, occlusion, cavity, finish); roughness = finish.roughness;"
               : "concreteSlab(world, face, vec3(u_direction, 0.0), local.y, 12.0 - local.y, "
                     + "albedo, normal, occlusion, cavity);";
         var shader = GpuGlsl.compile("concrete-projection-test", """
@@ -85,11 +85,13 @@ class GpuConcreteProjectionSmokeTest {
                   pixelMetres = .04;
                   vec3 albedo = vec3(0.0), normal = face;
                   float occlusion = 1.0, cavity = 1.0, roughness = .9;
+                  FINISH_DECLARATION
                   CONCRETE_CALL
                   vec3 detail = vec3(dot(normal, across), dot(normal, down), dot(normal, face));
                   fragColor = vec4(u_mode == 2 ? vec3(roughness) : u_mode == 0 ? albedo : detail * .5 + .5, 1.0);
               }
-              """.replace("CONCRETE_CALL", call));
+              """.replace("CONCRETE_CALL", call)
+              .replace("FINISH_DECLARATION", source.isBlank() ? "Finish finish = Finish(.9, 0.0, 0.0, vec3(0.0));" : ""));
         try {
             Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -98,14 +100,19 @@ class GpuConcreteProjectionSmokeTest {
             maps.color().bind(0);
             maps.data().bind(3);
             noise.bind(1);
-            if (source.isBlank()) { assets.sculptRoughness(List.of("cast")).maps().bind(2); }
+            if (source.isBlank()) {
+                assets.finishArrays(List.of("terrain/surfaces/cast"), 1).maps().bind(2);
+            }
             shader.bind();
             shader.setUniformi("u_terrainLayers", 0);
             if (shader.hasUniform("u_terrainData")) { shader.setUniformi("u_terrainData", 3); }
             shader.setUniformi("u_rainNoise", 1);
             if (source.isBlank()) {
-                shader.setUniformi("u_roughnessLayers", 2);
-                shader.setUniformf("u_sculptRoughness[0]", -1, -1);
+                shader.setUniformi("u_surfaceLayers", 2);
+                shader.setUniformf("u_finishSurface[0]", .9f, 0, 0, -1);
+                // The probe outputs roughness alone; the compiler may drop the emission it never shows.
+                if (shader.hasUniform("u_finishEmission[0]")) { shader.setUniformf("u_finishEmission[0]", 0, 0, 0, -1); }
+                if (shader.hasUniform("u_finishGlow[0]")) { shader.setUniformf("u_finishGlow[0]", 0, 0, 0); }
             }
             for (float slope : new float[] { 0, .5f, 1 }) {
                 shader.setUniformf("u_slope", slope);
@@ -125,16 +132,14 @@ class GpuConcreteProjectionSmokeTest {
                 }
             }
             if (source.isBlank()) {
-                // Exercise the real slab implementation, including its absent-property fallback.
+                // Exercise the real slab implementation with uniform authored roughness, fully rough included.
                 shader.setUniformi("u_mode", 2);
-                for (float scalar : new float[] { -1, .15f, .85f }) {
-                    shader.setUniformf("u_sculptRoughness[0]", scalar, -1);
+                for (float scalar : new float[] { .15f, .85f, 1 }) {
+                    shader.setUniformf("u_finishSurface[0]", scalar, 0, 0, -1);
                     quad.render(shader, GL20.GL_TRIANGLE_STRIP);
                     byte[] response = ScreenUtils.getFrameBufferPixels(false);
-                    float expected = scalar < 0 ? .9f : scalar;
                     for (int channel = 0; channel < 3; channel++) {
-                        assertEquals(expected * 255, response[channel] & 255, 1,
-                              "Cast slab must respect its authored scalar or preserve the legacy fallback");
+                        assertEquals(scalar * 255, response[channel] & 255, 1, "Cast slab must render its authored roughness");
                     }
                 }
             }

@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -11,7 +10,6 @@ import java.util.Random;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -29,7 +27,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.IntArray;
-import megamek.common.Configuration;
 import megamek.common.board.Coords;
 
 /**
@@ -486,8 +483,7 @@ final class GpuGroundCover implements Disposable {
             int detail = chunk.nearPixels >= 280 ? 1 : 0;
             if (chunk.nearPixels > START_PIXELS) {
                 if (turfTexture == null && !chunk.turf.isEmpty()) {
-                    turfTexture = GpuColorTexture.create(new FileHandle(new File(Configuration.dataDir(),
-                          "models/board/textures/vegetation/bank-turf.png")), true);
+                    turfTexture = GpuColorTexture.create(() -> GpuMaterialMaps.color("vegetation/bank-turf"), true, true);
                     turfTexture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
                     turfTexture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
                 }

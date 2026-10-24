@@ -85,12 +85,23 @@ final class GpuRoads {
             return transition != 0 ? transition : Float.compare(lift, ((Surface) other).lift);
         }
     }
+    /** A road material's own draw: its surface map, and its place in {@link #MATERIALS}, which finds its finish. */
     static final class Maps extends TextureAttribute {
         static final long TYPE = register("roadMaterialMaps");
         static { TextureAttribute.Mask |= TYPE; }
-        Maps(Texture texture) { super(TYPE, texture); }
+        final int material;
+        Maps(Texture texture, int material) {
+            super(TYPE, texture);
+            this.material = material;
+        }
         @Override
-        public Maps copy() { return new Maps(textureDescription.texture); }
+        public Maps copy() { return new Maps(textureDescription.texture, material); }
+        @Override public int hashCode() { return 31 * super.hashCode() + material; }
+        @Override
+        public int compareTo(Attribute other) {
+            int order = super.compareTo(other);
+            return order != 0 || type != other.type ? order : Integer.compare(material, ((Maps) other).material);
+        }
     }
     static final class Soil extends FloatAttribute {
         static final long TYPE = register("roadSoil");
@@ -139,6 +150,7 @@ final class GpuRoads {
             this(outer, inner, end, wheels, join, 0, false);
         }
     }
+    /** {@code repeat} is a multiple of its material's own repeat (GpuAssets.roadCoverage, GpuAssets.sculptCoverage). */
     record Patch(Area shape, String texture, Color tint, float repeat, float lift, Fade fade) {
         boolean blended() { return fade != null; }
         float endFade() { return fade == null ? 0 : fade.end(); }
@@ -406,8 +418,9 @@ final class GpuRoads {
         if (paved && !deck) {
             Area verge = road.footprint(BoardRoad.SHOULDER);
             verge.subtract(road.footprint(-FEATHER));
+            // Snow and sand verges fade into the same ground beside the road, so they keep its scale.
             patches.add(new Patch(verge, snow ? "snow" : sand ? "sand" : "roads/gravel", Color.WHITE,
-                  snow ? 3 : sand ? 1.4f : 1, .025f, new Fade(BoardRoad.SHOULDER, -.2f, endFade)));
+                  1, .025f, new Fade(BoardRoad.SHOULDER, -.2f, endFade)));
         }
         patches.add(new Patch(core, texture, tint, repeat, SURFACE_LIFT, null));
         if (!tail.isEmpty()) {
@@ -703,8 +716,9 @@ final class GpuRoads {
         return new MaskData(new BoardScene.Pixels(image).compact(), x, y, w, h);
     }
 
+    /** {@code coverage} widens the patch's world-space texture repeat with its texture (GpuAssets.coverage). */
     static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
-          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat) {
+          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat, float coverage) {
         Map<Vector3, Vector3> normals = new HashMap<>();
         for (var face : flat ? List.<BoardSurface.Face>of() : surface.groundFaces()) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
@@ -714,7 +728,7 @@ final class GpuRoads {
             }
         }
         for (var t : triangles) {
-            float repeat = BoardRelief.detailMetres(patch.repeat());
+            float repeat = BoardRelief.detailMetres(patch.repeat()) * coverage;
             float lift = patch.lift() * BoardGeometry.hexScale();
             Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
             Vector3 a = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();

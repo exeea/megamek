@@ -27,8 +27,8 @@ Hummocks change shading normals, not physical terrain or the board's water flags
 Fields and reed marshes retain their theme's natural surface family, usually
 grass. Mud and quicksand classify as dirt. Cultivation fades before a steep face;
 the bank retains its grass/soil mantle and normal relief.
-`terrain-biome.glsl` borrows `textures/terrain/surfaces/earth.png` and
-`earth-normal.png` for soil color/height and normal/occlusion. On horizontal surfaces,
+`terrain-biome.glsl` borrows the `terrain/surfaces/earth` material's
+colour/height and normal/occlusion layers for soil. On horizontal surfaces,
 colour mixes two repeats of the earth map; relief reads only the first. Steep faces
 blend the two wall projections instead. Peat, moss,
 saturation and pools are procedural combinations of those shared materials.
@@ -53,8 +53,8 @@ Runtime cutouts live in `mm-data/data/models/board/textures/vegetation`:
 
 | Files | Use |
 | --- | --- |
-| `marsh-sedge.png` | Sedge/cattail clumps on bent crossed cards, reduced to a camera-facing card at distance. |
-| `crop-row-side.png`, `crop-row-front.png`, `crop-row-top.png` | Seven distinct wheat variants, with matching upright and overhead views. |
+| `marsh-sedge_albedo.png` | Sedge/cattail clumps on bent crossed cards, reduced to a camera-facing card at distance. |
+| `crop-row-side_albedo.png`, `crop-row-front_albedo.png`, `crop-row-top_albedo.png` | Seven distinct wheat variants, with matching upright and overhead views. |
 | `crop-row.json` | Pixel-space stem bases and crown centers for registering the three views. |
 
 Crop strips repeat seven broad-leaf wheat variants with large ripe golden ears.

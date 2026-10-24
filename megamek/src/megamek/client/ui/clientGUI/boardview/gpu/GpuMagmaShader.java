@@ -20,18 +20,24 @@ final class GpuMagmaShader extends Attribute {
     /** The set's colour array plus normal/surface/heat numerical array, owned by GpuAssets. */
     private final GpuAssets.MaterialArrays maps;
     private final float emissionScale;
+    /** GpuAssets.coverage of the set's maps: a wider texture repeats less often at the same texel density. */
+    private final float coverage;
     /** The lava's field: its currents and bank distance for the melt, and how close a cooled bank is to it. */
     private final GpuWaterShader.Field field;
 
-    private GpuMagmaShader(int mode, GpuAssets.MaterialArrays maps, GpuWaterShader.Field field, float emissionScale) {
+    private GpuMagmaShader(int mode, GpuAssets.MaterialArrays maps, GpuWaterShader.Field field, float emissionScale,
+          float coverage) {
         super(TYPE);
         this.mode = mode;
         this.maps = maps;
         this.emissionScale = emissionScale;
+        this.coverage = coverage;
         this.field = mode == CRUST ? null : field;
     }
 
-    GpuMagmaShader withField(GpuWaterShader.Field field) { return new GpuMagmaShader(mode, maps, field, emissionScale); }
+    GpuMagmaShader withField(GpuWaterShader.Field field) {
+        return new GpuMagmaShader(mode, maps, field, emissionScale, coverage);
+    }
 
     boolean flowing() { return mode == LAVA || mode == FALL; }
 
@@ -53,11 +59,12 @@ final class GpuMagmaShader extends Attribute {
     }
 
     static Material material(GpuAssets assets, int mode, GpuWaterShader.Field field) {
-        var maps = assets.magma(mode == LAVA || mode == FALL);
+        boolean molten = mode == LAVA || mode == FALL;
+        var maps = assets.magma(molten);
         if (maps == null) { return null; }
-        float emissionScale = mode == LAVA || mode == FALL ? assets.lavaEmission().scale() : 0;
-        return new Material("magma:" + mode, new GpuMagmaShader(mode, maps, field, emissionScale),
-              IntAttribute.createCullFace(GL20.GL_NONE));
+        float emissionScale = molten ? assets.lavaEmission().scale() : 0;
+        return new Material("magma:" + mode, new GpuMagmaShader(mode, maps, field, emissionScale,
+              assets.coverage(GpuAssets.magmaName(molten))), IntAttribute.createCullFace(GL20.GL_NONE));
     }
 
     static void register(DefaultShader shader, Texture fallback) {
@@ -75,6 +82,13 @@ final class GpuMagmaShader extends Attribute {
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var magma = attributes.get(GpuMagmaShader.class, TYPE);
                 if (magma != null) { target.set(id, magma.emissionScale); }
+            }
+        });
+        shader.register("u_magmaCoverage", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var magma = attributes.get(GpuMagmaShader.class, TYPE);
+                target.set(id, magma != null ? magma.coverage : 1f);
             }
         });
         shader.register("u_magmaMode", new BaseShader.LocalSetter() {

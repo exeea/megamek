@@ -93,7 +93,7 @@ blade density fades at a distance, so both earth faces still read from above.
 
 At visible grass scales, `GpuBankTurf` adds dense crowns and hanging fringes to both
 contours. Its six authored silhouettes occupy a 3-by-2 transparent atlas at
-`mm-data/data/models/board/textures/vegetation/bank-turf.png`. This atlas is the
+`mm-data/data/models/board/textures/vegetation/bank-turf_albedo.png`. This atlas is the
 authoring input; there is no verified regeneration command.
 Its current Git blob is `3b49c883552538a9190d09d7dfdbab1d7866be39`, recorded in
 mm-data commit `3d469cb44960722c8530fe25bc7066982f79fdb6`. Stable placement varies

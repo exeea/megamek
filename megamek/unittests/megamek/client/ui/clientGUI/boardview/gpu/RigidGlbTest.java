@@ -303,6 +303,54 @@ class RigidGlbTest {
     }
 
     @Test
+    void aBoardAlbedoMakesTheMaterialItsWholeGodotMaterial() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        var previous = megamek.common.Configuration.dataDir();
+        megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
+        try {
+            Path folder = Files.createDirectories(directory.resolve("data/models/board/textures/test"));
+            var image = new java.awt.image.BufferedImage(2, 1, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            image.setRGB(0, 0, 0x808080);
+            image.setRGB(1, 0, 0x404040);
+            for (String map : List.of("albedo", "orm", "normal", "heightmap", "emission")) {
+                BoardMaterialFiles.write(folder, "panel_" + map + ".png", image);
+            }
+            BoardMaterialFiles.tres(folder, "panel", "orm", "normal", "heightmap", "ao", "metallic=0.5",
+                  "metallic_texture=ExtResource( 2 )", "metallic_texture_channel=2", "emission_enabled=true",
+                  "emission=Color(1, 0.5, 0, 1)", "emission_energy_multiplier=3.0", "emission_texture=ExtResource( 5 )",
+                  "heightmap_scale=2.0", "heightmap_deep_parallax=true", "heightmap_min_layers=4",
+                  "heightmap_max_layers=16", "heightmap_flip_tangent=true");
+            Path tres = folder.resolve("panel.tres");
+            Files.writeString(tres, Files.readString(tres).replace("[resource]",
+                  "[ext_resource path=\"panel_emission.png\" type=\"Texture\" id=5]\n[resource]"));
+            var document = document();
+            document.putArray("images").addObject().put("uri", "data/models/board/textures/test/panel_albedo.png");
+            document.putArray("textures").addObject().put("source", 0);
+            var pbr = (ObjectNode) document.get("materials").get(0).get("pbrMetallicRoughness");
+            pbr.put("roughnessFactor", .3).putObject("baseColorTexture").put("index", 0);
+            var data = (RigidGlb.Data) RigidGlb.load(file(document, false));
+            var surface = data.surfaces.get("paint");
+            // The .tres, not the GLB's factor, is the finish: its ORM map carries the factors.
+            assertEquals(1, surface.roughness());
+            assertEquals(1, surface.metallic());
+            assertEquals(1, surface.scatter(), "The finish map's red channel holds the (disabled, so zero) scattering");
+            assertEquals(folder.resolve("panel_orm.png").toString(), surface.map());
+            assertArrayEquals(new float[] { 3, 3, 3 }, surface.tint(), "Godot's add operator: the map times the energy");
+            assertArrayEquals(new float[] { 3, 3 * GpuColor.linear(.5f), 0 }, surface.glow(), 1e-6f,
+                  "Godot's add operator: the colour times the energy, decoded from sRGB");
+            assertEquals(new RigidGlb.Relief(folder.resolve("panel_heightmap.png").toString(), -.02f, .02f, 4, 16),
+                  surface.relief(), "Godot's depth is heightmap_scale / 100 in UV, flipped along the tangent");
+            var roles = new java.util.HashMap<Integer, String>();
+            data.materials.first().textures.forEach(texture -> roles.put(texture.usage, texture.fileName));
+            assertEquals(folder.resolve("panel_normal.png").toString(), roles.get(ModelTexture.USAGE_NORMAL));
+            assertEquals(folder.resolve("panel_orm.png").toString(), roles.get(ModelTexture.USAGE_AMBIENT));
+            assertEquals(folder.resolve("panel_emission.png").toString(), roles.get(ModelTexture.USAGE_EMISSIVE));
+            for (String key : roles.values()) { assertTrue(data.images.containsKey(key), key); }
+            assertTrue(data.images.containsKey(surface.relief().map()));
+        } finally { megamek.common.Configuration.setDataDir(previous); }
+    }
+
+    @Test
     void retainsLinearEmissionWithoutAddingItToOrdinaryMaterials() throws Exception {
         var document = document();
         assertNull(RigidGlb.load(file(document, false)).materials.first().emissive,
@@ -545,7 +593,7 @@ class RigidGlbTest {
         var snow = RigidGlb.loadLods(source, root.toPath());
         com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial crown = null;
         for (var material : snow.getFirst().materials) { if (material.id.equals("canopy-snow-cutout")) { crown = material; } }
-        assertTrue(crown.textures.first().fileName.replace('\\', '/').contains("textures/vegetation/conifer-snow-cutout.png"));
+        assertTrue(crown.textures.first().fileName.replace('\\', '/').contains("textures/vegetation/conifer-snow-cutout_albedo.png"));
         float[] bareVertices = bare.getFirst().meshes.first().vertices, snowVertices = snow.getFirst().meshes.first().vertices;
         assertEquals(bareVertices.length, snowVertices.length, "The winter form keeps the bare geometry");
         boolean tinted = false;

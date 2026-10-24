@@ -100,6 +100,11 @@ final class GpuIceShader extends FloatAttribute {
                 target.set(id, BoardRelief.metres(1));
             }
         });
+        shader.register("u_iceCoverage", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, assets.ice().coverage());
+            }
+        });
         shader.register("u_iceLevel", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 target.set(id, BoardGeometry.level());

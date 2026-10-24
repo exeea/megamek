@@ -357,14 +357,16 @@ stronger of authored and nuclear severity. Disabling combat scars does not hide 
 the appearance clears A without erasing combat history.
 
 The editable source is `mm-data/tools/materials/terrain/surfaces/scorched/scorched.ptex`.
-Its procedural deposits, cinders, ash and fused fissures export with stock Material
-Maker 1.7 through `tools/materials/export.py terrain/surfaces/scorched/scorched.ptex`.
+Its procedural deposits, cinders, ash and fused fissures export as a Godot 4 Standard
+material ([board materials](gpu-board-materials.md)) with stock Material Maker, or through
+`tools/materials/export.py terrain/surfaces/scorched/scorched.ptex`.
 The authoring-only `preview_s` control previews severity; exports always contain
-the fixed material basis. The two 512-square maps cover a 64-metre square, wider
-than a hex. Deposits span metres while the re-authored grain remains sub-metre:
+the fixed material basis. Its 512-square maps cover a 64-metre square, wider
+than a hex. Deposits span metres while the re-authored grain remains sub-metre.
+The GPU receives them as two maps:
 
-- `scorched.png`: sRGB colour in RGB, linear height in A.
-- `scorched-normal.png`: linear normal XY in RG, **roughness in B**, AO in A.
+- Colour/height: sRGB albedo in RGB, linear height in A.
+- Normal: linear normal XY in RG, **roughness in B**, AO in A (`GpuMaterialMaps.NORMAL_ROUGHNESS`).
   Authored scorch and mud store roughness instead of normal Z; their shaders reconstruct Z.
 
 `scorched()` in `terrain-damage-mask.glsl` evaluates one shared linear palette and
@@ -447,21 +449,24 @@ family. The shared pair takes two texture units (see
 their own anisotropic filtering, because libGDX's `setAnisotropicFilter` only addresses
 `GL_TEXTURE_2D`.
 
-Sculpt albedo textures store height in alpha; their tangent-normal partners store
-ambient occlusion in alpha. Each material's `<name>.json` gives its repeat in metres.
+Each material is a Godot 4 Standard material ([board materials](gpu-board-materials.md));
+on the GPU its colour carries height in alpha and its tangent normal carries ambient
+occlusion in alpha. `textures/materials.json` gives each material's repeat in metres at
+its catalogued width; exported wider, it repeats over proportionally more ground.
 The Material Maker project `mm-data/tools/materials/terrain/surfaces/<name>/<name>.ptex`
 generates a material's maps from editable primitives and any required `sources/` images.
-`python tools/materials/export.py`, run from the mm-data root, exports every project;
-an optional path relative to `tools/materials` exports one project. The script uses
-the official Material Maker CLI. Gradle `stageData` mirrors the maps
+`python tools/materials/export.py`, run from the mm-data root, exports every project
+with Material Maker's stock Godot 4 Standard target; an optional path relative to
+`tools/materials` exports one project. Gradle `stageData` mirrors the maps
 into `megamek/data`. Their height, normal and AO are artistic estimates, not measured
 scans.
 
 Concrete planting pits use `tree-pit-mulch` for their interiors and the existing
 authored concrete for their kerbs. The mulch project exposes bark-chip placement,
-palette and relief controls, reuses the soil-contact source for the soil substrate,
-and exports registered colour/height and normal/AO maps. Its metadata sets a 1 m
-repeat, 1.5 cm shading relief and scalar roughness of 0.92. The shader applies no
+palette and relief controls, takes its dark soil substrate from its own photographic source,
+and exports registered colour/height and normal/AO maps. The catalogue gives its 1 m
+repeat, its 1.5 cm relief shapes its normal, and its material's `roughness` of 0.92
+is its scalar roughness. The shader applies no
 separate brown palette or fixed kerb brightness boost. Bare stone beneath snow caps
 likewise keeps its authored granite pigment; snow coverage and per-rock population
 variation remain separate material effects.
@@ -481,10 +486,17 @@ its normal gradient by 2.37, rather than exaggerating the same relief over a lon
 distance.
 Slope and height-aware blending determine how cover gives way to mantle, rock and scree.
 
-Dirt repeats at 5 m. Exposed grass banks use `soil-contact` rather than dirt: cohesive
-eroded subsoil, not loose gravel, repeating at 4 m with 9.5 cm of estimated relief.
-Sandstone repeats at 12 m with 16 cm of estimated relief and `granite-contact` at 8 m
-with 8 cm; both have broad rock planes and discontinuous fractures. `sand`, `grass`
+Dirt repeats at 5 m with 6 cm of estimated relief: dry compact soil with embedded and loose
+stones of 1 to 10 cm. Exposed grass banks use `soil-contact` rather than dirt: dry crumbly
+loam with small clods and stones and no direction (parallel rills combed every bank), repeating
+at 12 m with 12 cm of estimated relief.
+Sandstone repeats at 12 m with 16 cm of estimated relief, in broad rock planes and discontinuous
+fractures. `granite-contact` (cliff walls) repeats at 12 m with 16 cm: pale karst limestone in
+jointed blocks with water streaks and lichen; the `rock` tops (12 m, 42 cm) are the same limestone
+as a weathered plateau of slabs with grass and soil in its fissures, and `scree` is its talus of
+angular blocks. Level bedrock of the families whose wall is `granite-contact` reads the `rock`
+map instead (`u_flatRock`), as the cliff's joints stand upright. Dirt, soil-contact, grass,
+rock, granite-contact, scree and the mulch's soil come from photographic studies. `sand`, `grass`
 and `scree` repeat at 6, 4 and 4 metres with 2.5, 2.5 and 10 cm of relief; lunar has
 its own `lunar-scree`. See [terrain realism](gpu-terrain-realism.md) for the visual
 references and acceptance rules.
@@ -552,7 +564,7 @@ colour, surface properties and normals; its normal gradients follow the rotation
 scale and wind stretch. Solid crust bends its domain within a few repeats to reduce
 the visible plate grid while retaining one material sample and its matching Jacobian.
 The solid magma source uses varied broken crust, quiet cold faces and sparse narrow
-fissures instead of a few repeated large slabs. Its four aligned maps are exported by
+fissures instead of a few repeated large slabs. Its aligned maps are exported by
 the Material Maker project `mm-data/tools/materials/terrain/lava/crust`.
 
 `GpuSurfaceScaleSmokeTest` captures 14 materials at identical overhead, oblique and
@@ -825,10 +837,10 @@ resource boundaries described here.
 `mm-data/tools/materials/terrain/surfaces/mud/mud.ptex` is the shared procedural mud
 material for MUD ground hexes and BRIDGE_MUD on natural arches. Its author controls
 cover clod size, basin size and coverage, pigment, roughness, repeat size and relief.
-Stock Material Maker exports it with
-`tools/materials/export.py terrain/surfaces/mud/mud.ptex`. The two 512-square maps
-repeat every 64 metres (wider than two hexes): `mud.png` stores sRGB colour and linear height;
-`mud-normal.png` uses the packed normal XY/roughness/AO format described above.
+Stock Material Maker exports it as a Godot 4 Standard material, also with
+`tools/materials/export.py terrain/surfaces/mud/mud.ptex`. Its 512-square maps
+repeat every 64 metres (wider than two hexes). On the GPU they become colour with height,
+and the normal XY/roughness/AO format described above.
 
 Both surfaces sample those same maps at world coordinates. Muddy ground continuing
 onto an arch therefore keeps the same pigment, clods and shallow pools across the

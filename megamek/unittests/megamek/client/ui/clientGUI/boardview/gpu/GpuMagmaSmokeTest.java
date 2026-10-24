@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.FloatBuffer;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,7 +21,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -67,16 +65,13 @@ class GpuMagmaSmokeTest {
         var roots = new ArrayList<Path>();
         for (int index = 0; index < 4; index++) {
             Path root = directory.resolve("source-" + index);
-            Path lava = Files.createDirectories(root.resolve("models/board/textures/terrain/lava"));
+            Path textures = root.resolve("models/board/textures");
             // The final repeat changes coverage to zero while retaining exactly the same emitted light.
             int alpha = index == 3 ? 0 : 255;
-            for (var map : Map.of("", 0xff000000, "-normal", 0xff8080ff,
-                  "-surface", 0x0080ccff, "-heat", (alpha << 24) | 0x004080c0).entrySet()) {
-                var image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
-                for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) { image.setRGB(x, y, map.getValue()); }
-                assertTrue(ImageIO.write(image, "png", lava.resolve("lava" + map.getKey() + ".png").toFile()));
-            }
-            Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":" + (index == 3 ? 2 : index * 2) + "}");
+            BoardMaterialFiles.relief(textures, "terrain/lava/lava", filled(0xff000000), filled(0xff8080ff),
+                  filled(0x0080ccff));
+            BoardMaterialFiles.heat(textures, "terrain/lava/lava", filled((alpha << 24) | 0x004080c0),
+                  index == 3 ? 2 : index * 2);
             roots.add(root);
         }
         var failure = new AtomicReference<Throwable>();
@@ -264,20 +259,21 @@ class GpuMagmaSmokeTest {
                       terrainMaterialLod(world, face);
                       pixelMetres = max(length(dFdx(world)), length(dFdy(world)));
                       farDetail = 0.0;
-                      vec3 color = vec3(.2), normal = face, bounce = vec3(0.0), emission;
+                      vec3 color = vec3(.2), normal = face, bounce = vec3(0.0);
                       float cavity = 1.0, height = .5, grass = 0.0, sand = 0.0;
-                      float response = 0.0, rainCover = 0.0, roughness, volcanic;
+                      float response = 0.0, rainCover = 0.0, volcanic;
+                      Finish finish = Finish(.9, 0.0, 0.0, vec3(0.0));
                       vec4 weights;
                       // The substrate case deliberately includes zero transfer and the actual exposed-sand field.
                       float sediment = any(lessThan(abs(u_coverFamilies - 2.0), vec4(.5)))
                             && u_sculptFamily != 2.0 && world.x < 0.0 ? 1.0 : 0.0;
                       blendCovers(world, face, v_diffuseUV.x, v_diffuseUV.y, .6, .5, sediment, .4, .6, .5,
                             color, normal, cavity, height, grass, sand, bounce, response, rainCover,
-                            emission, roughness, volcanic, weights);
+                            finish, volcanic, weights);
                       int channel = int(gl_FragCoord.y) % 5;
                       if (channel == 0) fragColor = vec4(color, height);
                       else if (channel == 1) fragColor = vec4(normal * .5 + .5, cavity);
-                      else if (channel == 2) fragColor = vec4(emission, roughness);
+                      else if (channel == 2) fragColor = vec4(finish.emission, finish.roughness);
                       else if (channel == 3) fragColor = weights;
                       else fragColor = vec4(volcanic, grass, sand, rainCover);
                   }
@@ -469,6 +465,13 @@ class GpuMagmaSmokeTest {
     }
 
     /** A zero-weight plateau meets positive coverage inside a derivative quad, not on its even-pixel edge. */
+    /** A 2-pixel square of one ARGB colour. */
+    private static BufferedImage filled(int argb) {
+        var image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) { image.setRGB(x, y, argb); }
+        return image;
+    }
+
     private static Mesh paletteQuad(int scenario, float span) {
         float[] vertices = new float[12 * 14];
         int offset = 0;

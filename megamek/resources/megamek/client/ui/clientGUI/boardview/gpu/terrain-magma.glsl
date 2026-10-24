@@ -8,6 +8,9 @@ const float MAGMA_HEAT = 3.0; // molten: linear emission RGB, original heat A; c
 #ifdef magmaEmissionMapFlag
 uniform float u_magmaEmissionScale;
 #endif
+// GpuAssets.coverage: a wider texture covers more ground per repeat at the same texel density. Only the texture's world
+// scale widens; slopes and relief stay physical.
+uniform float u_magmaCoverage;
 uniform sampler2D u_magmaField; // the lava's liquid field: R signed bank distance, BA world XY current
 uniform vec4 u_magmaFieldMap;   // world XY to field UV; zero without a field
 // Hex widths either side of a lava bank over which the melt chills into a skin and the cooled bank still glows.
@@ -26,6 +29,8 @@ vec3 magmaEmission(vec2 heat, float strength);
 #endif
 float magmaRepeatMetres();
 float magmaDistantRoughness();
+// The metres one repeat of the actual texture covers.
+float magmaTileMetres() { return magmaRepeatMetres() * u_magmaCoverage; }
 
 vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(u_magmaMaps, vec3(uv, map - 1.0), dx, dy); }
 
@@ -52,7 +57,7 @@ Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, bool relief) {
     if (terrainSurfaceDetail > 0.0) surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
     if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
         // Relief and normals share the authored height, but vanish before distant shading skips their maps.
-        vec2 parallax = eye.xy / max(abs(eye.z), .35) * surface.a * .1 * (12.0 / magmaRepeatMetres())
+        vec2 parallax = eye.xy / max(abs(eye.z), .35) * surface.a * .1 * (12.0 / magmaTileMetres())
               * terrainNormalDetail;
         if (relief && dot(parallax, parallax) > 0.0) {
             uv = magmaRelief(uv, dx, dy, surface, parallax);
@@ -115,7 +120,7 @@ struct MagmaProjection {
 };
 
 MagmaProjection magmaProjectionFor(vec3 world) {
-    vec3 position = world / magmaRepeatMetres();
+    vec3 position = world / magmaTileMetres();
     mat3 domain = magmaDomain(position);
     return MagmaProjection(position, dFdx(position), dFdy(position), domain);
 }

@@ -38,14 +38,21 @@ void groundFilm(inout vec3 normal, float puddle) {
     }
 }
 
-vec3 groundLighting(vec3 albedo, vec3 normal, vec3 geometric, float wet, float response, float puddle, float roughness, float occlusion) {
+// A negative roughness, for a material without one, is shaded matte (surface-lighting.glsl).
+vec3 groundLighting(vec3 albedo, vec3 normal, vec3 geometric, float wet, float response, float puddle, Finish finish,
+      float occlusion) {
     albedo = materialReflectance(albedo);
 #ifdef lightingFlag
     normal = shadingNormal(normal, geometric, -viewDirection());
-    Surface ground = opaqueSurface(albedo, normal, geometric, roughness, wet * mix(response, 1.0, puddle),
+    Surface ground = opaqueSurface(albedo, normal, geometric, finish.roughness, wet * mix(response, 1.0, puddle),
           surfaceVisibility());
+    metallicShare(ground, clamp(finish.metallic, 0.0, 1.0));
+    ground.scatter = clamp(finish.scatter, 0.0, 1.0);
     ground.occlusion = ground.specularOcclusion = occlusion;
+    ground.emission = finish.emission;
     albedo = shadeSurface(ground);
+#else
+    albedo += finish.emission;
 #endif
     return albedo;
 }

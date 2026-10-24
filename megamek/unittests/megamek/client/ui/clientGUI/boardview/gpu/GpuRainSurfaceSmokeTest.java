@@ -283,7 +283,7 @@ class GpuRainSurfaceSmokeTest {
             // The blue sky also illuminates dry pigment under PBR, so blue-minus-red cannot identify water.
             // Change only the output expression: the actual wetness, footprint and material coverage stay live.
             String ground = GpuShaderSource.readDisk("terrain-normal.frag");
-            String output = "fragColor = vec4(groundLighting(albedo, normal, geometric, wet, response, puddle, -1.0, 1.0), 1.0);";
+            String output = "fragColor = vec4(groundLighting(albedo, normal, geometric, wet, response, puddle, finish, occlusion), 1.0);";
             assertTrue(ground.contains(output), "The coverage probe must read the production puddle value");
             var changed = manager.apply(Map.of("terrain-normal.frag",
                   ground.replace(output, "fragColor = vec4(vec3(step(.01, puddle)), 1.0);")));

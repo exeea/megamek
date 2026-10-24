@@ -51,7 +51,7 @@ class GpuColorTextureSmokeTest {
             Files.createDirectories(scars);
             // Other brush styles remain the real independent round-impact controls.
             try (var files = Files.list(previous.toPath().resolve("models/board/textures/terrain/damage"))) {
-                for (var file : files.filter(path -> path.toString().endsWith(".png")).toList()) {
+                for (var file : files.filter(path -> path.toString().endsWith(".png") || path.toString().endsWith(".tres")).toList()) {
                     Files.copy(file, scars.resolve(file.getFileName()));
                 }
             }
@@ -67,6 +67,7 @@ class GpuColorTextureSmokeTest {
                 registration.append(']');
             }
             Files.writeString(crops.resolve("crop-row.json"), registration.append('}'));
+            for (String view : List.of("side", "front", "top")) { BoardMaterialFiles.tres(crops, "crop-row-" + view); }
             var compose = GpuBiomeVegetation.class.getDeclaredMethod("cropTextures");
             compose.setAccessible(true);
             int[][] original = null;
@@ -87,7 +88,7 @@ class GpuColorTextureSmokeTest {
                                 }
                             }
                         }
-                        javax.imageio.ImageIO.write(image, "png", crops.resolve("crop-row-" + view + ".png").toFile());
+                        javax.imageio.ImageIO.write(image, "png", crops.resolve("crop-row-" + view + "_albedo.png").toFile());
                     }
                     var textures = (Texture[]) compose.invoke(null);
                     try {
@@ -108,7 +109,7 @@ class GpuColorTextureSmokeTest {
                         for (int x = 32; x < 224; x++) { image.setRGB(x, y, 0xff606060); }
                     }
                     for (String name : List.of("laser-gouge", "ppc-gouge", "ballistic-gouge")) {
-                        javax.imageio.ImageIO.write(image, "png", scars.resolve(name + ".png").toFile());
+                        javax.imageio.ImageIO.write(image, "png", scars.resolve(name + "_albedo.png").toFile());
                     }
                     var damage = new GpuGroundDamage();
                     try {
@@ -593,11 +594,18 @@ class GpuColorTextureSmokeTest {
             try { PixmapIO.writePNG(constant, pixels); } finally { pixels.dispose(); }
             pixels = pattern();
             try { PixmapIO.writePNG(varying, pixels); } finally { pixels.dispose(); }
-            // Exercise the actual owned pair, including its sized storage and compact material indices.
+            FileHandle wide = new FileHandle(directory.resolve("wide.png").toFile());
+            pixels = new Pixmap(4, 4, Pixmap.Format.RGBA8888);
+            pixels.setBlending(Pixmap.Blending.None);
+            pixels.setColor(0x80808080);
+            pixels.fill();
+            try { PixmapIO.writePNG(wide, pixels); } finally { pixels.dispose(); }
+            // Exercise the actual owned pair, including its sized storage and compact material indices. The pair takes
+            // its largest layer's grid (2 by 2), so the constant layer is resized up to it.
             var factory = GpuAssets.class.getDeclaredMethod("repeatingArray", List.class, int.class);
             factory.setAccessible(true);
-            var arrays = (GpuAssets.MaterialArrays) factory.invoke(null,
-                  List.of(constant, constant, varying, varying, gray, gray), 2);
+            var arrays = (GpuAssets.MaterialArrays) factory.invoke(null, List.of(layer(constant), layer(constant),
+                  layer(varying), layer(varying), layer(gray), layer(gray)), 2);
             try (var sample = new Sampler(true)) {
                 arrays.color().bind();
                 assertEquals(GL30.GL_SRGB8_ALPHA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
@@ -607,33 +615,17 @@ class GpuColorTextureSmokeTest {
                       GL11.GL_TEXTURE_INTERNAL_FORMAT), "Numerical storage has no colour transfer");
                 assertEquals(3, arrays.color().getDepth());
                 assertEquals(3, arrays.data().getDepth());
+                assertEquals(2, arrays.color().getWidth(), "The largest layer sets the grid");
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), .21586050, .21586050, .21586050,
                       128.0 / 255, .001, "Only colour RGB is decoded; height remains raw");
                 assertPixel(sample.read(arrays.data(), .5f, .5f, 0, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255,
                       128.0 / 255, .001, "Normal/data layers retain their numerical values");
                 arrays.color().bind();
-                var stored = BufferUtils.newByteBuffer(3 * 4);
+                var stored = BufferUtils.newByteBuffer(3 * 4 * 4);
                 GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, stored);
-                for (int channel = 0; channel < 4; channel++) {
-                    assertEquals(channel == 3 ? 128 : 188, Byte.toUnsignedInt(stored.get(4 + channel)),
-                          "Linear resize stores sRGB byte 188 and independent coverage byte 128");
+                for (int index = 0; index < 4 * 4; index++) {
+                    assertEquals(128, Byte.toUnsignedInt(stored.get(index)), "A uniform layer keeps its bytes when resized");
                 }
-                // Use the same hardware decoder, whose permitted precision need not match CPU sRGB exactly.
-                Pixmap referencePixels = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
-                Texture reference;
-                try {
-                    referencePixels.setBlending(Pixmap.Blending.None);
-                    referencePixels.drawPixel(0, 0, 0xBCBCBC80);
-                    reference = GpuColorTexture.create(referencePixels, false);
-                } finally { referencePixels.dispose(); }
-                try (var referenceSample = new Sampler(false)) {
-                    float[] expected = referenceSample.read(reference, .5f, .5f, 0, 0);
-                    float[] actual = sample.read(arrays.color(), .5f, .5f, 1, 0);
-                    assertPixel(actual, expected[0], expected[1], expected[2], expected[3], 0,
-                          "Resized array and fixed-byte colour texture sample identically");
-                } finally { reference.dispose(); }
-                assertPixel(sample.read(arrays.data(), .5f, .5f, 1, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255,
-                      128.0 / 255, .001, "Numerical resize rounds the independent mean to byte 128");
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 2, 0), .21586050, .21586050, .21586050, 1, .001,
                       "File-decoded one-channel artwork is opaque grayscale");
                 assertPixel(sample.read(arrays.data(), .5f, .5f, 2, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255, 1, .001,
@@ -641,8 +633,38 @@ class GpuColorTextureSmokeTest {
             } finally { arrays.dispose(); }
             assertEquals(0, arrays.color().getTextureObjectHandle(), "Pair disposal releases colour");
             assertEquals(0, arrays.data().getTextureObjectHandle(), "Pair disposal releases data");
-            arrays = (GpuAssets.MaterialArrays) factory.invoke(null, List.of(varying, varying), 2);
+            // Black and white columns widened from 2 to 4 texels by a wider layer: colour resizes in linear light
+            // (0, .25, .75, 1 store sRGB bytes 0, 137, 225, 255), numerical data and coverage in their raw values.
+            arrays = (GpuAssets.MaterialArrays) factory.invoke(null, List.of(layer(varying), layer(varying),
+                  layer(wide), layer(wide)), 2);
             try (var sample = new Sampler(true)) {
+                int[] colour = { 0, 137, 225, 255 }, data = { 0, 64, 191, 255 }, coverage = { 64, 96, 160, 192 };
+                for (boolean isColour : new boolean[] { true, false }) {
+                    (isColour ? arrays.color() : arrays.data()).bind();
+                    var stored = BufferUtils.newByteBuffer(2 * 16 * 4);
+                    GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, stored);
+                    for (int x = 0; x < 4; x++) {
+                        for (int channel = 0; channel < 4; channel++) {
+                            int expected = channel == 3 ? coverage[x] : isColour ? colour[x] : data[x];
+                            assertEquals(expected, Byte.toUnsignedInt(stored.get(x * 4 + channel)),
+                                  (isColour ? "Linear colour" : "Raw data") + " resize, texel " + x + " channel " + channel);
+                        }
+                    }
+                }
+                // Use the same hardware decoder, whose permitted precision need not match CPU sRGB exactly.
+                Pixmap referencePixels = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+                Texture reference;
+                try {
+                    referencePixels.setBlending(Pixmap.Blending.None);
+                    referencePixels.drawPixel(0, 0, 0x89898960);
+                    reference = GpuColorTexture.create(referencePixels, false);
+                } finally { referencePixels.dispose(); }
+                try (var referenceSample = new Sampler(false)) {
+                    float[] expected = referenceSample.read(reference, .5f, .5f, 0, 0);
+                    float[] actual = sample.read(arrays.color(), 1.5f / 4, .5f, 0, 0);
+                    assertPixel(actual, expected[0], expected[1], expected[2], expected[3], 0,
+                          "Resized array and fixed-byte colour texture sample identically");
+                } finally { reference.dispose(); }
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), .5, .5, .5, 128.0 / 255, .001,
                       "Array bilinear filtering decodes before averaging");
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 1), .5, .5, .5, 128.0 / 255, .004,
@@ -651,6 +673,12 @@ class GpuColorTextureSmokeTest {
                       "Numerical mips average raw channels within UNORM8 storage precision");
             } finally { arrays.dispose(); }
         });
+    }
+
+    /** A repeating-array layer of one image, at the dimensions its header declares. */
+    private static GpuAssets.Layer layer(FileHandle file) {
+        int[] size = GpuMaterialMaps.size(file.file());
+        return new GpuAssets.Layer(size[0], size[1], () -> GpuColorTexture.decode(file));
     }
 
     private static Pixmap pattern() {
@@ -723,8 +751,11 @@ class GpuColorTextureSmokeTest {
         });
     }
 
+    private static final List<String> SURFACES = List.of("terrain/surfaces/mapped", "terrain/surfaces/scalar",
+          "terrain/surfaces/rough");
+
     @Test
-    void sculptRoughnessKeepsRawValuesMetadataAndOwnership() {
+    void finishArraysKeepRawValuesMetadataAndOwnership() {
         nativeCheck(() -> {
             var previous = megamek.common.Configuration.dataDir();
             megamek.common.Configuration.setDataDir(directory.toFile());
@@ -732,41 +763,60 @@ class GpuColorTextureSmokeTest {
             int unpack = GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT);
             try (var sample = new Sampler(true)) {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
-                for (String name : List.of("mapped", "scalar", "legacy")) { sculptPair(sculpt, name); }
-                Files.writeString(sculpt.resolve("mapped.json"), """
-                      {"tile":3,"roughness":0.93,"roughness_map":"roughness.png"}
-                      """);
-                Files.writeString(sculpt.resolve("scalar.json"), "{\"tile\":3,\"roughness\":0.27}");
-                Files.writeString(sculpt.resolve("legacy.json"), "{\"tile\":3}");
-                int[] values = { 17, 61, 103, 149, 193, 239 };
-                scalarPng(sculpt.resolve("roughness.png"), 3, 2, values);
+                // The finish layers share the sculpt data array's grid: these (square) sculpt maps take the ORM's 3 x 3.
+                for (String name : List.of("mapped", "scalar", "rough")) { sculptPair(sculpt, name, 3, 3); }
+                // Godot's rule: a varying map is a map (sent with its mean), the factor alone without a map is a scalar,
+                // and the default (roughness 1 over white, metallic 0) is fully rough and dielectric.
+                int[] values = { 17, 61, 103, 149, 193, 239, 127, 0, 254 };
+                roughnessMap(sculpt.resolve("mapped_orm.png"), 3, 3, values);
+                Path mapped = sculpt.resolve("mapped.tres");
+                Files.writeString(mapped, Files.readString(mapped)
+                      + "metallic = 0.5\nmetallic_texture = ExtResource( 2 )\nmetallic_texture_channel = 2\n");
+                Path scalar = sculpt.resolve("scalar.tres");
+                Files.writeString(scalar, Files.readString(scalar).replace("roughness = 1.0", "roughness = 0.27")
+                      .replace("roughness_texture = ExtResource( 2 )\n", "")
+                      .replace("[resource]", "[ext_resource path=\"scalar_emission.png\" type=\"Texture\" id=5]\n[resource]")
+                      + "emission_enabled = true\nemission_energy_multiplier = 2.0\nemission_texture = ExtResource( 5 )\n");
+                var glow = new BufferedImage(3, 3, BufferedImage.TYPE_INT_RGB);
+                glow.setRGB(0, 0, 0xff8000);
+                javax.imageio.ImageIO.write(glow, "png", sculpt.resolve("scalar_emission.png").toFile());
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 8);
-                var material = assets.sculptRoughness(List.of("mapped", "scalar", "legacy"));
+                var material = assets.finishArrays(SURFACES, SURFACES.size());
                 assertEquals(8, GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT), "Odd rows must restore unpack state");
-                assertSame(material, assets.sculptRoughness(List.of("mapped", "scalar", "legacy")));
+                assertSame(material, assets.finishArrays(SURFACES, SURFACES.size()));
+                // The ORM's blue channel is 0 in the mapped material: its metal is uniform, the factor times black.
+                // The finish layers follow the three normal/AO layers in the sculpt data array.
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
-                      new float[] { .93f, 0, .27f, -1, -1, -1 }, material.metadata());
+                      new float[] { 127 / 255f, 0, 0, 3, .27f, 0, 0, -1, 1, 0, 0, -1 }, material.surface(), 1e-6f);
+                org.junit.jupiter.api.Assertions.assertArrayEquals(
+                      new float[] { 0, 0, 0, -1, 2, 2, 2, 4, 0, 0, 0, -1 }, material.tint(), 1e-6f,
+                      "The emission layer follows the surface layers in the one array");
+                org.junit.jupiter.api.Assertions.assertArrayEquals(new float[9], material.glow(), 1e-6f,
+                      "Godot's default emission colour is black");
                 material.maps().bind();
-                assertEquals(GL30.GL_R8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
-                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "Roughness must use compact numerical storage");
+                assertEquals(GL30.GL_RGBA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
+                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "The finish is raw data; emission's sRGB bytes decode in the shader");
                 assertEquals(3, material.maps().getWidth());
-                assertEquals(2, material.maps().getHeight());
-                for (int y = 0; y < 2; y++) {
+                assertEquals(3, material.maps().getHeight());
+                assertSame(assets.sculptArray(List.of("mapped", "scalar", "rough")).data(), material.maps(),
+                      "The finish rides the sculpt data array: no texture unit of its own");
+                assertEquals(5, material.maps().getDepth(), "Three normal/AO layers, one surface and one emission layer");
+                for (int y = 0; y < 3; y++) {
                     for (int x = 0; x < 3; x++) {
                         assertEquals(values[y * 3 + x] / 255.0,
-                              sample.read(material.maps(), (x + .5f) / 3, (y + .5f) / 2, 0, 0)[0], .0006,
+                              sample.read(material.maps(), (x + .5f) / 3, (y + .5f) / 3, 3, 0)[0], .0006,
                               "Raw roughness must not be sRGB-decoded, resized or row-padded");
                     }
                 }
-                assertAuthoredRoughness(material);
-                int handle = material.maps().getTextureObjectHandle();
-                assertTrue(GL11.glIsTexture(handle));
+                assertAuthoredFinish(material);
+                int maps = material.maps().getTextureObjectHandle();
+                assertTrue(GL11.glIsTexture(maps));
                 assets.dispose();
                 assertEquals(0, material.maps().getTextureObjectHandle());
-                assertFalse(GL11.glIsTexture(handle), "The asset owner releases the array");
-                var reloaded = assets.sculptRoughness(List.of("mapped", "scalar", "legacy"));
+                assertFalse(GL11.glIsTexture(maps), "The asset owner releases the array");
+                var reloaded = assets.finishArrays(SURFACES, SURFACES.size());
                 org.junit.jupiter.api.Assertions.assertNotSame(material, reloaded);
-                assertEquals(103 / 255.0, sample.read(reloaded.maps(), 2.5f / 3, .25f, 0, 0)[0], .0006);
+                assertEquals(103 / 255.0, sample.read(reloaded.maps(), 2.5f / 3, .5f / 3, 3, 0)[0], .0006);
             } finally {
                 assets.dispose();
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, unpack);
@@ -775,79 +825,87 @@ class GpuColorTextureSmokeTest {
         });
     }
 
-    /** Use the actual shared shader with provider metadata, including a map and scalar on the same material. */
-    private static void assertAuthoredRoughness(GpuAssets.SculptRoughness material) {
+    /** Use the actual shared shader with provider metadata: an authored map, a scalar and a fully rough default. */
+    private static void assertAuthoredFinish(GpuAssets.FinishArrays material) {
         var quad = GpuAtmosphere.screenQuad();
-        var shader = GpuGlsl.compile("Authored roughness contract", GpuShaderSource.read("atmosphere.vert"),
-              "#version 330 core\n#define SCULPT_MATERIAL_COUNT 3\n"
-                    + GpuShaderSource.read("terrain-roughness.glsl") + """
+        var shader = GpuGlsl.compile("Authored finish contract", GpuShaderSource.read("atmosphere.vert"),
+              "#version 330 core\n#define FINISH_COUNT 3\n#define ROAD_FINISH 3\n" + GpuShaderSource.read("material-finish.glsl")
+                    + GpuShaderSource.read("finish-arrays.glsl") + """
                     out vec4 fragColor;
                     uniform float u_material;
                     void main() {
-                        float roughness = authoredRoughness(u_material, vec2(.5 / 3.0, .25), mat2(0.0), .81);
-                        fragColor = vec4(vec3(roughness), 1.0);
+                        Finish finish = finishTexel(u_material, vec2(.5 / 3.0, .5 / 3.0), mat2(0.0));
+                        fragColor = vec4(finish.roughness, finish.emission.r / 4.0, finish.emission.g / 4.0, 1.0);
                     }
                     """);
         try {
             GpuAtmosphere.screenState();
             material.maps().bind(0);
             shader.bind();
-            shader.setUniformi("u_roughnessLayers", 0);
-            shader.setUniform2fv("u_sculptRoughness[0]", material.metadata(), 0, material.metadata().length);
-            float[] expected = { 17 / 255f, .27f, .81f };
+            shader.setUniformi("u_surfaceLayers", 0);
+            shader.setUniform4fv("u_finishSurface[0]", material.surface(), 0, material.surface().length);
+            shader.setUniform4fv("u_finishEmission[0]", material.tint(), 0, material.tint().length);
+            shader.setUniform3fv("u_finishGlow[0]", material.glow(), 0, material.glow().length);
+            // The scalar's emission map is black but for its first texel: orange, decoded, times the energy 2.
+            float[][] expected = { { 17 / 255f, 0, 0 }, { .27f, .5f, GpuColor.linear(128 / 255f) * .5f }, { 1, 0, 0 } };
             for (int i = 0; i < expected.length; i++) {
                 shader.setUniformf("u_material", i * 2f);
                 quad.render(shader, GL20.GL_TRIANGLES);
                 var actual = BufferUtils.newByteBuffer(4);
                 Gdx.gl.glReadPixels(1, 1, 1, 1, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, actual);
                 for (int channel = 0; channel < 3; channel++) {
-                    assertEquals(expected[i] * 255, Byte.toUnsignedInt(actual.get(channel)), 1,
-                          "Actual shader precedence: authored map, scalar, then legacy fallback");
+                    assertEquals(expected[i][channel] * 255, Byte.toUnsignedInt(actual.get(channel)), 1,
+                          "Actual shader: the authored map, else the scalar; emission its map times its tint");
                 }
             }
         } finally { shader.dispose(); quad.dispose(); }
     }
 
     @Test
-    void sculptRoughnessRejectsAmbiguousOrIncompleteAuthoring() {
+    void finishArraysResampleAndRejectIncompleteAuthoring() {
         nativeCheck(() -> {
             var previous = megamek.common.Configuration.dataDir();
             megamek.common.Configuration.setDataDir(directory.toFile());
             try {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
-                sculptPair(sculpt, "first");
-                sculptPair(sculpt, "second");
-                Files.writeString(sculpt.resolve("first.json"), """
-                      {"tile":3,"roughness_map":"first-roughness.png"}
-                      """);
-                Files.writeString(sculpt.resolve("second.json"), """
-                      {"tile":3,"roughness_map":"second-roughness.png"}
-                      """);
-                scalarPng(sculpt.resolve("first-roughness.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
-                scalarPng(sculpt.resolve("second-roughness.png"), 2, 2, new int[] { 1, 2, 3, 4 });
-                assertRoughnessRejected("no implicit resize");
-                var image = new BufferedImage(3, 2, BufferedImage.TYPE_INT_RGB);
-                image.setRGB(1, 1, 0x204080);
-                javax.imageio.ImageIO.write(image, "png", sculpt.resolve("second-roughness.png").toFile());
-                assertRoughnessRejected("scalar data");
-                image = new BufferedImage(3, 2, BufferedImage.TYPE_USHORT_GRAY);
-                image.getRaster().setSample(1, 1, 0, 32768);
-                javax.imageio.ImageIO.write(image, "png", sculpt.resolve("second-roughness.png").toFile());
-                assertRoughnessRejected("non-indexed PNG8");
-                Files.delete(sculpt.resolve("second-roughness.png"));
-                assertRoughnessRejected("Missing sculpt roughness map");
-                scalarPng(sculpt.resolve("second-roughness.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
-                Files.delete(sculpt.resolve("first-normal.png"));
-                assertRoughnessRejected("first-normal.png");
+                sculptPair(sculpt, "first", 3, 3);
+                sculptPair(sculpt, "second", 2, 2);
+                roughnessMap(sculpt.resolve("first_orm.png"), 3, 3, new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 });
+                roughnessMap(sculpt.resolve("second_orm.png"), 2, 2, new int[] { 1, 2, 3, 4 });
+                // A smaller map takes the largest grid, as the colour arrays resample theirs.
+                var assets = new GpuAssets();
+                try {
+                    var mixed = assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second"), 2);
+                    assertEquals(3, mixed.maps().getWidth());
+                    assertEquals(3, mixed.maps().getHeight());
+                    assertEquals(4, mixed.maps().getDepth(), "Two normal/AO layers, two surface layers, no emission layer");
+                } finally { assets.dispose(); }
+                // Built first by the sculpt arrays, without a road material they could not find: no shifted indices.
+                var built = new GpuAssets();
+                try {
+                    built.sculptArray(List.of("first", "second"));
+                    var error = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                          () -> built.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second",
+                                "roads/asphalt"), 2));
+                    assertTrue(error.getMessage().contains("roads/asphalt"), error.getMessage());
+                } finally { built.dispose(); }
+                Files.delete(sculpt.resolve("second_orm.png"));
+                assertFinishRejected("second_orm.png");
+                roughnessMap(sculpt.resolve("second_orm.png"), 3, 3, new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 });
+                Path first = sculpt.resolve("first.tres");
+                Files.writeString(first, Files.readString(first).replace("roughness = 1.0", "roughness = 1.5"));
+                assertFinishRejected("Invalid roughness");
+                Files.delete(first);
+                assertFinishRejected("first.tres");
             } finally { megamek.common.Configuration.setDataDir(previous); }
         });
     }
 
-    private static void assertRoughnessRejected(String message) {
+    private static void assertFinishRejected(String message) {
         var assets = new GpuAssets();
         try {
             var error = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                  () -> assets.sculptRoughness(List.of("first", "second")));
+                  () -> assets.finishArrays(List.of("terrain/surfaces/first", "terrain/surfaces/second"), 2));
             assertTrue(error.getMessage().contains(message), error.getMessage());
         } finally { assets.dispose(); }
     }
@@ -859,9 +917,9 @@ class GpuColorTextureSmokeTest {
             megamek.common.Configuration.setDataDir(directory.toFile());
             try (var array = new Sampler(true); var texture = new Sampler(false)) {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
-                for (String missing : List.of("none", "earth.png", "earth-normal.png", "earth.json")) {
+                for (String missing : List.of("none", "earth_albedo.png", "earth_heightmap.png", "earth_normal.png",
+                      "earth_orm.png", "earth.tres")) {
                     sculptPair(sculpt, "earth");
-                    Files.writeString(sculpt.resolve("earth.json"), "{\"tile\":3}");
                     if (!missing.equals("none")) { Files.delete(sculpt.resolve(missing)); }
                     var assets = new GpuAssets();
                     try {
@@ -887,19 +945,28 @@ class GpuColorTextureSmokeTest {
         });
     }
 
-    private static void sculptPair(Path sculpt, String name) throws Exception {
-        GpuAssetReloadTest.png(sculpt.resolve(name + ".png"), 0x401080e0);
-        GpuAssetReloadTest.png(sculpt.resolve(name + "-normal.png"), 0x6040c0f0);
+    /** A sculpted material repeating every 3 m: colour 0x1080e0 at height 0x40, the board's normal 0x40c0f0 with AO 0x60. */
+    private static void sculptPair(Path sculpt, String name) throws Exception { sculptPair(sculpt, name, 64, 64); }
+
+    private static void sculptPair(Path sculpt, String name, int width, int height) throws Exception {
+        BoardMaterialFiles.sculpt(sculpt.getParent().getParent(), name, filled(0x401080e0, width, height),
+              filled(0x6040c0f0, width, height), 3);
     }
 
-    private static void scalarPng(Path path, int width, int height, int[] values) throws Exception {
+    private static BufferedImage filled(int argb, int width, int height) {
+        var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) { image.setRGB(x, y, argb); }
+        return image;
+    }
+
+    /** An ORM map of full occlusion whose roughness (G) holds {@code values}. */
+    private static void roughnessMap(Path path, int width, int height, int[] values) throws Exception {
         var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) { image.setRGB(x, y, values[y * width + x] * 0x010101); }
+            for (int x = 0; x < width; x++) { image.setRGB(x, y, 0xff0000 | values[y * width + x] << 8); }
         }
-        assertTrue(javax.imageio.ImageIO.write(image, "png", path.toFile()));
+        javax.imageio.ImageIO.write(image, "png", path.toFile());
     }
-
 
     private static BoardScene.Pixels pixels(int rgba) { return pixels(rgba, 4); }
 

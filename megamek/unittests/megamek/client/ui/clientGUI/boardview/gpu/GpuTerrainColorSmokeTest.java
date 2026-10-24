@@ -69,8 +69,9 @@ class GpuTerrainColorSmokeTest {
         }
         // Only the finished material inputs are replaced. The real sculpt lighting, environment LUT, scene
         // storage, shadows and atmosphere compositor remain in use; no texture or grade can retint the swatch.
-        pigment.append("normal = vec3(0,0,1); roughness = .9; film = 0.0; cavity = 1.0; occlusion = 1.0;\n")
-              .append("bounce = GROUND_ALBEDO; volcanic = 0.0; emission = vec3(0); caustic = 0.0; submerged = 0.0;\n");
+        pigment.append("normal = vec3(0,0,1); film = 0.0; cavity = 1.0; occlusion = 1.0;\n")
+              .append("bounce = GROUND_ALBEDO; volcanic = 0.0; finish = Finish(.9, 0.0, 0.0, vec3(0)); caustic = 0.0;"
+                    + " submerged = 0.0;\n");
         // shadeSurface (surface-shading.glsl) returns the diffuse-only and reflection-only rows; nothing emits here.
         String controls = String.format(Locale.ROOT, """
               if (gl_FragCoord.y < %.1f) return diffuseOnly;

@@ -213,8 +213,9 @@ limitations are recorded in the shader audit.
 ## Assets
 
 The Material Maker projects `mm-data/tools/materials/terrain/lava/crust` and `lava`
-export each material's aligned maps (`<name>.png`, `-normal`, `-surface` and `-heat`),
-with heat kept apart from the basalt reflectance. This is artistic relief, not
+export each material as a Godot 4 `ShaderMaterial` of its preview shader, `lava.gdshader` or
+`crust.gdshader` ([board materials](gpu-board-materials.md#shadermaterials)), with heat kept apart
+from the basalt reflectance as its emission. This is artistic relief, not
 measured photogrammetry. The `lava` project's molten-interior source contains broad irregular thin cooling plates
 separated by connected molten rifts; riverbanks come from the board geometry and
 shore field. The 2026-10-12 replacement removes the dense fiery thread patterns.
@@ -229,19 +230,26 @@ daylight. The bounded disk/falloff model remains an approximation, not exact are
 lighting or dynamic integration of each animated crack. Solid-crust and fungal
 light retain their separate calibrations.
 
-Each material (`crust` and `lava`) has four aligned, repeating 1024px maps in
+Each material (`crust` and `lava`) has aligned, repeating 1024px maps in
 `mm-data/data/models/board/textures/terrain/lava/`. The bake's reference scale is 12 metres.
 Solid crust retains that repeat; flowing lava uses 24 metres for larger readable
-rafts, with normal gradients and motion adjusted to retain their physical scale;
+rafts, with normal gradients and motion adjusted to retain their physical scale.
+Exported wider than 1024 pixels, both repeats widen in proportion (`u_magmaCoverage`);
 the shared world warp softens the regular grid, but recognisable motifs can still
 repeat. The maps are artistic materials, not a physical thermal simulation.
 
 | Map | Channels |
 | --- | --- |
-| `NAME.png` | sRGB basalt albedo, with heat removed |
-| `NAME-normal.png` | Linear tangent normal, U right and V down |
-| `NAME-surface.png` | R height, G perceptual roughness, B cavity AO, A relief UV / 0.1 |
-| `NAME-heat.png` | R emission intensity, GB legacy authored flow (unused by transport), A local fissure glow |
+| `NAME_albedo.png` | sRGB basalt albedo, with heat removed |
+| `NAME_normal.png` | Linear tangent normal, OpenGL convention (the GPU layer flips it to V down) |
+| `NAME_heightmap.png`, `NAME_orm.png` | Height; R cavity AO, G perceptual roughness. `heightmap_scale` is the relief UV × 100 |
+| `lava_emission.png` (`texture_emission`) | Linear emitted RGB, scaled by the material's `emission_energy` (5) |
+| `lava_coverage.png` (`texture_coverage`) | Exposed-melt coverage |
+| `crust_emission.png`, `crust_glow.png` (`texture_emission`, `texture_glow`) | Grey heat intensity; local fissure glow |
+
+On the GPU these become four layers: colour, normal, a surface map (R height,
+G roughness, B cavity AO, A relief UV / 0.1) and heat (molten RGB with coverage in A;
+crust intensity in R with glow in A).
 
 Metalness is zero and opacity is one. Height, normals and the shader's relief range
 use the same quantized field. The shader samples every material map at the same

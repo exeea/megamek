@@ -24,7 +24,8 @@ luminance, not measured displacement or new terrain geometry.
 The four color/height and normal/AO pairs are layers of the sculpt texture array.
 Their Material Maker projects are `fungus-ground`, `fungus-mat`, `fungus-cliff` and
 `fungus-fibres` under `mm-data/tools/materials/terrain/surfaces/`;
-`python tools/materials/export.py`, run from the mm-data root, exports all projects.
+`python tools/materials/export.py`, run from the mm-data root, exports all projects as
+Godot 4 Standard materials ([board materials](gpu-board-materials.md)).
 
 The shared `levelGrade` helper starts fungus with a darker, richer pigment, then
 progressively lightens it uphill with a scalar linear-light gain and a small,

@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.io.File;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.util.ArrayDeque;
@@ -17,7 +16,6 @@ import java.util.UUID;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -30,7 +28,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 import jakarta.annotation.Nullable;
-import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
@@ -701,11 +698,11 @@ final class GpuGroundDamage implements Disposable {
 
     /** Editable RGBA artwork: alpha is coverage; dark values are char/melt, light values disturbed debris. */
     private static BrushArt loadBrush(Style style) {
-        var file = new FileHandle(new File(Configuration.dataDir(), "models/board/textures/terrain/damage/" + style.file + ".png"));
+        String material = "terrain/damage/" + style.file;
         var levels = new ArrayList<Pixmap>();
         Pixmap source = null;
         try {
-            source = GpuColorTexture.decode(file);
+            source = GpuMaterialMaps.color(material);
             int left = source.getWidth(), top = source.getHeight(), right = -1, bottom = -1;
             for (int y = 0; y < source.getHeight(); y++) {
                 for (int x = 0; x < source.getWidth(); x++) {
@@ -763,7 +760,7 @@ final class GpuGroundDamage implements Disposable {
             return new BrushArt(List.copyOf(levels), levels.stream().map(GpuGroundDamage::array).toList(), aspect);
         } catch (RuntimeException error) {
             levels.forEach(Pixmap::dispose);
-            LOGGER.warn("Could not load ground scar {}: {}", file, error.getMessage());
+            LOGGER.warn("Could not load ground scar {}: {}", material, error.getMessage());
             return new BrushArt(List.of(), List.of(), 1);
         } finally {
             if (source != null) { source.dispose(); }

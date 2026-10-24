@@ -75,7 +75,25 @@ final class RigidGlb {
     /** Encoded bytes are retained for managed GPU texture recreation; external files keep a shared path key. */
     record Image(String key, byte[] encoded, String file, int minFilter, int magFilter, int wrapS, int wrapT) { }
 
-    record Surface(float roughness, float metallic, String map) { }
+    /**
+     * A material's finish: roughness, metallic and subsurface scattering factors over its optional finish map (an image
+     * key, {@link GpuMaterialMaps.Layout#METALLIC_ROUGHNESS}), its emission map's tint and its constant glow (both
+     * linear), its heightmap parallax, or null, and whether a board material's .tres gave it.
+     */
+    record Surface(float roughness, float metallic, float scatter, String map, float[] tint, float[] glow, Relief relief,
+          boolean board) {
+        /** glTF's own metallic-roughness: no scattering, emission as glTF's factor and texture give it, no relief. */
+        Surface(float roughness, float metallic, String map) {
+            this(roughness, metallic, 0, map, new float[] { 1, 1, 1 }, new float[3], null, false);
+        }
+    }
+
+    /**
+     * Godot's heightmap parallax: the heightmap (an image key, {@link GpuMaterialMaps.Layout#HEIGHT}), the depth along U
+     * and along V in UV units (Godot's heightmap_scale / 100, negative where Godot flips the tangent or binormal), and
+     * the deep parallax's layer range, 0 to 0 for a single step.
+     */
+    record Relief(String map, float depthU, float depthV, int minimumLayers, int maximumLayers) { }
 
     static final class Data extends ModelData {
         final Map<String, Image> images = new HashMap<>();
@@ -388,6 +406,44 @@ final class RigidGlb {
         }
     }
 
+    private static void texture(ModelMaterial target, int usage, String key) {
+        var texture = new ModelTexture();
+        texture.id = target.id;
+        texture.usage = usage;
+        texture.fileName = key;
+        if (target.textures == null) { target.textures = new com.badlogic.gdx.utils.Array<>(); }
+        target.textures.add(texture);
+    }
+
+    /**
+     * A board material's finish, adding to {@code target} the normal, occlusion and emission maps of its .tres the GLB
+     * leaves out, each sampled as the base colour is. Its factors and maps replace the GLB's own metallic-roughness.
+     */
+    private static Surface boardSurface(GodotMaterial board, Image base, ModelMaterial target, Data result) {
+        String sampler = base.key().substring(base.file().length());
+        java.util.function.Function<File, String> image = file -> {
+            String path = file.toPath().toAbsolutePath().normalize().toString();
+            var copy = new Image(path + sampler, null, path, base.minFilter(), base.magFilter(), base.wrapS(), base.wrapT());
+            result.images.put(copy.key(), copy);
+            return copy.key();
+        };
+        var finish = GpuMaterialMaps.modelFinish(board);
+        for (int usage : new int[] { ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT, ModelTexture.USAGE_EMISSIVE }) {
+            File map = switch (usage) {
+                case ModelTexture.USAGE_NORMAL -> board.normal();
+                case ModelTexture.USAGE_AMBIENT -> board.occlusion();
+                default -> finish.emission();
+            };
+            boolean present = target.textures != null && java.util.stream.StreamSupport.stream(target.textures.spliterator(),
+                  false).anyMatch(texture -> texture.usage == usage);
+            if (map != null && !present) { texture(target, usage, image.apply(map)); }
+        }
+        Relief relief = finish.heightmap() == null ? null : new Relief(image.apply(finish.heightmap()), finish.depthU(),
+              finish.depthV(), finish.minimumLayers(), finish.maximumLayers());
+        return new Surface(finish.roughness(), finish.metallic(), finish.scatter(),
+              finish.map() == null ? null : image.apply(finish.map()), finish.tint(), finish.glow(), relief, true);
+    }
+
     private static Path imagePath(FileHandle file, Path root, String value) throws IOException {
         var uri = URI.create(value);
         require(!uri.isAbsolute() && uri.getAuthority() == null && uri.getQuery() == null
@@ -443,7 +499,7 @@ final class RigidGlb {
                     result.images.put(image.key(), image);
                     surfaceMap = image.key();
                 }
-                result.surfaces.put(target.id, new Surface(roughness, metallic, surfaceMap));
+                Image base = null;
                 for (int usage : new int[] { ModelTexture.USAGE_DIFFUSE, ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT,
                       ModelTexture.USAGE_EMISSIVE }) {
                     var sourceTexture = switch (usage) {
@@ -479,13 +535,15 @@ final class RigidGlb {
                         image = new Image(path + sampler, null, path, image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT());
                     }
                     result.images.put(image.key(), image);
-                    var texture = new ModelTexture();
-                    texture.id = target.id;
-                    texture.usage = usage;
-                    texture.fileName = image.key();
-                    if (target.textures == null) { target.textures = new com.badlogic.gdx.utils.Array<>(); }
-                    target.textures.add(texture);
+                    if (usage == ModelTexture.USAGE_DIFFUSE) { base = image; }
+                    texture(target, usage, image.key());
                 }
+                // A base colour that is a board material's albedo makes the material that board material, as Godot draws
+                // it: its .tres supplies the finish and every map the GLB leaves out.
+                var board = base == null || base.file() == null ? null
+                      : GpuMaterialMaps.boardMaterial(new File(base.file()), GpuMaterialMaps.boardTextures());
+                result.surfaces.put(target.id, board == null ? new Surface(roughness, metallic, surfaceMap)
+                      : boardSurface(board, base, target, result));
                 result.materials.add(target);
                 materials.put(material, target.id);
             }

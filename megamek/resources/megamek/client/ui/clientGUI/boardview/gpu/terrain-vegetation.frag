@@ -17,6 +17,16 @@ uniform float u_biomeLod;
 #endif
 #endif
 
+#if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
+// The meadow's grass material: its place in the finish arrays (finish-arrays.glsl), and the metres and world units
+// one repeat spans.
+uniform vec3 u_meadowFinish;
+#endif
+#ifdef biomeVegetationFlag
+// Crops' or sedge's finish (GpuBiomeVegetation.Kind): roughness, metallic and scattering; emission.
+uniform vec3 u_biomeFinish, u_biomeGlow;
+#endif
+
 void main() {
     // An upward-biased normal approximates the many sunlit leaves in a tuft without black card-like speckles.
     vec3 leaf = normalize(v_normal) * (gl_FrontFacing ? 1.0 : -1.0);
@@ -32,7 +42,18 @@ void main() {
     vec2 turfUv = v_cloudPosition.xy * vec2(1.0, -1.0) / u_metre;
     mat2 turfGradient = mat2(dFdx(turfUv), dFdy(turfUv));
 #endif
-    float roughness = .86;
+    Finish finish = Finish(.86, 0.0, 0.0, vec3(0.0));
+#if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
+    // A meadow's blades are its grass: they take its material's finish where they root, filtered over the blade's own
+    // screen footprint, so every fragment of a blade reads the same texel at the level its size needs.
+    vec2 meadowFootprint = v_cloudPosition.xy * vec2(1.0, -1.0) / u_meadowFinish.z;
+    finish = finishTexel(int(u_meadowFinish.x + .5), v_coverRoot * vec2(1.0, -1.0) / u_meadowFinish.y,
+          mat2(dFdx(meadowFootprint), dFdy(meadowFootprint)));
+#endif
+#ifdef biomeVegetationFlag
+    // Their material's finish, as the means of its maps: their artwork is composited at run time.
+    finish = Finish(u_biomeFinish.x, u_biomeFinish.y, u_biomeFinish.z, u_biomeGlow);
+#endif
 #if defined(biomeVegetationFlag) && defined(diffuseTextureFlag)
     // Sample before any coverage discard: neighbouring fragments must agree on derivatives during an LOD fade.
     vec4 plant;
@@ -79,7 +100,7 @@ void main() {
 #endif
     if (plant.a < .32) discard;
 #ifdef bankTurfFlag
-    albedo *= turfColor(plant.rgb, turfGradient, roughness);
+    albedo *= turfColor(plant.rgb, turfGradient, finish);
 #else
     albedo *= plant.rgb;
 #endif
@@ -100,7 +121,10 @@ void main() {
     normal = shadingNormal(normal, geometric, -viewDirection());
     // Dry blades have a broad, rough reflection; rain smooths the same dielectric response into brighter glints. The
     // blade's own normal decides its lit side.
-    Surface blade = opaqueSurface(albedo, normal, normal, roughness, .6 * u_wetness, surfaceVisibility());
+    Surface blade = opaqueSurface(albedo, normal, normal, finish.roughness, .6 * u_wetness, surfaceVisibility());
+    metallicShare(blade, finish.metallic);
+    blade.scatter = finish.scatter;
+    blade.emission = finish.emission;
     // Thin leaves transmit part of their diffuse budget instead of adding another light source.
     blade.front = vec3(.85);
     blade.back = vec3(.15);
