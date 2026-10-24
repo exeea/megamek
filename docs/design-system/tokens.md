@@ -12,7 +12,7 @@ both platforms (and the launcher, later) can share it.
 In a dev build, open the lobby and use **Help > UI library (developer)**. The submenu only shows in the lobby.
 
 - **Swing controls...** opens the Swing gallery: every color role in both modes, the accessibility checks, the text
-  styles, spacing and shape, and three tabs of real Swing controls drawn by the MegaMek look and feel. A
+  styles, spacing and shape, and four tabs of real Swing controls drawn by the MegaMek look and feel. A
   toolbar toggles light mode and simulates deuteranopia, protanopia and tritanopia over the whole window. While the
   gallery is open the whole app uses MegaMek Dark or Light, and closing it restores the previous theme. This is the
   complete library; Swing controls are added here as they are built.
@@ -760,6 +760,46 @@ ticks, the header and Cancel at the top right, the step and percentage over a ba
 Moving it to this spec means sentence case instead of capitals (an open question for the whole HUD), the accent fill
 instead of mint, the failed state with Close and Retry, and the modal form for the loading screen.
 
+## Panels
+
+Anything that isn't a dialog, such as a sidebar, a unit card or a grouped area, sits in a panel with the dialog card's
+frame.
+
+| Part / state | Look |
+| --- | --- |
+| Panel | `surface.panel` with a 1px `border.subtle` edge and `border.strong` corner ticks, `tick.panel` (13) long and `tick.width` (2) wide; no rails, no shadow |
+| Padding | `lg` (12) all round; `xl` (16) for the roomy option, for panels that hold reading text |
+| Header | Optional: a status icon at `icon.md` (20), the title in `title` and `text.primary`, sentence case, then compact quiet or icon buttons at the trailing end; `md` (8) above the body, no divider or raised band |
+| Status | The ticks take the status color (`status.danger`, `status.warning`, `status.success` or `status.info`); always with the header icon, never the color alone |
+| Selectable, hover | The edge turns `border.control` |
+| Selectable, selected | A `selected.background` wash, the edge and ticks in `selected.primary` |
+| Selectable, focus | The `focus.ring` 2px ring in place of the edge, the ticks drawn over it |
+| Plain | The edge only, with no fill and no ticks, for groups inside a panel |
+| Disabled | The title in `text.disabled`, the edge and ticks in `border.subtle`; a disabled selectable panel can't be selected and Tab skips it |
+| Motion | Edge, ticks and wash ease with the [control timings](#motion); reduce motion makes them instant |
+
+- **Only the outermost frame has ticks.** Panels inside a panel, such as the cards in a sidebar, use the plain frame.
+- **Selectable panels are controls.** A click, or Space or Enter with the focus on it, selects the panel; in a group
+  one is selected at a time, like radio buttons. Screen readers hear a toggle button, or a radio button in a group.
+- **The header's actions are for the panel's content**, such as Edit or a ⋮ menu, in the compact size so the header
+  keeps the title's height.
+- **Overlay.** Over the libGDX board the panel's fill is the overlay surface, translucent like hud-v3's panels today;
+  Swing panels are opaque.
+
+**Swing.** [`TokenPanel`](../../megamek/src/megamek/client/ui/design/swing/TokenPanel.java) is the panel:
+`new TokenPanel(title)` or `new TokenPanel()` for no header, then `status`, `padding(Padding.ROOMY)`, `plain()`,
+`action` for each header button and `body` for the content. `selectable(true)` makes it a control; `setSelected` fires
+the `SELECTED` property, and `TokenPanel.selectOne(panels...)` groups them so one is selected at a time. Content inside
+must be non-opaque, since the themes' panels paint `surface.base`; `body` clears it on a `JPanel` it is given. To frame
+an existing panel without changing its layout, `TokenFrameBorder.apply(panel, TokenFrameBorder.panel(padding))` (or
+`plain`) sets the border and makes the panel non-opaque so the border paints the surface.
+[`TokenFrame`](../../megamek/src/megamek/client/ui/design/swing/TokenFrame.java) is the painter that dialogs, status
+cards and panels share.
+
+**libGDX.** Spec only for now. hud-v3's `panel` drawable (`UiTheme.HudFrame`) draws rails along the edge and the
+ticks, and `panel-foe` coral ticks. Moving them to this spec means dropping the rails, status ticks with the header icon
+instead of a colored frame alone, the selectable states for unit cards, and the overlay surface token.
+
 ## Code
 
 | Class | Role |
@@ -793,6 +833,7 @@ instead of mint, the failed state with Close and Retry, and the modal form for t
 | [`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java) | The Swing split panes |
 | [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java), [`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java), [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) | The Swing dialogs: content, opening and the modal card |
 | [`TokenStatusCard`](../../megamek/src/megamek/client/ui/design/swing/TokenStatusCard.java) | The Swing status card |
+| [`TokenPanel`](../../megamek/src/megamek/client/ui/design/swing/TokenPanel.java), [`TokenFrameBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenFrameBorder.java), [`TokenFrame`](../../megamek/src/megamek/client/ui/design/swing/TokenFrame.java) | The Swing panel, the frame as a border for existing panels, and the frame painter shared with dialogs |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 

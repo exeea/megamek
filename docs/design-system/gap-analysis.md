@@ -203,7 +203,7 @@ layer-control buttons. Roughly six visual families.
 | Tooltip | `panel` frame, `hud-small`, wraps at 340 | — | yes | |
 | Dialog / modal | `UiModal`, `UiKit.dialog` (620 wide), `UiConfirmation` | `ImmersiveDialog*` | `JDialog` | Decided: corner ticks; a modal card over a scrim, or a window. See [Dialogs](tokens.md#dialogs). |
 | Status card | `UiKit.Progress` (print card) | — | — | Decided: the dialog's frame without a scrim, Cancel in the header. See [Status cards](tokens.md#status-cards). |
-| Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Corner ticks need a custom Swing border. |
+| Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Decided: the dialog's frame without rails, status ticks, selectable and plain variants. See [Panels](tokens.md#panels). |
 | Scrollbar | 4-wide thin knob | `ImmersiveScrollBarStyle` | yes | FlatLaf thin-scrollbar properties cover it. |
 | Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Custom Swing components. |
 | Section header / rule | `rule`, `UiKit.header` | `createSectionHeader` (mono label + rule) | — | |
@@ -325,8 +325,10 @@ work for Swing, and item 11 is under investigation.
 - ~~Status cards~~: the progress of a long task in the dialog's frame, beside the view or over a scrim, with Cancel in
   the header, a percentage on the bar and a failed state with Close and Retry, in Swing; see
   [tokens.md](tokens.md#status-cards).
-- Panels and frames: the corner-ticked panel for anything that isn't a dialog (sidebars, unit cards, grouped
-  areas), reusing the dialog card's frame. The trial needs it.
+- ~~Panels and frames~~: the dialog card's corner-ticked frame for anything that isn't a dialog, with an optional
+  header, status ticks with their icon, selectable unit cards (hover, violet selection, focus ring, one at a time),
+  plain frames for groups inside a panel and a border for existing panels, in Swing; see
+  [tokens.md](tokens.md#panels).
 - Chips and badges: small status labels and counts, from hud-v3's `chip`, `chip-warn`, `chip-bad` and amber badge;
   MekHQ would use them heavily.
 - Toasts: short notices that come and go, separate from status cards; the existing `ToastOverlay` has its own look.

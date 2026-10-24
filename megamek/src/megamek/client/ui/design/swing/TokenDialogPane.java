@@ -90,7 +90,17 @@ public class TokenDialogPane extends JPanel {
 
         /** The status glyph at the large icon size, or null for NONE. */
         public Icon icon() {
-            return glyph == 0 ? null : FontHandler.symbolIcon(glyph, UIUtil.scaleForGUI(iconSize()), color());
+            return icon(iconSize());
+        }
+
+        /** The status glyph {@code size} unscaled pixels high, or null for NONE. */
+        Icon icon(int size) {
+            return icon(size, color());
+        }
+
+        /** The status glyph {@code size} unscaled pixels high in {@code color}, or null for NONE. */
+        Icon icon(int size, Color color) {
+            return glyph == 0 ? null : FontHandler.symbolIcon(glyph, UIUtil.scaleForGUI(size), color);
         }
 
         static int iconSize() {
@@ -401,35 +411,11 @@ public class TokenDialogPane extends JPanel {
         }
         Graphics2D g = (Graphics2D) graphics.create();
         try {
-            paintFrame(g, getWidth(), getHeight());
+            TokenFrame.paintCard(g, getWidth(), getHeight());
         } finally {
             g.dispose();
         }
     }
-
-    /** Paints a card: the panel surface, a subtle 1px edge and strong corner ticks. */
-    static void paintFrame(Graphics2D g, int w, int h) {
-        g.setColor(token("surface.panel"));
-        g.fillRect(0, 0, w, h);
-        int line = Math.max(1, UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("border"))));
-        g.setColor(token("border.subtle"));
-        g.fillRect(0, 0, w, line);
-        g.fillRect(0, h - line, w, line);
-        g.fillRect(0, 0, line, h);
-        g.fillRect(w - line, 0, line, h);
-        int stroke = Math.max(1, UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("tick.width"))));
-        int length = Math.min(UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("tick.panel"))),
-              Math.min(w, h) / 2);
-        g.setColor(token("border.strong"));
-        g.fillRect(0, 0, length, stroke);
-        g.fillRect(0, 0, stroke, length);
-        g.fillRect(w - length, 0, length, stroke);
-        g.fillRect(w - stroke, 0, stroke, length);
-        g.fillRect(0, h - stroke, length, stroke);
-        g.fillRect(0, h - length, stroke, length);
-        g.fillRect(w - length, h - stroke, length, stroke);
-        g.fillRect(w - stroke, h - length, stroke, length);
-        }
 
     static Color token(String role) {
         Mode mode = FlatLaf.isLafDark() ? Mode.DARK : Mode.LIGHT;

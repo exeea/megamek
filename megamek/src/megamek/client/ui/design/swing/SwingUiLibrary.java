@@ -122,6 +122,7 @@ public final class SwingUiLibrary extends JFrame {
     private static final int ICON_INFO = 0xE88E;
     private static final int ICON_RADIO_CHECKED = 0xE837;
     private static final int ICON_SEARCH = 0xE8B6;
+    private static final int ICON_MORE = 0xE5D4;
     /** Masked in the samples; not a real password. */
     private static final String SAMPLE_PASSWORD = "atlas-as7d";
 
@@ -222,6 +223,7 @@ public final class SwingUiLibrary extends JFrame {
         tabs.addTab(Messages.getString("UiLibrary.tab.inputs"), page(inputsPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.navigation"), page(navigationPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.feedback"), page(feedbackPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.containers"), page(containersPage()));
         tabs.setSelectedIndex(Math.min(selectedTab, tabs.getTabCount() - 1));
         content.add(tabs, BorderLayout.CENTER);
         content.revalidate();
@@ -605,6 +607,22 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.statusCards.note"), "small", "text.muted"));
         page.add(statusCardSamples());
         page.add(statusCardLauncher());
+        return page;
+    }
+
+    /** Panels and frames. */
+    private JComponent containersPage() {
+        JPanel page = controlsPage();
+        page.add(heading(Messages.getString("UiLibrary.controls.panels")));
+        page.add(paragraph(Messages.getString("UiLibrary.panels.note"), "small", "text.muted"));
+        page.add(panelSamples());
+        page.add(panelStatusSamples());
+        page.add(panelSelectableSamples());
+        page.add(panelNestingSamples());
+        JLabel live = text(Messages.getString("UiLibrary.panels.live"), "label", "text.secondary");
+        live.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(live);
+        page.add(panelSidebar());
         return page;
     }
 
@@ -1379,6 +1397,146 @@ public final class SwingUiLibrary extends JFrame {
         card.step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0);
         timer.start();
         return timer;
+    }
+
+    /** Panels without and with a header, and with roomy padding. */
+    private JComponent panelSamples() {
+        JPanel samples = sampleGrid();
+        TokenPanel bare = new TokenPanel().body(panelText("UiLibrary.panels.bodyText"));
+        addSample(samples, 0, 0, "UiLibrary.panels.default", sized(bare, 300));
+
+        TokenPanel headed = new TokenPanel(Messages.getString("UiLibrary.panels.lanceTitle"))
+              .action(TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.panels.edit"),
+                    TokenButtons.Size.COMPACT))
+              .action(TokenButtons.icon(ICON_MORE, Messages.getString("UiLibrary.panels.more"), false,
+                    TokenButtons.Size.COMPACT))
+              .body(panelText("UiLibrary.panels.lanceText"));
+        addSample(samples, 1, 0, "UiLibrary.panels.header", sized(headed, 300));
+
+        TokenPanel roomy = new TokenPanel(Messages.getString("UiLibrary.panels.briefingTitle"))
+              .padding(TokenPanel.Padding.ROOMY).body(panelText("UiLibrary.panels.briefingText"));
+        addSample(samples, 2, 0, "UiLibrary.panels.roomy", sized(roomy, 300));
+        return samples;
+    }
+
+    /** One panel per status: the ticks take the status color and the header its icon. */
+    private JComponent panelStatusSamples() {
+        JPanel samples = sampleGrid();
+        String[] names = { "danger", "warning", "success", "info" };
+        TokenDialogPane.Status[] statuses = { TokenDialogPane.Status.ERROR, TokenDialogPane.Status.WARNING,
+              TokenDialogPane.Status.SUCCESS, TokenDialogPane.Status.INFO };
+        for (int i = 0; i < names.length; i++) {
+            TokenPanel panel = new TokenPanel(Messages.getString("UiLibrary.panels." + names[i] + "Title"))
+                  .status(statuses[i]).body(panelText("UiLibrary.panels." + names[i] + "Text"));
+            addSample(samples, i, 0, "UiLibrary.panels." + names[i], sized(panel, 220));
+        }
+        return samples;
+    }
+
+    /** Selectable cards at rest, hover and focus frozen, selected and disabled. */
+    private JComponent panelSelectableSamples() {
+        JPanel samples = sampleGrid();
+        String[] states = { "rest", "hover", "selected", "focus", "disabled" };
+        for (int i = 0; i < states.length; i++) {
+            TokenPanel card = unitCard("Marauder MAD-3R", 75, 4).selectable(true);
+            switch (states[i]) {
+                case "hover" -> card.putClientProperty(TokenPanel.FROZEN_STATE, TokenPanel.FROZEN_HOVER);
+                case "selected" -> card.setSelected(true);
+                case "focus" -> card.putClientProperty(TokenPanel.FROZEN_STATE, TokenPanel.FROZEN_FOCUS);
+                case "disabled" -> disable(card);
+                default -> { }
+            }
+            addSample(samples, i, 0, "UiLibrary.panels.state." + states[i], sized(card, 180));
+        }
+        return samples;
+    }
+
+    /** Plain groups inside a panel, and an existing container framed by the border. */
+    private JComponent panelNestingSamples() {
+        JPanel samples = sampleGrid();
+        JPanel groups = new JPanel(new GridLayout(1, 0, scaleForGUI(8), 0));
+        groups.add(new TokenPanel().plain().body(panelLines("UiLibrary.panels.weapons", "AC/20", "SRM 6")));
+        groups.add(new TokenPanel().plain().body(panelLines("UiLibrary.panels.equipment", "CASE",
+              Messages.getString("UiLibrary.panels.heatSinks"))));
+        TokenPanel loadout = new TokenPanel(Messages.getString("UiLibrary.panels.loadoutTitle")).body(groups);
+        addSample(samples, 0, 0, "UiLibrary.panels.plain", sized(loadout, 320));
+
+        JPanel existing = TokenFrameBorder.apply(new JPanel(new GridLayout(0, 1, 0, scaleForGUI(4))),
+              TokenFrameBorder.panel(TokenPanel.Padding.REGULAR));
+        existing.add(text(Messages.getString("UiLibrary.panels.borderLine1"), "body", "text.primary"));
+        existing.add(text(Messages.getString("UiLibrary.panels.borderLine2"), "small", "text.muted"));
+        addSample(samples, 1, 0, "UiLibrary.panels.border", unstretched(existing));
+        return samples;
+    }
+
+    /** A live sidebar of plain unit cards, since only the outermost frame is ticked, of which one is selected. */
+    private JComponent panelSidebar() {
+        JPanel row = row(color("surface.base"));
+        TokenPanel[] cards = { unitCard("Atlas AS7-D", 100, 3).plain(), unitCard("Marauder MAD-3R", 75, 4).plain(),
+                               unitCard("Phoenix Hawk PXH-1", 45, 6).plain(), unitCard("Locust LCT-1V", 20, 8).plain() };
+        TokenPanel.selectOne(cards);
+        disable(cards[2]);
+        JPanel list = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(8)));
+        list.setOpaque(false);
+        JLabel result = text(Messages.getString("UiLibrary.panels.noneSelected"), "small", "text.muted");
+        for (TokenPanel card : cards) {
+            list.add(card);
+            card.addPropertyChangeListener(TokenPanel.SELECTED, event -> {
+                if (card.isSelected()) {
+                    result.setText(Messages.getString("UiLibrary.panels.selected", card.getAccessibleContext()
+                          .getAccessibleName()));
+                }
+            });
+        }
+        TokenPanel sidebar = new TokenPanel(Messages.getString("UiLibrary.panels.forceTitle"))
+              .action(TokenButtons.icon(ICON_MORE, Messages.getString("UiLibrary.panels.more"), false,
+                    TokenButtons.Size.COMPACT))
+              .body(list);
+        row.add(sized(sidebar, 260));
+        row.add(result);
+        return row;
+    }
+
+    /** A unit card: the name over its tonnage and walking speed, named for screen readers. */
+    private TokenPanel unitCard(String name, int tons, int walk) {
+        JPanel lines = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(2)));
+        lines.add(text(name, "body.strong", "text.primary"));
+        lines.add(text(Messages.getString("UiLibrary.panels.unitLine", tons, walk), "small", "text.muted"));
+        TokenPanel card = new TokenPanel().body(lines);
+        card.getAccessibleContext().setAccessibleName(name);
+        return card;
+    }
+
+    /** Disables {@code panel} and greys its labels, as a view would. */
+    private void disable(TokenPanel panel) {
+        panel.setEnabled(false);
+        for (Component line : panel.body().getComponents()) {
+            line.setForeground(color("text.disabled"));
+        }
+    }
+
+    private JComponent panelText(String key) {
+        JPanel lines = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(2)));
+        for (String line : Messages.getString(key).split("\n")) {
+            lines.add(text(line, "body", "text.secondary"));
+        }
+        return lines;
+    }
+
+    /** An overline caption over a few body lines. */
+    private JComponent panelLines(String captionKey, String... lines) {
+        JPanel column = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(2)));
+        column.add(text(Messages.getString(captionKey).toUpperCase(getLocale()), "overline", "text.muted"));
+        for (String line : lines) {
+            column.add(text(line, "body", "text.primary"));
+        }
+        return column;
+    }
+
+    /** {@code panel} at {@code width} unscaled pixels and its own height. */
+    private static JPanel sized(TokenPanel panel, int width) {
+        panel.setPreferredSize(new Dimension(scaleForGUI(width), panel.getPreferredSize().height));
+        return unstretched(panel);
     }
 
     /** Split panes side by side and stacked; hover is frozen on one, the others are live. */

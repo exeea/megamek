@@ -324,7 +324,7 @@ public class TokenStatusCard extends JPanel {
     protected void paintComponent(Graphics graphics) {
         Graphics2D g = (Graphics2D) graphics.create();
         try {
-            TokenDialogPane.paintFrame(g, getWidth(), getHeight());
+            TokenFrame.paintCard(g, getWidth(), getHeight());
         } finally {
             g.dispose();
         }
