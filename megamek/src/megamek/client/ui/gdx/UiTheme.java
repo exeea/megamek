@@ -220,6 +220,7 @@ public final class UiTheme implements Disposable {
 
     /** The skin of the hud-* styles and drawables; it holds every texture and font the theme makes. */
     public final Skin skin = new Skin();
+    private boolean refreshing;
     private final File fonts;
     private final List<FreeTypeFontGenerator> generators = new ArrayList<>();
     // The hud-* fonts share glyph pages instead of allocating a 1024x1024 page each.
@@ -358,11 +359,19 @@ public final class UiTheme implements Disposable {
 
     /**
      * Builds the styles again from the design tokens after the user's palette changed ({@link DesignTokens#setPalette});
-     * widgets made afterwards use the new colors. hud-v3's own styles do not depend on the tokens.
+     * widgets made afterwards use the new colors. hud-v3's own styles do not depend on the tokens. {@code more} adds a
+     * view's own token styles again under the same names. The old textures are not disposed, since widgets built
+     * before may still draw them.
      */
-    public void refreshTokens() {
-        tokenButtons();
-        tokenStyles();
+    public void refreshTokens(Runnable more) {
+        refreshing = true;
+        try {
+            tokenButtons();
+            tokenStyles();
+            more.run();
+        } finally {
+            refreshing = false;
+        }
     }
 
     private void tokenStyles() {
@@ -411,10 +420,11 @@ public final class UiTheme implements Disposable {
 
     /**
      * Registers a resource of a view that adds its own styles in this look, as the battle view's skin does. Each name
-     * has one owner: a name the skin already holds for {@code type}, the theme's or the view's, throws.
+     * has one owner: a name the skin already holds for {@code type}, the theme's or the view's, throws, except while
+     * {@link #refreshTokens} builds the token styles again over their old selves.
      */
     public <T> T add(String name, T resource, Class<?> type) {
-        if (skin.has(name, type)) {
+        if (!refreshing && skin.has(name, type)) {
             throw new IllegalStateException("The skin already has the " + type.getSimpleName() + " \"" + name + "\"");
         }
         skin.add(name, resource, type);

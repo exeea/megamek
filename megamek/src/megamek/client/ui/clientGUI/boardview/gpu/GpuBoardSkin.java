@@ -84,8 +84,7 @@ final class GpuBoardSkin implements Disposable {
 
     /** Builds the token styles again after the user's palette changed ({@link DesignTokens#setPalette}). */
     void refreshTokens() {
-        theme.refreshTokens();
-        tokenHud();
+        theme.refreshTokens(this::tokenHud);
     }
 
     /** The token look of a target pill ({@code pill}): a filter chip; {@code -over} and {@code -on} follow. */

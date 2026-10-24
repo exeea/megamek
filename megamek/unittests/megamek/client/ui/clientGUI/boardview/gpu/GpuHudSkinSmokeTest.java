@@ -49,6 +49,7 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
 import org.junit.jupiter.api.Tag;
@@ -353,6 +354,15 @@ class GpuHudSkinSmokeTest {
         GpuBoardSkin theme = new GpuBoardSkin();
         System.out.printf("GpuBoardSkin built in %.0f ms; GL renderer %s%n", (System.nanoTime() - start) / 1e6,
               Gdx.gl.glGetString(GL20.GL_RENDERER));
+        // The galleries' color-blind switch builds the token styles again over the old ones
+        DesignTokens.Palette palette = DesignTokens.palette();
+        try {
+            DesignTokens.setPalette(DesignTokens.Palette.COLORBLIND);
+            theme.refreshTokens();
+        } finally {
+            DesignTokens.setPalette(palette);
+            theme.refreshTokens();
+        }
         Set<Texture> textures = new LinkedHashSet<>();
         Stage stage = new Stage(new ScreenViewport());
         try {
