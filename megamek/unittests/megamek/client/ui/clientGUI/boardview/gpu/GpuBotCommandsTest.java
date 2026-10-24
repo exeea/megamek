@@ -60,6 +60,7 @@ class GpuBotCommandsTest {
     /** The order ends with a hex prompt (a board pick, or a typed prompt without a board view); not run here. */
     private static final Set<String> PROMPTS = Set.of(Messages.getString("BotCommandPanel.ScootToHex.title"),
           Messages.getString("BotCommandPanel.StrategicTarget.title"),
+          Messages.getString("BotCommandPanel.PriorityTargetPicker.title"),
           Messages.getString("BotCommandPanel.SetWaypoints.title"),
           Messages.getString("BotCommandPanel.AddWaypoint.title"),
           Messages.getString("BotCommandPanel.ArtillerySingle.title"),

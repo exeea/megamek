@@ -4764,14 +4764,14 @@ public class ClientGUI extends AbstractClientGUI
      * active window; otherwise e.g. Backspace (undo step) and the arrow keys (weapon/target cycling) are swallowed
      * from MekHQ text fields. See MekHQ issue #10642.
      * <p>
-     * The native board window is not a Swing window, so while it has the focus Swing reports no active window at all.
-     * That counts as the game window when this client's native window is up; a MekHQ window is a Swing window and so
-     * still does not.
+     * Swing reports no active window at all while a window it does not own has the focus, such as the native board
+     * window, whose keys reach the game through its own input. That counts as the game window; a MekHQ window is a
+     * Swing window and so still does not.
      * </p>
      */
     private boolean isGameWindowActive() {
         Window window = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
-        if ((window == null) && GpuBoardWindow.isActiveFor(this)) {
+        if (window == null) {
             return true;
         }
         while (window != null) {
