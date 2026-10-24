@@ -739,8 +739,8 @@ scrim: the user keeps working while it runs.
 | Footer | None: the card asks nothing |
 
 - **Placement is the view's.** The card is a component; the view puts it where it covers nothing the user works on (a
-  map view at the bottom centre, for example) and decides what to do when several tasks run at once. Toasts are a
-  separate pattern.
+  map view at the bottom centre, for example) and   decides what to do when several tasks run at once. [Toasts](#toasts)
+    are a separate pattern.
 - **No focus.** Beside the view the card doesn't take the focus; a user who tabs to it gets Escape to stop the task.
 - **Cancel, not ✕.** An ✕ reads as hiding the card while the task goes on, so stopping is a word.
 - **The end.** On success the view removes the card at once. A failure stays until the user closes it, so the error
@@ -849,6 +849,50 @@ overview and the HUD kit use them; `UiButton.badge` is an amber pill. Moving the
 open question for the whole HUD), status edges at full color with the icon, the filter and tag chips, and badges in the
 accent with the surface ring.
 
+## Toasts
+
+A toast is a short notice that comes and goes over a view, such as a unit's move or a hit on the board. It never asks
+anything and never takes the focus.
+
+| Part / state | Look |
+| --- | --- |
+| Card | `surface.popover` with a 1px `border.subtle` edge and a `radius.md` (6) corner, at most 480 wide; the text wraps beyond that |
+| Level | A 3px bar along the leading edge and the level's icon at `icon.md` (20), both in the level's color |
+| Levels | Info `status.info` (info icon), success `status.success` (check), warning `status.warning` (warning), danger `status.danger` (error), Game Master `selected.primary` (shield with a person) |
+| Unit | Optional: the acting unit's sprite, fitted in 40×34, after the icon |
+| Text | `body` in `text.primary`, sentence case |
+| Padding | `md` (8) above and below; `lg` (12) after the bar, `md` between the icon, sprite and text, then the ✕ |
+| Close | An ✕ in the compact icon button at the trailing end, `xs` (4) from the edge; not in the Tab order |
+| Motion | Fades in over `motion.medium` and out over `motion.slow`, eased; reduce motion makes both instant |
+
+- **Color is never the only cue.** Each level has its own icon, and screen readers hear the level before the text
+  ("Warning: Locust LCT-1V is running hot"). The Game Master has violet and a shield of its own, so a referee's
+  action never reads as an ordinary notice.
+- **Placement.** Toasts stack at the top centre of the view, `lg` from the edge and `md` apart, the newest at the top
+  pushing older ones down. At most five show at once; a sixth drops the oldest at once.
+- **Time.** A toast stays for the player's toast duration (3 seconds by default), plus a second for a warning or the
+  Game Master and two for danger, then fades out.
+- **Hover pauses.** The pointer over a toast stops its time, and brings it back if it was fading; after the pointer
+  leaves it stays at least a second more, so it can't vanish under a moving pointer.
+- **Clicks pass through.** Only the ✕ takes clicks: a click on or beside a toast reaches the board under it, so
+  toasts never block play.
+- **No actions.** A notice that needs an answer is a [dialog](#dialogs); a long task's progress is a
+  [status card](#status-cards); something that stays true, such as a unit's damage, is a status chip on the unit.
+
+**Swing.** [`TokenToasts`](../../megamek/src/megamek/client/ui/design/swing/TokenToasts.java) holds a view and shows
+toasts over it: `new TokenToasts(view)` goes where the view went, then `show(level, text)` or
+`show(level, text, unitImage)` from any thread, with a `TokenToast.Level`. `clear()` removes them all.
+[`TokenToast`](../../megamek/src/megamek/client/ui/design/swing/TokenToast.java) is the card, for a host that places
+toasts itself.
+
+**Swing board.** `BoardToastOverlay` draws today's board toasts: a fill in the level's color at 70%, bold text and no
+icon. Moving it to this spec means the popover surface with the bar and icon, the body face, the ✕, hover pause and
+the Game Master's icon; `ToastLevel` maps onto `TokenToast.Level`, with `ERROR` as `DANGER`, and the durations stay.
+
+**libGDX.** Spec only for now. hud-v3's `GpuToastStack` is close: a panel with a 3px bar, above the dock, the newest
+at the bottom, clicks passing through. Moving it to this spec means the top centre with the newest on top, the level
+icons, the Game Master's violet and shield, the ✕ and hover pause.
+
 ## Code
 
 | Class | Role |
@@ -883,12 +927,14 @@ accent with the surface ring.
 | [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java), [`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java), [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) | The Swing dialogs: content, opening and the modal card |
 | [`TokenStatusCard`](../../megamek/src/megamek/client/ui/design/swing/TokenStatusCard.java) | The Swing status card |
 | [`TokenPanel`](../../megamek/src/megamek/client/ui/design/swing/TokenPanel.java), [`TokenFrameBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenFrameBorder.java), [`TokenFrame`](../../megamek/src/megamek/client/ui/design/swing/TokenFrame.java) | The Swing panel, the frame as a border for existing panels, and the frame painter shared with dialogs |
-| [`TokenChips`](../../megamek/src/megamek/client/ui/design/swing/TokenChips.java), [`TokenBadge`](../../megamek/src/megamek/client/ui/design/swing/TokenBadge.java) | The Swing status, filter and tag chips, and count and dot badges || [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
+| [`TokenChips`](../../megamek/src/megamek/client/ui/design/swing/TokenChips.java), [`TokenBadge`](../../megamek/src/megamek/client/ui/design/swing/TokenBadge.java) | The Swing status, filter and tag chips, and count and dot badges |
+| [`TokenToasts`](../../megamek/src/megamek/client/ui/design/swing/TokenToasts.java), [`TokenToast`](../../megamek/src/megamek/client/ui/design/swing/TokenToast.java) | The Swing toast stack and toast |
+| [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
-panes, dialogs, status cards, panels, chips and badges are Swing-only for now, and so is motion. The Swing themes are
-selectable but not the default, and no view uses the new controls yet. Next come toasts and the all-caps decision
+panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. The Swing
+themes are selectable but not the default, and no view uses the new controls yet. Next comes the all-caps decision
 (see the gap analysis), then a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the developers
 accept the system.

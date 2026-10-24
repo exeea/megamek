@@ -15,6 +15,7 @@ import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
+import java.awt.Image;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -25,12 +26,15 @@ import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.geom.RoundRectangle2D;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Predicate;
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -103,12 +107,13 @@ import megamek.client.ui.design.TokenChecks;
 import megamek.client.ui.design.Vision;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.UIUtil;
+import megamek.common.Configuration;
 import megamek.logging.MMLogger;
 
 /**
  * The developer gallery of the Swing side of the design system, opened from Help in the lobby: every color role in
  * both modes, the accessibility checks, the text styles, spacing and shape, all painted from {@link DesignTokens}
- * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The last three
+ * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The last five
  * tabs show real Swing controls drawn by {@link MegaMekDarkLaf} or {@link MegaMekLightLaf}, which the gallery applies to
  * the app while it is open. The Swing control library grows here, control by control.
  */
@@ -628,6 +633,14 @@ public final class SwingUiLibrary extends JFrame {
         badgesLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
         page.add(badgesLive);
         page.add(badgeLobby());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.toasts")));
+        page.add(paragraph(Messages.getString("UiLibrary.toasts.note"), "small", "text.muted"));
+        page.add(toastSamples());
+        JLabel toastsLive = text(Messages.getString("UiLibrary.toasts.live"), "label", "text.secondary");
+        toastsLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(toastsLive);
+        page.add(toastBoard());
 
         page.add(heading(Messages.getString("UiLibrary.controls.statusCards")));
         page.add(paragraph(Messages.getString("UiLibrary.statusCards.note"), "small", "text.muted"));
@@ -1579,6 +1592,78 @@ public final class SwingUiLibrary extends JFrame {
         TokenPanel lobby = new TokenPanel(Messages.getString("UiLibrary.chips.lobbyTitle")).body(body);
         row.add(sized(lobby, 640));
         return row;
+    }
+
+    /** A toast at each level, then one with a unit sprite whose text wraps. */
+    private JComponent toastSamples() {
+        JPanel samples = sampleGrid();
+        String[] levels = { "info", "success", "warning", "danger", "gamemaster" };
+        TokenToast.Level[] values = TokenToast.Level.values();
+        for (int i = 0; i < levels.length; i++) {
+            TokenToast toast = new TokenToast(values[i], Messages.getString("UiLibrary.toasts.text." + levels[i]),
+                  null);
+            addSample(samples, i % 2, i / 2, "UiLibrary.toasts." + levels[i], unstretched(toast));
+        }
+        addSample(samples, 1, 2, "UiLibrary.toasts.unit", unstretched(new TokenToast(TokenToast.Level.WARNING,
+              Messages.getString("UiLibrary.toasts.text.long"), unitSprite())));
+        return samples;
+    }
+
+    /** The default heavy Mek sprite, or null when the unit images aren't there. */
+    private static Image unitSprite() {
+        try {
+            return ImageIO.read(new File(Configuration.unitImagesDir(), "defaults/default_heavy.png"));
+        } catch (IOException e) {
+            LOGGER.warn(e, "No unit sprite for the toast samples");
+            return null;
+        }
+    }
+
+    /** A stand-in board with toasts over it, a button per level and a burst that overflows the stack. */
+    private JComponent toastBoard() {
+        JLabel clicks = text(Messages.getString("UiLibrary.toasts.board", 0), "body", "text.muted");
+        clicks.setHorizontalAlignment(SwingConstants.CENTER);
+        JPanel board = new JPanel(new BorderLayout());
+        board.setBackground(color("surface.raised"));
+        board.setBorder(BorderFactory.createLineBorder(color("border.subtle")));
+        board.add(clicks, BorderLayout.CENTER);
+        int[] count = { 0 };
+        board.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent event) {
+                count[0]++;
+                clicks.setText(Messages.getString("UiLibrary.toasts.board", count[0]));
+            }
+        });
+        TokenToasts toasts = new TokenToasts(board);
+        toasts.setPreferredSize(new Dimension(scaleForGUI(760), scaleForGUI(340)));
+
+        JPanel buttons = row(color("surface.base"));
+        String[] levels = { "info", "success", "warning", "danger", "gamemaster" };
+        TokenToast.Level[] values = TokenToast.Level.values();
+        Image sprite = unitSprite();
+        for (int i = 0; i < levels.length; i++) {
+            TokenToast.Level level = values[i];
+            String key = levels[i];
+            JButton button = TokenButtons.button(TokenButtons.Kind.SECONDARY,
+                  Messages.getString("UiLibrary.toasts." + key), TokenButtons.Size.COMPACT);
+            button.addActionListener(event -> toasts.show(level,
+                  Messages.getString("UiLibrary.toasts.text." + key), level == TokenToast.Level.DANGER ? sprite : null));
+            buttons.add(button);
+        }
+        JButton burst = TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.toasts.burst"),
+              TokenButtons.Size.COMPACT);
+        burst.addActionListener(event -> {
+            for (int i = 0; i <= TokenToasts.MAX_VISIBLE; i++) {
+                toasts.show(TokenToast.Level.INFO, Messages.getString("UiLibrary.toasts.text.burst", i + 1));
+            }
+        });
+        buttons.add(burst);
+
+        JPanel holder = column(color("surface.base"));
+        holder.add(unstretched(toasts));
+        holder.add(buttons);
+        return holder;
     }
 
     /** A transparent row of chips after a fixed-width label. */

@@ -206,6 +206,7 @@ layer-control buttons. Roughly six visual families.
 | Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Decided: the dialog's frame without rails, status ticks, selectable and plain variants. See [Panels](tokens.md#panels). |
 | Scrollbar | 4-wide thin knob | `ImmersiveScrollBarStyle` | yes | FlatLaf thin-scrollbar properties cover it. |
 | Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Decided: status, filter and tag chips in sentence case; count and dot badges in the accent. See [Chips and badges](tokens.md#chips-and-badges). |
+| Toast | `GpuToastStack` (3px bar, above the dock) | `BoardToastOverlay` (tinted fill) | — | Decided: top centre, bar and icon, the newest on top, hover pause and ✕. See [Toasts](tokens.md#toasts). |
 | Section header / rule | `rule`, `UiKit.header` | `createSectionHeader` (mono label + rule) | — | |
 
 ## Accessibility findings
@@ -332,7 +333,9 @@ work for Swing, and item 11 is under investigation.
 - ~~Chips and badges~~: status chips with their icon and an edge in the status color, filter chips (a check when on,
   one at a time in a group), tag chips removed by their ✕ or Delete, and count and dot badges in the accent or a status
   color on a button's corner, in Swing; see [tokens.md](tokens.md#chips-and-badges).
-- Toasts: short notices that come and go, separate from status cards; the existing `ToastOverlay` has its own look.
+- ~~Toasts~~: short notices at the top centre of a view, a bar and an icon in the level's color (the Game Master in
+  violet with a shield), the newest on top and at most five, paused by the pointer, closed by their ✕, with clicks
+  passing through, in Swing; see [tokens.md](tokens.md#toasts).
 - All-caps: decide whether HUD labels, section overlines and the libGDX status card stay in capitals or move to
   sentence case, before the trial so nothing is restyled twice.
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
