@@ -525,9 +525,32 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     private void lists(Table page) {
         heading(page, "UiLibrary.gdx.lists");
-        UiList list = new UiList(kit);
+        compare(page, "UiList + hud-row", new Container<>(list("hud-row", null)).width(320),
+              new Container<>(kit.scrollList(list(UiTheme.TOKEN_ROW, UiTheme.TOKEN), true)).width(320));
+        compare(page, "UiTree", new Container<>(tree(null)).width(320),
+              new Container<>(kit.scrollList(tree(UiTheme.TOKEN), true)).width(320));
+        compare(page, "hud-list (ScrollPane)", new Container<>(kit.scrollList(listItems(false))).size(300, 110),
+              new Container<>(kit.scrollList(listItems(true), true)).size(300, 110));
+        Table empty = kit.panel();
+        kit.empty(empty, text("UiLibrary.gdx.empty"));
+        Table tokenEmpty = new Table();
+        tokenEmpty.setBackground(kit.skin.getDrawable("list-frame"));
+        kit.empty(tokenEmpty, text("UiLibrary.gdx.empty"), true);
+        compare(page, "UiKit.empty", new Container<>(empty).width(320), new Container<>(tokenEmpty).width(320));
+        heading(page, "UiLibrary.gdx.grids");
+        compare(page, "UiCardGrid", new Container<>(cardGrid(false)).size(420, 330),
+              new Container<>(cardGrid(true)).size(400, 330));
+        compare(page, "UiChoiceGrid", new Container<>(choiceGrid("hud", 420)).width(420),
+              new Container<>(choiceGrid("button-secondary", 400)).width(400));
+        compare(page, "hud-split", new Container<>(split(false)).size(320, 120),
+              new Container<>(kit.tokenSplit(split(true))).size(320, 120));
+    }
+
+    /** Three list rows in {@code rowStyle}, the second selected, reorderable in a {@link UiList} of {@code style}. */
+    private UiList list(String rowStyle, String style) {
+        UiList list = new UiList(kit, style);
         for (int index = 0; index < 3; index++) {
-            UiButton row = kit.button("hud-row", null,
+            UiButton row = kit.button(rowStyle, null,
                   text(index == 1 ? "UiLibrary.sample.selectedRow" : "UiLibrary.sample.row"), null);
             row.getLabel().setAlignment(Align.left);
             row.getCell(row.getLabel()).growX();
@@ -535,32 +558,41 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             list.add(row, row);
         }
         list.reorderable((from, to) -> { });
-        compare(page, "UiList + hud-row", new Container<>(list).width(320), null);
-        compare(page, "UiTree", new Container<>(tree()).width(320), null);
+        return list;
+    }
+
+    /** Twelve plain list items; in the token look each takes a row's height and text inset. */
+    private Table listItems(boolean token) {
         Table items = new Table();
         items.top().left();
         for (int index = 1; index <= 12; index++) {
-            items.add(kit.label(text("UiLibrary.gdx.listItem", index), "hud-body", 12.5f, UiTheme.TEXT)).left()
-                  .pad(3, 10, 3, 10).row();
+            if (token) {
+                items.add(kit.label(text("UiLibrary.gdx.listItem", index), "hud-body", 13,
+                      UiTheme.tokenColor("text.primary"))).left().growX().height(28).padLeft(8).row();
+            } else {
+                items.add(kit.label(text("UiLibrary.gdx.listItem", index), "hud-body", 12.5f, UiTheme.TEXT)).left()
+                      .pad(3, 10, 3, 10).row();
+            }
         }
-        compare(page, "hud-list (ScrollPane)", new Container<>(kit.scrollList(items)).size(300, 110), null);
-        Table empty = kit.panel();
-        kit.empty(empty, text("UiLibrary.gdx.empty"));
-        compare(page, "UiKit.empty", new Container<>(empty).width(320), null);
-        heading(page, "UiLibrary.gdx.grids");
-        compare(page, "UiCardGrid", new Container<>(cardGrid()).size(420, 330), null);
+        return items;
+    }
+
+    private UiChoiceGrid choiceGrid(String style, float width) {
         UiChoiceGrid choices = kit.choiceGrid(120, 8);
         for (int index = 1; index <= 5; index++) {
-            choices.addActor(kit.button("hud", null, text("UiLibrary.gdx.choice", index), null));
+            choices.addActor(kit.button(style, null, text("UiLibrary.gdx.choice", index), null));
         }
-        choices.fit(420, 200);
-        compare(page, "UiChoiceGrid", new Container<>(choices).width(420), null);
+        choices.fit(width, 200);
+        return choices;
+    }
+
+    private SplitPane split(boolean token) {
+        Color ink = token ? UiTheme.tokenColor("text.primary") : UiTheme.TEXT;
         Table top = new Table();
-        top.add(kit.label(text("UiLibrary.gdx.splitTop"), "hud-body", 12.5f, UiTheme.TEXT));
+        top.add(kit.label(text("UiLibrary.gdx.splitTop"), "hud-body", token ? 13 : 12.5f, ink));
         Table bottom = new Table();
-        bottom.add(kit.label(text("UiLibrary.gdx.splitBottom"), "hud-body", 12.5f, UiTheme.TEXT));
-        compare(page, "hud-split", new Container<>(new SplitPane(top, bottom, true, kit.skin, "hud-split"))
-              .size(320, 120), null);
+        bottom.add(kit.label(text("UiLibrary.gdx.splitBottom"), "hud-body", token ? 13 : 12.5f, ink));
+        return new SplitPane(top, bottom, true, kit.skin, "hud-split");
     }
 
     private void containers(Table page) {
@@ -806,8 +838,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return popover;
     }
 
-    private UiTree tree() {
-        UiTree tree = new UiTree(kit);
+    private UiTree tree(String style) {
+        UiTree tree = new UiTree(kit, style);
         tree.nodes(List.of(
               new UiTree.Node("display", text("UiLibrary.gdx.treeDisplay")).icon("tune").children(List.of(
                     new UiTree.Node("display.labels", text("UiLibrary.gdx.treeLabels")),
@@ -821,13 +853,22 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return tree;
     }
 
-    private ScrollPane cardGrid() {
+    /** The card grid; in the token look its captions are overlines and its cards plain token panels. */
+    private ScrollPane cardGrid(boolean token) {
         UiCardGrid grid = new UiCardGrid(3, 56, 24, 8);
-        grid.items(List.of(new UiCardGrid.Section(kit.caption(text("UiLibrary.gdx.cardsLight")), 4),
-              new UiCardGrid.Section(kit.caption(text("UiLibrary.gdx.cardsHeavy")), 5)), index -> {
-                  Table card = kit.panel();
-                  card.add(kit.label(text("UiLibrary.gdx.card", index + 1), "hud-medium", 12, UiTheme.TEXT))
-                        .expand();
+        grid.items(List.of(new UiCardGrid.Section(kit.caption(text("UiLibrary.gdx.cardsLight"), token), 4),
+              new UiCardGrid.Section(kit.caption(text("UiLibrary.gdx.cardsHeavy"), token), 5)), index -> {
+                  Table card;
+                  if (token) {
+                      card = new Table();
+                      card.setBackground(kit.skin.getDrawable("token-card"));
+                      card.add(kit.label(text("UiLibrary.gdx.card", index + 1), "hud-medium", 12.5f,
+                            UiTheme.tokenColor("text.primary"))).expand();
+                  } else {
+                      card = kit.panel();
+                      card.add(kit.label(text("UiLibrary.gdx.card", index + 1), "hud-medium", 12, UiTheme.TEXT))
+                            .expand();
+                  }
                   return card;
               });
         return kit.scrollList(grid);

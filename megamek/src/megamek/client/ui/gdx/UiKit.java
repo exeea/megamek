@@ -20,6 +20,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
+import com.badlogic.gdx.scenes.scene2d.ui.SplitPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
@@ -139,6 +140,91 @@ public final class UiKit {
         return scroll;
     }
 
+    /**
+     * A list as {@link #scrollList(Actor)}; with {@code token}, in the Token v0 look (docs/design-system/tokens.md,
+     * Lists and trees, Scrollbars): the input frame, and a pill thumb that always shows, over a rail while the pointer
+     * is on the bar, lighter while hovered and lighter still while dragged.
+     */
+    public ScrollPane scrollList(Actor list, boolean token) {
+        if (!token) {
+            return scrollList(list);
+        }
+        ScrollPane scroll = scrollList(list);
+        ScrollPane.ScrollPaneStyle rest = new ScrollPane.ScrollPaneStyle(
+              skin.get(UiTheme.TOKEN_LIST, ScrollPane.ScrollPaneStyle.class));
+        ScrollPane.ScrollPaneStyle over = new ScrollPane.ScrollPaneStyle(rest);
+        over.vScroll = skin.getDrawable("scroll-rail");
+        over.vScrollKnob = skin.getDrawable("scroll-thumb-over");
+        ScrollPane.ScrollPaneStyle down = new ScrollPane.ScrollPaneStyle(over);
+        down.vScrollKnob = skin.getDrawable("scroll-thumb-down");
+        scroll.setStyle(rest);
+        scroll.setFadeScrollBars(false);
+        // The pointer's x in the pane while it is over it, else negative
+        float[] pointer = { -1 };
+        scroll.addListener(new InputListener() {
+            @Override
+            public boolean mouseMoved(InputEvent event, float x, float y) {
+                pointer[0] = x;
+                return false;
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int index, Actor toActor) {
+                if (index == -1 && (toActor == null || !toActor.isDescendantOf(scroll))) {
+                    pointer[0] = -1;
+                }
+            }
+        });
+        scroll.addAction(Actions.forever(Actions.run(() -> {
+            ScrollPane.ScrollPaneStyle look = rest;
+            if (scroll.isScrollY() && scroll.isDragging()) {
+                look = down;
+            } else if (scroll.isScrollY()) {
+                float right = scroll.getWidth() - rest.background.getRightWidth();
+                if (pointer[0] >= right - scroll.getScrollBarWidth() && pointer[0] <= right) {
+                    look = over;
+                }
+            }
+            if (scroll.getStyle() != look) {
+                scroll.setStyle(look);
+            }
+        })));
+        return scroll;
+    }
+
+    /**
+     * Gives hud-v3's split pane the Token v0 divider (docs/design-system/tokens.md, Split panes): a subtle line in a
+     * grab band, an accent line while the pointer is on it or drags it. Returns the split pane.
+     */
+    public SplitPane tokenSplit(SplitPane split) {
+        SplitPane.SplitPaneStyle rest = skin.get(UiTheme.TOKEN_SPLIT,
+              SplitPane.SplitPaneStyle.class);
+        SplitPane.SplitPaneStyle active =
+              new SplitPane.SplitPaneStyle(skin.getDrawable("token-split-active"));
+        split.setStyle(rest);
+        boolean[] dragging = { false };
+        split.addListener(new InputListener() {
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                dragging[0] = split.isCursorOverHandle();
+                return dragging[0];
+            }
+
+            @Override
+            public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                dragging[0] = false;
+            }
+        });
+        split.addAction(Actions.forever(Actions.run(() -> {
+            SplitPane.SplitPaneStyle look =
+                  dragging[0] || split.isCursorOverHandle() ? active : rest;
+            if (split.getStyle() != look) {
+                split.setStyle(look);
+            }
+        })));
+        return split;
+    }
+
     /** A horizontal choice row with the same scroll behaviour and styling as other UIKit lists. */
     public ScrollPane scrollStrip(Actor strip) {
         ScrollPane scroll = scrollList(strip);
@@ -231,6 +317,17 @@ public final class UiKit {
         return new Label(UiTheme.upper(text), skin, "hud-caption");
     }
 
+    /** A caption as {@link #caption(String)}; with {@code token}, the upper-case overline type in text.muted. */
+    public Label caption(String text, boolean token) {
+        if (!token) {
+            return caption(text);
+        }
+        Label caption = new Label(UiTheme.upper(text), new Label.LabelStyle(skin.get(UiTheme.TYPE + "overline",
+              Label.LabelStyle.class)));
+        caption.getStyle().fontColor = UiTheme.tokenColor("text.muted");
+        return caption;
+    }
+
     /**
      * A theme icon (a Material symbol, or an image icon a view added) at a CSS size; inside a button it takes the
      * button's text color.
@@ -319,6 +416,21 @@ public final class UiKit {
         Label empty = label(text, "hud-body", 12.5f, UiTheme.MUTED);
         empty.setWrap(true);
         list.add(empty).growX().pad(16, 14, 16, 14);
+        return empty;
+    }
+
+    /**
+     * A list's empty state as {@link #empty(Table, String)}; with {@code token}, the Token v0 look: {@code text} in
+     * text.muted, centred in the first row's place (control.sm high).
+     */
+    public Label empty(Table list, String text, boolean token) {
+        if (!token) {
+            return empty(list, text);
+        }
+        Label empty = label(text, "hud-body", 13, UiTheme.tokenColor("text.muted"));
+        empty.setWrap(true);
+        empty.setAlignment(Align.center);
+        list.add(empty).growX().minHeight(DesignTokens.shipped().size().get("control.sm"));
         return empty;
     }
 

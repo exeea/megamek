@@ -331,6 +331,7 @@ public final class UiTheme implements Disposable {
         tokenSelects();
         tokenSelection();
         tokenInputs();
+        tokenLists();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -1274,6 +1275,124 @@ public final class UiTheme implements Disposable {
         picker.label = token(tokens.color("text.muted", mode));
         picker.labelOn = token(tokens.color("text.secondary", mode));
         skin.add(TOKEN, picker);
+    }
+
+    /** The token look of hud-v3's list and tree rows ({@code hud-row}, {@code UiTree}); control.sm high. */
+    public static final String TOKEN_ROW = "token-row";
+    /** The token look of hud-v3's scrolling list ({@code hud-list}): the input frame and the quiet scroll bar. */
+    public static final String TOKEN_LIST = "token-list";
+    /** The token look of hud-v3's split pane divider ({@code hud-split}). */
+    public static final String TOKEN_SPLIT = "token-split";
+
+    /**
+     * Token v0 styles for hud-v3's own lists, trees, grids and splits (docs/design-system/tokens.md, Lists and trees,
+     * Scrollbars and Split panes). Rows have no box: a hover wash, and a selected wash with a violet marker at the
+     * leading edge. The scroll bar's hover and drag looks are the {@code scroll-rail}, {@code scroll-thumb-over} and
+     * {@code scroll-thumb-down} drawables, and the divider's is {@code token-split-active}; {@code UiKit} swaps them in.
+     */
+    private void tokenLists() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        Color control = token(tokens.color("border.control", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        Color violet = token(tokens.color("selected.primary", mode));
+        Color hover = token(tokens.color("surface.hover", mode));
+        float border = tokens.size().get("border");
+        float xs = tokens.space().get("xs");
+        float sm = tokens.space().get("sm");
+        float md = tokens.space().get("md");
+        float radius = tokens.radius().get("sm");
+        float markerWidth = tokens.size().get("selection.width");
+        float markerHeight = tokens.size().get("icon.sm");
+        float height = tokens.size().get("control.sm");
+
+        Drawable marker = skin.newDrawable("white", violet);
+        NinePatchDrawable selectedWash = box("list-row-selected", token(tokens.color("selected.background", mode)),
+              null, 0, radius, null, 0, 0, 0);
+        Drawable selected = new BaseDrawable() {
+            @Override
+            public void draw(Batch batch, float x, float y, float width, float rowHeight) {
+                selectedWash.draw(batch, x, y, width, rowHeight);
+                marker.draw(batch, x, y + Math.round((rowHeight - markerHeight) / 2), markerWidth, markerHeight);
+            }
+        };
+        TokenButtonStyle row = new TokenButtonStyle();
+        row.font = skin.getFont("hud-body");
+        row.fontColor = token(tokens.color("text.primary", mode));
+        row.disabledFontColor = token(tokens.color("text.disabled", mode));
+        row.detailFontColor = token(tokens.color("text.secondary", mode));
+        row.up = rowPadding(flat(Color.CLEAR, 0, 0), markerWidth + sm, md, height);
+        row.over = rowPadding(box("list-row-over", hover, null, 0, radius, null, 0, 0, 0), markerWidth + sm, md,
+              height);
+        row.down = row.over;
+        row.checked = rowPadding(selected, markerWidth + sm, md, height);
+        row.checkedOver = row.checked;
+        row.checkedDown = row.checked;
+        row.disabled = row.up;
+        skin.add(TOKEN_ROW, row, TextButton.TextButtonStyle.class);
+        // A reorderable list's flying row on the raised surface, and the slot it will drop into
+        box("token-row-lifted", token(tokens.color("surface.raised", mode)), control, border, radius, null, 0, 0, 0);
+        box("token-row-slot", token(tokens.color("surface.base", mode)), subtle, border, radius, null, 0, 0, 0);
+
+        // The frame pads xs, which insets the rows' shape; the bar sits over the rows, inside the frame's edge
+        float bar = sm + 2 * tokens.space().get("xxs");
+        ScrollPane.ScrollPaneStyle list = new ScrollPane.ScrollPaneStyle();
+        list.background = box("list-frame", token(tokens.color("surface.input", mode)), control, border,
+              tokens.radius().get("md"), null, xs, xs, 0);
+        list.vScroll = skin.newDrawable("white", Color.CLEAR);
+        list.vScroll.setMinWidth(bar);
+        list.vScrollKnob = scrollThumb("scroll-thumb", control, sm, height);
+        skin.add(TOKEN_LIST, list);
+        box("scroll-rail", hover, null, 0, bar / 2, null, 0, 0, 0).setMinWidth(bar);
+        scrollThumb("scroll-thumb-over", token(tokens.color("text.muted", mode)), sm, height);
+        scrollThumb("scroll-thumb-down", token(tokens.color("text.secondary", mode)), sm, height);
+
+        box("token-card", token(tokens.color("surface.panel", mode)), subtle, border, tokens.radius().get("md"), null,
+              0, 0, 0);
+
+        float band = md;
+        float active = tokens.size().get("selection.width");
+        Drawable rest = skin.newDrawable("white", subtle);
+        Drawable accent = skin.newDrawable("white", token(tokens.color("accent.primary", mode)));
+        skin.add(TOKEN_SPLIT, new com.badlogic.gdx.scenes.scene2d.ui.SplitPane.SplitPaneStyle(
+              splitLine(rest, border, band)));
+        skin.add("token-split-active", splitLine(accent, active, band), Drawable.class);
+    }
+
+    /** Pads a row drawable {@code leading} units before its content and {@code trailing} after; control height. */
+    private static Drawable rowPadding(Drawable drawable, float leading, float trailing, float height) {
+        drawable.setLeftWidth(leading);
+        drawable.setRightWidth(trailing);
+        drawable.setTopHeight(0);
+        drawable.setBottomHeight(0);
+        drawable.setMinHeight(height);
+        drawable.setMinWidth(0);
+        return drawable;
+    }
+
+    /** A scroll bar's pill thumb, {@code width} wide and at least {@code length} long. */
+    private NinePatchDrawable scrollThumb(String name, Color color, float width, float length) {
+        NinePatchDrawable thumb = box(name, color, null, 0, width / 2, null, 0, 0, 0);
+        thumb.setMinWidth(width);
+        thumb.setMinHeight(length);
+        return thumb;
+    }
+
+    /** A divider line {@code thickness} thick across the middle of a grab band {@code band} high (or wide). */
+    private static Drawable splitLine(Drawable line, float thickness, float band) {
+        Drawable divider = new BaseDrawable() {
+            @Override
+            public void draw(Batch batch, float x, float y, float width, float height) {
+                if (width >= height) {
+                    line.draw(batch, x, y + Math.round((height - thickness) / 2), width, thickness);
+                } else {
+                    line.draw(batch, x + Math.round((width - thickness) / 2), y, thickness, height);
+                }
+            }
+        };
+        divider.setMinHeight(band);
+        divider.setMinWidth(band);
+        return divider;
     }
 
     /**

@@ -82,8 +82,17 @@ public final class UiList extends WidgetGroup {
 
     /** An empty list of the kit's skin; its view adds rows with {@link #add}. */
     public UiList(UiKit kit) {
-        slot = kit.skin.getDrawable("row-slot");
-        surface = kit.skin.getDrawable("row-lifted");
+        this(kit, null);
+    }
+
+    /**
+     * An empty list as {@link #UiList(UiKit)}; with {@link UiTheme#TOKEN}, its flying row and slot take the Token v0
+     * look, for rows in the {@link UiTheme#TOKEN_ROW} style.
+     */
+    public UiList(UiKit kit, String style) {
+        String prefix = UiTheme.TOKEN.equals(style) ? "token-" : "";
+        slot = kit.skin.getDrawable(prefix + "row-slot");
+        surface = kit.skin.getDrawable(prefix + "row-lifted");
         shadow = kit.skin.getDrawable("shadow");
         setTransform(false);
         setTouchable(Touchable.childrenOnly);

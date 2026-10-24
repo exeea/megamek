@@ -526,7 +526,15 @@ content and get the hover and the marker, but only the stock renderer gets the r
 [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java) adds `emptyText(list, text)`,
 `twoLine(list, title, detail)` and `scroll(view)`.
 
-**libGDX.** Nothing new yet. hud-v3's `UiList` and `UiTree` stay until the developers accept the system.
+**libGDX.** hud-v3's own lists take the look without new controls.
+[`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token-row` button style (no box, a
+hover wash, the selected wash and violet marker) and the `token-list` scroll pane style (the input frame, padded `xs`
+to inset the rows). `UiKit.scrollList(list, true)` frames a list in it;
+`new UiList(kit, UiTheme.TOKEN)` gives a reorderable list's flying row and slot token colors for `token-row` rows;
+`new UiTree(kit, UiTheme.TOKEN)` draws `token-row` rows 28 high (46 with a second line in `text.secondary`) with
+`text.secondary` chevrons; and `UiKit.empty(list, text, true)` centres a `text.muted` message in the first row's place.
+In card and choice grids only the parts change: `UiKit.caption(text, true)` is the overline caption, the `token-card`
+drawable a plain panel, and the options take the `button-secondary` style.
 
 ## Menus
 
@@ -603,7 +611,9 @@ scrolls instead of drawing a stripe beside it.
 them without changes. A bar takes the color of an opaque view, otherwise the viewport's; a transparent scroll pane
 shows what's behind it.
 
-**libGDX.** Nothing new yet; hud-v3's 4-wide list knob stays until the developers accept the system.
+**libGDX.** The `token-list` scroll pane style has the 10-wide bar and the `border.control` pill thumb, which always
+shows; `UiKit.scrollList(list, true)` swaps in the `scroll-rail` and the `text.muted` thumb while the pointer is on the
+bar and the `text.secondary` thumb while it drags. hud-v3's 4-wide `hud-list` knob stays as hud-v3 draws it.
 
 ## Sliders
 
@@ -741,7 +751,9 @@ Two areas side by side or stacked, with a divider the user drags to share the sp
 [`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java), so existing views get it
 without changes.
 
-**libGDX.** Nothing new yet.
+**libGDX.** `UiKit.tokenSplit(split)` gives hud-v3's split pane the `token-split` divider, a 1px `border.subtle` line
+in an `md` grab band without hud-v3's grip, and the 2px `accent.primary` line while the pointer is on it or drags it.
+scene2d has no one-touch arrows.
 
 ## Dialogs
 
