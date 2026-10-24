@@ -22,14 +22,10 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.InputEvent;
-import java.awt.event.KeyEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
@@ -41,9 +37,9 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComponent;
@@ -85,15 +81,14 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.util.KeyCommandBind;
-import megamek.common.Hex;
 import megamek.common.Configuration;
+import megamek.common.Hex;
 import megamek.common.Report;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
-import megamek.common.loaders.MapSettings;
 import megamek.common.units.Entity;
 import megamek.common.units.Terrains;
 import megamek.utilities.BoardClassifier;
@@ -1220,7 +1215,8 @@ class GpuBoardWindowSmokeTest {
                     onSwing(() -> {
                         JOptionPane prompt = savePrompt(ui.frame());
                         assertEquals(Messages.getString("ClientGUI.gameSaveDialogMessage"), prompt.getMessage());
-                        assertTrue(SwingUtilities.getWindowAncestor(prompt).isAlwaysOnTop());
+                        assertTrue(GpuBoardWindow.raisedOverBoard(
+                              (java.awt.Dialog) SwingUtilities.getWindowAncestor(prompt)));
                         prompt.setValue(response);
                         return null;
                     });
@@ -1373,7 +1369,7 @@ class GpuBoardWindowSmokeTest {
                     dialog.setVisible(true);
                     return dialog;
                 });
-                await(() -> onSwing(probe::isAlwaysOnTop));
+                await(() -> onSwing(() -> GpuBoardWindow.raisedOverBoard(probe)));
                 onSwing(() -> { probe.dispose(); return null; });
                 input(() -> ((Lwjgl3Graphics) Gdx.graphics).getWindow().restoreWindow());
                 for (int[] size : new int[][] { { 900, 600 }, { 2043, 1200 }, { 2560, 1600 }, { 3840, 2160 }, { 1280, 800 } }) {

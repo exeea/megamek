@@ -224,6 +224,9 @@ dependencies {
     implementation "com.badlogicgames.gdx:gdx:${gdxVersion}"
     implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:${gdxVersion}"
     implementation "com.badlogicgames.gdx:gdx-freetype:${gdxVersion}"
+    // JAWT gives the native windows of Swing dialogs that the 3D window owns on macOS and Linux. Pure Java (its
+    // natives are in LWJGL's core), it must match the LWJGL version libGDX brings.
+    implementation 'org.lwjgl:lwjgl-jawt:3.3.3'
     // CPU-only glTF decoding; terrain workers and unit validation share the same mesh data.
     implementation 'de.javagl:jgltf-model:2.0.4'
     runtimeOnly "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-desktop"

@@ -636,6 +636,28 @@ class GpuSwingDialogGateTest {
         }
     }
 
+    @Test
+    void aModalSwingDialogIsRaisedEvenOutsideTheAllowlistOrWithoutAnOwner() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "Shows Swing dialogs");
+        try (Declaring declaring = Declaring.create(); Gate gate = new Gate(declaring.gui, declaring.fixture)) {
+            JFrame frame = declaring.frame;
+            gate.present();
+            // Hidden behind the native window, a modal dialog would block the client unseen; it is still reported.
+            assertTrue(gate.raised(() -> {
+                JDialog probe = new JDialog(frame, "Modal gate probe", true);
+                probe.setSize(120, 80);
+                probe.setVisible(true);
+                return null;
+            }, window -> window instanceof JDialog dialog && "Modal gate probe".equals(dialog.getTitle())),
+                  "A modal dialog outside the allowlist");
+            assertEquals(List.of("A Swing dialog outside the allowlist opened over the battle window: "
+                  + "javax.swing.JDialog \"Modal gate probe\""), gate.errors);
+            // The first turn's sound question falls back to an ownerless confirmation box.
+            assertTrue(gate.raised(() -> JOptionPane.showConfirmDialog(null, "Mute?", "Turn Notifications",
+                  JOptionPane.YES_NO_OPTION), MESSAGE_BOX), "A modal box without an owner");
+        }
+    }
+
     /** An Archer (42) of the player with an AP pod and a B-pod in its left leg; two enemy squads in its hex. */
     private static Entity podCarrier(Declaring declaring) throws Exception {
         Entity archer = declaring.unit("Archer ARC-2R.mtf", 42, declaring.fixture.player, new Coords(7, 3));

@@ -6,6 +6,7 @@ import java.awt.BorderLayout;
 import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Frame;
+import java.awt.HeadlessException;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
@@ -18,12 +19,16 @@ import java.awt.event.WindowAdapter;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiFunction;
+import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
@@ -37,6 +42,7 @@ import javax.swing.Timer;
 import javax.swing.event.MenuEvent;
 import javax.swing.event.MenuListener;
 
+import com.badlogic.gdx.Files.FileType;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
@@ -60,6 +66,7 @@ import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.common.units.Entity;
 import megamek.client.ui.util.ScreenFit;
+import megamek.common.Configuration;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.enums.GamePhase;
@@ -220,6 +227,10 @@ public final class GpuBoardWindow {
     private JDialog preview2D;
     private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
+    /** Natively owned raised dialogs (Windows, macOS, Linux on X11) instead of floating them on top. Else {@code null}. */
+    private volatile GpuNativeDialogOwner nativeOwner;
+    /** EDT: natively owned modal dialogs; while any is open the board window is disabled, as a blocked frame is. */
+    private final Set<Dialog> modalDialogs = Collections.newSetFromMap(new IdentityHashMap<>());
     /**
      * The Swing window hides while the GPU view runs, so a Swing dialog owned by it would open behind the native
      * window. A client dialog that opens while the GPU window cannot ask the client's prompts itself (it starts or
@@ -228,6 +239,18 @@ public final class GpuBoardWindow {
     private final AWTEventListener dialogListener = event -> {
         if (closeWithPreviewOwner(event)) {
             return;
+        }
+        if ((event.getID() == ComponentEvent.COMPONENT_HIDDEN || event.getID() == WindowEvent.WINDOW_CLOSED)
+              && event.getSource() instanceof Dialog hidden) {
+            endModal(hidden);
+            GpuNativeDialogOwner owner = nativeOwner;
+            if (owner != null) {
+                if (event.getID() == WindowEvent.WINDOW_CLOSED) {
+                    owner.forget(hidden);
+                } else {
+                    owner.hidden(hidden);
+                }
+            }
         }
         if (event.getID() == WindowEvent.WINDOW_CLOSED && event.getSource() instanceof Dialog closed) {
             // A disposed dialog is released (with its content, such as the lobby's 2D preview) and keeps its stacking.
@@ -238,8 +261,9 @@ public final class GpuBoardWindow {
             return;
         }
         if (event.getID() == ComponentEvent.COMPONENT_SHOWN
-              && event.getSource() instanceof Dialog dialog && belongsToSwingWindow(dialog)) {
-            if (asksPrompts() && !allowedOverBattle(dialog)) {
+              && event.getSource() instanceof Dialog dialog && belongsToClient(dialog)) {
+            // A modal dialog left behind the native window would block the client unseen, so it rises regardless.
+            if (asksPrompts() && !allowedOverBattle(dialog) && !dialog.isModal()) {
                 return;
             }
             raise(dialog);
@@ -730,6 +754,10 @@ public final class GpuBoardWindow {
                     // The shared listener detects the shading language first; then the window is fitted on screen.
                     super.created(window);
                     fitOnScreen(window);
+                    // A preview's owner stays visible, so its dialogs keep floating instead of moving to this window.
+                    if (!preview) {
+                        nativeOwner = GpuNativeDialogOwner.forGlfwWindow(window.getWindowHandle());
+                    }
                 }
 
                 @Override
@@ -773,6 +801,16 @@ public final class GpuBoardWindow {
                         presentationRequested = true;
                         SwingUtilities.invokeLater(GpuBoardWindow.this::present);
                     }
+                }
+
+                @Override
+                public void dispose() {
+                    // Windows destroys owned windows with their owner; the dialogs return to theirs first.
+                    GpuNativeDialogOwner owner = nativeOwner;
+                    if (owner != null) {
+                        owner.releaseAll();
+                    }
+                    super.dispose();
                 }
             }, configuration);
         } catch (RuntimeException | LinkageError error) {
@@ -859,6 +897,12 @@ public final class GpuBoardWindow {
         }
         if (!preview && swingWindow != null) {
             swingWindow.setVisible(false);
+            // Dialogs raised while the native window was still opening float; they can belong to it now.
+            for (Dialog dialog : new ArrayList<>(dialogOnTop.keySet())) {
+                if (dialog.isShowing()) {
+                    raise(dialog);
+                }
+            }
         }
         if (preview) {
             // The owner's open dialogs stay in front, as those it opens later do (dialogListener), so the lobby's 2D
@@ -1002,11 +1046,54 @@ public final class GpuBoardWindow {
               .anyMatch(type::isInstance);
     }
 
-    /** Keeps a dialog above the native window until either closes ({@link #restoreDialogPresentation}). */
+    /**
+     * Keeps a dialog above the native window until either closes. The dialog becomes a native owned window of the
+     * board window where the platform allows ({@link GpuNativeDialogOwner}); elsewhere, or when that fails, it floats
+     * on top ({@link #restoreDialogPresentation}).
+     */
     private void raise(Dialog dialog) {
+        GpuNativeDialogOwner owner = nativeOwner;
+        if (owner != null && ownNatively(owner, dialog)) {
+            Boolean wasOnTop = dialogOnTop.remove(dialog);
+            if (wasOnTop != null) {
+                dialog.setAlwaysOnTop(wasOnTop);
+            }
+            if (dialog.isModal() && modalDialogs.add(dialog) && modalDialogs.size() == 1) {
+                setBoardEnabled(false);
+            }
+            dialog.toFront();
+            return;
+        }
         dialogOnTop.putIfAbsent(dialog, dialog.isAlwaysOnTop());
         dialog.setAlwaysOnTop(true);
         dialog.toFront();
+    }
+
+    /** A dialog of an owned dialog already stacks with it natively; any other is owned by the board window. */
+    private static boolean ownNatively(GpuNativeDialogOwner owner, Dialog dialog) {
+        return dialog.getOwner() instanceof Dialog parent && parent.isShowing() && owner.owns(parent)
+              || owner.adopt(dialog);
+    }
+
+    private void endModal(Dialog dialog) {
+        if (modalDialogs.remove(dialog) && modalDialogs.isEmpty()) {
+            setBoardEnabled(true);
+        }
+    }
+
+    /** Disables or re-enables the board window on its own thread; re-enabled, it takes the focus back. */
+    private void setBoardEnabled(boolean enabled) {
+        GpuNativeDialogOwner owner = nativeOwner;
+        Lwjgl3Application app = application;
+        if (owner == null || app == null) {
+            return;
+        }
+        app.postRunnable(() -> {
+            owner.setOwnerEnabled(enabled);
+            if (enabled && !closing) {
+                ((Lwjgl3Graphics) app.getGraphics()).getWindow().focusWindow();
+            }
+        });
     }
 
     /** True when the window is the Swing window itself or a dialog chain owned by it. */
@@ -1015,6 +1102,31 @@ public final class GpuBoardWindow {
             if (current == swingWindow) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * A dialog of the Swing window, or, unless this is a preview whose owner stays visible, a modal one without an owner
+     * of its own ({@code JOptionPane.showConfirmDialog(null, ...)}), which Swing gives its hidden shared frame. Such a
+     * dialog blocks the whole application, so it must not hide behind the native window, whichever client opened it.
+     */
+    private boolean belongsToClient(Dialog dialog) {
+        if (belongsToSwingWindow(dialog)) {
+            return true;
+        }
+        if (preview || !dialog.isModal()) {
+            return false;
+        }
+        try {
+            Frame shared = JOptionPane.getRootFrame();
+            for (Window current = dialog.getOwner(); current != null; current = current.getOwner()) {
+                if (current == shared) {
+                    return true;
+                }
+            }
+        } catch (HeadlessException headless) {
+            return false;
         }
         return false;
     }
@@ -1086,6 +1198,7 @@ public final class GpuBoardWindow {
 
     private void restoreDialogPresentation() {
         Toolkit.getDefaultToolkit().removeAWTEventListener(dialogListener);
+        modalDialogs.clear();
         dialogOnTop.forEach(Dialog::setAlwaysOnTop);
         dialogOnTop.clear();
     }
@@ -1106,6 +1219,19 @@ public final class GpuBoardWindow {
     /** Includes preparation: Legacy 2D panels must not open while the native window is starting. */
     public static synchronized boolean isActiveFor(ClientGUI gui) {
         return active != null && active.gui == gui;
+    }
+
+    /** Whether the active window keeps the dialog above itself: natively owned where supported, otherwise on top. */
+    static boolean raisedOverBoard(Dialog dialog) {
+        GpuBoardWindow window = active;
+        GpuNativeDialogOwner owner = window == null ? null : window.nativeOwner;
+        for (Dialog current = dialog; current != null;
+              current = current.getOwner() instanceof Dialog parent ? parent : null) {
+            if (owner != null && owner.owns(current)) {
+                return true;
+            }
+        }
+        return dialog.isAlwaysOnTop();
     }
 
     /** EDT: the View menu and its shortcut open the native ruler while this client's board is native. */
@@ -1225,6 +1351,11 @@ public final class GpuBoardWindow {
         configuration.setTitle(Messages.getString("GpuBoard.title"));
         configuration.setWindowedMode(1280, 800);
         configuration.setWindowSizeLimits(900, 600, -1, -1);
+        String[] icons = windowIcons();
+        if (icons.length > 0) {
+            // Windows and Linux show it on the title bar and taskbar; macOS uses the application's icon instead.
+            configuration.setWindowIcon(FileType.Absolute, icons);
+        }
         configuration.setInitialVisible(visible);
         // Keep rendering bounded even when VSync is disabled, we cap at 60fps. With VSync we let it do what it needs...
         configuration.setForegroundFPS(DEFAULT_VSYNC ? 0 : 60);
@@ -1236,11 +1367,21 @@ public final class GpuBoardWindow {
         return configuration;
     }
 
+    /** The MegaMek icons the Swing frames use, by size, that exist; a missing icon file would stop the window. */
+    static String[] windowIcons() {
+        return Stream.of(16, 32, 48, 256)
+              .map(size -> new File(Configuration.miscImagesDir(), "megamek-icon-" + size + "x" + size + ".png"))
+              .filter(File::isFile)
+              .map(File::getAbsolutePath)
+              .toArray(String[]::new);
+    }
+
     /** Every board window's events: its context sets the shading language, and losing focus pauses the battle. */
     private static class WindowListener extends Lwjgl3WindowAdapter {
         @Override
         public void created(Lwjgl3Window window) {
             GpuGlsl.detect();
+            GpuNativeDialogOwner.Win32.useWindowIconsForClass(window.getWindowHandle());
         }
 
         @Override
