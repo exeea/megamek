@@ -198,7 +198,7 @@ class GpuBoardPerformanceSmokeTest {
                         GpuBoardTestUi.capture(new File(screens, "performance-woods.png"));
                         if (size <= 32) {
                             start = System.nanoTime();
-                            BoardRelief.tune(new BoardRelief.Tuning(!original.cliffsIntoWater()));
+                            BoardRelief.tune(new BoardRelief.Tuning(!original.cliffsIntoWater(), original.containmentWalls()));
                             terrain.update(scene);
                             report("terrain-tuning", start);
                         }

@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
 
@@ -168,6 +169,20 @@ final class GpuWaterPages implements Disposable {
         material.set(water.depth());
         material.remove(BlendingAttribute.Type);
         material.set(new DepthTestAttribute(GL20.GL_LEQUAL, true));
+        return material;
+    }
+
+    /**
+     * A board-edge section's far side, seen from within the water, for what lies beyond the board
+     * ({@link GpuWaterShader#beyond}). Null for any other material.
+     */
+    static Material beyondMaterial(Material original) {
+        GpuWaterShader water = original.get(GpuWaterShader.class, GpuWaterShader.TYPE);
+        if (water == null || water.mode != GpuWaterShader.Mode.CUT) { return null; }
+        Material material = new Material(original);
+        material.id = original.id + ":beyond";
+        material.set(water.beyond());
+        material.set(IntAttribute.createCullFace(GL20.GL_FRONT));
         return material;
     }
 

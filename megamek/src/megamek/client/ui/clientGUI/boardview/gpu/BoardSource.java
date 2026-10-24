@@ -11,6 +11,7 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -25,11 +26,12 @@ interface BoardSource extends AutoCloseable {
      * Immutable preference snapshot published to the render thread: the 3D board's UI scale (the Tuning panel's share
      * of the scale the window takes from the monitor and its size; Swing's GUI scale is Swing's alone), the existing
      * preferences the native views read, whether the battle HUD shows its contacts panel, every key binding, the
-     * 3D board's graphics, MegaMek's movement colours and the overlay switches.
+     * 3D board's graphics, MegaMek's movement colours, the overlay switches and when every nameplate shows.
      */
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
           boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-          List<Bind> binds, BoardGraphics graphics, Overlays overlays, Map<GpuMovePlan.Band, Integer> movementColors) {
+          List<Bind> binds, BoardGraphics graphics, Overlays overlays, Map<GpuMovePlan.Band, Integer> movementColors,
+          NameplateMode nameplates) {
         public UiPreferences {
             binds = List.copyOf(binds);
             movementColors = Map.copyOf(movementColors);
@@ -57,41 +59,6 @@ interface BoardSource extends AutoCloseable {
             }
         }
 
-        /** Captures the client's movement palette, with the supplied sprint and jump colours. */
-        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb, Overlays overlays) {
-            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
-                  turnDetails, binds, graphics, overlays, Map.of(
-                        GpuMovePlan.Band.WALK, GUIPreferences.getInstance().getMoveDefaultColor().getRGB(),
-                        GpuMovePlan.Band.BACK, GUIPreferences.getInstance().getMoveBackColor().getRGB(),
-                        GpuMovePlan.Band.RUN, GUIPreferences.getInstance().getMoveRunColor().getRGB(),
-                        GpuMovePlan.Band.BOOST, GUIPreferences.getInstance().getMoveMASCColor().getRGB(),
-                        GpuMovePlan.Band.SPRINT, moveSprintRgb,
-                        GpuMovePlan.Band.JUMP, moveJumpRgb,
-                        GpuMovePlan.Band.ILLEGAL, GUIPreferences.getInstance().getMoveIllegalColor().getRGB()));
-        }
-
-        public int moveSprintRgb() {
-            return movementColors.get(GpuMovePlan.Band.SPRINT);
-        }
-
-        /** Preferences with the overlays' defaults, as the tests that switch no overlay build them. */
-        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb) {
-            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
-                  turnDetails, binds, moveSprintRgb, graphics, moveJumpRgb, Overlays.DEFAULTS);
-        }
-
-        /** Preferences with MegaMek's default jump colour, as the tests that draw no jump build them. */
-        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics) {
-            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
-                  turnDetails, binds, moveSprintRgb, graphics, java.awt.Color.RED.getRGB());
-        }
-
         static UiPreferences capture() {
             var preferences = PreferenceManager.getClientPreferences();
             GUIPreferences gui = GUIPreferences.getInstance();
@@ -100,20 +67,38 @@ interface BoardSource extends AutoCloseable {
                   gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
                   Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
                         KeyCommandBind.getDesc(bind))).toList(),
-                  gui.getMoveSprintColor().getRGB(), gui.getBoardGraphics(), gui.getMoveJumpColor().getRGB(),
-                  Overlays.capture(gui));
+                  gui.getBoardGraphics(), Overlays.capture(gui), Map.of(
+                        GpuMovePlan.Band.WALK, gui.getMoveDefaultColor().getRGB(),
+                        GpuMovePlan.Band.BACK, gui.getMoveBackColor().getRGB(),
+                        GpuMovePlan.Band.RUN, gui.getMoveRunColor().getRGB(),
+                        GpuMovePlan.Band.BOOST, gui.getMoveMASCColor().getRGB(),
+                        GpuMovePlan.Band.SPRINT, gui.getMoveSprintColor().getRGB(),
+                        GpuMovePlan.Band.JUMP, gui.getMoveJumpColor().getRGB(),
+                        GpuMovePlan.Band.ILLEGAL, gui.getMoveIllegalColor().getRGB()),
+                  gui.getNameplateMode());
         }
     }
 
     /**
      * One published snapshot. {@code status} and {@code panels} are always the newest capture; {@code panels} bundles
-     * the HUD services' snapshots. A map preview or the board editor publishes empty ones.
+     * the HUD services' snapshots. A map preview or the board editor publishes empty ones. A battle's {@code tooltip}
+     * is the hex tooltip of the hovered hex, or of the open menu's, and {@code hexDetails} that hex's lines below its
+     * terrain ({@link GpuBoardSource#hexDetails}); empty elsewhere.
      */
     public record Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
-          List<BoardScene.Command> globalCommands, String tooltip,
+          List<BoardScene.Command> globalCommands, String tooltip, String hexDetails,
           BoardFocus centerRequest, long boardGeneration, String actorName,
           BoardAtmosphere.Settings scenarioAtmosphere, GpuReportLog.Snapshot reports,
           GpuBattleStatus.Snapshot status, GpuHudData panels) {
+        /** A frame without a hex's lines below its terrain. */
+        public Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
+              List<BoardScene.Command> globalCommands, String tooltip, BoardFocus centerRequest, long boardGeneration,
+              String actorName, BoardAtmosphere.Settings scenarioAtmosphere, GpuReportLog.Snapshot reports,
+              GpuBattleStatus.Snapshot status, GpuHudData panels) {
+            this(scene, timeline, context, globalCommands, tooltip, "", centerRequest, boardGeneration, actorName,
+                  scenarioAtmosphere, reports, status, panels);
+        }
+
         /** A map's frame: no reports, battle status or HUD panels. */
         public Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
               List<BoardScene.Command> globalCommands, String tooltip, BoardFocus centerRequest, long boardGeneration,
@@ -124,13 +109,13 @@ interface BoardSource extends AutoCloseable {
 
         /** This frame with the animation events queued since the previous frame was taken. */
         Frame withTimeline(List<BoardScene.Animation> events) {
-            return new Frame(scene, events, context, globalCommands, tooltip, centerRequest, boardGeneration,
-                  actorName, scenarioAtmosphere, reports, status, panels);
+            return new Frame(scene, events, context, globalCommands, tooltip, hexDetails, centerRequest,
+                  boardGeneration, actorName, scenarioAtmosphere, reports, status, panels);
         }
 
         /** This frame showing {@code shown}, the scene the playback presents; this frame when it is its own. */
         Frame withScene(BoardScene shown) {
-            return shown == scene ? this : new Frame(shown, timeline, context, globalCommands, tooltip,
+            return shown == scene ? this : new Frame(shown, timeline, context, globalCommands, tooltip, hexDetails,
                   centerRequest, boardGeneration, actorName, scenarioAtmosphere, reports, status, panels);
         }
 

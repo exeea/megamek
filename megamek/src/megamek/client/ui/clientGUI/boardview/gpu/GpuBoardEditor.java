@@ -53,7 +53,7 @@ import megamek.common.Configuration;
 import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
-import megamek.common.board.BoardIssue;
+import megamek.common.board.HexIssue;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
 
@@ -177,7 +177,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /** An issue's hex waiting to be framed until its selection has applied, and when that wait ends (nanoTime). */
     private megamek.common.board.Coords pendingFrame;
     private long pendingFrameUntil;
-    private List<BoardIssue> shownIssues, sessionIssues;
+    private List<HexIssue> shownIssues, sessionIssues;
     /** The installed fit's objects inside the walls of Fitted pavement hexes; listed after the session's issues. */
     private List<BoardConcrete.Cut> shownCuts = List.of();
     private final Label status, documentName;
@@ -1162,7 +1162,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private void componentControls(BoardEditorSession.Brush brush) {
         List<Actor> controls = new ArrayList<>();
         if (brush.way()) { wayHeight(brush); }
-        else { controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "")); }
+        else if (!snapshot.drawsRoutes()) { controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "")); }
         var definition = blueprint.component(brush.component());
         if (brush.sampledHex() != null || definition.id().equals("ground")) {
             controls.add(brushNumber(UiKit.text("BoardEditor.levelLabel"), brush.elevation(), -10, 30, 1, Action.BRUSH_VALUE, "elevation")
@@ -1224,11 +1224,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         var fill = ui.checkbox(UiKit.text("BoardEditor.fill"), brush.fill()); fill.setName("editor-fill");
         onChange(fill, () -> send(Action.BRUSH_VALUE, "fill", Boolean.toString(fill.isTicked())));
         ui.tip(fill).getActor().setText(UiKit.text("BoardEditor.fill.tooltip"));
-        if (!brush.way()) { controls.add(fill); }
+        if (!snapshot.drawsRoutes()) { controls.add(fill); }
         brushRows.add(controls);
         brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.paintStamp"
               : brush.themeCard() ? "BoardEditor.hint.theme" : zone != null ? "BoardEditor.deploymentZoneHint"
-              : snapshot.drawsRoutes() ? "BoardEditor.hint.road" : "BoardEditor.hint.paint")));
+              : snapshot.drawsRoutes() ? brush.component().equals("building") ? "BoardEditor.hint.wall" : "BoardEditor.hint.road"
+              : "BoardEditor.hint.paint")));
     }
 
     /** The old editor's "Only overwrite clear hexes", for Paint and Sculpt: hexes that hold terrain are left as they are. */
@@ -2475,9 +2476,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      */
     private void issuesChanged() {
         if (sessionIssues == null) { return; }
-        List<BoardIssue> merged = new ArrayList<>(sessionIssues);
+        List<HexIssue> merged = new ArrayList<>(sessionIssues);
         for (var cut : shownCuts) {
-            merged.add(new BoardIssue(cut.at(), cut.object(), UiKit.text("BoardEditor.issueInsideWall", assetLabel(cut.asset()))));
+            merged.add(new HexIssue(cut.at(), cut.object(), UiKit.text("BoardEditor.issueInsideWall", assetLabel(cut.asset()))));
         }
         shownIssues = List.copyOf(merged);
         issues.setVisible(!shownIssues.isEmpty());

@@ -19,7 +19,7 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
-import megamek.common.board.BoardIssue;
+import megamek.common.board.HexIssue;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -128,7 +128,7 @@ class BoardEditorImportTest {
         // replaces it.
         BoardDecoration emblem = opened.getHex(piece).getDecorations().getFirst();
         assertEquals("decal/emblems/red-cross", emblem.asset());
-        assertEquals(List.of(new BoardIssue(piece, emblem.id(), "Emblem set with 1 of 7 pieces: the full emblem is placed")),
+        assertEquals(List.of(new HexIssue(piece, emblem.id(), "Emblem set with 1 of 7 pieces: the full emblem is placed")),
               session.snapshot().issues());
         session.command(new BoardEditorSession.Command(BoardEditorSession.Action.NEW, "4x4"), null);
         assertTrue(session.board().isNativeFormat(), "A new document is native");

@@ -30,6 +30,8 @@ uniform vec3 u_backdropHorizon;
 uniform float u_backdropExposure; // Positive: UI-authored backdrop with user EV only. Zero: incident lighting sky.
 uniform float u_transparentBackground;
 uniform vec3 u_spaceBackdrop; // Enabled, viewing aspect ratio, camera-relative sun/sky.
+uniform vec4 u_frame; // This target's part of the whole picture as uv offset and scale: a print tile's, else (0, 0, 1, 1).
+uniform float u_vignette; // The lens vignette's strength: 1 on screen, 0 for a print.
 uniform float u_spaceTime;
 uniform mat4 u_spaceView;
 uniform vec4 u_spaceLight; // Actual source direction and strength; never rotates with the decorative background.
@@ -140,9 +142,11 @@ void main() {
         vec3 direction = normalize(world(1.0) - world(0.0));
         if (u_projectionDepth.w > .5) {
             // Parallel cameras need a distant angular field rather than one repeated ray. This is camera-oriented,
-            // independent of its position and zoom: stars never stick to the board or move when it pans.
-            direction = normalize(direction + normalize(u_inverseView[0].xyz) * (v_uv.x * 2.0 - 1.0) * u_spaceBackdrop.y * .85
-                  + normalize(u_inverseView[1].xyz) * (v_uv.y * 2.0 - 1.0) * .85);
+            // independent of its position and zoom: stars never stick to the board or move when it pans. A print's
+            // tiles share one field across the whole picture.
+            vec2 uv = u_frame.xy + v_uv * u_frame.zw;
+            direction = normalize(direction + normalize(u_inverseView[0].xyz) * (uv.x * 2.0 - 1.0) * u_spaceBackdrop.y * .85
+                  + normalize(u_inverseView[1].xyz) * (uv.y * 2.0 - 1.0) * .85);
         }
         vec3 source = spaceLight(direction);
         if (u_spaceBackdrop.z > .5) direction = mat3(u_spaceView) * direction;
@@ -152,7 +156,7 @@ void main() {
         sky = backdropRadiance(spaceSky(direction) + source, 1.0) / max(u_exposure * (1.0 + u_lightning), 1e-8);
     }
     vec3 color = scene.rgb + (sky - u_sky) * (1.0 - coverage);
-    // Cutouts start at transparent black and keep foreground RGB associated until the PNG boundary.
+    // Cutouts start at transparent black and keep foreground RGB associated until the print lays them on paper.
     if (u_transparentBackground > 0.5) color = scene.rgb;
     vec3 linear = max(color, vec3(0.0));
     vec3 heat = vec3(0.0);
@@ -188,7 +192,7 @@ void main() {
     }
     linear = gradeScene(linear, coverage);
     linear += heat * sand.a * atmosphere.a * u_exposure;
-    // A printable cutout keeps physical coverage. Lens effects cannot create opacity in an ordinary RGBA PNG.
+    // A printable cutout keeps physical coverage. Lens effects cannot create opacity over the paper.
     float lensCoverage = u_transparentBackground > 0.5 ? coverage : 1.0;
     if (u_heatGlowStrength > 0.0) {
         // Fog already attenuated the visible source before blur. Sand also dims the camera halo.
@@ -205,9 +209,9 @@ void main() {
     color = displayScene(linear);
     // Board camera presentation; isolated material previews share only the color conversion.
     vec2 edge = (v_uv - 0.5) * 2.0;
-    color *= 1.0 - 0.09 * dot(edge, edge) * 0.5;
+    color *= 1.0 - 0.09 * dot(edge, edge) * 0.5 * u_vignette;
     if (u_fovEnabled > 0.5) color = fieldOfView(color, depth);
-    // Display contrast may lift black, but an empty PNG pixel must remain empty.
+    // Display contrast may lift black, but an empty print pixel must remain empty.
     if (u_transparentBackground > 0.5 && coverage == 0.0) color = vec3(0.0);
     fragColor = vec4(color, mix(1.0, coverage, u_transparentBackground));
     // Reuse the scene's hardware depth for tactical occlusion in this same draw.

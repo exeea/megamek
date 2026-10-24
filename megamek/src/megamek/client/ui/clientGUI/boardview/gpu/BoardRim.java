@@ -102,7 +102,7 @@ final class BoardRim {
     BoardScene.Pixels column(BoardScene scene, BoardScene.Tile tile, BoardScene.Pixels art,
           BoardScene.Pixels incline, BoardScene.Pixels highIncline) {
         List<Patch> patches = new ArrayList<>();
-        int ramps = BoardSurface.columnRamps(scene, tile);
+        int ramps = BoardSurface.ramps(scene, tile);
         for (int edge = 0; edge < 6; edge++) {
             int direction = BoardGeometry.edgeDirection(edge);
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));

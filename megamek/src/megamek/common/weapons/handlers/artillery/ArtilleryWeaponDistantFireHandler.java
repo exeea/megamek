@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Vector;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.common.Hex;
 import megamek.common.HexTarget;
@@ -51,7 +52,6 @@ import megamek.common.ToHitData;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.NukeDetonatedAction;
 import megamek.common.actions.WeaponAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
@@ -416,8 +416,8 @@ public class ArtilleryWeaponDistantFireHandler extends AmmoWeaponHandler {
         reportArtilleryAnimation(finalPos, height);
         if (ammoType.getMunitionType().contains(Munitions.M_FAE)) {
             handleArtilleryDriftMarker(targetPos, finalPos, artilleryAttackAction,
-                  AreaEffectHelper.processFuelAirDamage(
-                        finalPos, height, ammoType, artilleryAttackAction.getEntity(game), vPhaseReport, gameManager));
+                  AreaEffectHelper.processFuelAirDamage(finalPos, target.getBoardId(), height, ammoType,
+                        artilleryAttackAction.getEntity(game), vPhaseReport, gameManager));
             return false;
         }
 

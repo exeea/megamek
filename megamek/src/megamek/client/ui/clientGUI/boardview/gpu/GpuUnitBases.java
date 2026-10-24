@@ -91,7 +91,7 @@ final class GpuUnitBases implements Disposable {
     private static final Color GREY = Color.valueOf("9AA6A3");
     private static final Color ACTING_GLOW = Color.valueOf("a3ffe0");
     private static final Color FOCUS_GLOW = Color.valueOf("ff7a70");
-    private static final Color CROSS = Color.valueOf("ff8a80");
+    private static final Color CROSS = UiTheme.CORAL;
     private static final Color TRACK = Color.valueOf("4a5553");
     /** The condition icons in the HUD's icon font by status word key or label tile; other tiles show their letter. */
     private static final Map<String, String> CONDITION_ICONS = Map.ofEntries(Map.entry("SHUTDOWN", "power"),

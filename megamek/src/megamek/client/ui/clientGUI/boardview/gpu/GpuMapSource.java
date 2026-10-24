@@ -5,9 +5,7 @@ import java.awt.Font;
 import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,9 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import javax.imageio.ImageIO;
-import javax.imageio.ImageTypeSpecifier;
-import javax.imageio.metadata.IIOMetadataNode;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -148,7 +143,6 @@ final class GpuMapSource implements BoardSource {
     private volatile boolean closed;
     /** EDT-owned job state; only the immutable request crosses to the render thread. */
     private boolean printing;
-    private boolean savingPrint;
     private boolean choosingPrint;
     private final AtomicReference<GpuBoardPrint.Request> printRequest = new AtomicReference<>();
     /** EDT-owned: the board tagger runs ({@link #runBoardTagger}). */
@@ -296,7 +290,7 @@ final class GpuMapSource implements BoardSource {
                   "", !tagging, false, false, List.of(), () -> onSwing(() -> { if (!closed) { runBoardTagger(); } })));
         }
         commands.add(new BoardScene.Command("fileBoardPrint", Messages.getString("CommonMenuBar.PrintMenu"), "",
-              !printing && !savingPrint && !choosingPrint, false, false, List.of(), () -> onSwing(this::choosePrint)));
+              !printing && !choosingPrint, false, false, List.of(), () -> onSwing(this::choosePrint)));
         GUIPreferences gui = GUIPreferences.getInstance();
         List<BoardScene.Command> view = new ArrayList<>(List.of(renderer(gui),
               viewCommand(ClientGUI.VIEW_TOGGLE_HEX_COORDS, editor == null ? KeyCommandBind.HEX_COORDS : null,
@@ -307,11 +301,11 @@ final class GpuMapSource implements BoardSource {
             // the Client Settings' Trace Overlay section.
             view.add(viewCommand("boardTraceOverlay", null, gui.getShowTraceOverlay(), gui::toggleTraceConditionsOverlay));
             view.add(menuCommand("boardTraceOverlaySettings", "BoardEditor.traceSettings",
-                  () -> clientSettings(CommonSettingsPane.SETTINGS_OVERLAYS)));
+                  () -> clientSettings(owner, CommonSettingsPane.SETTINGS_OVERLAYS)));
         }
         commands.add(new BoardScene.Command("view", Messages.getString("CommonMenuBar.ViewMenu"), "", true,
               false, view, () -> { }));
-        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> clientSettings(null)));
+        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> clientSettings(owner, null)));
         commands.add(menuCommand("helpAbout", "CommonMenuBar.helpAbout", () -> new MMAboutDialog(owner).show()));
         if (requestClose != null) { commands.add(menuCommand("close", "Close", requestClose)); }
         return List.copyOf(commands);
@@ -364,7 +358,7 @@ final class GpuMapSource implements BoardSource {
     }
 
     /** The Client Settings dialog, opened on the settings page {@code route} when there is one. */
-    private void clientSettings(String route) {
+    static void clientSettings(Window owner, String route) {
         Window parent = owner;
         while (parent != null && !(parent instanceof JFrame)) { parent = parent.getOwner(); }
         CommonSettingsDialog settings = new CommonSettingsDialog((JFrame) parent);
@@ -406,15 +400,15 @@ final class GpuMapSource implements BoardSource {
         }).toList());
     }
 
-    /** EDT entry point; completion and failure return to that same owner after the GL thread finishes its snapshot. */
-    void requestPrint(Consumer<BufferedImage> completed, Consumer<Exception> failed) {
+    /** EDT entry point; completion and failure return to that same owner after the GL thread has written the file. */
+    void requestPrint(Path target, Runnable completed, Consumer<Exception> failed) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
-        if (closed || printing || savingPrint) { return; }
+        if (closed || printing) { return; }
         printing = true;
         try {
-            printRequest.set(new GpuBoardPrint.Request(printScene(), image -> onSwing(() -> {
+            printRequest.set(new GpuBoardPrint.Request(printScene(), target, () -> onSwing(() -> {
                 printing = false;
-                if (!closed) { completed.accept(image); refresh(); }
+                if (!closed) { completed.run(); refresh(); }
             }), failure -> onSwing(() -> {
                 printing = false;
                 if (!closed) { failed.accept(failure); refresh(); }
@@ -428,76 +422,42 @@ final class GpuMapSource implements BoardSource {
 
     @Override public GpuBoardPrint.Request takePrintRequest() { return printRequest.getAndSet(null); }
 
-    /** Print follows the board's existing printable-PNG workflow, using the 3D snapshot instead of 2D tiles. */
+    /** Print writes the 3D snapshot as a printable JPEG. */
     private void choosePrint() {
-        if (closed || printing || savingPrint || choosingPrint) { return; }
+        if (closed || printing || choosingPrint) { return; }
         choosingPrint = true;
         refresh();
         try {
             Path near = editor == null ? null : editor.path();
-            JFileChooser chooser = new JFileChooser(near == null ? new File(".") : near.toFile().getParentFile());
-            chooser.setDialogTitle(Messages.getString("CommonMenuBar.PrintMenu"));
-            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                  Messages.getString("GpuBoard.print.filter"), "png"));
-            chooser.setAccessory(new JLabel(Messages.getString("GpuBoard.print.scale")));
-            String name = near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString());
-            if (name == null || name.isBlank()) { name = "board"; }
-            chooser.setSelectedFile(new File(name + "-3d.png"));
-            if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION || closed) { return; }
-            Path target = chooser.getSelectedFile().toPath();
-            if (!target.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
-                target = target.resolveSibling(target.getFileName() + ".png");
-            }
-            Path output = target;
-            requestPrint(image -> savePrint(image, output), this::printFailed);
+            Path target = choosePrintFile(owner, near == null ? new File(".") : near.toFile().getParentFile(),
+                  near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString()), "-3d");
+            if (target == null || closed) { return; }
+            // The print card's Cancel ends a print without an error to report.
+            requestPrint(target, () -> { }, failure -> {
+                if (!(failure instanceof java.util.concurrent.CancellationException)) { printFailed(failure); }
+            });
         } catch (RuntimeException failure) { printFailed(failure); }
         finally { choosingPrint = false; refresh(); }
     }
 
-    private void savePrint(BufferedImage image, Path target) {
-        savingPrint = true;
-        Thread worker = new Thread(() -> {
-            Exception failure = null;
-            try {
-                writePrint(image, target, GpuBoardPrint.PIXELS_PER_METRE);
-            } catch (IOException | RuntimeException error) { failure = error; }
-            Exception result = failure;
-            onSwing(() -> {
-                savingPrint = false;
-                if (!closed) {
-                    if (result != null) { printFailed(result); }
-                    refresh();
-                }
-            });
-        }, "board-print-image");
-        worker.setDaemon(true);
-        worker.start();
+    /** The print's JPEG file, chosen in {@code directory}; null when cancelled. Shared by the 3D and 2D previews. */
+    static Path choosePrintFile(Window owner, File directory, String name, String suffix) {
+        JFileChooser chooser = new JFileChooser(directory);
+        chooser.setDialogTitle(Messages.getString("CommonMenuBar.PrintMenu"));
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+              Messages.getString("GpuBoard.print.filter"), "jpg", "jpeg"));
+        chooser.setAccessory(new JLabel(Messages.getString("GpuBoard.print.scale")));
+        chooser.setSelectedFile(new File((name == null || name.isBlank() ? "board" : name) + suffix + ".jpg"));
+        if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) { return null; }
+        Path target = chooser.getSelectedFile().toPath();
+        String file = target.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return file.endsWith(".jpg") || file.endsWith(".jpeg") ? target : target.resolveSibling(target.getFileName() + ".jpg");
     }
 
-    /** The PNG's physical pixel density preserves hex size in print programs that honor its resolution metadata. */
-    static void writePrint(BufferedImage image, Path target, int pixelsPerMetre) throws IOException {
-        if (pixelsPerMetre <= 0) { throw new IllegalArgumentException("Print resolution must be positive"); }
-        var writers = ImageIO.getImageWritersByFormatName("png");
-        if (!writers.hasNext()) { throw new IOException("No PNG writer"); }
-        var writer = writers.next();
-        try (var output = ImageIO.createImageOutputStream(target.toFile())) {
-            if (output == null) { throw new IOException("Cannot write " + target); }
-            writer.setOutput(output);
-            var parameters = writer.getDefaultWriteParam();
-            var metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), parameters);
-            var root = new IIOMetadataNode("javax_imageio_png_1.0");
-            var resolution = new IIOMetadataNode("pHYs");
-            resolution.setAttribute("pixelsPerUnitXAxis", Integer.toString(pixelsPerMetre));
-            resolution.setAttribute("pixelsPerUnitYAxis", Integer.toString(pixelsPerMetre));
-            resolution.setAttribute("unitSpecifier", "meter");
-            root.appendChild(resolution);
-            metadata.mergeTree("javax_imageio_png_1.0", root);
-            writer.write(null, new javax.imageio.IIOImage(image, null, metadata), parameters);
-        } finally { writer.dispose(); }
-    }
+    private void printFailed(Exception failure) { printFailed(owner, failure); }
 
-    private void printFailed(Exception failure) {
-        LOGGER.error(failure, "Unable to save printable 3D board");
+    static void printFailed(Window owner, Exception failure) {
+        LOGGER.error(failure, "Unable to save printable board");
         String message = failure.getMessage();
         if (message == null || message.isBlank()) { message = failure.toString(); }
         JOptionPane.showMessageDialog(owner, message, Messages.getString("ClientGUI.errorSavingFile"),
@@ -640,7 +600,8 @@ final class GpuMapSource implements BoardSource {
         if (next != shownPreview) {
             shownPreview = next;
             previewData = GpuEditorPreview.data(next, state.tool() == BoardEditorSession.Tool.ERASE,
-                  state.activeBrush().label(), (coords, hex) -> terrain.preview(board, coords, hex));
+                  state.activeBrush(), state.drawsRoutes(), (coords, hex) -> terrain.preview(board, coords, hex,
+                        at -> next.after().getOrDefault(at, board.getHex(at))));
         }
         return previewData;
     }

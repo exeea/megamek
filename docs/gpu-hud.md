@@ -69,9 +69,11 @@ last frame.
 | others | tooltip, centring request, board generation, actor name, the scenario's atmosphere |
 
 Two channels sit outside the frame and are read without the source's monitor:
-- `uiPreferences` (`UiPreferences`): the 3D UI scale (1.7), report keywords, the minimap, planetary conditions and turn
-  details preferences, every key binding (`Bind`: command, key, modifiers, text), and the sprint colour. It is
-  captured again at every capture and on preference events.
+- `uiPreferences` (`UiPreferences`): the 3D UI scale (1.7), report keywords, the minimap, contacts, planetary
+  conditions and turn details preferences, every key binding (`Bind`: command, key, modifiers, text), the 3D board's
+  graphics, the overlay switches, the movement colours and the nameplate setting. `UiPreferences.capture()` is its one
+  producer; it is captured again at every capture and on preference events. Tests change single components of a base
+  snapshot with `GpuHudInputTest.with`.
 - `dialog()`: the newest pending native dialog (1.6).
 
 Units the local player cannot see are not captured, and a sensor contact is captured without its identity.
@@ -228,7 +230,7 @@ answered.
 
 `GpuHudState` holds only what several components read or change together: the inspected unit, the armed weapon, the
 one open dialog (Help, Menu, Players or Tuning), the overview, chat, unit sheet and forces grid flags, the sheet's tab,
-the held nameplate key, the log's open state and the playback history. It is presentation state, never game state.
+whether the nameplate key shows every nameplate, the log's open state and the playback history. It is presentation state, never game state.
 
 - **Focus unit.** The candidates are the own units still to act, in ascending id order, the order of the phase's
   "next" command. A phase starts at the first candidate, or at the player's pick while it is one. During the local
@@ -450,10 +452,11 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuHelpDialog` | centred | Compact "Controls": category sidebar, action rows and current key badges; mouse gestures have their own category | none |
 | `GpuMenuPanel` | centred | "Players", then the menu bar's groups as `GpuBoardActions` captures them (File, Game, Board, View, Help, Commands, Maps) | each item's own action, or a redirect (below) |
 | `GpuPlayersPanel` | centred | the players as the Swing player list shows them; each bot's commands under it | bot commands |
-| `GpuContextMenu` | popover | unit menus and the hex menu, each starting with a Select or Inspect item per unit of its hex and ending with MegaMek's map menu of its hex in sections (a group's commands between separators, no menu of menus), weapon-row and queued-attack menus, the dock's More, select lists; a group opens its submenu beside its item as a desktop menu does: the menus before it stay open, another group replaces the chain below its menu, Esc closes the deepest and a press outside closes all | existing commands only |
+| `GpuContextMenu` | popover | unit menus and the hex menu (its header: the hex, MegaMek's terrain line and level, then the hex tooltip's other lines of the hex: a building, bridge or fuel tank with its height and CF, minefields, objects on the ground, clearing and bridge-building work), each starting with a Select or Inspect item per unit of its hex and ending with MegaMek's map menu of its hex in sections (a group's commands between separators, no menu of menus), weapon-row and queued-attack menus, the dock's More, select lists; a group opens its submenu beside its item as a desktop menu does: the menus before it stay open, another group replaces the chain below its menu, Esc closes the deepest and a press outside closes all | existing commands only |
+| `GpuHexTip` | popover, beside the pointer | after the pointer rests on a hex of the board for `GpuHexTip.DELAY` (0.75 s), the hex and its menu header's lines in small text on a faint plate, the first line broken only between its terms into the fewest, most even lines; gone when the pointer leaves the hex or the board, at a press, and while a menu or dialog is open | none; it never takes input |
 | `GpuModalDialog` | top layer | the pending dialog (1.6) | answer |
-| `GpuNameplates` | board labels | a team pip per unit; a tag for the focus, hovered and inspected unit, the physical target and sensor contacts, and every tag while the nameplate key is held: the unit named in the client's label style (`UnitAnnotations.labelName`) before its status words and, on a hovered enemy, the best roll or distance (a tag with neither name nor words stays a pip); under the pip or tag, each unit's Legacy 2D label marks (damage tile, armor and structure bars, from `UnitAnnotations`), which the unit card's damage label repeats; target cards replace their targets' plates | none |
-| `GpuBoardLabels` | board labels | to-hit badges (every shot), fire-preview guides (the best 50 of each direction), traces of the queued attacks, each guide and trace leaving its shooter outside its rectangle at its front, or its back at a target in its rear arc; leaders to the target cards, the destination tip, waypoint numbers, playback pop-ups (a unit's stack: the newest at its place, each older one 4 over the next) | none |
+| `GpuNameplates` | board labels | a team pip per unit; a tag for the focus, hovered and inspected unit, the physical target and sensor contacts, and every tag as Client Settings > 3D board nameplates chooses (always, by default; while the nameplate key is held; or toggled by it): the unit named in the client's label style (`UnitAnnotations.labelName`) before its status words and, on a hovered enemy, the best roll or distance (a tag with neither name nor words stays a pip); under the pip or tag, each unit's Legacy 2D label marks (damage tile, armor and structure bars, from `UnitAnnotations`), which the unit card's damage label repeats; target cards replace their targets' plates | none |
+| `GpuBoardLabels` | board labels | to-hit badges (every shot, on the unit's nameplate), fire-preview guides (the best 50 of each direction), traces of the queued attacks, each guide and trace leaving its shooter outside its rectangle at its front, or its back at a target in its rear arc; leaders to the target cards, the destination tip, waypoint numbers, playback pop-ups (a unit's stack: the newest at its place, each older one 4 over the next) | none |
 | `GpuTargetCards` | board labels | a card per target in letter order, placed by `GpuCardPlacement` clear of panels and units, its frame neutral; the target's letter square carries its colour, as in the weapons panel and the sheet (`GpuHudKit.targetColour`: MekBay's twelve target colours from A); the focus without attacks has no letter; target names wrap in full; the attack rows (no fire-order number) are a reorderable `UiList`; the footer offers Clear all while attacks are assigned, including on collapsed cards | fire orders; Clear all removes only this target's assigned attacks; a row with a grip drags to another place of the card (from any part of it, as the prototype's draggable `.or`), its focused grip moves it on Alt+Up/Down, each a single `move` |
 | `GpuTuningPanel` | dialogs layer | developer tuning (section 10); the frame rate beside its title | the tuning model |
 
@@ -558,7 +561,7 @@ client captured (`UiPreferences.binds()`). The defaults:
 | `TACTICAL_OVERLAYS` | H | Tactical View: expand or collapse the Overlays panel (remembered); elsewhere MegaMek's |
 | `TOGGLE_CHAT`, `TOGGLE_CHAT_CMD` | Enter, / | open chat; "/" starts the message |
 | `DONE` | Ctrl+Enter | the dock's main button; while a bot order picks hexes, the order with the picked hexes (the hint line shows the pick and both keys; in narrow windows the pick's chip has Done and Cancel buttons) |
-| `SHOW_NAMEPLATES` | Alt, held | every nameplate |
+| `SHOW_NAMEPLATES` | Alt, held or toggled (Client Settings) | every nameplate |
 | `MOVE_MODE_WALK`, `_RUN`, `_JUMP` | 1, 2, 3 | movement mode (local planner turn) |
 | `TURN_LEFT`, `TURN_RIGHT` | Shift+A, Shift+D | turn (local planner turn, when rebound away from boosted camera keys) |
 | `TWIST_LEFT`, `TWIST_RIGHT` | Shift+A, Shift+D | torso twist (local FIRING turn, when rebound away from boosted camera keys) |
@@ -792,7 +795,8 @@ the size), merged into the same font. Icons are Material Symbols Rounded glyphs 
    `ui.empty(list, text)`, and `ui.footer(panel)`. Centred dialogs: `ui.dialog(title, close)`.
 5. Controls: `UiButton button = ui.button(style, icon, text, sub); UiKit.onChange(button, action);` show state with
    `button.pressed(...)`; also `ui.segmented`, `ui.select`, `ui.search`, `ui.chip`, `ui.meter`, `ui.checkbox`;
-   tooltips through `ui.tip(actor)`.
+   `ui.progress(caption)`, a meter whose `set(done)` shows the percentage and the mint share and whose
+   `caption(text)` names the running step (the map views' print card); tooltips through `ui.tip(actor)`.
 6. Custom drawing: `ui.fill(batch, color, alpha, x, y, width, height)`, `UiTheme.pixelScale(batch)` and `snap`, the
    drawables `UiTheme.HudFrame`, `EdgeBox`, `Dashes`.
 7. A view's own styles go into the same skin through `theme.add(name, resource, type)`, `theme.box(...)` or
@@ -908,10 +912,10 @@ A developer and tester tool, to be removed before release.
 | Board | Geometry (with Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
 | Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
 | Terrain | Terrain build progress, Hex joins (Hex transitions, Hex padding), Water (Cliffs directly into water), Terrain detail (Grass blades, Water effects). Terrain and object detail levels are always on |
-| Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view |
+| Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view; the live view as one line with Copy (`BoardCamera.readout`: `cam ortho\|persp\|fly fov az tilt span at x,y,z hex`) |
 
 **Removing it before release:**
-1. Delete `GpuTuningPanel` and `GpuTuningPanelSmokeTest`.
+1. Delete `GpuTuningPanel`, `GpuTuningPanelSmokeTest` and `BoardCamera.readout`.
 2. In `GpuHud`, delete the tuning block (its comment says so) and the `tuningModel` constructor parameter, and drop
    the argument in `GpuBattleView.createBoard`.
 3. Delete `GpuHudState.Dialog.TUNING` and the `GpuBoard.hud.tuning.*` message keys.

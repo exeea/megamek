@@ -688,6 +688,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         heading(page, "UiLibrary.gdx.meters");
         compare(page, "UiKit.meter", meters(false, false), meters(false, true));
         compare(page, "UiKit.meter (compact)", meters(true, false), meters(true, true));
+        compare(page, "UiKit.progress", new Container<>(kit.progress(text("UiLibrary.gdx.progress")).set(.62f))
+              .width(320), null);
         compare(page, "GpuHudKit.heatBar", heatBars(false), heatBars(true));
         heading(page, "UiLibrary.gdx.toasts");
         compare(page, "GpuToastStack", toasts(false), toasts(true));

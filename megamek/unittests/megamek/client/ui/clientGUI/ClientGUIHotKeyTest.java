@@ -39,6 +39,9 @@ class ClientGUIHotKeyTest {
 
         verify(gui).addToast(ToastLevel.ERROR,
               Messages.getString("ClientGUI.openUnitListFileDialog.noReinforceMessage"));
-        assertFalse(gui.shouldIgnoreHotKeys(), "A player without a team keeps the hotkeys");
+        // the refusal must not leave the hotkeys switched off; whether the game window has the focus is a separate test
+        Field ignoreHotKeys = ClientGUI.class.getDeclaredField("ignoreHotKeys");
+        ignoreHotKeys.setAccessible(true);
+        assertFalse((boolean) ignoreHotKeys.get(gui), "A player without a team keeps the hotkeys");
     }
 }

@@ -34,7 +34,17 @@
  */
 package megamek.client.ui.clientGUI;
 
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.CardLayout;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.HeadlessException;
+import java.awt.Image;
+import java.awt.KeyboardFocusManager;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ComponentAdapter;
@@ -49,7 +59,6 @@ import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.*;
-import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.jar.JarFile;
@@ -59,6 +68,7 @@ import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.plaf.basic.BasicHTML;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.AbstractClient;
 import megamek.client.Client;
@@ -138,7 +148,6 @@ import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.Report;
 import megamek.common.actions.WeaponAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -986,6 +995,7 @@ public class ClientGUI extends AbstractClientGUI
         firingSolutionSpriteHandler = new FiringSolutionSpriteHandler(this, client);
         firingArcSpriteHandler = new FiringArcSpriteHandler(this);
         fleeZoneSpriteHandler = new FleeZoneSpriteHandler(this);
+        BotRouteSpriteHandler botRouteSpriteHandler = new BotRouteSpriteHandler(this, client.getGame());
         FortifyBuildSpriteHandler fortifyBuildSpriteHandler = new FortifyBuildSpriteHandler(this, client.getGame());
         DugInSpriteHandler dugInSpriteHandler = new DugInSpriteHandler(this, client.getGame());
         RubbleClearSpriteHandler rubbleClearSpriteHandler = new RubbleClearSpriteHandler(this, client.getGame());
@@ -1006,6 +1016,7 @@ public class ClientGUI extends AbstractClientGUI
               firingSolutionSpriteHandler,
               firingArcSpriteHandler,
               fleeZoneSpriteHandler,
+              botRouteSpriteHandler,
               fortifyBuildSpriteHandler,
               dugInSpriteHandler,
               rubbleClearSpriteHandler,
@@ -1326,6 +1337,34 @@ public class ClientGUI extends AbstractClientGUI
                   getForceDisplayPanel().getWidth(),
                   getForceDisplayPanel().getHeight());
         }
+        if (getMekSelectorDialog() != null) {
+            // This one reads the GUIP every time it goes visible, so need to set those directly.
+            GUIP.setMekSelectorSizeHeight(getMekSelectorDialog().getHeight());
+            GUIP.setMekSelectorSizeWidth(getMekSelectorDialog().getWidth());
+            GUIP.setMekSelectorPosX(0);
+            GUIP.setMekSelectorPosY(0);
+        }
+        if (getBotCommandsDialog() != null) {
+            getBotCommandsDialog().setBounds(0, 0, getBotCommandsPanel().getWidth(), getBotCommandsPanel().getHeight());
+        }
+        if (getRoundsInAirDialog() != null) {
+            getRoundsInAirDialog().setBounds(0,
+                                             0,
+                                             getRoundsInAirDialog().getWidth(),
+                                             getRoundsInAirDialog().getHeight());
+        }
+        if (getGameOptionsDialog() != null) {
+            getGameOptionsDialog().setBounds(0,
+                                             0,
+                                             getGameOptionsDialog().getWidth(),
+                                             getGameOptionsDialog().getHeight());
+        }
+        if (getNetworkInformationDialog() != null) {
+            getNetworkInformationDialog().setBounds(0,
+                                                    0,
+                                                    getNetworkInformationDialog().getWidth(),
+                                                    getNetworkInformationDialog().getHeight());
+        }
         if (getMiniReportDisplayDialog() != null) {
             getMiniReportDisplayDialog().setBounds(0,
                   0,
@@ -1352,6 +1391,12 @@ public class ClientGUI extends AbstractClientGUI
                   0,
                   getBotCommandsDialog().getWidth(),
                   getBotCommandsDialog().getHeight());
+        }
+        if (getRandomArmyDialog() != null) {
+            getRandomArmyDialog().setBounds(0, 0, getRandomArmyDialog().getWidth(), getRandomArmyDialog().getHeight());
+        }
+        if (getRandomNameDialog() != null) {
+            getRandomNameDialog().setBounds(0, 0, getRandomNameDialog().getWidth(), getRandomNameDialog().getHeight());
         }
     }
 
@@ -4705,11 +4750,37 @@ public class ClientGUI extends AbstractClientGUI
     @Override
     public boolean shouldIgnoreHotKeys() {
         return ignoreHotKeys
+              || !isGameWindowActive()
               || ((gameOptionsDialog != null) && gameOptionsDialog.isVisible())
               || isModalDialogShown()
               || ((help != null) && help.isVisible())
               || ((commonSettingsDialog != null) && commonSettingsDialog.isVisible())
               || ((aw != null) && aw.isVisible());
+    }
+
+    /**
+     * The key dispatcher is registered application-wide, so when this game runs inside MekHQ it also sees keys typed
+     * into MekHQ windows. Hotkeys must only fire while the game frame, or a window it owns such as the minimap, is the
+     * active window; otherwise e.g. Backspace (undo step) and the arrow keys (weapon/target cycling) are swallowed
+     * from MekHQ text fields. See MekHQ issue #10642.
+     * <p>
+     * Swing reports no active window at all while a window it does not own has the focus, such as the native board
+     * window, whose keys reach the game through its own input. That counts as the game window; a MekHQ window is a
+     * Swing window and so still does not.
+     * </p>
+     */
+    private boolean isGameWindowActive() {
+        Window window = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+        if (window == null) {
+            return true;
+        }
+        while (window != null) {
+            if (window == frame) {
+                return true;
+            }
+            window = window.getOwner();
+        }
+        return false;
     }
 
     void editBots() {

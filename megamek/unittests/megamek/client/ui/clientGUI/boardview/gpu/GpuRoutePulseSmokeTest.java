@@ -75,10 +75,7 @@ class GpuRoutePulseSmokeTest {
         colors.put(GpuMovePlan.Band.WALK, java.awt.Color.RED.getRGB());
         colors.put(GpuMovePlan.Band.RUN, java.awt.Color.GREEN.getRGB());
         colors.put(GpuMovePlan.Band.BOOST, java.awt.Color.BLUE.getRGB());
-        BoardSource.UiPreferences custom = new BoardSource.UiPreferences(preferences.scale(),
-              preferences.reportKeywords(), preferences.reportFilterKeywords(), preferences.minimapEnabled(),
-              preferences.contactsEnabled(), preferences.conditionsVisible(), preferences.turnDetails(),
-              preferences.binds(), preferences.graphics(), preferences.overlays(), colors);
+        BoardSource.UiPreferences custom = GpuHudInputTest.with(preferences, Map.of("movementColors", colors));
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
             GpuBoardOverlay overlay = new GpuBoardOverlay();

@@ -889,6 +889,11 @@ public final class UiKit {
         return new Meter(caption, false, bar, false);
     }
 
+    /** A progress bar (.progress): a meter whose value is the percentage done, over the mint share of its bar. */
+    public Progress progress(String caption) {
+        return new Progress(caption);
+    }
+
     /** A rectangle of the white texel in a color, at the widget's alpha. */
     public void fill(Batch batch, Color color, float alpha, float x, float y, float width, float height) {
         if (width > 0) {
@@ -1146,6 +1151,7 @@ public final class UiKit {
 
     /** A caption and value over a bar; the overview card's compact form uses smaller type and a 3-unit bar. */
     public final class Meter extends Table {
+        private final Label caption;
         private final Label value;
         private final Cell<Label> valueCell;
         private final Widget bar;
@@ -1157,7 +1163,8 @@ public final class UiKit {
             if (token) {
                 String type = compact ? "caption" : "small";
                 value = typeLabel("", type, "text.primary");
-                add(typeLabel(caption, type, "text.secondary")).left();
+                this.caption = typeLabel(caption, type, "text.secondary");
+                add(this.caption).left();
                 valueCell = add(value).right().expandX().padLeft(space("md"));
                 row();
                 add(bar).colspan(2).growX().padTop(space("xs"));
@@ -1165,7 +1172,8 @@ public final class UiKit {
             }
             float size = compact ? 9.5f : 10.5f;
             value = label("", compact ? "hud-caption" : "hud-button", compact ? size : 13, Color.WHITE);
-            Cell<Label> captionCell = add(label(UiTheme.upper(caption), "hud-caption", size, UiTheme.MUTED)).left();
+            this.caption = label(UiTheme.upper(caption), "hud-caption", size, UiTheme.MUTED);
+            Cell<Label> captionCell = add(this.caption).left();
             valueCell = add(value).right().expandX();
             if (compact) {
                 // .bars2's line box, lower than the labels' cap height and descent: 18.1 units with the bar
@@ -1174,6 +1182,12 @@ public final class UiKit {
             }
             row();
             add(bar).colspan(2).growX().padTop(4);
+        }
+
+        /** The caption at the left, upper-cased (.meter .l) except in the token look, such as a progress bar's step. */
+        public Meter caption(String text) {
+            caption.setText(token ? text : UiTheme.upper(text));
+            return this;
         }
 
         /** The value at the right of the caption, upper-cased as the caption (.meter .l). */
@@ -1230,6 +1244,33 @@ public final class UiKit {
                 pill.draw(batch, getX(), getY(), Math.max(getHeight(), getWidth() * fraction), getHeight());
             }
             batch.setPackedColor(previous);
+        }
+    }
+
+    /**
+     * A task's progress: the meter's caption, which may name the running step, and the share done as a whole percentage
+     * and the mint share of the meter's bar.
+     */
+    public final class Progress extends Table {
+        private final Meter meter;
+
+        private Progress(String caption) {
+            meter = new Meter(caption, false, new Bar(4), false);
+            add(meter).growX();
+            set(0);
+        }
+
+        /** The caption, such as the step that runs now. */
+        public Progress caption(String text) {
+            meter.caption(text);
+            return this;
+        }
+
+        /** The share done, from 0 to 1; the percentage rounds down, so 100% means done. */
+        public Progress set(float done) {
+            float share = MathUtils.clamp(done, 0, 1);
+            meter.set((int) (share * 100) + "%", share, UiTheme.MINT);
+            return this;
         }
     }
 

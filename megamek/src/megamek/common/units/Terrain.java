@@ -41,8 +41,8 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
 
+import jakarta.annotation.Nullable;
 import megamek.common.IndustrialElevator;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.RailRoute;
 import megamek.common.equipment.MiscType;
 import megamek.common.options.OptionsConstants;

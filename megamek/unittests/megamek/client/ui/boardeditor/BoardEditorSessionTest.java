@@ -967,13 +967,13 @@ class BoardEditorSessionTest {
         session.board().setHex(east, new megamek.common.Hex(0, "building:1:" + (1 << toward) + ";bldg_elev:1;bldg_cf:15", ""));
 
         send(session, Action.TERRAIN, "building", "2");
-        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(megamek.common.board.BoardIssue::coords)
+        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(megamek.common.board.HexIssue::coords)
               .collect(java.util.stream.Collectors.toSet()), "The edited hex and its re-validated neighbour");
         assertTrue(session.snapshot().issues().stream().filter(issue -> issue.coords().equals(at)).findFirst().orElseThrow()
               .text().startsWith("Incomplete Building"), "The game's own rule text");
         send(session, Action.TERRAIN, "bldg_elev", "1");
         send(session, Action.TERRAIN, "bldg_cf", "40");
-        assertEquals(java.util.List.of(new megamek.common.board.BoardIssue(east, "",
+        assertEquals(java.util.List.of(new megamek.common.board.HexIssue(east, "",
               "Building has an exit to a building of another Building Type (Light, Medium...).")), session.snapshot().issues(),
               "Completing the building leaves the neighbour's exit issue");
         var published = session.snapshot().issues();
@@ -981,7 +981,7 @@ class BoardEditorSessionTest {
         assertSame(published, session.snapshot().issues(), "Selection and other non-edits publish the same list");
 
         send(session, Action.UNDO, "", "");
-        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(megamek.common.board.BoardIssue::coords)
+        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(megamek.common.board.HexIssue::coords)
               .collect(java.util.stream.Collectors.toSet()), "Undo re-validates");
         send(session, Action.UNDO, "", ""); send(session, Action.UNDO, "", "");
         assertTrue(session.snapshot().issues().isEmpty());
@@ -998,7 +998,7 @@ class BoardEditorSessionTest {
         assertTrue(session.snapshot().issues().stream().noneMatch(issue -> issue.coords().equals(deck)));
         send(session, Action.REMOVE_COMPONENT, "", "bridge");
         var issue = session.snapshot().issues().stream().filter(found -> found.coords().equals(deck)).findFirst().orElseThrow();
-        assertEquals(new megamek.common.board.BoardIssue(deck, tree, "Object on deck but no bridge"), issue);
+        assertEquals(new megamek.common.board.HexIssue(deck, tree, "Object on deck but no bridge"), issue);
         send(session, Action.CLEAR_SELECTION, "", ""); send(session, Action.TOOL, "", "PAINT");
         send(session, Action.SELECT_AT, deck.getX() + "," + deck.getY(), issue.object());
         assertEquals(deck, session.snapshot().selected()); assertEquals(tree, session.snapshot().object());
@@ -1016,7 +1016,7 @@ class BoardEditorSessionTest {
         }
         Path file = directory.resolve("missing.board2"); BoardFile.save(board, file);
         session.open(file);
-        assertEquals(java.util.List.of(new megamek.common.board.BoardIssue(new Coords(2, 3), "gone", "Object art not found: scenery/no-such-art")),
+        assertEquals(java.util.List.of(new megamek.common.board.HexIssue(new Coords(2, 3), "gone", "Object art not found: scenery/no-such-art")),
               session.snapshot().issues());
     }
 

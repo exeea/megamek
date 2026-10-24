@@ -7,12 +7,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.IntStream;
 
+import jakarta.annotation.Nullable;
 import megamek.common.ECMInfo;
 import megamek.common.Hex;
 import megamek.common.Messages;
 import megamek.common.ToHitData;
 import megamek.common.actions.WeaponAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeECM;

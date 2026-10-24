@@ -41,7 +41,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
@@ -179,7 +178,7 @@ class GpuLiveBoardSpaceSmokeTest {
         GpuFirePreview.Snapshot preview = live.frame.get().panels().preview();
         assertTrue(preview.active() && preview.unitId() == SAGITTAIRE, "The Sagittaire's fire preview");
         assertTrue(live.strokes() > 0, "The preview's guides lie in the fx layer");
-        assertNotNull(live.badgeAt(view.unitHeads().get(ARCHER)), "The Archer's TN badge, 4 over its head");
+        assertNotNull(live.badgeOn(ARCHER, view), "The Archer's TN badge, 4 over its nameplate");
         // A larger HUD keeps the plates on the units: the heads are in stage units.
         GpuBoardSource.UiPreferences preferences = live.source.uiPreferences;
         live.source.uiPreferences = scaled(preferences, 1.5f);
@@ -329,10 +328,7 @@ class GpuLiveBoardSpaceSmokeTest {
 
     /** {@code preferences} at {@code factor} times their HUD scale. */
     private static GpuBoardSource.UiPreferences scaled(GpuBoardSource.UiPreferences preferences, float factor) {
-        GpuBoardSource.UiPreferences p = preferences;
-        return new GpuBoardSource.UiPreferences(p.scale() * factor, p.reportKeywords(), p.reportFilterKeywords(),
-              p.minimapEnabled(), p.contactsEnabled(), p.conditionsVisible(), p.turnDetails(),
-              p.binds(), p.moveSprintRgb(), BoardGraphics.ENHANCED);
+        return GpuHudInputTest.with(preferences, Map.of("scale", preferences.scale() * factor));
     }
 
     /** A 3D head is the top of the unit's model above its middle, in stage units, y up (C.4 HudView). */
@@ -504,7 +500,7 @@ class GpuLiveBoardSpaceSmokeTest {
         assertEquals(Set.of(QUICKDRAW, HACHIWARA), fire.badges().stream().map(GpuFireOrders.Badge::targetId)
               .collect(Collectors.toSet()), "Badges on the other enemies in range");
         for (GpuFireOrders.Badge badge : fire.badges()) {
-            assertNotNull(live.badgeAt(view.unitHeads().get(badge.targetId())), badge.targetId() + "'s badge");
+            assertNotNull(live.badgeOn(badge.targetId(), view), badge.targetId() + "'s badge");
         }
         for (GpuFireOrders.Target target : fire.targets()) {
             Group root = live.hud.stage.getRoot();
@@ -882,11 +878,9 @@ class GpuLiveBoardSpaceSmokeTest {
 
         Live(GpuBoardSource real) throws Exception {
             this.real = real;
-            GpuBoardSource.UiPreferences preferences = real.uiPreferences;
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures; envelopes and the minimap on.
-            source.uiPreferences = new GpuBoardSource.UiPreferences(.1f
-                  / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, false,
-                  false, GpuHudInputTest.preferences().binds(), preferences.moveSprintRgb(), BoardGraphics.ENHANCED);
+            source.uiPreferences = GpuHudInputTest.preferences(.1f
+                  / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()));
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
@@ -1132,21 +1126,23 @@ class GpuLiveBoardSpaceSmokeTest {
             return ((Collection<?>) field(field(field(hud, "boardLabels"), "strokes"), "list")).size();
         }
 
-        /** The shown TN badge bottom-centred 4 units over {@code head}, or null. */
-        Actor badgeAt(Vector2 head) {
-            return badge(hud.stage.getRoot(), head);
+        /** The unit's shown TN badge, bottom-centred 4 units over its nameplate, or null. */
+        Actor badgeOn(int unit, GpuHud.HudView view) throws Exception {
+            Vector2 head = view.unitHeads().get(unit);
+            GpuNameplates plates = (GpuNameplates) field(field(hud, "boardLabels"), "nameplates");
+            return badge(hud.stage.getRoot(), new Vector2(head.x, plates.top(unit, head.y)));
         }
 
-        private static Actor badge(Actor actor, Vector2 head) {
+        private static Actor badge(Actor actor, Vector2 base) {
             if ("tn-badge".equals(actor.getName()) && GpuBoardTestUi.shown(actor)) {
                 Vector2 corner = actor.localToStageCoordinates(new Vector2());
-                if (Math.abs(corner.x + actor.getWidth() / 2 - head.x) <= 1 && Math.abs(corner.y - head.y - 4) <= 1) {
+                if (Math.abs(corner.x + actor.getWidth() / 2 - base.x) <= 1 && Math.abs(corner.y - base.y - 4) <= 1) {
                     return actor;
                 }
             }
             if (actor instanceof Group group) {
                 for (Actor child : group.getChildren()) {
-                    Actor badge = badge(child, head);
+                    Actor badge = badge(child, base);
                     if (badge != null) {
                         return badge;
                     }

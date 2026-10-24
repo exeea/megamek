@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -29,7 +30,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.utils.ScreenUtils;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
@@ -340,8 +340,8 @@ class GpuPhaseHeaderSmokeTest {
     }
 
     private static GpuBoardSource.UiPreferences preferences(boolean conditions) {
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, conditions, false, List.of(), 0,
-              BoardGraphics.ENHANCED);
+        return GpuHudInputTest.with(GpuHudInputTest.preferences(),
+              Map.of("conditionsVisible", conditions, "binds", List.of()));
     }
 
     /** The panels of a frame whose phase display reports the given planetary condition lines. */

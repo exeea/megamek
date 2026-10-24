@@ -233,13 +233,126 @@ final class GpuRoads {
               HexAppearance.trafficControl(tile.appearance(), "bridgeRoad", deck.roadExits()), road.crossing(tile, true));
     }
 
+    /** Tile pixels a paved deck's asphalt stays solid past its footing on a bare bank, before fading over the apron. */
+    static float landingSetback(BoardBridge.Deck deck) { return setback(paved(deck.kind())); }
+
+    /** Tile pixels asphalt stays solid before a bare end, before fading over its apron; none for loose roads. */
+    private static float setback(boolean paved) { return paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0; }
+
+    private static boolean paved(BoardRoad.Kind kind) { return kind == BoardRoad.Kind.PAVED || kind == BoardRoad.Kind.ALLEY; }
+
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road, BoardBridgeFooting footing) {
         var patches = deckPatches(tile, deck, road);
-        if (footing.bareExits() == 0) { return patches; }
-        boolean paved = deck.kind() == BoardRoad.Kind.PAVED || deck.kind() == BoardRoad.Kind.ALLEY;
+        return footing.bareExits() == 0 ? patches : bare(patches, road, paved(deck.kind()));
+    }
+
+    /**
+     * The road painting a hex's ground: one ending on a cliff's top (BoardRoadGrade#overDrop) runs on just past the rim,
+     * so its paint wears out to gravel at the very edge, as if crumbling with the cliff's fall (#bare).
+     */
+    static BoardRoad painted(BoardScene scene, BoardScene.Tile tile, BoardRoad road) {
+        int drops = 0;
+        List<Float> past = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f));
+        for (int d = 0; d < 6; d++) {
+            if ((tile.roadExits() & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
+                drops |= 1 << d;
+                past.set(d, BoardRelief.metres(CRUMBLE) / BoardGeometry.hexScale());
+            }
+        }
+        return drops == 0 ? road : road.extended(past, drops);
+    }
+
+    /** How far, in metres, a road ending on a cliff's top runs on past its rim: its asphalt there is mostly gravel. */
+    private static final float CRUMBLE = 3.5f;
+
+    /**
+     * The paint of a road, worn out towards the ends {@link #painted} gives it on cliff tops. A road built in concrete
+     * (BoardRoadGrade#poured) stands on its cast base, whose top shows beside the paint.
+     */
+    static List<Patch> patches(BoardScene scene, BoardScene.Tile tile, BoardRoad painted, BoardRoad road) {
+        var patches = new ArrayList<>(patches(tile, painted));
+        var grade = BoardRoadGrade.of(scene, tile, true);
+        if (grade != null && grade.poured()) {
+            float scale = BoardGeometry.hexScale();
+            Area base = grade.region().createTransformedArea(new AffineTransform(1 / scale, 0, 0, 1 / scale,
+                  -BoardGeometry.centerX(tile.coords()) / scale, -BoardGeometry.centerY(tile.coords()) / scale));
+            patches.add(new Patch(base, "concrete", Color.WHITE, 1, CAST_LIFT, null));
+        }
+        return painted == road ? patches : bare(patches, painted, paved(tile.road()));
+    }
+
+    /** A cast base's lift: over the loose verge, under the carriageway's own paint. */
+    private static final float CAST_LIFT = .03f;
+
+    /** A road carried on through a ground portal to the end of its tunnel. */
+    static BoardRoad through(BoardRoad road, BoardTunnel tunnel) {
+        List<Float> lengths = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f));
+        lengths.set(tunnel.direction(), BoardTunnel.DEPTH - BoardTunnel.SETBACK);
+        return road.extended(lengths, 1 << tunnel.direction());
+    }
+
+    /**
+     * The paint a road {@link #through} a ground portal carries on past its hex's edge: its verges and markings, on the
+     * tunnel's floor, which carries the road's own surface.
+     */
+    static List<Patch> tunnelPatches(BoardScene.Tile tile, BoardRoad road, BoardTunnel tunnel) {
+        float scale = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
+        Path2D.Float outline = new Path2D.Float();
+        for (Vector3 corner : tunnelFloor(tunnel)) {
+            float x = (corner.x - cx) / scale, y = (corner.y - cy) / scale;
+            if (outline.getCurrentPoint() == null) { outline.moveTo(x, y); } else { outline.lineTo(x, y); }
+        }
+        outline.closePath();
+        Area floor = new Area(outline);
+        String surface = texture(tile.road());
+        List<Patch> result = new ArrayList<>();
+        for (var patch : patches(tile, road)) {
+            if (patch.texture().equals(surface)) { continue; }
+            Area shape = new Area(patch.shape());
+            shape.intersect(floor);
+            if (!shape.isEmpty()) {
+                result.add(new Patch(shape, patch.texture(), patch.tint(), patch.repeat(), patch.lift(), patch.fade()));
+            }
+        }
+        return result;
+    }
+
+    /** The floor a tunnel's paint lies on, flat at the portal's base: the opening's width, from the hex's edge in. */
+    static List<BoardTacticalGeometry.Triangle> tunnelFloor(BoardTunnel tunnel, Patch patch) {
+        var corners = tunnelFloor(tunnel);
+        float lift = patch.lift() * BoardGeometry.hexScale();
+        for (var corner : corners) { corner.z += lift; }
+        return List.of(new BoardTacticalGeometry.Triangle(corners.get(0), corners.get(1), corners.get(2), -1),
+              new BoardTacticalGeometry.Triangle(corners.get(0), corners.get(2), corners.get(3), -1));
+    }
+
+    private static List<Vector3> tunnelFloor(BoardTunnel tunnel) {
+        float scale = BoardGeometry.hexScale(), half = BoardTunnel.HALF_WIDTH * tunnel.widthScale() * scale;
+        Vector3 along = tunnel.along(), across = new Vector3(along.y, -along.x, 0);
+        List<Vector3> corners = new ArrayList<>();
+        for (float[] c : new float[][] { { -1, BoardTunnel.SETBACK }, { 1, BoardTunnel.SETBACK },
+              { 1, BoardTunnel.DEPTH }, { -1, BoardTunnel.DEPTH } }) {
+            corners.add(new Vector3(tunnel.origin()).mulAdd(across, c[0] * half).mulAdd(along, c[1] * scale));
+        }
+        return corners;
+    }
+
+    /** A tunnel's paint mask, darkening into it as its floor does (BoardTunnel#light). */
+    static MaskData tunnelMask(BoardScene.Tile tile, BoardRoad road, Patch patch, BoardTunnel tunnel) {
+        float scale = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
+        return mask(patch, (x, y, scratch) -> {
+            Color tint = color(road, patch, x, y, scratch);
+            // The shader reads a mask's tint as sRGB.
+            float light = (float) Math.pow(BoardTunnel.light(tunnel.depth(cx + x * scale, cy + y * scale)), 1 / 2.2);
+            return tint.set(tint.r * light, tint.g * light, tint.b * light, tint.a);
+        });
+    }
+
+    /** Paint ending on bare ground: a grounded material apron, the road's own paint fading out over it. */
+    private static List<Patch> bare(List<Patch> patches, BoardRoad road, boolean paved) {
         float apron = BoardBridgeFooting.apronLength();
-        float setback = paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0;
+        float setback = setback(paved);
         Area landing = road.endZone(apron);
         var result = new ArrayList<Patch>();
         if (paved) {
@@ -482,8 +595,11 @@ final class GpuRoads {
         float scale = BoardGeometry.hexScale();
         float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
         var bounds = patch.shape().getBounds2D();
+        // A neighbour's ground road at another level paints only the road surface it reserves here; a bridge's deck
+        // carries its apron onto the bank on purpose.
+        boolean apart = tile.elevation() != surface.tile.elevation() && BoardBridge.feature(tile) == null;
         for (var face : surface.groundFaces()) {
-            if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+            if (face.finish() != BoardSurface.Finish.TOP || apart && !surface.carries(face, tile)) { continue; }
             float area = (face.b().x - face.a().x) * (face.c().y - face.a().y)
                   - (face.b().y - face.a().y) * (face.c().x - face.a().x);
             // Nearly vertical slivers can remain where terrain strips meet. They have no paintable footprint.
@@ -502,6 +618,51 @@ final class GpuRoads {
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
     static MaskData mask(BoardRoad road, Patch patch) {
         return mask(patch, (x, y, scratch) -> color(road, patch, x, y, scratch));
+    }
+
+    /**
+     * The mask texels this carrier can display. A neighbour's shared mask can change outside these triangles without
+     * changing this hex. Keep a texel around the edges for linear filtering; discard wholly invisible patches.
+     */
+    static MaskData visibleMask(Coords at, MaskData mask, List<BoardTacticalGeometry.Triangle> triangles) {
+        var pixels = mask.pixels();
+        float density = pixels.width() / mask.width();
+        var path = new Path2D.Float();
+        for (var triangle : triangles) {
+            var points = List.of(triangle.a(), triangle.b(), triangle.c());
+            for (int i = 0; i < points.size(); i++) {
+                var p = points.get(i);
+                float x = maskU(at, mask, p) * pixels.width(), y = maskV(at, mask, p) * pixels.height();
+                if (i == 0) { path.moveTo(x, y); } else { path.lineTo(x, y); }
+            }
+            path.closePath();
+        }
+        var image = new BufferedImage(pixels.width(), pixels.height(), BufferedImage.TYPE_INT_ARGB);
+        var graphics = image.createGraphics();
+        try {
+            graphics.setColor(java.awt.Color.WHITE);
+            graphics.fill(path);
+            graphics.setStroke(new BasicStroke(2));
+            graphics.draw(path);
+        } finally { graphics.dispose(); }
+        int[] visible = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
+        // Decode a compacted mask once, not by a search per texel.
+        var decoded = java.nio.IntBuffer.allocate(visible.length);
+        pixels.writeRgba(decoded, 0, visible.length);
+        int minX = pixels.width(), minY = pixels.height(), maxX = -1, maxY = -1;
+        for (int y = 0; y < pixels.height(); y++) {
+            for (int x = 0; x < pixels.width(); x++) {
+                int i = y * pixels.width() + x, rgba = decoded.get(i);
+                if (visible[i] == 0 || (rgba & 255) == 0) { visible[i] = 0; continue; }
+                visible[i] = Integer.rotateRight(rgba, 8);
+                minX = Math.min(minX, x); minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+            }
+        }
+        if (maxX < minX) { return null; }
+        return new MaskData(new BoardScene.Pixels(image.getSubimage(minX, minY, maxX - minX + 1, maxY - minY + 1)).compact(),
+              Math.round(mask.x() * density + minX) / density, Math.round(mask.y() * density + minY) / density,
+              (maxX - minX + 1) / density, (maxY - minY + 1) / density);
     }
 
     @FunctionalInterface
@@ -556,9 +717,9 @@ final class GpuRoads {
             float repeat = BoardRelief.detailMetres(patch.repeat());
             float lift = patch.lift() * BoardGeometry.hexScale();
             Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
-            Vector3 a = flat ? fallback : surface.roadNormal(t.a(), normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();
-            Vector3 b = flat ? fallback : surface.roadNormal(t.b(), normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor();
-            Vector3 c = flat ? fallback : surface.roadNormal(t.c(), normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor();
+            Vector3 a = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();
+            Vector3 b = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor();
+            Vector3 c = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor();
             MeshPartBuilder mesh = meshes.get();
             mesh.triangle(carrier(mesh, t.a(), a, repeat, mask, surface.tile, coat),
                   carrier(mesh, t.b(), b, repeat, mask, surface.tile, coat),
@@ -572,11 +733,19 @@ final class GpuRoads {
 
     private static short carrier(MeshPartBuilder mesh, Vector3 p, Vector3 normal, float repeat, Mask mask, BoardScene.Tile tile,
           float coat) {
-        float scale = BoardGeometry.hexScale();
-        float u = ((p.x - BoardGeometry.centerX(tile.coords())) / scale - mask.data.x()) / mask.data.width();
-        float v = ((p.y - BoardGeometry.centerY(tile.coords())) / scale - mask.data.y()) / mask.data.height();
-        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat, u, v,
+        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat,
+              maskU(tile.coords(), mask.data, p), maskV(tile.coords(), mask.data, p),
               mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV);
+    }
+
+    /** Where the point {@code p} of the hex at {@code at} lies across {@code mask}: 0 at its left edge, 1 at its right. */
+    static float maskU(Coords at, MaskData mask, Vector3 p) {
+        return ((p.x - BoardGeometry.centerX(at)) / BoardGeometry.hexScale() - mask.x()) / mask.width();
+    }
+
+    /** Where the point {@code p} of the hex at {@code at} lies down {@code mask}: 0 at its first row, 1 past its last. */
+    static float maskV(Coords at, MaskData mask, Vector3 p) {
+        return ((p.y - BoardGeometry.centerY(at)) / BoardGeometry.hexScale() - mask.y()) / mask.height();
     }
 
     static float coverage(BoardRoad road, Patch patch, float x, float y) {

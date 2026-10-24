@@ -1,4 +1,4 @@
-# Native roadside slopes and tunnel portals
+# Road grades and tunnel portals
 
 [Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md)
 
@@ -6,176 +6,80 @@
 
 | Owner | Responsibility |
 | --- | --- |
-| `BoardRoad` | Share cosmetic road paths and crossing tangents between the rendered footprint and roadside clearance. |
-| `BoardSurface / BoardRelief` | Join Enhanced road grades to the terrain and cliff grid; use nominal columns for Classic route support. |
-| `ConcreteFit / BoardConcrete` | Share fitted concrete material and elevation boundaries, with structure, object and explicit Hex-edge protection. |
-| `GpuTilesetTerrain / BoardRim` | Draw Classic columns; select their wall textures without displacing their geometry. |
-| `BoardRampMesh` | Simplify interior ramp samples while preserving shared boundaries and height error constraints. |
+| `BoardRoadGrade` | A hex's reserved road ground and its height: edge levels, ramp shares and the Classic/Enhanced profile. |
+| `BoardRoadCut` | Meshes reserved ground and removes the terrain standing over it, closing the difference with cut faces; builds containment walls. |
+| `BoardRoadBank` | Enhanced: moves natural ground near roads vertically into banks, one field every hex evaluates alike. |
+| `BoardSurface` | Builds each hex's top (a Classic column or the Enhanced relief) and lets the carriageways reserve their ground. |
+| `BoardRelief` | Natural slopes and cliffs; a step's foot recedes from a road beside it (`roadPush`); bridge decks and tunnel portals still clear it. |
+| `BoardRoad` | Courses and footprints; a climbing return turn runs through the hex centre (`climbingTurn`). |
 | `BoardTunnel` | Detect eligible blocked exits and define portal placement/clipping. |
 | `GpuAssets / GpuRoads` | Load the portal kit and continue the road material through its lining. |
 | `mm-data/tools/board-models/road-tunnel.md` | Portal GLB dimensions and contract. |
 
-In Enhanced, roads beside elevation changes retain the native terrain slope and cliff
-profiles outside their carriageway. Actual graded approaches still use the
-existing road profile within the two connected hexes. Concrete retains its
-separate cast geometry.
+## Reserved ground
 
-Ramp heights cover the full carriageway and shoulder, including vertices from
-the terrain bank's sampling partition. Adjacent strips retain enough samples
-for that grade at distant detail. A valid pair of triangles keeps its diagonal
-so terrain repair cannot change the road's height interpolation. Bank vertices
-moved into a curved carriageway take the road height at their final position.
+A carriageway reserves its footprint and shoulder (`BoardRoad.footprint(SHOULDER)`) inside its own hex. A wide
+road/rail corridor also reserves the slivers past its edge's corners, and a bridge mouth a short strip beside the
+deck. The terrain is built first; reserved ground then replaces it. The road surface is level across its width and
+graded only along its course.
 
-Plain roads with opposite exits keep a straight centreline. Where one meets a turn
-at the same elevation, both hexes derive the same tangent normal to their shared
-edge; the turn uses a broad approach without pulling the straight road sideways.
-Grades, bridges and junctions retain their straight approach corridors. These
-cosmetic paths preserve the authored exits and the full carriageway width.
+Two connected carriageways meet at one height on their shared edge (`BoardRoadGrade.edgeLevel`):
 
-Two-exit routes rising or falling through successive elevations carry their grade
-along the existing road course, including curves and unequal steps. Two monotone
-Hermite halves retain the authored middle elevation and share endpoint slopes with
-adjoining approaches. Equal-step straight routes retain their linear grade. This
-avoids flat landings at each hex centre and crests between adjoining ramps. Lower
-and level built-deck connections use the bridge profile's actual mouth slope;
-higher decks retain their footing-owned approach. A missing neighbour at the board
-boundary is not a connected approach and cannot supply a ramp or corner height.
+- A junction (three or more exits) keeps its level; the road beyond it carries the whole ramp.
+- Two junctions, or two ordinary roads, meet halfway.
+- A road ending at unpaved dry ground within two levels carries the whole ramp to that ground's level; the
+  unpaved hex keeps its shape. A roadless concrete apron within two levels is graded like a road.
+- `BoardSurface.roadEdgeElevation` answers the same question for any caller, with a connected deck's height first.
+- A bridge deck keeps its own approach height.
 
-Straight sections store their endpoints and explicit border anchors, which keep
-centre-line markings aligned, instead of adding redundant collinear samples.
-Constant-width footprints use one round `BasicStroke` per path, followed by the
-existing flat terminal cuts; variable-width paths retain their segment envelopes.
-The rendered road and roadside clearance share these paths, and callers receive
-independent copies of cached footprint areas.
+Where two hexes share a ramp, each climbs over its outer `SHARED_RAMP` (30%) of the hex width and keeps the middle
+40% level. A road carrying a whole ramp starts at its centre. A climbing return turn runs straight in to the centre
+and out again, and the wedge between its two ramps is reserved with them. A junction keeps its core
+(`BoardRoad.CORRIDOR`, 55% of each arm's run; 75% for roundabouts) and ramps on its straight arms. A bridge approach
+keeps the deck's plane over the inset half of the hex, as `BoardBridgeFooting` builds it.
 
-## Gates, cuts and retaining walls
-
-`BoardRelief` is the source of Enhanced slopes and cliffs, including beside roads:
-
-- **Gate.** Where two hexes are graded to each other (a road, or ground a road only
-  approaches), their banks meet along the whole mouth. `BoardRelief.gateCorner` gives
-  both the same corner height. An existing level through-route keeps its elevation;
-  otherwise a shared climb can use its mouth height instead of leaving an isolated
-  high point between ramps. Other corners retain the middle of the three levels.
-  A natural third bank at an intermediate elevation follows that shared corner and
-  grades smoothly back to its unchanged plateau, rather than closing the difference
-  with a vertical triangle. If the third hex instead equals the lower road hex,
-  their uncovered common corner stays at that lower level. Only the actual road/rail
-  footprint can require a raised corner there; a road mouth must not create a ridge
-  across an otherwise level plateau. This decision is local to the corner. Natural approaches
-  to lower concrete also lower isolated corners while the slab stays fixed. The gate
-  edge itself has no cliff profile: it keeps its lattice line under the carriageway and
-  only its corners move, as the steps through them do. Ground a road merely approaches
-  is ordinary sculpted terrain, so it no longer pins the corners of the cliffs around it.
-  Beside a descending bridge approach, an isolated bank corner also lowers toward
-  the bridge gate. Corners covered by the widened pavement meet the deck grade;
-  uncovered corners can retain higher ground in the third hex.
-- **Rim.** A graded top takes the relief's rim exactly on its outline. Inside, each
-  edge's move reaches in along that edge's normal and fades out before the centre;
-  edges blend by inverse square distance. A receding rim then compresses the ground
-  without shearing it. Only the graded strips within the actual road course stay put.
-  Banks beyond a bend can follow the rim even if they lie inside an approach's
-  rectangular sampling domain. Where a rim bends faster
-  than the lattice is fine, a few small triangles flip; their free corners then move to
-  the middle of their neighbours. If that mean remains outside a concave fan, a bounded
-  correction moves the flipped triangles' free corners together to increase their
-  signed area, preserving the outline, curved pavement and heights. Slivers can remain
-  where two rims cross at a corner.
-  On Fire and Ice 2 all stay under 0.3 m, which its test checks; Mines 1 keeps one
-  0.6 m sliver, and MesaCity 2721 (a gate beside a five-level cliff) a cluster up to
-  0.9 m tall but under 0.3 m² each.
-- **Cut.** `roadClearance` cuts back only rock that would enter a road's shoulder and a
-  one-unit verge. The cut continues below the rim until the natural profile clears
-  that footprint, avoiding an undercut beneath the road. Everything clear of it keeps
-  its full natural relief. Fitted concrete boundaries remain the shared baseline;
-  clearance trims only natural displacement beyond that baseline. At a tunnel portal
-  the face it is set into stays flat on the lattice line up to the portal's top, where
-  its wing walls stand, so no sky shows under them.
-  Built bridge decks also clear higher neighbouring hillsides at deck height,
-  including bridge-only hexes. Where the widened road/rail slab overlaps a nominal
-  hex corner, the shared boundary itself retreats beyond the full slab and its
-  shoulder before the natural profile is trimmed. All incident edges use that
-  same contact. The landing's own level bank retains its natural support profile;
-  the toe of a higher hillside must be cut back with its face so no sloping triangle
-  crosses the carriageway. A descending curved bridge approach reserves additional
-  space for a 1:1 cut above its actual road/rail course, derived from the local drop.
-  This lets the inside plateau recede gradually instead of crowding the shoulder.
-  Straight and level bridge approaches do not receive that additional setback.
-- **Wall.** Where a concrete road beside a hex cuts the toe of an earth slope rising above it
-  (up to two levels), `BoardRelief.retainingWalls` builds straight precast panels on a
-  footing, each capped in half-metre steps just above the cut, standing in front of the
-  cut face. At most a level is walled; a taller cliff stays a rock cut. A slope beneath a
-  road never gets a wall. A graded rim that has moved away from the original level toe
-  keeps its earthwork without unsupported flat panels. Panels start at 1 m overall,
-  including their 0.25 m cap, and increase in half-metre steps when the retained cut
-  needs more height. Heights stay relative to the local footing, including below
-  elevation zero. The panels, caps and footings have closed backs and undersides,
-  so exposed portions remain solid from either side. They use the shared
-  fine-grain concrete texture. Natural roads keep cut banks and embankments instead
-  of receiving these automatic concrete panels.
-
-The road's longitudinal grade is resolved before blending the adjoining bank.
-The bank blends once and matches the finished boundary samples, including widened
-road/rail corridors. Where junction mouths meet at different heights, both owners
-share a lateral profile from each canonical corner through the exact mouth centre.
-Level bridge entrances also constrain the full passage width, so adjoining lower
-roads cannot pull their shared mouth below the deck. Graded concrete banks already
-own their road slab and do not receive a second, buried landing surface. Natural
-landings retain the overlap needed to cover a receding bank.
-The surface blends smoothly toward that profile over the available approach run,
-instead of forcing its height change through a narrow shoulder strip. Concrete
-grades the same road carrier before its existing clipping restores the outer slab.
-Ordinary approaches and uniform-height junctions retain their existing profiles.
-Steep dry natural support faces use the existing cliff texture
-projection and normal relief; horizontal ground projection would stretch on these
-faces. Concrete retains its own material and geometry.
-
-Enhanced concrete uses the existing contour fitter at dry concrete-to-concrete
-height boundaries too. The higher plateau owns each boundary, and all adjoining
-hexes read the same corner shifts. The fitted runs reserve road/rail clearance;
-an actual road or ground-rail ramp opening is not treated as a retaining wall.
-Graded hexes retain their connected mouth endpoints, including their level arms,
-so fitting cannot move the boundary away from the existing road carrier.
-Flat concrete roads use the full fitted slab even beside unrelated higher land.
-Level-contour candidates must also keep every affected hex edge facing around its
-own centre, preventing a moved wall corner from folding a neighbouring top.
-Side-wall collision checks, structural foundations and explicit
-`HexAppearance.Edges.HEX` overrides still pin the outline. Existing material/water
-fits have priority, and three-height corners remain fixed, so a short joining
-bevel can remain at those protected corners and ramp openings. The fit straightens
-exposed wall runs between these constraints; it does not promise one uninterrupted
-line through a graded junction.
-
-Shared cliff samples use the same canonical floating-point parameter on both
-sides. Ramp simplification preserves boundary segments. Native ground adjoining
-a uniformly flat road uses the road's unsplit edge: this avoids GPU raster cracks
-from collinear T junctions without adding triangles to the six-face road carrier.
-Interior rings cannot request more samples than their boundary edge provides.
-
-The finished road top publishes its actual rim positions and area-weighted
-normals to the cliff mesh. Both surfaces therefore share lighting at their contact;
-the wall does not recompute a different normal from an earlier terrain profile.
+Classic ramps are straight. Enhanced ramps ease in and out: level where they leave flat ground, and meeting the
+neighbouring ramp at their edge with one slope that both hexes derive. A ramp ending at a level junction eases
+fully into it.
 
 ## Graphics modes
 
-Classic uses sharp nominal hex columns: flat tops and vertical side walls outside
-the actual road/rail ramp footprint. `BoardSurface.columns` keeps route grades
-inside their corridor and closes the cut against the remaining flat column.
-A nearby or terminating road does not bring Enhanced banks into an unrelated
-hex. `BoardRim` chooses the Classic wall texture only; it does not move corners,
-round cliffs or stitch an Enhanced rim back to the column.
+**Classic** keeps sharp hex columns. One plane sweep meshes the column top and its reserved pieces together, so both
+sides of every boundary share their vertices. Vertical cut faces close each height difference along that boundary
+and use the column's wall art. A neighbour's wide corridor reserves its sliver of the adjacent column too.
+`BoardRim` keeps the cliff-top rim art clear of a ramp's mouth.
 
-Classic artwork uses nominal hex UV coordinates. Actual route ramps use their
-shared surface normals; the untouched top stays horizontal. Drawing, picking,
-tactical overlays and unit placement use the selected mode's support, and their
-surface caches are invalidated when that mode changes. Enhanced concrete fitting
-does not replace Classic's nominal outer hex outline.
+**Enhanced** builds the natural relief for every dry hex, roads included, then lets the roads reserve their ground:
 
-Built bridge landings and piers sample the same mode's ground, including support
-borrowed from another chunk, so their contact does not depend on chunk load order.
-Classic natural bridges retain a normal full hex cap with the carried terrain's
-artwork and graded entry/exit approaches; the arch leaves an underpass below it.
-Enhanced natural bridges retain their sculpted span.
+- Natural ground near a road moves only vertically, by one field of its position (`BoardRoadBank`): within the
+  height range a road spans it eases into the road as a bank (rise per run at most `SLOPE`, rounded where it leaves
+  the ground), and a shallow drop of up to `BoardRoadGrade.FILL` below the road beside it fills up as an
+  embankment. Ground further above or below keeps its shape, and the board's floor never moves. Faces are split on a
+  world-aligned grid, so tops, slopes and cliffs of neighbouring hexes stay joined.
+- A step beside a road recedes from it (`BoardRelief.roadPush`) instead of being cut. Where it rises from the road,
+  each height below the road's headroom (`BoardRoadGrade.CLEARANCE`) moves only as far as it must to clear the road:
+  the foot steepens into the verge and the face above keeps its place, so it never overhangs. A drop below a road
+  moves as one band. Where a road leaves its hex into a step, the step is cut through instead.
+- On reserved ground, natural tops give way wholly below the road's headroom, so no ground lies hidden just under the
+  road; slopes and cliffs give way above the road's surface, so their faces run on beneath its edge. A cliff over the
+  headroom stands over the verge. Cut faces close the reserved edge, meeting the road at its own vertices. Where the
+  road's edge misses the ground beside it by less than a tenth of a level, the edge meets the ground, so no hairline
+  cut face shows.
+- With containment walls on (`BoardRelief.Tuning.containmentWalls`, a checkbox in the GPU Tuning panel's Terrain
+  tab), an earth slope of up to two levels rising from a road to a higher roadless hex beside it keeps its toe behind
+  a precast wall at the road's edge, at least a metre tall and stepping up in half metres; only the slope above the
+  wall's top recedes, so the wall stays low. The relief decides where (`BoardRelief.walled`): only where the wall
+  saves the slope at least a verge of ground, along runs of at least `WALL_PANELS` panels through the steps' corners;
+  shorter stretches, ramps through the road's own hex and taller cliffs recede as without walls. The bank keeps the
+  walled slopes standing up to the wall's top, and each run of panels continues one panel past either end.
+- Concrete is cut vertically. A road ramping across the edge of concrete, and not also between natural hexes, is
+  built in concrete (`BoardRoadGrade.poured`): natural ground neither banks into nor stands over it, and its cut faces
+  use the concrete hex's walls.
+
+Drawing, picking, unit support, rails, road paint and tactical overlays all sample the same emitted faces. Faces
+without area are dropped; picking has no plane for them. Built bridge landings and piers sample the same mode's
+ground, including support borrowed from another chunk. Classic natural bridges keep a full hex cap with the carried
+terrain's art and graded approaches; Enhanced natural bridges keep their sculpted span.
 
 ## Fixtures and verification
 
@@ -183,24 +87,12 @@ The editable `mm-data/data/boards/fixtures/Road Grades - Grassland.board2` and
 `Road Grades - Concrete.board2` maps cover 36 layouts in road-only, centered-rail
 and beside-rail panels (216 cases total: 36 × 3 × 2). Their adjacent README and case
 CSV give coordinates and regeneration instructions. `BoardRoadGradeFixtureTest` checks
-shared seams, support and authored heights; `GpuRoadGradeFixtureSmokeTest` renders
-the saved maps in both graphics modes.
-
-Six ordinary cases cover continuous straight and curved inclines, higher/lower
-inside banks, a centered/beside rail transition and a graded bent bridge.
-The focused CPU suite rotates those six cases through six directions and both
-column parities, with both surfaces and all three panels: 432 specimens. It checks
-rail support along the course, shared mouth heights and the grade through each
-interior straight-route centre, rather than only matching the endpoints.
-Two additional layouts cover equal lower plateaus beside straight and curved
-inclines, with 144 rotated/material/corridor combinations. Actual-map regressions
-include Mines 1, City Hills Residential 1 at 1506, and Airport 3000 at 1513 and its
-two curved approaches. Unequal-step course tests cover both modes, rotations,
-column parities and all three road/rail panels.
+support under every carriageway, shared edge heights in both modes, level junction cores
+and rail support; `BoardRoadSlopeTest` checks that slopes around roads stay closed.
+`GpuRoadGradeFixtureSmokeTest` renders the saved maps in both graphics modes.
 
 ## Measured geometry work
 
-Two local optimizations were independently reviewed before implementation.
 `GpuRoads.keepClear` generates only lattice strokes that can reach the inverse-
 rotated keep-clear box bounds, including stroke width and a numeric margin. It
 preserves the original 8-pixel phase, ±128 line endpoints, transform, stroke and
@@ -223,13 +115,8 @@ in 3,530 of 6,590,592 raster pixels, all within 0.25 model pixels of the origina
 paint boundary; the largest alpha difference was 23/255. These are geometrically
 equivalent masks, not byte-identical raster images.
 
-`BoardSurface.retainingEdge` also avoids a temporary three-element vertex array
-per visited face while retaining its operation order. All 18 sampled ground and
-retaining-wall meshes were byte-identical. Selected concrete surface builds used
-26–60% less allocation; their wall-clock timings were too noisy for a speed claim.
-These measurements concern the two local geometry operations, not frame rate or
-whole-board load time. Probe reports are under the ignored
-`megamek/build/geometry-perf-audit` directory.
+These measurements concern one local geometry operation, not frame rate or whole-board load time.
+Probe reports are under the ignored `megamek/build/geometry-perf-audit` directory.
 
 ## Tunnel portals
 

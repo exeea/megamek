@@ -14,6 +14,7 @@ import java.util.function.BiConsumer;
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
@@ -33,7 +34,6 @@ import megamek.common.ToHitData;
 import megamek.common.actions.AbstractAttackAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeArc;

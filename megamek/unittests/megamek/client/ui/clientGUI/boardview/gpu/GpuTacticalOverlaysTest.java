@@ -36,7 +36,6 @@ import com.badlogic.gdx.scenes.scene2d.EventListener;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.GdxNativesLoader;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.BoardSource.UiPreferences.Overlays;
@@ -303,8 +302,8 @@ class GpuTacticalOverlaysTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     bind == KeyCommandBind.TACTICAL_OVERLAYS ? "H" : "")).toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", minimap, contacts, false, false, binds, 0,
-              BoardGraphics.ENHANCED, java.awt.Color.RED.getRGB(), overlays);
+        return GpuHudInputTest.with(GpuHudInputTest.preferences(),
+              Map.of("minimapEnabled", minimap, "contactsEnabled", contacts, "binds", binds, "overlays", overlays));
     }
 
     private Actor find(String name) {

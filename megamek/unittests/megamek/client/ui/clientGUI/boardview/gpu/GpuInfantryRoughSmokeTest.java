@@ -16,6 +16,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -72,6 +73,8 @@ class GpuInfantryRoughSmokeTest {
                         BoardGeometry.tune(BoardGeometry.DEFAULTS);
                         view.create();
                         GpuBoardTestUi.present(view);
+                        // Every unit needs its authored assembly here, the Atlas included.
+                        GpuBoardTestUi.<SelectBox<UnitDisplayMode>>tuning(view, "tuning-unit-display").setSelected(UnitDisplayMode.MODELS);
                         view.render();
                         view.boardCamera.advance(BoardCamera.ENTRANCE_SECONDS);
                         view.render();

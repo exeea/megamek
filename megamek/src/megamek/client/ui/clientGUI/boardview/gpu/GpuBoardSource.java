@@ -27,8 +27,10 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
+import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -40,6 +42,7 @@ import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
+import megamek.client.ui.clientGUI.tooltip.HexTooltip;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
@@ -49,7 +52,6 @@ import megamek.common.TagInfo;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -954,7 +956,10 @@ final class GpuBoardSource implements BoardSource {
             nextGlobal.add(new BoardScene.Command("boards", "Maps", "", true, false, boards, () -> { }));
         }
         HoverPoint pointer = hoverPoint;
-        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(contextCoords == null ? pointer.coords() : contextCoords));
+        Coords tipHex = contextCoords == null ? pointer.coords() : contextCoords;
+        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(tipHex));
+        String nextDetails = tipHex != null && board.contains(tipHex)
+              ? hexDetails(board.getHex(tipHex), view.getClientgui(), view.getBoardId()) : "";
         // The movement plan before the tactical capture, which leaves out what the plan draws (G4).
         Coords hover = pointer.coords();
         GpuMovePlan.Snapshot move = moves.capture(panel, hover, pointer.pointedZ());
@@ -1002,7 +1007,7 @@ final class GpuBoardSource implements BoardSource {
         status = battleStatus.arcs(arcTarget(status, hover, panels));
         Entity actor = view.game.getEntity(actorId);
         boolean knownActor = actor != null && identified(actor);
-        return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextTooltip,
+        return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextTooltip, nextDetails,
               view.getCenterRequest(), boardGeneration, knownActor ? actor.getShortName() : "",
               atmosphereFor(view.game.getPlanetaryConditions(), board.isSpace()), log, status, panels);
     }
@@ -1537,6 +1542,15 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /** Alt-click opens the native LOS ruler, independently of the active phase tool. */
+    /**
+     * A hex's lines of MegaMek's hex tooltip below its terrain ({@link HexTooltip#getHexTip}): its building, bridge or
+     * fuel tank with height and CF, minefields, objects on the ground, clearing and bridge-building work; one a line.
+     */
+    static String hexDetails(Hex hex, ClientGUI gui, int boardId) {
+        return GpuBoardActions.plainText(HexTooltip.getHexTip(hex, gui == null ? null : gui.getClient(), boardId))
+              .lines().map(String::strip).filter(line -> !line.isEmpty()).collect(Collectors.joining("\n"));
+    }
+
     static boolean isMeasurement(int modifiers) {
         return (modifiers & InputEvent.ALT_DOWN_MASK) != 0;
     }

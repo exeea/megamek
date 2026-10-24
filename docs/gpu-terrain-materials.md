@@ -412,12 +412,9 @@ the water depth cannot discard the neighboring land cover. Higher banks and clif
 continue their land material below the waterline. Protected road, concrete
 and frozen banks retain their existing boundaries; geometry and picking are unchanged.
 
-Road approaches change the finished surface, not just its texture. The rest of a
-roadside cliff keeps the native relief. `BoardRampMesh` can simplify interior samples,
-but must preserve shared mouth/edge vertices and the actual grade. Outline detection
-accounts for coordinate float precision: otherwise far-map road vertices can be
-mistaken for interior ones and moved away from their cliff (MesaCity1 N, near 5634). See
-[roads](gpu-roads.md) and [water](gpu-water.md) for their connection rules.
+Road approaches change the finished surface, not just its texture: reserved road ground replaces the
+relief beneath it, and the rest of a roadside slope keeps its native relief. See [roads](gpu-roads.md) and
+[water](gpu-water.md) for their connection rules.
 
 Trees, rocks, vegetation and units must sample the installed finished surface.
 Dressing such as a tree pit can be drawn/picked with the ground without raising the

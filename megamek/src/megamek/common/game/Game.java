@@ -44,6 +44,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.Version;
 import megamek.client.bot.AIType;
@@ -63,7 +64,6 @@ import megamek.common.actions.EnemyArtilleryInbound;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.RamAttackAction;
 import megamek.common.actions.TeleMissileAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.BoardSceneryLayouts;
@@ -360,6 +360,7 @@ public final class Game extends AbstractGame implements Serializable,
         } else if (system.equals(OptionsConstants.RULES_CORE)) {
             rulesManager = new CoreRulesManager();
         }
+        rulesManager.getRulesAmmo().updateAmmoBVs();
     }
 
     /**

@@ -15,6 +15,8 @@ import megamek.common.board.Coords;
 final class InfantryFootprint {
     private static final Vector3[] SIDES = sides();
     private static final float EDGE_MARGIN = .5f;
+    /** The hex's central area, as a fraction of its inner radius, which a formation's centre may stand anywhere in. */
+    private static final float CENTRE_AREA = .25f;
     /** Whether members that overlap as authored spread the layout outwards until they clear, rather than stay put. */
     static final boolean SPREAD_OVERLAPS = false;
     /** The room steps take from each side of a hex that is level ground to its edges. */
@@ -81,6 +83,15 @@ final class InfantryFootprint {
         return limits;
     }
 
+    /** Whether a member stands wholly on the hex's level ground there, clear of the room its steps take. */
+    static boolean inside(Vector3 position, Polygon outline, float scale, float[] room) {
+        float[] limits = limits(outline, scale, room);
+        for (int i = 0; i < SIDES.length; i++) {
+            if (SIDES[i].x * position.x + SIDES[i].y * position.y > limits[i]) { return false; }
+        }
+        return true;
+    }
+
     /**
      * Moves a member to the nearest spot on the hex's level ground, clear of the room its steps take. A member larger
      * than that ground stands centred where it overflows, as far inside as it can.
@@ -116,14 +127,26 @@ final class InfantryFootprint {
         return false;
     }
 
-    /** Draw the layout in, then move it as a whole into the available ground when a bank cuts into just one side. */
+    /**
+     * Bring the members' centre into the hex's central area, draw the layout in, then move it as a whole into the
+     * available ground when a bank cuts into just one side. A lone figure, or the few left of a formation, stand near
+     * the middle rather than on the outer slots a full formation would give them.
+     */
     static Layout layout(List<Vector3> positions, List<Polygon> outlines, float scale, float[] room) {
-        float compression = compress(positions, outlines, scale, room);
+        Vector3 centroid = new Vector3();
+        positions.forEach(position -> centroid.add(position.x, position.y, 0));
+        centroid.scl(1f / Math.max(1, positions.size()));
+        float area = CENTRE_AREA * BoardGeometry.height() / 2 / scale;
+        float distance = centroid.len();
+        // Only the part beyond the central area moves; a centre already within it stays as authored.
+        Vector3 shift = centroid.scl(distance > area ? 1 - area / distance : 0);
+        List<Vector3> centred = positions.stream().map(position -> new Vector3(position).sub(shift)).toList();
+        float compression = compress(centred, outlines, scale, room);
         float[] limits = new float[SIDES.length];
         Arrays.fill(limits, Float.POSITIVE_INFINITY);
-        for (int member = 0; member < positions.size(); member++) {
+        for (int member = 0; member < centred.size(); member++) {
             float[] memberLimits = limits(outlines.get(member), scale, room);
-            Vector3 position = positions.get(member);
+            Vector3 position = centred.get(member);
             for (int side = 0; side < SIDES.length; side++) {
                 float reach = SIDES[side].x * position.x + SIDES[side].y * position.y;
                 limits[side] = Math.min(limits[side], memberLimits[side] - compression * reach);
@@ -131,7 +154,8 @@ final class InfantryFootprint {
         }
         Vector3 offset = new Vector3();
         fit(offset, limits);
-        return new Layout(compression, offset);
+        // Layout.place scales the authored position: (position - shift) * compression + offset.
+        return new Layout(compression, offset.mulAdd(shift, -compression));
     }
 
     /**

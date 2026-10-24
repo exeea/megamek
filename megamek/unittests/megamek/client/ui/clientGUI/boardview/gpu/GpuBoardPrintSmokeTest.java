@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
@@ -14,6 +15,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
@@ -67,6 +69,8 @@ class GpuBoardPrintSmokeTest {
                     try {
                         for (boolean editor : List.of(false, true)) { checkPrint(editor, BoardGraphics.ENHANCED); }
                         checkPrint(false, BoardGraphics.CLASSIC);
+                        for (var graphics : BoardGraphics.values()) { checkSpacePrint(graphics); }
+                        checkCancel();
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
@@ -134,48 +138,28 @@ class GpuBoardPrintSmokeTest {
             assertTrue(weather.effects().rain() > 0 && weather.fog() > 0,
                   "The live board supplies rain and fog that must be excluded from printing");
 
-            AtomicReference<BufferedImage> printed = new AtomicReference<>();
-            AtomicReference<Throwable> failed = new AtomicReference<>();
-            SwingUtilities.invokeAndWait(() -> source.requestPrint(image -> {
-                if (!SwingUtilities.isEventDispatchThread()) {
-                    failed.set(new AssertionError("The completion must return to the map's EDT owner"));
-                }
-                printed.set(image);
-            }, failed::set));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
-            boolean printedColumns = false;
-            while (printed.get() == null && failed.get() == null) {
-                assertTrue(System.nanoTime() < deadline, "Printing must complete while the view continues to render");
-                view.render();
-                Object print = field(view, "boardPrint");
-                if (print != null && field(print, "terrain") instanceof GpuTerrain printTerrain) {
-                    printedColumns |= printTerrain.columns();
-                }
-                SwingUtilities.invokeAndWait(() -> { });
-            }
-            if (failed.get() != null) { throw new AssertionError("Print rendering failed", failed.get()); }
-            assertEquals(graphics == BoardGraphics.CLASSIC, printedColumns,
-                  "The print builds the live view's 3D Graphics: " + graphics);
-            BufferedImage image = printed.get();
-            assertNotNull(image);
-            File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
-            assertTrue(output.isDirectory() || output.mkdirs());
+            boolean[] printedColumns = { false };
             String name = (editing ? "board-print-editor" : "board-print-preview")
                   + (graphics == BoardGraphics.CLASSIC ? "-classic" : "");
-            File outputFile = new File(output, name + ".png");
-            GpuMapSource.writePrint(image, outputFile.toPath(), GpuBoardPrint.PIXELS_PER_METRE);
-            BufferedImage saved = ImageIO.read(outputFile);
+            BufferedImage image = print(source, view, name, () -> {
+                Object print = field(view, "boardPrint");
+                if (print != null && field(print, "terrain") instanceof GpuTerrain printTerrain) {
+                    printedColumns[0] |= printTerrain.columns();
+                }
+            });
+            assertEquals(graphics == BoardGraphics.CLASSIC, printedColumns[0],
+                  "The print builds the live view's 3D Graphics: " + graphics);
             assertEquals(2775, image.getWidth(), "Twelve columns at 1.125-inch pitch plus the edge, at 200 DPI");
             assertEquals(2470, image.getHeight(), "Nine 1.3-inch rows plus the staggered half hex, at 200 DPI");
             for (int y : List.of(100, 1100, 2100)) {
-                assertEquals(0, image.getRGB(0, y) >>> 24,
-                      "The background stays transparent across framebuffer tile boundaries");
-                assertEquals(0, saved.getRGB(0, y) >>> 24, "PNG output preserves the transparent background");
+                assertTrue(brightness(image.getRGB(0, y)) > 250,
+                      "The empty background is the paper's white across framebuffer tile and JPEG band boundaries");
             }
-            assertEquals(255, image.getRGB(150, 130) >>> 24, "The board itself stays opaque");
-            assertEquals(image.getRGB(150, 130), saved.getRGB(150, 130), "PNG output preserves the board colour and alpha");
-            assertOpaque(image, 100, 10, 100, 100); // The coordinate label and its antialiased outline.
-            assertOpaque(image, 110, 245, 80, 30); // The horizontal grid edge between the first two rows.
+            assertTrue(brightness(image.getRGB(150, 130)) < 220, "The board itself covers the paper");
+            assertNoPaper(image, 110, 245, 80, 30); // The horizontal grid edge between the first two rows.
+            // Every framebuffer tile is one part of one picture: no vignette darkens its corners (1.06 with one).
+            double vignette = tileVignette(image);
+            assertTrue(Math.abs(vignette - 1) < .02, "Tile corners print as bright as tile centres: " + vignette);
             assertTrue(image.getWidth() > Gdx.graphics.getWidth(), "Print resolution is independent of window width");
             assertTrue(image.getHeight() > Gdx.graphics.getHeight(), "Print resolution is independent of window height");
             // Hex 0403: three 225-pixel column steps, two 260-pixel rows and the odd column's half-row offset.
@@ -204,20 +188,195 @@ class GpuBoardPrintSmokeTest {
             // The offscreen job borrows assets; a normal frame after it finishes must still use valid resources.
             view.render();
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-            GpuBoardTestUi.capture(new File(output, name + "-live.png"));
+            GpuBoardTestUi.capture(new File(reviewDirectory(), name + "-live.png"));
         } finally {
             view.dispose();
             SwingUtilities.invokeAndWait(source::close);
         }
     }
 
-    private static void assertOpaque(BufferedImage image, int left, int top, int width, int height) {
+    /**
+     * Both graphics draw SPACE hexes transparent: they print the space sky behind them, one sky across every framebuffer
+     * tile.
+     */
+    private static void checkSpacePrint(BoardGraphics graphics) throws Exception {
+        AtomicReference<GpuMapSource> captured = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            GUIPreferences.getInstance().setBoardGraphics(graphics);
+            Hex[] hexes = new Hex[12 * 9];
+            for (int index = 0; index < hexes.length; index++) {
+                int x = index % 12, y = index / 12;
+                // A raised platform in the corner: its walls end at the board's floor beside the transparent SPACE.
+                boolean platform = x >= 9 && y >= 6;
+                hexes[index] = new Hex(platform ? 2 : 0, platform ? "pavement:1" : "space:1", "", new Coords(x, y));
+            }
+            Game game = new Game();
+            game.setBoard(new Board(12, 9, hexes));
+            captured.set(new GpuMapSource(game, null, null));
+        });
+        GpuMapSource source = captured.get();
+        GpuBattleView view = new GpuBattleView(source);
+        try {
+            view.create();
+            GpuBoardTestUi.present(view);
+            String name = "board-print-space" + (graphics == BoardGraphics.CLASSIC ? "-classic" : "");
+            BufferedImage image = print(source, view, name, () -> { });
+            view.render();
+            GpuBoardTestUi.capture(new File(reviewDirectory(), name + "-live.png"));
+            long total = 0;
+            int stars = 0, repeated = 0;
+            for (int y = 400; y < 700; y++) {
+                for (int x = 400; x < 700; x++) {
+                    int pixel = image.getRGB(x, y);
+                    total += brightness(pixel);
+                    if (brightness(pixel) > 60) {
+                        stars++;
+                        // The neighbouring framebuffer tile's same pixel: a per-tile sky would repeat each star there.
+                        if (pixel == image.getRGB(x + 1024, y)) { repeated++; }
+                    }
+                }
+            }
+            assertTrue(total / (300 * 300) < 100, "Space prints the dark sky, not the paper: " + total / (300 * 300));
+            assertTrue(stars > 0, "The space sky has its stars");
+            assertTrue(repeated < stars / 2, "The sky spans the whole print instead of repeating in each tile: "
+                  + repeated + " of " + stars + " star pixels repeat");
+        } finally {
+            view.dispose();
+            SwingUtilities.invokeAndWait(source::close);
+        }
+    }
+
+    /** The print card's Cancel ends a running print: no file stays, the card goes, and Print is offered again. */
+    private static void checkCancel() throws Exception {
+        AtomicReference<GpuMapSource> captured = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            GUIPreferences.getInstance().setBoardGraphics(BoardGraphics.ENHANCED);
+            Game game = new Game();
+            game.setBoard(Board.createEmptyBoard(12, 9));
+            captured.set(new GpuMapSource(game, null, null));
+        });
+        GpuMapSource source = captured.get();
+        GpuBattleView view = new GpuBattleView(source);
+        File target = new File(reviewDirectory(), "board-print-cancelled.jpg");
+        try {
+            view.create();
+            GpuBoardTestUi.present(view);
+            java.nio.file.Files.deleteIfExists(target.toPath());
+            AtomicBoolean printed = new AtomicBoolean();
+            AtomicReference<Exception> failed = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> source.requestPrint(target.toPath(), () -> printed.set(true), failed::set));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
+            while (!(field(view, "boardPrint") instanceof GpuBoardPrint print)
+                  || !print.progress().step().equals(Messages.getString("GpuBoard.print.rendering"))) {
+                assertTrue(System.nanoTime() < deadline, "The print reaches its rendering");
+                view.render();
+            }
+            assertTrue(target.exists(), "The print writes its file as it renders");
+            GpuBoardTestUi.click("map-print-cancel");
+            view.render();
+            assertNull(field(view, "boardPrint"), "Cancel stops the print at its next frame");
+            assertFalse(GpuBoardTestUi.stage().getRoot().findActor("map-print-progress").isVisible(),
+                  "The progress card leaves with the cancelled print");
+            SwingUtilities.invokeAndWait(() -> { });
+            assertTrue(failed.get() instanceof java.util.concurrent.CancellationException, "The print ends as cancelled");
+            assertFalse(printed.get());
+            // The encoder thread closes the file after any band it still encodes, then deletes it.
+            long removal = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (target.exists()) {
+                assertTrue(System.nanoTime() < removal, "A cancelled print leaves no file");
+                Thread.sleep(10);
+            }
+            assertTrue(source.takeFrame().globalCommands().stream()
+                  .anyMatch(command -> command.id().equals("fileBoardPrint") && command.enabled()), "Print is offered again");
+        } finally {
+            view.dispose();
+            SwingUtilities.invokeAndWait(source::close);
+        }
+    }
+
+    /**
+     * Prints through the map's EDT request while the view keeps rendering, as the live window does, into the review
+     * directory's {@code name}.jpg, and reads that file back.
+     */
+    private static BufferedImage print(GpuMapSource source, GpuBattleView view, String name, ThrowingRunnable eachFrame)
+          throws Exception {
+        File target = new File(reviewDirectory(), name + ".jpg");
+        AtomicBoolean printed = new AtomicBoolean();
+        AtomicReference<Throwable> failed = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> source.requestPrint(target.toPath(), () -> {
+            if (!SwingUtilities.isEventDispatchThread()) {
+                failed.set(new AssertionError("The completion must return to the map's EDT owner"));
+            }
+            printed.set(true);
+        }, failed::set));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
+        var card = GpuBoardTestUi.stage().getRoot().findActor("map-print-progress");
+        java.util.Set<String> steps = new java.util.HashSet<>();
+        boolean captured = false;
+        while (!printed.get() && failed.get() == null) {
+            assertTrue(System.nanoTime() < deadline, "Printing must complete while the view continues to render");
+            view.render();
+            eachFrame.run();
+            if (field(view, "boardPrint") instanceof GpuBoardPrint print) {
+                assertTrue(card.isVisible(), "The progress card shows while the board prints");
+                steps.add(print.progress().step());
+                if (!captured && print.progress().done() > 0 && print.progress().done() < 1) {
+                    GpuBoardTestUi.capture(new File(reviewDirectory(), name + "-progress.png"));
+                    captured = true;
+                }
+            }
+            SwingUtilities.invokeAndWait(() -> { });
+        }
+        if (failed.get() != null) { throw new AssertionError("Print rendering failed", failed.get()); }
+        assertTrue(steps.contains(Messages.getString("GpuBoard.print.rendering")), "The card names its steps: " + steps);
+        view.render();
+        assertFalse(card.isVisible(), "The progress card leaves with the finished print");
+        BufferedImage image = ImageIO.read(target);
+        assertNotNull(image, "The print wrote a readable JPEG");
+        return image;
+    }
+
+    private interface ThrowingRunnable { void run() throws Exception; }
+
+    private static File reviewDirectory() {
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+        assertTrue(output.isDirectory() || output.mkdirs());
+        return output;
+    }
+
+    private static int brightness(int pixel) {
+        return ((pixel >> 16 & 255) + (pixel >> 8 & 255) + (pixel & 255)) / 3;
+    }
+
+    /** No paper shows through: the board's coverage survives the grid and label drawing over it. */
+    private static void assertNoPaper(BufferedImage image, int left, int top, int width, int height) {
         for (int y = top; y < top + height; y++) {
             for (int x = left; x < left + width; x++) {
-                assertEquals(255, image.getRGB(x, y) >>> 24,
-                      "Grid and label antialiasing must preserve the opaque board at " + x + ", " + y);
+                assertTrue(brightness(image.getRGB(x, y)) < 240,
+                      "Grid antialiasing must preserve the covered board at " + x + ", " + y);
             }
         }
+    }
+
+    /** The grey board's mean brightness near each framebuffer tile's centre over that near its corners. */
+    private static double tileVignette(BufferedImage image) {
+        double[] sum = new double[2];
+        int[] count = new int[2];
+        for (int y = 0; y < image.getHeight(); y += 2) {
+            int top = y / 1024 * 1024, height = Math.min(1024, image.getHeight() - top);
+            for (int x = 0; x < image.getWidth(); x += 2) {
+                int left = x / 1024 * 1024, width = Math.min(1024, image.getWidth() - left);
+                float u = (x - left + .5f) / width * 2 - 1, v = (y - top + .5f) / height * 2 - 1;
+                int part = u * u + v * v < .25f ? 0 : u * u + v * v > 1.2f ? 1 : -1;
+                int pixel = image.getRGB(x, y), red = pixel >> 16 & 255, green = pixel >> 8 & 255, blue = pixel & 255;
+                if (part < 0 || Math.abs(red - green) > 12 || Math.abs(green - blue) > 12 || green < 60 || green > 230) {
+                    continue;
+                }
+                sum[part] += green;
+                count[part]++;
+            }
+        }
+        return sum[0] / count[0] / (sum[1] / count[1]);
     }
 
     private static int greenPixels(BufferedImage image, int left, int top, int width, int height) {

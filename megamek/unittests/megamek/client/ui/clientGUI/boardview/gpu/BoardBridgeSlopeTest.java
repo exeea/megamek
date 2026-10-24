@@ -24,6 +24,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardBridgeSlopeTest {
+    /** How far the mesh may stray from the ease it follows in rows. */
+    static final float EASED = .06f;
+
     @BeforeAll
     static void natives() { GdxNativesLoader.load(); }
 
@@ -182,14 +185,16 @@ class BoardBridgeSlopeTest {
                     var road = surfaces.get(roadAt);
                     assertEquals(center.z + lift, height(shape, center, false), .01f);
                     assertEquals(roadCenter.z, road.height(roadCenter.x, roadCenter.y), .01f);
-                    // A straight line from one inset to the other must describe both actual meshes.
+                    // One line from one inset to the other must describe both actual meshes; a solid ramp eases.
                     for (float t : new float[] { .3f, .4f, .499f, .501f, .6f, .7f }) {
                         for (float lateral : new float[] { -6, 0, 6 }) {
                             var p = new Vector3(center).lerp(roadCenter, t)
                                   .mulAdd(across, lateral * BoardGeometry.hexScale());
-                            float expected = center.z + (roadCenter.z - center.z) * (2 * t - .5f);
+                            float expected = center.z
+                                  + (roadCenter.z - center.z) * (roadLevel == 0 ? eased(t) : 2 * t - .5f);
                             if (t < .5f || roadLevel == 0) {
-                                assertEquals(expected + lift, height(shape, p, false), .015f, "Solid approach: " + lod);
+                                assertEquals(expected + lift, height(shape, p, false), roadLevel == 0 ? EASED : .015f,
+                                      "Solid approach: " + lod);
                             } else {
                                 assertEquals(expected, road.height(p.x, p.y), .015f, "Road inset: " + lod + " x=" + x
                                       + " roadLevel=" + roadLevel + " t=" + t + " lateral=" + lateral);
@@ -209,10 +214,10 @@ class BoardBridgeSlopeTest {
                               "The entrance wedge starts at the road inset and finishes on its flat hub");
                         for (float t : new float[] { .3f, .49f, .51f, .7f }) {
                             var p = new Vector3(center).lerp(roadCenter, t);
-                            float grade = center.z + (roadCenter.z - center.z) * (2 * t - .5f) + lift;
+                            float grade = center.z + (roadCenter.z - center.z) * eased(t) + lift;
                             for (int side : new int[] { -1, 1 }) {
                                 var rail = new Vector3(p).mulAdd(across, side * 16.5f * BoardGeometry.hexScale());
-                                assertEquals(grade + 2.5f * BoardGeometry.hexScale(), height(shape, rail, false), .015f,
+                                assertEquals(grade + 2.5f * BoardGeometry.hexScale(), height(shape, rail, false), EASED,
                                       "Both rails continue along the ramp without a terminal interrupting the grade");
                                 var origin = new Vector3(p).mulAdd(outward, side * 30 * BoardGeometry.hexScale());
                                 origin.z = (grade - BoardGeometry.level()) / 2;
@@ -276,10 +281,10 @@ class BoardBridgeSlopeTest {
                     for (float t : new float[] { .3f, .4f, .499f, .501f, .6f, .7f }) {
                         for (float lateral : new float[] { -3, 0, 3 }) {
                             var p = new Vector3(center).lerp(bankCenter, t).mulAdd(across, lateral * scale);
-                            float expected = (1.5f - 2 * t) * BoardGeometry.level() + lift;
-                            assertEquals(expected, BoardBridge.top(shape, p.x, p.y), .015f,
+                            float expected = (1 - eased(t)) * BoardGeometry.level() + lift;
+                            assertEquals(expected, BoardBridge.top(shape, p.x, p.y), EASED,
                                   "Continuous deck over both hexes: paved=" + paved + " lod=" + lod + " t=" + t);
-                            assertEquals(expected, height(shape, p, false), .015f,
+                            assertEquals(expected, height(shape, p, false), EASED,
                                   "Picking must use the same sloping top as drawing");
                         }
                         var p = new Vector3(center).lerp(bankCenter, t);
@@ -405,6 +410,15 @@ class BoardBridgeSlopeTest {
     }
 
     static int step(int direction) { return direction % 3 - 1; }
+
+    /**
+     * The share of its drop an Enhanced solid ramp has made at {@code t} of the way from the deck's centre to the
+     * bank's: one ease from one inset to the other, level at both.
+     */
+    static float eased(float t) {
+        float s = Math.clamp(2 * t - .5f, 0, 1);
+        return s * s * (3 - 2 * s);
+    }
 
     static BoardScene scene(Coords center, int exits, boolean roads) {
         var route = new HashMap<Coords, BoardScene.Tile>();

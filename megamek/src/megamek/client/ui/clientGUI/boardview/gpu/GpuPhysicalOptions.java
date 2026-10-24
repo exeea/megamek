@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.function.Predicate;
 import javax.swing.JComponent;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -17,7 +18,6 @@ import megamek.common.ToHitData;
 import megamek.common.actions.KickAttackAction;
 import megamek.common.actions.PhysicalAttackPsr;
 import megamek.common.actions.PunchAttackAction;
-import megamek.common.annotations.Nullable;
 import megamek.common.compute.Compute;
 import megamek.common.game.Game;
 import megamek.common.rolls.PilotingRollData;

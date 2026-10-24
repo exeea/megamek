@@ -423,6 +423,8 @@ public final class UiTheme implements Disposable {
         box("chip", Color.CLEAR, Color.valueOf("4B5654"), 1, 3, null, 2, 7, 0);
         box("chip-warn", Color.CLEAR, Color.valueOf("6F6035"), 1, 3, null, 2, 7, 0);
         box("chip-bad", Color.CLEAR, Color.valueOf("7A3F3A"), 1, 3, null, 2, 7, 0);
+        // The board's hex hover card (GpuHexTip): a faint plate without rails or border.
+        box("tip", rgba(12, 17, 19, .74f), null, 0, 3, null, 4, 8, 0);
         // A utility's count badge (.b.util .badge).
         box("badge", AMBER, null, 0, 8.5f, null, 0, 4, 17).setMinWidth(17);
         // A pill split in sections (UiKit.segmented "hud-pill"): one frame, the hovered and the pressed section in it.
@@ -921,6 +923,7 @@ public final class UiTheme implements Disposable {
         style.check = token(tokens.color("selected.primary", mode));
         style.underline = control;
         style.underlineOver = token(tokens.color("border.strong", mode));
+        style.underlineDisabled = token(tokens.color("border.subtle", mode));
         skin.add("default", style);
     }
 

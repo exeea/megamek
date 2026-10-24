@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.board.TilesetScenery;
@@ -187,7 +188,24 @@ public final class BoardSurfaceBlend {
             var next = scene.neighbor(tile, direction);
             if (contact(tile, next) && !cover(next).equals(own)) { return true; }
         }
-        return false;
+        return !spans(scene, tile).isEmpty();
+    }
+
+    /** A level rock span resting on a bank, and the family of its shell, which the bank's cover gives way to. */
+    private record Span(BoardNaturalBridge.BankJoin join, int family) { }
+
+    /** The level rock spans on the tile whose shell is not already its whole cover. */
+    private static List<Span> spans(BoardScene scene, BoardScene.Tile tile) {
+        if (!blendable(tile) || tile.liquid().present()) { return List.of(); }
+        List<Span> spans = new ArrayList<>(0);
+        for (int direction = 0; direction < 6; direction++) {
+            var join = BoardNaturalBridge.bankApproach(scene, tile, direction);
+            if (join == null) { continue; }
+            var span = scene.neighbor(tile, direction);
+            int family = BoardNaturalBridge.shell(BoardBridge.deck(scene, span).surface()).ordinal();
+            if (cover(tile).weight(family) < 1) { spans.add(new Span(join, family)); }
+        }
+        return spans;
     }
 
     private static boolean contact(BoardScene.Tile a, BoardScene.Tile b) {
@@ -237,6 +255,7 @@ public final class BoardSurfaceBlend {
         private final BoardScene.Tile owner;
         private final BoardConcrete coast;
         private final boolean blendableOwner, waterOwner;
+        private final List<Span> spans;
         private final Map<BoardScene.Tile, Contacts> contacts = new IdentityHashMap<>();
         private final Map<Position, Cover> ground = new HashMap<>(), cliffs = new HashMap<>();
 
@@ -246,13 +265,14 @@ public final class BoardSurfaceBlend {
             coast = BoardConcrete.of(scene);
             blendableOwner = blendable(owner);
             waterOwner = water(owner);
+            spans = spans(scene, owner);
         }
 
         Cover sample(float x, float y, float z) {
             Position key = new Position(x, y, z);
             Cover cover = ground.get(key);
             if (cover == null) {
-                cover = sampleGround(x, y, z);
+                cover = onto(sampleGround(x, y, z), x, y, z);
                 ground.put(key, cover);
             }
             return cover;
@@ -280,6 +300,30 @@ public final class BoardSurfaceBlend {
             }
             if (around.water()) { return sampleWater(at, around, x, y, z); }
             return sampleAt(at, around, cover(owner, z), x, y, z, false);
+        }
+
+        /**
+         * Across a level rock span's passage the bank's cover gives way to the span's shell over a broken band,
+         * entirely by the bank's edge where the span's top begins, so neither the ground nor its grass ends at a line.
+         */
+        private Cover onto(Cover cover, float x, float y, float z) {
+            float metre = BoardRelief.metres(1);
+            for (var span : spans) {
+                var passage = span.join().passage();
+                if (z < passage.level() - metre * .5f) { continue; }
+                float lateral = span.join().weight(new Vector3(x, y, z));
+                if (lateral <= 0) { continue; }
+                // How far inside the bank's edge towards the span the point lies.
+                float inside = passage.length() / 2 - ((x - passage.x()) * passage.nx() + (y - passage.y()) * passage.ny());
+                float warp = (BoardRelief.noise(x / (metre * 2.7f) + 31, y / (metre * 2.7f) - 13) - .5f) * 3 * metre;
+                float share = lateral * (1 - BoardRelief.smooth((inside - 1.5f * metre + warp) / (6 * metre)));
+                if (share <= 0) { continue; }
+                float[] weights = new float[FAMILIES];
+                for (int family = 0; family < FAMILIES; family++) { weights[family] = cover.weight(family) * (1 - share); }
+                weights[span.family()] += share;
+                cover = cover(weights, 1, cover.interpolation() * (1 - share));
+            }
+            return cover;
         }
 
         private Cover sampleColumn(float x, float y, float z) {

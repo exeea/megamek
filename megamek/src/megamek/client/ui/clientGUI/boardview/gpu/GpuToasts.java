@@ -6,10 +6,10 @@ import java.util.ArrayList;
 import java.util.List;
 import javax.swing.SwingUtilities;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.common.annotations.Nullable;
 import megamek.common.units.Entity;
 
 /** EDT service for the toast stack: the client's newest toasts with their level and duration. */

@@ -120,7 +120,7 @@ class BoardSurfaceTest {
     }
 
     @Test
-    void aRoadEndingAtTheEdgeStillCutsAndFillsBothApproachesInEveryDirection() {
+    void aRoadEndingAtUnpavedGroundCarriesTheWholeRampInEveryDirection() {
         for (int direction = 0; direction < 6; direction++) {
             for (boolean roadOnHighSide : List.of(true, false)) {
                 BoardScene scene = scene(false, direction, roadOnHighSide, !roadOnHighSide, 2);
@@ -130,12 +130,19 @@ class BoardSurfaceTest {
                 Vector3 highCenter = BoardGeometry.center(FIRST, 2);
                 Vector3 lowCenter = BoardGeometry.center(neighbor, 0);
                 Vector3 gate = new Vector3(highCenter).lerp(lowCenter, 0.5f);
-                assertEquals(BoardGeometry.LEVEL, high.height(gate.x, gate.y), 0.01f);
-                assertEquals(high.height(gate.x, gate.y), low.height(gate.x, gate.y), 0.01f);
+                // The road ramps all the way to the unpaved hex's level at their edge; the unpaved hex keeps its own.
+                float unpaved = roadOnHighSide ? lowCenter.z : highCenter.z;
+                assertEquals(unpaved, high.height(gate.x, gate.y), 0.01f);
+                assertEquals(unpaved, low.height(gate.x, gate.y), 0.01f);
                 Vector3 cut = new Vector3(gate).lerp(highCenter, 0.15f);
                 Vector3 fill = new Vector3(gate).lerp(lowCenter, 0.15f);
-                assertTrue(high.height(cut.x, cut.y) < highCenter.z);
-                assertTrue(low.height(fill.x, fill.y) > lowCenter.z);
+                if (roadOnHighSide) {
+                    assertTrue(high.height(cut.x, cut.y) < highCenter.z, "The road descends through its own hex");
+                    assertEquals(lowCenter.z, low.height(fill.x, fill.y), 0.01f, "The unpaved hex below is not filled");
+                } else {
+                    assertTrue(low.height(fill.x, fill.y) > lowCenter.z, "The road climbs through its own hex");
+                    assertEquals(highCenter.z, high.height(cut.x, cut.y), 0.01f, "The unpaved hex above is not cut");
+                }
                 UnitMotion movement = new UnitMotion(new BoardScene.Waypoint(FIRST, 2, direction));
                 movement.append(List.of(new BoardScene.Waypoint(FIRST, 2, direction),
                       new BoardScene.Waypoint(neighbor, 0, direction)), EntityMovementType.MOVE_WALK, 0);
@@ -198,7 +205,7 @@ class BoardSurfaceTest {
                       "Only the inset half of each connected hex is graded");
                 Vector3 halfway = new Vector3(hub).lerp(gate, .5f);
                 if (roadElevation > 0) {
-                    assertTrue(road.roadNormal(halfway).epsilonEquals(road.roadNormal(gate), .0001f),
+                    assertEquals((hub.z + road.height(gate.x, gate.y)) / 2, road.height(halfway.x, halfway.y), .01f,
                           "The road retains the bridge's planar grade through the shared edge");
                 }
                 assertEquals(0, belowBridge.height(gate.x, gate.y), 0.01f,
@@ -244,7 +251,8 @@ class BoardSurfaceTest {
             List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
             BoardScene.Tile tile = scene.tile(FIRST);
             tiles.set(FIRST.getX() * scene.height() + FIRST.getY(), new BoardScene.Tile(FIRST, 0, -1, false,
-                  exits, tile.surface(), tile.ground(), null, null, List.of(), List.of()));
+                  exits, tile.surface(), tile.ground(), null, null, null, null, List.of(), List.of(), BoardLiquid.NONE,
+                  null, false, exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             scene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
             Vector3 gate = BoardGeometry.center(FIRST, 0)
                   .lerp(BoardGeometry.center(FIRST.translated(direction), 0), 0.5f);
@@ -266,10 +274,10 @@ class BoardSurfaceTest {
                     BoardScene scene = bridgeScene(direction, bridgeDirection, bridgeHeight, roadUnderBridge);
                     Coords neighbor = FIRST.translated(direction);
                     Vector3 gate = BoardGeometry.center(FIRST, 0).lerp(BoardGeometry.center(neighbor, 0), 0.5f);
-                    assertEquals(-BoardGeometry.LEVEL,
-                          new BoardSurface(scene, scene.tile(FIRST)).height(gate.x, gate.y), 0.01f);
-                    assertEquals(-BoardGeometry.LEVEL,
-                          new BoardSurface(scene, scene.tile(neighbor)).height(gate.x, gate.y), 0.01f);
+                    // Two ground roads meet halfway; one ending at the unpaved ground carries the whole ramp down to it.
+                    float approach = (roadUnderBridge ? -1 : -2) * BoardGeometry.LEVEL;
+                    assertEquals(approach, new BoardSurface(scene, scene.tile(FIRST)).height(gate.x, gate.y), 0.01f);
+                    assertEquals(approach, new BoardSurface(scene, scene.tile(neighbor)).height(gate.x, gate.y), 0.01f);
                 }
             }
         }
@@ -1435,8 +1443,9 @@ class BoardSurfaceTest {
         BoardScene.Tile tile = scene.tile(coords);
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
         tiles.set(coords.getX() * scene.height() + coords.getY(), new BoardScene.Tile(coords, hex.getLevel(),
-              water ? 1 : -1, false, tile.roadExits(), tile.surface(), tile.ground(), null, null,
-              BoardFeatures.capture(hex, coords, Map.of()), List.of()));
+              water ? 1 : -1, false, tile.roadExits(), tile.surface(), tile.ground(), null, null, null, null,
+              BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null,
+              false, tile.road()));
         return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 
@@ -1451,11 +1460,14 @@ class BoardSurfaceTest {
             for (int y = 0; y < 4; y++) {
                 Coords coords = new Coords(x, y);
                 boolean first = coords.equals(FIRST), second = coords.equals(FIRST.translated(direction));
-                tiles.add(new BoardScene.Tile(coords, !river && first ? elevation : 0,
-                      river && (first || second) ? 2 : -1, false,
-                      river ? 0 : first && firstRoad ? 1 << direction
-                            : second && secondRoad ? 1 << ((direction + 3) % 6) : 0, BoardScene.Surface.GRASS,
-                      art, null, null, List.of(), List.of()));
+                int exits = river ? 0 : first && firstRoad ? 1 << direction
+                      : second && secondRoad ? 1 << ((direction + 3) % 6) : 0;
+                boolean wet = river && (first || second);
+                // A road's exits come with its drawn road, as a captured hex has them: only a carriageway is graded.
+                tiles.add(new BoardScene.Tile(coords, !river && first ? elevation : 0, wet ? 2 : -1, false, exits,
+                      BoardScene.Surface.GRASS, art, null, null, null, null, List.of(), List.of(),
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, false,
+                      exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             }
         }
         return new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of());

@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Polygon;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 
@@ -21,7 +22,11 @@ final class InfantryMotion {
     record Step(float gait, float distance, float standing) { }
     private static final float DEPART_END = .22f;
     private static final float PARK_START = .72f;
+    /** World units per second a member walks to a new spot in its hex, and the distance its gait eases over. */
+    private static final float WALK_SPEED = 14;
+    private static final float WALK_EASE = 2;
     private final Map<String, Member> members = new LinkedHashMap<>();
+    private boolean walking;
     private float layoutScale = Float.NaN;
     private float[] layoutRoom = InfantryFootprint.NO_STEPS;
     /** The standing formation's fitted layout, and the unit scale and terrain rim it was worked out for. */
@@ -48,6 +53,11 @@ final class InfantryMotion {
         boolean reversing;
         Step step;
         float verticalOffset;
+        /** Where a resting member stands while it walks to its spot, and how far it has walked there. */
+        final Vector3 shown = new Vector3();
+        boolean rested;
+        int age;
+        float walked;
 
         Member(UnitRig rig, Node node, Node rest, Member previous) {
             this.rig = rig;
@@ -79,6 +89,10 @@ final class InfantryMotion {
                 lastDrivePosition.set(previous.lastDrivePosition);
                 drivenDistance = previous.drivenDistance;
                 node.translation.set(previous.node.translation);
+                shown.set(previous.shown);
+                age = previous.age;
+                rested = previous.rested;
+                walked = previous.walked;
             }
         }
 
@@ -149,10 +163,20 @@ final class InfantryMotion {
     }
 
     /**
-     * @param room the world units that the steps on each edge of the unit's hex take from its level ground, which the
-     *             formation keeps clear of; {@link InfantryFootprint#NO_STEPS} for a hex level to its edges
+     * @param room     the world units that the steps on each edge of the unit's hex, or the sectors of other troops
+     *                 sharing it, take from its level ground, which the formation keeps clear of;
+     *                 {@link InfantryFootprint#NO_STEPS} for a hex level to its edges and a formation alone in it
+     * @param crowds   the view's packing of the hexes troops share with other units, which members join at rest
+     * @param seconds  the frame's animation time, which members spend walking to new spots
+     * @param instant  whether members take new spots at once
      */
-    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room) {
+    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room, HexCrowds crowds,
+          float seconds, boolean instant) {
+        position(model, unit, motion, room);
+        settle(unit, motion, crowds, model.horizontalScale(unit), room, seconds, instant);
+    }
+
+    private void position(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room) {
         var travel = motion.boarding();
         float scale = model.horizontalScale(unit);
         var vehicles = members.values().stream().filter(member -> member.rig.transport()).toList();
@@ -237,6 +261,66 @@ final class InfantryMotion {
     }
 
     /**
+     * A resting formation joins the crowd of a hex it shares with other units, and walks to new spots instead of
+     * jumping there, as when another unit enters or leaves the hex.
+     */
+    private void settle(BoardScene.Unit unit, UnitMotion.Sample motion, HexCrowds crowds, float scale, float[] room,
+          float seconds, boolean instant) {
+        var travel = motion.boarding();
+        boolean still = !motion.moving()
+              && (travel == null || travel.stage() == UnitMotion.Stage.UNLOAD && travel.progress() >= 1);
+        Vector3 center = BoardGeometry.center(unit.location().coords(), 0);
+        walking = false;
+        for (Member member : members.values()) {
+            // Members of a staggered group land one after another, after the formation's own movement ended.
+            boolean resting = still && !(member.rig.trooper() && motion.member(unit.id(), member.rig.container()).moving());
+            Vector3 spot = new Vector3(member.node.translation);
+            // A member that has just arrived stands where its movement ended, then walks only any further way.
+            if (resting && !member.rested) { member.shown.set(spot); }
+            member.rested = resting;
+            if (resting) {
+                // A trooper takes the ground of its watch heading, which it keeps once there, not the room it would
+                // need to turn.
+                float[] ground = InfantryFootprint.polygon(member.footprint, member.heading).getTransformedVertices().clone();
+                for (int v = 0; v < ground.length; v++) { ground[v] *= scale; }
+                crowds.register(unit.location().coords(), new HexCrowds.Figure(unit.id(), member.rig.container(),
+                      new Vector2(center.x + spot.x * scale, center.y + spot.y * scale), new Polygon(ground),
+                      member.rig.transport(), room));
+                var packed = crowds.spot(unit.id(), member.rig.container());
+                if (packed != null) { spot.set((packed.x - center.x) / scale, (packed.y - center.y) / scale, spot.z); }
+            }
+            // The first frames place a new formation, already packed into a crowded hex, without walking there.
+            if (!resting || instant || member.age < 2) {
+                member.shown.set(spot);
+                member.walked = 0;
+            } else {
+                walk(member, spot, seconds * WALK_SPEED / scale);
+            }
+            member.age = Math.min(2, member.age + 1);
+            member.node.translation.set(member.shown);
+        }
+    }
+
+    /** One frame's walk toward the spot, with the gait eased in and out and the walker facing its way. */
+    private void walk(Member member, Vector3 spot, float stride) {
+        float remaining = member.shown.dst(spot);
+        if (remaining <= stride || remaining < .01f) {
+            member.shown.set(spot);
+            member.walked = 0;
+            return;
+        }
+        float direction = MathUtils.atan2(spot.x - member.shown.x, spot.y - member.shown.y) * MathUtils.radiansToDegrees;
+        member.shown.lerp(spot, stride / remaining);
+        member.walked += stride;
+        float ease = Math.min(1, Math.min(member.walked, remaining - stride) / WALK_EASE);
+        walking = true;
+        if (member.rig.trooper()) {
+            member.orient(MathUtils.lerpAngleDeg(member.heading, direction, ease));
+            member.step = new Step(ease, member.walked, ease);
+        }
+    }
+
+    /**
      * The standing formation's layout, worked out again only when the unit scale, the members or the terrain rim
      * around the hex change.
      */
@@ -279,7 +363,7 @@ final class InfantryMotion {
     /** Standing infantry seek gaps in the rendered Rough mesh; vehicles keep their fitted positions. */
     boolean roughGround(ModelInstance instance, BoardScene scene, BoardScene.Unit unit, UnitMotion.Sample motion,
           BoardSurface.Cache surfaces, float[] room) {
-        if (members.isEmpty() || motion.moving() || motion.boarding() != null || motion.airborne(unit)) { return false; }
+        if (members.isEmpty() || walking || motion.moving() || motion.boarding() != null || motion.airborne(unit)) { return false; }
         BoardScene.Tile tile = scene.tile(unit.location().coords());
         if (tile == null || tile.liquid().present() || unit.location().elevation() != tile.elevation()) { return false; }
         BoardSurface surface = surfaces.get(scene, tile);

@@ -44,8 +44,13 @@ record UnitRig(String family, String type, String container, Map<String, String>
     /** The authored knee branch, independent of travel direction. Omitted roles retain the conventional gait. */
     float kneeDirection(String leg) { return "reverse".equals(legBends.get(leg)) ? -1 : 1; }
 
+    /** A formation figure: an articulated trooper, or a rigid meeple that stands and moves in its place. */
     boolean trooper() {
-        return "trooper-v1".equals(type);
+        return "trooper-v1".equals(type) || meeple();
+    }
+
+    boolean meeple() {
+        return "meeple-v1".equals(type);
     }
 
     boolean mek() {

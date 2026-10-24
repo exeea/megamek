@@ -73,7 +73,7 @@ class GpuWaterProgramsSmokeTest {
             environment.set(ColorAttribute.createAmbientLight(.4f, .4f, .4f, 1));
             environment.add(new DirectionalLight().set(1, 1, 1, -.4f, -.3f, -1));
             var parts = new ArrayList<Renderable>();
-            for (var water : List.of(pool, fall, fall.spray(), pool.cut(), pool.depth())) {
+            for (var water : List.of(pool, fall, fall.spray(), pool.cut(), pool.cut().beyond(), pool.depth())) {
                 var part = new ModelInstance(model).getRenderable(new Renderable());
                 part.material = new Material(material);
                 part.material.set(water);
@@ -111,8 +111,9 @@ class GpuWaterProgramsSmokeTest {
             assertEquals(mode == GpuWaterShader.Mode.SURFACE || mode == GpuWaterShader.Mode.FALL,
                   program.getUniformLocation("u_waterOcean0") >= 0, "Only surfaces and crests need the wave simulation");
             assertEquals(mode == GpuWaterShader.Mode.SURFACE || mode == GpuWaterShader.Mode.DEPTH
-                        || mode == GpuWaterShader.Mode.CUT, program.getUniformLocation("u_waterShape") >= 0,
-                  "The surface, its depth prepass and the board-edge section share one wave displacement");
+                        || mode == GpuWaterShader.Mode.CUT || mode == GpuWaterShader.Mode.BEYOND,
+                  program.getUniformLocation("u_waterShape") >= 0,
+                  "The surface, its depth prepass and both sides of the board-edge section share one wave displacement");
             assertEquals(mode == GpuWaterShader.Mode.SURFACE || mode == GpuWaterShader.Mode.FALL,
                   program.getUniformLocation("u_waderCount") >= 0, "Only surfaces and crests need unit interactions");
             assertEquals(mode == GpuWaterShader.Mode.SPRAY, program.getUniformLocation("u_cameraUp") >= 0,

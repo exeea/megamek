@@ -189,13 +189,25 @@ the surface's wave vertex program: its top vertices (colour G zero) follow the
 waves at the same rest positions as the surface's border samples, so the section
 shows the wave profile without a gap. Its bottom stays on the bed.
 
+Beyond the board the water goes on. Before the faded features and the water blend,
+`water-beyond.frag` draws the far side of every section (its back faces, a chunk's
+`beyondRenderables`, same wave program) opaque black, depth-tested against the scene and
+writing no depth. A view through the water that leaves the board therefore gets no light
+back, as from water too deep to show its bed, instead of the sky that the surface alone
+(at most `WATER_MAX_OPACITY`) would leave showing. Compared with the same views over water
+that really continues past the edge, the affected pixels differ by a mean RGB error of 7–18,
+against 74–118 with the sky showing (NVIDIA). Beyond a shallow edge the view is dark rather
+than a continuing bed. The pass costs a draw per section material in each visible chunk,
+with a constant fragment.
+
 ## Color, waves and interaction
 
 `water-surface.frag` handles open water. `water-optics.glsl` supplies the common
 depth-dependent absorption/scattering used by the surface and submerged ground,
 while `water-lighting.glsl` supplies reflection and light response.
 `water-interactions.glsl` and `water-pool.glsl` add local contacts and pool motion.
-`water-fall.frag`, `water-spray.frag` and `water-cut.frag` handle their named forms.
+`water-fall.frag`, `water-spray.frag` and `water-cut.frag` handle their named forms;
+`water-beyond.frag` stands for the water beyond the board edge.
 
 Clear, Mars, volcanic and hazardous water use palettes selected by
 `GpuWaterShader`. Compatible neighboring water at the same level blends optical

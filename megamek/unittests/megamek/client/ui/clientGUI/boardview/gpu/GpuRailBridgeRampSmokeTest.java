@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -95,26 +96,38 @@ class GpuRailBridgeRampSmokeTest {
         assertEquals(.5f * elevation * BoardGeometry.level() + lift + railTop,
               groundEnds.stream().mapToDouble(p -> p.z).max().orElseThrow(), .02,
               "The installed approach reaches the raised bridge, including after its elevation edit");
+        // The editor preview of laying this track: its pieces (the deck's too) reach the installed rails' seam vertices.
+        var bare = new ArrayList<>(scene.tiles());
         for (Coords at : List.of(APPROACH, BRIDGE)) {
             var tile = scene.tile(at);
-            var ghost = terrain.routeGhost(scene, tile, BoardRail.route(tile));
-            assertNotNull(ghost);
-            try {
-                sameVertices(at.equals(APPROACH) ? groundEnds : deckEnds, seamVertices(triangles(ghost), seam),
-                      "Editor preview uses the installed ramp at " + at);
-            } finally { ghost.model.dispose(); }
+            bare.set(at.getX() * scene.height() + at.getY(),
+                  tile.withFeatures(tile.features().stream().filter(feature -> !BoardRail.route(feature)).toList()));
         }
-        // Both rail heads remain above the bridge's solid on each side of the ownership boundary.
+        var preview = terrain.previewRoutes(terrain.compareRoutes(scene.withTiles(bare), scene, Set.of(APPROACH, BRIDGE)).join());
+        try {
+            for (Coords at : List.of(APPROACH, BRIDGE)) {
+                assertNotNull(preview.ghosts.get(at), "The new track is previewed at " + at);
+                var pieces = preview.ghosts.get(at).stream().flatMap(piece -> triangles(piece).stream()).toList();
+                var ends = seamVertices(pieces, seam);
+                for (var point : at.equals(APPROACH) ? groundEnds : deckEnds) {
+                    assertTrue(ends.stream().anyMatch(p -> p.epsilonEquals(point, .001f)),
+                          "Editor preview uses the installed ramp at " + at + ": " + point);
+                }
+            }
+        } finally { preview.dispose(); }
+        // Both rail heads remain above the bridge's solid, on its eased grade, on each side of the ownership boundary.
         if (elevation == 0) { return; }
         for (float along : new float[] { .35f, .45f, .55f, .65f }) {
             var point = BoardGeometry.center(BRIDGE, 0).lerp(BoardGeometry.center(APPROACH, 0), along);
-            float expected = (1.5f - 2 * along) * elevation * BoardGeometry.level() + lift + railTop;
+            float expected = (1 - BoardBridgeSlopeTest.eased(along)) * elevation * BoardGeometry.level() + lift + railTop;
             for (int side : new int[] { -1, 1 }) {
-                var ray = new Ray(new Vector3(point.x + side * 2.1f * scale, point.y, 200), new Vector3(0, 0, -1));
+                var ray = new Ray(new Vector3(point.x + side * BoardRail.GAUGE_HALF * scale, point.y, 200),
+                      new Vector3(0, 0, -1));
                 var hit = new Vector3();
                 assertTrue(Intersector.intersectRayTriangles(ray, along < .5f ? deck : ground, hit),
                       "The installed rail must cover the ramp at " + along);
-                assertEquals(expected, hit.z, .02f, "The rail head stays above the ramp at " + along);
+                // The rail's samples, a few pixels apart, chord the eased curve by up to a tenth.
+                assertEquals(expected, hit.z, .1f, "The rail head stays above the ramp at " + along);
             }
         }
     }

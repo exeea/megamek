@@ -67,8 +67,8 @@ final class GpuHudState {
     /** The sheet sections the player collapsed, by their caption keys. */
     final Set<String> collapsedSections = new HashSet<>();
     boolean forcesGrid;
-    /** The nameplate key (SHOW_NAMEPLATES) is held. */
-    boolean altHeld;
+    /** The nameplate key (SHOW_NAMEPLATES) shows every nameplate: it is held, or toggled on (NameplateMode). */
+    boolean allNameplates;
     private boolean logOpen;
     /** A report phase opened the closed log, so the next phase that is no report closes it again. */
     private boolean logAuto;
@@ -161,7 +161,8 @@ final class GpuHudState {
             BoardScene scene = frame.scene() == null ? null : frame.scene().withPlaybackSelection(
                   selectionCleared ? Entity.NONE : focus);
             return new GpuBoardSource.Frame(scene, frame.timeline(), null, frame.globalCommands(), frame.tooltip(),
-                  frame.centerRequest(), frame.boardGeneration(), focus == Entity.NONE ? "" : selectionFrame.actorName(),
+                  frame.hexDetails(), frame.centerRequest(), frame.boardGeneration(),
+                  focus == Entity.NONE ? "" : selectionFrame.actorName(),
                   frame.scenarioAtmosphere(), frame.reports(), focusStatus, shown);
         }
         GpuBattleStatus.Snapshot status = frame.status();
@@ -183,8 +184,8 @@ final class GpuHudState {
         BoardScene.Context context = frame.context();
         return new GpuBoardSource.Frame(frame.scene(), frame.timeline(),
               locked && context != null && !context.selectionCleared() ? null : context,
-              frame.globalCommands(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(),
-              locked ? "" : frame.actorName(), frame.scenarioAtmosphere(), frame.reports(),
+              frame.globalCommands(), frame.tooltip(), frame.hexDetails(), frame.centerRequest(),
+              frame.boardGeneration(), locked ? "" : frame.actorName(), frame.scenarioAtmosphere(), frame.reports(),
               locked ? presentedStatus : status, shown);
     }
 

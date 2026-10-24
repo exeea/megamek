@@ -20,9 +20,9 @@ import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Disposable;
+import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 

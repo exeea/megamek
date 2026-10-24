@@ -46,7 +46,6 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.Client;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLiveBoardSpaceSmokeTest.Live;
@@ -661,10 +660,8 @@ class GpuHudParitySmokeTest {
      * one), so the card shows its unit's record and the fire preview follows the focus.
      */
     static void start(Live live, UnaryOperator<GpuBattleStatus.Snapshot> status) throws Exception {
-        GpuBoardSource.UiPreferences p = live.source.uiPreferences;
-        live.source.uiPreferences = new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(),
-              p.reportFilterKeywords(), p.minimapEnabled(), p.contactsEnabled(), p.conditionsVisible(), p.turnDetails(),
-              live.real.uiPreferences.binds(), p.moveSprintRgb(), BoardGraphics.ENHANCED);
+        live.source.uiPreferences = GpuHudInputTest.with(live.source.uiPreferences,
+              Map.of("binds", live.real.uiPreferences.binds()));
         doAnswer(invocation -> {
             live.real.setCardUnit(invocation.getArgument(0));
             return null;

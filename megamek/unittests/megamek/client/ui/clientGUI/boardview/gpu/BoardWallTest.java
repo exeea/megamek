@@ -96,11 +96,11 @@ class BoardWallTest {
             var bounds = new BoundingBox().inf();
             triangles.forEach(bounds::ext);
             assertEquals(0, bounds.min.z, .001f);
-            assertEquals(BoardGeometry.MODEL_LEVEL_HEIGHT, bounds.max.z, .001f);
+            assertTrue(bounds.max.z > BoardGeometry.MODEL_LEVEL_HEIGHT && bounds.max.z <= BoardGeometry.MODEL_LEVEL_HEIGHT + 8.01f);
             Vector3 hit = new Vector3();
             assertTrue(Intersector.intersectRayTriangles(down(.31f, .27f), triangles, hit));
-            assertTrue(hit.z <= BoardGeometry.MODEL_LEVEL_HEIGHT + .001f
-                  && hit.z > BoardGeometry.MODEL_LEVEL_HEIGHT - 6, "The authored roof is solid and shallowly recessed");
+            assertTrue(hit.z >= BoardGeometry.MODEL_LEVEL_HEIGHT
+                  && hit.z < BoardGeometry.MODEL_LEVEL_HEIGHT + 2, "The solid deck caps the last full-height floor");
             if (exits == 0) { continue; }
             for (int direction = 0; direction < 6; direction++) {
                 Vector3 arm = joint(direction).scl(.98f);
@@ -115,21 +115,18 @@ class BoardWallTest {
     void opposingExitsMeetAtOneSharedPhysicalEndpoint() {
         for (int direction = 0; direction < 6; direction++) {
             Vector3 joint = joint(direction);
-            Vector3 outward = new Vector3(joint).nor();
             var first = BoardWall.triangles("buildings/wall-" + (1 << direction));
             var second = BoardWall.triangles("buildings/wall-" + (1 << ((direction + 3) % 6)));
             Vector3 a = new Vector3(), b = new Vector3();
-            assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(joint).mulAdd(outward, 2).add(0, 0, 9),
-                  new Vector3(outward).scl(-1)), first, a));
-            assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(joint).scl(-1).mulAdd(outward, -2).add(0, 0, 9),
-                  outward), second, b));
+            assertTrue(Intersector.intersectRayTriangles(down(joint.x * .999999f, joint.y * .999999f), first, a));
+            assertTrue(Intersector.intersectRayTriangles(down(-joint.x * .999999f, -joint.y * .999999f), second, b));
             b.add(new Vector3(joint).scl(2));
             assertEquals(0, a.dst(b), .001f, "Both hexes use the same mesh endpoint");
         }
     }
 
     @Test
-    void tallWallsKeepTheirRulesHeightAndContinuousRecessAtEveryJoin() {
+    void tallWallsKeepTheirFullFloorsAndContinuousDeckAtEveryJoin() {
         for (int levels : new int[] { 1, 3, 30 }) {
             float height = levels * BoardGeometry.MODEL_LEVEL_HEIGHT;
             for (int exits = 0; exits < 64; exits++) {
@@ -137,7 +134,7 @@ class BoardWallTest {
                 var hit = new Vector3();
                 assertTrue(Intersector.intersectRayTriangles(
                       new Ray(new Vector3(.31f, .27f, height + 2), new Vector3(0, 0, -1)), triangles, hit));
-                assertTrue(hit.z <= height + .001f && hit.z > height - 6);
+                assertTrue(hit.z >= height && hit.z < height + 2);
                 for (int direction = 0; direction < 6; direction++) {
                     if ((exits & 1 << direction) == 0) { continue; }
                     // Probe the seam within float roundoff, not inside differently scaled end bevels. Exact edge
@@ -146,14 +143,14 @@ class BoardWallTest {
                     assertTrue(Intersector.intersectRayTriangles(
                           new Ray(joint.add(0, 0, height + 2), new Vector3(0, 0, -1)), triangles, hit));
                     float floor = hit.z;
-                    assertTrue(floor < height && floor > height - 6, "The capped channel is a shallow roof recess");
+                    assertTrue(floor >= height && floor < height + 2, "The roof caps the last full floor");
                     var neighbour = BoardWall.triangles("buildings/wall-" + (1 << ((direction + 3) % 6)), levels);
                     var other = joint(direction).scl(-.999999f).add(0, 0, height + 2);
                     assertTrue(Intersector.intersectRayTriangles(new Ray(other, new Vector3(0, 0, -1)), neighbour, hit));
-                    assertEquals(floor, hit.z, .001f, "The recessed channel meets its neighbor without a raised end cap: height "
+                    assertEquals(floor, hit.z, .001f, "The deck meets its neighbor without a raised end cap: height "
                           + levels + ", exits " + exits + ", direction " + direction);
                     var outward = joint(direction).nor();
-                    var start = joint(direction).mulAdd(outward, .5f).add(0, 0, height - .35f);
+                    var start = joint(direction).mulAdd(outward, .5f).add(0, 0, height + 1);
                     if (Intersector.intersectRayTriangles(new Ray(start, new Vector3(outward).scl(-1)), triangles, hit)) {
                         assertTrue(start.dst(hit) > 1, "No thin vertical baffle may close the channel at the exact module seam");
                     }
@@ -164,13 +161,14 @@ class BoardWallTest {
 
     @Test
     void fortressBodyMatchesTheRoadWidthAndItsArmorHasRealProjection() {
-        var solid = BoardWall.triangles("buildings/wall-9");
+        var solid = BoardWall.triangles(BoardWall.layout("buildings/wall-9", 1, 90));
         var full = new BoundingBox().inf();
         solid.forEach(full::ext);
         assertTrue(full.getWidth() > 2 * HexTile.ROAD_HALF_WIDTH + 6
               && full.getWidth() < 2 * HexTile.ROAD_HALF_WIDTH + 12,
               "Heavy buttresses project beyond the thirty-unit road-width body");
-        assertEquals(HexTile.LEVEL_HEIGHT, full.max.z, .001f, "Armor never invents an extra rules level");
+        assertTrue(full.max.z > HexTile.LEVEL_HEIGHT && full.max.z < HexTile.LEVEL_HEIGHT + 8,
+              "Only the shallow roof details extend above the last full floor");
         var hit = new Vector3();
         assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(40, 0, 9), new Vector3(-1, 0, 0)), solid, hit));
         assertTrue(hit.x >= HexTile.ROAD_HALF_WIDTH, "The authored body and armor have real side geometry");
@@ -200,7 +198,8 @@ class BoardWallTest {
         var tall = BoardWall.model("buildings/wall-63", 30);
         assertTrue(tall.meshes.size > near.meshes.size, "Tall walls repeat the authored body instead of stretching its details");
         for (var mesh : tall.meshes) {
-            String name = mesh.id.replaceAll("/body-[0-9]+/", "/body-0/");
+            String name = mesh.id.replaceAll("/floor0-at-[0-9]+/", "/floor0-at-1/")
+                  .replace("/roof0-at-30/", "/roof0-at-3/");
             var reference = near.meshes.first();
             for (var candidate : near.meshes) { if (candidate.id.equals(name)) { reference = candidate; break; } }
             assertEquals(name, reference.id);
@@ -213,13 +212,13 @@ class BoardWallTest {
                 assertEquals(source[i + 10], stretched[i + 10]);
                 assertEquals(source[i + 11], stretched[i + 11], "Height fitting never reprojects the atlas");
                 float z = source[i + 2];
-                if (name.contains("/base/")) { assertEquals(z, stretched[i + 2], .001f); }
-                if (name.contains("/cap/")) { assertEquals(54 - z, 540 - stretched[i + 2], .001f); }
+                if (name.contains("/base0-")) { assertEquals(z, stretched[i + 2], .001f); }
+                if (name.contains("/roof0-")) { assertEquals(54 - z, 540 - stretched[i + 2], .001f); }
                 lowest = Math.min(lowest, stretched[i + 2]);
                 highest = Math.max(highest, stretched[i + 2]);
                 assertEquals(1, new Vector3(stretched[i + 3], stretched[i + 4], stretched[i + 5]).len(), .001f);
             }
-            if (name.contains("/body-")) { assertTrue(highest - lowest <= 42.001f, "Body details never stretch taller"); }
+            if (name.contains("/floor0-")) { assertEquals(18, highest - lowest, .001f, "Every repeated floor keeps its exact height"); }
         }
     }
 
@@ -230,7 +229,7 @@ class BoardWallTest {
         Vector3 base = BoardGeometry.center(CENTER, 2);
         assertTrue(obstacles.obstructs(new Vector3(base).add(0, 0, .1f), .1f, 1));
         assertFalse(obstacles.obstructs(new Vector3(base).add(20, 0, .1f), .1f, 1));
-        assertFalse(obstacles.obstructs(new Vector3(base).add(0, 0, 3 * BoardGeometry.level() + 1), .1f, 1));
+        assertFalse(obstacles.obstructs(new Vector3(base).add(0, 0, 3 * BoardGeometry.level() + 8 * BoardGeometry.hexScale()), .1f, 1));
         assertFalse(obstacles.obstructs(new Vector3(base).add(0, 0, -4), .1f, 1));
     }
 

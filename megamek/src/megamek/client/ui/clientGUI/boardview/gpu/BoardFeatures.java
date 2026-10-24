@@ -333,7 +333,8 @@ final class BoardFeatures {
         for (int direction = -1; direction < 6; direction++) {
             Coords at = direction < 0 ? coords : coords.translated(direction);
             Hex source = direction < 0 ? hex : board.apply(at);
-            if (source == null || source.getLevel() != hex.getLevel() || HexTile.liquid(source)) { continue; }
+            // A graded road's ramp and corridor reach a neighbour of another level too.
+            if (source == null || HexTile.liquid(source)) { continue; }
             int rails = RailRoute.groundSides(source);
             if (BoardRoad.capture(source) == BoardRoad.Kind.NONE && rails == 0) { continue; }
             BoardRoad road = BoardRoad.clearance(at, source, board, rails);

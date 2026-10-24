@@ -35,7 +35,7 @@ final class GpuWaterShader extends Attribute {
     static final float SURFACE_OPACITY = 0.48f;
     static final long TYPE = register("boardWaterSurface");
     /** Separate programs; palette and colour source remain material parameters within each mode. */
-    enum Mode { SURFACE, FALL, SPRAY, CUT, DEPTH }
+    enum Mode { SURFACE, FALL, SPRAY, CUT, BEYOND, DEPTH }
     /** Palette indices shared with water-optics.glsl and the submerged bed's vertex color. */
     static final int CLEAR = 0, MARS = 1, VOLCANO = 2, HAZARDOUS = 3;
     /** Depth encoded by the field and by the bed's vertex color, in levels; deeper water is uniformly deep. */
@@ -158,6 +158,9 @@ final class GpuWaterShader extends Attribute {
 
     /** Optical section at the board edge: its top (colour G zero) follows the surface waves; authored frames are dropped. */
     GpuWaterShader cut() { return new GpuWaterShader(this, Mode.CUT); }
+
+    /** What a view through the water meets beyond the board, drawn on a section's far side with the same displacement. */
+    GpuWaterShader beyond() { return new GpuWaterShader(this, Mode.BEYOND); }
 
     static int palette(BoardLiquid liquid) {
         if (liquid.kind() == BoardLiquid.Kind.HAZARDOUS) { return HAZARDOUS; }

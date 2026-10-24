@@ -59,6 +59,7 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
@@ -69,7 +70,6 @@ import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.InfantryActionDeclaration;
 import megamek.common.Player;
-import megamek.common.annotations.Nullable;
 import megamek.common.compute.InfantryActionStrengths;
 import megamek.common.game.Game;
 import megamek.common.units.AbstractBuildingEntity;

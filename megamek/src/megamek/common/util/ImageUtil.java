@@ -57,14 +57,14 @@ import java.util.WeakHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
-import javax.swing.*;
+import javax.swing.UIManager;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.ui.util.ImageAtlasMap;
 import megamek.client.ui.util.ImprovedAveragingScaleFilter;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Report;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.logging.MMLogger;

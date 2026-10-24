@@ -135,7 +135,7 @@ class BoardWetCliffTest {
 
     static void tune(boolean enabled) {
         var t = BoardRelief.tuning();
-        BoardRelief.tune(new BoardRelief.Tuning(enabled));
+        BoardRelief.tune(new BoardRelief.Tuning(enabled, BoardRelief.DEFAULTS.containmentWalls()));
     }
 
     @Test

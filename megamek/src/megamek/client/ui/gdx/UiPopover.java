@@ -139,8 +139,8 @@ public final class UiPopover extends Table {
     }
 
     /**
-     * The header's title, upper-cased, over the subtitle; a null or blank title removes the header and a null subtitle its
-     * line. An open popover keeps the corner it opened at.
+     * The header's title, upper-cased, over the subtitle, which may have several lines; a null or blank title removes
+     * the header and a null subtitle its lines. An open popover keeps the corner it opened at.
      */
     public UiPopover header(String text, String detail) {
         boolean shown = text != null && !text.isBlank();
@@ -152,7 +152,7 @@ public final class UiPopover extends Table {
         } else if (token) {
             detailCell.height(Value.prefHeight).padTop(DesignTokens.shipped().space().get("xxs"));
         } else {
-            detailCell.height(BODY_LINE);
+            detailCell.height(Math.max(BODY_LINE, subtitle.getPrefHeight()));
         }
         head.invalidate();
         headCell.setActor(shown ? head : null);

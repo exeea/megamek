@@ -32,11 +32,10 @@ final class GpuLinearOverlay implements Disposable {
         boolean srgb;
         if (previousDraw == 0 && defaultSrgb != null) { srgb = defaultSrgb; }
         else {
-            values.clear();
-            Gdx.gl.glGetFramebufferAttachmentParameteriv(GL30.GL_DRAW_FRAMEBUFFER,
+            // libGDX sends this query to EXT_framebuffer_object, which macOS's core profile lacks: the JVM aborted.
+            srgb = org.lwjgl.opengl.GL30C.glGetFramebufferAttachmentParameteri(GL30.GL_DRAW_FRAMEBUFFER,
                   previousDraw == 0 ? BACK_LEFT : GL20.GL_COLOR_ATTACHMENT0,
-                  GL30.GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, values);
-            srgb = values.get(0) == GL30.GL_SRGB;
+                  GL30.GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING) == GL30.GL_SRGB;
             if (previousDraw == 0) { defaultSrgb = srgb; }
         }
         active = true;

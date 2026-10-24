@@ -26,7 +26,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.awt.event.KeyEvent;
+import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +61,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.MapMenu;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.gdx.UiButton;
@@ -305,7 +308,7 @@ class GpuHudInputTest {
         when(Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn(true);
 
         assertTrue(press(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT, ALT_DOWN_MASK));
-        assertFalse(hud.state.altHeld, "Alt with a focused grip belongs to the reordering, not to the nameplates");
+        assertFalse(hud.state.allNameplates, "Alt with a focused grip belongs to the reordering, not to the nameplates");
         assertTrue(press(Input.Keys.UP, KeyEvent.VK_UP, ALT_DOWN_MASK), "never forwarded as CALLED_SHOT_HIGH");
         verify(fire, times(1)).move(5, -1);
 
@@ -367,10 +370,22 @@ class GpuHudInputTest {
     void releasingTheNameplateKeyEndsTheNameplates() {
         update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0));
         assertTrue(press(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT, ALT_DOWN_MASK));
-        assertTrue(hud.state.altHeld);
+        assertTrue(hud.state.allNameplates);
         // The release carries the key only, so a Shift or Ctrl still held does not keep the plates.
         assertTrue(hud.keyUp(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT), "the consumed press's release is consumed too");
-        assertFalse(hud.state.altHeld);
+        assertFalse(hud.state.allNameplates);
+    }
+
+    @Test
+    void theToggleSettingKeepsTheNameplatesUntilTheNextPress() {
+        hud.update(frame(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0), GpuHudData.EMPTY),
+              GpuHud.HudView.EMPTY, null, with(preferences(), Map.of("nameplates", NameplateMode.TOGGLE)));
+        assertTrue(press(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT, ALT_DOWN_MASK));
+        hud.keyUp(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT);
+        hud.focusLost();
+        assertTrue(hud.state.allNameplates, "neither the release nor a lost focus ends toggled nameplates");
+        assertTrue(press(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT, ALT_DOWN_MASK));
+        assertFalse(hud.state.allNameplates);
     }
 
     @Test
@@ -927,7 +942,11 @@ class GpuHudInputTest {
         return scene;
     }
 
-    /** MegaMek's default key of every bind, so the user's own key bindings do not change the test. */
+    /**
+     * MegaMek's default key of every bind, so the user's own key bindings do not change the test; no report keywords,
+     * the minimap and contacts panels on, the conditions and turn details off, the Enhanced graphics, the overlays'
+     * defaults, the client's movement colours and every nameplate shown while its key is held.
+     */
     static GpuBoardSource.UiPreferences preferences() {
         return preferences(1);
     }
@@ -936,8 +955,30 @@ class GpuHudInputTest {
     static GpuBoardSource.UiPreferences preferences(float scale) {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
-        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds, 0,
-              BoardGraphics.ENHANCED);
+        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds,
+              BoardGraphics.ENHANCED, GpuBoardSource.UiPreferences.Overlays.DEFAULTS,
+              GpuBoardSource.UiPreferences.capture().movementColors(), NameplateMode.HOLD);
+    }
+
+    /**
+     * {@code preferences} with the record components named in {@code changes} replaced and the others kept, so a test
+     * names only the preferences it changes; an unknown name fails.
+     */
+    static GpuBoardSource.UiPreferences with(GpuBoardSource.UiPreferences preferences, Map<String, ?> changes) {
+        RecordComponent[] components = GpuBoardSource.UiPreferences.class.getRecordComponents();
+        List<String> names = Arrays.stream(components).map(RecordComponent::getName).toList();
+        assertTrue(names.containsAll(changes.keySet()), "UiPreferences has no " + changes.keySet());
+        Object[] values = new Object[components.length];
+        try {
+            for (int i = 0; i < components.length; i++) {
+                values[i] = changes.containsKey(names.get(i)) ? changes.get(names.get(i))
+                      : components[i].getAccessor().invoke(preferences);
+            }
+            return GpuBoardSource.UiPreferences.class.getDeclaredConstructor(Arrays.stream(components)
+                  .map(RecordComponent::getType).toArray(Class<?>[]::new)).newInstance(values);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     static GpuBattleStatus.Snapshot status(int round, GamePhase phase, boolean myTurn, int actor, int turnIndex,

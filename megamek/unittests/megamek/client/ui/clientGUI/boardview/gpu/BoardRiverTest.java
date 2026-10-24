@@ -72,8 +72,8 @@ class BoardRiverTest {
                     int edge = Math.floorMod(1 - at.direction(peninsula), 6), opposite = (edge + 3) % 6;
                     for (float t : new float[] { .25f, .5f, .75f }) {
                         for (float z : new float[] { 0, BoardGeometry.level() / 2, BoardGeometry.level() }) {
-                            assertTrue(shore.relief.roadPoint(edge, t, z)
-                                  .epsilonEquals(land.relief.roadPoint(opposite, 1 - t, z), .002f),
+                            assertTrue(shore.relief.outlinePoint(edge, t, z)
+                                  .epsilonEquals(land.relief.outlinePoint(opposite, 1 - t, z), .002f),
                                   "The water-owned bank and the raised land share the same wall");
                         }
                     }

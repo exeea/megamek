@@ -35,8 +35,10 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ImmediateModeRenderer20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.ConvexHull;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -45,7 +47,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.utils.SharedLibraryLoader;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
@@ -108,7 +112,7 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuLoadingGrid loadingGrid;
     private Label loadingWaiting, loadingActive, loadingReady;
     /** The shader bar (showShaders), under the section legend. */
-    private UiKit.Meter loadingShaders;
+    private UiKit.Progress loadingShaders;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
@@ -152,11 +156,14 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, UpperBodyTurn> upperBodyTurns = new HashMap<>();
     private final Map<String, ArmFlip> armFlips = new HashMap<>();
     private final Map<String, UnitAnimator> animators = new HashMap<>();
+    /** The ground of the units other than troops, as last drawn, by the hexes they occupy; troops step around it. */
+    private final Map<Coords, List<Polygon>> occupiedGround = new HashMap<>();
+    private final HexCrowds crowds = new HexCrowds();
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
     final FullscreenKey fullscreenKey = new FullscreenKey();
-    /** The window's bounds before Alt+Enter made it fullscreen; the next Alt+Enter restores them. */
+    /** The window's bounds before the fullscreen key made it fullscreen; the key's next press restores them. */
     private GpuWindowBounds windowed;
     /** Render-thread snapshot of modifiers delivered to the separate Swing tools window. */
     private final List<Hover> hover = new ArrayList<>();
@@ -327,7 +334,7 @@ class GpuBattleView extends ApplicationAdapter {
             legend.add(entry).padLeft(12).padRight(12);
         }
         // Hidden while no program is left to link; a hidden bar keeps its row, so the tasks below never move.
-        loadingShaders = new UiKit(skin).meter(Messages.getString("GpuBoard.loadingShaders"), false);
+        loadingShaders = new UiKit(skin).progress(Messages.getString("GpuBoard.loadingShaders"));
         loadingShaders.setName("board-loading-shaders");
         loadingShaders.setVisible(false);
         content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
@@ -343,13 +350,10 @@ class GpuBattleView extends ApplicationAdapter {
         loadingStage.addActor(content);
     }
 
-    /** The shader bar shows the programs linked of those the load needs while any is left to link. */
-    static void showShaders(UiKit.Meter bar, TerrainLoadProgress.Shaders shaders) {
+    /** The shader bar shows the share of the programs the load needs that have linked, while any is left to link. */
+    static void showShaders(UiKit.Progress bar, TerrainLoadProgress.Shaders shaders) {
         bar.setVisible(shaders.linked() < shaders.total());
-        if (bar.isVisible()) {
-            bar.set(shaders.linked() + " / " + shaders.total(), (float) shaders.linked() / shaders.total(),
-                  GpuLoadingGrid.READY);
-        }
+        if (bar.isVisible()) { bar.set((float) shaders.linked() / shaders.total()); }
     }
 
     /** The loading screen at the HUD's display scale, read each frame since a monitor change keeps the window size. */
@@ -460,6 +464,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (boardPrint != null) { boardPrint.dispose(); boardPrint = null; }
         GpuGlsl.linkOffscreen(null);
         if (offscreenLinks != null) { offscreenLinks.dispose(); offscreenLinks = null; }
+        if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         // Join the terrain worker before releasing the model buffers it borrows.
         if (terrain != null) { terrain.dispose(); terrain = null; }
         if (fireControl != null) { fireControl.dispose(); fireControl = null; }
@@ -471,7 +476,6 @@ class GpuBattleView extends ApplicationAdapter {
         if (hexText != null) { hexText.dispose(); hexText = null; }
         if (hexGrid != null) { hexGrid.dispose(); hexGrid = null; }
         if (traceOverlay != null) { traceOverlay.dispose(); traceOverlay = null; }
-        if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         if (tethers != null) { tethers.dispose(); tethers = null; }
         if (tetherShader != null) { GpuShaderManager.dispose(tetherShader); tetherShader = null; }
@@ -659,7 +663,7 @@ class GpuBattleView extends ApplicationAdapter {
               || scene.boardId() != frame.scene().boardId());
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
-        if (unitModels != null) { unitModels.setDisplayMode(displayMode()); }
+        if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
         scene = history.live(scene);
         // Apply HUD state independently of camera framing; panels overlay the full board viewport.
@@ -743,6 +747,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
         }
         if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
+        if (ui instanceof GpuMapHud map) { map.print(boardPrint); }
         scene = terrain.presentation(scene);
         tilesChangedThisFrame = scene.tiles() != lastFrameTiles;
         lastFrameTiles = scene.tiles();
@@ -878,6 +883,9 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
               ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
+        if (source.isEditor()) {
+            editorPreview.prepare(scene, terrain, editorPreviewShown() ? source.editorPreview() : GpuEditorPreview.Data.NONE);
+        }
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, units);
         renderStage("cloud transmission");
@@ -1544,7 +1552,7 @@ class GpuBattleView extends ApplicationAdapter {
                     facing = 0; // Troops and their transports have cosmetic member headings, no gameplay facing.
                 }
                 var turn = upperBodyTurns.get(key);
-                animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(visual, instance, unit,
+                animators.computeIfAbsent(key, ignored -> newAnimator()).apply(visual, instance, unit,
                       sample, hoverClock, animationSeconds(),
                       history.speed() == UnitMotion.Speed.INSTANT, turn == null ? 0 : turn.degrees(),
                       UnitScreenScale.growth(placement, growth));
@@ -1577,6 +1585,30 @@ class GpuBattleView extends ApplicationAdapter {
             unitFootprints.put(unit, new UnitFootprint.Pose(placement, position, footprintFacing));
             unitAnchors.put(unit, anchor);
         }
+        occupiedGround.clear();
+        for (BoardScene.Unit unit : scene.units()) {
+            var instance = unitInstances.get(unit.id() + ":" + unit.part());
+            if (instance == null || UnitAnimator.troops(unit) || unit.sensorContact() || unit.airborne()
+                  || unit.attachment() != null) { continue; }
+            // The outline of its turned box seen from above, in whole world units so idle animation does not keep
+            // nudging the troops beside it.
+            var box = UnitBounds.local(instance);
+            float[] corners = new float[16];
+            for (int corner = 0; corner < 8; corner++) {
+                var point = new Vector3((corner & 1) == 0 ? box.min.x : box.max.x, (corner & 2) == 0 ? box.min.y : box.max.y,
+                      (corner & 4) == 0 ? box.min.z : box.max.z).mul(instance.transform);
+                corners[2 * corner] = Math.round(point.x);
+                corners[2 * corner + 1] = Math.round(point.y);
+            }
+            var hull = new ConvexHull().computePolygon(corners, false);
+            var ground = new Polygon(java.util.Arrays.copyOf(hull.items, hull.size - 2));
+            unit.footprint().forEach(coords -> occupiedGround.computeIfAbsent(coords, ignored -> new ArrayList<>()).add(ground));
+        }
+        crowds.pack(occupiedGround);
+    }
+
+    private UnitAnimator newAnimator() {
+        return new UnitAnimator(groundSurfaces, () -> scene, crowds);
     }
 
     /** Frame an action before its clock advances, including when one large frame reaches several queued actions. */
@@ -1815,7 +1847,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (instance == null || instance.model != model.instance.model) {
             instance = newUnitInstance(key, model);
         }
-        animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(model, instance, unit,
+        animators.computeIfAbsent(key, ignored -> newAnimator()).apply(model, instance, unit,
               motions.get(unit.id()).sample(), hoverClock, 0, true, unit.model().twist());
     }
 
@@ -3072,17 +3104,33 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * Alt+Enter (either Alt, Enter or numpad Enter), ahead of the HUD and the game's key bindings: its press, the
-     * character the window types for it and for each repeat, and its release reach neither.
+     * The fullscreen switch: Alt+Enter (either Alt, Enter or numpad Enter) everywhere, and the platform's own key, which
+     * no default bind uses: Control+Command+F on macOS, whose F11 shows the desktop, and F11 elsewhere.
+     */
+    static boolean isFullscreenSwitch(int key, int modifiers, boolean mac) {
+        return switch (key) {
+            case Input.Keys.ENTER, Input.Keys.NUMPAD_ENTER -> (modifiers & InputEvent.ALT_DOWN_MASK) != 0;
+            case Input.Keys.F -> mac && modifiers == (InputEvent.CTRL_DOWN_MASK | InputEvent.META_DOWN_MASK);
+            case Input.Keys.F11 -> !mac && modifiers == 0;
+            default -> false;
+        };
+    }
+
+    /**
+     * The fullscreen switch ({@link #isFullscreenSwitch}), ahead of the HUD and the game's key bindings: its press, the
+     * character the window types for an Enter and for each repeat, and its release reach neither.
      */
     final class FullscreenKey extends InputAdapter {
         private int held = -1;
 
         @Override
         public boolean keyDown(int key) {
-            if (key != Input.Keys.ENTER && key != Input.Keys.NUMPAD_ENTER) { return false; }
-            held = (modifiers() & InputEvent.ALT_DOWN_MASK) != 0 ? key : -1;
-            if (held < 0) { return false; }
+            if (!isFullscreenSwitch(key, modifiers(), SharedLibraryLoader.os == Os.MacOsX)) {
+                // A release the window never delivered (focus lost): the key's next plain press is the game's again.
+                if (key == held) { held = -1; }
+                return false;
+            }
+            held = key;
             toggleFullscreen();
             return true;
         }
@@ -3096,7 +3144,7 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean keyTyped(char character) {
-            return held >= 0 && character == '\n';
+            return character == '\n' && (held == Input.Keys.ENTER || held == Input.Keys.NUMPAD_ENTER);
         }
     }
 

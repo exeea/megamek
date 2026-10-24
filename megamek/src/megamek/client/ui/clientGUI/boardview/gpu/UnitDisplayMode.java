@@ -7,7 +7,7 @@ enum UnitDisplayMode {
     MEK_MEEPLES("Mek Meeples"),
     MODELS("3D Models");
 
-    static final UnitDisplayMode DEFAULT = MEK_MEEPLES;
+    static final UnitDisplayMode DEFAULT = ALL_MEEPLES;
     private final String label;
 
     UnitDisplayMode(String label) {

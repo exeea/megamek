@@ -52,7 +52,10 @@ final class GpuBoardLabels implements GpuHud.Component {
     private static final float RING_NORTH = .5f;
     /** In the Tactical View lines between units end on a circle just outside their base rings (r .88 apothems). */
     private static final float RING_GAP = .88f / GpuUnitBases.RING;
-    /** .tnb: bottom-centred 4 units above the head; 3 8 padding inside a 1-unit border; 6 between TN and odds. */
+    /**
+     * .tnb: bottom-centred 4 units above the unit's nameplate (on its head without one); 3 8 padding inside a 1-unit
+     * border; 6 between TN and odds.
+     */
     private static final float BADGE_RISE = 4;
     private static final float BADGE_GAP = 6;
     /** .tip3d: (+56, -34) CSS from the destination's anchor, flipped left over the HUD, 8 inside the window. */
@@ -136,6 +139,7 @@ final class GpuBoardLabels implements GpuHud.Component {
     private final GpuHudState state;
     private final BoardCamera camera;
     private final GpuContactsPanel contacts;
+    private final GpuNameplates nameplates;
     private final Texture white;
     /** Two texels, clear and opaque: every stroke is feathered across one unit on each side. */
     private final Texture ramp;
@@ -173,18 +177,20 @@ final class GpuBoardLabels implements GpuHud.Component {
     /**
      * {@code camera} places the labels that belong to hexes (the destination tip, the waypoint numbers, guides from
      * the destination); {@code contacts} owns the guide toggles (F3), and the open preview row is the enemy the card
-     * shows (F9); the pop-ups come from the state's playback history.
+     * shows (F9); the pop-ups come from the state's playback history. The TN badges stand on the {@code nameplates},
+     * which update first.
      */
     GpuBoardLabels(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera,
-          GpuContactsPanel contacts) {
+          GpuContactsPanel contacts, GpuNameplates nameplates) {
         ui = kit.ui;
         this.state = state;
         this.camera = camera;
         this.contacts = contacts;
+        this.nameplates = nameplates;
         white = ui.skin.get("white", Texture.class);
         ramp = ramp();
         disc = disc(Math.round(2 * PIN_SIZE));
-        badgeBox = box(rgba(23, 33, 33, .92f), rgba(236, 145, 137, .7f), 4, 9);
+        badgeBox = box(rgba(23, 33, 33, .92f), UiTheme.alpha(UiTheme.CORAL, .7f), 4, 9);
         openBadgeBox = box(rgba(60, 30, 28, .95f), Color.WHITE, 4, 9);
         offBadgeBox = box(rgba(23, 33, 33, .92f), rgba(174, 187, 180, .35f), 4, 9);
         root.setName("board-labels");
@@ -525,7 +531,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         }
     }
 
-    /** A TN badge bottom-centred over the unit's head (.tnb); a reason instead of a roll uses the .off look. */
+    /** A TN badge bottom-centred over the unit's nameplate (.tnb); a reason instead of a roll uses the .off look. */
     private void badge(int unit, GpuHud.HudView view, String value, String percent, String reason, Drawable box,
           Set<Integer> badged) {
         Vector2 head = view.unitHeads().get(unit);
@@ -534,7 +540,8 @@ final class GpuBoardLabels implements GpuHud.Component {
         }
         Badge badge = badgeActors.computeIfAbsent(unit, id -> new Badge());
         badge.show(value, percent, reason, box);
-        badge.setPosition(Math.round(head.x - badge.getWidth() / 2), Math.round(head.y + BADGE_RISE));
+        badge.setPosition(Math.round(head.x - badge.getWidth() / 2),
+              Math.round(nameplates.top(unit, head.y) + BADGE_RISE));
     }
 
     // Playback pop-ups (A.10 J10).

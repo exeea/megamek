@@ -48,7 +48,7 @@ import megamek.common.Configuration;
  */
 final class GpuBoardSkin implements Disposable {
     // Range bands of the solution card (#solution .rng).
-    static final Color BAND_SHORT = Color.valueOf("7DF0D1");
+    static final Color BAND_SHORT = MINT;
     static final Color BAND_MEDIUM = AMBER;
     static final Color BAND_LONG = Color.valueOf("9FB2F0");
     /** The hex labels' font size in texels: UiTheme.worldFont rasterises the 15 units of default-font at 4x. */

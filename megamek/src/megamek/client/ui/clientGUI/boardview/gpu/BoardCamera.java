@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
@@ -469,6 +470,20 @@ final class BoardCamera {
 
     long revision() {
         return revision;
+    }
+
+    /**
+     * The view as one line, {@code cam <ortho|persp|fly> fov F az A tilt T span S at X,Y,Z hex NNNN}, which the Tuning
+     * panel's Camera page shows: {@code at} is the viewport centre's point at the orbit pivot's depth and {@code span}
+     * the world height the viewport covers there, so they give the same eye and direction at any viewport size;
+     * {@code hex} is the terrain at the viewport centre.
+     */
+    String readout() {
+        Vector3 at = new Vector3(camera.position).mulAdd(camera.direction, camera.pivotDepth);
+        BoardGeometry.Hit hit = terrainHit == null ? null : terrainHit.apply(new Ray(camera.position, camera.direction));
+        return String.format(Locale.ROOT, "cam %s fov %.1f az %.2f tilt %.2f span %.2f at %.2f,%.2f,%.2f hex %s",
+              firstPerson ? "fly" : camera.perspective ? "persp" : "ortho", camera.fieldOfView, azimuth, tilt,
+              camera.zoom * camera.viewportHeight, at.x, at.y, at.z, hit == null ? "-" : hit.coords().getBoardNum());
     }
 
     void orbit(float rotation, float inclination) {

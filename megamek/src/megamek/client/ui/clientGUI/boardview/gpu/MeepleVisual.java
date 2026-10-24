@@ -50,7 +50,7 @@ final class MeepleVisual {
         var builder = new ModelBuilder();
         builder.begin();
         builder.node().id = ROOT;
-        // Separate builders: ModelBuilder reuses a builder for identical attributes, but extrusion interleaves both surfaces.
+        // ModelBuilder reuses builders for identical attributes; keep the textured caps and painted walls separate.
         long attributes = VertexAttributes.Usage.Position | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.Normal;
         var caps = new MeshBuilder();
         var sides = new MeshBuilder();

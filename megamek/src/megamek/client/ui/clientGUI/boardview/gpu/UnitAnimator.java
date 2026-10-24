@@ -27,6 +27,11 @@ final class UnitAnimator {
     /** A longer distance per cycle also lengthens airtime, without changing planted-foot speed. */
     static final float MEK_STRIDE_LENGTH = 1.6f;
     static final float MEK_STEP_LIFT = .16f;
+    /** A rigid meeple figure's hop: its length and height as fractions of the figure's height. */
+    private static final float MEEPLE_HOP_LENGTH = .5f;
+    private static final float MEEPLE_HOP_HEIGHT = .1f;
+    /** Maximum lead/lag within the shared hover cycle, stable for each formation member. */
+    private static final float MEEPLE_HOVER_PHASE_SECONDS = .2f;
     private static final float ARM_AIM_LIMIT_DEGREES = 120;
     private final List<Body> bodies = new ArrayList<>();
     private final List<Joint> mounts = new ArrayList<>();
@@ -38,6 +43,7 @@ final class UnitAnimator {
     private UnitGroundContact groundContact;
     private final BoardSurface.Cache surfaces;
     private final Supplier<BoardScene> scene;
+    private final HexCrowds crowds;
     private boolean dying;
     private boolean initialized;
     private ProneCause posture = ProneCause.NONE;
@@ -48,10 +54,16 @@ final class UnitAnimator {
 
     UnitAnimator(BoardSurface.Cache surfaces) { this(surfaces, () -> null); }
 
-    /** @param scene the board the unit stands on, so that a formation stays clear of the steps around its hex */
-    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene) {
+    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene) { this(surfaces, scene, new HexCrowds()); }
+
+    /**
+     * @param scene  the board the unit stands on, so that a formation stays clear of the steps around its hex
+     * @param crowds the view's packing of the troops in hexes they share with other units
+     */
+    UnitAnimator(BoardSurface.Cache surfaces, Supplier<BoardScene> scene, HexCrowds crowds) {
         this.surfaces = surfaces;
         this.scene = scene;
+        this.crowds = crowds;
     }
 
     private record Joint(Node node, Vector3 translation, Quaternion rotation, Vector3 scale) {
@@ -91,6 +103,10 @@ final class UnitAnimator {
         final float stepLift;
         final float memberScale;
         float wheelSteps, lastSteps;
+        /** This frame's hop of a meeple figure, in model units, added once it stands on the ground. */
+        float hop;
+        /** Signed world-space correction to the whole entity's hover wave. */
+        float hover;
         long movementSequence = -1;
 
         Body(UnitRig rig, ModelInstance instance, ModelInstance rest) {
@@ -149,6 +165,7 @@ final class UnitAnimator {
 
         void reset() {
             joints.values().forEach(Joint::reset);
+            hover = 0;
         }
     }
 
@@ -176,6 +193,12 @@ final class UnitAnimator {
             room[edge] = relief.topInset(edge);
         }
         return room;
+    }
+
+    /** Conventional infantry or battle armor: drawn as a formation of figures, with or without transports. */
+    static boolean troops(BoardScene.Unit unit) {
+        var family = unit.model() == null || unit.model().state() == null ? null : unit.model().state().structure().family();
+        return family == UnitFamilyScale.INFANTRY || family == UnitFamilyScale.BATTLE_ARMOR;
     }
 
     /** A material replacement rebinds nodes but keeps playback; a new/revealed unit starts directly in its pose. */
@@ -232,7 +255,7 @@ final class UnitAnimator {
         airborne = approach(airborne, motion.airborne(unit) ? 1 : 0, seconds, snap);
         bodies.forEach(Body::reset);
         mounts.forEach(Joint::reset);
-        formation.apply(model, unit, motion, stepRoom(unit));
+        formation.apply(model, unit, motion, stepRoom(unit), crowds, seconds, snap);
         for (Body body : bodies) {
             boolean mek = body.rig.mek() && unit.model().state().structure().anatomy() != null;
             var bodyMotion = motion.member(unit.id(), body.rig.container());
@@ -246,6 +269,12 @@ final class UnitAnimator {
             // Keep the phase small: adding a large hash to a float loses sub-step movement precision.
             // Mix adjacent troop IDs so their gait, breathing and watch motions do not synchronize.
             float seed = Math.floorMod(identity * (body.rig.trooper() ? 0x9E3779B9 : 1), 4096) * (MathUtils.PI2 / 4096);
+            if (flying && body.rig.meeple() && body.rig.container() != null
+                  && body.rig.container().startsWith("trooper-") && unit.attachment() == null) {
+                // The view still adds the entity's wave. Replace just this member's phase, without doubling its amplitude.
+                float phaseSeconds = MathUtils.sin(seed) * MEEPLE_HOVER_PHASE_SECONDS;
+                body.hover = hoverOffset(clock + phaseSeconds, unit.id(), unit.part()) - hoverOffset(clock, unit.id(), unit.part());
+            }
             var memberStep = formation.step(body.rig.container());
             float distance = (memberStep == null ? bodyMotion.steps() * BoardGeometry.height() / groundScale
                   : memberStep.distance()) / body.memberScale;
@@ -269,6 +298,11 @@ final class UnitAnimator {
                       * (bodyMotion.moving() ? 1 : 1 - smooth(bodyMotion.settledSeconds() / UnitMotion.FORMATION_SETTLE_SECONDS));
                 float bodyKneel = mek ? kneel : body.rig.trooper() && Math.floorMod(identity, 3) == 0 ? 1 - activity : 0;
                 if (body.rig.trooper()) { gait *= 1 - bodyKneel; }
+                if (body.rig.meeple()) {
+                    // Without limbs, the figure hops along its own path as a Mek token does (MeepleAnimator.bounce).
+                    float hops = distance * body.memberScale / (MEEPLE_HOP_LENGTH * body.restHeight);
+                    body.hop = Math.abs(MathUtils.sin(hops * MathUtils.PI)) * gait * MEEPLE_HOP_HEIGHT * body.restHeight;
+                }
                 float legCrouch = mek ? crouch + (quad ? fallen * .3f : 0) : 0;
                 // Absolute crouch angles must also account for the authored reverse-knee rest pose.
                 float legPose = Math.max(bodyKneel, Math.max(legCrouch, UnitConversion.vehiclePose(unit) > 0 ? 0
@@ -525,7 +559,23 @@ final class UnitAnimator {
         if (dying) { return false; }
         boolean rough = formation.roughGround(instance, scene, unit, motion, surfaces, stepRoom(unit));
         boolean contact = groundContact != null && groundContact.apply(scene, unit, motion);
-        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough;
+        boolean lifted = liftMembers();
+        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough || lifted;
+    }
+
+    /** Apply member hops/hover after contact settling and placement, using the actual displayed vertical scale. */
+    private boolean liftMembers() {
+        boolean lifted = false;
+        for (Body body : bodies) {
+            if (body.hop == 0 && body.hover == 0) { continue; }
+            float lift = body.hop + body.hover / instance.transform.getScaleZ();
+            if (lift == 0) { continue; }
+            Node root = body.joints.get("root").node();
+            root.translation.z += lift / (root.getParent() == null ? 1 : root.getParent().globalTransform.getScaleZ());
+            lifted = true;
+        }
+        if (lifted) { instance.calculateTransforms(); }
+        return lifted;
     }
 
     void conversion(UnitConversion conversion, BoardScene.Unit unit) {
@@ -801,6 +851,7 @@ final class UnitAnimator {
         Joint root = body.joints.get("root");
         if (root == null) { return; }
         body.reset();
+        body.hop = 0;
         if (body.rig.mek() || body.rig.trooper() || "proto-v1".equals(body.rig.type())) {
             // Outward-looking troops fall forward, preserving space between the formation's bodies.
             root.rotate(Vector3.X, (body.rig.trooper() ? -90 : "quad-v1".equals(body.rig.type()) ? 65 : 90) * progress);
