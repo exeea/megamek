@@ -168,7 +168,9 @@ public class AreaEffectHelper {
 
     /**
      * How fuel-air ordnance burns in an atmosphere: not at all in space, vacuum or anything thinner than thin air, at
-     * half damage (rounded up) in thin air, and in full otherwise. The rules and the 3D board's blast both use it.
+     * half damage (rounded up) in thin air, and in full otherwise (IO:AE 3rd printing, p.159). This is the one place the
+     * rule is decided: {@link #fuelAirHasNoEffect}, {@link #fuelAirDamageInAtmosphere} and the 3D board's blast all ask
+     * it.
      *
      * @param atmosphere the planetary atmosphere
      * @param space      whether the board is a space board
@@ -275,14 +277,15 @@ public class AreaEffectHelper {
     }
 
     /**
-     * Fuel-air ordnance has no effect in space or in an atmosphere thinner than Thin (IO:AE 3rd printing, p.159). Adds
-     * the report when that is the case.
+     * Whether fuel-air ordnance has no effect on this board ({@link #fuelAirStrength}). Adds the report when that is
+     * the case.
      *
      * @return {@code true} if the ordnance does nothing on this board
      */
     public static boolean fuelAirHasNoEffect(Game game, int boardId, Entity attacker, Vector<Report> vPhaseReport) {
-        if (game.getBoard(boardId).isSpace()
-              || game.getPlanetaryConditions().getAtmosphere().isLighterThan(Atmosphere.THIN)) {
+        FuelAirStrength strength = fuelAirStrength(game.getPlanetaryConditions().getAtmosphere(),
+              game.getBoard(boardId).isSpace());
+        if (strength == FuelAirStrength.NONE) {
             reportFuelAirAtmosphere(9986, attacker, vPhaseReport);
             return true;
         }
@@ -290,14 +293,14 @@ public class AreaEffectHelper {
     }
 
     /**
-     * Fuel-air ordnance does half damage, rounding up, in a Thin atmosphere (IO:AE 3rd printing, p.159). Adds the
+     * Fuel-air damage after the atmosphere ({@link #fuelAirStrength}): halved, rounding up, in thin air. Adds the
      * report when that is the case.
      *
      * @return the damage after the atmosphere
      */
     public static int fuelAirDamageInAtmosphere(Game game, int damage, Entity attacker,
           Vector<Report> vPhaseReport) {
-        if (game.getPlanetaryConditions().getAtmosphere().isThin()) {
+        if (fuelAirStrength(game.getPlanetaryConditions().getAtmosphere(), false) == FuelAirStrength.HALF) {
             reportFuelAirAtmosphere(9990, attacker, vPhaseReport);
             return (int) Math.ceil(damage / 2.0);
         }
@@ -321,7 +324,7 @@ public class AreaEffectHelper {
     ) {
         Game game = attacker.getGame();
         Vector<Integer> entitiesToExclude = new Vector<>();
-        boolean thinAir = game.getPlanetaryConditions().getAtmosphere().isThin();
+        boolean thinAir = fuelAirStrength(game.getPlanetaryConditions().getAtmosphere(), false) == FuelAirStrength.HALF;
 
         if (fuelAirHasNoEffect(game, boardId, attacker, vPhaseReport)) {
             return entitiesToExclude;
