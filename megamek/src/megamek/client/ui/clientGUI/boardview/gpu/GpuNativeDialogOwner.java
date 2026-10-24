@@ -212,7 +212,8 @@ abstract class GpuNativeDialogOwner {
         private static final long ICON_SMALL = 0;
         private static final long ICON_BIG = 1;
         private static volatile long enableWindow;
-        private static boolean classIconsSet;
+        private static long classBigIcon;
+        private static long classSmallIcon;
 
         private Win32(long hwnd) {
             super(hwnd);
@@ -279,28 +280,36 @@ abstract class GpuNativeDialogOwner {
         /**
          * GPU thread: the taskbar may show a window's class icon rather than its own, and GLFW's class has Windows'
          * generic one, so the class gets copies of the window's icons. The copies outlive the window, whose own
-         * icons GLFW destroys with it; the class is the process's, so one set serves every board window.
+         * icons GLFW destroys with it, and serve every board window. GLFW registers its class again each time it
+         * starts, so the class is checked on every window.
          */
         static synchronized void useWindowIconsForClass(long glfwWindow) {
-            if (SharedLibraryLoader.os != Os.Windows || classIconsSet) {
+            if (SharedLibraryLoader.os != Os.Windows) {
                 return;
             }
             try {
                 long hwnd = GLFWNativeWin32.glfwGetWin32Window(glfwWindow);
-                var library = User32.getLibrary();
-                long sendMessage = library.getFunctionAddress("SendMessageW");
-                long copyIcon = library.getFunctionAddress("CopyIcon");
-                if (hwnd == 0 || sendMessage == 0 || copyIcon == 0) {
+                if (hwnd == 0 || (classBigIcon != 0 && User32.GetClassLongPtr(hwnd, GCLP_HICON) == classBigIcon)) {
                     return;
                 }
-                long big = JNI.callPPPP(hwnd, User32.WM_GETICON, ICON_BIG, 0L, sendMessage);
-                long small = JNI.callPPPP(hwnd, User32.WM_GETICON, ICON_SMALL, 0L, sendMessage);
-                if (big == 0 || small == 0) {
-                    return;
+                if (classBigIcon == 0) {
+                    var library = User32.getLibrary();
+                    long sendMessage = library.getFunctionAddress("SendMessageW");
+                    long copyIcon = library.getFunctionAddress("CopyIcon");
+                    if (sendMessage == 0 || copyIcon == 0) {
+                        return;
+                    }
+                    long big = JNI.callPPPP(hwnd, User32.WM_GETICON, ICON_BIG, 0L, sendMessage);
+                    long small = JNI.callPPPP(hwnd, User32.WM_GETICON, ICON_SMALL, 0L, sendMessage);
+                    if (big == 0 || small == 0) {
+                        LOGGER.warn("The 3D window's taskbar button keeps the generic icon: the window has none");
+                        return;
+                    }
+                    classSmallIcon = JNI.callPP(small, copyIcon);
+                    classBigIcon = JNI.callPP(big, copyIcon);
                 }
-                User32.SetClassLongPtr(hwnd, GCLP_HICON, JNI.callPP(big, copyIcon));
-                User32.SetClassLongPtr(hwnd, GCLP_HICONSM, JNI.callPP(small, copyIcon));
-                classIconsSet = true;
+                User32.SetClassLongPtr(hwnd, GCLP_HICON, classBigIcon);
+                User32.SetClassLongPtr(hwnd, GCLP_HICONSM, classSmallIcon);
             } catch (RuntimeException | LinkageError failure) {
                 LOGGER.warn(failure, "The 3D window's taskbar button keeps the generic icon");
             }
