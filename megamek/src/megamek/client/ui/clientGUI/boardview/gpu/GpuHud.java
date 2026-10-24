@@ -32,6 +32,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
+import megamek.logging.MMLogger;
 
 /**
  * The battle HUD on the render thread (rebuild plan C.4): its Stage, the layout metrics and layers, the
@@ -39,6 +40,7 @@ import megamek.common.units.Entity;
  * the source's existing commands; the client keeps every rule.
  */
 final class GpuHud implements GpuBoardHud {
+    private static final MMLogger LOGGER = MMLogger.create(GpuHud.class);
     /** The prototype's spacing between stacked panels. */
     private static final float STACK = 12;
     /** The top of larger overlays and panels beside the right column. */
@@ -930,6 +932,10 @@ final class GpuHud implements GpuBoardHud {
         if (!status.myTurn() || state.turnLocked(status)) {
             // Outside the local turn, and in it with the selection cleared: a unit is selected or inspected, a hex
             // does nothing.
+            if (phase.isFiring() && (unit != null) && !own) {
+                LOGGER.info("[FireOrders] click on unit {} only selects it: my turn {}, turn locked {}", unit.id(),
+                      status.myTurn(), state.turnLocked(status));
+            }
             if (unit != null) {
                 select(unit.id());
             }

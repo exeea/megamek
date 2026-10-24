@@ -28302,10 +28302,12 @@ public class TWGameManager extends AbstractGameManager {
         }
         var equipment = equipmentIndex < 0 ? null : attacker.getEquipment(equipmentIndex);
         var result = new megamek.common.ResolvedAttack(java.util.UUID.randomUUID(), kind,
-              shot != null && shot.launch() != null ? shot.launch() : new UnitLocation(attacker.getId(), attacker.getPosition(), attacker.getFacing(), attacker.getElevation(),
-                    attacker.getBoardId(), attacker.getProneCause(), UnitLocation.Form.capture(attacker), attacker.getFallSide()),
-              new UnitLocation(target.getId(), target.getPosition(), target instanceof Entity entity ? entity.getFacing() : 0,
-                    target.getElevation(), target.getBoardId()), target.getTargetType(), equipmentIndex,
+              shot != null && shot.launch() != null ? shot.launch() : AirAttackPoints.firingLocation(attacker, target, kind,
+                    new UnitLocation(attacker.getId(), attacker.getPosition(), attacker.getFacing(), attacker.getElevation(),
+                    attacker.getBoardId(), attacker.getProneCause(), UnitLocation.Form.capture(attacker), attacker.getFallSide())),
+              AirAttackPoints.targetLocation(attacker, target, kind,
+                    new UnitLocation(target.getId(), target.getPosition(), target instanceof Entity entity ? entity.getFacing() : 0,
+                    target.getElevation(), target.getBoardId())), target.getTargetType(), equipmentIndex,
               equipment == null ? "" : equipment.getType().getInternalName(), limb, hit,
               firingMounts == null ? megamek.common.ResolvedAttack.captureMounts(attacker, equipmentIndex) : firingMounts,
               shot == null ? megamek.common.ResolvedAttack.Shot.capture(equipment) : shot);

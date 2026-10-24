@@ -884,6 +884,8 @@ final class GpuFireOrders implements AutoCloseable {
             WeaponDeclarationDisplay fd = display;
             Entity actor = acting(fd);
             if ((actor == null) || (actor.getId() != published.actorId()) || fd.isIgnoringEvents()) {
+                LOGGER.info("[FireOrders] command dropped: acting unit {}, orders shown for unit {}, display busy {}",
+                      (actor == null) ? "none" : actor.getId(), published.actorId(), fd.isIgnoringEvents());
                 return;
             }
             WeaponMounted selected = selectedWeapon(fd, actor);
@@ -1075,7 +1077,8 @@ final class GpuFireOrders implements AutoCloseable {
 
     /**
      * The key's target: an identified unit while the actor may target it (Game.getValidTargets), a sensor contact
-     * getting a toast instead, or the hex, building or minefield the game resolves; else null.
+     * getting a toast instead, or the hex, building or minefield the game resolves; else null. A refused unit gets a
+     * toast saying why, and every decision on a unit is logged.
      */
     private @Nullable Targetable target(WeaponDeclarationDisplay fd, Entity actor, TargetKey key) {
         Game game = source.currentView().game;
@@ -1083,11 +1086,50 @@ final class GpuFireOrders implements AutoCloseable {
             return resolve(game, key);
         }
         Entity unit = game.getEntity(key.id());
-        if ((unit != null) && source.sensorContact(unit)) {
+        if (unit == null) {
+            LOGGER.info("[FireOrders] {} ({}): target unit {} refused, the game has no such unit",
+                  actor.getShortName(), actor.getId(), key.id());
+            return null;
+        }
+        if (source.sensorContact(unit)) {
+            LOGGER.info("[FireOrders] {} ({}): target unit {} refused, it is a sensor contact", actor.getShortName(),
+                  actor.getId(), unit.getId());
             toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.contactNotTargetable");
             return null;
         }
-        return ((unit != null) && game.getValidTargets(actor).contains(unit)) ? unit : null;
+        if (game.getValidTargets(actor).contains(unit)) {
+            LOGGER.info("[FireOrders] {} ({}): target {} ({}) in {} accepted", actor.getShortName(), actor.getId(),
+                  unit.getShortName(), unit.getId(), hexName(unit.getPosition()));
+            return unit;
+        }
+        if (Compute.isAirToGround(actor, unit)) {
+            // Air to ground: the game takes only a unit in a hex the aircraft flew through this turn.
+            LOGGER.info("[FireOrders] {} ({}): target {} ({}) in {} refused, air to ground and not on the flight path {}",
+                  actor.getShortName(), actor.getId(), unit.getShortName(), unit.getId(),
+                  hexName(unit.getPosition()), flightPath(actor));
+            toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.offFlightPath", unit.getShortName());
+        } else {
+            LOGGER.info("[FireOrders] {} ({}): target {} ({}) in {} refused, not a valid target: enemy {}, seen {}, "
+                        + "hidden {}, targetable {}", actor.getShortName(), actor.getId(), unit.getShortName(),
+                  unit.getId(), hexName(unit.getPosition()), actor.isEnemyOf(unit),
+                  unit.hasSeenEntity(actor.getOwner()), unit.isHidden(), unit.isTargetable());
+            toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.notTargetable", unit.getShortName());
+        }
+        return null;
+    }
+
+    /** A hex as the log names it, or "no hex". */
+    private static String hexName(@Nullable Coords hex) {
+        return (hex == null) ? "no hex" : hex.getBoardNum();
+    }
+
+    /** The hexes the aircraft flew through this turn, as the log lists them. */
+    private static String flightPath(Entity aircraft) {
+        List<String> hexes = new ArrayList<>();
+        for (Coords hex : aircraft.getPassedThrough()) {
+            hexes.add(hex.getBoardNum());
+        }
+        return hexes.isEmpty() ? "(empty)" : hexes.toString();
     }
 
     /** The target the game knows by the key, or null. */
