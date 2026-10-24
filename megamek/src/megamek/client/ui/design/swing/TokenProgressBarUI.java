@@ -8,6 +8,9 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.font.TextLayout;
+import java.beans.PropertyChangeListener;
+import java.math.RoundingMode;
+import java.text.NumberFormat;
 import java.awt.geom.RoundRectangle2D;
 import javax.swing.JComponent;
 import javax.swing.JProgressBar;
@@ -19,23 +22,33 @@ import javax.swing.plaf.UIResource;
 import com.formdev.flatlaf.ui.FlatProgressBarUI;
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.UIScale;
+import megamek.client.ui.design.DesignTokens;
 
 /**
  * Progress bars of the MegaMek look and feels (docs/design-system/tokens.md, Progress bars): a thin accent pill on the
  * slider's track, with the bar's text above it in small secondary type rather than inside, so long status messages
- * stay readable. An indeterminate bar sends a segment along the track from start to end, over and over. Vertical bars
- * keep FlatLaf's drawing.
+ * stay readable. With {@link #SHOW_PERCENT} set, a determinate bar also shows its share done at the trailing end of the
+ * text line, in primary type. An indeterminate bar sends a segment along the track from start to end, over and over.
+ * Vertical bars keep FlatLaf's drawing.
  */
 public class TokenProgressBarUI extends FlatProgressBarUI {
     static final String TEXT_FOREGROUND = "MegaMek.progressBar.textForeground";
     static final String DISABLED_TRACK = "MegaMek.progressBar.disabledTrack";
     static final String TEXT_GAP = "MegaMek.progressBar.textGap";
+    static final String VALUE_FOREGROUND = "MegaMek.progressBar.valueForeground";
+    /**
+     * Client property: {@code Boolean.TRUE} shows the share done as a percentage at the trailing end of the text line
+     * while the bar is determinate. The line keeps its height while the bar is indeterminate, so nothing moves.
+     */
+    public static final String SHOW_PERCENT = "MegaMek.progressBar.showPercent";
     /** The indeterminate segment's share of the track. */
     private static final float SEGMENT = 0.3f;
 
     private Color textForeground;
     private Color disabledTrack;
     private int textGap;
+    private Color valueForeground;
+    private PropertyChangeListener percentListener;
 
     public static ComponentUI createUI(JComponent c) {
         return new TokenProgressBarUI();
@@ -51,6 +64,50 @@ public class TokenProgressBarUI extends FlatProgressBarUI {
         textForeground = UIManager.getColor(TEXT_FOREGROUND);
         disabledTrack = UIManager.getColor(DISABLED_TRACK);
         textGap = UIManager.getInt(TEXT_GAP);
+        valueForeground = UIManager.getColor(VALUE_FOREGROUND);
+    }
+
+    @Override
+    protected void installListeners() {
+        super.installListeners();
+        percentListener = event -> {
+            if (SHOW_PERCENT.equals(event.getPropertyName())) {
+                progressBar.revalidate();
+                progressBar.repaint();
+            }
+        };
+        progressBar.addPropertyChangeListener(percentListener);
+    }
+
+    @Override
+    protected void uninstallListeners() {
+        progressBar.removePropertyChangeListener(percentListener);
+        percentListener = null;
+        super.uninstallListeners();
+    }
+
+    private boolean percentLine() {
+        return Boolean.TRUE.equals(progressBar.getClientProperty(SHOW_PERCENT));
+    }
+
+    /** The percentage to show, or null: only for a determinate bar with {@link #SHOW_PERCENT}. Rounds down. */
+    String percentText() {
+        if (!percentLine() || progressBar.isIndeterminate()) {
+            return null;
+        }
+        NumberFormat format = NumberFormat.getPercentInstance(progressBar.getLocale());
+        format.setRoundingMode(RoundingMode.FLOOR);
+        format.setMaximumFractionDigits(0);
+        return format.format(progressBar.getPercentComplete());
+    }
+
+    /** The widest percentage, so the text before it does not move as it counts. */
+    private float percentWidth(FontMetrics metrics) {
+        if (percentText() == null) {
+            return 0;
+        }
+        NumberFormat format = NumberFormat.getPercentInstance(progressBar.getLocale());
+        return advance(format.format(1), metrics);
     }
 
     private boolean horizontal() {
@@ -63,7 +120,11 @@ public class TokenProgressBarUI extends FlatProgressBarUI {
 
     /** The height of the text line above the track and its gap, 0 without text. */
     private int textBlock(FontMetrics metrics) {
-        return progressBar.isStringPainted() ? metrics.getHeight() + UIScale.scale(textGap) : 0;
+        return progressBar.isStringPainted() || percentLine() ? metrics.getHeight() + UIScale.scale(textGap) : 0;
+    }
+
+    private int valueGap() {
+        return UIScale.scale(Math.round(DesignTokens.shipped().space().get("md")));
     }
 
     @Override
@@ -74,9 +135,12 @@ public class TokenProgressBarUI extends FlatProgressBarUI {
         Insets insets = progressBar.getInsets();
         FontMetrics metrics = progressBar.getFontMetrics(progressBar.getFont());
         int width = UIScale.scale(horizontalSize.width);
-        if (progressBar.isStringPainted()) {
-            width = Math.max(width, (int) Math.ceil(advance(progressBar.getString(), metrics)));
+        float line = progressBar.isStringPainted() ? advance(progressBar.getString(), metrics) : 0;
+        float percent = percentWidth(metrics);
+        if (percent > 0) {
+            line += (line > 0 ? valueGap() : 0) + percent;
         }
+        width = Math.max(width, (int) Math.ceil(line));
         return new Dimension(width + insets.left + insets.right,
               textBlock(metrics) + trackHeight() + insets.top + insets.bottom);
     }
@@ -130,8 +194,20 @@ public class TokenProgressBarUI extends FlatProgressBarUI {
                     g2.fill(pill(start, trackY, Math.max(amount, track), track));
                 }
             }
+            String percent = percentText();
+            int textWidth = width;
+            if (percent != null) {
+                float percentWidth = advance(percent, metrics);
+                Color color = enabled ? valueForeground : UIManager.getColor("Label.disabledForeground");
+                g2.setColor(color != null ? color : progressBar.getForeground());
+                g2.setFont(progressBar.getFont());
+                int percentX = leftToRight ? x + width - (int) Math.ceil(percentWidth) : x;
+                FlatUIUtils.drawString(progressBar, g2, percent, percentX, top + metrics.getAscent());
+                textWidth = Math.max(0, width - (int) Math.ceil(percentWidth(metrics)) - valueGap());
+            }
             if (progressBar.isStringPainted()) {
-                paintText(g2, metrics, x, top, width, leftToRight, enabled);
+                int textX = leftToRight ? x : x + width - textWidth;
+                paintText(g2, metrics, textX, top, textWidth, leftToRight, enabled);
             }
         } finally {
             g2.dispose();

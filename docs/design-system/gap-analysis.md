@@ -202,6 +202,7 @@ layer-control buttons. Roughly six visual families.
 | Popover / menu | `UiPopover`, `UiMenuList` | map popup colors | `JPopupMenu` | |
 | Tooltip | `panel` frame, `hud-small`, wraps at 340 | — | yes | |
 | Dialog / modal | `UiModal`, `UiKit.dialog` (620 wide), `UiConfirmation` | `ImmersiveDialog*` | `JDialog` | Decided: corner ticks; a modal card over a scrim, or a window. See [Dialogs](tokens.md#dialogs). |
+| Status card | `UiKit.Progress` (print card) | — | — | Decided: the dialog's frame without a scrim, Cancel in the header. See [Status cards](tokens.md#status-cards). |
 | Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Corner ticks need a custom Swing border. |
 | Scrollbar | 4-wide thin knob | `ImmersiveScrollBarStyle` | yes | FlatLaf thin-scrollbar properties cover it. |
 | Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Custom Swing components. |
@@ -321,6 +322,9 @@ work for Swing, and item 11 is under investigation.
 - ~~Dialogs~~: a corner-ticked modal card over a scrim for messages, confirmations and short forms, and a themed window
   for tools, with centred equal-width buttons (main action first), Enter and Escape, Cancel-first destructive
   confirmations and restyled `JOptionPane` dialogs, in Swing; see [tokens.md](tokens.md#dialogs).
+- ~~Status cards~~: the progress of a long task in the dialog's frame, beside the view or over a scrim, with Cancel in
+  the header, a percentage on the bar and a failed state with Close and Retry, in Swing; see
+  [tokens.md](tokens.md#status-cards).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`

@@ -297,7 +297,7 @@ public class TokenDialogPane extends JPanel {
         int contentWidth = UIUtil.scaleForGUI(width.pixels()) - 2 * xxl;
         if (body != null) {
             if (body instanceof MessageText text) {
-                text.wrapWidth = contentWidth;
+                text.wrapAt(contentWidth);
             }
             c.insets = new Insets(0, 0, 0, 0);
             c.weighty = 1;
@@ -401,32 +401,35 @@ public class TokenDialogPane extends JPanel {
         }
         Graphics2D g = (Graphics2D) graphics.create();
         try {
-            int w = getWidth();
-            int h = getHeight();
-            g.setColor(token("surface.panel"));
-            g.fillRect(0, 0, w, h);
-            int line = Math.max(1, UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("border"))));
-            g.setColor(token("border.subtle"));
-            g.fillRect(0, 0, w, line);
-            g.fillRect(0, h - line, w, line);
-            g.fillRect(0, 0, line, h);
-            g.fillRect(w - line, 0, line, h);
-            int stroke = Math.max(1, UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("tick.width"))));
-            int length = Math.min(UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("tick.panel"))),
-                  Math.min(w, h) / 2);
-            g.setColor(token("border.strong"));
-            g.fillRect(0, 0, length, stroke);
-            g.fillRect(0, 0, stroke, length);
-            g.fillRect(w - length, 0, length, stroke);
-            g.fillRect(w - stroke, 0, stroke, length);
-            g.fillRect(0, h - stroke, length, stroke);
-            g.fillRect(0, h - length, stroke, length);
-            g.fillRect(w - length, h - stroke, length, stroke);
-            g.fillRect(w - stroke, h - length, stroke, length);
+            paintFrame(g, getWidth(), getHeight());
         } finally {
             g.dispose();
         }
     }
+
+    /** Paints a card: the panel surface, a subtle 1px edge and strong corner ticks. */
+    static void paintFrame(Graphics2D g, int w, int h) {
+        g.setColor(token("surface.panel"));
+        g.fillRect(0, 0, w, h);
+        int line = Math.max(1, UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("border"))));
+        g.setColor(token("border.subtle"));
+        g.fillRect(0, 0, w, line);
+        g.fillRect(0, h - line, w, line);
+        g.fillRect(0, 0, line, h);
+        g.fillRect(w - line, 0, line, h);
+        int stroke = Math.max(1, UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("tick.width"))));
+        int length = Math.min(UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().size().get("tick.panel"))),
+              Math.min(w, h) / 2);
+        g.setColor(token("border.strong"));
+        g.fillRect(0, 0, length, stroke);
+        g.fillRect(0, 0, stroke, length);
+        g.fillRect(w - length, 0, length, stroke);
+        g.fillRect(w - stroke, 0, stroke, length);
+        g.fillRect(0, h - stroke, length, stroke);
+        g.fillRect(0, h - length, stroke, length);
+        g.fillRect(w - length, h - stroke, length, stroke);
+        g.fillRect(w - stroke, h - length, stroke, length);
+        }
 
     static Color token(String role) {
         Mode mode = FlatLaf.isLafDark() ? Mode.DARK : Mode.LIGHT;
@@ -519,6 +522,10 @@ public class TokenDialogPane extends JPanel {
         private int wrapWidth;
 
         MessageText(String text) {
+            this(text, "body");
+        }
+
+        MessageText(String text, String type) {
             super(text);
             setEditable(false);
             setFocusable(false);
@@ -526,8 +533,20 @@ public class TokenDialogPane extends JPanel {
             setWrapStyleWord(true);
             setOpaque(false);
             setBorder(null);
-            setFont(TokenFonts.font("body"));
+            setFont(TokenFonts.font(type));
             setForeground(token("text.primary"));
+        }
+
+        void wrapAt(int width) {
+            wrapWidth = width;
+        }
+
+        /** A theme change installs the text area's border and margin again; the message has neither. */
+        @Override
+        public void updateUI() {
+            super.updateUI();
+            setBorder(null);
+            setMargin(new Insets(0, 0, 0, 0));
         }
 
         @Override

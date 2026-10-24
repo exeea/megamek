@@ -467,6 +467,7 @@ public final class TokenLafDefaults {
         put("ProgressBar.selectionForeground", color("text.onAccent"));
         put("ProgressBar.selectionBackground", color("text.primary"));
         put(TokenProgressBarUI.TEXT_FOREGROUND, color("text.secondary"));
+        put(TokenProgressBarUI.VALUE_FOREGROUND, color("text.primary"));
         put(TokenProgressBarUI.DISABLED_TRACK, color("border.subtle"));
         values.put(TokenProgressBarUI.TEXT_GAP, number(tokens.space().get("xs")));
         // Sliders (TokenSliderUI): an accent fill up to a round icon.sm thumb on an xs pill track, the same with ticks

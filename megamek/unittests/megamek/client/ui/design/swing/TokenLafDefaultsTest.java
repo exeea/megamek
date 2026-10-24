@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -592,6 +593,7 @@ class TokenLafDefaultsTest {
                 assertColor(defaults, "ProgressBar.background", "border.control", mode);
                 assertColor(defaults, TokenProgressBarUI.TEXT_FOREGROUND, "text.secondary", mode);
                 assertColor(defaults, TokenProgressBarUI.DISABLED_TRACK, "border.subtle", mode);
+                assertColor(defaults, TokenProgressBarUI.VALUE_FOREGROUND, "text.primary", mode);
 
                 JProgressBar plain = new JProgressBar(0, 100);
                 assertInstanceOf(TokenProgressBarUI.class, plain.getUI());
@@ -618,6 +620,19 @@ class TokenLafDefaultsTest {
                 } finally {
                     g.dispose();
                 }
+
+                JProgressBar percent = new JProgressBar(0, 1000);
+                percent.setValue(259);
+                TokenProgressBarUI ui = (TokenProgressBarUI) percent.getUI();
+                assertNull(ui.percentText(), "off unless asked for");
+                int withoutPercent = percent.getPreferredSize().height;
+                percent.putClientProperty(TokenProgressBarUI.SHOW_PERCENT, Boolean.TRUE);
+                assertEquals("25%", ui.percentText(), "rounds down, so 100% means done");
+                assertEquals(size.height, percent.getPreferredSize().height, "a text line even without text");
+                assertTrue(percent.getPreferredSize().height > withoutPercent);
+                percent.setIndeterminate(true);
+                assertNull(ui.percentText(), "no percentage while the length is unknown");
+                assertEquals(size.height, percent.getPreferredSize().height, "the line keeps its height");
             }
         } finally {
             if (previous != null) {

@@ -15,6 +15,8 @@ import java.awt.event.ComponentEvent;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLayeredPane;
@@ -24,7 +26,7 @@ import javax.swing.LayoutFocusTraversalPolicy;
 import javax.swing.SwingUtilities;
 
 /**
- * Shows a {@link TokenDialogPane} as a modal card in a window: a {@code surface.scrim} over the whole window, menu bar
+ * Shows a {@link TokenDialogPane} or a {@link TokenStatusCard} as a modal card in a window: a {@code surface.scrim} over the whole window, menu bar
  * included, with the card centred on it. The scrim takes every click and the card every key, so nothing behind it
  * reacts, including the window's shortcuts; Tab stays inside the card. It fades in over {@code motion.fast} and closes
  * at once, giving the focus back to where it was.
@@ -33,7 +35,8 @@ final class TokenModalCard extends JComponent {
     private static final String FADE = "MegaMek.dialog.fade";
 
     private final JRootPane root;
-    private final TokenDialogPane pane;
+    private final Content content;
+    private final JComponent pane;
     private final ComponentAdapter follower = new ComponentAdapter() {
         @Override
         public void componentResized(ComponentEvent event) {
@@ -45,9 +48,20 @@ final class TokenModalCard extends JComponent {
     private JButton result;
     private boolean open;
 
-    TokenModalCard(JRootPane root, TokenDialogPane pane) {
+    /**
+     * What a card shows: the view, how to lay it out as a card with the action that closes it, and where the focus
+     * starts.
+     */
+    record Content(JComponent view, Consumer<Consumer<JButton>> assembler, Supplier<Component> initialFocus) {
+        static Content of(TokenDialogPane pane) {
+            return new Content(pane, closer -> pane.assemble(true, closer), pane::initialFocus);
+        }
+    }
+
+    TokenModalCard(JRootPane root, Content content) {
         this.root = root;
-        this.pane = pane;
+        this.content = content;
+        this.pane = content.view();
         setLayout(null);
         setOpaque(false);
         setFocusCycleRoot(true);
@@ -57,7 +71,7 @@ final class TokenModalCard extends JComponent {
         addMouseListener(swallow);
         addMouseMotionListener(swallow);
         addMouseWheelListener(swallow);
-        pane.assemble(true, this::close);
+        content.assembler().accept(this::close);
         add(pane);
         addHierarchyListener(event -> {
             if ((event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && !isShowing() && open) {
@@ -68,9 +82,9 @@ final class TokenModalCard extends JComponent {
     }
 
     /** Whether the card fits in {@code root} with the xxl margin all round. */
-    static boolean fits(JRootPane root, TokenDialogPane pane) {
-        pane.assemble(true, button -> { });
-        Dimension size = pane.getPreferredSize();
+    static boolean fits(JRootPane root, Content content) {
+        content.assembler().accept(button -> { });
+        Dimension size = content.view().getPreferredSize();
         int margin = TokenDialogPane.space("xxl");
         return root.isShowing() && size.width + 2 * margin <= root.getWidth()
               && size.height + 2 * margin <= root.getHeight();
@@ -92,7 +106,7 @@ final class TokenModalCard extends JComponent {
         fit();
         open = true;
         TokenDialogs.cardOpened();
-        Component focus = pane.initialFocus();
+        Component focus = content.initialFocus().get();
         SwingUtilities.invokeLater(() -> {
             if (open) {
                 focus.requestFocusInWindow();
@@ -106,12 +120,17 @@ final class TokenModalCard extends JComponent {
     private void fit() {
         JLayeredPane layers = root.getLayeredPane();
         setBounds(0, 0, layers.getWidth(), layers.getHeight());
+        revalidate();
+        repaint();
+    }
+
+    /** Centres the content at its preferred size, again whenever it changes, such as a status card that fails. */
+    @Override
+    public void doLayout() {
         Dimension size = pane.getPreferredSize();
         int width = Math.min(size.width, getWidth());
         int height = Math.min(size.height, getHeight());
         pane.setBounds((getWidth() - width) / 2, (getHeight() - height) / 2, width, height);
-        revalidate();
-        repaint();
     }
 
     private void close(JButton button) {

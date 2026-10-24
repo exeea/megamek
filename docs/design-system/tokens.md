@@ -613,17 +613,20 @@ How far along a known amount of work is, or that unknown work is still going on.
 | Track | An `xs` (4) high `border.control` pill, as on sliders |
 | Fill | `accent.primary` from the leading edge, in the same pill shape |
 | Text | Above the track, `xs` (4) away, in `small` type and `text.secondary`, leading-aligned; never inside the bar |
+| Percentage | Optional: on the text's line at the trailing end, `md` (8) past the text, in `small` type and `text.primary`; the whole percent, rounded down. Room is kept for "100%" so the text doesn't move |
 | Indeterminate | An `accent.primary` segment, 30% of the track, enters at the start, crosses and leaves at the end, once every 1.6 s |
 | Disabled | A `border.subtle` track with a `text.disabled` fill and text |
 
 - **Text outside the bar.** Status messages ("Round 3: waiting for the other players") are often longer than the bar
   is wide, and text over a thin fill can't keep its contrast.
 - **Determinate when possible.** Use the indeterminate bar only when the amount of work is truly unknown.
+- **Rounded down.** The percentage shows 100% only when the work is done. An indeterminate bar shows none, but keeps
+  the line so its text doesn't jump.
 
 **Swing.** The MegaMek themes draw every horizontal `JProgressBar` this way through
 [`TokenProgressBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenProgressBarUI.java), so existing views get
 it without changes; the bar grows by the text's height when it shows text. Vertical bars keep FlatLaf's drawing in the
-same colors.
+same colors. The client property `TokenProgressBarUI.SHOW_PERCENT` set to `true` adds the percentage.
 
 **libGDX.** Nothing new yet.
 
@@ -701,6 +704,9 @@ that the user moves around or keeps open beside the game open as a **window** wi
   when the user has moved the focus to it.
 - **First focus.** Otherwise the first input of the body takes the focus, then the main action.
 - **No stacking by habit.** A card can open over another card, but a flow that needs that is a sign it wants a window.
+- **Footer and header.** The footer holds the user's answer to the question the card asks, so only a card that asks
+  something has one. The header's trailing end holds controls for the card itself: close, help, or stopping what it
+  shows (see [Status cards](#status-cards)).
 
 **Swing.** Build the content as a
 [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java): `status`, `width`,
@@ -718,6 +724,41 @@ titles stay in the title bar. Moving them to `TokenDialogs` gives them the card.
 
 **libGDX.** Spec only for now: hud-v3's `UiModal` already draws a scrim and `GpuModalDialog` a 620-wide panel with 88
 by 36 buttons. Moving them to the card's frame, centred footer and keys is the developers' work.
+
+## Status cards
+
+The progress of a long task, such as printing the board or joining a game, in the dialog card's frame but without the
+scrim: the user keeps working while it runs.
+
+| Part / state | Look |
+| --- | --- |
+| Card | The dialog card's frame, padding and widths (`dialog.sm` by default); no scrim, no shadow |
+| Header | The title in `headline`, sentence case, then Cancel at the trailing end as a compact secondary button with text |
+| Body | A [progress bar](#progress-bars) with the running step as its text and the percentage at the trailing end; indeterminate when the length is unknown |
+| Failed | The bar's fill turns `status.danger` and the step and percentage give way to the error in `small` `text.primary` above it; Cancel becomes Close, with Retry before it, `md` (8) apart, when the task can run again |
+| Footer | None: the card asks nothing |
+
+- **Placement is the view's.** The card is a component; the view puts it where it covers nothing the user works on (a
+  map view at the bottom centre, for example) and decides what to do when several tasks run at once. Toasts are a
+  separate pattern.
+- **No focus.** Beside the view the card doesn't take the focus; a user who tabs to it gets Escape to stop the task.
+- **Cancel, not ✕.** An ✕ reads as hiding the card while the task goes on, so stopping is a word.
+- **The end.** On success the view removes the card at once. A failure stays until the user closes it, so the error
+  isn't missed.
+- **Waiting.** When the user can do nothing until the task ends, the same card shows over the scrim as a modal card,
+  with the focus on Cancel.
+
+**Swing.** [`TokenStatusCard`](../../megamek/src/megamek/client/ui/design/swing/TokenStatusCard.java) is the card:
+`onCancel` shows Cancel and runs when it is pressed, `step` and `progress` (0 to 1) or `indeterminate` show the work,
+`fail(message, retry)` shows an error with Retry when `retry` is not null, `onClose` runs when the user closes a failed
+card, and `finish` ends it. Calls must come on the event thread, so a background task uses `SwingUtilities.invokeLater`
+or a `SwingWorker`. `TokenDialogs.progress(owner, card)` shows it as a modal card and waits, still handling events,
+until the user cancels or closes it or the task calls `finish`.
+
+**libGDX.** Spec only for now. hud-v3's `UiKit.Progress`, the print card in `GpuMapHud`, is close: a panel with corner
+ticks, the header and Cancel at the top right, the step and percentage over a bar, at the bottom centre of the map.
+Moving it to this spec means sentence case instead of capitals (an open question for the whole HUD), the accent fill
+instead of mint, the failed state with Close and Retry, and the modal form for the loading screen.
 
 ## Code
 
@@ -751,11 +792,12 @@ by 36 buttons. Moving them to the card's frame, centred footer and keys is the d
 | [`TokenSections`](../../megamek/src/megamek/client/ui/design/swing/TokenSections.java), [`TokenTitledBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTitledBorder.java), [`TokenCollapsibleSection`](../../megamek/src/megamek/client/ui/design/swing/TokenCollapsibleSection.java) | The Swing section headers, titled panels and collapsible sections |
 | [`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java) | The Swing split panes |
 | [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java), [`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java), [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) | The Swing dialogs: content, opening and the modal card |
+| [`TokenStatusCard`](../../megamek/src/megamek/client/ui/design/swing/TokenStatusCard.java) | The Swing status card |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
-panes and dialogs are Swing-only for now, and so is motion. The Swing themes are selectable but not the default, and no
+panes, dialogs and status cards are Swing-only for now, and so is motion. The Swing themes are selectable but not the default, and no
 view uses the new controls yet. Next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
 developers accept the system.

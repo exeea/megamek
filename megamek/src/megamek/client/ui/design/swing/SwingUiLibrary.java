@@ -577,6 +577,11 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.dialogs.note"), "small", "text.muted"));
         page.add(dialogSamples());
         page.add(dialogLauncher());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.statusCards")));
+        page.add(paragraph(Messages.getString("UiLibrary.statusCards.note"), "small", "text.muted"));
+        page.add(statusCardSamples());
+        page.add(statusCardLauncher());
         page.add(heading(Messages.getString("UiLibrary.controls.focus")));
         page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
         page.add(focusSamples());
@@ -1037,6 +1042,9 @@ public final class SwingUiLibrary extends JFrame {
         JProgressBar disabled = sampleProgress(Messages.getString("UiLibrary.progress.loading"));
         disabled.setEnabled(false);
         addSample(samples, 3, 0, "UiLibrary.progress.disabled", disabled);
+        JProgressBar percent = sampleProgress(Messages.getString("UiLibrary.progress.rendering"));
+        percent.putClientProperty(TokenProgressBarUI.SHOW_PERCENT, Boolean.TRUE);
+        addSample(samples, 0, 1, "UiLibrary.progress.percent", percent);
         return samples;
     }
 
@@ -1227,6 +1235,129 @@ public final class SwingUiLibrary extends JFrame {
         JButton pressed = window ? TokenDialogs.window(owner, pane) : TokenDialogs.show(owner, pane);
         result.setText(pressed == null ? Messages.getString("UiLibrary.dialogs.closed")
               : Messages.getString("UiLibrary.dialogs.pressed", pressed.getText()));
+    }
+
+    /** Status cards as they sit on a view: running, of unknown length, failed and one that can't be cancelled. */
+    private JComponent statusCardSamples() {
+        JPanel samples = sampleGrid();
+        TokenStatusCard running = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"))
+              .onCancel(() -> { }).step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0.25);
+        addSample(samples, 0, 0, "UiLibrary.statusCards.running", unstretched(running));
+        TokenStatusCard unknown = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.joinTitle"))
+              .onCancel(() -> { }).step(Messages.getString("UiLibrary.statusCards.joining")).indeterminate();
+        addSample(samples, 1, 0, "UiLibrary.statusCards.unknown", unstretched(unknown));
+        TokenStatusCard failed = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"))
+              .onCancel(() -> { }).step(Messages.getString("UiLibrary.statusCards.rendering")).progress(0.6)
+              .fail(Messages.getString("UiLibrary.statusCards.printError"), () -> { });
+        addSample(samples, 0, 1, "UiLibrary.statusCards.failed", unstretched(failed));
+        TokenStatusCard fixed = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.saveTitle"))
+              .step(Messages.getString("UiLibrary.statusCards.saving")).progress(0.7);
+        addSample(samples, 1, 1, "UiLibrary.statusCards.fixed", unstretched(fixed));
+        return samples;
+    }
+
+    /**
+     * Runs a pretend print beside the view, as a modal card, or one that fails once at 60% and works on Retry; a slot
+     * under the buttons holds the card that runs beside the view.
+     */
+    private JComponent statusCardLauncher() {
+        JPanel holder = new JPanel(new BorderLayout());
+        holder.setOpaque(false);
+        JPanel launcher = row(color("surface.base"));
+        launcher.add(text(Messages.getString("UiLibrary.statusCards.live"), "label", "text.secondary"));
+        JLabel result = text(" ", "small", "text.muted");
+        JPanel slot = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
+        slot.setOpaque(false);
+        int margin = scaleForGUI(24);
+        slot.setBorder(BorderFactory.createEmptyBorder(0, margin, margin, 0));
+        slot.setPreferredSize(new Dimension(1,
+              new TokenStatusCard("M").onCancel(() -> { }).getPreferredSize().height + margin));
+
+        JButton beside = TokenButtons.secondary(Messages.getString("UiLibrary.statusCards.runBeside"));
+        beside.addActionListener(event -> {
+            if (slot.getComponentCount() > 0) {
+                return;
+            }
+            TokenStatusCard card = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"));
+            Runnable remove = () -> {
+                slot.removeAll();
+                slot.revalidate();
+                slot.repaint();
+            };
+            Timer task = demoPrint(card, false, () -> {
+                remove.run();
+                result.setText(Messages.getString("UiLibrary.statusCards.done"));
+            });
+            card.onCancel(() -> {
+                task.stop();
+                remove.run();
+                result.setText(Messages.getString("UiLibrary.statusCards.cancelled"));
+            });
+            card.onClose(() -> {
+                remove.run();
+                result.setText(Messages.getString("UiLibrary.statusCards.dismissed"));
+            });
+            slot.add(card);
+            slot.revalidate();
+            result.setText(" ");
+        });
+        JButton modal = TokenButtons.secondary(Messages.getString("UiLibrary.statusCards.runModal"));
+        modal.addActionListener(event -> runModal(launcher, result, false));
+        JButton failing = TokenButtons.secondary(Messages.getString("UiLibrary.statusCards.runFailing"));
+        failing.addActionListener(event -> runModal(launcher, result, true));
+        launcher.add(beside);
+        launcher.add(modal);
+        launcher.add(failing);
+        launcher.add(result);
+        holder.add(launcher, BorderLayout.NORTH);
+        holder.add(slot, BorderLayout.CENTER);
+        return holder;
+    }
+
+    private void runModal(JComponent owner, JLabel result, boolean failing) {
+        TokenStatusCard card = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"));
+        String[] outcome = { Messages.getString("UiLibrary.statusCards.done") };
+        Timer task = demoPrint(card, failing, card::finish);
+        card.onCancel(() -> {
+            task.stop();
+            outcome[0] = Messages.getString("UiLibrary.statusCards.cancelled");
+        });
+        card.onClose(() -> outcome[0] = Messages.getString("UiLibrary.statusCards.dismissed"));
+        TokenDialogs.progress(owner, card);
+        task.stop();
+        result.setText(outcome[0]);
+    }
+
+    /**
+     * Steps {@code card} through a pretend print of about five seconds and runs {@code done} at the end. A failing print
+     * stops at 60% with an error; Retry starts it again, and then it works.
+     */
+    private static Timer demoPrint(TokenStatusCard card, boolean failing, Runnable done) {
+        int[] percent = { 0 };
+        boolean[] failNext = { failing };
+        Timer timer = new Timer(50, null);
+        timer.addActionListener(event -> {
+            percent[0]++;
+            int value = percent[0];
+            card.step(Messages.getString(value < 40 ? "UiLibrary.statusCards.preparing"
+                  : value < 90 ? "UiLibrary.statusCards.rendering" : "UiLibrary.statusCards.writing"))
+                  .progress(value / 100.0);
+            if (failNext[0] && value == 60) {
+                timer.stop();
+                failNext[0] = false;
+                card.fail(Messages.getString("UiLibrary.statusCards.printError"), () -> {
+                    percent[0] = 0;
+                    card.step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0);
+                    timer.start();
+                });
+            } else if (value >= 100) {
+                timer.stop();
+                done.run();
+            }
+        });
+        card.step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0);
+        timer.start();
+        return timer;
     }
 
     /** Split panes side by side and stacked; hover is frozen on one, the others are live. */
