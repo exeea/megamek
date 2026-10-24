@@ -531,7 +531,6 @@ public final class UiTheme implements Disposable {
         int hover = tokens.color("surface.hover", mode);
         int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
         int selected = tokens.color("selected.background", mode);
-        int accent = tokens.color("accent.primary", mode);
         int danger = tokens.color("status.danger", mode);
         int selectedFace = ColorMath.over(selected, raised);
         Color control = token(tokens.color("border.control", mode));
@@ -546,14 +545,15 @@ public final class UiTheme implements Disposable {
         box("tb-secondary-over", token(ColorMath.over(hover, raised)), strong, border, radius, null, 0, 0, 0);
         box("tb-secondary-down", token(ColorMath.over(pressed, raised)), strong, border, radius, null, 0, 0, 0);
         box("tb-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
-        // A surface wash is invisible on the accent: hover leans toward the label color, press away from it
-        int accentHover = ColorMath.over(ColorMath.withAlpha(tokens.color("text.onAccent", mode),
-              tokens.alpha("tint.hover")), accent);
-        int accentPressed = ColorMath.over(ColorMath.withAlpha(tokens.color("text.primary", mode),
-              tokens.alpha("tint.pressed")), accent);
-        box("tb-primary", token(accent), token(accent), border, radius, null, 0, 0, 0);
-        box("tb-primary-over", token(accentHover), strong, border, radius, null, 0, 0, 0);
-        box("tb-primary-down", token(accentPressed), strong, border, radius, null, 0, 0, 0);
+        // The primary face is the inverse surface, hud-v3's cream, so mint stays for state. A surface wash barely
+        // shows on it: hover and press lean it toward the label color, press further.
+        int inverse = tokens.color("surface.inverse", mode);
+        int onInverse = tokens.color("text.onInverse", mode);
+        int inverseHover = ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.hover")), inverse);
+        int inversePressed = ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.pressed")), inverse);
+        box("tb-primary", token(inverse), token(inverse), border, radius, null, 0, 0, 0);
+        box("tb-primary-over", token(inverseHover), strong, border, radius, null, 0, 0, 0);
+        box("tb-primary-down", token(inversePressed), strong, border, radius, null, 0, 0, 0);
         box("tb-danger", token(raised), token(danger), border, radius, null, 0, 0, 0);
         box("tb-danger-over", token(ColorMath.over(ColorMath.withAlpha(danger, tokens.alpha("tint.hover")), raised)),
               token(danger), border, radius, null, 0, 0, 0);
@@ -568,13 +568,12 @@ public final class UiTheme implements Disposable {
         box("tb-quiet-checked", token(selected), null, 0, radius, null, 0, 0, 0);
         box("tb-focus", Color.CLEAR, ring, border, radius, null, 0, 0, 0);
         box("tb-focus-inner", Color.CLEAR, ring, border, Math.max(radius - border, 0), null, 0, 0, 0);
-        box("tb-focus-accent", Color.CLEAR, token(tokens.color("text.primary", mode)), border, radius, null, 0, 0, 0);
-        box("tb-focus-accent-inner", Color.CLEAR, token(tokens.color("text.onAccent", mode)), border,
-              Math.max(radius - border, 0), null, 0, 0, 0);
+        box("tb-focus-inverse", Color.CLEAR, token(tokens.color("text.primary", mode)), border, radius, null, 0, 0, 0);
+        box("tb-focus-inverse-inner", Color.CLEAR, token(onInverse), border, Math.max(radius - border, 0), null, 0, 0,
+              0);
 
         Color text = token(tokens.color("text.primary", mode));
         Color secondaryText = token(tokens.color("text.secondary", mode));
-        Color onAccent = token(tokens.color("text.onAccent", mode));
         Color disabledText = token(tokens.color("text.disabled", mode));
         float vertical = tokens.space().get("xxs");
         for (boolean compact : new boolean[] { false, true }) {
@@ -614,11 +613,12 @@ public final class UiTheme implements Disposable {
                 }
                 switch (kind) {
                     case "primary" -> {
-                        style.fontColor = onAccent;
-                        style.overFontColor = onAccent;
-                        style.downFontColor = onAccent;
-                        style.focusOuter = skin.getDrawable("tb-focus-accent");
-                        style.focusInner = skin.getDrawable("tb-focus-accent-inner");
+                        Color label = token(onInverse);
+                        style.fontColor = label;
+                        style.overFontColor = label;
+                        style.downFontColor = label;
+                        style.focusOuter = skin.getDrawable("tb-focus-inverse");
+                        style.focusInner = skin.getDrawable("tb-focus-inverse-inner");
                     }
                     case "danger" -> {
                         style.fontColor = token(danger);
@@ -807,7 +807,7 @@ public final class UiTheme implements Disposable {
 
     /**
      * The token choices in dark mode: a box, circle or pill in the input fill and control edge, strong under the
-     * pointer; on, an accent fill that hovers and presses like a primary button; disabled, no fill and a subtle edge.
+     * pointer; on, an accent fill that leans toward its mark on hover and away from it when pressed; disabled, no fill and a subtle edge.
      * The focus ring sits a gap away, so it never hides the state.
      */
     private void tokenChoices() {

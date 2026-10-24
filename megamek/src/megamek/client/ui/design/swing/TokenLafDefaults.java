@@ -178,36 +178,43 @@ public final class TokenLafDefaults {
         put("Button.focusedSelectedBorderColor", color("focus.ring"));
         put("Button.disabledSelectedBorderColor", color("border.subtle"));
 
-        // Primary (default) button: accent fill; its focus shows as an inner line in the on-accent color. A wash of the
-        // surface color is invisible on the accent, so hover leans toward the label color and press away from it.
+        // Primary (default) button: the inverse face, hud-v3's cream, so mint stays for state; its focus shows as an
+        // inner line in the label color. A surface wash barely shows on the inverse face, so hover and press lean it
+        // toward the label color, press further.
+        int inverse = color("surface.inverse");
+        int onInverse = color("text.onInverse");
+        int inverseHover = over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.hover")), inverse);
+        int inversePressed = over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.pressed")), inverse);
+        // Checked boxes and slider thumbs keep the accent; a surface wash is invisible on it, so hover leans toward the
+        // on-accent color and press away from it
         int accent = color("accent.primary");
         int accentHover = over(ColorMath.withAlpha(color("text.onAccent"), tokens.alpha("tint.hover")), accent);
         int accentPressed = over(ColorMath.withAlpha(color("text.primary"), tokens.alpha("tint.pressed")), accent);
-        put("Button.default.background", accent);
-        put("Button.default.foreground", color("text.onAccent"));
-        put("Button.default.hoverForeground", color("text.onAccent"));
-        put("Button.default.pressedForeground", color("text.onAccent"));
-        put("Button.default.hoverBackground", accentHover);
-        put("Button.default.pressedBackground", accentPressed);
-        put("Button.default.focusedBackground", accent);
-        put("Button.default.borderColor", accent);
+        put("Button.default.background", inverse);
+        put("Button.default.foreground", onInverse);
+        put("Button.default.hoverForeground", onInverse);
+        put("Button.default.pressedForeground", onInverse);
+        put("Button.default.hoverBackground", inverseHover);
+        put("Button.default.pressedBackground", inversePressed);
+        put("Button.default.focusedBackground", inverse);
+        put("Button.default.borderColor", inverse);
         put("Button.default.hoverBorderColor", color("border.strong"));
         put("Button.default.focusedBorderColor", color("text.primary"));
-        put("Button.default.focusColor", color("text.onAccent"));
+        put("Button.default.focusColor", onInverse);
         values.put("Button.default.boldText", "false");
         values.put("[style]Button.primary", style(
-              "background", accent,
-              "foreground", color("text.onAccent"),
-              "hoverForeground", color("text.onAccent"),
-              "pressedForeground", color("text.onAccent"),
-              "hoverBackground", accentHover,
-              "pressedBackground", accentPressed,
-              "focusedBackground", accent,
-              "borderColor", accent,
+              "background", inverse,
+              "foreground", onInverse,
+              "hoverForeground", onInverse,
+              "pressedForeground", onInverse,
+              "hoverBackground", inverseHover,
+              "pressedBackground", inversePressed,
+              "focusedBackground", inverse,
+              "borderColor", inverse,
               "hoverBorderColor", color("border.strong"),
               "pressedBorderColor", color("border.strong"),
               "focusedBorderColor", color("text.primary"),
-              "focusColor", color("text.onAccent")));
+              "focusColor", onInverse));
 
         // Danger: the danger color on text and edge; hover and press tint the face with it
         int danger = color("status.danger");

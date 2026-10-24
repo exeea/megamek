@@ -756,8 +756,8 @@ class TokenLafDefaultsTest {
         assertColor(defaults, "TextField.background", "surface.input", mode);
         assertColor(defaults, "Component.borderColor", "border.control", mode);
         assertColor(defaults, "Component.focusColor", "focus.ring", mode);
-        assertColor(defaults, "Button.default.background", "accent.primary", mode);
-        assertColor(defaults, "Button.default.foreground", "text.onAccent", mode);
+        assertColor(defaults, "Button.default.background", "surface.inverse", mode);
+        assertColor(defaults, "Button.default.foreground", "text.onInverse", mode);
         assertColor(defaults, "ProgressBar.foreground", "accent.primary", mode);
         assertColor(defaults, "Component.error.borderColor", "status.danger", mode);
         // Focus wins: one ring for every state, while a focused checked box keeps its checked look
@@ -792,8 +792,8 @@ class TokenLafDefaultsTest {
         assertColor(defaults, "Button.selectedBorderColor", "selected.primary", mode);
         assertColor(defaults, "Button.foreground", "text.secondary", mode);
         assertColor(defaults, "Button.hoverForeground", "text.primary", mode);
-        assertColor(defaults, "Button.default.focusedBackground", "accent.primary", mode);
-        int label = tokens.color("text.onAccent", mode);
+        assertColor(defaults, "Button.default.focusedBackground", "surface.inverse", mode);
+        int label = tokens.color("text.onInverse", mode);
         for (String key : List.of("Button.default.hoverBackground", "Button.default.pressedBackground")) {
             double contrast = ColorMath.contrast(label, defaults.getColor(key).getRGB());
             assertTrue(contrast >= 4.5, key + " label contrast " + contrast);

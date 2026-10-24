@@ -63,7 +63,7 @@ Names describe a role, not a hue, so each name has one meaning in both modes. Su
 | `surface.popover` | `#172022` | `#FFFFFF` | Menus, tooltips |
 | `surface.input` | `#1D2426` | `#FFFFFF` | Fields, selects |
 | `surface.hover` | `#FFFFFF0F` | `#16201E0D` | Hover wash |
-| `surface.inverse` | `#F0F2EE` | `#1C2426` | Primary button, checked toggle |
+| `surface.inverse` | `#F0F2EE` | `#1C2426` | Primary button face |
 | `surface.scrim` | `#0D1112A3` | `#16201E66` | Dims the window behind a modal card |
 | `text.primary` | `#F1F4F0` | `#16201E` | Body text |
 | `text.secondary` | `#CBD3D0` | `#3A4542` | Button labels, secondary values |
@@ -296,8 +296,8 @@ One focus look for every control, so keyboard users always find the same thing.
   control's size or moves a layout.
 - **Focus wins.** The ring replaces the edge, whatever the control's state. Meaning stays in the text, fill and icons:
   a checked box stays checked, and error and warning fields carry a status icon as well as their colored edge.
-- **Primary buttons** use a `text.primary` outer line and a `text.onAccent` inner line, so the ring shows on the
-  accent face.
+- **Primary buttons** use a `text.primary` outer line and a `text.onInverse` inner line, so the ring shows on the
+  inverse face.
 - **Small indicators** (check box, radio, slider thumb) get the ring around them, `focus.gap` (1) away, so the
   indicator keeps its look. Their label sits far enough away for the ring.
 - **Tabs** get the ring inside the selected tab. **Lists and tables** show it on their scroll pane edge.
@@ -320,7 +320,7 @@ every state.
 
 | Kind | Use | Rest | Hover / pressed | Selected |
 | --- | --- | --- | --- | --- |
-| Primary | The one main action of a view | `accent.primary` face, `text.onAccent` label | Face leans toward the label color (hover) or `text.primary` (pressed), strong edge | — |
+| Primary | The one main action of a view | `surface.inverse` face (hud-v3's cream; dark in light mode), `text.onInverse` label | Face leans toward the label color, further when pressed; strong edge | — |
 | Secondary | Every other action (the default) | `surface.raised` face, `border.control` edge, `text.secondary` label | `surface.hover` wash (twice for pressed), `border.strong` edge, `text.primary` label | — |
 | Quiet | Low-emphasis actions in toolbars and rows | No face, no edge | As secondary, without the edge | — |
 | Danger | Destructive actions | As secondary, `status.danger` label and edge | Danger wash at `tint.hover` / `tint.pressed` | — |
@@ -335,7 +335,9 @@ every state.
   the pointer, so the hover reads on every kind.
 - **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label.
 - **Focus** follows [Focus](#focus): a 1-wide `focus.ring` border plus a 1-wide inner line, inside the edge. On
-  primary the border is `text.primary` and the inner line `text.onAccent`, so it shows on the accent face.
+  primary the border is `text.primary` and the inner line `text.onInverse`, so it shows on the inverse face.
+- **Primary is not mint.** Mint means active, focused, informational and selected; a mint main action would compete
+  with the selection on the same screen. The inverse face is neutral, has the highest contrast, and is hud-v3's `hud-main`.
 - **Selection** is always the mint selected color with an edge or glyph change, never a lighter face alone, so it
   does not depend on telling two greys apart.
 - The primary label keeps at least 4.5:1 against its hover and pressed faces in both modes (tested).
@@ -441,7 +443,7 @@ galleries show every kind in every state, and a live row to click.
 | Off | `surface.input` fill, `border.control` edge |
 | On | `accent.primary` fill and edge with a `text.onAccent` mark: a check, a dot, or the switch's thumb on the right |
 | Mixed (check box) | As on, with a dash in place of the check |
-| Hover / pressed | `border.strong` edge; off adds the `surface.hover` wash, on leans the accent as a primary button does |
+| Hover / pressed | `border.strong` edge; off adds the `surface.hover` wash, on leans the accent toward the mark color (hover) or `text.primary` (pressed) |
 | Focus | The ring around the indicator, `focus.gap` (1) away (see [Focus](#focus)) |
 | Disabled | `surface.base` fill, `border.subtle` edge, `text.disabled` mark and label |
 
