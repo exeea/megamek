@@ -205,7 +205,7 @@ layer-control buttons. Roughly six visual families.
 | Status card | `UiKit.Progress` (print card) | — | — | Decided: the dialog's frame without a scrim, Cancel in the header. See [Status cards](tokens.md#status-cards). |
 | Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Decided: the dialog's frame without rails, status ticks, selectable and plain variants. See [Panels](tokens.md#panels). |
 | Scrollbar | 4-wide thin knob | `ImmersiveScrollBarStyle` | yes | FlatLaf thin-scrollbar properties cover it. |
-| Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Custom Swing components. |
+| Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Decided: status, filter and tag chips in sentence case; count and dot badges in the accent. See [Chips and badges](tokens.md#chips-and-badges). |
 | Section header / rule | `rule`, `UiKit.header` | `createSectionHeader` (mono label + rule) | — | |
 
 ## Accessibility findings
@@ -329,8 +329,9 @@ work for Swing, and item 11 is under investigation.
   header, status ticks with their icon, selectable unit cards (hover, violet selection, focus ring, one at a time),
   plain frames for groups inside a panel and a border for existing panels, in Swing; see
   [tokens.md](tokens.md#panels).
-- Chips and badges: small status labels and counts, from hud-v3's `chip`, `chip-warn`, `chip-bad` and amber badge;
-  MekHQ would use them heavily.
+- ~~Chips and badges~~: status chips with their icon and an edge in the status color, filter chips (a check when on,
+  one at a time in a group), tag chips removed by their ✕ or Delete, and count and dot badges in the accent or a status
+  color on a button's corner, in Swing; see [tokens.md](tokens.md#chips-and-badges).
 - Toasts: short notices that come and go, separate from status cards; the existing `ToastOverlay` has its own look.
 - All-caps: decide whether HUD labels, section overlines and the libGDX status card stay in capitals or move to
   sentence case, before the trial so nothing is restyled twice.

@@ -95,7 +95,7 @@ Why these values:
   the galleries show this.
 
 The `checks` block in the JSON lists every rule: text contrast 4.5:1, control contrast 3:1, and minimum distances
-between statuses, selection and accent for typical vision and the three simulated deficiencies. All 148 checks pass.
+between statuses, selection and accent for typical vision and the three simulated deficiencies. All 154 checks pass.
 
 ## Typography
 
@@ -800,6 +800,55 @@ cards and panels share.
 ticks, and `panel-foe` coral ticks. Moving them to this spec means dropping the rails, status ticks with the header icon
 instead of a colored frame alone, the selectable states for unit cards, and the overlay surface token.
 
+## Chips and badges
+
+Chips are small rounded labels: a status chip reports a state, a filter chip narrows a view and a tag chip is a value
+the user added. A badge counts something new on a button's corner. All of them have a `radius.md` (6) corner and
+their text in `small` (11.5), sentence case.
+
+| Kind / state | Look |
+| --- | --- |
+| Status chip | `icon.sm` (16) plus `xxs` (2) above and below, 20 high; the status icon at `icon.sm` and a 1px edge in the status color, the text in `text.primary`; padding `xs` (4) before the icon, `md` (8) after the text |
+| Status chip, neutral | No icon, the edge in `border.control` and the text in `text.secondary`, `md` padding both sides |
+| Filter chip | `control.sm` (28) high, `lg` (12) padding; a `border.control` edge and the text in `text.secondary` |
+| Filter chip, hover | A `surface.hover` fill, the edge in `border.strong`, the text in `text.primary` |
+| Filter chip, on | A `selected.background` fill, the edge in `selected.primary`, a check at `icon.sm` before the text in `text.primary`; the chip grows by the check |
+| Tag chip | `control.sm` high, the text in `text.primary` inside a `border.control` edge, then an ✕ in `text.muted`; hovering the ✕ shows a `surface.hover` square with a `radius.sm` corner and the ✕ turns `text.primary` |
+| Focus (filter, tag) | The `focus.ring` 2px ring in place of the edge |
+| Disabled (filter, tag) | The edge in `border.subtle`, the text in `text.disabled` |
+| Count badge | `icon.sm` high and at least as wide, `xs` padding; the count in the label's medium face at `caption`, `text.onAccent` on `accent.primary`; 99 and up shows 99+ |
+| Dot badge | `md` (8) across, in `accent.primary` |
+| Badge tone | `status.danger`, `status.warning` or `status.success` instead of the accent when the count is a status, such as damage reports |
+| Badge ring | `xxs` (2) in the surface behind, so the badge stands out of the button it overlaps |
+| Motion | Filter chips ease their fill and edge with the [control timings](#motion); reduce motion makes them instant |
+
+- **Color is never the only cue.** A status chip always has its icon (info, check, warning, error), and screen
+  readers hear the status as the chip's description. A filter chip shows a check when on, not only the violet.
+- **Status chips are smaller because they aren't controls.** They sit in rows and cards beside text; the interactive
+  chips take the compact control height so they keep a comfortable target.
+- **Filters.** A filter chip is a toggle; in a group where one filter applies at a time it behaves like a radio button
+  and one is always on.
+- **Tags.** Clicking the ✕, or Delete or Backspace with the focus on the chip, removes it and the focus moves on. The ✕
+  has the tooltip "Remove …", and screen readers hear a "Remove …" button.
+- **Badge placement.** The badge's centre sits `xs` inside the button's top-right corner, or on the icon's top-right
+  corner for a button with only an icon; top-left in right-to-left. A count of zero hides the badge. Screen readers
+  hear the count, so the button's description should say what it counts ("2 unread messages").
+
+**Swing.** [`TokenChips`](../../megamek/src/megamek/client/ui/design/swing/TokenChips.java) makes the chips:
+`status(text, tone)` with a `TokenChips.Tone`, `filter(text)` for a toggle, and `tag(text, onRemove)` for a removable
+value whose `onRemove` runs after the chip leaves its parent (`TagChip.removeTag()` removes it from code).
+`TokenChips.selectOne(chips...)` groups filter chips so one is on at a time.
+[`TokenBadge`](../../megamek/src/megamek/client/ui/design/swing/TokenBadge.java) is the badge: `TokenBadge.count(n)` or
+`TokenBadge.dot()`, then `tone` for a status color; `setCount` changes it and hides it at zero.
+`TokenBadge.attach(button, badge)` returns a holder to add in the button's place, which places the badge and leaves room
+for it.
+
+**libGDX.** Spec only for now. hud-v3's `UiKit.chip(text, tone)` makes the `chip`, `chip-warn` and `chip-bad` styles,
+in capitals with a tinted 1px edge that reaches only 2.4:1, and about 25 calls in the unit card, the forces panel and
+overview and the HUD kit use them; `UiButton.badge` is an amber pill. Moving them to this spec means sentence case (an
+open question for the whole HUD), status edges at full color with the icon, the filter and tag chips, and badges in the
+accent with the surface ring.
+
 ## Code
 
 | Class | Role |
@@ -834,12 +883,12 @@ instead of a colored frame alone, the selectable states for unit cards, and the 
 | [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java), [`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java), [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) | The Swing dialogs: content, opening and the modal card |
 | [`TokenStatusCard`](../../megamek/src/megamek/client/ui/design/swing/TokenStatusCard.java) | The Swing status card |
 | [`TokenPanel`](../../megamek/src/megamek/client/ui/design/swing/TokenPanel.java), [`TokenFrameBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenFrameBorder.java), [`TokenFrame`](../../megamek/src/megamek/client/ui/design/swing/TokenFrame.java) | The Swing panel, the frame as a border for existing panels, and the frame painter shared with dialogs |
-| [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
+| [`TokenChips`](../../megamek/src/megamek/client/ui/design/swing/TokenChips.java), [`TokenBadge`](../../megamek/src/megamek/client/ui/design/swing/TokenBadge.java) | The Swing status, filter and tag chips, and count and dot badges || [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
-panes, dialogs and status cards are Swing-only for now, and so is motion. The Swing themes are selectable but not the
-default, and no view uses the new controls yet. Next come panels, chips and badges, toasts and the all-caps decision
+panes, dialogs, status cards, panels, chips and badges are Swing-only for now, and so is motion. The Swing themes are
+selectable but not the default, and no view uses the new controls yet. Next come toasts and the all-caps decision
 (see the gap analysis), then a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the developers
 accept the system.

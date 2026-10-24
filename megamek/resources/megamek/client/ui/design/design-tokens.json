@@ -67,6 +67,7 @@
       { "fg": ["text.primary"], "bg": ["selected.background"], "over": "surface.panel", "min": 4.5, "why": "Text on a selected row" },
       { "fg": ["text.onInverse"], "bg": ["surface.inverse"], "min": 4.5, "why": "Text on inverted faces" },
       { "fg": ["text.onAccent"], "bg": ["accent.primary"], "min": 4.5, "why": "Text on accent fills" },
+      { "fg": ["text.onAccent"], "bg": ["status.danger", "status.warning", "status.success"], "min": 4.5, "why": "Counts on badge fills" },
       { "fg": ["accent.primary", "status.danger", "status.warning", "status.success", "status.info"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover"], "min": 4.5, "why": "Accent and status colors may be used as text" },
       { "fg": ["border.control", "border.strong", "focus.ring", "selected.primary"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover", "surface.input"], "min": 3.0, "why": "WCAG 1.4.11 non-text contrast" }
     ],

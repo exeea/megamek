@@ -123,6 +123,8 @@ public final class SwingUiLibrary extends JFrame {
     private static final int ICON_RADIO_CHECKED = 0xE837;
     private static final int ICON_SEARCH = 0xE8B6;
     private static final int ICON_MORE = 0xE5D4;
+    private static final int ICON_CHAT = 0xE0B7;
+    private static final int ICON_NOTIFICATIONS = 0xE7F4;
     /** Masked in the samples; not a real password. */
     private static final String SAMPLE_PASSWORD = "atlas-as7d";
 
@@ -610,9 +612,20 @@ public final class SwingUiLibrary extends JFrame {
         return page;
     }
 
-    /** Panels and frames. */
+    /** Chips and badges, then panels and frames. */
     private JComponent containersPage() {
         JPanel page = controlsPage();
+        page.add(heading(Messages.getString("UiLibrary.controls.chips")));
+        page.add(paragraph(Messages.getString("UiLibrary.chips.note"), "small", "text.muted"));
+        page.add(chipStatusSamples());
+        page.add(chipFilterSamples());
+        page.add(chipTagSamples());
+        page.add(badgeSamples());
+        JLabel chipsLive = text(Messages.getString("UiLibrary.chips.live"), "label", "text.secondary");
+        chipsLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(chipsLive);
+        page.add(chipLobby());
+
         page.add(heading(Messages.getString("UiLibrary.controls.panels")));
         page.add(paragraph(Messages.getString("UiLibrary.panels.note"), "small", "text.muted"));
         page.add(panelSamples());
@@ -1397,6 +1410,164 @@ public final class SwingUiLibrary extends JFrame {
         card.step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0);
         timer.start();
         return timer;
+    }
+
+    /** A status chip in each tone. */
+    private JComponent chipStatusSamples() {
+        JPanel samples = sampleGrid();
+        String[] tones = { "neutral", "info", "success", "warning", "danger" };
+        String[] texts = { "blueprint", "hidden", "deployed", "runningHot", "engineHit" };
+        TokenChips.Tone[] values = TokenChips.Tone.values();
+        for (int i = 0; i < tones.length; i++) {
+            TokenChips.StatusChip chip = TokenChips.status(Messages.getString("UiLibrary.chips." + texts[i]),
+                  values[i]);
+            addSample(samples, i, 0, "UiLibrary.chips." + tones[i], unstretched(chip));
+        }
+        return samples;
+    }
+
+    /** Filter chips at rest, hover and focus frozen, on and disabled. */
+    private JComponent chipFilterSamples() {
+        JPanel samples = sampleGrid();
+        String[] states = { "rest", "hover", "selected", "focus", "disabled" };
+        for (int i = 0; i < states.length; i++) {
+            TokenChips.FilterChip chip = TokenChips.filter(Messages.getString("UiLibrary.chips.meks"));
+            switch (states[i]) {
+                case "hover" -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_HOVER);
+                case "selected" -> chip.setSelected(true);
+                case "focus" -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_FOCUS);
+                case "disabled" -> chip.setEnabled(false);
+                default -> { }
+            }
+            addSample(samples, i, 0, "UiLibrary.panels.state." + states[i], unstretched(chip));
+        }
+        return samples;
+    }
+
+    /** Tag chips at rest, with the cross hovered and focus frozen, and disabled. */
+    private JComponent chipTagSamples() {
+        JPanel samples = sampleGrid();
+        String[] captions = { "UiLibrary.panels.state.rest", "UiLibrary.chips.hoverCross",
+                              "UiLibrary.panels.state.focus", "UiLibrary.panels.state.disabled" };
+        for (int i = 0; i < captions.length; i++) {
+            TokenChips.TagChip chip = TokenChips.tag(Messages.getString("UiLibrary.chips.night"), null);
+            switch (i) {
+                case 1 -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_HOVER);
+                case 2 -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_FOCUS);
+                case 3 -> chip.setEnabled(false);
+                default -> { }
+            }
+            addSample(samples, i, 0, captions[i], unstretched(chip));
+        }
+        return samples;
+    }
+
+    /** Count badges in each tone, one over 99, and a dot, on the buttons they count for. */
+    private JComponent badgeSamples() {
+        JPanel samples = sampleGrid();
+        addSample(samples, 0, 0, "UiLibrary.chips.badgeAccent", unstretched(TokenBadge.attach(
+              TokenButtons.icon(ICON_CHAT, Messages.getString("UiLibrary.chips.chat"), false,
+                    TokenButtons.Size.REGULAR), TokenBadge.count(3))));
+        addSample(samples, 1, 0, "UiLibrary.chips.badgeDanger", unstretched(TokenBadge.attach(
+              TokenButtons.secondary(Messages.getString("UiLibrary.chips.reports")),
+              TokenBadge.count(12).tone(TokenBadge.Tone.DANGER))));
+        addSample(samples, 2, 0, "UiLibrary.chips.badgeWarning", unstretched(TokenBadge.attach(
+              TokenButtons.icon(ICON_WARNING, Messages.getString("UiLibrary.chips.alerts"), false,
+                    TokenButtons.Size.REGULAR), TokenBadge.count(128).tone(TokenBadge.Tone.WARNING))));
+        addSample(samples, 3, 0, "UiLibrary.chips.badgeSuccess", unstretched(TokenBadge.attach(
+              TokenButtons.secondary(Messages.getString("UiLibrary.chips.ready")),
+              TokenBadge.count(4).tone(TokenBadge.Tone.SUCCESS))));
+        addSample(samples, 4, 0, "UiLibrary.chips.badgeDot", unstretched(TokenBadge.attach(
+              TokenButtons.icon(ICON_NOTIFICATIONS, Messages.getString("UiLibrary.chips.notifications"), false,
+                    TokenButtons.Size.REGULAR), TokenBadge.dot())));
+        return samples;
+    }
+
+    /** A live lobby panel: one-of filter chips, removable conditions with a reset, unit states and a chat count. */
+    private JComponent chipLobby() {
+        JPanel row = row(color("surface.base"));
+        String[] filters = { "all", "meks", "vehicles", "infantry" };
+        TokenChips.FilterChip[] chips = new TokenChips.FilterChip[filters.length];
+        JLabel showing = text("", "small", "text.muted");
+        JPanel filterRow = chipRow("UiLibrary.chips.show");
+        for (int i = 0; i < filters.length; i++) {
+            TokenChips.FilterChip chip = TokenChips.filter(Messages.getString("UiLibrary.chips." + filters[i]));
+            chip.addItemListener(event -> {
+                if (chip.isSelected()) {
+                    showing.setText(Messages.getString("UiLibrary.chips.showing", chip.getText()));
+                }
+            });
+            chips[i] = chip;
+            filterRow.add(chip);
+        }
+        TokenChips.selectOne(chips);
+        filterRow.add(showing);
+
+        JPanel conditionRow = chipRow("UiLibrary.chips.conditions");
+        JButton reset = TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.chips.reset"),
+              TokenButtons.Size.COMPACT);
+        Runnable fill = () -> {
+            for (Component child : conditionRow.getComponents()) {
+                if (child instanceof TokenChips.TagChip) {
+                    conditionRow.remove(child);
+                }
+            }
+            String[] conditions = { "night", "fog", "heavyRain" };
+            for (int i = 0; i < conditions.length; i++) {
+                conditionRow.add(TokenChips.tag(Messages.getString("UiLibrary.chips." + conditions[i]), null), i + 1);
+            }
+            conditionRow.revalidate();
+            conditionRow.repaint();
+        };
+        conditionRow.add(reset);
+        fill.run();
+        reset.addActionListener(event -> fill.run());
+
+        JPanel statusRow = chipRow("UiLibrary.chips.status");
+        statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.deployed"), TokenChips.Tone.SUCCESS));
+        statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.runningHot"), TokenChips.Tone.WARNING));
+        statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.engineHit"), TokenChips.Tone.DANGER));
+
+        JPanel chatRow = chipRow("UiLibrary.chips.chat");
+        TokenBadge unread = TokenBadge.count(2);
+        AbstractButton chat = TokenButtons.icon(ICON_CHAT, Messages.getString("UiLibrary.chips.chat"), false,
+              TokenButtons.Size.REGULAR);
+        Runnable describe = () -> chat.getAccessibleContext().setAccessibleDescription(
+              unread.getCount() > 0 ? Messages.getString("UiLibrary.chips.unread", unread.getCount()) : null);
+        chat.addActionListener(event -> {
+            unread.setCount(0);
+            describe.run();
+        });
+        JButton message = TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.chips.message"),
+              TokenButtons.Size.COMPACT);
+        message.addActionListener(event -> {
+            unread.setCount(unread.getCount() + 1);
+            describe.run();
+        });
+        describe.run();
+        chatRow.add(TokenBadge.attach(chat, unread));
+        chatRow.add(message);
+
+        JPanel body = new JPanel();
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        for (JPanel line : new JPanel[] { filterRow, conditionRow, statusRow, chatRow }) {
+            line.setAlignmentX(LEFT_ALIGNMENT);
+            line.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(3), 0, scaleForGUI(3), 0));
+            body.add(line);
+        }
+        TokenPanel lobby = new TokenPanel(Messages.getString("UiLibrary.chips.lobbyTitle")).body(body);
+        row.add(sized(lobby, 640));
+        return row;
+    }
+
+    /** A transparent row of chips after a fixed-width label. */
+    private JPanel chipRow(String labelKey) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEADING, scaleForGUI(6), 0));
+        row.setOpaque(false);
+        JLabel label = text(Messages.getString(labelKey), "label", "text.secondary");
+        label.setPreferredSize(new Dimension(scaleForGUI(84), label.getPreferredSize().height));
+        row.add(label);
+        return row;
     }
 
     /** Panels without and with a header, and with roomy padding. */
