@@ -471,8 +471,8 @@ public final class SwingUiLibrary extends JFrame {
               mode == Mode.DARK ? MegaMekDarkLaf.NAME : MegaMekLightLaf.NAME), "small", "text.muted"));
         JPanel motion = row(color("surface.base"));
         motion.add(reduceMotionSwitch());
-        motion.add(text(Messages.getString("UiLibrary.controls.reduceMotionNote"), "small", "text.muted"));
         page.add(motion);
+        page.add(paragraph(Messages.getString("UiLibrary.controls.reduceMotionNote"), "small", "text.muted"));
         return page;
     }
 
