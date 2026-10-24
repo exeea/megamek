@@ -698,6 +698,40 @@ public final class UiKit {
         return chip;
     }
 
+    /**
+     * A chip in hud-v3's look, or with {@code token} Token v0's status chip: OK, WARN and BAD with their status icon
+     * and a 1px edge in the status color over text.primary, NORMAL the neutral chip with a border.control edge and
+     * text.secondary; small type, sentence case.
+     */
+    public Actor chip(String text, Tone tone, boolean token) {
+        if (!token) {
+            return chip(text, tone);
+        }
+        String status = switch (tone) {
+            case OK -> "success";
+            case WARN -> "warning";
+            case BAD -> "danger";
+            default -> null;
+        };
+        float xs = space("xs");
+        float md = space("md");
+        Table chip = new Table();
+        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + (status == null ? "neutral" : status)));
+        if (status == null) {
+            chip.add(typeLabel(text, "small", "text.secondary")).padLeft(md).padRight(md);
+        } else {
+            String icon = switch (tone) {
+                case OK -> "check";
+                case WARN -> "warn";
+                default -> "error";
+            };
+            chip.add(icon(icon, DesignTokens.shipped().size().get("icon.sm"), UiTheme.tokenColor("status." + status)))
+                  .padLeft(xs);
+            chip.add(typeLabel(text, "small", "text.primary")).padLeft(xs).padRight(md);
+        }
+        return chip;
+    }
+
     /** A search field (.field) with its placeholder, and a clear button while it holds text. */
     public SearchField search(String placeholder) {
         return new SearchField(placeholder, false);
@@ -838,12 +872,21 @@ public final class UiKit {
 
     /** A labelled bar (.meter; compact: the overview card's .bars2). */
     public Meter meter(String caption, boolean compact) {
-        return new Meter(caption, compact, new Bar(compact ? 3 : 4));
+        return new Meter(caption, compact, new Bar(compact ? 3 : 4), false);
+    }
+
+    /**
+     * A meter in hud-v3's look, or with {@code token} Token v0's progress bar: the caption above in small type and
+     * text.secondary (caption type when compact), the value at the trailing end in text.primary, sentence case, over
+     * a 4-high border.control pill track with a pill fill in the color {@link Meter#set} gives.
+     */
+    public Meter meter(String caption, boolean compact, boolean token) {
+        return token ? new Meter(caption, compact, new TokenBar(), true) : meter(caption, compact);
     }
 
     /** A meter's caption and value over a bar that its view draws, such as a segmented or hatched bar. */
     public Meter meter(String caption, Widget bar) {
-        return new Meter(caption, false, bar);
+        return new Meter(caption, false, bar, false);
     }
 
     /** A rectangle of the white texel in a color, at the widget's alpha. */
@@ -1106,11 +1149,22 @@ public final class UiKit {
         private final Label value;
         private final Cell<Label> valueCell;
         private final Widget bar;
+        private final boolean token;
 
-        private Meter(String caption, boolean compact, Widget bar) {
+        private Meter(String caption, boolean compact, Widget bar, boolean token) {
+            this.bar = bar;
+            this.token = token;
+            if (token) {
+                String type = compact ? "caption" : "small";
+                value = typeLabel("", type, "text.primary");
+                add(typeLabel(caption, type, "text.secondary")).left();
+                valueCell = add(value).right().expandX().padLeft(space("md"));
+                row();
+                add(bar).colspan(2).growX().padTop(space("xs"));
+                return;
+            }
             float size = compact ? 9.5f : 10.5f;
             value = label("", compact ? "hud-caption" : "hud-button", compact ? size : 13, Color.WHITE);
-            this.bar = bar;
             Cell<Label> captionCell = add(label(UiTheme.upper(caption), "hud-caption", size, UiTheme.MUTED)).left();
             valueCell = add(value).right().expandX();
             if (compact) {
@@ -1125,7 +1179,7 @@ public final class UiKit {
         /** The value at the right of the caption, upper-cased as the caption (.meter .l). */
         public Meter value(String text) {
             valueCell.setActor(value);
-            value.setText(UiTheme.upper(text));
+            value.setText(token ? text : UiTheme.upper(text));
             return this;
         }
 
@@ -1144,8 +1198,38 @@ public final class UiKit {
             if (bar instanceof Bar plain) {
                 plain.fraction = MathUtils.clamp(fraction, 0, 1);
                 plain.fillColor = fill;
+            } else if (bar instanceof TokenBar pill) {
+                pill.fraction = MathUtils.clamp(fraction, 0, 1);
+                pill.fillColor = fill;
             }
             return this;
+        }
+    }
+
+    /** A token meter's bar: the border.control pill track and a pill fill from the leading edge. */
+    private final class TokenBar extends Widget {
+        private final Drawable track = skin.getDrawable("token-track");
+        private final Drawable pill = skin.getDrawable("token-bar");
+        private float fraction;
+        private Color fillColor = UiTheme.tokenColor("accent.primary");
+
+        @Override
+        public float getPrefHeight() {
+            return track.getMinHeight();
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            float previous = batch.getPackedColor();
+            float alpha = getColor().a * parentAlpha;
+            batch.setColor(1, 1, 1, alpha);
+            track.draw(batch, getX(), getY(), getWidth(), getHeight());
+            if (fraction > 0) {
+                // A pill can't be narrower than it is high
+                batch.setColor(fillColor.r, fillColor.g, fillColor.b, fillColor.a * alpha);
+                pill.draw(batch, getX(), getY(), Math.max(getHeight(), getWidth() * fraction), getHeight());
+            }
+            batch.setPackedColor(previous);
         }
     }
 

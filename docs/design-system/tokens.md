@@ -705,7 +705,12 @@ How far along a known amount of work is, or that unknown work is still going on.
 it without changes; the bar grows by the text's height when it shows text. Vertical bars keep FlatLaf's drawing in the
 same colors. The client property `TokenProgressBarUI.SHOW_PERCENT` set to `true` adds the percentage.
 
-**libGDX.** Nothing new yet.
+**libGDX.** hud-v3's meters take the look without new controls: `UiKit.meter(caption, compact, true)` puts the
+caption above in `small` type and `text.secondary` (`caption` type when compact) and the value at the trailing end in
+`text.primary`, sentence case, over the `token-track` pill with a pill fill. A meter shows a value rather than progress,
+so its caller passes the fill color, a status role such as `status.success` for armor. `GpuHudKit.heatBar(segments,
+true)` keeps the heat bar's shape in token colors: a `border.control` track, the heat in `status.warning`, the hatched
+forecast, and the ticks in `text.muted`, the next one in `text.primary`. hud-v3 has no indeterminate bar yet.
 
 ## Sections
 
@@ -933,11 +938,12 @@ value whose `onRemove` runs after the chip leaves its parent (`TagChip.removeTag
 `TokenBadge.attach(button, badge)` returns a holder to add in the button's place, which places the badge and leaves room
 for it.
 
-**libGDX.** Spec only for now. hud-v3's `UiKit.chip(text, tone)` makes the `chip`, `chip-warn` and `chip-bad` styles,
-in capitals with a tinted 1px edge that reaches only 2.4:1, and about 25 calls in the unit card, the forces panel and
-overview and the HUD kit use them; `UiButton.badge` is an amber pill. Moving them to this spec means sentence case (an
-open question for the whole HUD), status edges at full color with the icon, the filter and tag chips, and badges in the
-accent with the surface ring.
+**libGDX.** `UiKit.chip(text, tone, true)` is the status chip: `Tone.OK`, `WARN` and `BAD` get the check, warning and
+error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip. A
+button in a token style (`button-*`) draws `UiButton.badge` as the count badge, in the `token-badge` face and frame
+with its ring in `surface.panel`, and `UiButton.dot` as the dot; hud-v3's buttons keep the amber pill. About 25 calls in
+the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips, in capitals (the sentence case
+question is open for the whole HUD). hud-v3 has no filter or tag chips.
 
 ## Toasts
 
@@ -979,9 +985,11 @@ toasts itself.
 icon. Moving it to this spec means the popover surface with the bar and icon, the body face, the ✕, hover pause and
 the Game Master's icon; `ToastLevel` maps onto `TokenToast.Level`, with `ERROR` as `DANGER`, and the durations stay.
 
-**libGDX.** Spec only for now. hud-v3's `GpuToastStack` is close: a panel with a 3px bar, above the dock, the newest
-at the bottom, clicks passing through. Moving it to this spec means the top centre with the newest on top, the level
-icons, the Game Master's violet and shield, the ✕ and hover pause.
+**libGDX.** `new GpuToastStack(kit, source, state, true)` draws Token v0's cards: the `token-toast-<level>` frame with
+its bar, the level's icon (`shield-person` for the Game Master), the sprite fitted in 40 by 34, `body` text wrapped at
+480 and the compact close button, the only part that takes presses. The cards fade in over `medium` and out over
+`slow`. Where the stack sits is still hud-v3's: above the dock with the newest at the bottom. The top centre, the
+newest on top and the hover pause are the developers' work.
 
 ## Code
 

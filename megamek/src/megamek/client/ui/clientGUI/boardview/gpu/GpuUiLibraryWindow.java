@@ -673,42 +673,69 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     private void status(Table page) {
         heading(page, "UiLibrary.gdx.chipsBadges");
-        Table chips = new Table();
-        chips.defaults().padRight(8);
-        chips.add(kit.chip(text("UiLibrary.status.info"), Tone.NORMAL));
-        chips.add(kit.chip(text("UiLibrary.status.success"), Tone.OK));
-        chips.add(kit.chip(text("UiLibrary.status.warning"), Tone.WARN));
-        chips.add(kit.chip(text("UiLibrary.status.danger"), Tone.BAD));
-        compare(page, "UiKit.chip", chips, null);
+        compare(page, "UiKit.chip", chips(false), chips(true));
         Table marks = new Table();
         marks.defaults().padRight(12);
         marks.add(new Container<>(kit.label("3", "hud-caption", 10, UiTheme.FILL_INK))
               .background(kit.skin.getDrawable("badge")));
         marks.add(new Image(kit.skin.getDrawable("dot")));
-        compare(page, "badge, dot", marks, null);
+        Table tokenMarks = new Table();
+        tokenMarks.defaults().padRight(20);
+        tokenMarks.add(kit.button("button-secondary", "report", text("UiLibrary.gdx.sampleLog"), null).badge("3"));
+        tokenMarks.add(kit.button("button-icon", "chat", null, null).badge("128"));
+        tokenMarks.add(kit.button("button-icon", "report", null, null).dot(true));
+        compare(page, "badge, dot", marks, tokenMarks);
         heading(page, "UiLibrary.gdx.meters");
-        Table meters = kit.panel();
-        meters.pad(14, 16, 14, 16);
+        compare(page, "UiKit.meter", meters(false, false), meters(false, true));
+        compare(page, "UiKit.meter (compact)", meters(true, false), meters(true, true));
+        compare(page, "GpuHudKit.heatBar", heatBars(false), heatBars(true));
+        heading(page, "UiLibrary.gdx.toasts");
+        compare(page, "GpuToastStack", toasts(false), toasts(true));
+    }
+
+    /** The four chip tones, in hud-v3's look or Token v0's. */
+    private Table chips(boolean token) {
+        Table chips = new Table();
+        chips.defaults().padRight(8);
+        chips.add(kit.chip(text("UiLibrary.status.info"), Tone.NORMAL, token));
+        chips.add(kit.chip(text("UiLibrary.status.success"), Tone.OK, token));
+        chips.add(kit.chip(text("UiLibrary.status.warning"), Tone.WARN, token));
+        chips.add(kit.chip(text("UiLibrary.status.danger"), Tone.BAD, token));
+        return chips;
+    }
+
+    /** Armor, structure and (unless compact) heat meters in a panel, in hud-v3's look or Token v0's. */
+    private Container<Table> meters(boolean compact, boolean token) {
+        Table meters = kit.panel(token);
+        if (!token) {
+            meters.pad(compact ? 10 : 14, compact ? 14 : 16, compact ? 10 : 14, compact ? 14 : 16);
+        }
         meters.defaults().growX().uniformX().padRight(12);
-        meters.add(kit.meter(text("UiLibrary.gdx.armor"), false).set("91%", .91f, UiTheme.MINT));
-        meters.add(kit.meter(text("UiLibrary.gdx.structure"), false).set("40%", .4f, UiTheme.AMBER));
-        meters.add(kit.meter(text("UiLibrary.gdx.heat"), false).set("12", .4f, UiTheme.CORAL));
-        compare(page, "UiKit.meter", new Container<>(meters).width(420), null);
-        Table compact = kit.panel();
-        compact.pad(10, 14, 10, 14);
-        compact.defaults().growX().uniformX().padRight(12);
-        compact.add(kit.meter(text("UiLibrary.gdx.armor"), true).set("91%", .91f, UiTheme.MINT));
-        compact.add(kit.meter(text("UiLibrary.gdx.structure"), true).set("40%", .4f, UiTheme.AMBER));
-        compare(page, "UiKit.meter (compact)", new Container<>(compact).width(320), null);
+        Color armor = token ? UiTheme.tokenColor("status.success") : UiTheme.MINT;
+        Color structure = token ? UiTheme.tokenColor("status.warning") : UiTheme.AMBER;
+        meters.add(kit.meter(text("UiLibrary.gdx.armor"), compact, token).set("91%", .91f, armor));
+        meters.add(kit.meter(text("UiLibrary.gdx.structure"), compact, token).set("40%", .4f, structure));
+        if (!compact) {
+            Color heat = token ? UiTheme.tokenColor("status.danger") : UiTheme.CORAL;
+            meters.add(kit.meter(text("UiLibrary.gdx.heat"), false, token).set("12", .4f, heat));
+        }
+        return new Container<>(meters).width(compact ? 320 : token ? MIGRATED_WIDTH : 420);
+    }
+
+    /** The continuous and the segmented heat bar, in hud-v3's colors or Token v0's. */
+    private Table heatBars(boolean token) {
         Table heat = new Table();
         heat.defaults().left().width(300).height(8).padBottom(12);
-        heat.add(hud.heatBar(false).set(12, 18, 30, List.of(8, 13, 17, 24))).row();
-        heat.add(hud.heatBar(true).set(12, 18, 30, List.of(8, 13, 17, 24)));
-        compare(page, "GpuHudKit.heatBar", heat, null);
-        heading(page, "UiLibrary.gdx.toasts");
-        GpuToastStack stack = new GpuToastStack(hud, null, null);
+        heat.add(hud.heatBar(false, token).set(12, 18, 30, List.of(8, 13, 17, 24))).row();
+        heat.add(hud.heatBar(true, token).set(12, 18, 30, List.of(8, 13, 17, 24)));
+        return heat;
+    }
+
+    /** A toast of each level, settled, in hud-v3's look or Token v0's card. */
+    private Table toasts(boolean token) {
+        GpuToastStack stack = new GpuToastStack(hud, null, null, token);
         Table toasts = new Table();
-        toasts.defaults().left().padBottom(6);
+        toasts.defaults().left().padBottom(token ? 8 : 6);
         long id = 0;
         for (ToastLevel level : ToastLevel.values()) {
             String key = "UiLibrary.gdx.toast." + level.name().toLowerCase(Locale.ROOT);
@@ -718,7 +745,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             toast.getColor().a = 1;
             toasts.add(toast).row();
         }
-        compare(page, "GpuToastStack", toasts, null);
+        return toasts;
     }
 
     private void hudParts(Table page) {

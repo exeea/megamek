@@ -33,7 +33,6 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
@@ -147,7 +146,15 @@ final class GpuHudKit implements Disposable {
 
     /** The heat bar: continuous (.meter .bar) or one segment per heat point (.heatfc .segs). */
     HeatBar heatBar(boolean segments) {
-        return new HeatBar(segments);
+        return new HeatBar(segments, false);
+    }
+
+    /**
+     * The heat bar in hud-v3's colors, or with {@code token} in Token v0's: a border.control track, the heat in
+     * status.warning and the ticks in text.muted, the next one in text.primary.
+     */
+    HeatBar heatBar(boolean segments, boolean token) {
+        return new HeatBar(segments, token);
     }
 
     /** A target number as shown: an automatic success reads 2+, which every 2d6 roll makes. */
@@ -572,13 +579,34 @@ final class GpuHudKit implements Disposable {
     final class HeatBar extends Widget {
         private final boolean segments;
         private final Drawable hatch = ui.skin.getDrawable("hatch");
+        private final Color track;
+        private final Color fill;
+        private final Color empty;
+        private final Color edge;
+        private final Color mark;
+        private final Color nextMark;
         private int heat;
         private int forecast;
         private int scale = 1;
         private List<Integer> ticks = List.of();
 
-        private HeatBar(boolean segments) {
+        private HeatBar(boolean segments, boolean token) {
             this.segments = segments;
+            if (token) {
+                track = UiTheme.tokenColor("border.control");
+                fill = UiTheme.tokenColor("status.warning");
+                empty = track;
+                edge = UiTheme.tokenColor("text.muted");
+                mark = edge;
+                nextMark = UiTheme.tokenColor("text.primary");
+            } else {
+                track = UiTheme.TRACK;
+                fill = UiTheme.AMBER;
+                empty = SEGMENT;
+                edge = TICK;
+                mark = new Color(1, 1, 1, .3f);
+                nextMark = Color.WHITE;
+            }
         }
 
         HeatBar set(int current, int predicted, int maximum, List<Integer> marks) {
@@ -605,26 +633,26 @@ final class GpuHudKit implements Disposable {
                 for (int point = 0; point < scale; point++) {
                     float x = getX() + point * (width + 2);
                     if (ticks.contains(point)) {
-                        ui.fill(batch, TICK, alpha, x - 2, y, 2, height);
+                        ui.fill(batch, edge, alpha, x - 2, y, 2, height);
                     }
                     if (point < heat) {
-                        ui.fill(batch, UiTheme.AMBER, alpha, x, y, width, height);
+                        ui.fill(batch, fill, alpha, x, y, width, height);
                     } else if (point < forecast) {
                         hatched(batch, alpha, x, width);
                     } else {
-                        ui.fill(batch, SEGMENT, alpha, x, y, width, height);
+                        ui.fill(batch, empty, alpha, x, y, width, height);
                     }
                 }
             } else {
                 float current = getWidth() * Math.min(heat, scale) / scale;
                 float predicted = getWidth() * Math.min(forecast, scale) / scale;
-                ui.fill(batch, UiTheme.TRACK, alpha, getX(), y, getWidth(), height);
-                ui.fill(batch, UiTheme.AMBER, alpha, getX(), y, current, height);
+                ui.fill(batch, track, alpha, getX(), y, getWidth(), height);
+                ui.fill(batch, fill, alpha, getX(), y, current, height);
                 hatched(batch, alpha, getX() + current, predicted - current);
                 int next = ticks.stream().filter(tick -> tick > heat).findFirst().orElse(-1);
                 for (int tick : ticks) {
                     float reach = tick == next ? 3 : 2;
-                    ui.fill(batch, Color.WHITE, alpha * (tick == next ? 1 : .3f),
+                    ui.fill(batch, tick == next ? nextMark : mark, alpha,
                           getX() + Math.round(getWidth() * tick / scale), y - reach, 1, height + 2 * reach);
                 }
             }

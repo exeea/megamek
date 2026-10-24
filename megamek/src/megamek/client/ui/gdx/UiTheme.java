@@ -149,6 +149,8 @@ public final class UiTheme implements Disposable {
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
           Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
+          // shield_person: the Game Master's toast (Token v0)
+          Map.entry("shield-person", 0xF650),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,
           // security, visibility, terrain, visibility_off (a TAG link's crosshair is "locate").
           Map.entry("power", 0xE8AC), Map.entry("prone", 0xE258), Map.entry("anchor", 0xF1CD),
@@ -238,6 +240,9 @@ public final class UiTheme implements Disposable {
                   hudGlyphs);
             skin.add(TYPE + type.name(), new Label.LabelStyle(face, type.color()));
         }
+        // A count badge's digits: caption's size in label's medium face
+        skin.add(TOKEN_BADGE, new Label.LabelStyle(font(TOKEN_BADGE, ROBOTO, MEDIUM, 10.5f, 0, 0, hudGlyphs),
+              TEXT));
         hudGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture(), false));
 
         hudDrawables();
@@ -333,6 +338,7 @@ public final class UiTheme implements Disposable {
         tokenInputs();
         tokenLists();
         tokenContainers();
+        tokenStatus();
     }
 
     /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
@@ -1402,6 +1408,60 @@ public final class UiTheme implements Disposable {
               tokens.radius().get("md"), null, sm, md, 0));
         tip.wrapWidth = 280;
         skin.add(TOKEN, tip);
+    }
+
+    /** The Label style of a token count badge's digits: caption's size in the medium face. */
+    public static final String TOKEN_BADGE = "token-badge";
+    /** The prefix of a token status chip's frame, followed by neutral, success, warning or danger. */
+    public static final String TOKEN_CHIP = "token-chip-";
+    /** The prefix of a token toast's card, followed by the level's name in lower case. */
+    public static final String TOKEN_TOAST = "token-toast-";
+
+    /**
+     * Token v0 styles for hud-v3's status elements (docs/design-system/tokens.md, Chips and badges, Progress bars and
+     * Toasts): the status chips' frames, the count badge with its ring and the dot, a meter's pill track and fill
+     * ({@code token-track}, and {@code token-bar} tinted when drawn) and a toast card for each level.
+     */
+    private void tokenStatus() {
+        DesignTokens tokens = DesignTokens.shipped();
+        Mode mode = Mode.DARK;
+        float border = tokens.size().get("border");
+        float radius = tokens.radius().get("md");
+        float xs = tokens.space().get("xs");
+        float md = tokens.space().get("md");
+        float lg = tokens.space().get("lg");
+        float chip = tokens.size().get("icon.sm") + 2 * tokens.space().get("xxs");
+        String[] tones = {"neutral", "success", "warning", "danger"};
+        for (String tone : tones) {
+            String edge = "neutral".equals(tone) ? "border.control" : "status." + tone;
+            box(TOKEN_CHIP + tone, Color.CLEAR, token(tokens.color(edge, mode)), border, radius, null, 0, 0, chip);
+        }
+
+        // The badge's ring is drawn inside its box, so the box is the badge plus the ring on each side
+        float ring = tokens.space().get("xxs");
+        float badge = tokens.size().get("icon.sm") + 2 * ring;
+        box(TOKEN_BADGE, token(tokens.color("accent.primary", mode)), token(tokens.color("surface.panel", mode)), ring,
+              badge / 2, null, 0, xs + ring, badge).setMinWidth(badge);
+        float dot = tokens.space().get("md");
+        box("token-dot", token(tokens.color("accent.primary", mode)), null, 0, dot / 2, null, 0, 0, dot)
+              .setMinWidth(dot);
+
+        float track = tokens.space().get("xs");
+        box("token-track", token(tokens.color("border.control", mode)), null, 0, track / 2, null, 0, 0, track)
+              .setMinWidth(track);
+        box("token-bar", Color.WHITE, null, 0, track / 2, null, 0, 0, track).setMinWidth(track);
+
+        Color popover = token(tokens.color("surface.popover", mode));
+        Color subtle = token(tokens.color("border.subtle", mode));
+        String[][] levels = {{"info", "status.info"}, {"success", "status.success"}, {"warning", "status.warning"},
+                             {"error", "status.danger"}, {"gamemaster", "selected.primary"}};
+        for (String[] level : levels) {
+            // The bar is 3 wide inside the edge; the close button sits xs from the trailing edge
+            NinePatchDrawable card = box(TOKEN_TOAST + level[0], popover, subtle, border, radius,
+                  token(tokens.color(level[1], mode)), md, 0, 0);
+            card.setLeftWidth(border + 3 + lg);
+            card.setRightWidth(xs);
+        }
     }
 
     /** Pads a row drawable {@code leading} units before its content and {@code trailing} after; control height. */

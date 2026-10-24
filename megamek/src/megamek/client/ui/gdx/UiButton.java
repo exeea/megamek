@@ -14,6 +14,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import com.badlogic.gdx.utils.Align;
+import megamek.client.ui.design.DesignTokens;
 
 /**
  * A hud-v3 button (.b and its variants; {@link UiKit#button} builds them). It shows the pressed state its view sets and
@@ -30,6 +31,8 @@ public class UiButton extends TextButton {
     /** Icons in a color of their own rather than the text's; a token style's disabled color while disabled. */
     public final Map<Actor, Color> iconColors = new HashMap<>();
     private final UiKit kit;
+    /** A Token v0 button ({@code button-*} styles), whose badge and dot take the token look. */
+    private final boolean token;
     private boolean pressed, hovered, held, focused;
     private Label badge;
     private Image dot;
@@ -40,6 +43,7 @@ public class UiButton extends TextButton {
     public UiButton(UiKit kit, String style) {
         super("", kit.skin, style);
         this.kit = kit;
+        token = style.startsWith("button-");
         clearChildren();
     }
 
@@ -92,28 +96,36 @@ public class UiButton extends TextButton {
         pressed(value);
     }
 
-    /** The count badge at the top-right corner (.b.util .badge); null hides it. */
+    /**
+     * The count badge at the top-right corner (.b.util .badge); null hides it. A token button's badge is Token v0's:
+     * text.onAccent digits on accent.primary in a ring of the panel's surface, its centre xs inside the corner, and
+     * counts past 99 read 99+.
+     */
     public UiButton badge(String text) {
         if (badge == null && text != null) {
-            badge = kit.label(text, "hud-name", 10, Color.valueOf("1A1A1A"));
+            badge = token ? new Label(text, new Label.LabelStyle(kit.skin.get(UiTheme.TOKEN_BADGE,
+                  Label.LabelStyle.class))) : kit.label(text, "hud-name", 10, Color.valueOf("1A1A1A"));
             Label.LabelStyle style = badge.getStyle();
-            style.background = kit.skin.getDrawable("badge");
+            style.background = kit.skin.getDrawable(token ? UiTheme.TOKEN_BADGE : "badge");
+            if (token) {
+                style.fontColor = UiTheme.tokenColor("text.onAccent");
+            }
             badge.setStyle(style);
             badge.setAlignment(Align.center);
             addActor(badge);
         }
         if (badge != null) {
             badge.setVisible(text != null);
-            badge.setText(text);
+            badge.setText(token && text != null && text.matches("\\d{3,}") ? "99+" : text);
             invalidate();
         }
         return this;
     }
 
-    /** The unread dot (.b.util .dotb). */
+    /** The unread dot (.b.util .dotb); a token button's is the md accent.primary dot. */
     public UiButton dot(boolean shown) {
         if (dot == null && shown) {
-            dot = new Image(kit.skin.getDrawable("dot"));
+            dot = new Image(kit.skin.getDrawable(token ? "token-dot" : "dot"));
             addActor(dot);
         }
         if (dot != null) {
@@ -138,11 +150,21 @@ public class UiButton extends TextButton {
     public void layout() {
         super.layout();
         if (trailing != null) { trailing.setBounds(getWidth() - trailingWidth - 3, (getHeight() - trailingSize) / 2, trailingWidth, trailingSize); }
-        if (badge != null) {
+        if (badge != null && token) {
+            // The badge's box holds its ring, so its centre is the ring's centre
+            float inset = DesignTokens.shipped().space().get("xs");
+            float height = badge.getStyle().background.getMinHeight();
+            badge.setSize(Math.max(height, badge.getPrefWidth()), height);
+            badge.setPosition(getWidth() - inset - badge.getWidth() / 2, getHeight() - inset - height / 2);
+        } else if (badge != null) {
             badge.setSize(Math.max(17, badge.getPrefWidth()), 17);
             badge.setPosition(getWidth() + 6 - badge.getWidth(), getHeight() + 6 - badge.getHeight());
         }
-        if (dot != null) {
+        if (dot != null && token) {
+            float inset = DesignTokens.shipped().space().get("xs");
+            float size = dot.getDrawable().getMinWidth();
+            dot.setBounds(getWidth() - inset - size / 2, getHeight() - inset - size / 2, size, size);
+        } else if (dot != null) {
             dot.setBounds(getWidth() - 13, getHeight() - 12, 7, 7);
         }
     }

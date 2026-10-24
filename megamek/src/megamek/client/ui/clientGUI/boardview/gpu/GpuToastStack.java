@@ -4,12 +4,14 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
@@ -20,6 +22,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.VerticalGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
@@ -45,8 +49,14 @@ final class GpuToastStack implements GpuHud.Component {
     private static final float SPRITE_WIDTH = 34;
     private static final float SPRITE_HEIGHT = 30;
     private static final float SPRITE_GAP = 10;
+    /** Token v0's toast: at most 480 wide, and the unit's sprite fitted in 40 x 34. */
+    private static final float TOKEN_MAX_WIDTH = 480;
+    private static final float TOKEN_SPRITE_WIDTH = 40;
+    private static final float TOKEN_SPRITE_HEIGHT = 34;
 
     private final GpuHudKit kit;
+    /** Token v0's toast card (docs/design-system/tokens.md, Toasts) rather than hud-v3's. */
+    private final boolean token;
     private final VerticalGroup root = new VerticalGroup();
     private final Map<ToastLevel, Drawable> backgrounds = new EnumMap<>(ToastLevel.class);
     /** The toasts on screen by id, until they have faded out or the stack dropped them. */
@@ -56,13 +66,28 @@ final class GpuToastStack implements GpuHud.Component {
     private GpuToasts.Snapshot toasts;
 
     GpuToastStack(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
+        this(kit, source, state, false);
+    }
+
+    /**
+     * A stack of hud-v3's toasts, or with {@code token} Token v0's cards: the popover surface with the level's bar
+     * and icon and a close button, which alone takes presses. Where the stack sits and in which order is still
+     * hud-v3's.
+     */
+    GpuToastStack(GpuHudKit kit, GpuBoardSource source, GpuHudState state, boolean token) {
         this.kit = kit;
+        this.token = token;
         root.setName("toast-stack");
         root.space(GAP);
         root.columnCenter();
-        root.setTouchable(Touchable.disabled);
+        root.setTouchable(token ? Touchable.childrenOnly : Touchable.disabled);
         Texture white = kit.ui.skin.get("white", Texture.class);
         for (ToastLevel level : ToastLevel.values()) {
+            if (token) {
+                backgrounds.put(level, kit.ui.skin.getDrawable(UiTheme.TOKEN_TOAST
+                      + level.name().toLowerCase(Locale.ROOT)));
+                continue;
+            }
             UiTheme.EdgeBox box = new UiTheme.EdgeBox(white, UiTheme.PANEL2, bar(level), 0, 0, 0, BAR);
             UiTheme.pad(box, PAD_Y, PAD_X).setLeftWidth(BAR + PAD_X);
             backgrounds.put(level, box);
@@ -116,6 +141,9 @@ final class GpuToastStack implements GpuHud.Component {
      * beyond it. It fades in, stays for the toast's duration, fades out and leaves the stack.
      */
     Actor toast(GpuToasts.Toast toast) {
+        if (token) {
+            return tokenToast(toast);
+        }
         Table row = new Table();
         row.setBackground(backgrounds.get(toast.level()));
         float room = MAX_WIDTH - BAR - 2 * PAD_X;
@@ -135,5 +163,76 @@ final class GpuToastStack implements GpuHud.Component {
         row.addAction(Actions.sequence(Actions.fadeIn(FADE), Actions.delay(toast.durationMs() / 1000f),
               Actions.fadeOut(FADE), Actions.run(() -> shown.remove(id)), Actions.removeActor()));
         return row;
+    }
+
+    /**
+     * One toast in Token v0's card, at most {@link #TOKEN_MAX_WIDTH} wide: the level's icon, the unit's sprite when it
+     * has one, the text in body type, wrapped when it needs more room, and the close button. It fades in over
+     * {@code medium}, stays for the toast's duration, fades out over {@code slow} and leaves the stack.
+     */
+    private Actor tokenToast(GpuToasts.Toast toast) {
+        DesignTokens tokens = DesignTokens.shipped();
+        float md = tokens.space().get("md");
+        float iconSize = tokens.size().get("icon.md");
+        ToastLevel level = toast.level();
+        Drawable card = backgrounds.get(level);
+        Table row = new Table();
+        row.setTouchable(Touchable.childrenOnly);
+        row.setBackground(card);
+        Actor icon = kit.ui.icon(icon(level), iconSize, UiTheme.tokenColor(role(level)));
+        icon.setTouchable(Touchable.disabled);
+        row.add(icon);
+        long id = toast.id();
+        UiButton close = kit.ui.closeButton(() -> {
+            shown.remove(id);
+            row.clearActions();
+            row.addAction(Actions.sequence(Actions.fadeOut(tokens.duration("medium") / 1000f, Interpolation.pow2Out),
+                  Actions.removeActor()));
+        }, true);
+        float room = TOKEN_MAX_WIDTH - card.getLeftWidth() - card.getRightWidth() - iconSize - 2 * md
+              - close.getPrefWidth();
+        if (toast.icon() != null) {
+            Actor sprite = kit.sprite(TOKEN_SPRITE_WIDTH, TOKEN_SPRITE_HEIGHT).set(toast.icon(),
+                  GpuHudKit.FRIEND_SPRITE);
+            sprite.setTouchable(Touchable.disabled);
+            row.add(sprite).padLeft(md);
+            room -= TOKEN_SPRITE_WIDTH + md;
+        }
+        Label text = kit.ui.typeLabel(toast.text(), "body", "text.primary");
+        text.setTouchable(Touchable.disabled);
+        Cell<Label> cell = row.add(text).left().padLeft(md).growX();
+        if (text.getPrefWidth() > room) {
+            text.setWrap(true);
+            cell.width(room);
+        }
+        row.add(close).padLeft(md);
+        row.getColor().a = 0;
+        row.addAction(Actions.sequence(Actions.fadeIn(tokens.duration("medium") / 1000f, Interpolation.pow2Out),
+              Actions.delay(toast.durationMs() / 1000f),
+              Actions.fadeOut(tokens.duration("slow") / 1000f, Interpolation.pow2Out),
+              Actions.run(() -> shown.remove(id)), Actions.removeActor()));
+        return row;
+    }
+
+    /** A level's icon: info, check, warning, error, and the Game Master's shield with a person. */
+    private static String icon(ToastLevel level) {
+        return switch (level) {
+            case INFO -> "info";
+            case SUCCESS -> "check";
+            case WARNING -> "warn";
+            case ERROR -> "error";
+            case GAMEMASTER -> "shield-person";
+        };
+    }
+
+    /** A level's color role; the Game Master has the selection violet. */
+    private static String role(ToastLevel level) {
+        return switch (level) {
+            case INFO -> "status.info";
+            case SUCCESS -> "status.success";
+            case WARNING -> "status.warning";
+            case ERROR -> "status.danger";
+            case GAMEMASTER -> "selected.primary";
+        };
     }
 }
