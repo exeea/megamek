@@ -56,7 +56,7 @@ import megamek.common.units.UnitType;
  * This class handles evaluating spaces on the board for the purposes of minefield deployment
  */
 public class MinefieldDeploymentPlanner {
-	
+
 	public static final Set<Integer> DISALLOWED_TERRAIN_TYPES = Set.of(
 			Terrains.MAGMA,
 			Terrains.BUILDING,
@@ -67,18 +67,18 @@ public class MinefieldDeploymentPlanner {
 			Terrains.SPACE,
 			Terrains.SKY
 			);
-	
+
 	public static final int POSITIVE_BUT_LOW_VALUE = 1;
-	
+
 	private double mekProportion = 0.0;
 	private double trackProportion = 0.0;
 	private double wheelProportion = 0.0;
 	private double hoverProportion = 0.0;
 	private double infantryProportion = 0.0;
 	private int vibrabombSetting = 50;
-	
+
 	private Map<Coords, Integer> placedMines = new HashMap<>();
-	
+
 	/**
 	 * Increment mine placement counter
 	 */
@@ -86,7 +86,7 @@ public class MinefieldDeploymentPlanner {
 		placedMines.putIfAbsent(coords, 0);
 		placedMines.put(coords, placedMines.get(coords) + 1);
 	}
-	
+
 	/**
 	 * Constructor for the minefield deployment planner.
 	 * Initializes opposition unit counts and "reasonable" vibrabomb setting
@@ -100,16 +100,16 @@ public class MinefieldDeploymentPlanner {
 		int wheeledVeeCount = 0;
 		int infantryCount = 0;
 		int hoverVeeCount = 0;
-		
+
 		Map<Double, Integer> mekWeightCount = new HashMap<>();
-		
+
 		// first, we collect the unit type counts
 		for (Entity entity : game.getEntitiesVector()) {
 			// ignore off-board and non-hostile entities
 			if (entity.isOffBoard() || !entity.getOwner().isEnemyOf(player)) {
 				continue;
 			}
-			
+
 			if (entity.getUnitType() == UnitType.MEK) {
 				mekCount++;
 				// add an entry to the bucket if we don't have one
@@ -124,33 +124,33 @@ public class MinefieldDeploymentPlanner {
 				} else if (entity.getMovementMode() == EntityMovementMode.HOVER) {
 					hoverVeeCount++;
 				}
-			// for now, we lump BA, Protomeks and infantry together; 
+			// for now, we lump BA, Protomeks and infantry together;
 			// they're relatively low-impact/low-BV and uncommon in general usage compared
 			// to meks and tanks and have similar preferences for where
 			// you should place mines to counter them
-			} else if (entity.getUnitType() == UnitType.INFANTRY || 
+			} else if (entity.getUnitType() == UnitType.INFANTRY ||
 					entity.getUnitType() == UnitType.BATTLE_ARMOR ||
 					entity.getUnitType() == UnitType.PROTOMEK) {
 				infantryCount++;
 			}
 		}
-		
+
 		double hostileUnitCount = mekCount + trackedVeeCount + wheeledVeeCount + infantryCount + hoverVeeCount;
-		
+
 		// to be honest, it's not going to be a meaningful game in this case
 		if (hostileUnitCount <= 0) {
 			return;
 		}
-		
+
 		mekProportion = (double) mekCount / hostileUnitCount;
 		trackProportion = (double) trackedVeeCount / hostileUnitCount;
 		wheelProportion = (double) wheeledVeeCount / hostileUnitCount;
 		infantryProportion = (double) infantryCount / hostileUnitCount;
 		hoverProportion = (double) hoverVeeCount / hostileUnitCount;
-		
+
 		calculateVibrabombSetting(mekWeightCount);
 	}
-	
+
 	/**
 	 * Worker function that calculates the vibra bomb setting
 	 * that'll get the most meks
@@ -159,31 +159,31 @@ public class MinefieldDeploymentPlanner {
 		if (mekWeightCount.isEmpty()) {
 			return;
 		}
-		
+
 		// a simplification: we take the weight that has the most meks
 		// and we then put the setting at that. In case of a tie, we take an arbitrary
 		// weight (whichever one was added first) in the current implementation
 		int mekCount = 0;
 		double currentWeight = 0;
-		
+
 		for (double weight : mekWeightCount.keySet()) {
 			if (mekWeightCount.get(weight) > mekCount) {
 				mekCount = mekWeightCount.get(weight);
 				currentWeight = weight;
 			}
 		}
-		
+
 		vibrabombSetting = (int) currentWeight;
 	}
-	
+
 	/**
-	 * Recommended weight setting for vibrabombs, 
+	 * Recommended weight setting for vibrabombs,
 	 * calculated at initialization based on the number and weights of enemy meks present
 	 */
 	public int getVibrabombSetting() {
 		return vibrabombSetting;
 	}
-	
+
 	/**
 	 * Given a minefield type, the player, game and board
 	 * Return a set of coordinates sorted into buckets by their utility score
@@ -191,61 +191,61 @@ public class MinefieldDeploymentPlanner {
 	 */
 	public Map<Double, List<Coords>> getBucketedCandidateCoords(int minefieldType, Board board) {
 		Map<Coords, Double> minefieldScores = buildCoalescedMinefieldScores(minefieldType, board);
-		
+
 		Map<Double, List<Coords>> bucketedCoords = new TreeMap<>(Collections.reverseOrder());
-		
+
 		for (Coords coords : minefieldScores.keySet()) {
 			double scoreBucket = minefieldScores.get(coords);
-			
+
 			bucketedCoords.putIfAbsent(scoreBucket, new ArrayList<Coords>());
 			bucketedCoords.get(scoreBucket).add(coords);
 		}
-		
+
 		for (double bucket : bucketedCoords.keySet()) {
 			Collections.shuffle(bucketedCoords.get(bucket));
 		}
-		
+
 		return bucketedCoords;
 	}
-	
+
 	/**
 	 * Given a minefield type (from Minefield class), build a map of coordinates and
 	 * their associated scores. It's a weighted average depending on the numbers and types
 	 * of units the opponent has.
-	 * 
-	 * Currently, we only consider meks and ground-bound vehicles. 
+	 *
+	 * Currently, we only consider meks and ground-bound vehicles.
 	 */
 	public Map<Coords, Double> buildCoalescedMinefieldScores(int minefieldType, Board board) {
-		Map<Coords, Double> coalescedMap = new HashMap<>();		
-		
+		Map<Coords, Double> coalescedMap = new HashMap<>();
+
 		// now, we generate the map for each unit type
 		Map<Coords, Integer> mekScores = new HashMap<>();
 		Map<Coords, Integer> trackedVeeScores = new HashMap<>();
 		Map<Coords, Integer> wheeledVeeScores = new HashMap<>();
 		Map<Coords, Integer> infantryScores = new HashMap<>();
 		Map<Coords, Integer> hoverVeeScores = new HashMap<>();
-		
+
 		// only calculate the scores for a unit type if it's present in the opfor
 		if (mekProportion > 0) {
 			mekScores = getMinefieldScores(minefieldType, UnitType.MEK, EntityMovementMode.BIPED, board);
 		}
-		
+
 		if (trackProportion > 0) {
 			trackedVeeScores = getMinefieldScores(minefieldType, UnitType.TANK, EntityMovementMode.TRACKED, board);
 		}
-		
+
 		if (wheelProportion > 0) {
 			wheeledVeeScores = getMinefieldScores(minefieldType, UnitType.TANK, EntityMovementMode.WHEELED, board);
 		}
-		
+
 		if (hoverProportion > 0) {
 			hoverVeeScores = getMinefieldScores(minefieldType, UnitType.TANK, EntityMovementMode.HOVER, board);
 		}
-		
+
 		if (infantryProportion > 0) {
 			infantryScores = getMinefieldScores(minefieldType, UnitType.INFANTRY, EntityMovementMode.INF_LEG, board);
 		}
-		
+
 		// now, for each coordinate, we take the weighted average
 		// if a coordinate has no value, it means it is unsuitable for that unit type
 		// so we treat it as a 0.
@@ -253,65 +253,65 @@ public class MinefieldDeploymentPlanner {
 		for (int x = 0; x < board.getWidth(); x++) {
 			for (int y = 0; y < board.getHeight(); y++) {
 				Coords coords = new Coords(x, y);
-				
+
 				double mekScore = mekScores.getOrDefault(coords, 0);
 				double trackedVeeScore = trackedVeeScores.getOrDefault(coords, 0);
 				double wheeledVeeScore = wheeledVeeScores.getOrDefault(coords, 0);
 				double infantryScore = infantryScores.getOrDefault(coords, 0);
 				double hoverVeeScore = hoverVeeScores.getOrDefault(coords, 0);
-				
+
 				double totalScore = mekScore * mekProportion +
 						trackedVeeScore * trackProportion +
 						wheeledVeeScore * wheelProportion +
-						infantryScore * infantryProportion + 
+						infantryScore * infantryProportion +
 						hoverVeeScore * hoverProportion;
-				
+
 				// if we've already placed a minefield here, we discourage placing more
 				if (placedMines.containsKey(coords)) {
 					totalScore -= placedMines.get(coords);
 				}
-				
+
 				coalescedMap.put(coords, totalScore);
 			}
 		}
-		
+
 		return coalescedMap;
 	}
-	
-	
+
+
 	/**
-	 * Given a mine field type (from Minefield class), a unit type (mek, tank etc), 
-	 * a movement mode (e.g. walking, wheeld etc) and the board, 
+	 * Given a mine field type (from Minefield class), a unit type (mek, tank etc),
+	 * a movement mode (e.g. walking, wheeld etc) and the board,
 	 * get a map of hexes and their suitability values for minefield placement
 	 */
 	public Map<Coords, Integer> getMinefieldScores(int minefieldType, int unitType,
 			EntityMovementMode movementMode, Board board) {
 		Map<Coords, Integer> minefieldScores = new HashMap<>();
-		
+
 		// these three types of mines only affect meks, so...
 		if ((minefieldType == Minefield.TYPE_TRIPWIRE || minefieldType == Minefield.TYPE_PITFALL ||
 				minefieldType == Minefield.TYPE_VIBRABOMB) && unitType != UnitType.MEK) {
 			return minefieldScores;
 		}
-				
+
 		for(int x = 0; x < board.getWidth(); x++) {
 			for (int y = 0; y < board.getHeight(); y++) {
 				Coords coords = new Coords(x, y);
 				Hex hex = board.getHex(coords);
-				
+
 				// if we can't place the minefield, just move on
 				if (hex.containsAnyTerrainOf(DISALLOWED_TERRAIN_TYPES)) {
 					minefieldScores.put(coords, Integer.MIN_VALUE);
 					continue;
 				}
-				
+
 				if (!hex.canPlaceMinefield(minefieldType)) {
 					minefieldScores.put(coords, Integer.MIN_VALUE);
 					continue;
 				}
-				
+
 				int hexScore = 0;
-				
+
 				switch (unitType) {
 				// meks and ground tanks are really the only meaningful consideration
 				// for mine placement.
@@ -333,93 +333,93 @@ public class MinefieldDeploymentPlanner {
 					hexScore = getIndividualHexScoreForInfantry(hex, board);
 					break;
 				}
-					
+
 				if (hexScore != Integer.MIN_VALUE) {
 					minefieldScores.put(coords, hexScore);
 				}
 			}
 		}
-		
+
 		return minefieldScores;
 	}
-	
+
 	/**
 	 * Worker function that takes the current hex and determines how good it is for
 	 * placing a minefield into when the opponent is a mek
 	 */
 	public int getIndividualHexScoreForMeks(Hex hex, Board board) {
 		int hexScore = 0;
-		
+
 		// meks are pretty likely to go into woods for cover
 		// ultra-heavy is prohibited
 		if (hex.containsTerrain(Terrains.WOODS)) {
 			switch (hex.terrainLevel(Terrains.WOODS)) {
-				case 3: 
+				case 3:
 					return Integer.MIN_VALUE;
 				default:
 					hexScore += hex.terrainLevel(Terrains.WOODS);
 					break;
 			}
 		}
-		
+
 		// meks are pretty likely to go into jungle for cover
 		// ultra-heavy is prohibited
 		if (hex.containsTerrain(Terrains.JUNGLE)) {
 			switch (hex.terrainLevel(Terrains.JUNGLE)) {
-				case 3: 
+				case 3:
 					return Integer.MIN_VALUE;
 				default:
 					hexScore += hex.terrainLevel(Terrains.JUNGLE);
 					break;
 			}
 		}
-		
+
 		// terrain that causes PSRs for no cover benefit is less likely
 		for (int terrain : hex.getTerrainTypes()) {
 			if (Terrains.HAZARDS_WITH_BLACK_ICE.contains(terrain)) {
 				hexScore -= hex.terrainLevel(terrain);
 			}
 		}
-		
+
 		// terrain that costs extra to move into/through for no cover benefit is less likely
 		// example: foliage, rough, etc.
 		if (hex.vegetationCeiling() == 1) {
 			hexScore--;
 		}
-		
+
 		if (hex.containsTerrain(Terrains.ROUGH)) {
 			hexScore -= hex.terrainLevel(Terrains.ROUGH);
 		}
-		
+
 		// it's fun to put mines on bridges
 		if (hex.containsAnyTerrainOf(Terrains.BRIDGE)) {
 			hexScore++;
 		}
-		
+
 		// calculate the partial cover bonus for this hex
 		// if we're really low relative to the rest of the map, you're probably not getting it
 		// if we're really high relative to the rest of the map you're probably getting it
 		int hexFloor = hex.floor();
 		int minElevation = board.getMinElevation();
 		int maxElevation = board.getMaxElevation();
-		double hexElevationCoverMultiplier = (double) (hexFloor - minElevation) / 
+		double hexElevationCoverMultiplier = (double) (hexFloor - minElevation) /
 				(double) (maxElevation - minElevation);
 		int partialCoverBonus = (int) (2.0 * hexElevationCoverMultiplier);
-		
+
 		// terrain next to partial cover is actually pretty good
 		// as is terrain that one can completely hide behind
 		// a very rough estimation of partial cover as a full calculation of this is super expensive
 		for (int direction = 0; direction < 6; direction++) {
 			Hex neighborHex = board.getHexInDir(hex.getCoords(), direction);
-			
+
 			if (neighborHex == null) {
 				continue;
 			}
-			
+
 			int neighborHexFloor = neighborHex.floor();
 			int neighborHexCeiling = neighborHex.ceiling();
-			
-			// partial cover bonus: buildings that go to this hex floor + 1 
+
+			// partial cover bonus: buildings that go to this hex floor + 1
 			if (neighborHex.containsTerrain(Terrains.BLDG_ELEV) &&
 					neighborHexCeiling == hexFloor + 1) {
 				hexScore += partialCoverBonus;
@@ -429,7 +429,7 @@ public class MinefieldDeploymentPlanner {
 					neighborHexCeiling > hexFloor + 1) {
 				hexScore++;
 			}
-			
+
 			// partial cover bonus: terrain level goes to this hex floor + 1
 			if (neighborHexFloor == hexFloor + 1) {
 				hexScore += partialCoverBonus;
@@ -438,22 +438,22 @@ public class MinefieldDeploymentPlanner {
 				hexScore++;
 			}
 		}
-		
+
 		return hexScore;
 	}
-	
+
 	/**
 	 * Worker function that takes the current hex and determines how good it is for
 	 * placing a minefield into when the opponent is a tracked vehicle
 	 */
 	public int getIndividualHexScoreForTrackedVees(Hex hex, Board board) {
 		int hexScore = 0;
-		
+
 		// tanks can't go into water
 		if (hex.hasDepth1WaterOrDeeper()) {
 			return Integer.MIN_VALUE;
 		}
-		
+
 		// tanks can only go into light woods
 		if (hex.containsTerrain(Terrains.WOODS)) {
 			if (hex.terrainLevel(Terrains.WOODS) >= 2) {
@@ -462,111 +462,111 @@ public class MinefieldDeploymentPlanner {
 				hexScore++;
 			}
 		}
-		
+
 		// tanks can't go into the jungle
 		if (hex.containsTerrain(Terrains.JUNGLE)) {
 			return Integer.MIN_VALUE;
 		}
-		
+
 		// terrain that causes PSRs for no cover benefit is less likely
 		for (int terrain : hex.getTerrainTypes()) {
 			if (Terrains.HAZARDS_WITH_BLACK_ICE.contains(terrain)) {
 				hexScore -= hex.terrainLevel(terrain);
 			}
 		}
-		
+
 		// terrain that costs extra to move into/through for no cover benefit is less likely
-		// example: rough, etc.		
+		// example: rough, etc.
 		if (hex.containsTerrain(Terrains.ROUGH)) {
 			hexScore -= hex.terrainLevel(Terrains.ROUGH);
 		}
-		
+
 		// vehicles like going on pavement because it makes them go faster
 		if (hex.containsAnyTerrainOf(Terrains.ROAD, Terrains.PAVEMENT, Terrains.BRIDGE)) {
 			hexScore++;
 		}
-		
+
 		int hexFloor = hex.floor();
-		
+
 		// terrain next to higher elevations is good to hide in
 		for (int direction = 0; direction < 6; direction++) {
 			Hex neighborHex = board.getHexInDir(hex.getCoords(), direction);
-			
+
 			if (neighborHex == null) {
 				continue;
 			}
-			
+
 			int neighborHexFloor = neighborHex.floor();
 			int neighborHexCeiling = neighborHex.ceiling();
-			
-			// cover bonus: buildings that go to this hex floor + 1 
+
+			// cover bonus: buildings that go to this hex floor + 1
 			if (neighborHex.containsTerrain(Terrains.BLDG_ELEV) &&
 					neighborHexCeiling > hexFloor) {
 				hexScore++;
 			}
-			
+
 			// partial cover bonus: terrain level goes to this hex floor + 1
 			if (neighborHexFloor > hexFloor) {
 				hexScore++;
 			}
 		}
-		
+
 		return hexScore;
 	}
-	
+
 	/**
 	 * Worker function that takes the current hex and determines how good it is for
 	 * placing a minefield into when the opponent is a wheeled vehicle
 	 */
 	public int getIndividualHexScoreForWheeledVees(Hex hex, Board board) {
 		int hexScore = 0;
-		
+
 		// wheeled vehicles can't go into a whole bunch of terrain
 		if (hex.hasDepth1WaterOrDeeper() ||	hex.hasVegetation() ||
 				hex.containsAnyTerrainOf(Terrains.ROUGH, Terrains.RUBBLE)) {
 			return Integer.MIN_VALUE;
 		}
-		
+
 		// terrain that causes PSRs for no cover benefit is less likely
 		for (int terrain : hex.getTerrainTypes()) {
 			if (Terrains.HAZARDS_WITH_BLACK_ICE.contains(terrain)) {
 				hexScore -= hex.terrainLevel(terrain);
 			}
 		}
-		
+
 		// vehicles like going on pavement because it makes them go faster
 		if (hex.containsAnyTerrainOf(Terrains.ROAD, Terrains.PAVEMENT, Terrains.BRIDGE)) {
 			hexScore++;
 		}
-		
+
 		int hexFloor = hex.floor();
-		
+
 		// terrain next to higher elevations is good to hide in
 		for (int direction = 0; direction < 6; direction++) {
 			Hex neighborHex = board.getHexInDir(hex.getCoords(), direction);
-			
+
 			if (neighborHex == null) {
 				continue;
 			}
-			
+
 			int neighborHexFloor = neighborHex.floor();
 			int neighborHexCeiling = neighborHex.ceiling();
-			
-			// LOS block/chokepoint bonus: buildings that go to this hex floor + 1 
+
+			// LOS block/chokepoint bonus: buildings that go to this hex floor + 1
 			if (neighborHex.containsTerrain(Terrains.BLDG_ELEV) &&
 					neighborHexCeiling > hexFloor) {
 				hexScore++;
 			}
-			
+
 			// partial cover bonus: terrain level goes to this hex floor + 1
 			if (neighborHexFloor > hexFloor) {
 				hexScore++;
 			}
 		}
-		
+
 		return hexScore;
 	}
-	
+
 	/**
 	 * Worker function that takes the current hex and determines how good it is for
 	 * placing a minefield into when the opponent is a hover vehicle
@@ -574,108 +574,108 @@ public class MinefieldDeploymentPlanner {
 	 */
 	public int getIndividualHexScoreForHoverVees(Hex hex, Board board) {
 		int hexScore = 0;
-		
+
 		// hover vehicles can't go into spaces with "trees"
 		if (hex.hasVegetation()) {
 			return Integer.MIN_VALUE;
 		}
-		
+
 		// terrain that causes PSRs for no cover benefit is less likely
 		for (int terrain : hex.getTerrainTypes()) {
 			if (Terrains.HAZARDS_WITH_BLACK_ICE.contains(terrain)) {
 				hexScore -= hex.terrainLevel(terrain);
 			}
 		}
-		
+
 		int hexFloor = hex.floor();
-		
+
 		// terrain next to higher elevations is good to hide in
 		for (int direction = 0; direction < 6; direction++) {
 			Hex neighborHex = board.getHexInDir(hex.getCoords(), direction);
-			
+
 			if (neighborHex == null) {
 				continue;
 			}
-			
+
 			int neighborHexFloor = neighborHex.floor();
 			int neighborHexCeiling = neighborHex.ceiling();
-			
-			// LOS block/chokepoint bonus: buildings that go to this hex floor + 1 
+
+			// LOS block/chokepoint bonus: buildings that go to this hex floor + 1
 			if (neighborHex.containsTerrain(Terrains.BLDG_ELEV) &&
 					neighborHexCeiling > hexFloor) {
 				hexScore++;
 			}
-			
+
 			// partial cover bonus: terrain level goes to this hex floor + 1
 			if (neighborHexFloor > hexFloor) {
 				hexScore++;
 			}
 		}
-		
+
 		if (hexScore > 0) {
 			return POSITIVE_BUT_LOW_VALUE;
 		} else {
 			return hexScore;
 		}
 	}
-	
+
 	/**
 	 * Worker function that takes the current hex and determines how good it is for
 	 * placing a minefield into when the opponent is a mek
-	 * 
+	 *
 	 * Note that infantry is inherently less valuable BV-wise,
 	 * so we cap the hex scores at 1.
 	 */
 	public int getIndividualHexScoreForInfantry(Hex hex, Board board) {
 		int hexScore = 0;
-		
+
 		// most infantry can't go into water
-		if (hex.hasDepth1WaterOrDeeper() || hex.containsAnyTerrainOf(Terrains.FIRE, 
+		if (hex.hasDepth1WaterOrDeeper() || hex.containsAnyTerrainOf(Terrains.FIRE,
 				Terrains.MAGMA, Terrains.HAZARDOUS_LIQUID)) {
 			return Integer.MIN_VALUE;
 		}
-		
+
 		// infantry are pretty likely to go into woods for cover
 		if (hex.containsTerrain(Terrains.WOODS)) {
 			hexScore += hex.terrainLevel(Terrains.WOODS);
 		}
-		
+
 		// infantry are pretty likely to go into jungle for cover
 		if (hex.containsTerrain(Terrains.JUNGLE)) {
 			hexScore += hex.terrainLevel(Terrains.JUNGLE);
 		}
-		
+
 		// infantry don't like being in open terrain because of the 2x damage
 		if (hex.isClear()) {
 			hexScore--;
 		}
-		
+
 		int hexFloor = hex.floor();
-		
+
 		// terrain next to higher elevation is actually pretty good
 		// a very rough estimation of partial cover as a full calculation of this is super expensive
 		for (int direction = 0; direction < 6; direction++) {
 			Hex neighborHex = board.getHexInDir(hex.getCoords(), direction);
-			
+
 			if (neighborHex == null) {
 				continue;
 			}
-			
+
 			int neighborHexFloor = neighborHex.floor();
 			int neighborHexCeiling = neighborHex.ceiling();
-			
+
 			// full cover bonus: buildings that go to this hex floor + 2 or higher
 			if (neighborHex.containsTerrain(Terrains.BLDG_ELEV) &&
 					neighborHexCeiling > hexFloor) {
 				hexScore++;
 			}
-			
+
 			// full cover bonus: terrain level goes to this hex floor + 2 or higher
 			if (neighborHexFloor > hexFloor) {
 				hexScore++;
 			}
 		}
-		
+
 		if (hexScore > 0) {
 			return POSITIVE_BUT_LOW_VALUE;
 		} else {

@@ -60,8 +60,8 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.common.board.Board;
 import megamek.common.ManeuverType;
+import megamek.common.board.Board;
 import megamek.common.moves.MovePath;
 
 /**

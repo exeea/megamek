@@ -4,13 +4,13 @@ package megamek.client.ui.boardeditor;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Path;
+
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
-import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

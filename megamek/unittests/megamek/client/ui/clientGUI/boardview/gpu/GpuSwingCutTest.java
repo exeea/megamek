@@ -36,13 +36,13 @@ import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.common.Configuration;
@@ -108,8 +108,8 @@ class GpuSwingCutTest {
     }
 
     /**
-     * G4: while the plan draws the route, the native frame shows MegaMek's movement envelope and the zones, 
-     * whose sprites extend the envelope's: everything the board state captures but the route's steps, 
+     * G4: while the plan draws the route, the native frame shows MegaMek's movement envelope and the zones,
+     * whose sprites extend the envelope's: everything the board state captures but the route's steps,
      * of which this plan has none yet. The weapon's bracket, a field of fire too,
      * is the fire control's wall.
      */

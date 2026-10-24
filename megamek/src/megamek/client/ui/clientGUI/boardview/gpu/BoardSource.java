@@ -7,11 +7,11 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
-import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.PlanetaryConditions;

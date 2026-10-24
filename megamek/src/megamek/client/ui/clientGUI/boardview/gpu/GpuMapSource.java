@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Font;
 import java.awt.Window;
-import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.io.File;
 import java.nio.file.Path;
@@ -35,8 +34,8 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.panels.CommonSettingsPane;
-import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Hex;
 import megamek.common.board.Board;

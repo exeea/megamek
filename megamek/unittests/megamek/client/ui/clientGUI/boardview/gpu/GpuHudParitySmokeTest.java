@@ -7,7 +7,6 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ATLAS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ATLAS_MOVED;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.BATTLEMASTER;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ENEMY_LOCUST;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.HEXES;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.KING_CRAB;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.LOCUST;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.MARAUDER;
@@ -693,7 +692,7 @@ class GpuHudParitySmokeTest {
     /**
      * EDT: gives the fixture's board state the fixture's client, as the battle window's board state has it. The
      * fixtures build the board state before their client; without one the source knows no turn of the local player
-     * (the fire preview would not follow the plan, the physical options stay off). 
+     * (the fire preview would not follow the plan, the physical options stay off).
      * The client shows that board, so the source's captured commands run (a command
      * of a board the client does not show is stale).
      */

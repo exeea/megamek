@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;

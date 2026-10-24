@@ -10,8 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.Hex;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.board.HexTile;

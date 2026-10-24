@@ -63,7 +63,6 @@ import megamek.client.ui.widget.picmap.PicMap;
 import megamek.common.Configuration;
 import megamek.common.CriticalSlot;
 import megamek.common.equipment.*;
-import megamek.common.game.Game;
 import megamek.common.units.Entity;
 import megamek.common.util.fileUtils.MegaMekFile;
 
