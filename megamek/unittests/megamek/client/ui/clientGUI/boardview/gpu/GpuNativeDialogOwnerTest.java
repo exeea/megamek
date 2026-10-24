@@ -42,7 +42,7 @@ class GpuNativeDialogOwnerTest {
     @BeforeEach
     void open() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless());
-        assumeTrue(GpuNativeDialogOwner.supported(), "Windows with FlatLaf's native library");
+        assumeTrue(GpuNativeDialogOwner.Win32.supported(), "Windows with FlatLaf's native library");
         onSwing(() -> {
             board = new JFrame("board");
             board.setBounds(100, 100, 400, 300);
@@ -52,7 +52,7 @@ class GpuNativeDialogOwnerTest {
             dialog = new JDialog(hiddenClient, "options", false);
             dialog.setBounds(150, 150, 200, 120);
             dialog.setVisible(true);
-            owner = new GpuNativeDialogOwner(FlatNativeWindowsLibrary.getHWND(board));
+            owner = GpuNativeDialogOwner.forWindows(FlatNativeWindowsLibrary.getHWND(board));
             return null;
         });
     }
@@ -74,7 +74,7 @@ class GpuNativeDialogOwnerTest {
 
     @Test
     void adoptedDialogIsOwnedByTheBoardWithoutFloatingAboveOtherApplications() throws Exception {
-        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.handle(dialog));
+        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
         long previous = nativeOwner(dialogHandle);
         assertNotEquals(owner.ownerHandle(), previous);
 
@@ -94,7 +94,7 @@ class GpuNativeDialogOwnerTest {
 
     @Test
     void minimizingTheBoardHidesItsDialog() throws Exception {
-        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.handle(dialog));
+        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
         assertTrue(onSwing(() -> owner.adopt(dialog)));
 
         onSwing(() -> {
@@ -129,7 +129,7 @@ class GpuNativeDialogOwnerTest {
 
     @Test
     void forgottenDialogIsNotRestored() throws Exception {
-        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.handle(dialog));
+        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
         assertTrue(onSwing(() -> owner.adopt(dialog)));
 
         onSwing(() -> {
@@ -142,11 +142,11 @@ class GpuNativeDialogOwnerTest {
     }
 
     private static long nativeOwner(long handle) {
-        return User32.GetWindowLongPtr(handle, GpuNativeDialogOwner.GWLP_HWNDPARENT);
+        return User32.GetWindowLongPtr(handle, GpuNativeDialogOwner.Win32.GWLP_HWNDPARENT);
     }
 
     private static boolean visible(long handle) {
-        return (User32.GetWindowLongPtr(handle, GpuNativeDialogOwner.GWL_STYLE) & WS_VISIBLE) != 0;
+        return (User32.GetWindowLongPtr(handle, GpuNativeDialogOwner.Win32.GWL_STYLE) & WS_VISIBLE) != 0;
     }
 
     private static boolean eventually(BooleanSupplier condition) throws InterruptedException {

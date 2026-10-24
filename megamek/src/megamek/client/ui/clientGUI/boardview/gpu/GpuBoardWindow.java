@@ -26,6 +26,7 @@ import java.util.function.BiFunction;
 import java.util.Set;
 import java.util.function.Supplier;
 import javax.swing.JCheckBoxMenuItem;
+import java.util.stream.Stream;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -38,6 +39,7 @@ import javax.swing.Timer;
 import javax.swing.event.MenuEvent;
 import javax.swing.event.MenuListener;
 
+import com.badlogic.gdx.Files.FileType;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
@@ -61,6 +63,7 @@ import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.common.units.Entity;
 import megamek.client.ui.util.ScreenFit;
+import megamek.common.Configuration;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.enums.GamePhase;
@@ -221,7 +224,7 @@ public final class GpuBoardWindow {
     private JDialog preview2D;
     private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
-    /** Windows: owns raised dialogs natively by the board window instead of floating them on top. Null elsewhere. */
+    /** Natively owned raised dialogs (Windows, macOS, Linux on X11) instead of floating them on top. Else null. */
     private volatile GpuNativeDialogOwner nativeOwner;
     /** EDT: natively owned modal dialogs; while any is open the board window is disabled, as a blocked frame is. */
     private final Set<Dialog> modalDialogs = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -238,8 +241,12 @@ public final class GpuBoardWindow {
               && event.getSource() instanceof Dialog hidden) {
             endModal(hidden);
             GpuNativeDialogOwner owner = nativeOwner;
-            if (owner != null && event.getID() == WindowEvent.WINDOW_CLOSED) {
-                owner.forget(hidden);
+            if (owner != null) {
+                if (event.getID() == WindowEvent.WINDOW_CLOSED) {
+                    owner.forget(hidden);
+                } else {
+                    owner.hidden(hidden);
+                }
             }
         }
         if (event.getID() == WindowEvent.WINDOW_CLOSED && event.getSource() instanceof Dialog closed) {
@@ -1037,8 +1044,9 @@ public final class GpuBoardWindow {
     }
 
     /**
-     * Keeps a dialog above the native window until either closes. On Windows the dialog becomes a native owned window
-     * of the board window; elsewhere, or when that fails, it floats on top ({@link #restoreDialogPresentation}).
+     * Keeps a dialog above the native window until either closes. The dialog becomes a native owned window of the
+     * board window where the platform allows ({@link GpuNativeDialogOwner}); elsewhere, or when that fails, it floats
+     * on top ({@link #restoreDialogPresentation}).
      */
     private void raise(Dialog dialog) {
         GpuNativeDialogOwner owner = nativeOwner;
@@ -1210,7 +1218,7 @@ public final class GpuBoardWindow {
         return active != null && active.gui == gui;
     }
 
-    /** Whether the active window keeps the dialog above itself: natively owned on Windows, otherwise on top. */
+    /** Whether the active window keeps the dialog above itself: natively owned where supported, otherwise on top. */
     static boolean raisedOverBoard(Dialog dialog) {
         GpuBoardWindow window = active;
         GpuNativeDialogOwner owner = window == null ? null : window.nativeOwner;
@@ -1340,6 +1348,11 @@ public final class GpuBoardWindow {
         configuration.setTitle(Messages.getString("GpuBoard.title"));
         configuration.setWindowedMode(1280, 800);
         configuration.setWindowSizeLimits(900, 600, -1, -1);
+        String[] icons = windowIcons();
+        if (icons.length > 0) {
+            // Windows and Linux show it on the title bar and taskbar; macOS uses the application's icon instead.
+            configuration.setWindowIcon(FileType.Absolute, icons);
+        }
         configuration.setInitialVisible(visible);
         // Keep rendering bounded even when VSync is disabled, we cap at 60fps. With VSync we let it do what it needs...
         configuration.setForegroundFPS(DEFAULT_VSYNC ? 0 : 60);
@@ -1349,6 +1362,15 @@ public final class GpuBoardWindow {
         GpuGlsl.configure(configuration);
         configuration.setWindowListener(new WindowListener());
         return configuration;
+    }
+
+    /** The MegaMek icons the Swing frames use, by size, that exist; a missing icon file would stop the window. */
+    static String[] windowIcons() {
+        return Stream.of(16, 32, 48, 256)
+              .map(size -> new File(Configuration.miscImagesDir(), "megamek-icon-" + size + "x" + size + ".png"))
+              .filter(File::isFile)
+              .map(File::getAbsolutePath)
+              .toArray(String[]::new);
     }
 
     /** Every board window's events: its context sets the shading language, and losing focus pauses the battle. */
