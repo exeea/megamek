@@ -401,6 +401,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private JComboBox<String> skinFiles;
     private JComboBox<UITheme> uiThemes;
     private final JCheckBox reduceMotion = new JCheckBox(Messages.getString("CommonSettingsDialog.reduceMotion"));
+    private final JCheckBox colorBlindPalette = new JCheckBox(
+          Messages.getString("CommonSettingsDialog.colorBlindPalette"));
 
     // Advanced Settings
     private ColourSelectorButton advancedChatboxBackgroundColor;
@@ -2639,6 +2641,11 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         row.add(uiThemes);
         comps.add(row);
 
+        colorBlindPalette.setToolTipText(Messages.getString("CommonSettingsDialog.colorBlindPalette.tooltip"));
+        row = new ArrayList<>();
+        row.add(colorBlindPalette);
+        comps.add(row);
+
         addSpacer(comps, 5);
 
         reduceMotion.setToolTipText(Messages.getString("CommonSettingsDialog.reduceMotion.tooltip"));
@@ -2979,6 +2986,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             }
             uiThemes.setSelectedItem(new UITheme(GUIP.getUITheme()));
             reduceMotion.setSelected(GUIP.getReduceMotion());
+            colorBlindPalette.setSelected(GUIP.getColorBlindPalette());
 
             fovInsideEnabled.setSelected(GUIP.getFovHighlight());
             fovHighlightAlpha.setValue(GUIP.getFovHighlightAlpha());
@@ -3449,6 +3457,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             GUIP.setUITheme(newUITheme.getClassName());
         }
         GUIP.setReduceMotion(reduceMotion.isSelected());
+        GUIP.setColorBlindPalette(colorBlindPalette.isSelected());
 
         String newSkinFile = (String) skinFiles.getSelectedItem();
         String oldSkinFile = GUIP.getSkinFile();

@@ -41,8 +41,9 @@ import megamek.client.ui.design.swing.TokenButtons.Size;
 import megamek.client.ui.util.UIUtil;
 
 /**
- * The segmented control (docs/design-system/tokens.md, Segmented control): a few mutually exclusive options in one
- * joined frame, for switching a view or a mode in place. The selected section has a violet wash and edge, like a
+ * The segmented control (docs/design-system/tokens.md, Segmented control): a few mutually exclusive options as separate
+ * raised segments, xs apart and each with its own edge, for switching a view or a mode in place. The selected segment
+ * has a mint wash and edge, like a
  * selected toggle; the sections share the width equally. Tab reaches only the selected section; Left and Right move
  * the selection, and Space and Enter select the focused section. It paints itself from the tokens of the current mode,
  * easing between states ({@link TokenMotion}).
@@ -66,7 +67,9 @@ public class TokenSegmented extends JPanel {
         this.size = size;
         setOpaque(false);
         int line = line();
-        setLayout(new GridLayout(1, labels.length, line, 0));
+        // Each segment's box is its bounds grown by the edge; xs stays between two boxes
+        int gap = UIUtil.scaleForGUI(Math.round(DesignTokens.shipped().space().get("xs")));
+        setLayout(new GridLayout(1, labels.length, gap + 2 * line, 0));
         setBorder(BorderFactory.createEmptyBorder(line, line, line, line));
         ButtonGroup group = new ButtonGroup();
         for (String label : labels) {
@@ -75,7 +78,7 @@ public class TokenSegmented extends JPanel {
             segments.add(segment);
             add(segment);
             // A section reads as a tab: it follows the screen's text case mode
-            TokenTextCase.role(segment, "tab");
+            TokenPresentation.role(segment, "tab");
         }
         for (int i = 0; i < segments.size(); i++) {
             bindKeys(i);
@@ -181,29 +184,25 @@ public class TokenSegmented extends JPanel {
         try {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             float arc = arc();
-            RoundRectangle2D frame = new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), arc, arc);
-            g.setColor(new Color(raised, true));
-            g.fill(frame);
-            g.clip(frame);
             for (int i = 0; i < segments.size(); i++) {
                 Segment segment = segments.get(i);
                 ButtonModel model = segment.getModel();
+                RoundRectangle2D box = round(outer(segment), arc);
+                g.setColor(new Color(raised, true));
+                g.fill(box);
                 Color fill = TokenMotion.color(this, FILL + i, model.isSelected() ? new Color(selected, true) : null,
                       TokenMotion.fast());
                 if (fill != null) {
                     g.setColor(fill);
-                    g.fill(round(outer(segment), arc));
+                    g.fill(box);
                 }
-                boolean pressed = model.isArmed() && model.isPressed();
-                Color target = null;
-                if (enabled && (model.isRollover() || model.isPressed())) {
-                    target = new Color(pressed ? ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2))
-                          : hover, true);
-                }
-                Color wash = TokenMotion.color(this, WASH + i, target, TokenMotion.buttonState(segment));
+                Color wash = TokenMotion.color(this, WASH + i, hovered(segment) && !model.isSelected()
+                      ? new Color(pressed(segment) ? ColorMath.withAlpha(hover,
+                      Math.min(255, ColorMath.alpha(hover) * 2)) : hover, true) : null,
+                      TokenMotion.buttonState(segment));
                 if (wash != null) {
                     g.setColor(wash);
-                    g.fill(model.isSelected() ? round(outer(segment), arc) : segment.getBounds());
+                    g.fill(box);
                 }
             }
         } finally {
@@ -211,7 +210,7 @@ public class TokenSegmented extends JPanel {
         }
     }
 
-    /** The edges go over the sections: the frame, the dividers, the selected edge and the focus ring. */
+    /** The edges go over the sections: each segment's own edge, mint when selected, and the focus ring. */
     @Override
     protected void paintChildren(Graphics graphics) {
         super.paintChildren(graphics);
@@ -223,26 +222,21 @@ public class TokenSegmented extends JPanel {
         Graphics2D g = (Graphics2D) graphics.create();
         try {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setColor(color(tokens, enabled ? "border.control" : "border.subtle", mode));
-            g.fill(ring(new Rectangle(0, 0, getWidth(), getHeight()), line, arc));
-
             int selected = getSelectedIndex();
-            g.setColor(color(tokens, "border.subtle", mode));
-            for (int i = 1; i < segments.size(); i++) {
-                if (i != selected && i - 1 != selected) {
-                    Segment segment = segments.get(i);
-                    g.fillRect(segment.getX() - line, segment.getY(), line, segment.getHeight());
-                }
-            }
-            Color selectedEdge = color(tokens, enabled ? "selected.primary" : "border.subtle", mode);
             for (int i = 0; i < segments.size(); i++) {
                 Segment segment = segments.get(i);
-                Color edge = TokenMotion.color(this, EDGE + i, i == selected ? selectedEdge : null,
-                      TokenMotion.fast());
-                if (edge != null) {
-                    g.setColor(edge);
-                    g.fill(ring(outer(segment), line, arc));
+                String role;
+                if (!enabled) {
+                    role = "border.subtle";
+                } else if (i == selected) {
+                    role = "selected.primary";
+                } else {
+                    role = hovered(segment) ? "border.strong" : "border.control";
                 }
+                Color edge = TokenMotion.color(this, EDGE + i, color(tokens, role, mode),
+                      i == selected ? TokenMotion.fast() : TokenMotion.buttonState(segment));
+                g.setColor(edge);
+                g.fill(ring(outer(segment), line, arc));
             }
             for (Segment segment : segments) {
                 if (enabled && FlatUIUtils.isPermanentFocusOwner(segment)) {
@@ -256,8 +250,17 @@ public class TokenSegmented extends JPanel {
         }
     }
 
-    /** A section's bounds grown over the frame edge and the dividers beside it. */
-    private Rectangle outer(Segment segment) {
+    private boolean hovered(Segment segment) {
+        ButtonModel model = segment.getModel();
+        return isEnabled() && (model.isRollover() || model.isPressed());
+    }
+
+    private static boolean pressed(Segment segment) {
+        ButtonModel model = segment.getModel();
+        return model.isArmed() && model.isPressed();
+    }
+
+    /** A segment's box: its bounds grown by the edge, which the layout leaves room for. */    private Rectangle outer(Segment segment) {
         Rectangle bounds = segment.getBounds();
         int line = line();
         bounds.grow(line, line);

@@ -27,7 +27,7 @@ import megamek.client.ui.design.DesignTokens;
 /**
  * The design system's lists and trees for Swing (docs/design-system/tokens.md, Lists and trees). The MegaMek look and
  * feels draw every list and tree this way: rows at least {@code control.sm} high, inset and rounded like the popup list,
- * a surface wash under the pointer and, for the selection, the violet wash plus a violet marker at the row's leading
+ * a surface wash under the pointer and, for the selection, the mint wash plus a mint marker at the row's leading
  * edge, so a selected row never relies on color alone. This adds an empty-state text and a two-line row.
  */
 public final class TokenLists {

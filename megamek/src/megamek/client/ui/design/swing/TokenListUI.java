@@ -19,7 +19,7 @@ import com.formdev.flatlaf.ui.FlatListUI;
 
 /**
  * Lists of the MegaMek look and feels (docs/design-system/tokens.md, Lists and trees): rows at least
- * {@code control.sm} high, a surface wash under the pointer and a violet marker on selected rows, and the empty-state
+ * {@code control.sm} high, a surface wash under the pointer and a mint marker on selected rows, and the empty-state
  * text of {@link TokenLists#emptyText}. A combo box's popup list keeps the select's own rows.
  */
 public class TokenListUI extends FlatListUI {

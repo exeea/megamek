@@ -8,7 +8,7 @@ import megamek.client.ui.design.DesignTokens;
 
 /**
  * Design-system tabs (docs/design-system/tokens.md, Tabs): labels on the window surface that switch between the pages
- * of one view. The selected tab has a violet underline whether or not the strip has focus, and a hairline runs under
+ * of one view. The selected tab has a mint underline whether or not the strip has focus, and a hairline runs under
  * the whole strip; the tabs sit at its left. Compact tabs are for panels, regular ones for a window's top-level pages.
  */
 public class UiTabs extends UiOptionBar {

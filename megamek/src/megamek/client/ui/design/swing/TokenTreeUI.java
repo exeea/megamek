@@ -16,7 +16,7 @@ import com.formdev.flatlaf.ui.FlatTreeUI;
 
 /**
  * Trees of the MegaMek look and feels (docs/design-system/tokens.md, Lists and trees): the list's rows with chevrons
- * and indentation, a surface wash under the pointer and a violet marker at the leading edge of selected rows.
+ * and indentation, a surface wash under the pointer and a mint marker at the leading edge of selected rows.
  */
 public class TokenTreeUI extends FlatTreeUI {
     private final MouseAdapter hoverTracker = new MouseAdapter() {

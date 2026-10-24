@@ -1,6 +1,6 @@
 {
   "version": "0.1",
-  "about": "MegaMek suite design tokens: the one source of truth for Swing and libGDX. Colors are #RRGGBB or #RRGGBBAA in sRGB. 'overlay' is the translucent value a surface uses when it is drawn over the board (libGDX); opaque Swing surfaces use 'dark'. Sizes are logical pixels at scale 1. See docs/design-system/tokens.md.",
+  "about": "MegaMek suite design tokens: the one source of truth for Swing and libGDX. Colors are #RRGGBB or #RRGGBBAA in sRGB. 'overlay' is the translucent value a surface uses when it is drawn over the board (libGDX); opaque Swing surfaces use 'dark'. 'colorblind' holds the dark and light values of the color-blind safe palette where they differ from the standard ones. Sizes are logical pixels at scale 1. See docs/design-system/tokens.md.",
   "color": {
     "surface.base": { "dark": "#0E1314", "light": "#ECEFEE", "use": "Window and app background." },
     "surface.panel": { "dark": "#141A1C", "light": "#FFFFFF", "overlay": "#12181AEB", "use": "Panels, dialogs, cards." },
@@ -25,13 +25,14 @@
     "accent.primary": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Brand accent: active state, links, progress, info." },
     "focus.ring": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Keyboard focus ring: 2 wide inside the edge, or around a small indicator with a 1 gap." },
 
-    "selected.primary": { "dark": "#9982D3", "light": "#5A49C6", "use": "Selected/current item: marker, edge, map selection." },
-    "selected.background": { "dark": "#9982D33D", "light": "#5A49C624", "use": "Selected row or cell wash, laid over its surface." },
+    "selected.primary": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Selected/current item: marker, edge, map selection. Shares the accent; the marker shape, not the color, tells it apart." },
+    "selected.background": { "dark": "#82E2CE29", "light": "#0A5C4C1F", "use": "Selected row or cell wash, laid over its surface." },
 
-    "status.danger": { "dark": "#FA878C", "light": "#8C1C12", "use": "Errors, destruction, enemy, critical." },
-    "status.warning": { "dark": "#F2D42D", "light": "#A24F00", "use": "Caution, heat, at-risk." },
-    "status.success": { "dark": "#669C00", "light": "#357A48", "use": "Done, healthy, valid." },
-    "status.info": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Neutral information; shares the accent on purpose." }
+    "status.danger": { "dark": "#F2777A", "light": "#B42318", "colorblind": { "dark": "#FA878C", "light": "#8C1C12" }, "use": "Errors, destruction, enemy, critical." },
+    "status.warning": { "dark": "#F2C14E", "light": "#8F5300", "colorblind": { "dark": "#F2D42D", "light": "#A24F00" }, "use": "Caution, heat, at-risk." },
+    "status.success": { "dark": "#8BD56B", "light": "#1E7B34", "colorblind": { "dark": "#669C00", "light": "#357A48" }, "use": "Done, healthy, valid." },
+    "status.info": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Neutral information; shares the accent on purpose." },
+    "status.gamemaster": { "dark": "#9982D3", "light": "#5A49C6", "use": "Game Master notices and actions." }
   },
   "typography": {
     "family": "Roboto",
@@ -75,12 +76,13 @@
       { "fg": ["text.onInverse"], "bg": ["surface.inverse"], "min": 4.5, "why": "Text on inverted faces" },
       { "fg": ["text.onAccent"], "bg": ["accent.primary"], "min": 4.5, "why": "Text on accent fills" },
       { "fg": ["text.onAccent"], "bg": ["status.danger", "status.warning", "status.success"], "min": 4.5, "why": "Counts on badge fills" },
-      { "fg": ["accent.primary", "status.danger", "status.warning", "status.success", "status.info"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover"], "min": 4.5, "why": "Accent and status colors may be used as text" },
+      { "fg": ["accent.primary", "status.danger", "status.warning", "status.success", "status.info", "status.gamemaster"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover"], "min": 4.5, "why": "Accent and status colors may be used as text" },
       { "fg": ["border.control", "border.strong", "focus.ring", "selected.primary"], "bg": ["surface.base", "surface.panel", "surface.raised", "surface.popover", "surface.input"], "min": 3.0, "why": "WCAG 1.4.11 non-text contrast" }
     ],
+    "visionRule": "The standard palette is measured for normal vision; the colorblind palette for every simulated vision type.",
     "distinct": [
-      { "colors": ["status.danger", "status.warning", "status.success", "selected.primary"], "minDeltaE": 10, "why": "Statuses and selection stay apart for every vision type" },
-      { "colors": ["accent.primary", "status.danger", "status.warning", "status.success", "selected.primary"], "minDeltaE": 8, "why": "The accent is not mistaken for a status or the selection" }
+      { "colors": ["status.danger", "status.warning", "status.success", "status.gamemaster"], "minDeltaE": 10, "why": "Statuses stay apart" },
+      { "colors": ["accent.primary", "status.danger", "status.warning", "status.success", "status.gamemaster"], "minDeltaE": 8, "why": "The accent (and so the selection and info) is not mistaken for a status" }
     ]
   }
 }

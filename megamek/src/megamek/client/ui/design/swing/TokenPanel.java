@@ -106,7 +106,7 @@ public class TokenPanel extends JPanel {
             tools = null;
             header = null;
         } else {
-            heading = TokenTextCase.role(new JLabel(title, JLabel.LEADING), "title");
+            heading = TokenPresentation.role(new JLabel(title, JLabel.LEADING), "title");
             tools = new JPanel(new FlowLayout(FlowLayout.TRAILING, TokenDialogPane.space("xs"), 0));
             tools.setOpaque(false);
             header = new JPanel(new BorderLayout(TokenDialogPane.space("md"), 0));
@@ -404,7 +404,7 @@ public class TokenPanel extends JPanel {
                 TokenFrame.paint(g, width, height, null, TokenDialogPane.token("focus.ring"), ringWidth(), null);
             } else {
                 Color edge = TokenMotion.color(this, EDGE, edgeColor(enabled, on, hovered), TokenMotion.hover(hovered));
-                TokenFrame.paint(g, width, height, null, edge, TokenFrame.line(), null);
+                TokenFrame.edge(g, width, height, edge, TokenFrame.line(), plain);
             }
             if (!plain) {
                 TokenFrame.paint(g, width, height, null, null, 0,

@@ -82,6 +82,12 @@ final class GpuBoardSkin implements Disposable {
         tuningStyles();
     }
 
+    /** Builds the token styles again after the user's palette changed ({@link DesignTokens#setPalette}). */
+    void refreshTokens() {
+        theme.refreshTokens();
+        tokenHud();
+    }
+
     /** The token look of a target pill ({@code pill}): a filter chip; {@code -over} and {@code -on} follow. */
     static final String TOKEN_PILL = "token-pill";
     /** The token look of a unit row ({@code hud-row}); {@code -foe} and {@code -friend} are its inspected edges. */
@@ -105,7 +111,7 @@ final class GpuBoardSkin implements Disposable {
         Color control = UiTheme.tokenColor("border.control");
         Color subtle = UiTheme.tokenColor("border.subtle");
         Color selected = UiTheme.tokenColor("selected.background");
-        Color violet = UiTheme.tokenColor("selected.primary");
+        Color selection = UiTheme.tokenColor("selected.primary");
 
         float letter = tokens.size().get("icon.md");
         theme.box("token-letter", Color.WHITE, null, 0, tokens.radius().get("sm"), null, 0, 0, letter)
@@ -116,7 +122,7 @@ final class GpuBoardSkin implements Disposable {
         theme.box(TOKEN_PILL, Color.CLEAR, control, border, radius, null, 0, 0, chip).setLeftWidth(xs);
         theme.box(TOKEN_PILL + "-over", UiTheme.tokenColor("surface.hover"), UiTheme.tokenColor("border.strong"),
               border, radius, null, 0, 0, chip).setLeftWidth(xs);
-        theme.box(TOKEN_PILL + "-on", selected, violet, border, radius, null, 0, 0, chip).setLeftWidth(xs);
+        theme.box(TOKEN_PILL + "-on", selected, selection, border, radius, null, 0, 0, chip).setLeftWidth(xs);
         for (String state : new String[] {"", "-over", "-on"}) {
             skin.getDrawable(TOKEN_PILL + state).setRightWidth(lg);
         }
@@ -127,7 +133,7 @@ final class GpuBoardSkin implements Disposable {
         row.up = theme.box(TOKEN_UNIT_ROW, Color.CLEAR, subtle, border, radius, null, sm, md, 0);
         row.over = theme.box(TOKEN_UNIT_ROW + "-over", Color.CLEAR, control, border, radius, null, sm, md, 0);
         row.down = row.over;
-        row.checked = theme.box(TOKEN_UNIT_ROW + "-selected", selected, violet, border, radius, null, sm, md, 0);
+        row.checked = theme.box(TOKEN_UNIT_ROW + "-selected", selected, selection, border, radius, null, sm, md, 0);
         row.checkedOver = row.checked;
         row.checkedDown = row.checked;
         theme.add(TOKEN_UNIT_ROW, row, TextButton.TextButtonStyle.class);

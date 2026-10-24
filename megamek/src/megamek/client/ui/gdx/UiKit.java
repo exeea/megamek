@@ -35,7 +35,7 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
-import megamek.client.ui.design.DesignTokens.TextMode;
+import megamek.client.ui.design.DesignTokens.Presentation;
 
 /**
  * The hud-v3 widgets that native views build from a UiTheme's skin (rebuild plan C.3), and the helpers they all use: a
@@ -70,7 +70,7 @@ public final class UiKit {
     /** The skin the widgets are built from: a UiTheme's, or one that a view's own skin composes with it. */
     public final Skin skin;
     private final Texture white;
-    private TextMode textMode = TextMode.GAME;
+    private Presentation presentation = Presentation.GAME;
     private Locale locale = Locale.getDefault();
 
     /** A kit over {@code skin}, which holds a UiTheme's styles; the kit only reads it. */
@@ -83,13 +83,13 @@ public final class UiKit {
      * The text case mode of the token controls the kit builds (docs/design-system/tokens.md, Text case): game, as the
      * in-game HUD is, unless a view sets app.
      */
-    public TextMode textMode() {
-        return textMode;
+    public Presentation presentation() {
+        return presentation;
     }
 
     /** Builds the following token controls in {@code mode}; controls already built keep theirs. */
-    public UiKit textMode(TextMode mode) {
-        textMode = mode;
+    public UiKit presentation(Presentation mode) {
+        presentation = mode;
         return this;
     }
 
@@ -104,12 +104,12 @@ public final class UiKit {
 
     /** Whether text role {@code role} ("button", "tab"...) is upper case in the kit's text mode. */
     public boolean upperCase(String role) {
-        return DesignTokens.shipped().upperCase(role, textMode);
+        return DesignTokens.shipped().upperCase(role, presentation);
     }
 
     /** {@code text} in the case of text role {@code role} in the kit's text mode and locale. */
     public String cased(String role, String text) {
-        return DesignTokens.shipped().cased(role, textMode, text, locale);
+        return DesignTokens.shipped().cased(role, presentation, text, locale);
     }
 
     /**
@@ -595,7 +595,7 @@ public final class UiKit {
      * caption on one line. Styles: hud (quiet, .b), hud-plain (normal-case .brow .b), hud-main (commit), hud-mini,
      * hud-icon (30-unit .b.ib), hud-seg, hud-utility (icon over label), hud-utility-row (.b.util.row) and
      * hud-utility-small (.b.brk.sm); and the token button set, button-&lt;kind&gt; and button-&lt;kind&gt;-compact
-     * ({@link UiTheme#BUTTON_KINDS}), which new views use: their labels follow the kit's {@link #textMode()}.
+     * ({@link UiTheme#BUTTON_KINDS}), which new views use: their labels follow the kit's {@link #presentation()}.
      */
     public UiButton button(String style, String icon, String text, String sub) {
         // Labelled token buttons, tabs and segments have a caps copy; icon buttons show a glyph and have none
@@ -719,7 +719,7 @@ public final class UiKit {
 
     /**
      * A menu item as {@link #menuRow(String, String, Boolean, boolean)} in {@code style}: hud-menu-row, or
-     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a violet check and a text.secondary chevron.
+     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a mint check and a text.secondary chevron.
      */
     public UiButton menuRow(String style, String text, String detail, Boolean checked, boolean group) {
         UiButton row = new UiButton(this, style);
@@ -840,10 +840,14 @@ public final class UiKit {
         return field;
     }
 
-    /** The token slider (docs/design-system/tokens.md, Sliders): a pill track, the accent fill and an accent disc. */
+    /**
+     * The token slider (docs/design-system/tokens.md, Sliders): a pill track and the accent fill up to the thumb, a thin
+     * light bar in the game presentation and an accent disc in the app one.
+     */
     public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle tokenSliderStyle() {
         return new com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle(
-              skin.get(UiTheme.TOKEN, com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle.class));
+              skin.get(presentation == Presentation.GAME ? UiTheme.TOKEN_BAR : UiTheme.TOKEN,
+                    com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle.class));
     }
 
     /** A token text input (docs/design-system/tokens.md, Inputs); compact is control.sm high, otherwise control.md. */
@@ -994,9 +998,6 @@ public final class UiKit {
         /** The segments or tabs, in the order of their labels. */
         public final List<UiButton> buttons = new ArrayList<>();
 
-        /** The hairlines between two sections of a token segmented control, hidden beside the selected one. */
-        private final List<Image> dividers = new ArrayList<>();
-
         private Segmented(String style, boolean flex, String... labels) {
             if (style.startsWith(UiTheme.TOKEN_SEGMENT) || style.startsWith(UiTheme.TOKEN_TAB)) {
                 tokenSections(style, flex, labels);
@@ -1027,26 +1028,18 @@ public final class UiKit {
         }
 
         /**
-         * The Token v0 look: tabs side by side on a border.subtle hairline, or segments of one width in a raised
-         * frame with hairlines between them (docs/design-system/tokens.md, Tabs and Segmented control).
+         * The Token v0 look: tabs side by side on a border.subtle hairline, or segments of one width that stand apart,
+         * xs between them, each with its own edge (docs/design-system/tokens.md, Tabs and Segmented control).
          */
         private void tokenSections(String style, boolean flex, String... labels) {
             boolean tabs = style.startsWith(UiTheme.TOKEN_TAB);
-            float border = DesignTokens.shipped().size().get("border");
             if (tabs) {
                 setBackground(skin.getDrawable("token-tabs"));
-            } else {
-                setBackground(skin.getDrawable("seg-frame"));
-                pad(border);
             }
+            float gap = DesignTokens.shipped().space().get("xs");
             for (String text : labels) {
-                if (!tabs && !buttons.isEmpty()) {
-                    Image divider = new Image(skin.getDrawable("token-divider"));
-                    dividers.add(divider);
-                    add(divider).width(border).fillY().padTop(6).padBottom(6);
-                }
                 UiButton button = button(style, null, text, null);
-                Cell<UiButton> cell = add(button).fillY();
+                Cell<UiButton> cell = add(button).fillY().padLeft(tabs || buttons.isEmpty() ? 0 : gap);
                 if (flex) {
                     cell.growX().uniformX();
                 } else if (!tabs) {
@@ -1060,9 +1053,6 @@ public final class UiKit {
         public Segmented select(int index) {
             for (int i = 0; i < buttons.size(); i++) {
                 buttons.get(i).pressed(i == index);
-            }
-            for (int i = 0; i < dividers.size(); i++) {
-                dividers.get(i).setVisible(i != index && i + 1 != index);
             }
             return this;
         }

@@ -7,7 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import megamek.client.ui.design.DesignTokens;
-import megamek.client.ui.design.DesignTokens.TextMode;
+import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.design.DesignTokens.TypeStyle;
 import megamek.client.ui.util.UIUtil;
 
@@ -22,7 +22,7 @@ public final class TokenFonts {
      */
     public static Font font(String styleName) {
         DesignTokens tokens = DesignTokens.shipped();
-        return font(styleName, tokens.textRoles().containsKey(styleName) && tokens.upperCase(styleName, TextMode.APP));
+        return font(styleName, tokens.textRoles().containsKey(styleName) && tokens.upperCase(styleName, Presentation.APP));
     }
 
     /**

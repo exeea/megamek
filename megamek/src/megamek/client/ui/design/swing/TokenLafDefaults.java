@@ -162,7 +162,7 @@ public final class TokenLafDefaults {
             put(prefix + "toolbar.selectedBackground", over(selected, base));
             put(prefix + "toolbar.selectedForeground", color("selected.primary"));
         }
-        // Edges are shared by plain and toggle buttons; a selected toggle keeps a violet edge in every state
+        // Edges are shared by plain and toggle buttons; a selected toggle keeps a mint edge in every state
         values.put("ButtonUI", TokenButtonUI.class.getName());
         values.put("ToggleButtonUI", TokenButtonUI.Toggle.class.getName());
         values.put("Button.border", TokenButtonUI.Border.class.getName());
@@ -221,7 +221,7 @@ public final class TokenLafDefaults {
               "hoverBackground", over(ColorMath.withAlpha(danger, tokens.alpha("tint.hover")), raised),
               "pressedBackground", over(ColorMath.withAlpha(danger, tokens.alpha("tint.pressed")), raised)));
 
-        // Quiet and icon buttons have no face or edge until hovered; a selected icon toggle is a violet wash and glyph
+        // Quiet and icon buttons have no face or edge until hovered; a selected icon toggle is a mint wash and glyph
         for (String type : new String[] { "Button", "ToggleButton" }) {
             values.put("[style]" + type + ".quiet", "buttonType: borderless");
             values.put("[style]" + type + ".icon", "buttonType: borderless; squareSize: true");
@@ -229,7 +229,7 @@ public final class TokenLafDefaults {
             values.put("[style]" + type + ".compact", padding("md"));
         }
 
-        // Toggle: selection is a violet wash and edge, never only a lighter face
+        // Toggle: selection is a mint wash and edge, never only a lighter face
         put("ToggleButton.disabledSelectedBackground",
               over(ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2), raised));
 
@@ -284,8 +284,8 @@ public final class TokenLafDefaults {
         values.put("TitledBorder.border", TokenTitledBorder.LegacyLine.class.getName());
         put("TitledBorder.titleColor", color("text.secondary"));
         // Lists and trees (TokenListUI, TokenTreeUI): rows at least control.sm high, inset and rounded like the popup
-        // list. The pointer's row gets the hover wash; a selected row keeps the violet wash, focused or not, and adds a
-        // violet marker at its leading edge, so selection never relies on color alone. Text starts past the marker.
+        // list. The pointer's row gets the hover wash; a selected row keeps the mint wash, focused or not, and adds a
+        // mint marker at its leading edge, so selection never relies on color alone. Text starts past the marker.
         values.put("ListUI", TokenListUI.class.getName());
         values.put("TreeUI", TokenTreeUI.class.getName());
         String rowArc = number(tokens.radius().get("sm") * 2);
@@ -367,7 +367,7 @@ public final class TokenLafDefaults {
         // Focus is a ring inside the selected tab (TokenTabbedPaneUI), not a tint that reads like hover
         put("TabbedPane.focusColor", base);
         values.put("TabbedPaneUI", TokenTabbedPaneUI.class.getName());
-        // Tabs: secondary labels that brighten under the pointer; the selected tab has a violet underline whether or
+        // Tabs: secondary labels that brighten under the pointer; the selected tab has a mint underline whether or
         // not the strip has focus. Plain tab panes are compact; TokenTabs makes regular ones.
         put("TabbedPane.contentAreaColor", color("border.subtle"));
         put("TabbedPane.foreground", color("text.secondary"));
@@ -384,7 +384,7 @@ public final class TokenLafDefaults {
         values.put("TabbedPane.tabInsets", "0," + tabSide + ",0," + tabSide);
         put("PopupMenu.borderColor", color("border.control"));
         // Select (TokenSelects): the shared popup list. Rows under the pointer or the keyboard get the hover wash, not
-        // the selection violet; the current value has a violet check instead.
+        // the selection color; the current value has a mint check instead.
         put("ComboBox.popupBackground", popover);
         put("ComboBox.selectionBackground", over(hover, popover));
         put("ComboBox.selectionForeground", color("text.primary"));
@@ -400,7 +400,7 @@ public final class TokenLafDefaults {
         put(TokenSelects.INLINE_HOVER_FOREGROUND, color("text.primary"));
         put(TokenSelects.PLACEHOLDER_FOREGROUND, color("text.muted"));
         // Menus: the select's popup and rows. The row under the pointer or the keyboard gets the hover wash (the
-        // @menu* variables above), checks and radios are violet, and accelerators are muted.
+        // @menu* variables above), checks and radios are mint, and accelerators are muted.
         int rowSide = Math.round(tokens.space().get("xs") + tokens.space().get("md"));
         int border = Math.round(tokens.size().get("border"));
         values.put("Popup.borderCornerRadius", number(tokens.radius().get("md")));
@@ -482,6 +482,12 @@ public final class TokenLafDefaults {
         values.put("Slider.thumbBorderWidth", number(tokens.size().get("border")));
         values.put("Slider.tickLength", number(tokens.space().get("sm")));
         values.put("Slider.tickWidth", number(tokens.size().get("tick.width")));
+        // The game presentation's thumb (TokenSliderUI): a light xs bar, icon.sm long, that stands out of the fill
+        values.put("Slider.barThumbSize", number(tokens.space().get("xs")) + "," + thumb);
+        values.put("Slider.barThumbArc", number(tokens.radius().get("sm")));
+        values.put("Slider.barThumbFocusGap", number(tokens.size().get("focus.gap")));
+        put("Slider.barThumbColor", color("text.secondary"));
+        put("Slider.barThumbActiveColor", color("text.primary"));
         put("Slider.trackColor", color("border.control"));
         put("Slider.trackValueColor", accent);
         put("Slider.thumbColor", accent);

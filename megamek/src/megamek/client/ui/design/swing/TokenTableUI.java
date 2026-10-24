@@ -18,7 +18,7 @@ import com.formdev.flatlaf.ui.FlatTableUI;
 
 /**
  * Tables of the MegaMek look and feels (docs/design-system/tokens.md, Tables). FlatLaf rounds and insets the zebra
- * stripes and the selection across the whole row; this adds the surface wash under the pointer, the violet marker on
+ * stripes and the selection across the whole row; this adds the surface wash under the pointer, the mint marker on
  * selected rows and the empty-state text of {@link TokenTables#emptyText}. The wash goes over the cells, so rows whose
  * renderers paint their own background still show it.
  */

@@ -25,7 +25,8 @@ public final class DesignTokens {
     /** The classpath location of the token file. */
     public static final String RESOURCE = "/megamek/client/ui/design/design-tokens.json";
 
-    private static volatile DesignTokens shipped;
+    private static final Map<Palette, DesignTokens> SHIPPED = new EnumMap<>(Palette.class);
+    private static volatile Palette activePalette = Palette.STANDARD;
 
     /** The two color modes. Native battle views are dark only for now. */
     public enum Mode {
@@ -34,10 +35,22 @@ public final class DesignTokens {
     }
 
     /**
-     * A screen's text case mode (docs/design-system/tokens.md, Text case): app screens upper-case only overline tags,
-     * game screens also the short framing labels. The mode belongs to a screen, not to an app.
+     * The user's color vision setting (docs/design-system/tokens.md, Palettes), independent of the {@link Mode}: the
+     * standard palette uses natural status colors and is measured for normal vision; the color-blind safe palette
+     * overrides the status colors so they stay apart for every simulated {@link Vision}.
      */
-    public enum TextMode {
+    public enum Palette {
+        STANDARD,
+        COLORBLIND
+    }
+
+    /**
+     * A screen's presentation mode (docs/design-system/tokens.md, Presentation mode): whether it is an app or a game
+     * screen. It sets the text case (app screens upper-case only overline tags, game screens also the short framing
+     * labels) and the few control shapes that differ, such as the slider's thumb. The mode belongs to a screen, not
+     * to an app.
+     */
+    public enum Presentation {
         APP,
         GAME
     }
@@ -81,7 +94,7 @@ public final class DesignTokens {
     private final String caseRule;
     private final Map<String, TypeStyle> typeStyles;
     private final Map<String, String> textRoles;
-    private final Map<TextMode, Set<String>> upperRoles;
+    private final Map<Presentation, Set<String>> upperRoles;
     private final Map<String, Float> space;
     private final Map<String, Float> radius;
     private final Map<String, Float> size;
@@ -90,16 +103,19 @@ public final class DesignTokens {
     private final float[] easing;
     private final List<ContrastCheck> contrastChecks;
     private final List<DistinctCheck> distinctChecks;
+    private final Palette tokenPalette;
 
-    private DesignTokens(JsonNode root) {
+    private DesignTokens(JsonNode root, Palette palette) {
+        tokenPalette = palette;
         version = root.path("version").asText();
         Map<String, ColorToken> colorMap = new LinkedHashMap<>();
         for (Map.Entry<String, JsonNode> entry : fields(root.path("color"))) {
             JsonNode node = entry.getValue();
             String name = entry.getKey();
             JsonNode overlay = node.get("overlay");
-            colorMap.put(name, new ColorToken(name, ColorMath.parse(required(node, "dark", name)),
-                  ColorMath.parse(required(node, "light", name)),
+            JsonNode values = palette == Palette.COLORBLIND && node.has("colorblind") ? node.get("colorblind") : node;
+            colorMap.put(name, new ColorToken(name, ColorMath.parse(required(values, "dark", name)),
+                  ColorMath.parse(required(values, "light", name)),
                   overlay == null ? null : ColorMath.parse(overlay.asText()), node.path("use").asText()));
         }
         colors = Collections.unmodifiableMap(colorMap);
@@ -128,10 +144,10 @@ public final class DesignTokens {
             roles.put(entry.getKey(), style);
         }
         textRoles = Collections.unmodifiableMap(roles);
-        Map<TextMode, Set<String>> upper = new EnumMap<>(TextMode.class);
-        for (TextMode textMode : TextMode.values()) {
+        Map<Presentation, Set<String>> upper = new EnumMap<>(Presentation.class);
+        for (Presentation presentation : Presentation.values()) {
             Set<String> upperInMode = new LinkedHashSet<>();
-            for (JsonNode role : textCase.path("upper").path(textMode.name().toLowerCase(Locale.ROOT))) {
+            for (JsonNode role : textCase.path("upper").path(presentation.name().toLowerCase(Locale.ROOT))) {
                 String name = role.asText();
                 String style = roles.get(name);
                 if (style == null) {
@@ -143,7 +159,7 @@ public final class DesignTokens {
                 }
                 upperInMode.add(name);
             }
-            upper.put(textMode, Collections.unmodifiableSet(upperInMode));
+            upper.put(presentation, Collections.unmodifiableSet(upperInMode));
         }
         upperRoles = Collections.unmodifiableMap(upper);
 
@@ -175,31 +191,56 @@ public final class DesignTokens {
         distinctChecks = List.copyOf(distinct);
     }
 
-    /** The tokens shipped with the application, read once. */
+    /** The tokens shipped with the application in the active {@link #palette()}, read once per palette. */
     public static DesignTokens shipped() {
-        DesignTokens tokens = shipped;
-        if (tokens == null) {
-            synchronized (DesignTokens.class) {
-                tokens = shipped;
-                if (tokens == null) {
-                    try (InputStream stream = DesignTokens.class.getResourceAsStream(RESOURCE)) {
-                        if (stream == null) {
-                            throw new IllegalStateException("Missing design token resource " + RESOURCE);
-                        }
-                        tokens = read(stream);
-                    } catch (IOException exception) {
-                        throw new UncheckedIOException(exception);
-                    }
-                    shipped = tokens;
-                }
-            }
-        }
-        return tokens;
+        return shipped(activePalette);
     }
 
-    /** Reads a token file. */
+    /** The tokens shipped with the application in {@code palette}, read once. */
+    public static DesignTokens shipped(Palette palette) {
+        synchronized (SHIPPED) {
+            DesignTokens tokens = SHIPPED.get(palette);
+            if (tokens == null) {
+                try (InputStream stream = DesignTokens.class.getResourceAsStream(RESOURCE)) {
+                    if (stream == null) {
+                        throw new IllegalStateException("Missing design token resource " + RESOURCE);
+                    }
+                    tokens = read(stream, palette);
+                } catch (IOException exception) {
+                    throw new UncheckedIOException(exception);
+                }
+                SHIPPED.put(palette, tokens);
+            }
+            return tokens;
+        }
+    }
+
+    /** The user's color vision palette, which {@link #shipped()} resolves; standard until set. */
+    public static Palette palette() {
+        return activePalette;
+    }
+
+    /**
+     * Sets the user's color vision palette. Themes built from {@link #shipped()} keep their colors until they are built
+     * again: Swing by setting the look and feel again, libGDX by {@code UiTheme.refreshTokens()}.
+     */
+    public static void setPalette(Palette palette) {
+        activePalette = palette;
+    }
+
+    /** Reads a token file in the standard palette. */
     public static DesignTokens read(InputStream stream) throws IOException {
-        return new DesignTokens(new ObjectMapper().readTree(stream));
+        return read(stream, Palette.STANDARD);
+    }
+
+    /** Reads a token file in {@code palette}. */
+    public static DesignTokens read(InputStream stream, Palette palette) throws IOException {
+        return new DesignTokens(new ObjectMapper().readTree(stream), palette);
+    }
+
+    /** The palette these tokens' colors are in. */
+    public Palette tokenPalette() {
+        return tokenPalette;
     }
 
     public String version() {
@@ -263,18 +304,18 @@ public final class DesignTokens {
         return typeStyles.get(style);
     }
 
-    /** Whether text of {@code role} is upper case on a screen in {@code textMode}. */
-    public boolean upperCase(String role, TextMode textMode) {
+    /** Whether text of {@code role} is upper case on a screen in {@code presentation}. */
+    public boolean upperCase(String role, Presentation presentation) {
         roleStyle(role);
-        return upperRoles.get(textMode).contains(role);
+        return upperRoles.get(presentation).contains(role);
     }
 
     /**
-     * {@code text} as a {@code role} shows it in {@code textMode}: upper-cased by the rules of {@code locale}, or as
+     * {@code text} as a {@code role} shows it in {@code presentation}: upper-cased by the rules of {@code locale}, or as
      * is. Strings stay sentence case in their bundles; only the drawn text changes. HTML text is never changed.
      */
-    public String cased(String role, TextMode textMode, String text, Locale locale) {
-        if (text == null || !upperCase(role, textMode) || text.regionMatches(true, 0, "<html>", 0, 6)) {
+    public String cased(String role, Presentation presentation, String text, Locale locale) {
+        if (text == null || !upperCase(role, presentation) || text.regionMatches(true, 0, "<html>", 0, 6)) {
             return text;
         }
         return text.toUpperCase(locale);

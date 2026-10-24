@@ -43,7 +43,8 @@ import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.ColorToken;
 import megamek.client.ui.design.DesignTokens.Mode;
-import megamek.client.ui.design.DesignTokens.TextMode;
+import megamek.client.ui.design.DesignTokens.Palette;
+import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiAngleDial;
 import megamek.client.ui.gdx.UiButton;
@@ -122,7 +123,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
           new ColorMove("MINT", UiTheme.MINT, "accent.primary"),
           new ColorMove("CORAL", UiTheme.CORAL, "status.danger"),
           new ColorMove("AMBER", UiTheme.AMBER, "status.warning"),
-          new ColorMove("VIOLET", UiTheme.VIOLET, "selected.primary"),
+          new ColorMove("VIOLET", UiTheme.VIOLET, "status.gamemaster"),
           new ColorMove("BLIP", UiTheme.BLIP, null));
     /** Mint meant both active and success; its success uses move to their own token. */
     private static final String MINT_SUCCESS = "status.success";
@@ -139,7 +140,9 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private static GpuUiLibraryWindow open;
 
     private final float preference;
-    private final DesignTokens tokens = DesignTokens.shipped();
+    private DesignTokens tokens = DesignTokens.shipped();
+    /** The palette when the gallery opened, put back when it closes. */
+    private final Palette previousPalette = DesignTokens.palette();
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     private final Table[] pages = new Table[TABS.length];
     private volatile Lwjgl3Application application;
@@ -247,7 +250,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         boardSkin = new GpuBoardSkin();
         hud = new GpuHudKit(boardSkin.skin);
         kit = hud.ui;
-        kit.textMode(TextMode.GAME);
+        kit.presentation(Presentation.GAME);
         stage = new Stage(new ScreenViewport());
         Gdx.input.setInputProcessor(stage);
         sprite = loadSprite();
@@ -262,7 +265,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         Label note = kit.label(text("UiLibrary.gdx.note"), "hud-small", 11.5f, UiTheme.MUTED);
         note.setWrap(true);
         head.add(note).width(NAME_WIDTH + TODAY_WIDTH + MIGRATED_WIDTH + 2 * COLUMN_GAP).padTop(4).row();
-        head.add(textModeSwitch()).padTop(8);
+        head.add(presentationSwitch()).padTop(8);
         root.add(head).growX().row();
         String[] labels = new String[TABS.length];
         for (int index = 0; index < TABS.length; index++) {
@@ -311,24 +314,43 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
      * The text case mode the token controls are built in: game, as in-game views are, or app. Switching rebuilds the
      * pages and the token overlays, and shows the current tab where it was scrolled to.
      */
-    private Actor textModeSwitch() {
-        UiButton toggle = kit.button("button-toggle" + UiTheme.COMPACT, null, text("UiLibrary.textMode.game"), null);
-        toggle.setChecked(kit.textMode() == TextMode.GAME);
+    private Actor presentationSwitch() {
+        UiButton toggle = kit.button("button-toggle" + UiTheme.COMPACT, null, text("UiLibrary.presentation.game"), null);
+        toggle.setChecked(kit.presentation() == Presentation.GAME);
         UiKit.onChange(toggle, () -> {
-            TextMode mode = toggle.isChecked() ? TextMode.GAME : TextMode.APP;
-            // After this event, as the rebuilt pages replace the actors under the pointer
-            Gdx.app.postRunnable(() -> {
-                kit.textMode(mode);
-                float scrollY = scroll.getScrollY();
-                Arrays.fill(pages, null);
-                tokenOverlays();
-                selectTab(tab);
-                scroll.layout();
-                scroll.setScrollY(scrollY);
-                scroll.updateVisualScroll();
+            Presentation mode = toggle.isChecked() ? Presentation.GAME : Presentation.APP;
+            rebuildPages(() -> kit.presentation(mode));
+        });
+        UiButton colorBlind = kit.button("button-toggle" + UiTheme.COMPACT, null, text("UiLibrary.palette.colorBlind"),
+              null);
+        colorBlind.setChecked(DesignTokens.palette() == Palette.COLORBLIND);
+        UiKit.onChange(colorBlind, () -> {
+            Palette palette = colorBlind.isChecked() ? Palette.COLORBLIND : Palette.STANDARD;
+            rebuildPages(() -> {
+                DesignTokens.setPalette(palette);
+                tokens = DesignTokens.shipped();
+                boardSkin.refreshTokens();
             });
         });
-        return toggle;
+        Table row = new Table();
+        row.defaults().padRight(8);
+        row.add(toggle);
+        row.add(colorBlind);
+        return row;
+    }
+
+    /** Applies a change after this event, as the rebuilt pages replace the actors under the pointer. */
+    private void rebuildPages(Runnable change) {
+        Gdx.app.postRunnable(() -> {
+            change.run();
+            float scrollY = scroll.getScrollY();
+            Arrays.fill(pages, null);
+            tokenOverlays();
+            selectTab(tab);
+            scroll.layout();
+            scroll.setScrollY(scrollY);
+            scroll.updateVisualScroll();
+        });
     }
 
     @Override
@@ -350,6 +372,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        DesignTokens.setPalette(previousPalette);
         if (stage != null) {
             stage.dispose();
         }
@@ -679,7 +702,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         rails.setBackground(kit.skin.getDrawable("panel-rails"));
         rails.add(kit.label(text("UiLibrary.gdx.tacticalView"), "hud-medium", 12, UiTheme.TEXT));
         Table frame = new Table();
-        frame.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_FRAME));
+        frame.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_RAILS));
         frame.add(kit.typeLabel(text("UiLibrary.gdx.tacticalView"), "body", "text.primary"));
         compare(page, "panel-rails", rails, topLeft(frame));
         compare(page, "rule", new Container<>(new Image(kit.skin.getDrawable("rule"))).size(320, 1),
@@ -1232,7 +1255,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
               weight(font.instance())), "hud-small", 11, UiTheme.MUTED)).left().row();
         String line = text("UiLibrary.type.sample");
         if (UiTheme.CAPS_FONT.equals(name)) {
-            line = tokens.cased("button", TextMode.GAME, line, MegaMek.getMMOptions().getLocale());
+            line = tokens.cased("button", Presentation.GAME, line, MegaMek.getMMOptions().getLocale());
         }
         Label label = new Label("overline".equals(name) ? UiTheme.upper(line) : line, kit.skin, style);
         label.setEllipsis(true);

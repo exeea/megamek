@@ -22,7 +22,7 @@ import megamek.client.ui.util.UIUtil;
 /**
  * The design system's select for Swing (docs/design-system/tokens.md, Select): a combo box with the input face, or the
  * inline variant, a value with a dotted underline that sits in running text or a dense header. Both open the shared
- * popup list: hover and keyboard rows get a surface wash and the current value a violet check, so violet keeps meaning
+ * popup list: hover and keyboard rows get a surface wash and the current value a mint check, so the selection color keeps meaning
  * selected. The MegaMek look and feels draw every combo box this way; this adds the sizes, the inline variant and a
  * placeholder.
  */

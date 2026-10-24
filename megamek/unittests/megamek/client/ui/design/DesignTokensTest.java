@@ -14,7 +14,8 @@ import java.util.regex.Pattern;
 import megamek.client.ui.design.DesignTokens.ContrastCheck;
 import megamek.client.ui.design.DesignTokens.DistinctCheck;
 import megamek.client.ui.design.DesignTokens.Mode;
-import megamek.client.ui.design.DesignTokens.TextMode;
+import megamek.client.ui.design.DesignTokens.Palette;
+import megamek.client.ui.design.DesignTokens.Presentation;
 import org.junit.jupiter.api.Test;
 
 class DesignTokensTest {
@@ -85,37 +86,64 @@ class DesignTokensTest {
     void appModeUpperCasesOnlyOverlinesAndGameModeTheFramingLabels() {
         DesignTokens tokens = DesignTokens.shipped();
         for (String role : tokens.textRoles().keySet()) {
-            assertEquals(role.equals("overline"), tokens.upperCase(role, TextMode.APP), role + " in app mode");
-            if (tokens.upperCase(role, TextMode.APP)) {
-                assertTrue(tokens.upperCase(role, TextMode.GAME), role + " is upper case in game mode too");
+            assertEquals(role.equals("overline"), tokens.upperCase(role, Presentation.APP), role + " in app mode");
+            if (tokens.upperCase(role, Presentation.APP)) {
+                assertTrue(tokens.upperCase(role, Presentation.GAME), role + " is upper case in game mode too");
             }
         }
         for (String role : List.of("display", "headline", "title", "button", "tab")) {
-            assertTrue(tokens.upperCase(role, TextMode.GAME), role + " in game mode");
+            assertTrue(tokens.upperCase(role, Presentation.GAME), role + " in game mode");
         }
         assertFalse(tokens.typeStyle("body").hasCaps(), "Body text is never upper case");
         assertFalse(tokens.typeStyle("small").hasCaps(), "Table text is never upper case");
         assertTrue(tokens.roleStyle("button").capsTracking() > tokens.roleStyle("button").tracking(),
               "Upper case is tracked wider");
-        assertEquals("END TURN", tokens.cased("button", TextMode.GAME, "End turn", Locale.ROOT));
-        assertEquals("End turn", tokens.cased("button", TextMode.APP, "End turn", Locale.ROOT));
-        assertEquals("<html>End turn", tokens.cased("button", TextMode.GAME, "<html>End turn", Locale.ROOT));
-        assertEquals("\u0130PTAL", tokens.cased("button", TextMode.GAME, "iptal", Locale.forLanguageTag("tr")));
-        assertThrows(IllegalArgumentException.class, () -> tokens.upperCase("no.such", TextMode.GAME));
+        assertEquals("END TURN", tokens.cased("button", Presentation.GAME, "End turn", Locale.ROOT));
+        assertEquals("End turn", tokens.cased("button", Presentation.APP, "End turn", Locale.ROOT));
+        assertEquals("<html>End turn", tokens.cased("button", Presentation.GAME, "<html>End turn", Locale.ROOT));
+        assertEquals("\u0130PTAL", tokens.cased("button", Presentation.GAME, "iptal", Locale.forLanguageTag("tr")));
+        assertThrows(IllegalArgumentException.class, () -> tokens.upperCase("no.such", Presentation.GAME));
     }
 
     @Test
-    void everyAccessibilityCheckPassesInBothModes() {
+    void everyAccessibilityCheckPassesInBothModesOfBothPalettes() {
         List<String> failures = new ArrayList<>();
-        List<TokenChecks.Result> results = TokenChecks.run(DesignTokens.shipped());
-        for (TokenChecks.Result result : results) {
-            if (!result.passes()) {
-                failures.add(String.format("%s %s: %.2f < %.2f%s (%s)", result.mode(), result.subject(),
-                      result.value(), result.min(), result.vision() == null ? "" : " for " + result.vision(),
-                      result.why()));
+        for (Palette palette : Palette.values()) {
+            List<TokenChecks.Result> results = TokenChecks.run(DesignTokens.shipped(palette));
+            for (TokenChecks.Result result : results) {
+                if (!result.passes()) {
+                    failures.add(String.format("%s %s %s: %.2f < %.2f%s (%s)", palette, result.mode(),
+                          result.subject(), result.value(), result.min(),
+                          result.vision() == null ? "" : " for " + result.vision(), result.why()));
+                }
             }
+            assertTrue(results.stream().anyMatch(result -> result.mode() == Mode.LIGHT));
         }
-        assertTrue(results.stream().anyMatch(result -> result.mode() == Mode.LIGHT));
         assertTrue(failures.isEmpty(), String.join("\n", failures));
+    }
+
+    @Test
+    void theColorBlindPaletteOverridesOnlyTheStatusColors() {
+        DesignTokens standard = DesignTokens.shipped(Palette.STANDARD);
+        DesignTokens safe = DesignTokens.shipped(Palette.COLORBLIND);
+        assertEquals(Palette.COLORBLIND, safe.tokenPalette());
+        for (String name : standard.colors().keySet()) {
+            boolean differs = standard.colorToken(name).dark() != safe.colorToken(name).dark()
+                  || standard.colorToken(name).light() != safe.colorToken(name).light();
+            assertEquals(List.of("status.danger", "status.warning", "status.success").contains(name), differs, name);
+        }
+        assertEquals(standard.color("accent.primary", Mode.DARK), safe.color("selected.primary", Mode.DARK),
+              "Selection shares the accent in both palettes");
+    }
+
+    @Test
+    void shippedFollowsTheActivePalette() {
+        try {
+            DesignTokens.setPalette(Palette.COLORBLIND);
+            assertEquals(Palette.COLORBLIND, DesignTokens.shipped().tokenPalette());
+        } finally {
+            DesignTokens.setPalette(Palette.STANDARD);
+        }
+        assertEquals(Palette.STANDARD, DesignTokens.shipped().tokenPalette());
     }
 }

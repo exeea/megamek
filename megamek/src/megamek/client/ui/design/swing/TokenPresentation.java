@@ -24,21 +24,22 @@ import javax.swing.plaf.UIResource;
 
 import megamek.MegaMek;
 import megamek.client.ui.design.DesignTokens;
-import megamek.client.ui.design.DesignTokens.TextMode;
+import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.design.DesignTokens.TypeStyle;
 
 /**
- * A screen's text case mode for Swing (docs/design-system/tokens.md, Text case). {@link #setMode} marks a screen's root
- * as an app or a game screen; every component with a text role below it follows the nearest marked ancestor, and app is
- * the default. The library's factories give their buttons, tabs and segmented controls a role; {@link #role} gives one
- * to another component.
+ * A screen's presentation mode for Swing (docs/design-system/tokens.md, Presentation mode). {@link #setMode} marks a
+ * screen's root as an app or a game screen; every component below it follows the nearest marked ancestor, and app is
+ * the default. The mode sets the text case of components with a text role and a short list of shapes (the slider's
+ * thumb). The library's factories give their buttons, tabs and segmented controls a role; {@link #role} gives one to
+ * another component.
  * <p>
  * A component keeps its sentence-case text and shows it upper-cased, in the role's caps tracking, when its role is
  * upper case in its screen's mode. Code may keep calling {@code setText}, {@code setTitleAt} and {@code setFont}: the
  * new value becomes the source and is shown in the screen's case. {@code getText} returns the shown text.
  */
-public final class TokenTextCase {
-    private static final String MODE = "MegaMek.textMode";
+public final class TokenPresentation {
+    private static final String MODE = "MegaMek.presentation";
     private static final String ROLE = "MegaMek.textRole";
     private static final String SOURCE = "MegaMek.textSource";
     private static final String TAB_SOURCES = "MegaMek.textTabSources";
@@ -47,32 +48,34 @@ public final class TokenTextCase {
     private static final String ACCESSIBLE_NAME = "MegaMek.textAccessibleName";
     private static final String APPLYING = "MegaMek.textApplying";
 
-    private TokenTextCase() {
+    private TokenPresentation() {
     }
 
     /** Marks {@code root}, a window's content or a screen's top panel, as an app or a game screen. */
-    public static void setMode(JComponent root, TextMode mode) {
+    public static void setMode(JComponent root, Presentation mode) {
         root.putClientProperty(MODE, mode);
         refresh(root);
+        // Sliders pick their thumb shape while painting
+        root.repaint();
     }
 
     /**
      * The text mode of the nearest marked ancestor of {@code component}; a popup follows its invoker and a dialog its
      * owner window, which may be marked on its root pane.
      */
-    public static TextMode mode(Component component) {
+    public static Presentation mode(Component component) {
         Component current = component;
         while (current != null) {
-            if (current instanceof JComponent jComponent && jComponent.getClientProperty(MODE) instanceof TextMode mode) {
+            if (current instanceof JComponent jComponent && jComponent.getClientProperty(MODE) instanceof Presentation mode) {
                 return mode;
             }
             if (current instanceof RootPaneContainer window && window.getRootPane() != null
-                  && window.getRootPane().getClientProperty(MODE) instanceof TextMode mode) {
+                  && window.getRootPane().getClientProperty(MODE) instanceof Presentation mode) {
                 return mode;
             }
             current = current instanceof JPopupMenu popup ? popup.getInvoker() : current.getParent();
         }
-        return TextMode.APP;
+        return Presentation.APP;
     }
 
     /**
@@ -164,7 +167,7 @@ public final class TokenTextCase {
             return;
         }
         DesignTokens tokens = DesignTokens.shipped();
-        TextMode mode = mode(component);
+        Presentation mode = mode(component);
         boolean upper = tokens.upperCase(role, mode);
         Locale locale = MegaMek.getMMOptions().getLocale();
         component.putClientProperty(APPLYING, Boolean.TRUE);

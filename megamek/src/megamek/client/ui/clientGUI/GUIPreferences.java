@@ -521,6 +521,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SENSOR_PREFERENCE_ORDER = "SensorPreferenceOrder";
     public static final String UI_THEME = "UITheme";
     public static final String REDUCE_MOTION = "ReduceMotion";
+    public static final String COLOR_BLIND_PALETTE = "ColorBlindPalette";
     public static final String BOARD_EDIT_LOAD_SIZE_HEIGHT = "BoardEditLoadSizeHeight";
     public static final String BOARD_EDIT_LOAD_SIZE_WIDTH = "BoardEditLoadSizeWidth";
     public static final String BOARD_EDIT_RANDOM_DIALOG_START = "BoardEditRandomDialogStart";
@@ -1099,6 +1100,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(AUTO_SELECT_NEXT, true);
         store.setDefault(UI_THEME, "com.formdev.flatlaf.FlatDarculaLaf");
         store.setDefault(REDUCE_MOTION, false);
+        store.setDefault(COLOR_BLIND_PALETTE, false);
 
         store.setDefault(RAT_TECH_LEVEL, 0);
         store.setDefault(RAT_BV_MIN, "5800");
@@ -2143,6 +2145,11 @@ public class GUIPreferences extends PreferenceStoreProxy {
     /** Whether the interface skips its transitions (hover fades, popup fades, smooth scrolling). */
     public boolean getReduceMotion() {
         return store.getBoolean(REDUCE_MOTION);
+    }
+
+    /** Whether the MegaMek themes use the color-blind safe palette instead of the standard one. */
+    public boolean getColorBlindPalette() {
+        return store.getBoolean(COLOR_BLIND_PALETTE);
     }
 
     public WeaponSortOrder getDefaultWeaponSortOrder() {
@@ -3214,6 +3221,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setReduceMotion(boolean reduce) {
         store.setValue(REDUCE_MOTION, reduce);
+    }
+
+    public void setColorBlindPalette(boolean colorBlind) {
+        store.setValue(COLOR_BLIND_PALETTE, colorBlind);
     }
 
     public void setSoftCenter(boolean b) {

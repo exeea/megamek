@@ -20,7 +20,7 @@ import megamek.client.ui.util.UIUtil;
 /**
  * The special button (docs/design-system/tokens.md, Buttons): a raised face with corner ticks at rest that grow along
  * the edges into a full frame under the pointer, the HUD utility look. The ticks close slowly ({@code slow}) and open
- * again a little faster. A selected one, set with {@link #setSelected}, has a violet wash and frame; a click never
+ * again a little faster. A selected one, set with {@link #setSelected}, has a mint wash and frame; a click never
  * selects it. It paints itself from the tokens of the current mode.
  */
 public class SpecialButton extends JButton {

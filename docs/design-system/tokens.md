@@ -13,7 +13,7 @@ In a dev build, open the lobby and use **Help > UI library (developer)**. The su
 
 - **Swing controls...** opens the Swing gallery: every color role in both modes, the accessibility checks, the text
   styles, spacing and shape, and five tabs of real Swing controls drawn by the MegaMek look and feel. A
-  toolbar toggles light mode and [game text mode](#text-case), and simulates deuteranopia, protanopia and tritanopia
+  toolbar toggles light mode and [game text mode](#presentation-mode), and simulates deuteranopia, protanopia and tritanopia
   over the whole window. While the
   gallery is open the whole app uses MegaMek Dark or Light, and closing it restores the previous theme. This is the
   complete library; Swing controls are added here as they are built.
@@ -76,29 +76,50 @@ Names describe a role, not a hue, so each name has one meaning in both modes. Su
 | `border.strong` | `#E8F1EB` | `#2A3533` | Hovered edge, full frame |
 | `accent.primary` | `#82E2CE` | `#0A5C4C` | Active state, links, progress |
 | `focus.ring` | `#82E2CE` | `#0A5C4C` | Keyboard focus |
-| `selected.primary` | `#9982D3` | `#5A49C6` | Selected item marker and edge |
-| `selected.background` | `#9982D33D` | `#5A49C624` | Selected row wash |
-| `status.danger` | `#FA878C` | `#8C1C12` | Errors, destruction, enemy |
-| `status.warning` | `#F2D42D` | `#A24F00` | Caution, heat |
-| `status.success` | `#669C00` | `#357A48` | Done, healthy |
+| `selected.primary` | `#82E2CE` | `#0A5C4C` | Selected item marker and edge |
+| `selected.background` | `#82E2CE29` | `#0A5C4C1F` | Selected row wash |
+| `status.danger` | `#F2777A` | `#B42318` | Errors, destruction, enemy |
+| `status.warning` | `#F2C14E` | `#8F5300` | Caution, heat |
+| `status.success` | `#8BD56B` | `#1E7B34` | Done, healthy |
 | `status.info` | `#82E2CE` | `#0A5C4C` | Neutral information |
+| `status.gamemaster` | `#9982D3` | `#5A49C6` | Game Master notices and actions |
 
 Why these values:
 
 - **Accent is mint, and only the accent.** hud-v3 used mint for both "active" and "success". Success is now a
   distinct olive green, and info deliberately shares the accent so there is one fewer hue to tell apart.
-- **Selected is violet, not orange.** Orange sat too close to danger and warning: its worst simulated
-  distance (CIEDE2000) was 12.1, against 16.5 for violet. Violet is also unused by every status.
-- **Statuses separate by lightness, not only hue.** Danger, warning and success differ in lightness as well as hue,
-  so they stay apart under every simulated color vision deficiency. In light mode they must be dark enough to read as
-  text (4.5:1), which leaves less room, so the worst light-mode distance is about 11 against about 16.5 in dark.
+- **Selected is mint, like the accent.** A selection always adds a shape (a marker, an edge, a check or an
+  underline), so the shape, not a second hue, tells it apart from an active control. Violet read as foreign next to
+  the mint HUD; it stays only for the Game Master (`status.gamemaster`), whose notices need a hue of their own.
+- **Statuses use the hues players expect.** Red, amber and green in the standard palette; the color-blind safe
+  palette (see [Palettes](#palettes)) moves them apart in lightness as well as hue.
 - **Borders that identify a control reach 3:1** (WCAG 1.4.11). hud-v3 field and chip borders measured 1.8 and 2.4.
   `border.subtle` is for decoration only and must never be the only cue.
 - **Color is never the only cue.** Status chips pair the color with an icon (error, warning, check, info, radio);
   the galleries show this.
 
 The `checks` block in the JSON lists every rule: text contrast 4.5:1, control contrast 3:1, and minimum distances
-between statuses, selection and accent for typical vision and the three simulated deficiencies. All 154 checks pass.
+between the statuses and the accent. Contrast is checked in all four themes; distances follow the `visionRule`.
+
+### Palettes
+
+There are four themes: dark and light, each in a **standard** and a **color-blind safe** palette. The palette is a user
+setting of its own (Client settings, "Color-blind safe colors"; `GUIPreferences.COLOR_BLIND_PALETTE`), apart from the
+light or dark theme.
+
+| Palette | Changes | Distances checked for |
+| --- | --- | --- |
+| Standard | The values above | Typical vision |
+| Color-blind safe | Only the statuses, from each role's `colorblind` block: danger `#FA878C` / `#8C1C12`, warning `#F2D42D` / `#A24F00`, success `#669C00` / `#357A48` (dark / light) | Typical vision and the three simulated deficiencies |
+
+- **Why two palettes.** Colors that stay apart for every vision type pushed the standard statuses toward odd hues (an
+  olive success, a lemon warning). Each palette now does one job well.
+- **Contrast never changes.** Every contrast check runs in all four themes.
+- Player, team and unit colors are out of scope and stay as they are.
+- `DesignTokens.setPalette(Palette)` switches the palette for the whole JVM, and `DesignTokens.shipped()` returns the
+  active one. Swing sets the look and feel again; libGDX re-adds its token styles (`GpuBoardSkin.refreshTokens()`), and
+  widgets built before keep the old ones. Both galleries have a Color-blind safe switch.
+- Whether MekHQ and MegaMekLab share the setting is decided when they adopt the tokens.
 
 ### Migrating hud-v3 colors
 
@@ -114,7 +135,8 @@ between statuses, selection and accent for typical vision and the three simulate
 | `TICK`, `RAIL` | `border.control` |
 | `CORNER`, `HOVER` | `border.strong` |
 | `MINT` | `accent.primary`; its success uses move to `status.success` |
-| `CORAL`, `AMBER`, `VIOLET` | `status.danger`, `status.warning`, `selected.primary` |
+| `CORAL`, `AMBER` | `status.danger`, `status.warning` |
+| `VIOLET` | `selected.primary` (now mint) for selection; `status.gamemaster` for the Game Master |
 | `BLIP` | No token: it stays a HUD game color, like unit and team colors |
 
 No hud-v3 color becomes `surface.base`, `surface.input`, `surface.hover`, `surface.scrim`, `text.onAccent`,
@@ -142,14 +164,16 @@ upper case have it, and the tokens fail to load if a role is upper case in a sty
 
 Rules:
 
-- **Case depends on the screen's mode**; see [Text case](#text-case).
+- **Case depends on the screen's mode**; see [Presentation mode](#presentation-mode).
 - **Two weights**, regular (400) and medium (500). Hierarchy comes from size and weight, not case or condensed faces.
   hud-v3's condensed bold styles are retired.
 - Sizes are logical pixels at scale 1; both platforms multiply by the user's UI scale.
 
-### Text case
+### Presentation mode
 
-Each screen is in one of two modes. The mode belongs to the screen, not to the app, so MekHQ or MegaMek can mix both.
+Each screen is in one of two presentation modes, game or app. The mode belongs to the screen, not to the app, so MekHQ
+or MegaMek can mix both. It sets the text case below and the [slider thumb](#sliders); other differences may join it
+later, always as a whole-screen choice rather than per control.
 
 | Text | App mode | Game mode |
 | --- | --- | --- |
@@ -174,15 +198,15 @@ case. The tokens' `typography.case` block maps each role to its style (`display`
 `tab` on `label`, `overline`) and lists the roles each mode upper-cases; `DesignTokens.upperCase(role, mode)` and
 `cased(role, mode, text, locale)` read it.
 
-- **Swing:** `TokenTextCase.setMode(root, TextMode.GAME)` marks a screen; a dialog follows its owner window, whose
+- **Swing:** `TokenPresentation.setMode(root, Presentation.GAME)` marks a screen; a dialog follows its owner window, whose
   mode may be set on its root pane. The button, tab and segmented factories give their controls the `button` or `tab`
   role (icon buttons get none: their text is a glyph), and `TokenPanel`, `TokenDialogPane` and `TokenStatusCard` give
-  their headings the `title` or `headline` role; `TokenTextCase.role` gives one to another button, label or tab pane.
+  their headings the `title` or `headline` role; `TokenPresentation.role` gives one to another button, label or tab pane.
   A control keeps its sentence-case text and shows it upper-cased in the caps-tracked font, so views keep calling
   `setText`, `setTitleAt` and `setFont`; screen readers get the sentence-case text.
 - **libGDX:** fonts bake their spacing in, so caps text has its own fonts: `hud-medium-caps` with a `-caps` copy of
   each labelled token button, tab and segment style, and `type-<style>-caps` for display, headline and title.
-  `UiKit.textMode` (game by default) picks them for the buttons, tabs, segmented controls and token panel and dialog
+  `UiKit.presentation` (game by default) picks them for the buttons, tabs, segmented controls and token panel and dialog
   headers it builds; `UiKit.roleLabel`, `roleTypeLabel` and `cased` do the same for other text. The kit depends on no
   game options, so its view passes in the player's locale (`UiKit.locale`).
 
@@ -301,19 +325,19 @@ every state.
 | Quiet | Low-emphasis actions in toolbars and rows | No face, no edge | As secondary, without the edge | — |
 | Danger | Destructive actions | As secondary, `status.danger` label and edge | Danger wash at `tint.hover` / `tint.pressed` | — |
 | Toggle | An on/off choice | As secondary | As secondary | `selected.background` wash, `selected.primary` edge |
-| Icon | A Material Symbols glyph, square; needs a tooltip | As quiet | As quiet | Violet wash and violet glyph |
-| Special | Emphasis moments (the HUD utility look) | Raised face, `border.control` corner ticks | Full `border.strong` frame | Violet wash and frame |
+| Icon | A Material Symbols glyph, square; needs a tooltip | As quiet | As quiet | Selected wash and glyph |
+| Special | Emphasis moments (the HUD utility look) | Raised face, `border.control` corner ticks | Full `border.strong` frame | Selected wash and frame |
 
 - **Sizes.** Regular is `control.md` (36) high with `lg` side padding, for dialogs and forms; compact is `control.sm`
   (28) with `md` padding, for dense tables and toolbars. Icon glyphs are `icon.md` / `icon.sm`.
-- **Labels** are Roboto Medium, sentence case in app mode and upper case in game mode (see [Text case](#text-case)).
+- **Labels** are Roboto Medium, sentence case in app mode and upper case in game mode (see [Presentation mode](#presentation-mode)).
   Rest text is `text.secondary` and brightens to `text.primary` under
   the pointer, so the hover reads on every kind.
 - **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label.
 - **Focus** follows [Focus](#focus): a 1-wide `focus.ring` border plus a 1-wide inner line, inside the edge. On
   primary the border is `text.primary` and the inner line `text.onAccent`, so it shows on the accent face.
-- **Selection** is always violet with an edge or glyph change, never a lighter face alone, so it does not depend on
-  telling two greys apart.
+- **Selection** is always the mint selected color with an edge or glyph change, never a lighter face alone, so it
+  does not depend on telling two greys apart.
 - The primary label keeps at least 4.5:1 against its hover and pressed faces in both modes (tested).
 
 ### Using them
@@ -404,7 +428,8 @@ clear button; a plain `TextField` takes the `input` style and `UiKit.hoverEdge(f
 `UiNumber.tokenLook()` gives the scrub a text.secondary caption, an `input-compact` field and the token slider. The
 dial and hex pickers (`UiAngleDial`, `UiHexSides`) only recolour: `style("token")` reads the token `PickerStyle`
 (discs, border.control and border.strong ticks, accent value, text.muted labels that turn text.secondary when chosen
-and text.primary on hover). The `hud` and `hud-search` field styles stay as hud-v3 draws them today.
+and text.primary on hover). The hub keeps hud-v3's mint ring, `selection.width` (2) wide, and the needle stops at it,
+so the value inside sits on a plain base. The `hud` and `hud-search` field styles stay as hud-v3 draws them today.
 
 ## Choices
 
@@ -459,24 +484,26 @@ Labels on the window surface that switch between the pages of one view.
 
 - **Sizes.** Compact (`control.sm`, 28 high, `md` side padding) is the default for every tab pane, since most sit in
   panels; regular (`control.md`, 36, `lg` padding) is for a window's top-level pages.
-- **Labels** are Roboto Medium, like buttons, and follow the screen's [text case](#text-case) mode.
+- **Labels** are Roboto Medium, like buttons, and follow the screen's [presentation mode](#presentation-mode) mode.
 - **Not by color alone.** The underline marks the selected tab as well as the brighter label.
 
 ## Segmented control
 
-Two to five short, mutually exclusive options in one raised frame, for switching a view or a mode in place (map, list
-or cards). Use tabs to switch between pages, and radio buttons for a choice in a form.
+Two to five short, mutually exclusive options as separate segments, `xs` (4) apart, for switching a view or a mode in
+place (map, list or cards). Use tabs to switch between pages, and radio buttons for a choice in a form.
 
 | State | Look |
 | --- | --- |
-| Rest | `surface.raised` frame with a `border.control` edge; `border.subtle` dividers; `text.secondary` labels |
-| Hover / pressed | The `surface.hover` wash (twice for pressed) on the section, `text.primary` label |
-| Selected | `selected.background` wash and `selected.primary` edge on the section, as a selected toggle; the dividers beside it give way |
-| Focus | The ring on the selected section, over its edge |
+| Rest | Each segment a `surface.raised` box with its own `border.control` edge and `radius.md`; `text.secondary` labels |
+| Hover / pressed | A `border.strong` edge and the `surface.hover` wash (twice for pressed) on the segment, `text.primary` label |
+| Selected | `selected.background` wash and `selected.primary` edge on the segment, as a selected toggle |
+| Focus | The ring on the selected segment, over its edge |
 | Disabled | `border.subtle` edges, `text.disabled` labels, the selected wash at half strength |
 
 - **Sizes** match buttons: regular `control.md` (36) with `lg` padding, compact `control.sm` (28) with `md`.
-- **Width.** The sections share the width equally, the widest label setting it.
+- **Width.** The segments share the width equally, the widest label setting it.
+- **Separate, not joined.** Each segment reads as a button of its own, so a joined frame's hairlines, which hid beside
+  the selection, are gone.
 - **Keys.** Tab reaches the control as one stop; Left and Right move the selection, which applies at once.
 
 **Swing.** The MegaMek themes give every `JTabbedPane` the token tabs, compact, so existing views get them without
@@ -499,9 +526,9 @@ traversal yet.
 
 hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
 `-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and
-`hud-tab-caps` compact tabs in sentence case. Segments share one width inside the `seg-frame`, with `border.subtle`
-hairlines that hide beside the selected section; tabs sit on a `border.subtle` hairline with a violet underline under
-the selected one.
+`hud-tab-caps` compact tabs in sentence case. Segments share one width, `xs` apart, each drawn from the `seg-item`,
+`seg-over`, `seg-down` and `seg-on` faces; tabs sit on a `border.subtle` hairline with a mint underline under the
+selected one.
 
 ## Select
 
@@ -521,7 +548,7 @@ options should stay visible.
 - **Sizes** match inputs: regular `control.md` (36), compact `control.sm` (28). The face is as wide as its widest item
   or placeholder, so it does not jump when the value changes. The inline face is `control.sm` high.
 - **Inline** is for a value inside a header or running text, where a box would be too heavy.
-- **Violet means selected.** The check, not the wash, marks the current value, so the wash stays neutral.
+- **Mint means selected.** The check, not the wash, marks the current value, so the wash stays neutral.
 - **Keys.** Enter, Space or Down opens the list on the current value; Up and Down move, Home and End jump, Enter
   chooses and Escape closes without a choice. The focus comes back to the face.
 
@@ -558,7 +585,7 @@ when items have several comparable columns.
 | Empty | A `text.muted` message centered in the first row's place |
 | Tree | The list's rows with `text.secondary` chevrons and no connecting lines; each level indents 16, and the leading edge leaves room for the marker |
 
-- **Violet means selected**, and the marker keeps a selection visible without relying on its color, in multiple
+- **Mint means selected**, and the marker keeps a selection visible without relying on its color, in multiple
   selections too. Hover stays neutral.
 - **Keys** are Swing's: Up and Down move, Home and End jump, Shift and Ctrl extend a multiple selection; Left and Right
   collapse and expand tree nodes.
@@ -573,7 +600,7 @@ content and get the hover and the marker, but only the stock renderer gets the r
 
 **libGDX.** hud-v3's own lists take the look without new controls.
 [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token-row` button style (no box, a
-hover wash, the selected wash and violet marker) and the `token-list` scroll pane style (the input frame, padded `xs`
+hover wash, the selected wash and mint marker) and the `token-list` scroll pane style (the input frame, padded `xs`
 to inset the rows). `UiKit.scrollList(list, true)` frames a list in it;
 `new UiList(kit, UiTheme.TOKEN)` gives a reorderable list's flying row and slot token colors for `token-row` rows;
 `new UiTree(kit, UiTheme.TOKEN)` draws `token-row` rows 28 high (46 with a second line in `text.secondary`) with
@@ -596,7 +623,7 @@ Menu bars, their menus and context menus. They share the select's popup, so ever
 | Separator | A `border.subtle` line with `xs` (4) above and below |
 | Disabled | `text.disabled` label, shortcut, check and chevron |
 
-- **Hover stays neutral**, as in the select's popup and lists. Violet only marks a state that is on.
+- **Hover stays neutral**, as in the select's popup and lists. The selected color only marks a state that is on.
 - **Keys** are Swing's: arrows move and open submenus, Enter chooses, Escape closes, and Alt or F10 reaches the menu
   bar.
 
@@ -605,7 +632,7 @@ Menu bars, their menus and context menus. They share the select's popup, so ever
 
 **libGDX.** hud-v3's menu rows take the Token v0 look from the `token-menu-row` style: `UiKit.menuRow(style, ...)`
 and `new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW)`. Rows are `control.sm` high with the `sel-row-over` wash for the
-pointer and the keyboard highlight, a violet check, a `text.muted` shortcut and a `text.secondary` chevron. The list
+pointer and the keyboard highlight, a mint check, a `text.muted` shortcut and a `text.secondary` chevron. The list
 sits in the `token-popup` frame (the select's popup with `xs` padding, which insets the wash) and its separators are
 `border.subtle` hairlines. `UiButton.iconColors` keeps an icon in its own color rather than the text's, and
 `TokenButtonStyle.detailFontColor` sets the details' color.
@@ -670,14 +697,15 @@ A number picked from a range by dragging the thumb, clicking the track (the thum
 | Part / state | Look |
 | --- | --- |
 | Track | An `xs` (4) high pill: `accent.primary` up to the thumb, `border.control` past it |
-| Thumb | An `icon.sm` (16) `accent.primary` disc, with or without ticks and labels |
+| Thumb | App mode: an `icon.sm` (16) `accent.primary` disc. Game mode: hud-v3's thin bar, `xs` (4) wide and `icon.sm` (16) tall with `radius.sm`, in `text.secondary` so it stands out from the accent fill. With or without ticks and labels |
 | Ticks | `tick.width` (2) pills under the track in `border.control`: major ones `sm` (6) long, minor ones half that |
 | Labels | `small` type in `text.muted` under the ticks |
-| Hover / dragging | The pointer anywhere on the slider gives the thumb a `border.strong` edge and leans its face as on a checked box: toward the on-accent color on hover, toward the text color while dragging |
+| Hover / dragging | The disc gains a `border.strong` edge and leans its face as on a checked box: toward the on-accent color on hover, toward the text color while dragging. The bar turns `text.primary` |
 | Focus | The ring around the thumb, `focus.gap` (1) away (see [Focus](#focus)) |
 | Disabled | A `border.subtle` track and ticks with no fill, and a `text.disabled` thumb |
 
-- **One look.** Ticks and labels don't change the thumb or drop the fill, so every slider reads the same way.
+- **One look per mode.** Ticks and labels don't change the thumb or drop the fill, so every slider on a screen reads
+  the same way; the screen's [presentation mode](#presentation-mode) picks the disc or the bar.
 - **Readout.** When the exact value matters (opacity, scale, a count), show it beside the track in `body` type. It
   keeps the width of the longest value so the track doesn't shift as it changes.
 - **Not by color alone.** The thumb's position carries the value; the fill only repeats it.
@@ -686,11 +714,13 @@ A number picked from a range by dragging the thumb, clicking the track (the thum
 [`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), so existing views get it
 without changes, including their ticks and standard labels; a custom label table keeps the labels it was given.
 [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java)`.withReadout(slider, format)` adds
-the readout and lines it up with the track on the slider's baseline.
+the readout and lines it up with the track on the slider's baseline. On a game-mode screen
+(`TokenPresentation.setMode`) the thumb is the bar (`Slider.barThumb*` defaults).
 
 **libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token` `SliderStyle`:
-a 4-high pill track, an accent fill and a 16 accent disc thumb that gains a border.strong edge on hover or press.
-`UiKit.tokenSliderStyle()` returns a copy for one slider; the tuning panel's `UiKit.sliderStyle()` stays as hud-v3
+a 4-high pill track, an accent fill and a 16 accent disc thumb that gains a border.strong edge on hover or press, and
+the `token-slider-bar` style with the game-mode bar thumb. `UiKit.tokenSliderStyle()` returns a copy of the one for
+the kit's presentation mode (the bar by default, since libGDX is game mode); the tuning panel's `UiKit.sliderStyle()` stays as hud-v3
 draws it.
 
 ## Tables
@@ -711,7 +741,7 @@ each item is one line of text.
 | Empty | A `text.muted` message centered in the first row's place |
 | Disabled | `text.disabled` text and headers, with no hover or marker |
 
-- **Violet means selected**, as in lists. A selected cell has no rectangle of its own: the row is the cursor.
+- **Mint means selected**, as in lists. A selected cell has no rectangle of its own: the row is the cursor.
 - **Sorting.** Click a header to sort by it and again to reverse; the chevron shows the direction.
 - **Keys** are Swing's: Up and Down move, Page Up and Page Down scroll, Shift and Ctrl extend a multiple selection.
 
@@ -902,18 +932,20 @@ frame.
 
 | Part / state | Look |
 | --- | --- |
-| Panel | `surface.panel` with a 1px `border.subtle` edge and `border.strong` corner ticks, `tick.panel` (13) long and `tick.width` (2) wide; no rails, no shadow |
+| Panel | `surface.panel` with `border.strong` corner ticks, `tick.panel` (13) long and `tick.width` (2) wide, and a 1px `border.subtle` edge along the top and bottom only, like a paper roll: the ticks close the sides. No shadow |
 | Padding | `lg` (12) all round; `xl` (16) for the roomy option, for panels that hold reading text |
 | Header | Optional: a status icon at `icon.md` (20), the title in `title` and `text.primary`, sentence case, then compact quiet or icon buttons at the trailing end; `md` (8) above the body, no divider or raised band |
 | Status | The ticks take the status color (`status.danger`, `status.warning`, `status.success` or `status.info`); always with the header icon, never the color alone |
 | Selectable, hover | The edge turns `border.control` |
 | Selectable, selected | A `selected.background` wash, the edge and ticks in `selected.primary` |
 | Selectable, focus | The `focus.ring` 2px ring in place of the edge, the ticks drawn over it |
-| Plain | The edge only, with no fill and no ticks, for groups inside a panel |
+| Plain | A 1px edge all round, with no fill and no ticks, for groups inside a panel |
 | Disabled | The title in `text.disabled`, the edge and ticks in `border.subtle`; a disabled selectable panel can't be selected and Tab skips it |
 | Motion | Edge, ticks and wash ease with the [control timings](#motion); reduce motion makes them instant |
 
 - **Only the outermost frame has ticks.** Panels inside a panel, such as the cards in a sidebar, use the plain frame.
+- **Paper roll.** Every ticked frame (panels, dialog cards, status cards) has edges only at the top and bottom. The
+  focus ring still goes all round.
 - **Selectable panels are controls.** A click, or Space or Enter with the focus on it, selects the panel; in a group
   one is selected at a time, like radio buttons. Screen readers hear a toggle button, or a radio button in a group.
 - **The header's actions are for the panel's content**, such as Edit or a ⋮ menu, in the compact size so the header
@@ -935,8 +967,8 @@ cards and panels share.
 ticks. `UiKit.panel(true)` is the `token-panel` frame padded `lg`; `UiKit.header(title, count, true, tools...)` the
 header, with `closeButton(action, true)` as a tool; `UiKit.footer(panel, true)` a `border.subtle` hairline and a foot
 row, each `md` below the one before. `token-panel-danger` replaces `panel-foe` (its header carries the error icon),
-`token-frame` replaces `panel-rails` as the plain frame, `token-panel-overlay` is the panel on the overlay surface over
-the board, and `token-divider` replaces `rule`. `new UiPopover(kit, dismissed, UiTheme.TOKEN)` is the popover in the
+`token-frame` is the plain frame, `token-rails` replaces `panel-rails` (the Tactical View chip: the overlay panel
+with `border.control` rails), `token-panel-overlay` is the panel on the overlay surface over the board, and `token-divider` replaces `rule`. `new UiPopover(kit, dismissed, UiTheme.TOKEN)` is the popover in the
 `token-popup` frame, with a `body.strong` title over `small` detail in `text.secondary` and a `border.subtle` divider.
 
 The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`
@@ -974,7 +1006,7 @@ their text in `small` (11.5), sentence case.
 | Motion | Filter chips ease their fill and edge with the [control timings](#motion); reduce motion makes them instant |
 
 - **Color is never the only cue.** A status chip always has its icon (info, check, warning, error), and screen
-  readers hear the status as the chip's description. A filter chip shows a check when on, not only the violet.
+  readers hear the status as the chip's description. A filter chip shows a check when on, not only the mint.
 - **Status chips are smaller because they aren't controls.** They sit in rows and cards beside text; the interactive
   chips take the compact control height so they keep a comfortable target.
 - **Filters.** A filter chip is a toggle; in a group where one filter applies at a time it behaves like a radio button
@@ -1020,8 +1052,8 @@ anything and never takes the focus.
 | Motion | Fades in over `motion.medium` and out over `motion.slow`, eased; reduce motion makes both instant |
 
 - **Color is never the only cue.** Each level has its own icon, and screen readers hear the level before the text
-  ("Warning: Locust LCT-1V is running hot"). The Game Master has violet and a shield of its own, so a referee's
-  action never reads as an ordinary notice.
+  ("Warning: Locust LCT-1V is running hot"). The Game Master has violet (`status.gamemaster`) and a shield of its own,
+  so a referee's action never reads as an ordinary notice.
 - **Placement.** Toasts stack at the top centre of the view, `lg` from the edge and `md` apart, the newest at the top
   pushing older ones down. At most five show at once; a sixth drops the oldest at once.
 - **Time.** A toast stays for the player's toast duration (3 seconds by default), plus a second for a warning or the
@@ -1062,7 +1094,7 @@ newest on top and the hover pause are the developers' work.
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
-| [`TokenTextCase`](../../megamek/src/megamek/client/ui/design/swing/TokenTextCase.java), [`TokenFonts`](../../megamek/src/megamek/client/ui/design/swing/TokenFonts.java) | A Swing screen's text case mode, and the caps-tracked fonts |
+| [`TokenPresentation`](../../megamek/src/megamek/client/ui/design/swing/TokenPresentation.java), [`TokenFonts`](../../megamek/src/megamek/client/ui/design/swing/TokenFonts.java) | A Swing screen's presentation mode, and the caps-tracked fonts |
 | [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java), [`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java), [`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), [`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) | Swing keyboard focus |
 | [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
 | [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java), [`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) | The Swing inputs and form field |
@@ -1093,5 +1125,5 @@ Outside the galleries, only the two Swing themes and the libGDX button, input, c
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
 panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. The Swing
 themes are selectable but not the default, and no view uses the new controls yet. The all-caps decision is final
-([Text case](#text-case)); next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
+([Presentation mode](#presentation-mode)); next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
 developers accept the system.

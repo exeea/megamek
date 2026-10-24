@@ -128,7 +128,7 @@ public final class UiTheme implements Disposable {
             default -> throw new IllegalStateException("No Roboto instance for weight " + style.weight());
         };
         boolean upper = tokens.textRoles().containsKey(style.name())
-              && tokens.upperCase(style.name(), DesignTokens.TextMode.APP);
+              && tokens.upperCase(style.name(), DesignTokens.Presentation.APP);
         return new HudFont(style.name(), instance, style.size(), style.tracking(upper), TEXT);
     }
 
@@ -353,6 +353,19 @@ public final class UiTheme implements Disposable {
         tooltip.wrapWidth = 340;
         skin.add("hud", tooltip);
         icons();
+        tokenStyles();
+    }
+
+    /**
+     * Builds the styles again from the design tokens after the user's palette changed ({@link DesignTokens#setPalette});
+     * widgets made afterwards use the new colors. hud-v3's own styles do not depend on the tokens.
+     */
+    public void refreshTokens() {
+        tokenButtons();
+        tokenStyles();
+    }
+
+    private void tokenStyles() {
         tokenFields();
         tokenChoices();
         tokenOptions();
@@ -514,7 +527,7 @@ public final class UiTheme implements Disposable {
         Color control = token(tokens.color("border.control", mode));
         Color subtle = token(tokens.color("border.subtle", mode));
         Color strong = token(tokens.color("border.strong", mode));
-        Color violet = token(tokens.color("selected.primary", mode));
+        Color selectedEdge = token(tokens.color("selected.primary", mode));
         Color ring = token(tokens.color("focus.ring", mode));
         float radius = tokens.radius().get("md");
         float border = tokens.size().get("border");
@@ -537,8 +550,8 @@ public final class UiTheme implements Disposable {
         box("tb-danger-down",
               token(ColorMath.over(ColorMath.withAlpha(danger, tokens.alpha("tint.pressed")), raised)),
               token(danger), border, radius, null, 0, 0, 0);
-        box("tb-toggle-checked", token(selectedFace), violet, border, radius, null, 0, 0, 0);
-        box("tb-toggle-checked-over", token(ColorMath.over(hover, selectedFace)), violet, border, radius, null, 0, 0,
+        box("tb-toggle-checked", token(selectedFace), selectedEdge, border, radius, null, 0, 0, 0);
+        box("tb-toggle-checked-over", token(ColorMath.over(hover, selectedFace)), selectedEdge, border, radius, null, 0, 0,
               0);
         box("tb-quiet-over", token(hover), null, 0, radius, null, 0, 0, 0);
         box("tb-quiet-down", token(pressed), null, 0, radius, null, 0, 0, 0);
@@ -612,9 +625,9 @@ public final class UiTheme implements Disposable {
                         style.checked = sized(resized("tb-quiet-checked", 0, 0, 0), vertical, 0, height, true);
                         style.checkedOver = style.checked;
                         style.checkedDown = style.checked;
-                        style.checkedFontColor = violet;
-                        style.checkedOverFontColor = violet;
-                        style.checkedDownFontColor = violet;
+                        style.checkedFontColor = selectedEdge;
+                        style.checkedOverFontColor = selectedEdge;
+                        style.checkedDownFontColor = selectedEdge;
                     }
                     default -> { }
                 }
@@ -628,7 +641,7 @@ public final class UiTheme implements Disposable {
         }
     }
 
-    /** The special button's faces: corner ticks at rest, a full frame under the pointer, violet when selected. */
+    /** The special button's faces: corner ticks at rest, a full frame under the pointer, in the selection color when selected. */
     private void special(TokenButtonStyle style, DesignTokens tokens, Mode mode, float vertical, float side,
           float height) {
         Texture white = skin.get("white", Texture.class);
@@ -638,17 +651,17 @@ public final class UiTheme implements Disposable {
         int selectedFace = ColorMath.over(tokens.color("selected.background", mode), raised);
         float tick = tokens.size().get("tick.control");
         Color strong = token(tokens.color("border.strong", mode));
-        Color violet = token(tokens.color("selected.primary", mode));
+        Color selectedEdge = token(tokens.color("selected.primary", mode));
         style.up = sized(new HudFrame(white, token(raised), null, token(tokens.color("border.control", mode)), tick,
               null), vertical, side, height, false);
         style.over = sized(new HudFrame(white, token(ColorMath.over(hover, raised)), null, null, 0, strong), vertical,
               side, height, false);
         style.down = sized(new HudFrame(white, token(ColorMath.over(pressed, raised)), null, null, 0, strong),
               vertical, side, height, false);
-        style.checked = sized(new HudFrame(white, token(selectedFace), null, null, 0, violet), vertical, side, height,
+        style.checked = sized(new HudFrame(white, token(selectedFace), null, null, 0, selectedEdge), vertical, side, height,
               false);
         style.checkedOver = sized(new HudFrame(white, token(ColorMath.over(hover, selectedFace)), null, null, 0,
-              violet), vertical, side, height, false);
+              selectedEdge), vertical, side, height, false);
         style.checkedDown = style.checkedOver;
         style.disabled = sized(new HudFrame(white, token(raised), null, token(tokens.color("border.subtle", mode)),
               tick, null), vertical, side, height, false);
@@ -855,9 +868,9 @@ public final class UiTheme implements Disposable {
 
     /**
      * Tabs and segmented controls in dark mode (docs/design-system/tokens.md, Tabs and Segmented control). A tab is a
-     * label on the window surface with a wash under the pointer and a violet underline when selected. A segmented
-     * control is one raised frame; its selected section has a violet wash and edge, like a selected toggle, drawn over
-     * the frame edge.
+     * label on the window surface with a wash under the pointer and a mint underline when selected. A segmented
+     * control is a row of separate raised segments, each with its own edge; the selected one has a mint wash and
+     * edge, like a selected toggle.
      */
     private void tokenOptions() {
         DesignTokens tokens = DesignTokens.shipped();
@@ -869,7 +882,7 @@ public final class UiTheme implements Disposable {
         int selectedDisabled = ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2);
         Color control = token(tokens.color("border.control", mode));
         Color subtle = token(tokens.color("border.subtle", mode));
-        Color violet = token(tokens.color("selected.primary", mode));
+        Color selectedEdge = token(tokens.color("selected.primary", mode));
         Color ring = token(tokens.color("focus.ring", mode));
         float border = tokens.size().get("border");
         float focus = tokens.size().get("focus.width");
@@ -878,13 +891,14 @@ public final class UiTheme implements Disposable {
         // Tabs: a square wash under the pointer; pressed looks the same, as in FlatLaf
         skin.add("tab-over", skin.newDrawable("white", token(hover)), Drawable.class);
 
-        box("seg-frame", token(raised), control, border, radius, null, 0, 0, 0);
-        box("seg-frame-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
-        // A section's wash sits inside the frame edge, so its corners follow the edge's inner radius
-        float inner = Math.max(radius - border, 0);
-        box("seg-over", token(hover), null, 0, inner, null, 0, 0, 0);
-        box("seg-down", token(pressed), null, 0, inner, null, 0, 0, 0);
-        box("seg-on", token(ColorMath.over(selected, raised)), violet, border, radius, null, 0, 0, 0);
+        // Segments stand apart, each a raised box with its own edge, like a row of toggle buttons
+        int raisedHover = ColorMath.over(hover, raised);
+        Color strong = token(tokens.color("border.strong", mode));
+        box("seg-item", token(raised), control, border, radius, null, 0, 0, 0);
+        box("seg-item-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
+        box("seg-over", token(raisedHover), strong, border, radius, null, 0, 0, 0);
+        box("seg-down", token(ColorMath.over(pressed, raised)), strong, border, radius, null, 0, 0, 0);
+        box("seg-on", token(ColorMath.over(selected, raised)), selectedEdge, border, radius, null, 0, 0, 0);
         box("seg-on-disabled", token(ColorMath.over(selectedDisabled, raised)), subtle, border, radius, null, 0, 0,
               0);
         box("seg-focus", Color.CLEAR, ring, focus, radius, null, 0, 0, 0);
@@ -893,7 +907,7 @@ public final class UiTheme implements Disposable {
         style.text = token(tokens.color("text.secondary", mode));
         style.activeText = token(tokens.color("text.primary", mode));
         style.disabledText = token(tokens.color("text.disabled", mode));
-        style.underline = violet;
+        style.underline = selectedEdge;
         style.disabledUnderline = subtle;
         style.hairline = subtle;
         style.ring = ring;
@@ -932,7 +946,7 @@ public final class UiTheme implements Disposable {
     /**
      * Selects and their popup list in dark mode (docs/design-system/tokens.md, Select). The face is the input box; the
      * inline variant has a dotted underline instead. The popup list is a popover frame with a control edge: the row
-     * at the pointer or the keyboard gets the hover wash, and the current value a violet check, so violet keeps
+     * at the pointer or the keyboard gets the hover wash, and the current value a mint check, so the selection color keeps
      * meaning selected.
      */
     private void tokenSelects() {
@@ -992,7 +1006,7 @@ public final class UiTheme implements Disposable {
         Color secondaryText = token(tokens.color("text.secondary", mode));
         Color disabledText = token(tokens.color("text.disabled", mode));
         Color subtle = token(tokens.color("border.subtle", mode));
-        Color violet = token(tokens.color("selected.primary", mode));
+        Color selectedEdge = token(tokens.color("selected.primary", mode));
         float xs = tokens.space().get("xs");
         float border = tokens.size().get("border");
         float underline = tokens.size().get("selection.width");
@@ -1012,13 +1026,13 @@ public final class UiTheme implements Disposable {
             segment.downFontColor = text;
             segment.checkedFontColor = text;
             segment.disabledFontColor = disabledText;
-            segment.up = sized(flat(Color.CLEAR, 0, 0), 0, side, height, false);
+            segment.up = sized(resized("seg-item", 0, 0, 0), 0, side, height, false);
             segment.over = sized(resized("seg-over", 0, 0, 0), 0, side, height, false);
             segment.down = sized(resized("seg-down", 0, 0, 0), 0, side, height, false);
             segment.checked = sized(resized("seg-on", 0, 0, 0), 0, side, height, false);
             segment.checkedOver = segment.checked;
             segment.checkedDown = segment.checked;
-            segment.disabled = segment.up;
+            segment.disabled = sized(resized("seg-item-disabled", 0, 0, 0), 0, side, height, false);
             skin.add(TOKEN_SEGMENT + suffix, segment, TextButton.TextButtonStyle.class);
 
             TokenButtonStyle tab = new TokenButtonStyle();
@@ -1031,7 +1045,7 @@ public final class UiTheme implements Disposable {
             tab.up = sized(flat(Color.CLEAR, 0, 0), 0, side, height, false);
             tab.over = sized(skin.newDrawable("tab-over"), 0, side, height, false);
             tab.down = tab.over;
-            tab.checked = sized(new Dashes(white, violet, underline, 0, 0, false), 0, side, height, false);
+            tab.checked = sized(new Dashes(white, selectedEdge, underline, 0, 0, false), 0, side, height, false);
             tab.checkedOver = tab.checked;
             tab.checkedDown = tab.checked;
             tab.disabled = tab.up;
@@ -1275,6 +1289,8 @@ public final class UiTheme implements Disposable {
 
     /** The name of the Token v0 styles of hud-v3's own inputs: the slider style and the pickers' colors. */
     public static final String TOKEN = "token";
+    /** The token slider of the game presentation, whose thumb is a thin bar (tokens.md, Sliders). */
+    public static final String TOKEN_BAR = "token-slider-bar";
 
     /**
      * Token v0 styles for hud-v3's own inputs (docs/design-system/tokens.md, Inputs and Sliders): the slider's pill
@@ -1314,13 +1330,30 @@ public final class UiTheme implements Disposable {
         slider.disabledKnob.setMinWidth(thumb);
         skin.add(TOKEN, slider);
 
+        // The game presentation's thumb: a light xs bar, icon.sm long, that stands out of the accent fill
+        Slider.SliderStyle bar = new Slider.SliderStyle(slider);
+        float barWidth = tokens.space().get("xs");
+        float barRadius = tokens.radius().get("sm");
+        bar.knob = box("slider-bar", token(tokens.color("text.secondary", mode)), null, 0, barRadius, null, 0, 0,
+              thumb);
+        bar.knob.setMinWidth(barWidth);
+        bar.knobOver = box("slider-bar-over", token(tokens.color("text.primary", mode)), null, 0, barRadius, null, 0,
+              0, thumb);
+        bar.knobOver.setMinWidth(barWidth);
+        bar.knobDown = bar.knobOver;
+        bar.disabledKnob = box("slider-bar-disabled", token(tokens.color("text.disabled", mode)), null, 0, barRadius,
+              null, 0, 0, thumb);
+        bar.disabledKnob.setMinWidth(barWidth);
+        skin.add(TOKEN_BAR, bar);
+
         float dial = UiAngleDial.SIZE, well = UiAngleDial.WELL, hub = UiAngleDial.HUB, grip = UiAngleDial.KNOB;
         Color base = token(tokens.color("surface.base", mode));
         box("token-dial-face", token(tokens.color("surface.raised", mode)), control, border, dial / 2, null, 0, 0,
               dial);
         box("token-dial-well", token(tokens.color("surface.input", mode)), control, border, well / 2, null, 0, 0,
               well);
-        box("token-dial-hub", base, strong, border, hub / 2, null, 0, 0, hub);
+        // The hub keeps hud-v3's mint ring, which the needle stops at, so the value inside stays on the plain base
+        box("token-dial-hub", base, token(accent), tokens.size().get("selection.width"), hub / 2, null, 0, 0, hub);
         box("token-dial-knob", token(accent), base, 2, grip / 2, null, 0, 0, grip);
         PickerStyle picker = new PickerStyle();
         picker.discs = "token-dial";
@@ -1343,7 +1376,7 @@ public final class UiTheme implements Disposable {
 
     /**
      * Token v0 styles for hud-v3's own lists, trees, grids and splits (docs/design-system/tokens.md, Lists and trees,
-     * Scrollbars and Split panes). Rows have no box: a hover wash, and a selected wash with a violet marker at the
+     * Scrollbars and Split panes). Rows have no box: a hover wash, and a selected wash with a mint marker at the
      * leading edge. The scroll bar's hover and drag looks are the {@code scroll-rail}, {@code scroll-thumb-over} and
      * {@code scroll-thumb-down} drawables, and the divider's is {@code token-split-active}; {@code UiKit} swaps them in.
      */
@@ -1352,7 +1385,7 @@ public final class UiTheme implements Disposable {
         Mode mode = Mode.DARK;
         Color control = token(tokens.color("border.control", mode));
         Color subtle = token(tokens.color("border.subtle", mode));
-        Color violet = token(tokens.color("selected.primary", mode));
+        Color selectedEdge = token(tokens.color("selected.primary", mode));
         Color hover = token(tokens.color("surface.hover", mode));
         float border = tokens.size().get("border");
         float xs = tokens.space().get("xs");
@@ -1363,7 +1396,7 @@ public final class UiTheme implements Disposable {
         float markerHeight = tokens.size().get("icon.sm");
         float height = tokens.size().get("control.sm");
 
-        Drawable marker = skin.newDrawable("white", violet);
+        Drawable marker = skin.newDrawable("white", selectedEdge);
         NinePatchDrawable selectedWash = box("list-row-selected", token(tokens.color("selected.background", mode)),
               null, 0, radius, null, 0, 0, 0);
         Drawable selected = new BaseDrawable() {
@@ -1416,12 +1449,14 @@ public final class UiTheme implements Disposable {
         skin.add("token-split-active", splitLine(accent, active, band), Drawable.class);
     }
 
-    /** The token look of hud-v3's panel ({@code panel}): the edge, the corner ticks and lg padding. */
+    /** The token look of hud-v3's panel ({@code panel}): a paper roll edge, the corner ticks and lg padding. */
     public static final String TOKEN_PANEL = "token-panel";
     /** The token panel with status.danger ticks, which replaces {@code panel-foe}; its header carries the icon. */
     public static final String TOKEN_PANEL_DANGER = "token-panel-danger";
-    /** The plain frame, the edge only, which replaces {@code panel-rails} and frames panels inside panels. */
+    /** The plain frame, the edge only, which frames panels inside panels. */
     public static final String TOKEN_FRAME = "token-frame";
+    /** The rails frame, which replaces {@code panel-rails}: the overlay panel with border.control rails, no corners. */
+    public static final String TOKEN_RAILS = "token-rails";
 
     /**
      * Token v0 styles for hud-v3's containers (docs/design-system/tokens.md, Panels, Dialogs and Tooltips): the panel
@@ -1441,15 +1476,20 @@ public final class UiTheme implements Disposable {
         float md = tokens.space().get("md");
         float lg = tokens.space().get("lg");
 
-        skin.add(TOKEN_PANEL, pad(new HudFrame(white, panel, null, strong, tick, subtle, border), lg, lg),
+        // Panels are paper rolls: the edge runs along the top and bottom, and the corner ticks close the sides
+        skin.add(TOKEN_PANEL, pad(new HudFrame(white, panel, null, strong, tick, subtle, border).paperRoll(), lg, lg),
               Drawable.class);
         skin.add(TOKEN_PANEL_DANGER, pad(new HudFrame(white, panel, null,
-              token(tokens.color("status.danger", mode)), tick, subtle, border), lg, lg), Drawable.class);
+              token(tokens.color("status.danger", mode)), tick, subtle, border).paperRoll(), lg, lg), Drawable.class);
         Integer overlay = tokens.colorToken("surface.panel").overlay();
-        skin.add(TOKEN_PANEL + "-overlay", pad(new HudFrame(white, overlay == null ? panel : token(overlay), null,
-              strong, tick, subtle, border), lg, lg), Drawable.class);
+        Color overlayPanel = overlay == null ? panel : token(overlay);
+        skin.add(TOKEN_PANEL + "-overlay", pad(new HudFrame(white, overlayPanel, null, strong, tick, subtle, border)
+              .paperRoll(), lg, lg), Drawable.class);
         skin.add(TOKEN_FRAME, pad(new HudFrame(white, Color.CLEAR, null, null, 0, subtle, border), sm, md),
               Drawable.class);
+        // HudFrame's rails are tick.width (2) high
+        skin.add(TOKEN_RAILS, pad(new HudFrame(white, overlayPanel, token(tokens.color("border.control", mode)), null,
+              0, null), sm, md), Drawable.class);
 
         Label.LabelStyle tipText = new Label.LabelStyle(skin.get(TYPE + "small", Label.LabelStyle.class));
         tipText.fontColor = token(tokens.color("text.primary", mode));
@@ -1504,7 +1544,7 @@ public final class UiTheme implements Disposable {
         Color popover = token(tokens.color("surface.popover", mode));
         Color subtle = token(tokens.color("border.subtle", mode));
         String[][] levels = {{"info", "status.info"}, {"success", "status.success"}, {"warning", "status.warning"},
-                             {"error", "status.danger"}, {"gamemaster", "selected.primary"}};
+                             {"error", "status.danger"}, {"gamemaster", "status.gamemaster"}};
         for (String[] level : levels) {
             // The bar is 3 wide inside the edge; the close button sits xs from the trailing edge
             NinePatchDrawable card = box(TOKEN_TOAST + level[0], popover, subtle, border, radius,
@@ -2047,6 +2087,7 @@ public final class UiTheme implements Disposable {
         private final float cornerLength;
         private final Color outline;
         private final float edge;
+        private boolean sides = true;
         private final Color tint = new Color();
 
         /** The fill, then rails, an outline and corner strokes of {@code cornerLength} units; each may be null. */
@@ -2064,6 +2105,12 @@ public final class UiTheme implements Disposable {
             this.cornerLength = cornerLength;
             this.outline = outline;
             this.edge = edge;
+        }
+
+        /** Makes this a paper roll: the outline runs along the top and bottom only, and the corner strokes close it. */
+        public HudFrame paperRoll() {
+            sides = false;
+            return this;
         }
 
         @Override
@@ -2085,8 +2132,10 @@ public final class UiTheme implements Disposable {
                 float stroke = Math.max(1, Math.round(edge * scale)) / scale;
                 rect(batch, outline, left, top - stroke, right - left, stroke);
                 rect(batch, outline, left, bottom, right - left, stroke);
-                rect(batch, outline, left, bottom + stroke, stroke, top - bottom - 2 * stroke);
-                rect(batch, outline, right - stroke, bottom + stroke, stroke, top - bottom - 2 * stroke);
+                if (sides) {
+                    rect(batch, outline, left, bottom + stroke, stroke, top - bottom - 2 * stroke);
+                    rect(batch, outline, right - stroke, bottom + stroke, stroke, top - bottom - 2 * stroke);
+                }
             }
             if (corner != null) {
                 float length = Math.min(snap(cornerLength, scale), Math.min(right - left, top - bottom) / 2);

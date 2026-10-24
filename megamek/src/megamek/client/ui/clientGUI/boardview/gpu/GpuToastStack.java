@@ -225,14 +225,14 @@ final class GpuToastStack implements GpuHud.Component {
         };
     }
 
-    /** A level's color role; the Game Master has the selection violet. */
+    /** A level's color role; the Game Master has status.gamemaster. */
     private static String role(ToastLevel level) {
         return switch (level) {
             case INFO -> "status.info";
             case SUCCESS -> "status.success";
             case WARNING -> "status.warning";
             case ERROR -> "status.danger";
-            case GAMEMASTER -> "selected.primary";
+            case GAMEMASTER -> "status.gamemaster";
         };
     }
 }
