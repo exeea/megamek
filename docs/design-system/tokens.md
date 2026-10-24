@@ -12,7 +12,7 @@ both platforms (and the launcher, later) can share it.
 In a dev build, open the lobby and use **Help > UI library (developer)**. The submenu only shows in the lobby.
 
 - **Swing controls...** opens the Swing gallery: every color role in both modes, the accessibility checks, the text
-  styles, spacing and shape, and four tabs of real Swing controls drawn by the MegaMek look and feel. A
+  styles, spacing and shape, and five tabs of real Swing controls drawn by the MegaMek look and feel. A
   toolbar toggles light mode and simulates deuteranopia, protanopia and tritanopia over the whole window. While the
   gallery is open the whole app uses MegaMek Dark or Light, and closing it restores the previous theme. This is the
   complete library; Swing controls are added here as they are built.

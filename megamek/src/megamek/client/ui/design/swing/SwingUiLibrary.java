@@ -225,6 +225,7 @@ public final class SwingUiLibrary extends JFrame {
         tabs.addTab(Messages.getString("UiLibrary.tab.inputs"), page(inputsPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.navigation"), page(navigationPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.feedback"), page(feedbackPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.notifications"), page(notificationsPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.containers"), page(containersPage()));
         tabs.setSelectedIndex(Math.min(selectedTab, tabs.getTabCount() - 1));
         content.add(tabs, BorderLayout.CENTER);
@@ -516,6 +517,15 @@ public final class SwingUiLibrary extends JFrame {
         choices.add(new JSpinner(new SpinnerNumberModel(4, 0, 12, 1)));
         page.add(choices);
 
+        page.add(heading(Messages.getString("UiLibrary.controls.chips")));
+        page.add(paragraph(Messages.getString("UiLibrary.chips.note"), "small", "text.muted"));
+        page.add(chipFilterSamples());
+        page.add(chipTagSamples());
+        JLabel chipsLive = text(Messages.getString("UiLibrary.chips.live"), "label", "text.secondary");
+        chipsLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(chipsLive);
+        page.add(chipLobby());
+
         page.add(heading(Messages.getString("UiLibrary.controls.inputs")));
         page.add(paragraph(Messages.getString("UiLibrary.inputs.note"), "small", "text.muted"));
         for (TokenButtons.Size size : TokenButtons.Size.values()) {
@@ -581,7 +591,7 @@ public final class SwingUiLibrary extends JFrame {
         return page;
     }
 
-    /** Tooltips, progress, sections, split panes, dialogs and status cards. */
+    /** Tooltips, progress, sections, split panes and dialogs. */
     private JComponent feedbackPage() {
         JPanel page = controlsPage();
         page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
@@ -604,6 +614,20 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.dialogs.note"), "small", "text.muted"));
         page.add(dialogSamples());
         page.add(dialogLauncher());
+        return page;
+    }
+
+    /** Status chips and badges, then status cards. */
+    private JComponent notificationsPage() {
+        JPanel page = controlsPage();
+        page.add(heading(Messages.getString("UiLibrary.controls.badges")));
+        page.add(paragraph(Messages.getString("UiLibrary.badges.note"), "small", "text.muted"));
+        page.add(chipStatusSamples());
+        page.add(badgeSamples());
+        JLabel badgesLive = text(Messages.getString("UiLibrary.badges.live"), "label", "text.secondary");
+        badgesLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(badgesLive);
+        page.add(badgeLobby());
 
         page.add(heading(Messages.getString("UiLibrary.controls.statusCards")));
         page.add(paragraph(Messages.getString("UiLibrary.statusCards.note"), "small", "text.muted"));
@@ -612,20 +636,9 @@ public final class SwingUiLibrary extends JFrame {
         return page;
     }
 
-    /** Chips and badges, then panels and frames. */
+    /** Panels and frames. */
     private JComponent containersPage() {
         JPanel page = controlsPage();
-        page.add(heading(Messages.getString("UiLibrary.controls.chips")));
-        page.add(paragraph(Messages.getString("UiLibrary.chips.note"), "small", "text.muted"));
-        page.add(chipStatusSamples());
-        page.add(chipFilterSamples());
-        page.add(chipTagSamples());
-        page.add(badgeSamples());
-        JLabel chipsLive = text(Messages.getString("UiLibrary.chips.live"), "label", "text.secondary");
-        chipsLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
-        page.add(chipsLive);
-        page.add(chipLobby());
-
         page.add(heading(Messages.getString("UiLibrary.controls.panels")));
         page.add(paragraph(Messages.getString("UiLibrary.panels.note"), "small", "text.muted"));
         page.add(panelSamples());
@@ -1483,9 +1496,8 @@ public final class SwingUiLibrary extends JFrame {
         return samples;
     }
 
-    /** A live lobby panel: one-of filter chips, removable conditions with a reset, unit states and a chat count. */
+    /** A live lobby panel: one-of filter chips and removable conditions with a reset. */
     private JComponent chipLobby() {
-        JPanel row = row(color("surface.base"));
         String[] filters = { "all", "meks", "vehicles", "infantry" };
         TokenChips.FilterChip[] chips = new TokenChips.FilterChip[filters.length];
         JLabel showing = text("", "small", "text.muted");
@@ -1522,7 +1534,11 @@ public final class SwingUiLibrary extends JFrame {
         conditionRow.add(reset);
         fill.run();
         reset.addActionListener(event -> fill.run());
+        return lobby(filterRow, conditionRow);
+    }
 
+    /** A live lobby panel: unit states and a chat count that new messages raise and reading clears. */
+    private JComponent badgeLobby() {
         JPanel statusRow = chipRow("UiLibrary.chips.status");
         statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.deployed"), TokenChips.Tone.SUCCESS));
         statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.runningHot"), TokenChips.Tone.WARNING));
@@ -1547,10 +1563,15 @@ public final class SwingUiLibrary extends JFrame {
         describe.run();
         chatRow.add(TokenBadge.attach(chat, unread));
         chatRow.add(message);
+        return lobby(statusRow, chatRow);
+    }
 
+    /** The "Lobby" panel holding {@code lines}, one under the other. */
+    private JComponent lobby(JPanel... lines) {
+        JPanel row = row(color("surface.base"));
         JPanel body = new JPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
-        for (JPanel line : new JPanel[] { filterRow, conditionRow, statusRow, chatRow }) {
+        for (JPanel line : lines) {
             line.setAlignmentX(LEFT_ALIGNMENT);
             line.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(3), 0, scaleForGUI(3), 0));
             body.add(line);
