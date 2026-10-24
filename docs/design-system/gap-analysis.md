@@ -319,7 +319,7 @@ work for Swing, and item 11 is under investigation.
   switches, the Special button's closing ticks, fading popups and tooltips, opening sections and per-row hover washes,
   from one shared animator with a reduce-motion client setting, in Swing; see [tokens.md](tokens.md#motion).
 - ~~Dialogs~~: a corner-ticked modal card over a scrim for messages, confirmations and short forms, and a themed window
-  for tools, with centred equal-width buttons (main action last), Enter and Escape, Cancel-first destructive
+  for tools, with centred equal-width buttons (main action first), Enter and Escape, Cancel-first destructive
   confirmations and restyled `JOptionPane` dialogs, in Swing; see [tokens.md](tokens.md#dialogs).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.

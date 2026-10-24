@@ -52,10 +52,10 @@ import megamek.client.ui.util.UIUtil;
 /**
  * The content of a design system dialog (docs/design-system/tokens.md, Dialogs): a header with an optional status icon
  * and the title, the body, an optional extras row (such as "don't ask again") and a footer of buttons centred under it,
- * the main action rightmost. {@link TokenDialogs} shows it as a modal card over the window or in a window of its own;
+ * the main action first, as in Windows. {@link TokenDialogs} shows it as a modal card over the window or in a window of its own;
  * a window shows the title in its title bar instead of the header.
  * <p>
- * Add the buttons in reading order; the main action, {@link #primary} or {@link #danger}, always goes last. Enter
+ * Add the other buttons in reading order; the main action, {@link #primary} or {@link #danger}, always goes first. Enter
  * presses the focused button, or the primary one when the focus is elsewhere; Escape and the close button cancel. A
  * danger action is never pressed by Enter from elsewhere, and the focus starts on Cancel.
  */
@@ -191,13 +191,13 @@ public class TokenDialogPane extends JPanel {
         return button;
     }
 
-    /** The main action: the rightmost button, which Enter presses. */
+    /** The main action: the first button, which Enter presses. */
     public JButton primary(String text) {
         return main(TokenButtons.primary(text), false);
     }
 
     /**
-     * A destructive main action: the rightmost button, which Enter only presses when it has the focus. The focus starts
+     * A destructive main action: the first button, which Enter only presses when it has the focus. The focus starts
      * on the cancel button.
      */
     public JButton danger(String text) {
@@ -213,12 +213,13 @@ public class TokenDialogPane extends JPanel {
         return button;
     }
 
-    /** The footer buttons in the order they show: the added ones, then the main action. */
+    /** The footer buttons in the order they show: the main action, then the others as added. */
     public List<JButton> buttons() {
-        List<JButton> ordered = new ArrayList<>(buttons);
+        List<JButton> ordered = new ArrayList<>();
         if (main != null) {
             ordered.add(main);
         }
+        ordered.addAll(buttons);
         return ordered;
     }
 
@@ -234,7 +235,7 @@ public class TokenDialogPane extends JPanel {
 
     /**
      * The component that takes the focus when the dialog opens: Cancel when the main action is destructive, otherwise
-     * the first input of the body, then the main action, then the last button.
+     * the first input of the body, then the main action, then the first button.
      */
     Component initialFocus() {
         if (mainIsDanger && !cancels.isEmpty()) {
@@ -247,7 +248,7 @@ public class TokenDialogPane extends JPanel {
         if (main != null) {
             return main;
         }
-        return buttons.isEmpty() ? this : buttons.get(buttons.size() - 1);
+        return buttons.isEmpty() ? this : buttons.get(0);
     }
 
     private static Component firstFocusable(Component component) {

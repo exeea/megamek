@@ -690,11 +690,11 @@ that the user moves around or keeps open beside the game open as a **window** wi
 | Header | An optional status icon at `icon.lg` (24), the title in `headline`, then help and close icon buttons in the compact size |
 | Status | Info `status.info`, success `status.success`, warning `status.warning`, error `status.danger`, question `accent.primary`; always with the icon, never the color alone |
 | Body | `body` text in `text.primary` wrapping at the card's width, or any content such as form fields; an optional extra row (for example "Don't ask again") `xl` (16) below it |
-| Footer | `xxl` (24) below the content: the buttons centred, `md` (8) apart, all as wide as the widest and at least 88; the main action last (first in right-to-left) |
+| Footer | `xxl` (24) below the content: the buttons centred, `md` (8) apart, all as wide as the widest and at least 88; the main action first, as in Windows (last in right-to-left) |
 | Motion | The card and its scrim fade in over `fast` (120 ms); they close at once. Reduce motion skips the fade |
 
-- **One main action.** A dialog has at most one primary or danger button, and it goes last; Cancel and other choices
-  sit before it.
+- **One main action.** A dialog has at most one primary or danger button, and it goes first; Cancel and other choices
+  follow it. This is the Windows order ([Deploy] [Cancel]), which most of the suite's users already know.
 - **Keys.** Enter presses the focused button or else the main one; Escape and the close button cancel. Tab stays in the
   card.
 - **Destructive actions.** With a danger button the focus starts on Cancel, and Enter only presses the danger button
@@ -713,7 +713,7 @@ shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. While
 `UIUtil.isModalDialogDisplayed()` is true, so MegaMek's hotkeys stand down as they do for a modal dialog.
 
 Existing `JOptionPane` dialogs keep their windows but take the footer's layout through the MegaMek themes: the token
-status icons, `xxl` padding, buttons centred, as wide as each other, at least 88 and with the main one last. Their
+status icons, `xxl` padding, buttons centred, as wide as each other, at least 88 and with the main one first. Their
 titles stay in the title bar. Moving them to `TokenDialogs` gives them the card.
 
 **libGDX.** Spec only for now: hud-v3's `UiModal` already draws a scrim and `GpuModalDialog` a 620-wide panel with 88

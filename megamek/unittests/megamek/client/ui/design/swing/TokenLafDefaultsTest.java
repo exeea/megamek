@@ -711,7 +711,7 @@ class TokenLafDefaultsTest {
                 UIManager.setLookAndFeel(lookAndFeel);
                 UIDefaults defaults = UIManager.getDefaults();
                 assertEquals(0, defaults.getInt("OptionPane.buttonOrientation"));
-                assertTrue(defaults.getBoolean("OptionPane.isYesLast"));
+                assertFalse(defaults.getBoolean("OptionPane.isYesLast"));
                 assertTrue(defaults.getBoolean("OptionPane.sameSizeButtons"));
                 List<TokenDialogPane.Status> statuses = List.of(TokenDialogPane.Status.ERROR,
                       TokenDialogPane.Status.WARNING, TokenDialogPane.Status.INFO, TokenDialogPane.Status.QUESTION);

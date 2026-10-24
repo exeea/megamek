@@ -439,7 +439,7 @@ public final class TokenLafDefaults {
         put("RootPane.activeBorderColor", color("border.subtle"));
         put("RootPane.inactiveBorderColor", color("border.subtle"));
         // Option panes take the dialog card's layout: panel surface, xxl padding, the buttons centred with the main
-        // one last and all as wide as the widest; their status icons come from putIcons
+        // one first and all as wide as the widest; their status icons come from putIcons
         int dialogPadding = Math.round(tokens.space().get("xxl"));
         put("OptionPane.background", panel);
         values.put("OptionPane.border",
@@ -449,7 +449,7 @@ public final class TokenLafDefaults {
         values.put("OptionPane.buttonMinimumWidth", "{scaledInteger}" + TokenDialogPane.BUTTON_MIN_WIDTH);
         values.put("OptionPane.sameSizeButtons", "true");
         values.put("OptionPane.buttonOrientation", "0");
-        values.put("OptionPane.isYesLast", "true");
+        values.put("OptionPane.isYesLast", "false");
         values.put("OptionPane.iconMessageGap", number(tokens.space().get("lg")));
 
         // Indicators

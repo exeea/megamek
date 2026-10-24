@@ -38,12 +38,12 @@ class TokenDialogPaneTest {
     }
 
     @Test
-    void mainActionShowsLast() {
+    void mainActionShowsFirst() {
         TokenDialogPane pane = new TokenDialogPane("Title");
         JButton go = pane.primary("Go");
         JButton cancel = pane.cancel("Cancel");
         JButton later = pane.secondary("Later");
-        assertEquals(List.of(cancel, later, go), pane.buttons());
+        assertEquals(List.of(go, cancel, later), pane.buttons());
         assertSame(go, pane.defaultButton());
         assertThrows(IllegalStateException.class, () -> pane.danger("Delete"));
     }
