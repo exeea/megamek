@@ -35,6 +35,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TiledDrawable;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.gdx.UiTheme.EdgeBox;
 import megamek.client.ui.gdx.UiTheme.HudFrame;
@@ -77,7 +78,71 @@ final class GpuBoardSkin implements Disposable {
             enemy.dispose();
         }
         battleDrawables();
+        tokenHud();
         tuningStyles();
+    }
+
+    /** The token look of a target pill ({@code pill}): a filter chip; {@code -over} and {@code -on} follow. */
+    static final String TOKEN_PILL = "token-pill";
+    /** The token look of a unit row ({@code hud-row}); {@code -foe} and {@code -friend} are its inspected edges. */
+    static final String TOKEN_UNIT_ROW = "token-unit-row";
+    /** The token look of a log event disc ({@code disc}); {@code -foe} is the enemy's. */
+    static final String TOKEN_DISC = "token-disc";
+
+    /**
+     * Token v0 styles for the battle HUD's own parts (docs/design-system/tokens.md, HUD parts): the letter square,
+     * tinted to each target's colour; the target pill as a filter chip; the unit row as a selectable plain panel with
+     * its inspected edges; the log's discs; and the dock's waiting box as a plain frame. hud-v3's own stay as they are.
+     */
+    private void tokenHud() {
+        DesignTokens tokens = DesignTokens.shipped();
+        float border = tokens.size().get("border");
+        float radius = tokens.radius().get("md");
+        float xs = tokens.space().get("xs");
+        float sm = tokens.space().get("sm");
+        float md = tokens.space().get("md");
+        float lg = tokens.space().get("lg");
+        Color control = UiTheme.tokenColor("border.control");
+        Color subtle = UiTheme.tokenColor("border.subtle");
+        Color selected = UiTheme.tokenColor("selected.background");
+        Color violet = UiTheme.tokenColor("selected.primary");
+
+        float letter = tokens.size().get("icon.md");
+        theme.box("token-letter", Color.WHITE, null, 0, tokens.radius().get("sm"), null, 0, 0, letter)
+              .setMinWidth(letter);
+
+        // The pill's letter square sits xs inside its leading edge; the name ends lg before the trailing one
+        float chip = tokens.size().get("control.sm");
+        theme.box(TOKEN_PILL, Color.CLEAR, control, border, radius, null, 0, 0, chip).setLeftWidth(xs);
+        theme.box(TOKEN_PILL + "-over", UiTheme.tokenColor("surface.hover"), UiTheme.tokenColor("border.strong"),
+              border, radius, null, 0, 0, chip).setLeftWidth(xs);
+        theme.box(TOKEN_PILL + "-on", selected, violet, border, radius, null, 0, 0, chip).setLeftWidth(xs);
+        for (String state : new String[] {"", "-over", "-on"}) {
+            skin.getDrawable(TOKEN_PILL + state).setRightWidth(lg);
+        }
+
+        TextButton.TextButtonStyle row = new TextButton.TextButtonStyle();
+        row.font = skin.getFont("hud-body");
+        row.fontColor = UiTheme.tokenColor("text.primary");
+        row.up = theme.box(TOKEN_UNIT_ROW, Color.CLEAR, subtle, border, radius, null, sm, md, 0);
+        row.over = theme.box(TOKEN_UNIT_ROW + "-over", Color.CLEAR, control, border, radius, null, sm, md, 0);
+        row.down = row.over;
+        row.checked = theme.box(TOKEN_UNIT_ROW + "-selected", selected, violet, border, radius, null, sm, md, 0);
+        row.checkedOver = row.checked;
+        row.checkedDown = row.checked;
+        theme.add(TOKEN_UNIT_ROW, row, TextButton.TextButtonStyle.class);
+        theme.box(TOKEN_UNIT_ROW + "-foe", Color.CLEAR, UiTheme.tokenColor("status.danger"), border, radius, null, sm,
+              md, 0);
+        theme.box(TOKEN_UNIT_ROW + "-friend", Color.CLEAR, UiTheme.tokenColor("accent.primary"), border, radius, null,
+              sm, md, 0);
+
+        Color raised = UiTheme.tokenColor("surface.raised");
+        theme.box(TOKEN_DISC, raised, UiTheme.tokenColor("accent.primary"), border, chip / 2, null, 0, 0, chip)
+              .setMinWidth(chip);
+        theme.box(TOKEN_DISC + "-foe", raised, UiTheme.tokenColor("status.danger"), border, chip / 2, null, 0, 0,
+              chip).setMinWidth(chip);
+
+        theme.box("token-waiting", Color.CLEAR, subtle, border, radius, null, 0, lg, tokens.size().get("control.lg"));
     }
 
     /**

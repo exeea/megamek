@@ -20,6 +20,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
+import com.badlogic.gdx.scenes.scene2d.ui.SplitPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
@@ -115,7 +116,12 @@ public final class UiKit {
      * pointer, which then stays stuck. Its label acts only while it shows.
      */
     public TextTooltip tip(Actor actor) {
-        TextTooltip tip = new TextTooltip("", skin, "hud");
+        return tip(actor, false);
+    }
+
+    /** A tooltip as {@link #tip(Actor)}; with {@code token}, the Token v0 tooltip card ({@link UiTheme#TOKEN}). */
+    public TextTooltip tip(Actor actor, boolean token) {
+        TextTooltip tip = new TextTooltip("", skin, token ? UiTheme.TOKEN : "hud");
         actor.addListener(tip);
         tip.getActor().addAction(Actions.forever(Actions.run(() -> {
             if (!actor.ascendantsVisible()) {
@@ -137,6 +143,91 @@ public final class UiKit {
         scroll.setFlickScroll(false);
         wheelWhileHovered(scroll);
         return scroll;
+    }
+
+    /**
+     * A list as {@link #scrollList(Actor)}; with {@code token}, in the Token v0 look (docs/design-system/tokens.md,
+     * Lists and trees, Scrollbars): the input frame, and a pill thumb that always shows, over a rail while the pointer
+     * is on the bar, lighter while hovered and lighter still while dragged.
+     */
+    public ScrollPane scrollList(Actor list, boolean token) {
+        if (!token) {
+            return scrollList(list);
+        }
+        ScrollPane scroll = scrollList(list);
+        ScrollPane.ScrollPaneStyle rest = new ScrollPane.ScrollPaneStyle(
+              skin.get(UiTheme.TOKEN_LIST, ScrollPane.ScrollPaneStyle.class));
+        ScrollPane.ScrollPaneStyle over = new ScrollPane.ScrollPaneStyle(rest);
+        over.vScroll = skin.getDrawable("scroll-rail");
+        over.vScrollKnob = skin.getDrawable("scroll-thumb-over");
+        ScrollPane.ScrollPaneStyle down = new ScrollPane.ScrollPaneStyle(over);
+        down.vScrollKnob = skin.getDrawable("scroll-thumb-down");
+        scroll.setStyle(rest);
+        scroll.setFadeScrollBars(false);
+        // The pointer's x in the pane while it is over it, else negative
+        float[] pointer = { -1 };
+        scroll.addListener(new InputListener() {
+            @Override
+            public boolean mouseMoved(InputEvent event, float x, float y) {
+                pointer[0] = x;
+                return false;
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int index, Actor toActor) {
+                if (index == -1 && (toActor == null || !toActor.isDescendantOf(scroll))) {
+                    pointer[0] = -1;
+                }
+            }
+        });
+        scroll.addAction(Actions.forever(Actions.run(() -> {
+            ScrollPane.ScrollPaneStyle look = rest;
+            if (scroll.isScrollY() && scroll.isDragging()) {
+                look = down;
+            } else if (scroll.isScrollY()) {
+                float right = scroll.getWidth() - rest.background.getRightWidth();
+                if (pointer[0] >= right - scroll.getScrollBarWidth() && pointer[0] <= right) {
+                    look = over;
+                }
+            }
+            if (scroll.getStyle() != look) {
+                scroll.setStyle(look);
+            }
+        })));
+        return scroll;
+    }
+
+    /**
+     * Gives hud-v3's split pane the Token v0 divider (docs/design-system/tokens.md, Split panes): a subtle line in a
+     * grab band, an accent line while the pointer is on it or drags it. Returns the split pane.
+     */
+    public SplitPane tokenSplit(SplitPane split) {
+        SplitPane.SplitPaneStyle rest = skin.get(UiTheme.TOKEN_SPLIT,
+              SplitPane.SplitPaneStyle.class);
+        SplitPane.SplitPaneStyle active =
+              new SplitPane.SplitPaneStyle(skin.getDrawable("token-split-active"));
+        split.setStyle(rest);
+        boolean[] dragging = { false };
+        split.addListener(new InputListener() {
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                dragging[0] = split.isCursorOverHandle();
+                return dragging[0];
+            }
+
+            @Override
+            public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                dragging[0] = false;
+            }
+        });
+        split.addAction(Actions.forever(Actions.run(() -> {
+            SplitPane.SplitPaneStyle look =
+                  dragging[0] || split.isCursorOverHandle() ? active : rest;
+            if (split.getStyle() != look) {
+                split.setStyle(look);
+            }
+        })));
+        return split;
     }
 
     /** A horizontal choice row with the same scroll behaviour and styling as other UIKit lists. */
@@ -226,9 +317,27 @@ public final class UiKit {
         label.setFontScale(label.getStyle().font.getScaleX() * size / tableSize);
     }
 
+    /** A label in a Token v0 type style ({@link UiTheme#TYPE_STYLES}) in the color of {@code role}. */
+    public Label typeLabel(String text, String type, String role) {
+        Label.LabelStyle style = new Label.LabelStyle(skin.get(UiTheme.TYPE + type, Label.LabelStyle.class));
+        style.fontColor = UiTheme.tokenColor(role);
+        return new Label(text, style);
+    }
+
     /** The prototype's caption (.cap): upper-case condensed muted text. */
     public Label caption(String text) {
         return new Label(UiTheme.upper(text), skin, "hud-caption");
+    }
+
+    /** A caption as {@link #caption(String)}; with {@code token}, the upper-case overline type in text.muted. */
+    public Label caption(String text, boolean token) {
+        if (!token) {
+            return caption(text);
+        }
+        Label caption = new Label(UiTheme.upper(text), new Label.LabelStyle(skin.get(UiTheme.TYPE + "overline",
+              Label.LabelStyle.class)));
+        caption.getStyle().fontColor = UiTheme.tokenColor("text.muted");
+        return caption;
     }
 
     /**
@@ -258,6 +367,20 @@ public final class UiKit {
     }
 
     /**
+     * A panel as {@link #panel()}; with {@code token}, the Token v0 panel ({@link UiTheme#TOKEN_PANEL}): the edge and
+     * corner ticks, padded lg all round, so its header, body and footer bring no padding of their own.
+     */
+    public Table panel(boolean token) {
+        if (!token) {
+            return panel();
+        }
+        Table panel = new Table();
+        panel.setBackground(skin.getDrawable(UiTheme.TOKEN_PANEL));
+        panel.top();
+        return panel;
+    }
+
+    /**
      * A panel header (.phd): the upper-case title, an optional muted count (.n) beside it, and tools at the right:
      * buttons, or a count that a panel shows there.
      */
@@ -280,9 +403,45 @@ public final class UiKit {
         return header;
     }
 
+    /**
+     * A panel header as {@link #header(String, String, Actor...)}; with {@code token}, the Token v0 header for a token
+     * panel: the sentence-case title in the {@code title} type and text.primary, the count in text.muted, the tools
+     * xs apart, and md above the body.
+     */
+    public Table header(String title, String count, boolean token, Actor... tools) {
+        return token ? tokenHeader(title, count, "title", tools) : header(title, count, tools);
+    }
+
+    private Table tokenHeader(String title, String count, String type, Actor... tools) {
+        Table header = new Table();
+        header.padBottom(space("md"));
+        Label heading = typeLabel(title, type, "text.primary");
+        heading.setEllipsis(true);
+        header.add(heading).minWidth(0);
+        if (count != null) {
+            Label counted = typeLabel(count, "body", "text.muted");
+            counted.setName(HEADER_COUNT);
+            header.add(counted).padLeft(space("sm"));
+        }
+        header.add().expandX();
+        for (Actor tool : tools) {
+            header.add(tool).padLeft(space("xs"));
+        }
+        return header;
+    }
+
+    private static float space(String name) {
+        return DesignTokens.shipped().space().get(name);
+    }
+
     /** A close button (.b.ib with the close icon), as a header's tool, which runs {@code action}. */
     public UiButton closeButton(Runnable action) {
-        UiButton close = button("hud-icon", "close", null, null);
+        return closeButton(action, false);
+    }
+
+    /** A close button as {@link #closeButton(Runnable)}; with {@code token}, the compact icon button. */
+    public UiButton closeButton(Runnable action, boolean token) {
+        UiButton close = button(token ? "button-icon" + UiTheme.COMPACT : "hud-icon", "close", null, null);
         onChange(close, action);
         return close;
     }
@@ -303,6 +462,23 @@ public final class UiKit {
     }
 
     /**
+     * A dialog as {@link #dialog(String, Runnable)}; with {@code token}, the Token v0 dialog card: the token panel
+     * padded xl above the header and xxl elsewhere, and a header with the sentence-case title in the {@code headline}
+     * type and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or wider.
+     */
+    public Table dialog(String title, Runnable close, boolean token) {
+        if (!token) {
+            return dialog(title, close);
+        }
+        Table dialog = panel(true);
+        dialog.pad(space("xl"), space("xxl"), space("xxl"), space("xxl"));
+        Table header = tokenHeader(title, null, "headline", closeButton(close, true));
+        header.padBottom(space("xl"));
+        dialog.add(header).growX().row();
+        return dialog;
+    }
+
+    /**
      * Ends {@code panel} with its footer (.pfoot): the rule, then a foot row padded 8 14 9 14, which it returns for the
      * panel's line and actions.
      */
@@ -314,11 +490,42 @@ public final class UiKit {
         return foot;
     }
 
+    /**
+     * Ends {@code panel} with its footer as {@link #footer(Table)}; with {@code token}, a border.subtle hairline md
+     * below the body, then the foot row md below it, inside the token panel's padding.
+     */
+    public Table footer(Table panel, boolean token) {
+        if (!token) {
+            return footer(panel);
+        }
+        panel.add(new Image(skin.getDrawable("token-divider"))).growX()
+              .height(DesignTokens.shipped().size().get("border")).padTop(space("md")).row();
+        Table foot = new Table();
+        foot.padTop(space("md"));
+        panel.add(foot).growX();
+        return foot;
+    }
+
     /** A list's empty state (.empty): {@code text}, wrapped and muted, as the list's only row. */
     public Label empty(Table list, String text) {
         Label empty = label(text, "hud-body", 12.5f, UiTheme.MUTED);
         empty.setWrap(true);
         list.add(empty).growX().pad(16, 14, 16, 14);
+        return empty;
+    }
+
+    /**
+     * A list's empty state as {@link #empty(Table, String)}; with {@code token}, the Token v0 look: {@code text} in
+     * text.muted, centred in the first row's place (control.sm high).
+     */
+    public Label empty(Table list, String text, boolean token) {
+        if (!token) {
+            return empty(list, text);
+        }
+        Label empty = label(text, "hud-body", 13, UiTheme.tokenColor("text.muted"));
+        empty.setWrap(true);
+        empty.setAlignment(Align.center);
+        list.add(empty).growX().minHeight(DesignTokens.shipped().size().get("control.sm"));
         return empty;
     }
 
@@ -394,21 +601,45 @@ public final class UiKit {
 
     /** A drop-down's face (.fsel; inline: .amsel): the current choice and a chevron. Its view opens the list. */
     public UiButton select(String text, boolean inline) {
-        UiButton select = new UiButton(this, inline ? "hud-select-inline" : "hud-select");
+        return select(text, inline, false);
+    }
+
+    /**
+     * A drop-down's face as {@link #select(String, boolean)}; with {@code token}, in the Token v0 look (the input box,
+     * or a dotted underline when inline, and a text.secondary chevron).
+     */
+    public UiButton select(String text, boolean inline, boolean token) {
+        String style = inline ? token ? UiTheme.TOKEN_SELECT_INLINE : "hud-select-inline"
+              : token ? UiTheme.TOKEN_SELECT : "hud-select";
+        UiButton select = new UiButton(this, style);
         select.setText(text);
         size(select.getLabel(), inline ? "hud-small" : "hud-body", inline ? 11 : 12);
         select.getLabel().setAlignment(Align.left);
         select.getLabel().setEllipsis(true);
         select.add(select.getLabel()).growX().minWidth(0);
-        Icon chevron = icon("chevron-down", 12, Color.WHITE);
-        select.icons.add(chevron);
-        select.add(chevron).padLeft(inline ? 2 : 6);
+        if (token) {
+            Icon chevron = icon("chevron-down", UiTheme.FIELD_ICON, Color.WHITE);
+            select.iconColors.put(chevron, skin.get(UiTheme.SelectStyle.class).chevron);
+            select.add(chevron).size(UiTheme.FIELD_ICON).padLeft(DesignTokens.shipped().space().get("xs"));
+        } else {
+            Icon chevron = icon("chevron-down", 12, Color.WHITE);
+            select.icons.add(chevron);
+            select.add(chevron).padLeft(inline ? 2 : 6);
+        }
         return select;
     }
 
     /** A checkbox (.tog): the box, mint while ticked, and its label; a click on either flips it. */
     public Checkbox checkbox(String text, boolean ticked) {
-        return new Checkbox(text, ticked);
+        return new Checkbox(text, ticked, false);
+    }
+
+    /**
+     * A checkbox as {@link #checkbox(String, boolean)}; with {@code token}, in the Token v0 look (an input box with a
+     * control edge, an accent fill and an onAccent check when ticked).
+     */
+    public Checkbox checkbox(String text, boolean ticked, boolean token) {
+        return new Checkbox(text, ticked, token);
     }
 
     /**
@@ -416,12 +647,27 @@ public final class UiKit {
      * as a shortcut, and a chevron when the item opens a group. The keyboard highlight is the pressed state.
      */
     public UiButton menuRow(String text, String detail, Boolean checked, boolean group) {
-        UiButton row = new UiButton(this, "hud-menu-row");
+        return menuRow("hud-menu-row", text, detail, checked, group);
+    }
+
+    /**
+     * A menu item as {@link #menuRow(String, String, Boolean, boolean)} in {@code style}: hud-menu-row, or
+     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a violet check and a text.secondary chevron.
+     */
+    public UiButton menuRow(String style, String text, String detail, Boolean checked, boolean group) {
+        UiButton row = new UiButton(this, style);
+        boolean token = style.equals(UiTheme.TOKEN_MENU_ROW);
+        UiTheme.SelectStyle colors = token ? skin.get(UiTheme.SelectStyle.class) : null;
+        float gap = token ? DesignTokens.shipped().space().get("sm") : 10;
         if (checked != null) {
             Icon mark = icon("check", 16, Color.WHITE);
             mark.setVisible(checked);
-            row.icons.add(mark);
-            row.add(mark).padRight(10);
+            if (token) {
+                row.iconColors.put(mark, colors.check);
+            } else {
+                row.icons.add(mark);
+            }
+            row.add(mark).padRight(gap);
         }
         row.setText(text);
         row.getLabel().setAlignment(Align.left);
@@ -429,12 +675,16 @@ public final class UiKit {
         if (detail != null && !detail.isEmpty()) {
             Label shortcut = label(detail, "hud-small", 11, Color.WHITE);
             row.details.add(shortcut);
-            row.add(shortcut).padLeft(10);
+            row.add(shortcut).padLeft(gap);
         }
         if (group) {
             Icon chevron = icon("chevron-right", 12, Color.WHITE);
-            row.icons.add(chevron);
-            row.add(chevron).padLeft(10);
+            if (token) {
+                row.iconColors.put(chevron, colors.chevron);
+            } else {
+                row.icons.add(chevron);
+            }
+            row.add(chevron).padLeft(gap);
         }
         return row;
     }
@@ -448,9 +698,85 @@ public final class UiKit {
         return chip;
     }
 
+    /**
+     * A chip in hud-v3's look, or with {@code token} Token v0's status chip: OK, WARN and BAD with their status icon
+     * and a 1px edge in the status color over text.primary, NORMAL the neutral chip with a border.control edge and
+     * text.secondary; small type, sentence case.
+     */
+    public Actor chip(String text, Tone tone, boolean token) {
+        if (!token) {
+            return chip(text, tone);
+        }
+        String status = switch (tone) {
+            case OK -> "success";
+            case WARN -> "warning";
+            case BAD -> "danger";
+            default -> null;
+        };
+        float xs = space("xs");
+        float md = space("md");
+        Table chip = new Table();
+        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + (status == null ? "neutral" : status)));
+        if (status == null) {
+            chip.add(typeLabel(text, "small", "text.secondary")).padLeft(md).padRight(md);
+        } else {
+            String icon = switch (tone) {
+                case OK -> "check";
+                case WARN -> "warn";
+                default -> "error";
+            };
+            chip.add(icon(icon, DesignTokens.shipped().size().get("icon.sm"), UiTheme.tokenColor("status." + status)))
+                  .padLeft(xs);
+            chip.add(typeLabel(text, "small", "text.primary")).padLeft(xs).padRight(md);
+        }
+        return chip;
+    }
+
     /** A search field (.field) with its placeholder, and a clear button while it holds text. */
     public SearchField search(String placeholder) {
-        return new SearchField(placeholder);
+        return new SearchField(placeholder, false);
+    }
+
+    /**
+     * A search field as {@link #search(String)}; with {@code token}, in the Token v0 look: the {@code input-search}
+     * style with a leading search glyph and a compact icon button to clear it.
+     */
+    public SearchField search(String placeholder, boolean token) {
+        return new SearchField(placeholder, token);
+    }
+
+    /**
+     * Gives a field in a token {@code input} style the {@code border.strong} edge under the pointer anywhere over
+     * {@code root} (the field, or a stack that draws parts over it), which scene2d's TextField lacks. Returns the field.
+     */
+    public static <T extends TextField> T hoverEdge(T field, Actor root) {
+        if (!(field.getStyle() instanceof UiTheme.TokenFieldStyle rest) || rest.over == null) {
+            return field;
+        }
+        TextField.TextFieldStyle over = new TextField.TextFieldStyle(rest);
+        over.background = rest.over;
+        root.addListener(new InputListener() {
+            @Override
+            public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
+                if (pointer == -1) {
+                    field.setStyle(over);
+                }
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
+                if (pointer == -1 && (toActor == null || !toActor.isDescendantOf(root))) {
+                    field.setStyle(rest);
+                }
+            }
+        });
+        return field;
+    }
+
+    /** The token slider (docs/design-system/tokens.md, Sliders): a pill track, the accent fill and an accent disc. */
+    public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle tokenSliderStyle() {
+        return new com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle(
+              skin.get(UiTheme.TOKEN, com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle.class));
     }
 
     /** A token text input (docs/design-system/tokens.md, Inputs); compact is control.sm high, otherwise control.md. */
@@ -546,12 +872,21 @@ public final class UiKit {
 
     /** A labelled bar (.meter; compact: the overview card's .bars2). */
     public Meter meter(String caption, boolean compact) {
-        return new Meter(caption, compact, new Bar(compact ? 3 : 4));
+        return new Meter(caption, compact, new Bar(compact ? 3 : 4), false);
+    }
+
+    /**
+     * A meter in hud-v3's look, or with {@code token} Token v0's progress bar: the caption above in small type and
+     * text.secondary (caption type when compact), the value at the trailing end in text.primary, sentence case, over
+     * a 4-high border.control pill track with a pill fill in the color {@link Meter#set} gives.
+     */
+    public Meter meter(String caption, boolean compact, boolean token) {
+        return token ? new Meter(caption, compact, new TokenBar(), true) : meter(caption, compact);
     }
 
     /** A meter's caption and value over a bar that its view draws, such as a segmented or hatched bar. */
     public Meter meter(String caption, Widget bar) {
-        return new Meter(caption, false, bar);
+        return new Meter(caption, false, bar, false);
     }
 
     /** A progress bar (.progress): a meter whose value is the percentage done, over the mint share of its bar. */
@@ -592,7 +927,14 @@ public final class UiKit {
         /** The segments or tabs, in the order of their labels. */
         public final List<UiButton> buttons = new ArrayList<>();
 
+        /** The hairlines between two sections of a token segmented control, hidden beside the selected one. */
+        private final List<Image> dividers = new ArrayList<>();
+
         private Segmented(String style, boolean flex, String... labels) {
+            if (style.startsWith(UiTheme.TOKEN_SEGMENT) || style.startsWith(UiTheme.TOKEN_TAB)) {
+                tokenSections(style, flex, labels);
+                return;
+            }
             boolean tabs = style.startsWith("hud-tab");
             // A pill ("hud-pill"): one frame whose sections touch, a hairline between two of them.
             boolean pill = style.equals("hud-pill");
@@ -617,10 +959,43 @@ public final class UiKit {
             }
         }
 
+        /**
+         * The Token v0 look: tabs side by side on a border.subtle hairline, or segments of one width in a raised
+         * frame with hairlines between them (docs/design-system/tokens.md, Tabs and Segmented control).
+         */
+        private void tokenSections(String style, boolean flex, String... labels) {
+            boolean tabs = style.startsWith(UiTheme.TOKEN_TAB);
+            float border = DesignTokens.shipped().size().get("border");
+            if (tabs) {
+                setBackground(skin.getDrawable("token-tabs"));
+            } else {
+                setBackground(skin.getDrawable("seg-frame"));
+                pad(border);
+            }
+            for (String text : labels) {
+                if (!tabs && !buttons.isEmpty()) {
+                    Image divider = new Image(skin.getDrawable("token-divider"));
+                    dividers.add(divider);
+                    add(divider).width(border).fillY().padTop(6).padBottom(6);
+                }
+                UiButton button = button(style, null, text, null);
+                Cell<UiButton> cell = add(button).fillY();
+                if (flex) {
+                    cell.growX().uniformX();
+                } else if (!tabs) {
+                    cell.uniformX().fillX();
+                }
+                buttons.add(button);
+            }
+        }
+
         /** Presses the segment at {@code index} and releases the others; -1 releases all. */
         public Segmented select(int index) {
             for (int i = 0; i < buttons.size(); i++) {
                 buttons.get(i).pressed(i == index);
+            }
+            for (int i = 0; i < dividers.size(); i++) {
+                dividers.get(i).setVisible(i != index && i + 1 != index);
             }
             return this;
         }
@@ -631,20 +1006,44 @@ public final class UiKit {
      * fires a ChangeEvent; its view's own change ({@link #ticked}) fires none.
      */
     public final class Checkbox extends Table {
-        private final Icon box = icon("checkbox-off", 18, UiTheme.MUTED);
+        private final Icon box;
+        /** The Token v0 look's check over the box; null in the hud-v3 look. */
+        private final Icon mark;
+        private final ClickListener click;
         private boolean ticked;
 
-        private Checkbox(String text, boolean initial) {
-            add(box).padRight(8);
-            add(label(text, "hud-body", 13, UiTheme.TEXT));
-            setTouchable(Touchable.enabled);
-            addListener(new ClickListener() {
+        private Checkbox(String text, boolean initial, boolean token) {
+            click = new ClickListener() {
                 @Override
                 public void clicked(InputEvent event, float x, float y) {
                     toggle();
                 }
-            });
+            };
+            if (token) {
+                UiTheme.ChoiceStyle colors = skin.get(UiTheme.ChoiceStyle.class);
+                box = new Icon(skin.getDrawable("choice-box"), UiTheme.CHOICE_SIZE);
+                mark = icon("check", UiTheme.CHOICE_SIZE, colors.mark);
+                Stack indicator = new Stack(box, mark);
+                add(indicator).size(UiTheme.CHOICE_SIZE).padRight(DesignTokens.shipped().space().get("sm"));
+                add(label(text, "hud-body", 13, colors.text));
+            } else {
+                box = icon("checkbox-off", 18, UiTheme.MUTED);
+                mark = null;
+                add(box).padRight(8);
+                add(label(text, "hud-body", 13, UiTheme.TEXT));
+            }
+            setTouchable(Touchable.enabled);
+            addListener(click);
             ticked(initial);
+        }
+
+        @Override
+        public void act(float delta) {
+            if (mark != null) {
+                String state = click.isPressed() ? "-down" : click.isOver() ? "-over" : "";
+                box.setDrawable(skin.getDrawable("choice-box" + (ticked ? "-on" : "") + state));
+            }
+            super.act(delta);
         }
 
         /** Whether the box is ticked. */
@@ -655,6 +1054,11 @@ public final class UiKit {
         /** Ticks or clears the box without an event. */
         public Checkbox ticked(boolean value) {
             ticked = value;
+            if (mark != null) {
+                box.setDrawable(skin.getDrawable(value ? "choice-box-on" : "choice-box"));
+                mark.setVisible(value);
+                return this;
+            }
             box.setDrawable(skin.getDrawable(value ? "icon-checkbox-on" : "icon-checkbox-off"));
             box.setColor(value ? UiTheme.MINT : UiTheme.MUTED);
             return this;
@@ -676,13 +1080,28 @@ public final class UiKit {
         /** The clear button, shown while the field holds text. */
         public final UiButton clear;
 
-        private SearchField(String placeholder) {
-            field = new TextField("", skin, "hud-search");
+        private SearchField(String placeholder, boolean token) {
+            field = new TextField("", skin, token ? "input-search" : "hud-search");
             field.setMessageText(placeholder);
             field.setProgrammaticChangeEvents(true);
-            clear = closeButton(() -> field.setText(""));
             Table overlay = new Table();
-            overlay.right().add(clear).size(26).padRight(3);
+            if (token) {
+                clear = button("button-icon-compact", "close", null, null);
+                onChange(clear, () -> field.setText(""));
+                DesignTokens tokens = DesignTokens.shipped();
+                float inset = tokens.size().get("border") + tokens.space().get("xs");
+                float side = tokens.size().get("border") + tokens.space().get("md");
+                float height = tokens.size().get("control.md");
+                Icon glyph = icon("search", UiTheme.FIELD_ICON, field.getStyle().messageFontColor);
+                glyph.setTouchable(Touchable.disabled);
+                overlay.add(glyph).size(UiTheme.FIELD_ICON).padLeft(side);
+                overlay.add().expandX();
+                overlay.add(clear).size(height - 2 * inset).padRight(inset);
+                hoverEdge(field, this);
+            } else {
+                clear = closeButton(() -> field.setText(""));
+                overlay.right().add(clear).size(26).padRight(3);
+            }
             add(field);
             add(overlay);
         }
@@ -736,11 +1155,23 @@ public final class UiKit {
         private final Label value;
         private final Cell<Label> valueCell;
         private final Widget bar;
+        private final boolean token;
 
-        private Meter(String caption, boolean compact, Widget bar) {
+        private Meter(String caption, boolean compact, Widget bar, boolean token) {
+            this.bar = bar;
+            this.token = token;
+            if (token) {
+                String type = compact ? "caption" : "small";
+                value = typeLabel("", type, "text.primary");
+                this.caption = typeLabel(caption, type, "text.secondary");
+                add(this.caption).left();
+                valueCell = add(value).right().expandX().padLeft(space("md"));
+                row();
+                add(bar).colspan(2).growX().padTop(space("xs"));
+                return;
+            }
             float size = compact ? 9.5f : 10.5f;
             value = label("", compact ? "hud-caption" : "hud-button", compact ? size : 13, Color.WHITE);
-            this.bar = bar;
             this.caption = label(UiTheme.upper(caption), "hud-caption", size, UiTheme.MUTED);
             Cell<Label> captionCell = add(this.caption).left();
             valueCell = add(value).right().expandX();
@@ -753,16 +1184,16 @@ public final class UiKit {
             add(bar).colspan(2).growX().padTop(4);
         }
 
-        /** The caption at the left, upper-cased (.meter .l), such as the step a progress bar runs. */
+        /** The caption at the left, upper-cased (.meter .l) except in the token look, such as a progress bar's step. */
         public Meter caption(String text) {
-            caption.setText(UiTheme.upper(text));
+            caption.setText(token ? text : UiTheme.upper(text));
             return this;
         }
 
         /** The value at the right of the caption, upper-cased as the caption (.meter .l). */
         public Meter value(String text) {
             valueCell.setActor(value);
-            value.setText(UiTheme.upper(text));
+            value.setText(token ? text : UiTheme.upper(text));
             return this;
         }
 
@@ -781,8 +1212,38 @@ public final class UiKit {
             if (bar instanceof Bar plain) {
                 plain.fraction = MathUtils.clamp(fraction, 0, 1);
                 plain.fillColor = fill;
+            } else if (bar instanceof TokenBar pill) {
+                pill.fraction = MathUtils.clamp(fraction, 0, 1);
+                pill.fillColor = fill;
             }
             return this;
+        }
+    }
+
+    /** A token meter's bar: the border.control pill track and a pill fill from the leading edge. */
+    private final class TokenBar extends Widget {
+        private final Drawable track = skin.getDrawable("token-track");
+        private final Drawable pill = skin.getDrawable("token-bar");
+        private float fraction;
+        private Color fillColor = UiTheme.tokenColor("accent.primary");
+
+        @Override
+        public float getPrefHeight() {
+            return track.getMinHeight();
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            float previous = batch.getPackedColor();
+            float alpha = getColor().a * parentAlpha;
+            batch.setColor(1, 1, 1, alpha);
+            track.draw(batch, getX(), getY(), getWidth(), getHeight());
+            if (fraction > 0) {
+                // A pill can't be narrower than it is high
+                batch.setColor(fillColor.r, fillColor.g, fillColor.b, fillColor.a * alpha);
+                pill.draw(batch, getX(), getY(), Math.max(getHeight(), getWidth() * fraction), getHeight());
+            }
+            batch.setPackedColor(previous);
         }
     }
 
@@ -794,7 +1255,7 @@ public final class UiKit {
         private final Meter meter;
 
         private Progress(String caption) {
-            meter = new Meter(caption, false, new Bar(4));
+            meter = new Meter(caption, false, new Bar(4), false);
             add(meter).growX();
             set(0);
         }

@@ -6,14 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FontMetrics;
+import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +25,8 @@ import java.util.Set;
 import javax.accessibility.AccessibleRole;
 import javax.accessibility.AccessibleState;
 import javax.swing.AbstractButton;
+import javax.swing.BorderFactory;
+import javax.swing.CellRendererPane;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -29,13 +35,16 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JMenuItem;
+import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
+import javax.swing.JProgressBar;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
+import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
@@ -47,6 +56,7 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.UIDefaults;
 import javax.swing.UIManager;
+import javax.swing.border.TitledBorder;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
@@ -64,7 +74,8 @@ class TokenLafDefaultsTest {
     /** Keys FlatLaf styles through the component's own setters rather than the UI delegate. */
     private static final Set<String> COMPONENT_KEYS = Set.of("background", "foreground", "margin", "font");
     /** Washes painted over whatever content lies under them rather than as a component's background. */
-    private static final Set<String> TRANSLUCENT_KEYS = Set.of("ScrollBar.hoverTrackColor");
+    private static final Set<String> TRANSLUCENT_KEYS = Set.of("ScrollBar.hoverTrackColor", TokenTables.HOVER_WASH,
+          TokenSections.HOVER_BACKGROUND);
 
     private final DesignTokens tokens = DesignTokens.shipped();
 
@@ -129,6 +140,8 @@ class TokenLafDefaultsTest {
     @Test
     void inputsMatchButtonHeightsAndShowHoverAndReadOnlyEdges() throws Exception {
         String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        // The edges ease between states; with reduce motion each one shows at once
+        TokenMotion.setReduced(true);
         try {
             for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
                 UIManager.setLookAndFeel(lookAndFeel);
@@ -166,6 +179,7 @@ class TokenLafDefaultsTest {
                 assertEquals(spinner, FieldEdge.edgeOf(editor));
             }
         } finally {
+            TokenMotion.setReduced(false);
             if (previous != null) {
                 UIManager.setLookAndFeel(previous);
             }
@@ -337,6 +351,51 @@ class TokenLafDefaultsTest {
                 assertEquals(UIScale.scale(indent * 2), ((TokenTreeUI) tree.getUI()).getLeftChildIndent()
                       + ((TokenTreeUI) tree.getUI()).getRightChildIndent());
                 assertEquals(UIScale.scale(markerSpace), tree.getInsets().left, "chevrons clear the marker");
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void tablesFollowTheListRows() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+
+                JTable table = new JTable(new Object[][] { { "Atlas", 100 } }, new Object[] { "Unit", "Tons" });
+                assertTrue(table.getUI() instanceof TokenTableUI);
+                assertTrue(table.getTableHeader().getUI() instanceof TokenTableHeaderUI);
+                assertEquals(UIScale.scale(Math.round(tokens.size().get("control.sm"))), table.getRowHeight());
+                assertEquals(defaults.get("List.selectionArc"), defaults.get("Table.selectionArc"));
+                assertEquals(defaults.get("List.selectionInsets"), defaults.get("Table.selectionInsets"));
+                assertNotNull(defaults.getColor("Table.alternateRowColor"));
+                assertFalse(new Color(defaults.getColor("Table.alternateRowColor").getRGB())
+                      .equals(new Color(table.getBackground().getRGB())), "zebra rows differ from the others");
+                assertColor(defaults, "TableHeader.foreground", "text.secondary", mode);
+                assertEquals(TokenFonts.font("overline").getSize(), table.getTableHeader().getFont().getSize());
+                assertEquals(Math.round(tokens.space().get("sm")), UIManager.getInt(TokenTables.SORT_ICON_GAP));
+
+                int markerSpace = Math.round(tokens.space().get("xs") + tokens.size().get("selection.width")
+                      + tokens.space().get("sm"));
+                table.setSize(table.getPreferredSize());
+                table.doLayout();
+                // Renderers sit in the table's renderer pane while they paint
+                CellRendererPane rendererPane = new CellRendererPane();
+                table.add(rendererPane);
+                Component cell = table.prepareRenderer(table.getCellRenderer(0, 0), 0, 0);
+                rendererPane.add(cell);
+                cell.setBounds(table.getCellRect(0, 0, false));
+                assertEquals(UIScale.scale(markerSpace), ((JComponent) cell).getInsets().left,
+                      "the first column clears the marker");
+                cell.setBounds(table.getCellRect(0, 1, false));
+                assertEquals(UIScale.scale(Math.round(tokens.space().get("xs") + tokens.space().get("sm"))),
+                      ((JComponent) cell).getInsets().right, "the last column clears the row's inset");
             }
         } finally {
             if (previous != null) {
@@ -523,6 +582,168 @@ class TokenLafDefaultsTest {
         }
     }
 
+    @Test
+    void progressBarsPutTheirTextAboveAThinTrack() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                assertColor(defaults, "ProgressBar.background", "border.control", mode);
+                assertColor(defaults, TokenProgressBarUI.TEXT_FOREGROUND, "text.secondary", mode);
+                assertColor(defaults, TokenProgressBarUI.DISABLED_TRACK, "border.subtle", mode);
+                assertColor(defaults, TokenProgressBarUI.VALUE_FOREGROUND, "text.primary", mode);
+
+                JProgressBar plain = new JProgressBar(0, 100);
+                assertInstanceOf(TokenProgressBarUI.class, plain.getUI());
+                assertEquals(TokenFonts.font("small").getSize2D(), plain.getFont().getSize2D(), 0.01);
+                int track = UIScale.scale(Math.round(tokens.space().get("xs")));
+                assertEquals(track, plain.getPreferredSize().height);
+
+                JProgressBar texted = new JProgressBar(0, 100);
+                texted.setString("Round 3: waiting for the other players to finish deploying their units");
+                texted.setStringPainted(true);
+                FontMetrics metrics = texted.getFontMetrics(texted.getFont());
+                Dimension size = texted.getPreferredSize();
+                assertEquals(metrics.getHeight() + UIScale.scale(Math.round(tokens.space().get("xs"))) + track,
+                      size.height, "text above the track");
+                assertTrue(size.width >= metrics.stringWidth(texted.getString()), "the text fits");
+                assertEquals(size.height, texted.getMinimumSize().height);
+
+                texted.setIndeterminate(true);
+                texted.setSize(size);
+                BufferedImage image = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = image.createGraphics();
+                try {
+                    texted.paint(g);
+                } finally {
+                    g.dispose();
+                }
+
+                JProgressBar percent = new JProgressBar(0, 1000);
+                percent.setValue(259);
+                TokenProgressBarUI ui = (TokenProgressBarUI) percent.getUI();
+                assertNull(ui.percentText(), "off unless asked for");
+                int withoutPercent = percent.getPreferredSize().height;
+                percent.putClientProperty(TokenProgressBarUI.SHOW_PERCENT, Boolean.TRUE);
+                assertEquals("25%", ui.percentText(), "rounds down, so 100% means done");
+                assertEquals(size.height, percent.getPreferredSize().height, "a text line even without text");
+                assertTrue(percent.getPreferredSize().height > withoutPercent);
+                percent.setIndeterminate(true);
+                assertNull(ui.percentText(), "no percentage while the length is unknown");
+                assertEquals(size.height, percent.getPreferredSize().height, "the line keeps its height");
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void sectionsShareOneHeader() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                assertColor(defaults, TokenSections.TITLE_FOREGROUND, "text.secondary", mode);
+                assertColor(defaults, TokenSections.LINE_COLOR, "border.subtle", mode);
+                assertColor(defaults, "TitledBorder.titleColor", "text.secondary", mode);
+                int height = UIScale.scale(Math.round(tokens.size().get("control.sm")));
+
+                JLabel header = TokenSections.header("Movement");
+                assertEquals(height, header.getPreferredSize().height);
+                assertEquals("Movement", header.getAccessibleContext().getAccessibleName(),
+                      "screen readers get the title as written");
+
+                JPanel titled = new JPanel();
+                titled.setBorder(TokenSections.titled("Deployment"));
+                assertEquals(new Insets(height, 0, 0, 0), titled.getInsets(), "content flush with the title");
+
+                TitledBorder legacy = (TitledBorder) BorderFactory.createTitledBorder("Deployment");
+                assertInstanceOf(TokenTitledBorder.LegacyLine.class, legacy.getBorder());
+                assertEquals(TokenFonts.font("label").getSize2D(), legacy.getTitleFont().getSize2D(), 0.01);
+
+                JLabel content = new JLabel("Zone");
+                TokenCollapsibleSection section = TokenSections.collapsible("Advanced rules", content, false);
+                assertFalse(content.isVisible());
+                List<Object> changes = new ArrayList<>();
+                section.addPropertyChangeListener(TokenCollapsibleSection.EXPANDED,
+                      event -> changes.add(event.getNewValue()));
+                JComponent row = section.getHeader();
+                assertTrue(row.isFocusable());
+                assertEquals(height, row.getPreferredSize().height);
+                assertEquals(AccessibleRole.TOGGLE_BUTTON, row.getAccessibleContext().getAccessibleRole());
+                assertEquals("Advanced rules", row.getAccessibleContext().getAccessibleName());
+                assertTrue(row.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.COLLAPSED));
+                press(row, "toggle");
+                assertTrue(section.isExpanded());
+                assertTrue(content.isVisible());
+                assertEquals(List.of(true), changes);
+                assertTrue(row.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.EXPANDED));
+                section.setEnabled(false);
+                press(row, "toggle");
+                assertTrue(section.isExpanded(), "a disabled section stays as it is");
+                assertFalse(row.isEnabled());
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void splitPaneDividersAreLines() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                Mode mode = lookAndFeel instanceof MegaMekDarkLaf ? Mode.DARK : Mode.LIGHT;
+                UIDefaults defaults = lookAndFeel.getDefaults();
+                assertColor(defaults, TokenSplitPaneUI.LINE_COLOR, "border.subtle", mode);
+                assertColor(defaults, TokenSplitPaneUI.ACTIVE_COLOR, "accent.primary", mode);
+                JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, new JLabel("A"), new JLabel("B"));
+                TokenSplitPaneUI ui = assertInstanceOf(TokenSplitPaneUI.class, split.getUI());
+                assertInstanceOf(TokenSplitPaneUI.LineDivider.class, ui.getDivider());
+                assertEquals(UIScale.scale(Math.round(tokens.space().get("md"))), split.getDividerSize());
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
+    @Test
+    void optionPanesCentreTheirButtonsWithTokenIcons() throws Exception {
+        String previous = UIManager.getLookAndFeel() == null ? null : UIManager.getLookAndFeel().getClass().getName();
+        try {
+            for (FlatLaf lookAndFeel : List.of(new MegaMekDarkLaf(), new MegaMekLightLaf())) {
+                UIManager.setLookAndFeel(lookAndFeel);
+                UIDefaults defaults = UIManager.getDefaults();
+                assertEquals(0, defaults.getInt("OptionPane.buttonOrientation"));
+                assertFalse(defaults.getBoolean("OptionPane.isYesLast"));
+                assertTrue(defaults.getBoolean("OptionPane.sameSizeButtons"));
+                List<TokenDialogPane.Status> statuses = List.of(TokenDialogPane.Status.ERROR,
+                      TokenDialogPane.Status.WARNING, TokenDialogPane.Status.INFO, TokenDialogPane.Status.QUESTION);
+                List<String> keys = List.of("OptionPane.errorIcon", "OptionPane.warningIcon",
+                      "OptionPane.informationIcon", "OptionPane.questionIcon");
+                for (int i = 0; i < keys.size(); i++) {
+                    Icon icon = assertInstanceOf(Icon.class, defaults.get(keys.get(i)), keys.get(i));
+                    assertEquals(statuses.get(i).icon().getIconWidth(), icon.getIconWidth(), keys.get(i));
+                }
+            }
+        } finally {
+            if (previous != null) {
+                UIManager.setLookAndFeel(previous);
+            }
+        }
+    }
+
     private static void press(JComponent component, String action) {
         component.getActionMap().get(action).actionPerformed(new ActionEvent(component,
               ActionEvent.ACTION_PERFORMED, action));
@@ -549,6 +770,9 @@ class TokenLafDefaultsTest {
         assertTrue(defaults.getIcon("CheckBox.icon") instanceof TokenCheckBoxIcon, "CheckBox.icon");
         assertTrue(defaults.getIcon("RadioButton.icon") instanceof TokenRadioButtonIcon, "RadioButton.icon");
         assertEquals(TokenTabbedPaneUI.class.getName(), defaults.getString("TabbedPaneUI"));
+        // Buttons ease between their states
+        assertEquals(TokenButtonUI.class.getName(), defaults.getString("ButtonUI"));
+        assertEquals(TokenButtonUI.Toggle.class.getName(), defaults.getString("ToggleButtonUI"));
         // Inputs: control.sm height by default, a strong edge on hover, no fill and a subtle edge when read-only
         assertEquals(Math.round(tokens.size().get("control.sm")), defaults.getInt(FieldEdge.HEIGHT));
         assertColor(defaults, FieldEdge.HOVER_COLOR, "border.strong", mode);

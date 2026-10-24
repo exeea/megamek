@@ -12,14 +12,15 @@ both platforms (and the launcher, later) can share it.
 In a dev build, open the lobby and use **Help > UI library (developer)**. The submenu only shows in the lobby.
 
 - **Swing controls...** opens the Swing gallery: every color role in both modes, the accessibility checks, the text
-  styles, spacing and shape, and a **Controls** tab of real Swing controls drawn by the MegaMek look and feel. A
+  styles, spacing and shape, and five tabs of real Swing controls drawn by the MegaMek look and feel. A
   toolbar toggles light mode and simulates deuteranopia, protanopia and tritanopia over the whole window. While the
   gallery is open the whole app uses MegaMek Dark or Light, and closing it restores the previous theme. This is the
   complete library; Swing controls are added here as they are built.
-- **libGDX controls...** opens the native gallery: the Token v0 dark colors beside the hud-v3 colors in use today,
-  the hud fonts, all 19 current button styles in rest, pressed and disabled states, and the other toolkit controls. It
-  is a subset of the Swing library and grows only when the game needs a control. Only one native window can run at a
-  time, so it closes before a board or the board editor opens, and it will not open next to one.
+- **libGDX controls...** opens the native gallery: one tab per group of hud-v3 toolkit elements (colors and type,
+  buttons, selection, inputs, lists, containers, status and HUD parts), each shown as the game draws it today beside
+  its migrated Token v0 look, filled in tab by tab. The migration restyles these elements and adds no new controls.
+  Only one native window can run at a time, so it closes before a board or the board editor opens, and it will not
+  open next to one.
 
 The same checks run as a unit test, along with a test that the Swing themes pick the tokens up:
 
@@ -61,6 +62,7 @@ Names describe a role, not a hue, so each name has one meaning in both modes. Su
 | `surface.input` | `#1D2426` | `#FFFFFF` | Fields, selects |
 | `surface.hover` | `#FFFFFF0F` | `#16201E0D` | Hover wash |
 | `surface.inverse` | `#F0F2EE` | `#1C2426` | Primary button, checked toggle |
+| `surface.scrim` | `#0D1112A3` | `#16201E66` | Dims the window behind a modal card |
 | `text.primary` | `#F1F4F0` | `#16201E` | Body text |
 | `text.secondary` | `#CBD3D0` | `#3A4542` | Button labels, secondary values |
 | `text.muted` | `#9AA6A3` | `#596562` | Captions, hints |
@@ -94,7 +96,27 @@ Why these values:
   the galleries show this.
 
 The `checks` block in the JSON lists every rule: text contrast 4.5:1, control contrast 3:1, and minimum distances
-between statuses, selection and accent for typical vision and the three simulated deficiencies. All 148 checks pass.
+between statuses, selection and accent for typical vision and the three simulated deficiencies. All 154 checks pass.
+
+### Migrating hud-v3 colors
+
+| hud-v3 color (`UiTheme`) | Token |
+| --- | --- |
+| `TEXT`, `ACCENT`, `MUTED`, `DISABLED` | `text.primary`, `text.secondary`, `text.muted`, `text.disabled` |
+| `PANEL`, `PANEL2` | `surface.panel`, `surface.raised` (overlay values) |
+| `POP` | `surface.popover` |
+| `FILL`, `MAIN` | `surface.inverse` |
+| `FILL_INK` | `text.onInverse` |
+| `FILL_MUTED` | `surface.raised` |
+| `LINE`, `TRACK`, `QUIET` | `border.subtle` |
+| `TICK`, `RAIL` | `border.control` |
+| `CORNER`, `HOVER` | `border.strong` |
+| `MINT` | `accent.primary`; its success uses move to `status.success` |
+| `CORAL`, `AMBER`, `VIOLET` | `status.danger`, `status.warning`, `selected.primary` |
+| `BLIP` | No token: it stays a HUD game color, like unit and team colors |
+
+No hud-v3 color becomes `surface.base`, `surface.input`, `surface.hover`, `surface.scrim`, `text.onAccent`,
+`focus.ring`, `selected.background` or `status.info`; the libGDX gallery lists them as new in Token v0.
 
 ## Typography
 
@@ -128,6 +150,22 @@ every instance. So `mm-data` also ships `Roboto/Roboto-Medium.ttf`, a static ins
 which is how Swing asks for medium; regular comes from the variable font's default instance. libGDX keeps reading the
 variable font. Both platforms therefore draw the same outlines from one source.
 
+libGDX registers each style as a Label style named `type-` plus the style (`UiTheme.TYPE_STYLES`), beside the hud-v3
+fonts it replaces.
+
+### Migrating hud-v3 fonts
+
+| hud-v3 font | Style |
+| --- | --- |
+| `hud-body`, `hud-small` | `body`, `small` |
+| `hud-medium`, `hud-utility`, `hud-mini`, `hud-button`, `hud-main` | `label` (button and tab text) |
+| `hud-sub` | `caption` |
+| `hud-caption` | `overline` |
+| `hud-name` | `body.strong` |
+| `hud-title`, `hud-heading`, `hud-phase` | `title`, `headline`, `display` |
+
+The libGDX gallery's Colors and type tab shows each hud-v3 color and font beside the token that replaces it.
+
 ## Spacing, shape and motion
 
 | Group | Values |
@@ -136,6 +174,7 @@ variable font. Both platforms therefore draw the same outlines from one source.
 | Radius | sm 2, md 3 |
 | Control height | sm 28, md 36, lg 46 |
 | Icon | sm 16, md 20, lg 24 |
+| Dialog width | sm 420, md 620, lg 800 |
 | Border | 1 |
 | Selection | 2 (the selected tab's underline) |
 | Focus ring | 2 wide inside the edge; 1 gap around small indicators; `focus.ring` |
@@ -145,6 +184,39 @@ variable font. Both platforms therefore draw the same outlines from one source.
 
 Regular frames use corner ticks. The framed button (ticks that grow into a full frame on hover) is a special
 variant for emphasis moments, not the default button.
+
+## Motion
+
+A game UI moves: controls ease between their states instead of switching, so the interface responds to the pointer.
+Every transition uses the `motion` tokens and one easing curve; nothing bounces or overshoots.
+
+| What | How |
+| --- | --- |
+| Hover | Comes in `fast` (120) and lingers on the way out, `medium` (200), so a sweep across controls leaves a short trail |
+| Press | Shows at once; the release fades back over `medium` |
+| Buttons, inputs, selects, tabs, segmented controls | Face, text and edge colors ease between states |
+| Check box, radio button, switch | Box fill and edge ease `fast`; the check draws along its stroke, the radio dot grows from the center, the switch thumb slides |
+| Special button | The corner ticks grow along the edges into the full frame, `slow` (320) in and `medium` out |
+| Popups, menus, tooltips | Fade in `fast`; they close at once |
+| Collapsible sections | The chevron turns a quarter and the content slides open or closed over `medium` |
+| List, tree and table rows | The hover wash fades in and out per row |
+| Scrollbars | The rail eases in and the thumb brightens with hover |
+| Sliders | The thumb's colors ease and it grows a pixel each side under the pointer |
+| Appearing | Nothing animates when it first shows; only changes move |
+
+- **Reduce motion** turns every transition into an instant change, including FlatLaf's own animations and smooth
+  scrolling. It is a MegaMek client setting (Client Settings, next to the theme), off by default.
+- **Popups only fade where they have their own window**, which is every popup on Windows 11 and any popup that
+  reaches past its window elsewhere. One that fits inside its window appears at once.
+- **The gallery shows it live** on the Spacing and shape tab: one sample of each kind, and Play runs them all once.
+
+**Swing.** [`TokenMotion`](../../megamek/src/megamek/client/ui/design/swing/TokenMotion.java) is the one animator:
+a control asks for the value it would paint for its current state and gets the value on its way there, and one shared
+timer repaints moving controls until they arrive. Custom controls use the same calls, `TokenMotion.color(...)` and
+`TokenMotion.value(...)`, with `TokenMotion.hover(...)` and `TokenMotion.buttonState(...)` for the durations above.
+`TokenMotion.setReduced(...)` applies the setting.
+
+**libGDX.** Nothing new yet; hud-v3 keeps its instant states until the developers accept the system.
 
 ## Focus
 
@@ -232,8 +304,15 @@ gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; ali
 | `hud-row`, `hud-menu-row` | Not buttons: list row and menu item come later |
 | `hud-select`, `hud-select-inline` | Not buttons: the [select](#select) |
 
-The hud-v3 styles stay until their views move; the libGDX gallery lists them under "hud-v3 button styles (to
-migrate)".
+The hud-v3 styles stay until their views move. Two rules come with the mapping:
+
+- **A secondary button the game holds pressed becomes a toggle.** Secondary has no selected look, so a `hud`,
+  `hud-plain`, `hud-mini` or `hud-utility-small` button that stays checked moves to toggle (compact for the compact
+  ones). Secondary stays for plain actions.
+- **`hud-delete-icon` becomes a plain icon button.** Token v0 has no danger icon color; the `close` glyph and a tooltip
+  carry that it deletes.
+
+The libGDX gallery's Buttons tab shows each hud-v3 style in its five states beside the token kind it becomes.
 
 ## Inputs
 
@@ -274,8 +353,13 @@ the status icon, `status(Status)` and `readOnly(true)`; `UiTextField.Area` is th
 `input(text, compact)`, `password(compact)`, `tokenSearch(placeholder, compact)`, `area(text, rows)` and
 `formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)). It is the
 in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD's number control), and read-only text
-can not be selected, because scene2d has no read-only field. The `hud` and `hud-search` field styles stay until their
-views move.
+can not be selected, because scene2d has no read-only field. hud-v3's own fields take the look without new controls:
+`UiKit.search(placeholder, true)` builds the search field on `input-search` with a leading glyph and a compact icon
+clear button; a plain `TextField` takes the `input` style and `UiKit.hoverEdge(field, root)` for the hover edge; and
+`UiNumber.tokenLook()` gives the scrub a text.secondary caption, an `input-compact` field and the token slider. The
+dial and hex pickers (`UiAngleDial`, `UiHexSides`) only recolour: `style("token")` reads the token `PickerStyle`
+(discs, border.control and border.strong ticks, accent value, text.muted labels that turn text.secondary when chosen
+and text.primary on hover). The `hud` and `hud-search` field styles stay as hud-v3 draws them today.
 
 ## Choices
 
@@ -313,7 +397,8 @@ drawables [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) regi
 the `UiTheme.CHOICE_STATES`), its mark and the focus ring. `UiKit` builds them: `check(text, checked)`,
 `radio(text, checked)`, `toggleSwitch(text, on)` and `radioGroup(radios...)`. A click, or Space or Enter while it has
 keyboard focus, fires a `ChangeEvent`; `setChecked` and `mixed(true)` from code fire none. `hovered`, `held` and
-`focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` stays until its views move.
+`focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` takes the Token v0 look with
+`checkbox(text, ticked, true)`: the `choice-box` faces and a `text.onAccent` check over the accent fill when ticked.
 
 ## Tabs
 
@@ -365,8 +450,13 @@ faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
 `tokenTabs(compact, labels...)` and `tokenSegmented(compact, labels...)`. A click, or Left and Right while the bar has
 keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
 `focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no Tab
-traversal yet. hud-v3's `UiKit.segmented` and the `hud-tab`, `hud-seg` and `hud-pill` styles stay until their views
-move.
+traversal yet.
+
+hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
+`-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and
+`hud-tab-caps` compact tabs in sentence case. Segments share one width inside the `seg-frame`, with `border.subtle`
+hairlines that hide beside the selected section; tabs sit on a `border.subtle` hairline with a violet underline under
+the selected one.
 
 ## Select
 
@@ -403,8 +493,9 @@ items...)`, `inline(items...)` (or `inline(combo)`) and `placeholder(combo, text
 registers. `UiKit` builds them: `tokenSelect(compact, items...)` and `tokenSelectInline(items...)`. The list sits on
 the stage's root while open and closes on a press outside it. Choosing another item fires a `ChangeEvent` from the
 select; `select(i)` from code fires none, and `placeholder(text)` shows the placeholder until a choice. `hovered`,
-`focused` and `opened` freeze those states for the gallery. hud-v3's `UiKit.select`, its `hud-select` styles and the
-`UiPopover` / `UiMenuList` drop-downs stay until their views move.
+`focused` and `opened` freeze those states for the gallery. hud-v3's own `UiKit.select(text, inline, true)` takes the
+Token v0 look: the `token-select` style is the input box with a `text.secondary` chevron, and `token-select-inline` a
+dotted `border.control` underline that turns `border.strong` on hover.
 
 ## Lists and trees
 
@@ -435,7 +526,15 @@ content and get the hover and the marker, but only the stock renderer gets the r
 [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java) adds `emptyText(list, text)`,
 `twoLine(list, title, detail)` and `scroll(view)`.
 
-**libGDX.** Nothing new yet. hud-v3's `UiList` and `UiTree` stay until the developers accept the system.
+**libGDX.** hud-v3's own lists take the look without new controls.
+[`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token-row` button style (no box, a
+hover wash, the selected wash and violet marker) and the `token-list` scroll pane style (the input frame, padded `xs`
+to inset the rows). `UiKit.scrollList(list, true)` frames a list in it;
+`new UiList(kit, UiTheme.TOKEN)` gives a reorderable list's flying row and slot token colors for `token-row` rows;
+`new UiTree(kit, UiTheme.TOKEN)` draws `token-row` rows 28 high (46 with a second line in `text.secondary`) with
+`text.secondary` chevrons; and `UiKit.empty(list, text, true)` centres a `text.muted` message in the first row's place.
+In card and choice grids only the parts change: `UiKit.caption(text, true)` is the overline caption, the `token-card`
+drawable a plain panel, and the options take the `button-secondary` style.
 
 ## Menus
 
@@ -459,7 +558,12 @@ Menu bars, their menus and context menus. They share the select's popup, so ever
 **Swing.** The MegaMek themes style every `JMenuBar`, `JMenu`, `JMenuItem`, `JCheckBoxMenuItem`,
 `JRadioButtonMenuItem` and `JPopupMenu`, so existing menus get the look without changes.
 
-**libGDX.** Nothing new yet; the in-game UI has no menus that need it.
+**libGDX.** hud-v3's menu rows take the Token v0 look from the `token-menu-row` style: `UiKit.menuRow(style, ...)`
+and `new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW)`. Rows are `control.sm` high with the `sel-row-over` wash for the
+pointer and the keyboard highlight, a violet check, a `text.muted` shortcut and a `text.secondary` chevron. The list
+sits in the `token-popup` frame (the select's popup with `xs` padding, which insets the wash) and its separators are
+`border.subtle` hairlines. `UiButton.iconColors` keeps an icon in its own color rather than the text's, and
+`TokenButtonStyle.detailFontColor` sets the details' color.
 
 ## Tooltips
 
@@ -475,14 +579,17 @@ carry a shortcut and a title.
 | HTML | Keeps its own layout inside the same card |
 
 - **One line of plain text is about `control.sm` (28) tall**, the height of a compact control.
-- **Delays stay user settings**: MegaMek's tooltip delay and dismiss preferences still apply. Tooltips fade in once
-  the motion step lands; until then they appear at once.
+- **Delays stay user settings**: MegaMek's tooltip delay and dismiss preferences still apply. Tooltips fade in `fast`
+  (see [Motion](#motion)).
 
 **Swing.** The MegaMek themes draw every tooltip this way. `TokenTooltips.withKey(component, text, key)` adds a
 shortcut chip; `TokenTooltips.card(component, title, detail, key)` makes an info card. Both set the plain tooltip text
 too, so screen readers and other look and feels still get it.
 
-**libGDX.** Nothing new yet; hud-v3's tooltip stays until the developers accept the system.
+**libGDX.** `UiKit.tip(actor, true)` gives a hud-v3 tooltip the card: the `token` `TextTooltipStyle` in
+[`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), `small` text in `text.primary` on the `token-tip`
+box (`surface.popover`, a `border.control` edge, a `radius.md` corner, padded `sm` by `md`), wrapping at 280. The info
+card and the shortcut chip aren't there yet: hud-v3's tooltips are plain text.
 
 ## Scrollbars
 
@@ -499,8 +606,7 @@ scrolls instead of drawing a stripe beside it.
 
 - **The thumb stays visible on every surface**: `border.control` keeps at least 3:1 against the base, panel, input and
   popover surfaces in both modes.
-- **Wheel and keys** are Swing's. Smooth scrolling stays on; it follows the reduce-motion setting once the motion step
-  lands.
+- **Wheel and keys** are Swing's. Smooth scrolling is on unless reduce motion is set (see [Motion](#motion)).
 
 **Swing.** The MegaMek themes draw every `JScrollBar` and `JScrollPane` this way through
 [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java) and
@@ -508,7 +614,9 @@ scrolls instead of drawing a stripe beside it.
 them without changes. A bar takes the color of an opaque view, otherwise the viewport's; a transparent scroll pane
 shows what's behind it.
 
-**libGDX.** Nothing new yet; hud-v3's 4-wide list knob stays until the developers accept the system.
+**libGDX.** The `token-list` scroll pane style has the 10-wide bar and the `border.control` pill thumb, which always
+shows; `UiKit.scrollList(list, true)` swaps in the `scroll-rail` and the `text.muted` thumb while the pointer is on the
+bar and the `text.secondary` thumb while it drags. hud-v3's 4-wide `hud-list` knob stays as hud-v3 draws it.
 
 ## Sliders
 
@@ -535,7 +643,366 @@ without changes, including their ticks and standard labels; a custom label table
 [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java)`.withReadout(slider, format)` adds
 the readout and lines it up with the track on the slider's baseline.
 
-**libGDX.** Nothing new yet; the tuning panel's slider style stays until the developers accept the system.
+**libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token` `SliderStyle`:
+a 4-high pill track, an accent fill and a 16 accent disc thumb that gains a border.strong edge on hover or press.
+`UiKit.tokenSliderStyle()` returns a copy for one slider; the tuning panel's `UiKit.sliderStyle()` stays as hud-v3
+draws it.
+
+## Tables
+
+Items with several comparable columns, such as units with their tonnage, movement and armor. A list is better when
+each item is one line of text.
+
+| Part / state | Look |
+| --- | --- |
+| Frame | The scroll pane, as for lists |
+| Rows | The list's rows stretched across every column: `control.sm` (28) high, inset `xs` (4) with a `radius.sm` corner. No grid lines |
+| Zebra | Every other row gets `surface.hover` at half strength, so the eye can follow a wide row |
+| Hover | A `surface.hover` wash over the row under the pointer, painted on top so it also shows on stripes and on custom cells |
+| Selected | The list's selection: the `selected.background` wash and the `selected.primary` marker at the row's leading edge |
+| Cells | `sm` (6) apart; the first column's text starts past the marker and the last one ends `sm` (6) inside the row shape. Numbers align right |
+| Header | `overline` labels (upper case) in `text.secondary` on `surface.input`, over a `border.control` line. Each label aligns like its column |
+| Header hover / sorted | `text.primary`; the sorted column adds a `text.primary` chevron `sm` (6) after its label. Dragging a column gives it a `surface.hover` fill |
+| Empty | A `text.muted` message centered in the first row's place |
+| Disabled | `text.disabled` text and headers, with no hover or marker |
+
+- **Violet means selected**, as in lists. A selected cell has no rectangle of its own: the row is the cursor.
+- **Sorting.** Click a header to sort by it and again to reverse; the chevron shows the direction.
+- **Keys** are Swing's: Up and Down move, Page Up and Page Down scroll, Shift and Ctrl extend a multiple selection.
+
+**Swing.** The MegaMek themes draw every `JTable` and its header this way through
+[`TokenTableUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableUI.java),
+[`TokenTableHeaderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableHeaderUI.java) and
+[`TokenTableCellBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTableCellBorder.java), so existing views
+get them without changes. Tables with their own renderers keep their cells' content and get the hover and the marker;
+headers take their alignment from the column's renderer.
+[`TokenTables`](../../megamek/src/megamek/client/ui/design/swing/TokenTables.java)`.emptyText(table, text)` adds the
+empty message.
+
+**libGDX.** Nothing new yet; hud-v3 has no table.
+
+## Progress bars
+
+How far along a known amount of work is, or that unknown work is still going on.
+
+| Part / state | Look |
+| --- | --- |
+| Track | An `xs` (4) high `border.control` pill, as on sliders |
+| Fill | `accent.primary` from the leading edge, in the same pill shape |
+| Text | Above the track, `xs` (4) away, in `small` type and `text.secondary`, leading-aligned; never inside the bar |
+| Percentage | Optional: on the text's line at the trailing end, `md` (8) past the text, in `small` type and `text.primary`; the whole percent, rounded down. Room is kept for "100%" so the text doesn't move |
+| Indeterminate | An `accent.primary` segment, 30% of the track, enters at the start, crosses and leaves at the end, once every 1.6 s |
+| Disabled | A `border.subtle` track with a `text.disabled` fill and text |
+
+- **Text outside the bar.** Status messages ("Round 3: waiting for the other players") are often longer than the bar
+  is wide, and text over a thin fill can't keep its contrast.
+- **Determinate when possible.** Use the indeterminate bar only when the amount of work is truly unknown.
+- **Rounded down.** The percentage shows 100% only when the work is done. An indeterminate bar shows none, but keeps
+  the line so its text doesn't jump.
+
+**Swing.** The MegaMek themes draw every horizontal `JProgressBar` this way through
+[`TokenProgressBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenProgressBarUI.java), so existing views get
+it without changes; the bar grows by the text's height when it shows text. Vertical bars keep FlatLaf's drawing in the
+same colors. The client property `TokenProgressBarUI.SHOW_PERCENT` set to `true` adds the percentage.
+
+**libGDX.** hud-v3's meters take the look without new controls: `UiKit.meter(caption, compact, true)` puts the
+caption above in `small` type and `text.secondary` (`caption` type when compact) and the value at the trailing end in
+`text.primary`, sentence case, over the `token-track` pill with a pill fill. A meter shows a value rather than progress,
+so its caller passes the fill color, a status role such as `status.success` for armor. `GpuHudKit.heatBar(segments,
+true)` keeps the heat bar's shape in token colors: a `border.control` track, the heat in `status.warning`, the hatched
+forecast, and the ticks in `text.muted`, the next one in `text.primary`. hud-v3 has no indeterminate bar yet.
+
+## Sections
+
+A heading that names the group of fields or content below it, inside a page or a dialog.
+
+| Part / state | Look |
+| --- | --- |
+| Header | A `control.sm` (28) high row: an `overline` title (upper case) in `text.secondary`, then a 1px `border.subtle` line from `sm` (6) past it to the far edge, level with the middle of the capitals |
+| Titled panel | The header across the top of the panel; the content starts below it, flush with the title. No box |
+| Collapsible | The header with the tree's chevron `sm` (6) in from its leading edge; the content below opens and closes |
+| Collapsible hover | A `surface.hover` wash over the header row with a `radius.sm` corner; the title turns `text.primary` |
+| Collapsible focus | The focus ring inside the header row (see [Focus](#focus)) |
+| Disabled | A `text.disabled` title; a collapsible section doesn't open or close |
+| Separator | The line alone, `border.subtle`, horizontal or vertical |
+
+- **Short titles.** Overline is for labels of one or two words; longer explanations go in the content.
+- **Keys.** A collapsible section's header takes the keyboard focus; Enter or Space opens or closes it.
+- **No boxes.** Sections are told apart by their headers and space, not by frames around them.
+
+**Swing.** [`TokenSections`](../../megamek/src/megamek/client/ui/design/swing/TokenSections.java) makes the three
+forms: `header(title)` is a label to place above a group, `titled(title)` is a
+[`TokenTitledBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTitledBorder.java) for a panel, and
+`collapsible(title, content, expanded)` is a
+[`TokenCollapsibleSection`](../../megamek/src/megamek/client/ui/design/swing/TokenCollapsibleSection.java) that fires
+`expanded` when it opens or closes. Screen readers get the title as written, not in capitals, and the collapsible
+header as a toggle that is expanded or collapsed. `JSeparator` already has the separator's look.
+
+Existing borders from `BorderFactory.createTitledBorder` change with the themes but keep the JDK's layout: their title
+gets `label` type in `text.secondary` and a `border.subtle` line after it instead of a box, but it stays in mixed case
+and sits about 3px further in than the content. Moving a view to `TokenSections.titled` gives it the true look. The
+settings dialog's `CollapsibleSectionPanel` is the developers' to move to `TokenSections.collapsible`.
+
+**libGDX.** Nothing new yet; hud-v3 has no collapsible section.
+
+## Split panes
+
+Two areas side by side or stacked, with a divider the user drags to share the space between them.
+
+| Part / state | Look |
+| --- | --- |
+| Divider | A 1px `border.subtle` line in the middle of an `md` (8) wide grab area |
+| Hover / dragging | A `selection.width` (2) `accent.primary` line |
+| One-touch arrows | `text.muted`, `text.primary` on hover and `accent.primary` pressed |
+
+**Swing.** The MegaMek themes draw every `JSplitPane` divider this way through
+[`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java), so existing views get it
+without changes.
+
+**libGDX.** `UiKit.tokenSplit(split)` gives hud-v3's split pane the `token-split` divider, a 1px `border.subtle` line
+in an `md` grab band without hud-v3's grip, and the 2px `accent.primary` line while the pointer is on it or drags it.
+scene2d has no one-touch arrows.
+
+## Dialogs
+
+Two tiers. Messages, confirmations and short forms open as a **modal card** over the window; tools and longer forms
+that the user moves around or keeps open beside the game open as a **window** with the theme's title bar.
+
+| Part / state | Look |
+| --- | --- |
+| Scrim | `surface.scrim` over the whole window; it takes every click, and the window's keys stand down |
+| Card | `surface.panel` with a 1px `border.subtle` edge and `border.strong` corner ticks, `tick.panel` (13) long and `tick.width` (2) wide; centred in the window |
+| Width | `dialog.sm` (420) for messages and confirmations, `dialog.md` (620) for forms, `dialog.lg` (800) for the largest cards |
+| Padding | `xl` (16) above the header, `xxl` (24) elsewhere; a window has `xxl` all round |
+| Header | An optional status icon at `icon.lg` (24), the title in `headline`, then help and close icon buttons in the compact size |
+| Status | Info `status.info`, success `status.success`, warning `status.warning`, error `status.danger`, question `accent.primary`; always with the icon, never the color alone |
+| Body | `body` text in `text.primary` wrapping at the card's width, or any content such as form fields; an optional extra row (for example "Don't ask again") `xl` (16) below it |
+| Footer | `xxl` (24) below the content: the buttons centred, `md` (8) apart, all as wide as the widest and at least 88; the main action first, as in Windows (last in right-to-left) |
+| Motion | The card and its scrim fade in over `fast` (120 ms); they close at once. Reduce motion skips the fade |
+
+- **One main action.** A dialog has at most one primary or danger button, and it goes first; Cancel and other choices
+  follow it. This is the Windows order ([Deploy] [Cancel]), which most of the suite's users already know.
+- **Keys.** Enter presses the focused button or else the main one; Escape and the close button cancel. Tab stays in the
+  card.
+- **Destructive actions.** With a danger button the focus starts on Cancel, and Enter only presses the danger button
+  when the user has moved the focus to it.
+- **First focus.** Otherwise the first input of the body takes the focus, then the main action.
+- **No stacking by habit.** A card can open over another card, but a flow that needs that is a sign it wants a window.
+- **Footer and header.** The footer holds the user's answer to the question the card asks, so only a card that asks
+  something has one. The header's trailing end holds controls for the card itself: close, help, or stopping what it
+  shows (see [Status cards](#status-cards)).
+
+**Swing.** Build the content as a
+[`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java): `status`, `width`,
+`message` or `body`, `extra` and `help`, then the buttons with `cancel`, `secondary` and one of `primary` or `danger`.
+[`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java)`.show(owner, pane)` opens it as a
+card (a [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) in the window's layered
+pane) and returns the pressed button, or null when cancelled; it waits like a modal dialog. When the window has no
+room for the card it opens a window instead, which `TokenDialogs.window(owner, pane)` also does on request. The
+shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. While a card is open
+`UIUtil.isModalDialogDisplayed()` is true, so MegaMek's hotkeys stand down as they do for a modal dialog.
+
+Existing `JOptionPane` dialogs keep their windows but take the footer's layout through the MegaMek themes: the token
+status icons, `xxl` padding, buttons centred, as wide as each other, at least 88 and with the main one first. Their
+titles stay in the title bar. Moving them to `TokenDialogs` gives them the card.
+
+**libGDX.** `UiKit.dialog(title, close, true)` is the card: the token panel frame padded `xl` above the header and
+`xxl` elsewhere, the title in `headline`, sentence case, and the compact icon button for close, `xl` above the body. Its
+owner sets the width (`dialog.sm`) and adds the body and the footer, centred, the buttons `md` apart, as wide as each
+other and at least 88, the main one first. `UiModal.fadeIn(seconds)` fades the layer in over `fast` when it opens; its
+scrim is already `surface.scrim`. `new UiConfirmation(kit, name, dismissed, UiTheme.TOKEN)` puts the confirmation
+beside its trigger in the token popover: a `status.warning` icon, the question in `body.strong` over `text.secondary`
+detail, then compact danger and secondary buttons with the focus on Cancel. The dialog keys and `GpuModalDialog` are
+still the developers' work.
+
+## Status cards
+
+The progress of a long task, such as printing the board or joining a game, in the dialog card's frame but without the
+scrim: the user keeps working while it runs.
+
+| Part / state | Look |
+| --- | --- |
+| Card | The dialog card's frame, padding and widths (`dialog.sm` by default); no scrim, no shadow |
+| Header | The title in `headline`, sentence case, then Cancel at the trailing end as a compact secondary button with text |
+| Body | A [progress bar](#progress-bars) with the running step as its text and the percentage at the trailing end; indeterminate when the length is unknown |
+| Failed | The bar's fill turns `status.danger` and the step and percentage give way to the error in `small` `text.primary` above it; Cancel becomes Close, with Retry before it, `md` (8) apart, when the task can run again |
+| Footer | None: the card asks nothing |
+
+- **Placement is the view's.** The card is a component; the view puts it where it covers nothing the user works on (a
+  map view at the bottom centre, for example) and   decides what to do when several tasks run at once. [Toasts](#toasts)
+    are a separate pattern.
+- **No focus.** Beside the view the card doesn't take the focus; a user who tabs to it gets Escape to stop the task.
+- **Cancel, not ✕.** An ✕ reads as hiding the card while the task goes on, so stopping is a word.
+- **The end.** On success the view removes the card at once. A failure stays until the user closes it, so the error
+  isn't missed.
+- **Waiting.** When the user can do nothing until the task ends, the same card shows over the scrim as a modal card,
+  with the focus on Cancel.
+
+**Swing.** [`TokenStatusCard`](../../megamek/src/megamek/client/ui/design/swing/TokenStatusCard.java) is the card:
+`onCancel` shows Cancel and runs when it is pressed, `step` and `progress` (0 to 1) or `indeterminate` show the work,
+`fail(message, retry)` shows an error with Retry when `retry` is not null, `onClose` runs when the user closes a failed
+card, and `finish` ends it. Calls must come on the event thread, so a background task uses `SwingUtilities.invokeLater`
+or a `SwingWorker`. `TokenDialogs.progress(owner, card)` shows it as a modal card and waits, still handling events,
+until the user cancels or closes it or the task calls `finish`.
+
+**libGDX.** Spec only for now. hud-v3's `UiKit.Progress`, the print card in `GpuMapHud`, is close: a panel with corner
+ticks, the header and Cancel at the top right, the step and percentage over a bar, at the bottom centre of the map.
+Moving it to this spec means sentence case instead of capitals (an open question for the whole HUD), the accent fill
+instead of mint, the failed state with Close and Retry, and the modal form for the loading screen.
+
+## Panels
+
+Anything that isn't a dialog, such as a sidebar, a unit card or a grouped area, sits in a panel with the dialog card's
+frame.
+
+| Part / state | Look |
+| --- | --- |
+| Panel | `surface.panel` with a 1px `border.subtle` edge and `border.strong` corner ticks, `tick.panel` (13) long and `tick.width` (2) wide; no rails, no shadow |
+| Padding | `lg` (12) all round; `xl` (16) for the roomy option, for panels that hold reading text |
+| Header | Optional: a status icon at `icon.md` (20), the title in `title` and `text.primary`, sentence case, then compact quiet or icon buttons at the trailing end; `md` (8) above the body, no divider or raised band |
+| Status | The ticks take the status color (`status.danger`, `status.warning`, `status.success` or `status.info`); always with the header icon, never the color alone |
+| Selectable, hover | The edge turns `border.control` |
+| Selectable, selected | A `selected.background` wash, the edge and ticks in `selected.primary` |
+| Selectable, focus | The `focus.ring` 2px ring in place of the edge, the ticks drawn over it |
+| Plain | The edge only, with no fill and no ticks, for groups inside a panel |
+| Disabled | The title in `text.disabled`, the edge and ticks in `border.subtle`; a disabled selectable panel can't be selected and Tab skips it |
+| Motion | Edge, ticks and wash ease with the [control timings](#motion); reduce motion makes them instant |
+
+- **Only the outermost frame has ticks.** Panels inside a panel, such as the cards in a sidebar, use the plain frame.
+- **Selectable panels are controls.** A click, or Space or Enter with the focus on it, selects the panel; in a group
+  one is selected at a time, like radio buttons. Screen readers hear a toggle button, or a radio button in a group.
+- **The header's actions are for the panel's content**, such as Edit or a ⋮ menu, in the compact size so the header
+  keeps the title's height.
+- **Overlay.** Over the libGDX board the panel's fill is the overlay surface, translucent like hud-v3's panels today;
+  Swing panels are opaque.
+
+**Swing.** [`TokenPanel`](../../megamek/src/megamek/client/ui/design/swing/TokenPanel.java) is the panel:
+`new TokenPanel(title)` or `new TokenPanel()` for no header, then `status`, `padding(Padding.ROOMY)`, `plain()`,
+`action` for each header button and `body` for the content. `selectable(true)` makes it a control; `setSelected` fires
+the `SELECTED` property, and `TokenPanel.selectOne(panels...)` groups them so one is selected at a time. Content inside
+must be non-opaque, since the themes' panels paint `surface.base`; `body` clears it on a `JPanel` it is given. To frame
+an existing panel without changing its layout, `TokenFrameBorder.apply(panel, TokenFrameBorder.panel(padding))` (or
+`plain`) sets the border and makes the panel non-opaque so the border paints the surface.
+[`TokenFrame`](../../megamek/src/megamek/client/ui/design/swing/TokenFrame.java) is the painter that dialogs, status
+cards and panels share.
+
+**libGDX.** hud-v3's panels take the frame through `UiTheme.HudFrame`, whose outline can now be thinner than its
+ticks. `UiKit.panel(true)` is the `token-panel` frame padded `lg`; `UiKit.header(title, count, true, tools...)` the
+header, with `closeButton(action, true)` as a tool; `UiKit.footer(panel, true)` a `border.subtle` hairline and a foot
+row, each `md` below the one before. `token-panel-danger` replaces `panel-foe` (its header carries the error icon),
+`token-frame` replaces `panel-rails` as the plain frame, `token-panel-overlay` is the panel on the overlay surface over
+the board, and `token-divider` replaces `rule`. `new UiPopover(kit, dismissed, UiTheme.TOKEN)` is the popover in the
+`token-popup` frame, with a `body.strong` title over `small` detail in `text.secondary` and a `border.subtle` divider.
+
+The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`
+is the unit row as a selectable plain panel: the `token-unit-row` style has a `border.subtle` edge at rest,
+`border.control` on hover, and the `selected.background` wash with a `selected.primary` edge when selected; an
+inspected row takes a `status.danger` edge for an enemy and `accent.primary` for a friend. Its model is in `small`
+`text.muted`, the name in `body.strong` `text.primary` in sentence case, and the status line in `small` in its tone's
+status color (`text.secondary` for a plain line); an enemy's sprite turns `status.danger`. `letter(letter, card, true)`
+keeps the target's color on a `radius.sm` square, icon.md in a pill and icon.lg on a card, with the letter in `label`
+`text.onAccent`. `damageTile(color, true)` keeps the damage color inside a `border.control` frame. The log's
+`token-disc` and `token-disc-foe` are `control.sm` discs on `surface.raised` with an `accent.primary` or
+`status.danger` edge, and the dock's `token-waiting` is a plain frame `control.lg` high. Target, sprite and damage
+colors are game data and stay as they are.
+
+## Chips and badges
+
+Chips are small rounded labels: a status chip reports a state, a filter chip narrows a view and a tag chip is a value
+the user added. A badge counts something new on a button's corner. All of them have a `radius.md` (6) corner and
+their text in `small` (11.5), sentence case.
+
+| Kind / state | Look |
+| --- | --- |
+| Status chip | `icon.sm` (16) plus `xxs` (2) above and below, 20 high; the status icon at `icon.sm` and a 1px edge in the status color, the text in `text.primary`; padding `xs` (4) before the icon, `md` (8) after the text |
+| Status chip, neutral | No icon, the edge in `border.control` and the text in `text.secondary`, `md` padding both sides |
+| Filter chip | `control.sm` (28) high, `lg` (12) padding; a `border.control` edge and the text in `text.secondary` |
+| Filter chip, hover | A `surface.hover` fill, the edge in `border.strong`, the text in `text.primary` |
+| Filter chip, on | A `selected.background` fill, the edge in `selected.primary`, a check at `icon.sm` before the text in `text.primary`; the chip grows by the check |
+| Tag chip | `control.sm` high, the text in `text.primary` inside a `border.control` edge, then an ✕ in `text.muted`; hovering the ✕ shows a `surface.hover` square with a `radius.sm` corner and the ✕ turns `text.primary` |
+| Focus (filter, tag) | The `focus.ring` 2px ring in place of the edge |
+| Disabled (filter, tag) | The edge in `border.subtle`, the text in `text.disabled` |
+| Count badge | `icon.sm` high and at least as wide, `xs` padding; the count in the label's medium face at `caption`, `text.onAccent` on `accent.primary`; 99 and up shows 99+ |
+| Dot badge | `md` (8) across, in `accent.primary` |
+| Badge tone | `status.danger`, `status.warning` or `status.success` instead of the accent when the count is a status, such as damage reports |
+| Badge ring | `xxs` (2) in the surface behind, so the badge stands out of the button it overlaps |
+| Motion | Filter chips ease their fill and edge with the [control timings](#motion); reduce motion makes them instant |
+
+- **Color is never the only cue.** A status chip always has its icon (info, check, warning, error), and screen
+  readers hear the status as the chip's description. A filter chip shows a check when on, not only the violet.
+- **Status chips are smaller because they aren't controls.** They sit in rows and cards beside text; the interactive
+  chips take the compact control height so they keep a comfortable target.
+- **Filters.** A filter chip is a toggle; in a group where one filter applies at a time it behaves like a radio button
+  and one is always on.
+- **Tags.** Clicking the ✕, or Delete or Backspace with the focus on the chip, removes it and the focus moves on. The ✕
+  has the tooltip "Remove …", and screen readers hear a "Remove …" button.
+- **Badge placement.** The badge's centre sits `xs` inside the button's top-right corner, or on the icon's top-right
+  corner for a button with only an icon; top-left in right-to-left. A count of zero hides the badge. Screen readers
+  hear the count, so the button's description should say what it counts ("2 unread messages").
+
+**Swing.** [`TokenChips`](../../megamek/src/megamek/client/ui/design/swing/TokenChips.java) makes the chips:
+`status(text, tone)` with a `TokenChips.Tone`, `filter(text)` for a toggle, and `tag(text, onRemove)` for a removable
+value whose `onRemove` runs after the chip leaves its parent (`TagChip.removeTag()` removes it from code).
+`TokenChips.selectOne(chips...)` groups filter chips so one is on at a time.
+[`TokenBadge`](../../megamek/src/megamek/client/ui/design/swing/TokenBadge.java) is the badge: `TokenBadge.count(n)` or
+`TokenBadge.dot()`, then `tone` for a status color; `setCount` changes it and hides it at zero.
+`TokenBadge.attach(button, badge)` returns a holder to add in the button's place, which places the badge and leaves room
+for it.
+
+**libGDX.** `UiKit.chip(text, tone, true)` is the status chip: `Tone.OK`, `WARN` and `BAD` get the check, warning and
+error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip. A
+button in a token style (`button-*`) draws `UiButton.badge` as the count badge, in the `token-badge` face and frame
+with its ring in `surface.panel`, and `UiButton.dot` as the dot; hud-v3's buttons keep the amber pill. About 25 calls in
+the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips, in capitals (the sentence case
+question is open for the whole HUD). hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
+they take the filter chip's look: `token-pill`, `token-pill-over` and `token-pill-on` in `GpuBoardSkin`, with the
+check before the target's letter square when on.
+
+## Toasts
+
+A toast is a short notice that comes and goes over a view, such as a unit's move or a hit on the board. It never asks
+anything and never takes the focus.
+
+| Part / state | Look |
+| --- | --- |
+| Card | `surface.popover` with a 1px `border.subtle` edge and a `radius.md` (6) corner, at most 480 wide; the text wraps beyond that |
+| Level | A 3px bar along the leading edge and the level's icon at `icon.md` (20), both in the level's color |
+| Levels | Info `status.info` (info icon), success `status.success` (check), warning `status.warning` (warning), danger `status.danger` (error), Game Master `selected.primary` (shield with a person) |
+| Unit | Optional: the acting unit's sprite, fitted in 40×34, after the icon |
+| Text | `body` in `text.primary`, sentence case |
+| Padding | `md` (8) above and below; `lg` (12) after the bar, `md` between the icon, sprite and text, then the ✕ |
+| Close | An ✕ in the compact icon button at the trailing end, `xs` (4) from the edge; not in the Tab order |
+| Motion | Fades in over `motion.medium` and out over `motion.slow`, eased; reduce motion makes both instant |
+
+- **Color is never the only cue.** Each level has its own icon, and screen readers hear the level before the text
+  ("Warning: Locust LCT-1V is running hot"). The Game Master has violet and a shield of its own, so a referee's
+  action never reads as an ordinary notice.
+- **Placement.** Toasts stack at the top centre of the view, `lg` from the edge and `md` apart, the newest at the top
+  pushing older ones down. At most five show at once; a sixth drops the oldest at once.
+- **Time.** A toast stays for the player's toast duration (3 seconds by default), plus a second for a warning or the
+  Game Master and two for danger, then fades out.
+- **Hover pauses.** The pointer over a toast stops its time, and brings it back if it was fading; after the pointer
+  leaves it stays at least a second more, so it can't vanish under a moving pointer.
+- **Clicks pass through.** Only the ✕ takes clicks: a click on or beside a toast reaches the board under it, so
+  toasts never block play.
+- **No actions.** A notice that needs an answer is a [dialog](#dialogs); a long task's progress is a
+  [status card](#status-cards); something that stays true, such as a unit's damage, is a status chip on the unit.
+
+**Swing.** [`TokenToasts`](../../megamek/src/megamek/client/ui/design/swing/TokenToasts.java) holds a view and shows
+toasts over it: `new TokenToasts(view)` goes where the view went, then `show(level, text)` or
+`show(level, text, unitImage)` from any thread, with a `TokenToast.Level`. `clear()` removes them all.
+[`TokenToast`](../../megamek/src/megamek/client/ui/design/swing/TokenToast.java) is the card, for a host that places
+toasts itself.
+
+**Swing board.** `BoardToastOverlay` draws today's board toasts: a fill in the level's color at 70%, bold text and no
+icon. Moving it to this spec means the popover surface with the bar and icon, the body face, the ✕, hover pause and
+the Game Master's icon; `ToastLevel` maps onto `TokenToast.Level`, with `ERROR` as `DANGER`, and the durations stay.
+
+**libGDX.** `new GpuToastStack(kit, source, state, true)` draws Token v0's cards: the `token-toast-<level>` frame with
+its bar, the level's icon (`shield-person` for the Game Master), the sprite fitted in 40 by 34, `body` text wrapped at
+480 and the compact close button, the only part that takes presses. The cards fade in over `medium` and out over
+`slow`. Where the stack sits is still hud-v3's: above the dock with the newest at the bottom. The top centre, the
+newest on top and the hover pause are the developers' work.
 
 ## Code
 
@@ -546,6 +1013,7 @@ the readout and lines it up with the track on the slider's baseline.
 | [`Vision`](../../megamek/src/megamek/client/ui/design/Vision.java) | Typical vision and the three simulated deficiencies |
 | [`TokenChecks`](../../megamek/src/megamek/client/ui/design/TokenChecks.java) | Runs the JSON `checks` |
 | [`SwingUiLibrary`](../../megamek/src/megamek/client/ui/design/swing/SwingUiLibrary.java) | The Swing gallery |
+| [`TokenMotion`](../../megamek/src/megamek/client/ui/design/swing/TokenMotion.java), [`TokenButtonUI`](../../megamek/src/megamek/client/ui/design/swing/TokenButtonUI.java), [`TokenPopupFactory`](../../megamek/src/megamek/client/ui/design/swing/TokenPopupFactory.java), [`RowWash`](../../megamek/src/megamek/client/ui/design/swing/RowWash.java) | Swing motion: the animator, eased buttons, popup fade-in and row hover |
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
@@ -563,10 +1031,21 @@ the readout and lines it up with the track on the slider's baseline.
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
 | [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |
 | [`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), [`TokenSliders`](../../megamek/src/megamek/client/ui/design/swing/TokenSliders.java) | The Swing sliders and their readout |
+| [`TokenTables`](../../megamek/src/megamek/client/ui/design/swing/TokenTables.java), [`TokenTableUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableUI.java), [`TokenTableHeaderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTableHeaderUI.java), [`TokenTableCellBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTableCellBorder.java) | The Swing tables |
+| [`TokenProgressBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenProgressBarUI.java) | The Swing progress bars |
+| [`TokenSections`](../../megamek/src/megamek/client/ui/design/swing/TokenSections.java), [`TokenTitledBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenTitledBorder.java), [`TokenCollapsibleSection`](../../megamek/src/megamek/client/ui/design/swing/TokenCollapsibleSection.java) | The Swing section headers, titled panels and collapsible sections |
+| [`TokenSplitPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSplitPaneUI.java) | The Swing split panes |
+| [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java), [`TokenDialogs`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogs.java), [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) | The Swing dialogs: content, opening and the modal card |
+| [`TokenStatusCard`](../../megamek/src/megamek/client/ui/design/swing/TokenStatusCard.java) | The Swing status card |
+| [`TokenPanel`](../../megamek/src/megamek/client/ui/design/swing/TokenPanel.java), [`TokenFrameBorder`](../../megamek/src/megamek/client/ui/design/swing/TokenFrameBorder.java), [`TokenFrame`](../../megamek/src/megamek/client/ui/design/swing/TokenFrame.java) | The Swing panel, the frame as a border for existing panels, and the frame painter shared with dialogs |
+| [`TokenChips`](../../megamek/src/megamek/client/ui/design/swing/TokenChips.java), [`TokenBadge`](../../megamek/src/megamek/client/ui/design/swing/TokenBadge.java) | The Swing status, filter and tag chips, and count and dot badges |
+| [`TokenToasts`](../../megamek/src/megamek/client/ui/design/swing/TokenToasts.java), [`TokenToast`](../../megamek/src/megamek/client/ui/design/swing/TokenToast.java) | The Swing toast stack and toast |
 | [`VisionLayerUI`](../../megamek/src/megamek/client/ui/design/swing/VisionLayerUI.java) | Simulates a deficiency over any Swing component |
 | [`GpuUiLibraryWindow`](../../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUiLibraryWindow.java) | The libGDX gallery |
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
-styles read the tokens; lists, trees, menus, tooltips, scrollbars and sliders are Swing-only for now. The Swing themes are selectable but not the default, and no view uses the new controls yet.
-Next come the rest of the controls and dialogs, then a trial of MegaMek's Swing startup path on them; hud-v3 moves
-only once the developers accept the system.
+styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
+panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. The Swing
+themes are selectable but not the default, and no view uses the new controls yet. Next comes the all-caps decision
+(see the gap analysis), then a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the developers
+accept the system.

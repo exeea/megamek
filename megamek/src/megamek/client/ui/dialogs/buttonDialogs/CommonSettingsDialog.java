@@ -400,6 +400,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
           "CommonSettingsDialog.showUnitDisplayNamesOnMinimap.name"));
     private JComboBox<String> skinFiles;
     private JComboBox<UITheme> uiThemes;
+    private final JCheckBox reduceMotion = new JCheckBox(Messages.getString("CommonSettingsDialog.reduceMotion"));
 
     // Advanced Settings
     private ColourSelectorButton advancedChatboxBackgroundColor;
@@ -2640,6 +2641,13 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         addSpacer(comps, 5);
 
+        reduceMotion.setToolTipText(Messages.getString("CommonSettingsDialog.reduceMotion.tooltip"));
+        row = new ArrayList<>();
+        row.add(reduceMotion);
+        comps.add(row);
+
+        addSpacer(comps, 5);
+
         // Skin
         skinFiles = new JComboBox<>();
         skinFiles.setRenderer(new DefaultListCellRenderer() {
@@ -2970,6 +2978,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
                 }
             }
             uiThemes.setSelectedItem(new UITheme(GUIP.getUITheme()));
+            reduceMotion.setSelected(GUIP.getReduceMotion());
 
             fovInsideEnabled.setSelected(GUIP.getFovHighlight());
             fovHighlightAlpha.setValue(GUIP.getFovHighlightAlpha());
@@ -3439,6 +3448,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         if (newUITheme != null && !oldUITheme.equals(newUITheme.getClassName())) {
             GUIP.setUITheme(newUITheme.getClassName());
         }
+        GUIP.setReduceMotion(reduceMotion.isSelected());
 
         String newSkinFile = (String) skinFiles.getSelectedItem();
         String oldSkinFile = GUIP.getSkinFile();

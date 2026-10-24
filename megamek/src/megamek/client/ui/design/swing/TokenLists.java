@@ -83,9 +83,8 @@ public final class TokenLists {
         return UIScale.scale(Math.max(0, UIManager.getInt(ROW_HEIGHT)));
     }
 
-    /** The surface wash under the pointer, inset and rounded like the selection. */
-    static void paintHover(Graphics g, int x, int y, int width, int height, Insets insets, int arc) {
-        Color color = UIManager.getColor(HOVER_BACKGROUND);
+    /** A row-shaped fill in {@code color}, inset and rounded like the selection; nothing when the color is null. */
+    static void paintWash(Graphics g, Color color, int x, int y, int width, int height, Insets insets, int arc) {
         if (color == null) {
             return;
         }
@@ -131,6 +130,11 @@ public final class TokenLists {
 
     /** The muted empty-state text, centered near the top of the visible area. */
     static void paintEmptyText(Graphics g, JComponent c, String text) {
+        paintEmptyText(g, c, text, rowHeight());
+    }
+
+    /** The muted empty-state text, centered in the first {@code rowHeight} of the visible area. */
+    static void paintEmptyText(Graphics g, JComponent c, String text, int rowHeight) {
         Rectangle visible = c.getVisibleRect();
         Insets insets = c.getInsets();
         Graphics2D g2 = (Graphics2D) g.create();
@@ -142,7 +146,7 @@ public final class TokenLists {
             FontMetrics metrics = g2.getFontMetrics();
             int textWidth = metrics.stringWidth(text);
             int x = visible.x + Math.max(insets.left, (visible.width - textWidth) / 2);
-            int y = visible.y + insets.top + (rowHeight() - metrics.getHeight()) / 2 + metrics.getAscent();
+            int y = visible.y + insets.top + (rowHeight - metrics.getHeight()) / 2 + metrics.getAscent();
             g2.drawString(text, x, y);
         } finally {
             g2.dispose();

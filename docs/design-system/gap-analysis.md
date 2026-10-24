@@ -148,8 +148,8 @@ should propose a step scale (for example 2/4/6/8/12/16/24) and map existing valu
   springs, ~150 ms settle).
 - Immersive dialogs have text reveal and distortion effects (bespoke; stay custom).
 - Interstellar map animates at 16 ms steps; zoom settles after 180 ms.
-- FlatLaf has no state transitions, so instant state changes are the natural shared rule. Motion tokens only need
-  durations for the few things that animate.
+- FlatLaf has no state transitions of its own, so the Swing themes add them: one shared animator eases every control
+  between states on the `motion` tokens, with a reduce-motion setting; see [tokens.md](tokens.md#motion).
 
 ### Scaling
 
@@ -201,10 +201,12 @@ layer-control buttons. Roughly six visual families.
 | List row / tree | `UiList`, `UiTree` | — | `JList`, `JTree` | |
 | Popover / menu | `UiPopover`, `UiMenuList` | map popup colors | `JPopupMenu` | |
 | Tooltip | `panel` frame, `hud-small`, wraps at 340 | — | yes | |
-| Dialog / modal | `UiModal`, `UiKit.dialog` (620 wide), `UiConfirmation` | `ImmersiveDialog*` | `JDialog` | Cut-corner frame vs corner-tick frame: pick one. |
-| Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Corner ticks need a custom Swing border. |
+| Dialog / modal | `UiModal`, `UiKit.dialog` (620 wide), `UiConfirmation` | `ImmersiveDialog*` | `JDialog` | Decided: corner ticks; a modal card over a scrim, or a window. See [Dialogs](tokens.md#dialogs). |
+| Status card | `UiKit.Progress` (print card) | — | — | Decided: the dialog's frame without a scrim, Cancel in the header. See [Status cards](tokens.md#status-cards). |
+| Panel / frame | `HudFrame` with corner ticks | angular surface | `JPanel` | Decided: the dialog's frame without rails, status ticks, selectable and plain variants. See [Panels](tokens.md#panels). |
 | Scrollbar | 4-wide thin knob | `ImmersiveScrollBarStyle` | yes | FlatLaf thin-scrollbar properties cover it. |
-| Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Custom Swing components. |
+| Chip / badge | `chip`, `chip-warn`, `chip-bad`, amber badge | — | — | Decided: status, filter and tag chips in sentence case; count and dot badges in the accent. See [Chips and badges](tokens.md#chips-and-badges). |
+| Toast | `GpuToastStack` (3px bar, above the dock) | `BoardToastOverlay` (tinted fill) | — | Decided: top centre, bar and icon, the newest on top, hover pause and ✕. See [Toasts](tokens.md#toasts). |
 | Section header / rule | `rule`, `UiKit.header` | `createSectionHeader` (mono label + rule) | — | |
 
 ## Accessibility findings
@@ -261,7 +263,8 @@ work for Swing, and item 11 is under investigation.
 4. **Orange "selected".** The map and Immersive controls use orange for the selected/current item; hud-v3 uses mint
    or a white fill. Decide whether `accent.selected` exists or maps to `accent.primary`.
 5. **Frame language.** hud-v3 corner ticks vs Immersive cut corners. Pick one for panels and dialogs; the other can
-   stay as a decorative variant of Immersive dialogs.
+   stay as a decorative variant of Immersive dialogs. *Decided: corner ticks for panels and dialogs; cut corners stay
+   in the Immersive dialogs.*
 6. **Focus state.** hud-v3 has none; add a focus ring to the spec.
 7. **Border contrast.** See Accessibility.
 8. **Danger hue / colorblind cues.** See Accessibility.
@@ -284,8 +287,7 @@ work for Swing, and item 11 is under investigation.
   [tokens.md](tokens.md#swing-themes). Making them the default and hiding the stock themes behind a classic option
   comes after the controls are settled.
 - ~~Button spec~~: Primary, Secondary, Quiet, Danger, Toggle, Icon and Special in regular and compact sizes, with
-  every state including focus, in Swing and libGDX; see [tokens.md](tokens.md#buttons). The Special reveal animation
-  comes with the motion work.
+  every state including focus, in Swing and libGDX; see [tokens.md](tokens.md#buttons).
 - ~~Focus~~: one keyboard-only ring inside the edge for every Swing control, and on libGDX buttons; see
   [tokens.md](tokens.md#focus).
 - ~~Inputs~~: text, password, search, number and text area at button heights, with hover, focus, status, read-only
@@ -308,14 +310,34 @@ work for Swing, and item 11 is under investigation.
   rail and a brighter thumb under the pointer, in Swing; see [tokens.md](tokens.md#scrollbars).
 - ~~Sliders~~: an accent fill up to a round thumb on a pill track, the same with ticks and labels, with an optional
   value readout, in Swing; see [tokens.md](tokens.md#sliders).
-- The rest of the gallery: tables and the remaining controls, in Swing (libGDX only where the in-game UI needs
-  them).
-- Motion (after the controls, before dialogs): short hover, press and open transitions on the `motion` tokens for
-  every Swing control set, from one shared animator, plus a reduce-motion setting. The token values exist but the
-  Swing controls still switch states instantly, which reads as a desktop app rather than a game.
-- Dialogs (last, after the other controls): one frame, title bar, button row (order, primary and default buttons,
-  Escape and Enter), sizes and message / confirm / form patterns for both platforms, so the many hand-built dialogs
-  can migrate to one shape.
+- ~~Tables~~: the list's rows across every column with faint zebra stripes, a hover wash over the cells, the violet
+  selection and marker, and upper-case overline headers aligned like their column, in Swing; see
+  [tokens.md](tokens.md#tables).
+- ~~The rest of the gallery~~: progress bars (a thin accent pill with its text above it), section headers (titled
+  panels, collapsible sections and separators share one upper-case header with a line) and split panes (a subtle line
+  that turns accent under the pointer), in Swing; see [tokens.md](tokens.md#progress-bars),
+  [Sections](tokens.md#sections) and [Split panes](tokens.md#split-panes). No view uses a toolbar, so there is none.
+- ~~Motion~~: hover that comes in fast and lingers out, instant presses with fading releases, drawn checks, sliding
+  switches, the Special button's closing ticks, fading popups and tooltips, opening sections and per-row hover washes,
+  from one shared animator with a reduce-motion client setting, in Swing; see [tokens.md](tokens.md#motion).
+- ~~Dialogs~~: a corner-ticked modal card over a scrim for messages, confirmations and short forms, and a themed window
+  for tools, with centred equal-width buttons (main action first), Enter and Escape, Cancel-first destructive
+  confirmations and restyled `JOptionPane` dialogs, in Swing; see [tokens.md](tokens.md#dialogs).
+- ~~Status cards~~: the progress of a long task in the dialog's frame, beside the view or over a scrim, with Cancel in
+  the header, a percentage on the bar and a failed state with Close and Retry, in Swing; see
+  [tokens.md](tokens.md#status-cards).
+- ~~Panels and frames~~: the dialog card's corner-ticked frame for anything that isn't a dialog, with an optional
+  header, status ticks with their icon, selectable unit cards (hover, violet selection, focus ring, one at a time),
+  plain frames for groups inside a panel and a border for existing panels, in Swing; see
+  [tokens.md](tokens.md#panels).
+- ~~Chips and badges~~: status chips with their icon and an edge in the status color, filter chips (a check when on,
+  one at a time in a group), tag chips removed by their ✕ or Delete, and count and dot badges in the accent or a status
+  color on a button's corner, in Swing; see [tokens.md](tokens.md#chips-and-badges).
+- ~~Toasts~~: short notices at the top centre of a view, a bar and an icon in the level's color (the Game Master in
+  violet with a shield), the newest on top and at most five, paused by the pointer, closed by their ✕, with clicks
+  passing through, in Swing; see [tokens.md](tokens.md#toasts).
+- All-caps: decide whether HUD labels, section overlines and the libGDX status card stay in capitals or move to
+  sentence case, before the trial so nothing is restyled twice.
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`

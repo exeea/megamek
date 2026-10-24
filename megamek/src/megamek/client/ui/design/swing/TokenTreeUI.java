@@ -8,6 +8,7 @@ import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import javax.swing.JComponent;
+import javax.swing.UIManager;
 import javax.swing.plaf.ComponentUI;
 import javax.swing.tree.TreePath;
 
@@ -35,6 +36,7 @@ public class TokenTreeUI extends FlatTreeUI {
         }
     };
     private int hoverRow = -1;
+    private RowWash wash;
 
     public static ComponentUI createUI(JComponent c) {
         return new TokenTreeUI();
@@ -43,6 +45,7 @@ public class TokenTreeUI extends FlatTreeUI {
     @Override
     protected void installListeners() {
         super.installListeners();
+        wash = new RowWash(tree);
         tree.addMouseListener(hoverTracker);
         tree.addMouseMotionListener(hoverTracker);
     }
@@ -52,6 +55,7 @@ public class TokenTreeUI extends FlatTreeUI {
         tree.removeMouseListener(hoverTracker);
         tree.removeMouseMotionListener(hoverTracker);
         hoverRow = -1;
+        wash.clear();
         super.uninstallListeners();
     }
 
@@ -62,18 +66,15 @@ public class TokenTreeUI extends FlatTreeUI {
         boolean selected = tree.isRowSelected(row);
         int x = isWideSelection() ? 0 : bounds.x;
         int width = isWideSelection() ? tree.getWidth() : bounds.width;
-        if (decorated && !selected && row == hoverRow()) {
-            TokenLists.paintHover(g, x, bounds.y, width, bounds.height, selectionInsets, selectionArc);
+        if (decorated && !selected) {
+            TokenLists.paintWash(g,
+                  wash.color(row, TokenLists.frozenHover(tree), UIManager.getColor(TokenLists.HOVER_BACKGROUND)),
+                  x, bounds.y, width, bounds.height, selectionInsets, selectionArc);
         }
         super.paintRow(g, clipBounds, insets, bounds, path, row, isExpanded, hasBeenExpanded, isLeaf);
         if (decorated && selected && isPaintSelection()) {
             TokenLists.paintMarker(g, tree, x, bounds.y, width, bounds.height, selectionInsets);
         }
-    }
-
-    private int hoverRow() {
-        int frozen = TokenLists.frozenHover(tree);
-        return frozen >= 0 ? frozen : hoverRow;
     }
 
     private int rowAt(Point point) {
@@ -89,6 +90,7 @@ public class TokenTreeUI extends FlatTreeUI {
         if (row == hoverRow) {
             return;
         }
+        wash.moveTo(row);
         repaintRow(hoverRow);
         hoverRow = row;
         repaintRow(hoverRow);

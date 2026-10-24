@@ -18,12 +18,16 @@ import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.util.UIUtil;
 
 /**
- * The special button (docs/design-system/tokens.md, Buttons): a raised face with corner ticks at rest that close into a
- * full frame under the pointer, the HUD utility look. A selected one, set with {@link #setSelected}, has a violet wash
- * and frame; a click never selects it. It paints itself from the tokens of the current mode; the reveal animation comes
- * with the motion work.
+ * The special button (docs/design-system/tokens.md, Buttons): a raised face with corner ticks at rest that grow along
+ * the edges into a full frame under the pointer, the HUD utility look. The ticks close slowly ({@code slow}) and open
+ * again a little faster. A selected one, set with {@link #setSelected}, has a violet wash and frame; a click never
+ * selects it. It paints itself from the tokens of the current mode.
  */
 public class SpecialButton extends JButton {
+    private static final String FACE = "special.face";
+    private static final String EDGE = "special.edge";
+    private static final String TEXT = "special.text";
+    private static final String REVEAL = "special.reveal";
     private final TokenButtons.Size size;
 
     SpecialButton(String text, TokenButtons.Size size) {
@@ -66,16 +70,25 @@ public class SpecialButton extends JButton {
             int width = getWidth();
             int height = getHeight();
             int line = Math.max(1, UIUtil.scaleForGUI(Math.round(tokens.size().get("tick.width"))));
-            g.setColor(new Color(face, true));
+            g.setColor(TokenMotion.color(this, FACE, new Color(face, true), TokenMotion.buttonState(this)));
             g.fillRect(0, 0, width, height);
 
-            if (selected || (hovered || pressed)) {
-                g.setColor(new Color(tokens.color(selected ? "selected.primary" : "border.strong", mode), true));
+            // The ticks grow along the edges until they close into the frame: slowly in, lingering out
+            boolean active = selected || hovered || pressed;
+            float reveal = TokenMotion.value(this, REVEAL, active,
+                  pressed ? 0 : active ? TokenMotion.slow() : TokenMotion.medium());
+            Color rest = new Color(tokens.color(enabled ? "border.control" : "border.subtle", mode), true);
+            Color full = TokenMotion.color(this, EDGE,
+                  new Color(tokens.color(selected ? "selected.primary" : "border.strong", mode), true),
+                  TokenMotion.fast());
+            g.setColor(TokenMotion.mix(rest, full, reveal));
+            if (reveal >= 1) {
                 frame(g, 0, 0, width, height, line);
             } else {
-                g.setColor(new Color(tokens.color(enabled ? "border.control" : "border.subtle", mode), true));
-                int tick = UIUtil.scaleForGUI(Math.round(tokens.size().get("tick.control")));
-                ticks(g, width, height, line, Math.min(tick, Math.min(width, height) / 2));
+                int tick = Math.min(UIUtil.scaleForGUI(Math.round(tokens.size().get("tick.control"))),
+                      Math.min(width, height) / 2);
+                ticks(g, width, height, line, Math.round(tick + (width / 2f - tick) * reveal),
+                      Math.round(tick + (height / 2f - tick) * reveal));
             }
             if (enabled && FlatUIUtils.isPermanentFocusOwner(this)) {
                 g.setColor(new Color(tokens.color("focus.ring", mode), true));
@@ -86,7 +99,8 @@ public class SpecialButton extends JButton {
             }
 
             String role = !enabled ? "text.disabled" : selected || hovered || pressed ? "text.primary" : "text.secondary";
-            g.setColor(new Color(tokens.color(role, mode), true));
+            g.setColor(TokenMotion.color(this, TEXT, new Color(tokens.color(role, mode), true),
+                  TokenMotion.buttonState(this)));
             g.setFont(getFont());
             FontMetrics metrics = g.getFontMetrics();
             String text = getText();
@@ -105,16 +119,17 @@ public class SpecialButton extends JButton {
         g.fillRect(x + width - line, y + line, line, height - 2 * line);
     }
 
-    private static void ticks(Graphics2D g, int width, int height, int line, int length) {
+    /** Corner ticks {@code across} long on the top and bottom edges and {@code down} long on the sides. */
+    private static void ticks(Graphics2D g, int width, int height, int line, int across, int down) {
         int right = width - line;
         int bottom = height - line;
-        g.fillRect(0, 0, length, line);
-        g.fillRect(0, 0, line, length);
-        g.fillRect(width - length, 0, length, line);
-        g.fillRect(right, 0, line, length);
-        g.fillRect(0, bottom, length, line);
-        g.fillRect(0, height - length, line, length);
-        g.fillRect(width - length, bottom, length, line);
-        g.fillRect(right, height - length, line, length);
+        g.fillRect(0, 0, across, line);
+        g.fillRect(0, 0, line, down);
+        g.fillRect(width - across, 0, across, line);
+        g.fillRect(right, 0, line, down);
+        g.fillRect(0, bottom, across, line);
+        g.fillRect(0, height - down, line, down);
+        g.fillRect(width - across, bottom, across, line);
+        g.fillRect(right, height - down, line, down);
     }
 }

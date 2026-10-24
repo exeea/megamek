@@ -26,6 +26,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.utils.Align;
+import megamek.client.ui.design.DesignTokens;
 
 /**
  * A tree of rows (the board editor's Layers, the Client Settings sidebar): each node a list row (.brow .b) with an
@@ -47,6 +48,9 @@ public final class UiTree extends Table {
     /** A row's height without and with a second line; each level's indent, which is also the chevron's column. */
     private static final float ROW = 30, TALL_ROW = 40, INDENT = 16;
     private static final float CHEVRON = 13, ACTION = 26;
+    /** The Token v0 rows: control.sm, and control.lg with a second line. */
+    private static final float TOKEN_HEIGHT = DesignTokens.shipped().size().get("control.sm");
+    private static final float TOKEN_TALL = DesignTokens.shipped().size().get("control.lg");
 
     /**
      * A trailing action button of a row: its actor's {@code name} (unique in the tree), which the view hears with the
@@ -114,6 +118,8 @@ public final class UiTree extends Table {
     private record Look(Node node, boolean parent, int depth, boolean grip, boolean chevrons) { }
 
     private final UiKit kit;
+    /** Whether the rows take the Token v0 look ({@link UiTheme#TOKEN_ROW}). */
+    private final boolean token;
     private List<Node> roots = List.of();
     /** Every node of the model by id, and each one's parent's id (none for a root). */
     private final Map<String, Node> nodes = new HashMap<>();
@@ -139,7 +145,17 @@ public final class UiTree extends Table {
 
     /** An empty tree of the kit's rows. */
     public UiTree(UiKit kit) {
+        this(kit, null);
+    }
+
+    /**
+     * An empty tree as {@link #UiTree(UiKit)}; with {@link UiTheme#TOKEN}, in the Token v0 look
+     * (docs/design-system/tokens.md, Lists and trees): {@link UiTheme#TOKEN_ROW} rows without a box, text.secondary
+     * chevrons and second lines.
+     */
+    public UiTree(UiKit kit, String style) {
         this.kit = kit;
+        token = UiTheme.TOKEN.equals(style);
         top();
         addListener(new InputListener() {
             @Override
@@ -430,7 +446,7 @@ public final class UiTree extends Table {
         boolean chevrons = nodes.values().stream().anyMatch(node -> !node.children().isEmpty());
         addRows(this, roots, 0, chevrons, previous);
         if (shown.isEmpty() && !empty.isEmpty()) {
-            Label text = kit.empty(this, empty);
+            Label text = kit.empty(this, empty, token);
             text.setName("tree-empty");
         }
         // The keyboard's row hidden by a collapse goes to its nearest shown ancestor.
@@ -457,7 +473,7 @@ public final class UiTree extends Table {
             }
             if (end - start > 1) {
                 List<Node> run = visible.subList(start, end);
-                UiList list = new UiList(kit);
+                UiList list = new UiList(kit, token ? UiTheme.TOKEN : null);
                 stacks.add(list);
                 for (Node node : run) {
                     // A row moves with its shown descendants.
@@ -552,7 +568,8 @@ public final class UiTree extends Table {
             if (look.chevrons()) {
                 Table toggle = new Table();
                 if (look.parent()) {
-                    chevron = kit.icon("chevron-down", CHEVRON, UiTheme.MUTED);
+                    chevron = kit.icon("chevron-down", CHEVRON,
+                          token ? UiTheme.tokenColor("text.secondary") : UiTheme.MUTED);
                     toggle.add(chevron);
                     toggle.setName(id + "-chevron");
                     toggle.setTouchable(Touchable.enabled);
@@ -575,13 +592,20 @@ public final class UiTree extends Table {
             }
             button = rowButton(node, look.grip());
             grip = look.grip() ? button.icons.getFirst() : null;
-            add(button).growX().minWidth(0).height(node.detail() == null ? ROW : TALL_ROW).pad(2, 2 + indent, 2, 2);
+            if (token) {
+                add(button).growX().minWidth(0).height(node.detail() == null ? TOKEN_HEIGHT : TOKEN_TALL)
+                      .padLeft(indent);
+            } else {
+                add(button).growX().minWidth(0).height(node.detail() == null ? ROW : TALL_ROW)
+                      .pad(2, 2 + indent, 2, 2);
+            }
         }
 
         /** The row button (.brow .b): the grip and icon, the label over the second line, the trailing actions. */
         private UiButton rowButton(Node node, boolean grip) {
             String id = node.id();
-            UiButton row = kit.button("hud-plain", node.icon() != null ? node.icon() : grip ? "grip" : null,
+            UiButton row = kit.button(token ? UiTheme.TOKEN_ROW : "hud-plain",
+                  node.icon() != null ? node.icon() : grip ? "grip" : null,
                   node.label(), null);
             row.setName(id);
             if (grip) {
@@ -606,7 +630,9 @@ public final class UiTree extends Table {
             row.getLabelCell().growX().minWidth(0);
             if (node.detail() != null) {
                 row.row();
-                Label detail = kit.label(node.detail(), "hud-small", 10.5f, UiTheme.MUTED);
+                Label detail = token
+                      ? kit.label(node.detail(), "hud-small", 11.5f, UiTheme.tokenColor("text.secondary"))
+                      : kit.label(node.detail(), "hud-small", 10.5f, UiTheme.MUTED);
                 detail.setEllipsis(true);
                 row.add(detail).colspan(2).growX().minWidth(0).left().padTop(3);
             }

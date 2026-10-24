@@ -7,6 +7,7 @@ import java.awt.Graphics2D;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.RoundRectangle2D;
+import javax.swing.JComponent;
 import javax.swing.UIManager;
 
 import com.formdev.flatlaf.ui.FlatButtonUI;
@@ -58,9 +59,14 @@ public class TokenSwitchIcon extends TokenCheckBoxIcon {
         g.fill(pill(borderWidth, w - borderWidth * 2, h - borderWidth * 2));
 
         float thumb = h - INSET * 2;
-        Color color = !c.isEnabled() ? disabledCheckmarkColor : on ? getCheckmarkColor(c, false) : thumbColor;
+        float travel = c instanceof JComponent component
+              ? TokenMotion.value(component, MARK, on, TokenMotion.fast()) : on ? 1 : 0;
+        Color color = !c.isEnabled() ? disabledCheckmarkColor
+              : TokenMotion.mix(thumbColor, getCheckmarkColor(c, false), travel);
         g.setColor(color);
-        g.fill(new Ellipse2D.Float(on ? w - INSET - thumb : INSET, INSET, thumb, thumb));
+        float left = INSET;
+        float right = w - INSET - thumb;
+        g.fill(new Ellipse2D.Float(left + (right - left) * travel, INSET, thumb, thumb));
     }
 
     private static float height() {

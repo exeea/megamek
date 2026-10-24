@@ -31,6 +31,7 @@ final class FieldEdge {
     static final String READ_ONLY_COLOR = "MegaMek.field.readOnlyBorderColor";
     /** The input height when the component has no {@code JComponent.minimumHeight} of its own. */
     static final String HEIGHT = "MegaMek.field.height";
+    private static final String EDGE = "field.edge";
 
     private static final AWTEventListener MOUSE = FieldEdge::mouse;
     private static int installs;
@@ -55,9 +56,19 @@ final class FieldEdge {
 
     /**
      * The edge color for {@code component}: FlatLaf's {@code normal} color, unless the input is enabled and not
-     * focused, in which case a read-only input gets the subtle edge and a hovered one the strong edge.
+     * focused, in which case a read-only input gets the subtle edge and a hovered one the strong edge. The edge eases
+     * between them ({@link TokenMotion}): focus shows at once, hover comes in quickly and lingers on the way out.
      */
     static Paint color(Component component, Paint normal, boolean enabled, boolean focused) {
+        Paint target = target(component, normal, enabled, focused);
+        if (!(component instanceof JComponent c) || !(target instanceof Color || target == null)) {
+            return target;
+        }
+        int duration = focused ? 0 : TokenMotion.hover(target == UIManager.getColor(HOVER_COLOR));
+        return TokenMotion.color(c, EDGE, (Color) target, duration);
+    }
+
+    private static Paint target(Component component, Paint normal, boolean enabled, boolean focused) {
         if (!enabled || focused || !isInput(component)) {
             return normal;
         }

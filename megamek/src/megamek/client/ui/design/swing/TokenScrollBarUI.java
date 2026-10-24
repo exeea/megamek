@@ -15,7 +15,7 @@ import com.formdev.flatlaf.ui.FlatScrollBarUI;
 /**
  * Scroll bars of the MegaMek look and feels (docs/design-system/tokens.md, Scrollbars): a thin pill thumb and no track
  * of their own, so a bar shows the color of the content it scrolls instead of a stripe. The pointer anywhere over the
- * bar shows its rail and brightens the thumb.
+ * bar eases in its rail and brightens the thumb.
  */
 public class TokenScrollBarUI extends FlatScrollBarUI {
     /** Client property freezing a bar in {@link #HOVER} or {@link #PRESSED}, for the design gallery. */
@@ -24,6 +24,8 @@ public class TokenScrollBarUI extends FlatScrollBarUI {
     static final String PRESSED = "pressed";
 
     private static final Color NO_TRACK = new Color(0, true);
+    private static final String RAIL = "scrollBar.rail";
+    private static final String THUMB = "scrollBar.thumb";
 
     public static ComponentUI createUI(JComponent c) {
         return new TokenScrollBarUI();
@@ -48,13 +50,17 @@ public class TokenScrollBarUI extends FlatScrollBarUI {
     @Override
     protected Color getTrackColor(JComponent c, boolean hover, boolean pressed) {
         boolean shown = hover || c.getClientProperty(FROZEN_STATE) != null;
-        return shown && hoverTrackColor != null ? hoverTrackColor : NO_TRACK;
+        Color rail = TokenMotion.color(c, RAIL, shown ? hoverTrackColor : null, TokenMotion.hover(shown));
+        return rail != null ? rail : NO_TRACK;
     }
 
     @Override
     protected Color getThumbColor(JComponent c, boolean hover, boolean pressed) {
         Object frozen = c.getClientProperty(FROZEN_STATE);
-        return super.getThumbColor(c, hover || frozen != null, pressed || PRESSED.equals(frozen));
+        boolean down = pressed || PRESSED.equals(frozen);
+        boolean over = hover || frozen != null;
+        Color target = super.getThumbColor(c, over, down);
+        return TokenMotion.color(c, THUMB, target, down ? 0 : TokenMotion.hover(over));
     }
 
     /**

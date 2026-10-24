@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.design.swing;
 
+import javax.swing.UIDefaults;
+
 import com.formdev.flatlaf.FlatDarkLaf;
 import megamek.client.ui.design.DesignTokens.Mode;
 
@@ -18,14 +20,24 @@ public class MegaMekDarkLaf extends FlatDarkLaf {
     }
 
     @Override
+    public UIDefaults getDefaults() {
+        UIDefaults defaults = super.getDefaults();
+        TokenLafDefaults.putFonts(defaults);
+        TokenLafDefaults.putIcons(defaults);
+        return defaults;
+    }
+
+    @Override
     public void initialize() {
         super.initialize();
         FocusVisibility.install();
         FieldEdge.install();
+        TokenPopupFactory.install();
     }
 
     @Override
     public void uninitialize() {
+        TokenPopupFactory.uninstall();
         FieldEdge.uninstall();
         FocusVisibility.uninstall();
         super.uninitialize();

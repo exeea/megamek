@@ -44,11 +44,16 @@ import megamek.client.ui.util.UIUtil;
  * The segmented control (docs/design-system/tokens.md, Segmented control): a few mutually exclusive options in one
  * joined frame, for switching a view or a mode in place. The selected section has a violet wash and edge, like a
  * selected toggle; the sections share the width equally. Tab reaches only the selected section; Left and Right move
- * the selection, and Space and Enter select the focused section. It paints itself from the tokens of the current mode.
+ * the selection, and Space and Enter select the focused section. It paints itself from the tokens of the current mode,
+ * easing between states ({@link TokenMotion}).
  * <p>
  * Listeners hear only selections made by the user; {@link #setSelectedIndex} is silent.
  */
 public class TokenSegmented extends JPanel {
+    private static final String FILL = "segmented.fill.";
+    private static final String WASH = "segmented.wash.";
+    private static final String EDGE = "segmented.edge.";
+    private static final String TEXT = "segmented.text";
     private final List<Segment> segments = new ArrayList<>();
     private final Size size;
     private boolean silent;
@@ -178,16 +183,24 @@ public class TokenSegmented extends JPanel {
             g.setColor(new Color(raised, true));
             g.fill(frame);
             g.clip(frame);
-            for (Segment segment : segments) {
+            for (int i = 0; i < segments.size(); i++) {
+                Segment segment = segments.get(i);
                 ButtonModel model = segment.getModel();
-                if (model.isSelected()) {
-                    g.setColor(new Color(selected, true));
+                Color fill = TokenMotion.color(this, FILL + i, model.isSelected() ? new Color(selected, true) : null,
+                      TokenMotion.fast());
+                if (fill != null) {
+                    g.setColor(fill);
                     g.fill(round(outer(segment), arc));
                 }
+                boolean pressed = model.isArmed() && model.isPressed();
+                Color target = null;
                 if (enabled && (model.isRollover() || model.isPressed())) {
-                    boolean pressed = model.isArmed() && model.isPressed();
-                    int wash = pressed ? ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2)) : hover;
-                    g.setColor(new Color(wash, true));
+                    target = new Color(pressed ? ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2))
+                          : hover, true);
+                }
+                Color wash = TokenMotion.color(this, WASH + i, target, TokenMotion.buttonState(segment));
+                if (wash != null) {
+                    g.setColor(wash);
                     g.fill(model.isSelected() ? round(outer(segment), arc) : segment.getBounds());
                 }
             }
@@ -219,9 +232,15 @@ public class TokenSegmented extends JPanel {
                     g.fillRect(segment.getX() - line, segment.getY(), line, segment.getHeight());
                 }
             }
-            if (selected >= 0) {
-                g.setColor(color(tokens, enabled ? "selected.primary" : "border.subtle", mode));
-                g.fill(ring(outer(segments.get(selected)), line, arc));
+            Color selectedEdge = color(tokens, enabled ? "selected.primary" : "border.subtle", mode);
+            for (int i = 0; i < segments.size(); i++) {
+                Segment segment = segments.get(i);
+                Color edge = TokenMotion.color(this, EDGE + i, i == selected ? selectedEdge : null,
+                      TokenMotion.fast());
+                if (edge != null) {
+                    g.setColor(edge);
+                    g.fill(ring(outer(segment), line, arc));
+                }
             }
             for (Segment segment : segments) {
                 if (enabled && FlatUIUtils.isPermanentFocusOwner(segment)) {
@@ -377,7 +396,8 @@ public class TokenSegmented extends JPanel {
             Graphics2D g = (Graphics2D) graphics.create();
             try {
                 g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                g.setColor(color(tokens, role, mode()));
+                g.setColor(TokenMotion.color(this, TEXT, color(tokens, role, mode()),
+                      TokenMotion.buttonState(this)));
                 g.setFont(getFont());
                 FontMetrics metrics = g.getFontMetrics();
                 String text = getText();

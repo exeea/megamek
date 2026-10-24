@@ -14,20 +14,27 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.GridLayout;
+import java.awt.Image;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.geom.RoundRectangle2D;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Predicate;
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -35,6 +42,7 @@ import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultButtonModel;
 import javax.swing.Icon;
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
@@ -46,6 +54,7 @@ import javax.swing.JList;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
@@ -54,8 +63,10 @@ import javax.swing.JRadioButton;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
+import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
@@ -65,14 +76,19 @@ import javax.swing.JToolTip;
 import javax.swing.JTree;
 import javax.swing.JViewport;
 import javax.swing.KeyStroke;
+import javax.swing.RowSorter;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
+import javax.swing.SortOrder;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.WindowConstants;
+import javax.swing.table.DefaultTableModel;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.PlainDocument;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -91,13 +107,14 @@ import megamek.client.ui.design.TokenChecks;
 import megamek.client.ui.design.Vision;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.UIUtil;
+import megamek.common.Configuration;
 import megamek.logging.MMLogger;
 
 /**
  * The developer gallery of the Swing side of the design system, opened from Help in the lobby: every color role in
  * both modes, the accessibility checks, the text styles, spacing and shape, all painted from {@link DesignTokens}
- * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The Controls tab
- * shows real Swing controls drawn by {@link MegaMekDarkLaf} or {@link MegaMekLightLaf}, which the gallery applies to
+ * rather than from the active look and feel, and viewable through a color vision deficiency simulation. The last five
+ * tabs show real Swing controls drawn by {@link MegaMekDarkLaf} or {@link MegaMekLightLaf}, which the gallery applies to
  * the app while it is open. The Swing control library grows here, control by control.
  */
 public final class SwingUiLibrary extends JFrame {
@@ -110,6 +127,9 @@ public final class SwingUiLibrary extends JFrame {
     private static final int ICON_INFO = 0xE88E;
     private static final int ICON_RADIO_CHECKED = 0xE837;
     private static final int ICON_SEARCH = 0xE8B6;
+    private static final int ICON_MORE = 0xE5D4;
+    private static final int ICON_CHAT = 0xE0B7;
+    private static final int ICON_NOTIFICATIONS = 0xE7F4;
     /** Masked in the samples; not a real password. */
     private static final String SAMPLE_PASSWORD = "atlas-as7d";
 
@@ -118,6 +138,7 @@ public final class SwingUiLibrary extends JFrame {
     private final JPanel content = new JPanel(new BorderLayout());
     private final JLayer<JComponent> layer = new JLayer<>(content, visionLayer);
     private final Map<String, Font> fonts = new HashMap<>();
+    private final List<TokenChoices.Switch> reduceSwitches = new ArrayList<>();
     private Mode mode = Mode.DARK;
     private int selectedTab;
     private final String previousLookAndFeel;
@@ -200,12 +221,17 @@ public final class SwingUiLibrary extends JFrame {
         }
         content.removeAll();
         fonts.clear();
+        reduceSwitches.clear();
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab(Messages.getString("UiLibrary.tab.colors"), page(colorsPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.checks"), page(checksPage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.type"), page(typePage()));
         tabs.addTab(Messages.getString("UiLibrary.tab.shape"), page(shapePage()));
-        tabs.addTab(Messages.getString("UiLibrary.tab.controls"), page(controlsPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.inputs"), page(inputsPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.navigation"), page(navigationPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.feedback"), page(feedbackPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.notifications"), page(notificationsPage()));
+        tabs.addTab(Messages.getString("UiLibrary.tab.containers"), page(containersPage()));
         tabs.setSelectedIndex(Math.min(selectedTab, tabs.getTabCount() - 1));
         content.add(tabs, BorderLayout.CENTER);
         content.revalidate();
@@ -292,15 +318,177 @@ public final class SwingUiLibrary extends JFrame {
         for (Map.Entry<String, Float> entry : tokens.motion().entrySet()) {
             page.add(text(entry.getKey() + "  " + trim(entry.getValue()) + " ms", "body", "text.secondary"));
         }
+        page.add(paragraph(Messages.getString("UiLibrary.shape.motionRules"), "small", "text.muted"));
+        page.add(motionDemo());
         return page;
+    }
+
+    /**
+     * One live sample of each kind of motion, and a Play button that runs them all once: it hovers, presses and
+     * toggles the samples itself and sweeps the pointer down the rows, then puts everything back.
+     */
+    private JComponent motionDemo() {
+        JPanel demo = column(color("surface.base"));
+        JPanel controls = row(color("surface.base"));
+        JButton play = TokenButtons.primary(Messages.getString("UiLibrary.motion.play"));
+        controls.add(play);
+        controls.add(reduceMotionSwitch());
+        controls.add(text(Messages.getString("UiLibrary.motion.playNote"), "small", "text.muted"));
+        demo.add(controls);
+
+        JPanel samples = sampleGrid();
+        JButton hover = TokenButtons.secondary(Messages.getString("UiLibrary.motion.hoverMe"));
+        addSample(samples, 0, 0, "UiLibrary.motion.hover", unstretched(hover));
+        SpecialButton special = TokenButtons.special(Messages.getString("UiLibrary.motion.hoverMe"),
+              TokenButtons.Size.REGULAR);
+        addSample(samples, 1, 0, "UiLibrary.motion.special", unstretched(special));
+        JButton press = TokenButtons.primary(Messages.getString("UiLibrary.motion.pressMe"));
+        addSample(samples, 2, 0, "UiLibrary.motion.press", unstretched(press));
+
+        // The section opens last and alone in its row, so nothing beside it moves while it does
+        JPanel choices = row(color("surface.base"));
+        JCheckBox check = TokenChoices.check(Messages.getString("UiLibrary.controls.checked"), false);
+        JRadioButton optionA = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionA"), true);
+        JRadioButton optionB = TokenChoices.radio(Messages.getString("UiLibrary.controls.optionB"), false);
+        TokenChoices.group(optionA, optionB);
+        TokenChoices.Switch toggle = TokenChoices.toggleSwitch(Messages.getString("UiLibrary.choices.autosave"),
+              false);
+        choices.add(check);
+        choices.add(optionA);
+        choices.add(optionB);
+        choices.add(toggle);
+        addSample(samples, 0, 1, "UiLibrary.motion.choices", choices);
+        JPanel popups = row(color("surface.base"));
+        JComboBox<String> select = new JComboBox<>(new String[] { "North", "South", "Any" });
+        JButton tipped = TokenButtons.quiet(Messages.getString("UiLibrary.motion.hoverMe"));
+        tipped.setToolTipText(Messages.getString("UiLibrary.motion.tooltip"));
+        popups.add(select);
+        popups.add(tipped);
+        addSample(samples, 1, 1, "UiLibrary.motion.popup", popups);
+        JSlider slider = sampleSlider(false);
+        addSample(samples, 2, 1, "UiLibrary.motion.slider", unstretched(slider));
+
+        TokenCollapsibleSection section = TokenSections.collapsible(
+              Messages.getString("UiLibrary.sections.advanced"), sectionContent(), false);
+        addSample(samples, 0, 2, "UiLibrary.motion.section", section);
+        JList<String> units = new JList<>(new String[] { "Atlas AS7-D", "Griffin GRF-1N", "Locust LCT-1V",
+                                                         "Marauder MAD-3R", "Wasp WSP-1A" });
+        units.setVisibleRowCount(5);
+        addSample(samples, 1, 2, "UiLibrary.motion.rows", TokenLists.scroll(units));
+        demo.add(samples);
+
+        play.addActionListener(event -> {
+            play.setEnabled(false);
+            boolean wasChecked = check.isSelected();
+            boolean wasA = optionA.isSelected();
+            boolean wasOn = toggle.isSelected();
+            boolean wasOpen = section.isExpanded();
+            int rows = units.getModel().getSize();
+            int tipDelay = ToolTipManager.sharedInstance().getInitialDelay();
+            // Steps every 80ms: hover and toggle at once while the pointer sweeps the rows, then press and open
+            // the select, then show the tooltip, then put it all back
+            int[] step = { 0 };
+            Timer script = new Timer(80, null);
+            script.addActionListener(tick -> {
+                int now = step[0]++;
+                if (now == 0) {
+                    hover.getModel().setRollover(true);
+                    special.getModel().setRollover(true);
+                    check.setSelected(!wasChecked);
+                    (wasA ? optionB : optionA).setSelected(true);
+                    toggle.setSelected(!wasOn);
+                    section.setExpanded(!wasOpen);
+                    pointer(slider, MouseEvent.MOUSE_ENTERED, slider.getWidth() / 2, slider.getHeight() / 2);
+                    pointer(slider, MouseEvent.MOUSE_MOVED, slider.getWidth() / 2, slider.getHeight() / 2);
+                }
+                if (now < rows) {
+                    Rectangle cellBounds = units.getCellBounds(now, now);
+                    if (cellBounds != null) {
+                        pointer(units, MouseEvent.MOUSE_MOVED, cellBounds.x + cellBounds.width / 2,
+                              (int) cellBounds.getCenterY());
+                    }
+                } else if (now == rows) {
+                    pointer(units, MouseEvent.MOUSE_EXITED, -1, -1);
+                }
+                if (now == 10) {
+                    press.getModel().setArmed(true);
+                    press.getModel().setPressed(true);
+                    if (select.isShowing()) {
+                        select.setPopupVisible(true);
+                    }
+                } else if (now == 15) {
+                    // Disarm first so releasing the press doesn't fire the button
+                    press.getModel().setArmed(false);
+                    press.getModel().setPressed(false);
+                } else if (now == 20) {
+                    select.setPopupVisible(false);
+                    ToolTipManager.sharedInstance().setInitialDelay(0);
+                    pointer(tipped, MouseEvent.MOUSE_ENTERED, tipped.getWidth() / 2, tipped.getHeight() / 2);
+                    pointer(tipped, MouseEvent.MOUSE_MOVED, tipped.getWidth() / 2, tipped.getHeight() / 2);
+                } else if (now == 30) {
+                    pointer(tipped, MouseEvent.MOUSE_EXITED, -1, -1);
+                    ToolTipManager.sharedInstance().setInitialDelay(tipDelay);
+                    hover.getModel().setRollover(false);
+                    special.getModel().setRollover(false);
+                    check.setSelected(wasChecked);
+                    (wasA ? optionA : optionB).setSelected(true);
+                    toggle.setSelected(wasOn);
+                    section.setExpanded(wasOpen);
+                    pointer(slider, MouseEvent.MOUSE_EXITED, -1, -1);
+                } else if (now >= 36) {
+                    script.stop();
+                    play.setEnabled(true);
+                }
+            });
+            script.start();
+        });
+        return demo;
+    }
+
+    /** Holds {@code component} at its preferred size inside a stretched grid cell. */
+    private static JPanel unstretched(JComponent component) {
+        JPanel holder = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
+        holder.setOpaque(false);
+        holder.add(component);
+        return holder;
+    }
+
+    /** Sends {@code component} a synthetic pointer event, as if the pointer were at {@code x, y}. */
+    private static void pointer(JComponent component, int id, int x, int y) {
+        component.dispatchEvent(new MouseEvent(component, id, System.currentTimeMillis(), 0, x, y, 0, false));
+    }
+
+    /** A reduce motion switch kept in step with the others in the gallery. */
+    private TokenChoices.Switch reduceMotionSwitch() {
+        TokenChoices.Switch reduce = TokenChoices.toggleSwitch(Messages.getString("UiLibrary.controls.reduceMotion"),
+              TokenMotion.isReduced());
+        reduce.addItemListener(event -> {
+            TokenMotion.setReduced(reduce.isSelected());
+            for (TokenChoices.Switch other : reduceSwitches) {
+                other.setSelected(reduce.isSelected());
+            }
+        });
+        reduceSwitches.add(reduce);
+        return reduce;
     }
 
     // ---- Samples
 
-    private JComponent controlsPage() {
+    /** A controls page that opens with the theme's name and the reduce motion switch, shared by all three. */
+    private JPanel controlsPage() {
         JPanel page = column(color("surface.base"));
         page.add(paragraph(Messages.getString("UiLibrary.controls.intro",
               mode == Mode.DARK ? MegaMekDarkLaf.NAME : MegaMekLightLaf.NAME), "small", "text.muted"));
+        JPanel motion = row(color("surface.base"));
+        motion.add(reduceMotionSwitch());
+        page.add(motion);
+        page.add(paragraph(Messages.getString("UiLibrary.controls.reduceMotionNote"), "small", "text.muted"));
+        return page;
+    }
+
+    /** Buttons, choices, inputs, sliders and the keyboard focus. */
+    private JComponent inputsPage() {
+        JPanel page = controlsPage();
 
         page.add(heading(Messages.getString("UiLibrary.controls.buttons")));
         page.add(paragraph(Messages.getString("UiLibrary.buttons.note"), "small", "text.muted"));
@@ -334,6 +522,15 @@ public final class SwingUiLibrary extends JFrame {
         choices.add(new JSpinner(new SpinnerNumberModel(4, 0, 12, 1)));
         page.add(choices);
 
+        page.add(heading(Messages.getString("UiLibrary.controls.chips")));
+        page.add(paragraph(Messages.getString("UiLibrary.chips.note"), "small", "text.muted"));
+        page.add(chipFilterSamples());
+        page.add(chipTagSamples());
+        JLabel chipsLive = text(Messages.getString("UiLibrary.chips.live"), "label", "text.secondary");
+        chipsLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(chipsLive);
+        page.add(chipLobby());
+
         page.add(heading(Messages.getString("UiLibrary.controls.inputs")));
         page.add(paragraph(Messages.getString("UiLibrary.inputs.note"), "small", "text.muted"));
         for (TokenButtons.Size size : TokenButtons.Size.values()) {
@@ -352,14 +549,15 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.sliders.note"), "small", "text.muted"));
         page.add(sliderMatrix());
 
-        page.add(heading(Messages.getString("UiLibrary.controls.ranges")));
-        JPanel ranges = row(color("surface.base"));
-        JProgressBar progress = new JProgressBar(0, 100);
-        progress.setValue(60);
-        progress.setStringPainted(true);
-        ranges.add(progress);
-        page.add(ranges);
+        page.add(heading(Messages.getString("UiLibrary.controls.focus")));
+        page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
+        page.add(focusSamples());
+        return page;
+    }
 
+    /** Tabs, segmented controls, selects, lists, menus, scrollbars and tables. */
+    private JComponent navigationPage() {
+        JPanel page = controlsPage();
         page.add(heading(Messages.getString("UiLibrary.controls.tabs")));
         page.add(paragraph(Messages.getString("UiLibrary.tabs.note"), "small", "text.muted"));
         for (TokenButtons.Size size : TokenButtons.Size.values()) {
@@ -388,32 +586,82 @@ public final class SwingUiLibrary extends JFrame {
         page.add(paragraph(Messages.getString("UiLibrary.menus.note"), "small", "text.muted"));
         page.add(menuSamples());
 
-        page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
-        page.add(paragraph(Messages.getString("UiLibrary.tooltips.note"), "small", "text.muted"));
-        page.add(tooltipSamples());
-
         page.add(heading(Messages.getString("UiLibrary.controls.scrollbars")));
         page.add(paragraph(Messages.getString("UiLibrary.scrollbars.note"), "small", "text.muted"));
         page.add(scrollbarSamples());
 
         page.add(heading(Messages.getString("UiLibrary.controls.table")));
-        JTable table = new JTable(new Object[][] {
-              { "Atlas AS7-D", "100", "3/5/0", "54" },
-              { "Marauder MAD-3R", "75", "4/6/0", "42" },
-              { "Phoenix Hawk PXH-1", "45", "6/9/6", "38" },
-              { "Locust LCT-1V", "20", "8/12/0", "21" },
-        }, new Object[] { Messages.getString("UiLibrary.controls.unit"),
-              Messages.getString("UiLibrary.controls.tons"), Messages.getString("UiLibrary.controls.movement"),
-              Messages.getString("UiLibrary.controls.armor") });
-        table.setRowSelectionInterval(1, 1);
-        table.setPreferredScrollableViewportSize(new Dimension(scaleForGUI(520), table.getRowHeight() * 4));
-        JScrollPane tableScroll = new JScrollPane(table);
-        tableScroll.setAlignmentX(LEFT_ALIGNMENT);
-        page.add(tableScroll);
+        page.add(paragraph(Messages.getString("UiLibrary.tables.note"), "small", "text.muted"));
+        page.add(tableSamples());
+        return page;
+    }
 
-        page.add(heading(Messages.getString("UiLibrary.controls.focus")));
-        page.add(paragraph(Messages.getString("UiLibrary.focus.note"), "small", "text.muted"));
-        page.add(focusSamples());
+    /** Tooltips, progress, sections, split panes and dialogs. */
+    private JComponent feedbackPage() {
+        JPanel page = controlsPage();
+        page.add(heading(Messages.getString("UiLibrary.controls.tooltips")));
+        page.add(paragraph(Messages.getString("UiLibrary.tooltips.note"), "small", "text.muted"));
+        page.add(tooltipSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.progress")));
+        page.add(paragraph(Messages.getString("UiLibrary.progress.note"), "small", "text.muted"));
+        page.add(progressSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.sections")));
+        page.add(paragraph(Messages.getString("UiLibrary.sections.note"), "small", "text.muted"));
+        page.add(sectionSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.splitPanes")));
+        page.add(paragraph(Messages.getString("UiLibrary.splitPanes.note"), "small", "text.muted"));
+        page.add(splitPaneSamples());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.dialogs")));
+        page.add(paragraph(Messages.getString("UiLibrary.dialogs.note"), "small", "text.muted"));
+        page.add(dialogSamples());
+        page.add(dialogLauncher());
+        return page;
+    }
+
+    /** Status chips and badges, then status cards. */
+    private JComponent notificationsPage() {
+        JPanel page = controlsPage();
+        page.add(heading(Messages.getString("UiLibrary.controls.badges")));
+        page.add(paragraph(Messages.getString("UiLibrary.badges.note"), "small", "text.muted"));
+        page.add(chipStatusSamples());
+        page.add(badgeSamples());
+        JLabel badgesLive = text(Messages.getString("UiLibrary.badges.live"), "label", "text.secondary");
+        badgesLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(badgesLive);
+        page.add(badgeLobby());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.toasts")));
+        page.add(paragraph(Messages.getString("UiLibrary.toasts.note"), "small", "text.muted"));
+        page.add(toastSamples());
+        JLabel toastsLive = text(Messages.getString("UiLibrary.toasts.live"), "label", "text.secondary");
+        toastsLive.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(toastsLive);
+        page.add(toastBoard());
+
+        page.add(heading(Messages.getString("UiLibrary.controls.statusCards")));
+        page.add(paragraph(Messages.getString("UiLibrary.statusCards.note"), "small", "text.muted"));
+        page.add(statusCardSamples());
+        page.add(statusCardLauncher());
+        return page;
+    }
+
+    /** Panels and frames. */
+    private JComponent containersPage() {
+        JPanel page = controlsPage();
+        page.add(heading(Messages.getString("UiLibrary.controls.panels")));
+        page.add(paragraph(Messages.getString("UiLibrary.panels.note"), "small", "text.muted"));
+        page.add(panelSamples());
+        page.add(panelStatusSamples());
+        page.add(panelSelectableSamples());
+        page.add(panelNestingSamples());
+        JLabel live = text(Messages.getString("UiLibrary.panels.live"), "label", "text.secondary");
+        live.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(12), 0, scaleForGUI(4), 0));
+        page.add(live);
+        page.add(panelSidebar());
         return page;
     }
 
@@ -774,6 +1022,855 @@ public final class SwingUiLibrary extends JFrame {
         glue.weightx = 1;
         samples.add(Box.createHorizontalGlue(), glue);
         return samples;
+    }
+
+    /**
+     * Tables in each state: hover is frozen on a row of the first table and on a header of the second; sorting,
+     * selecting and the rest stay live.
+     */
+    private JComponent tableSamples() {
+        JPanel samples = new JPanel(new GridBagLayout());
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+
+        JTable states = sampleTable(true);
+        states.getRowSorter().setSortKeys(List.of(new RowSorter.SortKey(1, SortOrder.DESCENDING)));
+        states.setRowSelectionInterval(3, 3);
+        states.putClientProperty(TokenLists.FROZEN_HOVER, 1);
+        addTableSample(samples, 0, 0, "UiLibrary.tables.states", states);
+
+        JTable multi = sampleTable(true);
+        multi.getSelectionModel().setSelectionInterval(1, 2);
+        multi.getSelectionModel().addSelectionInterval(4, 4);
+        multi.getTableHeader().putClientProperty(TokenTables.FROZEN_HEADER_HOVER, 2);
+        addTableSample(samples, 1, 0, "UiLibrary.tables.multi", multi);
+
+        JTable empty = TokenTables.emptyText(sampleTable(false), Messages.getString("UiLibrary.tables.emptyText"));
+        addTableSample(samples, 0, 1, "UiLibrary.tables.empty", empty);
+
+        JTable disabled = sampleTable(true);
+        disabled.setRowSelectionInterval(1, 1);
+        disabled.setEnabled(false);
+        disabled.getTableHeader().setEnabled(false);
+        addTableSample(samples, 1, 1, "UiLibrary.tables.disabled", disabled);
+
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 2;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
+    }
+
+    /** A sortable unit table, filled or with no rows. Numbers are right-aligned by their column class. */
+    private static JTable sampleTable(boolean filled) {
+        Object[][] rows = filled ? new Object[][] {
+              { "Atlas AS7-D", 100, "3/5/0", 304 },
+              { "Marauder MAD-3R", 75, "4/6/0", 184 },
+              { "Phoenix Hawk PXH-1", 45, "6/9/6", 120 },
+              { "Hunchback HBK-4G", 50, "4/6/0", 160 },
+              { "Locust LCT-1V", 20, "8/12/0", 64 },
+              { "Wasp WSP-1A", 20, "6/9/6", 48 },
+              { "Griffin GRF-1N", 55, "5/8/5", 152 },
+        } : new Object[0][];
+        String[] columns = { Messages.getString("UiLibrary.controls.unit"),
+                             Messages.getString("UiLibrary.controls.tons"),
+                             Messages.getString("UiLibrary.controls.movement"),
+                             Messages.getString("UiLibrary.controls.armor") };
+        DefaultTableModel model = new DefaultTableModel(rows, columns) {
+            @Override
+            public Class<?> getColumnClass(int column) {
+                return column == 1 || column == 3 ? Integer.class : String.class;
+            }
+
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        JTable table = new JTable(model);
+        table.setAutoCreateRowSorter(true);
+        table.getColumnModel().getColumn(0).setPreferredWidth(scaleForGUI(150));
+        return table;
+    }
+
+    /** Adds {@code table} in its scroll pane under a caption, at {@code column} of caption row {@code row}. */
+    private void addTableSample(JPanel samples, int column, int row, String captionKey, JTable table) {
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.NORTHWEST;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(6));
+        cell.gridx = column;
+        cell.gridy = row * 2;
+        samples.add(text(Messages.getString(captionKey), "caption", "text.muted"), cell);
+        cell.gridy++;
+        JScrollPane scroll = new JScrollPane(table);
+        scroll.setPreferredSize(new Dimension(scaleForGUI(430), scaleForGUI(190)));
+        samples.add(scroll, cell);
+    }
+
+    /** Progress bars with and without text, indeterminate and disabled. */
+    private JComponent progressSamples() {
+        JPanel samples = sampleGrid();
+        JProgressBar loading = sampleProgress(Messages.getString("UiLibrary.progress.loading"));
+        addSample(samples, 0, 0, "UiLibrary.progress.determinate", loading);
+        addSample(samples, 1, 0, "UiLibrary.progress.plain", sampleProgress(null));
+        JProgressBar waiting = sampleProgress(Messages.getString("UiLibrary.progress.waiting"));
+        waiting.setIndeterminate(true);
+        addSample(samples, 2, 0, "UiLibrary.progress.indeterminate", waiting);
+        JProgressBar disabled = sampleProgress(Messages.getString("UiLibrary.progress.loading"));
+        disabled.setEnabled(false);
+        addSample(samples, 3, 0, "UiLibrary.progress.disabled", disabled);
+        JProgressBar percent = sampleProgress(Messages.getString("UiLibrary.progress.rendering"));
+        percent.putClientProperty(TokenProgressBarUI.SHOW_PERCENT, Boolean.TRUE);
+        addSample(samples, 0, 1, "UiLibrary.progress.percent", percent);
+        return samples;
+    }
+
+    private static JProgressBar sampleProgress(String text) {
+        JProgressBar progress = new JProgressBar(0, 100);
+        progress.setValue(60);
+        if (text != null) {
+            progress.setString(text);
+            progress.setStringPainted(true);
+        }
+        Dimension size = progress.getPreferredSize();
+        progress.setPreferredSize(new Dimension(Math.max(scaleForGUI(200), size.width), size.height));
+        progress.setMinimumSize(progress.getPreferredSize());
+        return progress;
+    }
+
+    /**
+     * Section headers alone, titling a panel (new and legacy side by side) and opening and closing a section, then
+     * plain separators. Hover is frozen on one collapsible; the others are live.
+     */
+    private JComponent sectionSamples() {
+        JPanel samples = sampleGrid();
+        JPanel header = column(color("surface.base"));
+        header.add(TokenSections.header(Messages.getString("UiLibrary.sections.movement")));
+        header.add(sectionContent());
+        addSample(samples, 0, 0, "UiLibrary.sections.header", header);
+
+        JPanel titled = sectionContent();
+        titled.setBorder(TokenSections.titled(Messages.getString("UiLibrary.sections.deployment")));
+        addSample(samples, 1, 0, "UiLibrary.sections.titled", titled);
+        JPanel legacy = sectionContent();
+        legacy.setBorder(BorderFactory.createTitledBorder(Messages.getString("UiLibrary.sections.deployment")));
+        addSample(samples, 2, 0, "UiLibrary.sections.legacy", legacy);
+
+        addSample(samples, 0, 1, "UiLibrary.sections.expanded",
+              TokenSections.collapsible(Messages.getString("UiLibrary.sections.advanced"), sectionContent(), true));
+        addSample(samples, 1, 1, "UiLibrary.sections.collapsed",
+              TokenSections.collapsible(Messages.getString("UiLibrary.sections.victory"), sectionContent(), false));
+        TokenCollapsibleSection hover = TokenSections.collapsible(Messages.getString("UiLibrary.sections.movement"),
+              sectionContent(), false);
+        hover.putClientProperty(TokenCollapsibleSection.FROZEN_HOVER, true);
+        addSample(samples, 2, 1, "UiLibrary.sections.hover", hover);
+
+        JPanel separators = new JPanel(new BorderLayout(scaleForGUI(8), scaleForGUI(8)));
+        separators.setBackground(color("surface.base"));
+        separators.add(new JSeparator(), BorderLayout.NORTH);
+        JPanel vertical = row(color("surface.base"));
+        for (String key : List.of("UiLibrary.controls.tabA", "UiLibrary.controls.tabB", "UiLibrary.controls.tabC")) {
+            if (vertical.getComponentCount() > 0) {
+                JSeparator line = new JSeparator(SwingConstants.VERTICAL);
+                line.setPreferredSize(new Dimension(line.getPreferredSize().width, scaleForGUI(16)));
+                vertical.add(line);
+            }
+            vertical.add(text(Messages.getString(key), "body", "text.secondary"));
+        }
+        separators.add(vertical, BorderLayout.CENTER);
+        addSample(samples, 0, 2, "UiLibrary.sections.separators", separators);
+        return samples;
+    }
+
+    /** A small group of fields to fill a section sample. */
+    private JPanel sectionContent() {
+        JPanel content = new JPanel(new GridBagLayout());
+        content.setOpaque(false);
+        content.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.WEST;
+        cell.insets = new Insets(scaleForGUI(2), 0, scaleForGUI(2), scaleForGUI(8));
+        cell.gridy = 0;
+        content.add(text(Messages.getString("UiLibrary.sections.zone"), "body", "text.primary"), cell);
+        content.add(new JComboBox<>(new String[] { "North", "South", "Any" }), cell);
+        cell.gridy++;
+        content.add(text(Messages.getString("UiLibrary.sections.round"), "body", "text.primary"), cell);
+        content.add(new JSpinner(new SpinnerNumberModel(1, 0, 20, 1)), cell);
+        cell.gridy++;
+        cell.gridwidth = 2;
+        content.add(TokenChoices.check(Messages.getString("UiLibrary.controls.checked"), true), cell);
+        // Extra width goes to a trailing column, keeping the fields at the leading edge
+        GridBagConstraints rest = new GridBagConstraints();
+        rest.gridx = 2;
+        rest.weightx = 1;
+        content.add(Box.createHorizontalGlue(), rest);
+        return content;
+    }
+
+    /** Dialog cards as they show over a window: a message, a confirmation, a destructive one and a short form. */
+    private JComponent dialogSamples() {
+        JPanel samples = sampleGrid();
+        TokenDialogPane info = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.messageTitle"))
+              .status(TokenDialogPane.Status.INFO).message(Messages.getString("UiLibrary.dialogs.messageText"));
+        info.primary(Messages.getString("Okay"));
+        addSample(samples, 0, 0, "UiLibrary.dialogs.message", onScrim(info));
+
+        addSample(samples, 1, 0, "UiLibrary.dialogs.confirm", onScrim(confirmPane()));
+        addSample(samples, 0, 1, "UiLibrary.dialogs.danger", onScrim(dangerPane()));
+        addSample(samples, 1, 1, "UiLibrary.dialogs.form", onScrim(formPane()));
+        return samples;
+    }
+
+    private TokenDialogPane confirmPane() {
+        TokenDialogPane pane = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.confirmTitle"))
+              .status(TokenDialogPane.Status.QUESTION).message(Messages.getString("UiLibrary.dialogs.confirmText"));
+        pane.extra(TokenChoices.check(Messages.getString("UiLibrary.dialogs.dontAsk"), false));
+        pane.cancel(Messages.getString("Cancel"));
+        pane.primary(Messages.getString("UiLibrary.dialogs.confirmAction"));
+        return pane;
+    }
+
+    private TokenDialogPane dangerPane() {
+        TokenDialogPane pane = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.dangerTitle"))
+              .status(TokenDialogPane.Status.WARNING).message(Messages.getString("UiLibrary.dialogs.dangerText"));
+        pane.cancel(Messages.getString("Cancel"));
+        pane.danger(Messages.getString("UiLibrary.dialogs.dangerAction"));
+        return pane;
+    }
+
+    private TokenDialogPane formPane() {
+        JPanel form = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(12)));
+        form.setOpaque(false);
+        JTextField name = TokenFields.text(TokenButtons.Size.REGULAR);
+        name.setText("Kell Hounds");
+        form.add(new TokenFormField(Messages.getString("UiLibrary.dialogs.formName"), name));
+        JComboBox<String> skill = new JComboBox<>(new String[] { "Green", "Regular", "Veteran", "Elite" });
+        skill.setSelectedIndex(1);
+        form.add(new TokenFormField(Messages.getString("UiLibrary.dialogs.formSkill"), skill)
+              .setHelper(Messages.getString("UiLibrary.dialogs.formSkillHelp")));
+        TokenDialogPane pane = new TokenDialogPane(Messages.getString("UiLibrary.dialogs.formTitle")).body(form);
+        pane.help(() -> { });
+        pane.cancel(Messages.getString("Cancel"));
+        pane.primary(Messages.getString("UiLibrary.dialogs.formAction"));
+        return pane;
+    }
+
+    /** {@code pane} as a card on a patch of scrim, as it shows over a window. */
+    private JComponent onScrim(TokenDialogPane pane) {
+        pane.assemble(true, button -> { });
+        JPanel backdrop = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0)) {
+            @Override
+            protected void paintComponent(Graphics graphics) {
+                super.paintComponent(graphics);
+                graphics.setColor(color("surface.scrim"));
+                graphics.fillRect(0, 0, getWidth(), getHeight());
+            }
+        };
+        backdrop.setBackground(color("surface.base"));
+        int margin = scaleForGUI(24);
+        backdrop.setBorder(BorderFactory.createEmptyBorder(margin, margin, margin, margin));
+        backdrop.add(pane);
+        return unstretched(backdrop);
+    }
+
+    /** Buttons that open live dialogs in each tier, and what the last one gave back. */
+    private JComponent dialogLauncher() {
+        JPanel launcher = row(color("surface.base"));
+        launcher.add(text(Messages.getString("UiLibrary.dialogs.live"), "label", "text.secondary"));
+        JLabel result = text(" ", "small", "text.muted");
+        JButton message = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openMessage"));
+        message.addActionListener(event -> {
+            TokenDialogs.message(launcher, TokenDialogPane.Status.SUCCESS,
+                  Messages.getString("UiLibrary.dialogs.savedTitle"), Messages.getString("UiLibrary.dialogs.savedText"));
+            result.setText(Messages.getString("UiLibrary.dialogs.closed"));
+        });
+        JButton confirm = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openConfirm"));
+        confirm.addActionListener(event -> showResult(result, launcher, confirmPane(), false));
+        JButton danger = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openDanger"));
+        danger.addActionListener(event -> showResult(result, launcher, dangerPane(), false));
+        JButton form = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openForm"));
+        form.addActionListener(event -> showResult(result, launcher, formPane(), false));
+        JButton window = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openWindow"));
+        window.addActionListener(event -> showResult(result, launcher,
+              formPane().width(TokenDialogPane.Width.MEDIUM), true));
+        JButton option = TokenButtons.secondary(Messages.getString("UiLibrary.dialogs.openOptionPane"));
+        option.addActionListener(event -> {
+            int answer = JOptionPane.showConfirmDialog(this, Messages.getString("UiLibrary.dialogs.confirmText"),
+                  Messages.getString("UiLibrary.dialogs.confirmTitle"), JOptionPane.OK_CANCEL_OPTION,
+                  JOptionPane.QUESTION_MESSAGE);
+            result.setText(Messages.getString(answer == JOptionPane.OK_OPTION ? "UiLibrary.dialogs.okay"
+                  : "UiLibrary.dialogs.closed"));
+        });
+        for (JButton button : List.of(message, confirm, danger, form, window, option)) {
+            launcher.add(button);
+        }
+        launcher.add(result);
+        return launcher;
+    }
+
+    private void showResult(JLabel result, JComponent owner, TokenDialogPane pane, boolean window) {
+        JButton pressed = window ? TokenDialogs.window(owner, pane) : TokenDialogs.show(owner, pane);
+        result.setText(pressed == null ? Messages.getString("UiLibrary.dialogs.closed")
+              : Messages.getString("UiLibrary.dialogs.pressed", pressed.getText()));
+    }
+
+    /** Status cards as they sit on a view: running, of unknown length, failed and one that can't be cancelled. */
+    private JComponent statusCardSamples() {
+        JPanel samples = sampleGrid();
+        TokenStatusCard running = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"))
+              .onCancel(() -> { }).step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0.25);
+        addSample(samples, 0, 0, "UiLibrary.statusCards.running", unstretched(running));
+        TokenStatusCard unknown = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.joinTitle"))
+              .onCancel(() -> { }).step(Messages.getString("UiLibrary.statusCards.joining")).indeterminate();
+        addSample(samples, 1, 0, "UiLibrary.statusCards.unknown", unstretched(unknown));
+        TokenStatusCard failed = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"))
+              .onCancel(() -> { }).step(Messages.getString("UiLibrary.statusCards.rendering")).progress(0.6)
+              .fail(Messages.getString("UiLibrary.statusCards.printError"), () -> { });
+        addSample(samples, 0, 1, "UiLibrary.statusCards.failed", unstretched(failed));
+        TokenStatusCard fixed = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.saveTitle"))
+              .step(Messages.getString("UiLibrary.statusCards.saving")).progress(0.7);
+        addSample(samples, 1, 1, "UiLibrary.statusCards.fixed", unstretched(fixed));
+        return samples;
+    }
+
+    /**
+     * Runs a pretend print beside the view, as a modal card, or one that fails once at 60% and works on Retry; a slot
+     * under the buttons holds the card that runs beside the view.
+     */
+    private JComponent statusCardLauncher() {
+        JPanel holder = new JPanel(new BorderLayout());
+        holder.setOpaque(false);
+        holder.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel launcher = row(color("surface.base"));
+        launcher.add(text(Messages.getString("UiLibrary.statusCards.live"), "label", "text.secondary"));
+        JLabel result = text(" ", "small", "text.muted");
+        JPanel slot = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
+        slot.setOpaque(false);
+        int margin = scaleForGUI(24);
+        slot.setBorder(BorderFactory.createEmptyBorder(0, margin, margin, 0));
+        slot.setPreferredSize(new Dimension(1,
+              new TokenStatusCard("M").onCancel(() -> { }).getPreferredSize().height + margin));
+
+        JButton beside = TokenButtons.secondary(Messages.getString("UiLibrary.statusCards.runBeside"));
+        beside.addActionListener(event -> {
+            if (slot.getComponentCount() > 0) {
+                return;
+            }
+            TokenStatusCard card = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"));
+            Runnable remove = () -> {
+                slot.removeAll();
+                slot.revalidate();
+                slot.repaint();
+            };
+            Timer task = demoPrint(card, false, () -> {
+                remove.run();
+                result.setText(Messages.getString("UiLibrary.statusCards.done"));
+            });
+            card.onCancel(() -> {
+                task.stop();
+                remove.run();
+                result.setText(Messages.getString("UiLibrary.statusCards.cancelled"));
+            });
+            card.onClose(() -> {
+                remove.run();
+                result.setText(Messages.getString("UiLibrary.statusCards.dismissed"));
+            });
+            slot.add(card);
+            slot.revalidate();
+            result.setText(" ");
+        });
+        JButton modal = TokenButtons.secondary(Messages.getString("UiLibrary.statusCards.runModal"));
+        modal.addActionListener(event -> runModal(launcher, result, false));
+        JButton failing = TokenButtons.secondary(Messages.getString("UiLibrary.statusCards.runFailing"));
+        failing.addActionListener(event -> runModal(launcher, result, true));
+        launcher.add(beside);
+        launcher.add(modal);
+        launcher.add(failing);
+        launcher.add(result);
+        holder.add(launcher, BorderLayout.NORTH);
+        holder.add(slot, BorderLayout.CENTER);
+        return holder;
+    }
+
+    private void runModal(JComponent owner, JLabel result, boolean failing) {
+        TokenStatusCard card = new TokenStatusCard(Messages.getString("UiLibrary.statusCards.printTitle"));
+        String[] outcome = { Messages.getString("UiLibrary.statusCards.done") };
+        Timer task = demoPrint(card, failing, card::finish);
+        card.onCancel(() -> {
+            task.stop();
+            outcome[0] = Messages.getString("UiLibrary.statusCards.cancelled");
+        });
+        card.onClose(() -> outcome[0] = Messages.getString("UiLibrary.statusCards.dismissed"));
+        TokenDialogs.progress(owner, card);
+        task.stop();
+        result.setText(outcome[0]);
+    }
+
+    /**
+     * Steps {@code card} through a pretend print of about five seconds and runs {@code done} at the end. A failing print
+     * stops at 60% with an error; Retry starts it again, and then it works.
+     */
+    private static Timer demoPrint(TokenStatusCard card, boolean failing, Runnable done) {
+        int[] percent = { 0 };
+        boolean[] failNext = { failing };
+        Timer timer = new Timer(50, null);
+        timer.addActionListener(event -> {
+            percent[0]++;
+            int value = percent[0];
+            card.step(Messages.getString(value < 40 ? "UiLibrary.statusCards.preparing"
+                  : value < 90 ? "UiLibrary.statusCards.rendering" : "UiLibrary.statusCards.writing"))
+                  .progress(value / 100.0);
+            if (failNext[0] && value == 60) {
+                timer.stop();
+                failNext[0] = false;
+                card.fail(Messages.getString("UiLibrary.statusCards.printError"), () -> {
+                    percent[0] = 0;
+                    card.step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0);
+                    timer.start();
+                });
+            } else if (value >= 100) {
+                timer.stop();
+                done.run();
+            }
+        });
+        card.step(Messages.getString("UiLibrary.statusCards.preparing")).progress(0);
+        timer.start();
+        return timer;
+    }
+
+    /** A status chip in each tone. */
+    private JComponent chipStatusSamples() {
+        JPanel samples = sampleGrid();
+        String[] tones = { "neutral", "info", "success", "warning", "danger" };
+        String[] texts = { "blueprint", "hidden", "deployed", "runningHot", "engineHit" };
+        TokenChips.Tone[] values = TokenChips.Tone.values();
+        for (int i = 0; i < tones.length; i++) {
+            TokenChips.StatusChip chip = TokenChips.status(Messages.getString("UiLibrary.chips." + texts[i]),
+                  values[i]);
+            addSample(samples, i, 0, "UiLibrary.chips." + tones[i], unstretched(chip));
+        }
+        return samples;
+    }
+
+    /** Filter chips at rest, hover and focus frozen, on and disabled. */
+    private JComponent chipFilterSamples() {
+        JPanel samples = sampleGrid();
+        String[] states = { "rest", "hover", "selected", "focus", "disabled" };
+        for (int i = 0; i < states.length; i++) {
+            TokenChips.FilterChip chip = TokenChips.filter(Messages.getString("UiLibrary.chips.meks"));
+            switch (states[i]) {
+                case "hover" -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_HOVER);
+                case "selected" -> chip.setSelected(true);
+                case "focus" -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_FOCUS);
+                case "disabled" -> chip.setEnabled(false);
+                default -> { }
+            }
+            addSample(samples, i, 0, "UiLibrary.panels.state." + states[i], unstretched(chip));
+        }
+        return samples;
+    }
+
+    /** Tag chips at rest, with the cross hovered and focus frozen, and disabled. */
+    private JComponent chipTagSamples() {
+        JPanel samples = sampleGrid();
+        String[] captions = { "UiLibrary.panels.state.rest", "UiLibrary.chips.hoverCross",
+                              "UiLibrary.panels.state.focus", "UiLibrary.panels.state.disabled" };
+        for (int i = 0; i < captions.length; i++) {
+            TokenChips.TagChip chip = TokenChips.tag(Messages.getString("UiLibrary.chips.night"), null);
+            switch (i) {
+                case 1 -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_HOVER);
+                case 2 -> chip.putClientProperty(TokenChips.FROZEN_STATE, TokenChips.FROZEN_FOCUS);
+                case 3 -> chip.setEnabled(false);
+                default -> { }
+            }
+            addSample(samples, i, 0, captions[i], unstretched(chip));
+        }
+        return samples;
+    }
+
+    /** Count badges in each tone, one over 99, and a dot, on the buttons they count for. */
+    private JComponent badgeSamples() {
+        JPanel samples = sampleGrid();
+        addSample(samples, 0, 0, "UiLibrary.chips.badgeAccent", unstretched(TokenBadge.attach(
+              TokenButtons.icon(ICON_CHAT, Messages.getString("UiLibrary.chips.chat"), false,
+                    TokenButtons.Size.REGULAR), TokenBadge.count(3))));
+        addSample(samples, 1, 0, "UiLibrary.chips.badgeDanger", unstretched(TokenBadge.attach(
+              TokenButtons.secondary(Messages.getString("UiLibrary.chips.reports")),
+              TokenBadge.count(12).tone(TokenBadge.Tone.DANGER))));
+        addSample(samples, 2, 0, "UiLibrary.chips.badgeWarning", unstretched(TokenBadge.attach(
+              TokenButtons.icon(ICON_WARNING, Messages.getString("UiLibrary.chips.alerts"), false,
+                    TokenButtons.Size.REGULAR), TokenBadge.count(128).tone(TokenBadge.Tone.WARNING))));
+        addSample(samples, 3, 0, "UiLibrary.chips.badgeSuccess", unstretched(TokenBadge.attach(
+              TokenButtons.secondary(Messages.getString("UiLibrary.chips.ready")),
+              TokenBadge.count(4).tone(TokenBadge.Tone.SUCCESS))));
+        addSample(samples, 4, 0, "UiLibrary.chips.badgeDot", unstretched(TokenBadge.attach(
+              TokenButtons.icon(ICON_NOTIFICATIONS, Messages.getString("UiLibrary.chips.notifications"), false,
+                    TokenButtons.Size.REGULAR), TokenBadge.dot())));
+        return samples;
+    }
+
+    /** A live lobby panel: one-of filter chips and removable conditions with a reset. */
+    private JComponent chipLobby() {
+        String[] filters = { "all", "meks", "vehicles", "infantry" };
+        TokenChips.FilterChip[] chips = new TokenChips.FilterChip[filters.length];
+        JLabel showing = text("", "small", "text.muted");
+        JPanel filterRow = chipRow("UiLibrary.chips.show");
+        for (int i = 0; i < filters.length; i++) {
+            TokenChips.FilterChip chip = TokenChips.filter(Messages.getString("UiLibrary.chips." + filters[i]));
+            chip.addItemListener(event -> {
+                if (chip.isSelected()) {
+                    showing.setText(Messages.getString("UiLibrary.chips.showing", chip.getText()));
+                }
+            });
+            chips[i] = chip;
+            filterRow.add(chip);
+        }
+        TokenChips.selectOne(chips);
+        filterRow.add(showing);
+
+        JPanel conditionRow = chipRow("UiLibrary.chips.conditions");
+        JButton reset = TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.chips.reset"),
+              TokenButtons.Size.COMPACT);
+        Runnable fill = () -> {
+            for (Component child : conditionRow.getComponents()) {
+                if (child instanceof TokenChips.TagChip) {
+                    conditionRow.remove(child);
+                }
+            }
+            String[] conditions = { "night", "fog", "heavyRain" };
+            for (int i = 0; i < conditions.length; i++) {
+                conditionRow.add(TokenChips.tag(Messages.getString("UiLibrary.chips." + conditions[i]), null), i + 1);
+            }
+            conditionRow.revalidate();
+            conditionRow.repaint();
+        };
+        conditionRow.add(reset);
+        fill.run();
+        reset.addActionListener(event -> fill.run());
+        return lobby(filterRow, conditionRow);
+    }
+
+    /** A live lobby panel: unit states and a chat count that new messages raise and reading clears. */
+    private JComponent badgeLobby() {
+        JPanel statusRow = chipRow("UiLibrary.chips.status");
+        statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.deployed"), TokenChips.Tone.SUCCESS));
+        statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.runningHot"), TokenChips.Tone.WARNING));
+        statusRow.add(TokenChips.status(Messages.getString("UiLibrary.chips.engineHit"), TokenChips.Tone.DANGER));
+
+        JPanel chatRow = chipRow("UiLibrary.chips.chat");
+        TokenBadge unread = TokenBadge.count(2);
+        AbstractButton chat = TokenButtons.icon(ICON_CHAT, Messages.getString("UiLibrary.chips.chat"), false,
+              TokenButtons.Size.REGULAR);
+        Runnable describe = () -> chat.getAccessibleContext().setAccessibleDescription(
+              unread.getCount() > 0 ? Messages.getString("UiLibrary.chips.unread", unread.getCount()) : null);
+        chat.addActionListener(event -> {
+            unread.setCount(0);
+            describe.run();
+        });
+        JButton message = TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.chips.message"),
+              TokenButtons.Size.COMPACT);
+        message.addActionListener(event -> {
+            unread.setCount(unread.getCount() + 1);
+            describe.run();
+        });
+        describe.run();
+        chatRow.add(TokenBadge.attach(chat, unread));
+        chatRow.add(message);
+        return lobby(statusRow, chatRow);
+    }
+
+    /** The "Lobby" panel holding {@code lines}, one under the other. */
+    private JComponent lobby(JPanel... lines) {
+        JPanel row = row(color("surface.base"));
+        JPanel body = new JPanel();
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        for (JPanel line : lines) {
+            line.setAlignmentX(LEFT_ALIGNMENT);
+            line.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(3), 0, scaleForGUI(3), 0));
+            body.add(line);
+        }
+        TokenPanel lobby = new TokenPanel(Messages.getString("UiLibrary.chips.lobbyTitle")).body(body);
+        row.add(sized(lobby, 640));
+        return row;
+    }
+
+    /** A toast at each level, then one with a unit sprite whose text wraps. */
+    private JComponent toastSamples() {
+        JPanel samples = sampleGrid();
+        String[] levels = { "info", "success", "warning", "danger", "gamemaster" };
+        TokenToast.Level[] values = TokenToast.Level.values();
+        for (int i = 0; i < levels.length; i++) {
+            TokenToast toast = new TokenToast(values[i], Messages.getString("UiLibrary.toasts.text." + levels[i]),
+                  null);
+            addSample(samples, i % 2, i / 2, "UiLibrary.toasts." + levels[i], unstretched(toast));
+        }
+        addSample(samples, 1, 2, "UiLibrary.toasts.unit", unstretched(new TokenToast(TokenToast.Level.WARNING,
+              Messages.getString("UiLibrary.toasts.text.long"), unitSprite())));
+        return samples;
+    }
+
+    /** The default heavy Mek sprite, or null when the unit images aren't there. */
+    private static Image unitSprite() {
+        try {
+            return ImageIO.read(new File(Configuration.unitImagesDir(), "defaults/default_heavy.png"));
+        } catch (IOException e) {
+            LOGGER.warn(e, "No unit sprite for the toast samples");
+            return null;
+        }
+    }
+
+    /** A stand-in board with toasts over it, a button per level and a burst that overflows the stack. */
+    private JComponent toastBoard() {
+        JLabel clicks = text(Messages.getString("UiLibrary.toasts.board", 0), "body", "text.muted");
+        clicks.setHorizontalAlignment(SwingConstants.CENTER);
+        JPanel board = new JPanel(new BorderLayout());
+        board.setBackground(color("surface.raised"));
+        board.setBorder(BorderFactory.createLineBorder(color("border.subtle")));
+        board.add(clicks, BorderLayout.CENTER);
+        int[] count = { 0 };
+        board.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent event) {
+                count[0]++;
+                clicks.setText(Messages.getString("UiLibrary.toasts.board", count[0]));
+            }
+        });
+        TokenToasts toasts = new TokenToasts(board);
+        toasts.setPreferredSize(new Dimension(scaleForGUI(760), scaleForGUI(340)));
+
+        JPanel buttons = row(color("surface.base"));
+        String[] levels = { "info", "success", "warning", "danger", "gamemaster" };
+        TokenToast.Level[] values = TokenToast.Level.values();
+        Image sprite = unitSprite();
+        for (int i = 0; i < levels.length; i++) {
+            TokenToast.Level level = values[i];
+            String key = levels[i];
+            JButton button = TokenButtons.button(TokenButtons.Kind.SECONDARY,
+                  Messages.getString("UiLibrary.toasts." + key), TokenButtons.Size.COMPACT);
+            button.addActionListener(event -> toasts.show(level,
+                  Messages.getString("UiLibrary.toasts.text." + key), level == TokenToast.Level.DANGER ? sprite : null));
+            buttons.add(button);
+        }
+        JButton burst = TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.toasts.burst"),
+              TokenButtons.Size.COMPACT);
+        burst.addActionListener(event -> {
+            for (int i = 0; i <= TokenToasts.MAX_VISIBLE; i++) {
+                toasts.show(TokenToast.Level.INFO, Messages.getString("UiLibrary.toasts.text.burst", i + 1));
+            }
+        });
+        buttons.add(burst);
+
+        JPanel holder = column(color("surface.base"));
+        holder.add(unstretched(toasts));
+        holder.add(buttons);
+        return holder;
+    }
+
+    /** A transparent row of chips after a fixed-width label. */
+    private JPanel chipRow(String labelKey) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEADING, scaleForGUI(6), 0));
+        row.setOpaque(false);
+        JLabel label = text(Messages.getString(labelKey), "label", "text.secondary");
+        label.setPreferredSize(new Dimension(scaleForGUI(84), label.getPreferredSize().height));
+        row.add(label);
+        return row;
+    }
+
+    /** Panels without and with a header, and with roomy padding. */
+    private JComponent panelSamples() {
+        JPanel samples = sampleGrid();
+        TokenPanel bare = new TokenPanel().body(panelText("UiLibrary.panels.bodyText"));
+        addSample(samples, 0, 0, "UiLibrary.panels.default", sized(bare, 300));
+
+        TokenPanel headed = new TokenPanel(Messages.getString("UiLibrary.panels.lanceTitle"))
+              .action(TokenButtons.button(TokenButtons.Kind.QUIET, Messages.getString("UiLibrary.panels.edit"),
+                    TokenButtons.Size.COMPACT))
+              .action(TokenButtons.icon(ICON_MORE, Messages.getString("UiLibrary.panels.more"), false,
+                    TokenButtons.Size.COMPACT))
+              .body(panelText("UiLibrary.panels.lanceText"));
+        addSample(samples, 1, 0, "UiLibrary.panels.header", sized(headed, 300));
+
+        TokenPanel roomy = new TokenPanel(Messages.getString("UiLibrary.panels.briefingTitle"))
+              .padding(TokenPanel.Padding.ROOMY).body(panelText("UiLibrary.panels.briefingText"));
+        addSample(samples, 2, 0, "UiLibrary.panels.roomy", sized(roomy, 300));
+        return samples;
+    }
+
+    /** One panel per status: the ticks take the status color and the header its icon. */
+    private JComponent panelStatusSamples() {
+        JPanel samples = sampleGrid();
+        String[] names = { "danger", "warning", "success", "info" };
+        TokenDialogPane.Status[] statuses = { TokenDialogPane.Status.ERROR, TokenDialogPane.Status.WARNING,
+              TokenDialogPane.Status.SUCCESS, TokenDialogPane.Status.INFO };
+        for (int i = 0; i < names.length; i++) {
+            TokenPanel panel = new TokenPanel(Messages.getString("UiLibrary.panels." + names[i] + "Title"))
+                  .status(statuses[i]).body(panelText("UiLibrary.panels." + names[i] + "Text"));
+            addSample(samples, i, 0, "UiLibrary.panels." + names[i], sized(panel, 220));
+        }
+        return samples;
+    }
+
+    /** Selectable cards at rest, hover and focus frozen, selected and disabled. */
+    private JComponent panelSelectableSamples() {
+        JPanel samples = sampleGrid();
+        String[] states = { "rest", "hover", "selected", "focus", "disabled" };
+        for (int i = 0; i < states.length; i++) {
+            TokenPanel card = unitCard("Marauder MAD-3R", 75, 4).selectable(true);
+            switch (states[i]) {
+                case "hover" -> card.putClientProperty(TokenPanel.FROZEN_STATE, TokenPanel.FROZEN_HOVER);
+                case "selected" -> card.setSelected(true);
+                case "focus" -> card.putClientProperty(TokenPanel.FROZEN_STATE, TokenPanel.FROZEN_FOCUS);
+                case "disabled" -> disable(card);
+                default -> { }
+            }
+            addSample(samples, i, 0, "UiLibrary.panels.state." + states[i], sized(card, 180));
+        }
+        return samples;
+    }
+
+    /** Plain groups inside a panel, and an existing container framed by the border. */
+    private JComponent panelNestingSamples() {
+        JPanel samples = sampleGrid();
+        JPanel groups = new JPanel(new GridLayout(1, 0, scaleForGUI(8), 0));
+        groups.add(new TokenPanel().plain().body(panelLines("UiLibrary.panels.weapons", "AC/20", "SRM 6")));
+        groups.add(new TokenPanel().plain().body(panelLines("UiLibrary.panels.equipment", "CASE",
+              Messages.getString("UiLibrary.panels.heatSinks"))));
+        TokenPanel loadout = new TokenPanel(Messages.getString("UiLibrary.panels.loadoutTitle")).body(groups);
+        addSample(samples, 0, 0, "UiLibrary.panels.plain", sized(loadout, 320));
+
+        JPanel existing = TokenFrameBorder.apply(new JPanel(new GridLayout(0, 1, 0, scaleForGUI(4))),
+              TokenFrameBorder.panel(TokenPanel.Padding.REGULAR));
+        existing.add(text(Messages.getString("UiLibrary.panels.borderLine1"), "body", "text.primary"));
+        existing.add(text(Messages.getString("UiLibrary.panels.borderLine2"), "small", "text.muted"));
+        addSample(samples, 1, 0, "UiLibrary.panels.border", unstretched(existing));
+        return samples;
+    }
+
+    /** A live sidebar of plain unit cards, since only the outermost frame is ticked, of which one is selected. */
+    private JComponent panelSidebar() {
+        JPanel row = row(color("surface.base"));
+        TokenPanel[] cards = { unitCard("Atlas AS7-D", 100, 3).plain(), unitCard("Marauder MAD-3R", 75, 4).plain(),
+                               unitCard("Phoenix Hawk PXH-1", 45, 6).plain(), unitCard("Locust LCT-1V", 20, 8).plain() };
+        TokenPanel.selectOne(cards);
+        disable(cards[2]);
+        JPanel list = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(8)));
+        list.setOpaque(false);
+        JLabel result = text(Messages.getString("UiLibrary.panels.noneSelected"), "small", "text.muted");
+        for (TokenPanel card : cards) {
+            list.add(card);
+            card.addPropertyChangeListener(TokenPanel.SELECTED, event -> {
+                if (card.isSelected()) {
+                    result.setText(Messages.getString("UiLibrary.panels.selected", card.getAccessibleContext()
+                          .getAccessibleName()));
+                }
+            });
+        }
+        TokenPanel sidebar = new TokenPanel(Messages.getString("UiLibrary.panels.forceTitle"))
+              .action(TokenButtons.icon(ICON_MORE, Messages.getString("UiLibrary.panels.more"), false,
+                    TokenButtons.Size.COMPACT))
+              .body(list);
+        row.add(sized(sidebar, 260));
+        row.add(result);
+        return row;
+    }
+
+    /** A unit card: the name over its tonnage and walking speed, named for screen readers. */
+    private TokenPanel unitCard(String name, int tons, int walk) {
+        JPanel lines = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(2)));
+        lines.add(text(name, "body.strong", "text.primary"));
+        lines.add(text(Messages.getString("UiLibrary.panels.unitLine", tons, walk), "small", "text.muted"));
+        TokenPanel card = new TokenPanel().body(lines);
+        card.getAccessibleContext().setAccessibleName(name);
+        return card;
+    }
+
+    /** Disables {@code panel} and greys its labels, as a view would. */
+    private void disable(TokenPanel panel) {
+        panel.setEnabled(false);
+        for (Component line : panel.body().getComponents()) {
+            line.setForeground(color("text.disabled"));
+        }
+    }
+
+    private JComponent panelText(String key) {
+        JPanel lines = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(2)));
+        for (String line : Messages.getString(key).split("\n")) {
+            lines.add(text(line, "body", "text.secondary"));
+        }
+        return lines;
+    }
+
+    /** An overline caption over a few body lines. */
+    private JComponent panelLines(String captionKey, String... lines) {
+        JPanel column = new JPanel(new GridLayout(0, 1, 0, scaleForGUI(2)));
+        column.add(text(Messages.getString(captionKey).toUpperCase(getLocale()), "overline", "text.muted"));
+        for (String line : lines) {
+            column.add(text(line, "body", "text.primary"));
+        }
+        return column;
+    }
+
+    /** {@code panel} at {@code width} unscaled pixels and its own height. */
+    private static JPanel sized(TokenPanel panel, int width) {
+        panel.setPreferredSize(new Dimension(scaleForGUI(width), panel.getPreferredSize().height));
+        return unstretched(panel);
+    }
+
+    /** Split panes side by side and stacked; hover is frozen on one, the others are live. */
+    private JComponent splitPaneSamples() {
+        JPanel samples = sampleGrid();
+        addSample(samples, 0, 0, "UiLibrary.splitPanes.rest", sampleSplit(JSplitPane.HORIZONTAL_SPLIT));
+        JSplitPane hover = sampleSplit(JSplitPane.HORIZONTAL_SPLIT);
+        hover.putClientProperty(TokenSplitPaneUI.FROZEN_HOVER, true);
+        addSample(samples, 1, 0, "UiLibrary.splitPanes.hover", hover);
+        addSample(samples, 2, 0, "UiLibrary.splitPanes.vertical", sampleSplit(JSplitPane.VERTICAL_SPLIT));
+        return samples;
+    }
+
+    private JSplitPane sampleSplit(int orientation) {
+        JList<String> units = new JList<>(new String[] { "Atlas AS7-D", "Griffin GRF-1N", "Locust LCT-1V",
+                                                         "Marauder MAD-3R", "Wasp WSP-1A" });
+        JScrollPane list = TokenLists.scroll(units);
+        list.setMinimumSize(new Dimension(scaleForGUI(60), scaleForGUI(40)));
+        JTextArea details = paragraph(Messages.getString("UiLibrary.splitPanes.details"), "body", "text.secondary");
+        details.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(8), scaleForGUI(8),
+              scaleForGUI(8)));
+        details.setMinimumSize(new Dimension(scaleForGUI(60), scaleForGUI(40)));
+        JSplitPane split = new JSplitPane(orientation, list, details);
+        split.setResizeWeight(0.5);
+        split.setPreferredSize(new Dimension(scaleForGUI(300), scaleForGUI(180)));
+        split.setBackground(color("surface.base"));
+        return split;
+    }
+
+    /** A grid of captioned samples that grows with them, as an opening section does. */
+    private JPanel sampleGrid() {
+        JPanel samples = new JPanel(new GridBagLayout()) {
+            @Override
+            public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        samples.setBackground(color("surface.base"));
+        samples.setAlignmentX(LEFT_ALIGNMENT);
+        GridBagConstraints glue = new GridBagConstraints();
+        glue.gridx = 10;
+        glue.weightx = 1;
+        samples.add(Box.createHorizontalGlue(), glue);
+        return samples;
+    }
+
+    /** Adds {@code sample} under a caption, at {@code column} of caption row {@code row}, a fixed width. */
+    private void addSample(JPanel samples, int column, int row, String captionKey, JComponent sample) {
+        GridBagConstraints cell = new GridBagConstraints();
+        cell.anchor = GridBagConstraints.NORTHWEST;
+        cell.fill = GridBagConstraints.HORIZONTAL;
+        cell.insets = new Insets(scaleForGUI(4), scaleForGUI(6), scaleForGUI(4), scaleForGUI(18));
+        cell.gridx = column;
+        cell.gridy = row * 2;
+        samples.add(text(Messages.getString(captionKey), "caption", "text.muted"), cell);
+        cell.gridy++;
+        samples.add(sample, cell);
     }
 
     /**

@@ -26,7 +26,9 @@ public final class UiAngleDial extends Widget {
     private static final double DEGREES_PER_UNIT = .5;
     /** Where zero points on the face, in degrees counter-clockwise from the right: straight up. Values turn back. */
     private static final double UP = 90;
-    private final Drawable face, well, hub, knob;
+    private Drawable face, well, hub, knob;
+    private UiTheme.PickerStyle colors;
+    private final UiKit ui;
     private final TransformDrawable stroke;
     private final DoubleConsumer preview;
     private final UiCursorCapture cursor = new UiCursorCapture();
@@ -36,10 +38,8 @@ public final class UiAngleDial extends Widget {
 
     public UiAngleDial(UiKit ui, DoubleConsumer preview, Runnable commit) {
         this.preview = preview;
-        face = ui.skin.getDrawable("dial-face");
-        well = ui.skin.getDrawable("dial-well");
-        hub = ui.skin.getDrawable("dial-hub");
-        knob = ui.skin.getDrawable("dial-knob");
+        this.ui = ui;
+        style("default");
         stroke = (TransformDrawable) ui.skin.getDrawable("dial-stroke");
         addListener(new InputListener() {
             /** The angle a click points to, none from the hub. */
@@ -69,6 +69,16 @@ public final class UiAngleDial extends Widget {
 
     public void value(double next) { value = next; }
 
+    /** Draws the dial in the skin's {@link UiTheme.PickerStyle} {@code name}: default (hud-v3) or token. */
+    public UiAngleDial style(String name) {
+        colors = ui.skin.get(name, UiTheme.PickerStyle.class);
+        face = ui.skin.getDrawable(colors.discs + "-face");
+        well = ui.skin.getDrawable(colors.discs + "-well");
+        hub = ui.skin.getDrawable(colors.discs + "-hub");
+        knob = ui.skin.getDrawable(colors.discs + "-knob");
+        return this;
+    }
+
     /** A drag from a caption turns the dial as well, from the value at its press. */
     public void begin(float stageX, float stageY, double initial) {
         originX = stageX;
@@ -92,7 +102,7 @@ public final class UiAngleDial extends Widget {
         // The scale: every 10 degrees, longer and brighter every 30, zero in mint.
         for (int degrees = 0; degrees < 360; degrees += 10) {
             boolean major = degrees % 30 == 0;
-            Color color = degrees == 0 ? UiTheme.MINT : major ? UiTheme.ACCENT : UiTheme.TICK;
+            Color color = degrees == 0 ? colors.accent : major ? colors.major : colors.minor;
             ray(batch, color, parentAlpha, cx, cy, UP + degrees, major ? 51 : 56, SIZE / 2 - 5, major ? 2 : 1.5f);
         }
         // The turn from zero along the well's rim, in pieces short enough to follow the circle.
@@ -101,10 +111,10 @@ public final class UiAngleDial extends Widget {
         int pieces = (int) Math.ceil(Math.abs(sweep) * rim / 5);
         for (int i = 0; i < pieces; i++) {
             double a = up - sweep * i / pieces, b = up - sweep * (i + 1) / pieces;
-            line(batch, UiTheme.MINT, parentAlpha, cx + rim * (float) Math.cos(a), cy + rim * (float) Math.sin(a),
+            line(batch, colors.accent, parentAlpha, cx + rim * (float) Math.cos(a), cy + rim * (float) Math.sin(a),
                   cx + rim * (float) Math.cos(b), cy + rim * (float) Math.sin(b), 3);
         }
-        ray(batch, UiTheme.MINT, parentAlpha, cx, cy, UP - value, HUB / 2, rim, 2.5f);
+        ray(batch, colors.accent, parentAlpha, cx, cy, UP - value, HUB / 2, rim, 2.5f);
         batch.setColor(1, 1, 1, parentAlpha);
         double angle = up - sweep;
         disc(batch, knob, cx + rim * (float) Math.cos(angle), cy + rim * (float) Math.sin(angle), KNOB);

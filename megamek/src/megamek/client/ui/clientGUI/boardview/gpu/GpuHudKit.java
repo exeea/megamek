@@ -33,8 +33,8 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
+import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
@@ -102,6 +102,23 @@ final class GpuHudKit implements Disposable {
               ui.skin.newDrawable("letter-primary", UiTheme.tint(targetColour(letter), UiTheme.MAIN, 1)), card);
     }
 
+    /**
+     * A target's letter square in hud-v3's look, or with {@code token} Token v0's: the target's own colour (game data)
+     * with radius.sm, the letter in the label type's medium face in text.onAccent, icon.md in a pill and icon.lg on a
+     * card.
+     */
+    Container<Label> letter(char letter, boolean card, boolean token) {
+        if (!token) {
+            return letter(letter, card);
+        }
+        Label label = ui.typeLabel(String.valueOf(letter), "label", "text.onAccent");
+        label.setAlignment(Align.center);
+        Container<Label> tile = new Container<>(label).size(DesignTokens.shipped().size().get(card ? "icon.lg"
+              : "icon.md"));
+        tile.setBackground(ui.skin.newDrawable("token-letter", targetColour(letter)));
+        return tile;
+    }
+
     /** A letter square of {@code text} on {@code background}: 19 units in a target pill (.pill i), 24 on a card. */
     Container<Label> square(String text, Color ink, Drawable background, boolean card) {
         Label label = ui.label(text, "hud-name", card ? 13 : 11, ink);
@@ -117,17 +134,30 @@ final class GpuHudKit implements Disposable {
      * crippled level's black reads on the dark HUD fill. It leaves the batch colour changed.
      */
     void damageTile(Batch batch, Color color, float alpha, float x, float y) {
-        ui.fill(batch, LABEL_GREY, alpha, x, y, DAMAGE_TILE, DAMAGE_TILE);
+        damageTile(batch, color, alpha, x, y, LABEL_GREY);
+    }
+
+    private void damageTile(Batch batch, Color color, float alpha, float x, float y, Color frame) {
+        ui.fill(batch, frame, alpha, x, y, DAMAGE_TILE, DAMAGE_TILE);
         ui.fill(batch, color, alpha, x + 1, y + 1, DAMAGE_TILE - 2, DAMAGE_TILE - 2);
     }
 
     /** A label background with the damage tile of {@code color} left of the words, centred on their line. */
     Drawable damageTile(Color color) {
+        return damageTile(color, false);
+    }
+
+    /**
+     * The damage tile's label background in hud-v3's look, or with {@code token} Token v0's: the damage colour stays
+     * (game data) inside a border.control frame.
+     */
+    Drawable damageTile(Color color, boolean token) {
+        Color frame = token ? UiTheme.tokenColor("border.control") : LABEL_GREY;
         BaseDrawable tile = new BaseDrawable() {
             @Override
             public void draw(Batch batch, float x, float y, float width, float height) {
                 float previous = batch.getPackedColor();
-                damageTile(batch, color, batch.getColor().a, x, y + Math.round((height - DAMAGE_TILE) / 2));
+                damageTile(batch, color, batch.getColor().a, x, y + Math.round((height - DAMAGE_TILE) / 2), frame);
                 batch.setPackedColor(previous);
             }
         };
@@ -142,12 +172,30 @@ final class GpuHudKit implements Disposable {
 
     /** A unit row: 40 x 34 sprites in the forces list (.row), 34 x 30 in the fire preview (.prow). */
     UnitRow unitRow(float spriteWidth, float spriteHeight) {
-        return new UnitRow(spriteWidth, spriteHeight);
+        return new UnitRow(spriteWidth, spriteHeight, false);
+    }
+
+    /**
+     * A unit row in hud-v3's look, or with {@code token} Token v0's: a selectable plain panel (border.subtle edge,
+     * border.control on hover, the selected wash and edge, status.danger or accent.primary edges when inspected), the
+     * model in small/text.muted, the name in body.strong/text.primary in sentence case and the status line in small in
+     * its tone's status colour.
+     */
+    UnitRow unitRow(float spriteWidth, float spriteHeight, boolean token) {
+        return new UnitRow(spriteWidth, spriteHeight, token);
     }
 
     /** The heat bar: continuous (.meter .bar) or one segment per heat point (.heatfc .segs). */
     HeatBar heatBar(boolean segments) {
-        return new HeatBar(segments);
+        return new HeatBar(segments, false);
+    }
+
+    /**
+     * The heat bar in hud-v3's colors, or with {@code token} in Token v0's: a border.control track, the heat in
+     * status.warning and the ticks in text.muted, the next one in text.primary.
+     */
+    HeatBar heatBar(boolean segments, boolean token) {
+        return new HeatBar(segments, token);
     }
 
     /** A target number as shown: an automatic success reads 2+, which every 2d6 roll makes. */
@@ -348,14 +396,15 @@ final class GpuHudKit implements Disposable {
         private static final String PRONE = "PRONE";
         private static final String SHUTDOWN = "SHUTDOWN";
         final UnitSprite sprite;
-        final Label model = ui.label("", "hud-small", 10, UiTheme.MUTED);
-        final Label name = new Label("", ui.skin, "hud-name");
-        final Label line = ui.label("", "hud-small", 11, Color.WHITE);
+        final Label model;
+        final Label name;
+        final Label line;
         /** The fourth line (.prow .em.inc), hidden until {@link #extra} gives it a text; its component colors it. */
         final Label extra = ui.label("", "hud-small", 10.5f, Color.WHITE);
         final Container<Actor> right = new Container<>();
-        private final Drawable foe = ui.skin.getDrawable("row-foe");
-        private final Drawable friend = ui.skin.getDrawable("row-friend");
+        private final boolean token;
+        private final Drawable foe;
+        private final Drawable friend;
         private final Cell<Label> nameCell;
         private final Cell<Label> extraCell;
         private boolean inspected;
@@ -365,9 +414,25 @@ final class GpuHudKit implements Disposable {
         /** A status line and its color (r1 section 3.3, plan C6). */
         record Line(String text, Tone tone) { }
 
-        private UnitRow(float spriteWidth, float spriteHeight) {
-            super(ui, "hud-row");
+        private UnitRow(float spriteWidth, float spriteHeight, boolean token) {
+            super(ui, token ? GpuBoardSkin.TOKEN_UNIT_ROW : "hud-row");
+            this.token = token;
             sprite = new UnitSprite(spriteWidth, spriteHeight);
+            if (token) {
+                model = ui.typeLabel("", "small", "text.muted");
+                name = ui.typeLabel("", "body.strong", "text.primary");
+                // The tone colours the line through the label's color
+                line = ui.typeLabel("", "small", "text.primary");
+                line.getStyle().fontColor = Color.WHITE;
+                foe = ui.skin.getDrawable(GpuBoardSkin.TOKEN_UNIT_ROW + "-foe");
+                friend = ui.skin.getDrawable(GpuBoardSkin.TOKEN_UNIT_ROW + "-friend");
+            } else {
+                model = ui.label("", "hud-small", 10, UiTheme.MUTED);
+                name = new Label("", ui.skin, "hud-name");
+                line = ui.label("", "hud-small", 11, Color.WHITE);
+                foe = ui.skin.getDrawable("row-foe");
+                friend = ui.skin.getDrawable("row-friend");
+            }
             // Lines too long for the row end in an ellipsis instead of running into the right slot.
             model.setEllipsis(true);
             name.setEllipsis(true);
@@ -376,24 +441,45 @@ final class GpuHudKit implements Disposable {
             extra.setVisible(false);
             Table text = new Table();
             text.defaults().left().growX().minWidth(0);
-            // CSS line-height 1.25 of each line's font size.
-            text.add(model).height(12.5f).row();
-            nameCell = text.add(name).height(17);
+            // CSS line-height 1.25 of each line's font size; a token row takes each type style's own line.
+            text.add(model).height(token ? lineHeight(model) : 12.5f).row();
+            nameCell = text.add(name).height(token ? lineHeight(name) : 17);
             text.row();
-            text.add(line).height(13.75f).row();
+            text.add(line).height(token ? lineHeight(line) : 13.75f).row();
             extraCell = text.add(extra).height(0);
-            add(sprite).padRight(11);
+            float gap = token ? DesignTokens.shipped().space().get("md") : 11;
+            add(sprite).padRight(gap);
             add(text).growX().minWidth(0);
-            add(right).padLeft(11);
+            add(right).padLeft(gap);
         }
 
         UnitRow set(BoardScene.Pixels pixels, Color spriteColor, String model, String name, String status, Tone tone) {
-            sprite.set(pixels, spriteColor);
+            // An enemy's coral sprite takes status.danger in the token look; the friend's and a contact's stay
+            sprite.set(pixels, token && UiTheme.CORAL.equals(spriteColor) ? UiTheme.tokenColor("status.danger")
+                  : spriteColor);
             this.model.setText(model);
-            this.name.setText(UiTheme.upper(name));
+            this.name.setText(token ? name : UiTheme.upper(name));
             line.setText(status);
-            line.setColor(tone.color);
+            line.setColor(token ? tokenTone(tone) : tone.color);
             return this;
+        }
+
+        /** A status line's token colour: text.secondary for NORMAL, the status colours for OK, WARN and BAD. */
+        private static Color tokenTone(Tone tone) {
+            return UiTheme.tokenColor(switch (tone) {
+                case OK -> "status.success";
+                case WARN -> "status.warning";
+                case BAD -> "status.danger";
+                default -> "text.secondary";
+            });
+        }
+
+        /** The line a label's type style takes: its height with a sample text. */
+        private static float lineHeight(Label label) {
+            label.setText("Mg");
+            float height = label.getPrefHeight();
+            label.setText("");
+            return height;
         }
 
         UnitRow inspected(boolean value) {
@@ -572,13 +658,34 @@ final class GpuHudKit implements Disposable {
     final class HeatBar extends Widget {
         private final boolean segments;
         private final Drawable hatch = ui.skin.getDrawable("hatch");
+        private final Color track;
+        private final Color fill;
+        private final Color empty;
+        private final Color edge;
+        private final Color mark;
+        private final Color nextMark;
         private int heat;
         private int forecast;
         private int scale = 1;
         private List<Integer> ticks = List.of();
 
-        private HeatBar(boolean segments) {
+        private HeatBar(boolean segments, boolean token) {
             this.segments = segments;
+            if (token) {
+                track = UiTheme.tokenColor("border.control");
+                fill = UiTheme.tokenColor("status.warning");
+                empty = track;
+                edge = UiTheme.tokenColor("text.muted");
+                mark = edge;
+                nextMark = UiTheme.tokenColor("text.primary");
+            } else {
+                track = UiTheme.TRACK;
+                fill = UiTheme.AMBER;
+                empty = SEGMENT;
+                edge = TICK;
+                mark = new Color(1, 1, 1, .3f);
+                nextMark = Color.WHITE;
+            }
         }
 
         HeatBar set(int current, int predicted, int maximum, List<Integer> marks) {
@@ -605,26 +712,26 @@ final class GpuHudKit implements Disposable {
                 for (int point = 0; point < scale; point++) {
                     float x = getX() + point * (width + 2);
                     if (ticks.contains(point)) {
-                        ui.fill(batch, TICK, alpha, x - 2, y, 2, height);
+                        ui.fill(batch, edge, alpha, x - 2, y, 2, height);
                     }
                     if (point < heat) {
-                        ui.fill(batch, UiTheme.AMBER, alpha, x, y, width, height);
+                        ui.fill(batch, fill, alpha, x, y, width, height);
                     } else if (point < forecast) {
                         hatched(batch, alpha, x, width);
                     } else {
-                        ui.fill(batch, SEGMENT, alpha, x, y, width, height);
+                        ui.fill(batch, empty, alpha, x, y, width, height);
                     }
                 }
             } else {
                 float current = getWidth() * Math.min(heat, scale) / scale;
                 float predicted = getWidth() * Math.min(forecast, scale) / scale;
-                ui.fill(batch, UiTheme.TRACK, alpha, getX(), y, getWidth(), height);
-                ui.fill(batch, UiTheme.AMBER, alpha, getX(), y, current, height);
+                ui.fill(batch, track, alpha, getX(), y, getWidth(), height);
+                ui.fill(batch, fill, alpha, getX(), y, current, height);
                 hatched(batch, alpha, getX() + current, predicted - current);
                 int next = ticks.stream().filter(tick -> tick > heat).findFirst().orElse(-1);
                 for (int tick : ticks) {
                     float reach = tick == next ? 3 : 2;
-                    ui.fill(batch, Color.WHITE, alpha * (tick == next ? 1 : .3f),
+                    ui.fill(batch, tick == next ? nextMark : mark, alpha,
                           getX() + Math.round(getWidth() * tick / scale), y - reach, 1, height + 2 * reach);
                 }
             }

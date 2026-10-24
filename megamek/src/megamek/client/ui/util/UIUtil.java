@@ -57,6 +57,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.MMToggleButton;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.comboBoxes.MMComboBox;
+import megamek.client.ui.design.swing.TokenDialogs;
 import megamek.client.ui.widget.RawImagePanel;
 import megamek.common.Player;
 import megamek.common.units.Entity;
@@ -1407,10 +1408,11 @@ public final class UIUtil {
     }
 
     /**
-     * Returns true when a modal dialog such as the Camo Chooser or a Load Force dialog is currently shown.
+     * Returns true when a modal dialog such as the Camo Chooser or a Load Force dialog is currently shown, including a
+     * design system modal card.
      */
     public static boolean isModalDialogDisplayed() {
-        return Stream.of(Window.getWindows())
+        return TokenDialogs.isCardShown() || Stream.of(Window.getWindows())
               .anyMatch(w -> w.isShowing() && (w instanceof JDialog dialogWindow) && (dialogWindow.isModal()));
     }
 
