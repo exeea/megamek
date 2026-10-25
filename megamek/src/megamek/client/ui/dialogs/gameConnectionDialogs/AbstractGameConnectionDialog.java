@@ -34,7 +34,6 @@ package megamek.client.ui.dialogs.gameConnectionDialogs;
 
 import java.awt.BorderLayout;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
@@ -48,6 +47,10 @@ import megamek.client.ui.buttons.ButtonEsc;
 import megamek.client.ui.buttons.DialogButton;
 import megamek.client.ui.clientGUI.CloseAction;
 import megamek.client.ui.clientGUI.OkayAction;
+import megamek.client.ui.design.swing.TokenButtons;
+import megamek.client.ui.design.swing.TokenButtons.Kind;
+import megamek.client.ui.design.swing.TokenButtons.Size;
+import megamek.client.ui.design.swing.TokenDialogs;
 import megamek.client.ui.dialogs.clientDialogs.ClientDialog;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.MathUtility;
@@ -109,13 +112,9 @@ public abstract class AbstractGameConnectionDialog extends ClientDialog implemen
     protected abstract JPanel createMiddlePanel();
 
     protected void createButtons() {
-        JButton okayB = new DialogButton(new OkayAction(this));
-        JButton cancelB = new ButtonEsc(new CloseAction(this));
-
-        JPanel buttonPanel = new JPanel(new FlowLayout());
-        buttonPanel.add(okayB);
-        buttonPanel.add(cancelB);
-        add(buttonPanel, BorderLayout.PAGE_END);
+        JButton okayB = TokenButtons.style(new DialogButton(new OkayAction(this)), Kind.PRIMARY, Size.REGULAR);
+        JButton cancelB = TokenButtons.style(new ButtonEsc(new CloseAction(this)), Kind.SECONDARY, Size.REGULAR);
+        add(TokenDialogs.footer(okayB, cancelB), BorderLayout.PAGE_END);
     }
     // endregion Initialization
 

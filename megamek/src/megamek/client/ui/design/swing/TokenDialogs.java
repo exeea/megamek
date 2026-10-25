@@ -6,8 +6,11 @@ import java.awt.KeyboardFocusManager;
 import java.awt.Window;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import javax.swing.AbstractButton;
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JPanel;
 import javax.swing.JRootPane;
 import javax.swing.RootPaneContainer;
 import javax.swing.SwingUtilities;
@@ -15,6 +18,7 @@ import javax.swing.WindowConstants;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.swing.TokenDialogPane.Status;
+import megamek.client.ui.util.UIUtil;
 
 /**
  * Shows design system dialogs (docs/design-system/tokens.md, Dialogs) in their two tiers:
@@ -31,6 +35,23 @@ public final class TokenDialogs {
     private static int openCards;
 
     private TokenDialogs() {
+    }
+
+    /**
+     * A dialog footer for windows that are not yet a {@link TokenDialogPane}: {@code buttons} centred, {@code md}
+     * apart, all as wide as the widest, at least 88 wide and the regular control height, padded {@code xxl} on every
+     * side but the top, which has {@code xl}. Give the main action first; the row reverses for right-to-left.
+     */
+    public static JPanel footer(AbstractButton... buttons) {
+        JPanel footer = new JPanel(new TokenDialogPane.EqualRow(TokenDialogPane.space("md"),
+              UIUtil.scaleForGUI(TokenDialogPane.BUTTON_MIN_WIDTH),
+              UIUtil.scaleForGUI(TokenButtons.Size.REGULAR.height())));
+        int xxl = TokenDialogPane.space("xxl");
+        footer.setBorder(BorderFactory.createEmptyBorder(TokenDialogPane.space("xl"), xxl, xxl, xxl));
+        for (AbstractButton button : buttons) {
+            footer.add(button);
+        }
+        return footer;
     }
 
     /** Shows {@code pane} as a modal card over {@code owner}'s window and gives the pressed button, or null. */

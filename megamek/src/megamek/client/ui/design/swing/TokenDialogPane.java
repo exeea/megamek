@@ -434,14 +434,20 @@ public class TokenDialogPane extends JPanel {
     static final class EqualRow implements LayoutManager {
         private final int gap;
         private final int minWidth;
+        private final int minHeight;
 
         EqualRow(int gap, int minWidth) {
+            this(gap, minWidth, 0);
+        }
+
+        EqualRow(int gap, int minWidth, int minHeight) {
             this.gap = gap;
             this.minWidth = minWidth;
+            this.minHeight = minHeight;
         }
 
         private Dimension cell(Container parent) {
-            Dimension cell = new Dimension(minWidth, 0);
+            Dimension cell = new Dimension(minWidth, minHeight);
             for (Component component : parent.getComponents()) {
                 if (component.isVisible()) {
                     Dimension size = component.getPreferredSize();

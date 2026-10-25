@@ -32,7 +32,6 @@
  */
 package megamek.client.ui.dialogs.buttonDialogs;
 
-import java.awt.GridLayout;
 import java.awt.event.ActionEvent;
 import java.util.ResourceBundle;
 import javax.swing.JButton;
@@ -43,6 +42,10 @@ import javax.swing.JPanel;
 import jakarta.annotation.Nullable;
 import megamek.MegaMek;
 import megamek.client.ui.buttons.MMButton;
+import megamek.client.ui.design.swing.TokenButtons;
+import megamek.client.ui.design.swing.TokenButtons.Kind;
+import megamek.client.ui.design.swing.TokenButtons.Size;
+import megamek.client.ui.design.swing.TokenDialogs;
 import megamek.client.ui.enums.ValidationState;
 import megamek.logging.MMLogger;
 
@@ -137,15 +140,15 @@ public abstract class AbstractValidationButtonDialog extends AbstractButtonDialo
      */
     @Override
     protected JPanel createButtonPanel() {
-        JPanel panel = new JPanel(new GridLayout(1, 2));
-        setOkButton(new MMButton("okButton", resources.getString("Ok.text"),
-              resources.getString("Ok.toolTipText"), this::okButtonActionPerformed));
-        panel.add(getOkButton());
-        panel.add(new MMButton("validateButton", resources.getString("Validate.text"),
-              resources.getString("Validate.toolTipText"), this::validateButtonActionPerformed));
-        panel.add(new MMButton("cancelButton", resources.getString("Cancel.text"),
-              resources.getString("Cancel.toolTipText"), this::cancelActionPerformed));
-        return panel;
+        setOkButton(TokenButtons.style(new MMButton("okButton", resources.getString("Ok.text"),
+              resources.getString("Ok.toolTipText"), this::okButtonActionPerformed), Kind.PRIMARY, Size.REGULAR));
+        return TokenDialogs.footer(getOkButton(),
+              TokenButtons.style(new MMButton("validateButton", resources.getString("Validate.text"),
+                    resources.getString("Validate.toolTipText"), this::validateButtonActionPerformed),
+                    Kind.SECONDARY, Size.REGULAR),
+              TokenButtons.style(new MMButton("cancelButton", resources.getString("Cancel.text"),
+                    resources.getString("Cancel.toolTipText"), this::cancelActionPerformed), Kind.SECONDARY,
+                    Size.REGULAR));
     }
     // endregion Initialization
 

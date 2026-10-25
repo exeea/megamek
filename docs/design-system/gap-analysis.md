@@ -365,7 +365,9 @@ work for Swing, and item 11 is under investigation.
   layout gets in the way. Steps, one screen at a time:
   1. ~~Theme~~: MegaMek Dark is MegaMek's default; settings list the MegaMek themes, the stock ones behind **Show
      classic themes**. Players who picked a theme keep it.
-  2. Shared dialog footers on the token buttons (main action first, equal widths, centred).
+  2. ~~Shared dialog footers~~: `AbstractButtonDialog`, `AbstractValidationButtonDialog` and the Host/Connect
+     dialogs put their buttons in `TokenDialogs.footer`, Ok as the primary button first. Dialogs with their own
+     footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
   3. Main menu: a full-window game screen over the battle art, opened by a skippable "Welcome back" greeting and reveal
      on app launch (an instant cut with reduce motion), the menu bar hidden and Settings, Help and Tools on screen.
      The reveal is waiting on a developer vote.

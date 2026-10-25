@@ -941,7 +941,10 @@ shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. While
 
 Existing `JOptionPane` dialogs keep their windows but take the footer's layout through the MegaMek themes: the token
 status icons, `xxl` padding, buttons centred, as wide as each other, at least 88 and with the main one first. Their
-titles stay in the title bar. Moving them to `TokenDialogs` gives them the card.
+titles stay in the title bar. Moving them to `TokenDialogs` gives them the card. Other existing dialog windows take
+the same footer from `TokenDialogs.footer(buttons...)`: the buttons restyled with `TokenButtons.style`, the main one
+first, centred `md` apart, as wide as each other, at least 88 wide and `control.md` high, `xl` below the content and
+`xxl` from the window's edges. MegaMek's `AbstractButtonDialog` family and its Host and Connect dialogs use it.
 
 **libGDX.** `UiKit.dialog(title, close, true)` is the card: the token panel frame padded `xl` above the header and
 `xxl` elsewhere, the title in `headline`, sentence case, and the compact icon button for close, `xl` above the body. Its
