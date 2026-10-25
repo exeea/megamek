@@ -106,6 +106,33 @@ class DesignTokensTest {
     }
 
     @Test
+    void gameModeCondensesTheFramingLabelsAndNamesAndAppModeNothing() {
+        DesignTokens tokens = DesignTokens.shipped();
+        assertEquals(75, tokens.condensedWidth());
+        assertFalse(tokens.widthRule().isBlank());
+        assertEquals(List.of("display", "headline", "title", "button", "tab", "overline", "name"),
+              List.copyOf(tokens.condensedRoles(Presentation.GAME)));
+        assertTrue(tokens.condensedRoles(Presentation.APP).isEmpty(), "App mode is all regular width");
+        for (String role : tokens.textRoles().keySet()) {
+            assertFalse(tokens.condensed(role, Presentation.APP), role + " in app mode");
+            assertEquals(tokens.condensedRoles(Presentation.GAME).contains(role),
+                  tokens.condensed(role, Presentation.GAME), role + " in game mode");
+            if (tokens.upperCase(role, Presentation.GAME)) {
+                assertTrue(tokens.condensed(role, Presentation.GAME), "Upper-case " + role + " is condensed");
+            }
+        }
+        for (String role : tokens.condensedRoles(Presentation.GAME)) {
+            assertEquals(500, tokens.roleStyle(role).weight(), role + " fits the one condensed static face");
+        }
+        assertEquals("body.strong", tokens.textRoles().get("name"));
+        for (Presentation presentation : Presentation.values()) {
+            assertFalse(tokens.upperCase("name", presentation), "Names keep their case in " + presentation);
+        }
+        assertEquals(0, tokens.roleStyle("name").tracking(false), "Condensed names keep normal tracking");
+        assertThrows(IllegalArgumentException.class, () -> tokens.condensed("no.such", Presentation.GAME));
+    }
+
+    @Test
     void everyAccessibilityCheckPassesInBothModesOfBothPalettes() {
         List<String> failures = new ArrayList<>();
         for (Palette palette : Palette.values()) {

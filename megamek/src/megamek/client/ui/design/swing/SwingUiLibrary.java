@@ -303,6 +303,8 @@ public final class SwingUiLibrary extends JFrame {
         JPanel page = column(color("surface.base"));
         page.add(heading(Messages.getString("UiLibrary.type.rule")));
         page.add(paragraph(tokens.caseRule(), "body", "text.secondary"));
+        page.add(heading(Messages.getString("UiLibrary.type.width")));
+        page.add(paragraph(tokens.widthRule(), "body", "text.secondary"));
 
         page.add(heading(Messages.getString("UiLibrary.type.roles")));
         page.add(paragraph(Messages.getString("UiLibrary.type.rolesNote"), "small", "text.muted"));
@@ -314,11 +316,14 @@ public final class SwingUiLibrary extends JFrame {
         page.add(header);
         Locale locale = MegaMek.getMMOptions().getLocale();
         String sample = Messages.getString("UiLibrary.type.roleSample");
+        String nameSample = Messages.getString("UiLibrary.type.nameSample");
         tokens.textRoles().forEach((role, styleName) -> {
             JPanel row = roleRow(color("surface.panel"), text(role + "  (" + styleName + ")", "caption", "text.muted"));
             for (Presentation sampleMode : Presentation.values()) {
-                JLabel shown = new JLabel(tokens.cased(role, sampleMode, sample, locale));
-                shown.setFont(TokenFonts.font(styleName, tokens.upperCase(role, sampleMode)));
+                JLabel shown = new JLabel(tokens.cased(role, sampleMode, role.equals("name") ? nameSample : sample,
+                      locale));
+                shown.setFont(TokenFonts.font(styleName, tokens.upperCase(role, sampleMode),
+                      tokens.condensed(role, sampleMode)));
                 shown.setForeground(color("text.primary"));
                 row.add(shown);
             }

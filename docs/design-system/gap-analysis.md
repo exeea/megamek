@@ -34,7 +34,8 @@ Agreed so far:
 | libGDX light mode | Deferred; the HUD is dark only for now. The Java2D board has no light/dark theming either. |
 | Accent | hud-v3 mint, retuned as needed; it stops doubling as the success color. |
 | Migration | The stock themes stay behind a hidden "classic" option until migration is done. |
-| Presentation mode | **Final.** Two modes, chosen per screen: **game** and **app**. The mode sets the text case and the slider thumb (game: hud-v3's thin bar; app: a disc), and later differences join it as whole-screen choices. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token (values signed off: display .04, headline .05, title .06, label .08, overline .1 em). Both galleries have a switch between the modes. See [tokens.md](tokens.md#presentation-mode). |
+| Presentation mode | **Final.** Two modes, chosen per screen: **game** and **app**. The mode sets the text case, the [type width](tokens.md#type-width) and the slider thumb (game: hud-v3's thin bar; app: a disc), and later differences join it as whole-screen choices. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token (values signed off: display .04, headline .05, title .06, label .08, overline .1 em). Both galleries have a switch between the modes. See [tokens.md](tokens.md#presentation-mode). |
+| Type width | **Final.** Roboto Condensed (`wdth` 75) for game mode's framing roles (display, headline, title, button, tab, overline) and a new `name` role for unit and pilot names (`body.strong`, sentence case), at the same weight (500) and tracking rules; body, small, caption, field labels, tables, values and running text stay regular width, and app mode is all regular width. Condensed packs some 15-20% more into narrow HUD columns and reads as technical and military; it stays off running text, tables and app mode because condensed letters crowd at 10-12 px and tire in long text. hud-v3's wide tracking on mixed case is not adopted: it uses up the space condensed saves. All condensed roles are medium, so Swing needs one more static face, Roboto Condensed Medium. See [tokens.md](tokens.md#type-width). |
 | Panels and rails | **Final.** Ticked frames (panels, dialog cards, status cards) draw their edge only at the top and bottom, a paper roll, since the ticks close the sides. The edge stays the quiet `border.subtle` so busy screens don't fill with lines (revisited and kept). Only the outermost frame has ticks: cards in a card grid stay plain, so a grid doesn't repeat a tick set per card. hud-v3's `panel-rails` (the Tactical View chip) keeps its rails as `token-rails`; `token-frame` is the plain frame. See [tokens.md](tokens.md#panels). |
 | Dialog buttons | **Final.** Centred, equal width, main action first, in both presentation modes. hud-v3 puts them in the bottom-right corner, but that is a desktop OS habit, and one rule for both modes means shared dialogs don't move their buttons. See [tokens.md](tokens.md#dialogs). |
 | Segmented control | **Final.** Separate segments, `xs` apart, each with its own edge, instead of a joined frame with hairlines, in both sizes: hud-v3's joined `hud-pill` becomes the compact size, not a second look. See [tokens.md](tokens.md#segmented-control). |
@@ -293,7 +294,7 @@ work for Swing, and item 11 is under investigation.
 ## Next steps
 
 - ~~Token v0~~: done, see [tokens.md](tokens.md).
-- ~~Shared assets~~: static Roboto Medium for Swing is in `mm-data`.
+- ~~Shared assets~~: static Roboto Medium and Roboto Condensed Medium for Swing are in `mm-data`.
 - ~~FlatLaf theme~~: MegaMek Dark and MegaMek Light are built from the tokens and selectable; see
   [tokens.md](tokens.md#swing-themes). Making them the default and hiding the stock themes behind a classic option
   comes after the controls are settled.
@@ -351,6 +352,8 @@ work for Swing, and item 11 is under investigation.
   text, in Swing and libGDX; see [tokens.md](tokens.md#presentation-mode).
 - ~~Drake's feedback~~: presentation mode (text case plus the slider thumb), violet kept only for the Game Master, standard and color-blind safe palettes as a user setting, paper-roll panel edges, rails
   kept for `panel-rails`, separate segments and the dial's mint hub, in Swing and libGDX.
+- ~~Type width~~: game mode sets the framing labels and unit names in Roboto Condensed Medium (a second static face for
+  Swing in `mm-data`), the rest regular width, in Swing and libGDX; see [tokens.md](tokens.md#type-width).
 - ~~On state~~: cream for every "on" control (toggles, segments, chips, check boxes, radios, switches), neutral
   selection for items in collections, mint only for focus and accents, an outside focus ring on cream faces and a
   faint cream disabled-on look, in Swing and libGDX; see [tokens.md](tokens.md#color-roles).

@@ -45,17 +45,25 @@
       "headline": { "size": 20, "weight": 500, "tracking": 0, "capsTracking": 0.05, "use": "Page and dialog headings." },
       "title": { "size": 16, "weight": 500, "tracking": 0, "capsTracking": 0.06, "use": "Panel and section titles." },
       "body": { "size": 13, "weight": 400, "tracking": 0, "use": "Default text." },
-      "body.strong": { "size": 13, "weight": 500, "tracking": 0, "use": "Emphasis, names, values." },
+      "body.strong": { "size": 13, "weight": 500, "tracking": 0, "use": "Emphasis, values, and unit and pilot names (the name role)." },
       "label": { "size": 12.5, "weight": 500, "tracking": 0.01, "capsTracking": 0.08, "use": "Buttons, tabs, field labels." },
       "small": { "size": 11.5, "weight": 400, "tracking": 0, "use": "Dense tables, secondary lines." },
       "caption": { "size": 10.5, "weight": 400, "tracking": 0.01, "use": "Hints, units, timestamps." },
       "overline": { "size": 10.5, "weight": 500, "tracking": 0.01, "capsTracking": 0.1, "use": "Short section eyebrows and tags." }
     },
     "case": {
-      "roles": { "display": "display", "headline": "headline", "title": "title", "button": "label", "tab": "label", "overline": "overline" },
+      "roles": { "display": "display", "headline": "headline", "title": "title", "button": "label", "tab": "label", "overline": "overline", "name": "body.strong" },
       "upper": {
         "app": ["overline"],
         "game": ["display", "headline", "title", "button", "tab", "overline"]
+      }
+    },
+    "width": {
+      "rule": "Type is Roboto at regular width (wdth 100). Game mode sets the framing labels and unit and pilot names in Roboto Condensed (wdth 75) at the same weight and tracking; body, small, caption, field labels, tables, values and running text stay regular width. App mode is all regular width, the overline included.",
+      "condensed": 75,
+      "roles": {
+        "app": [],
+        "game": ["display", "headline", "title", "button", "tab", "overline", "name"]
       }
     }
   },

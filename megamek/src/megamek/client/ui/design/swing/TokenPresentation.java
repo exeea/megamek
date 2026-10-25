@@ -30,12 +30,13 @@ import megamek.client.ui.design.DesignTokens.TypeStyle;
 /**
  * A screen's presentation mode for Swing (docs/design-system/tokens.md, Presentation mode). {@link #setMode} marks a
  * screen's root as an app or a game screen; every component below it follows the nearest marked ancestor, and app is
- * the default. The mode sets the text case of components with a text role and a short list of shapes (the slider's
- * thumb). The library's factories give their buttons, tabs and segmented controls a role; {@link #role} gives one to
+ * the default. The mode sets the text case and type width of components with a text role and a short list of shapes
+ * (the slider's thumb). The library's factories give their buttons, tabs and segmented controls a role; {@link #role} gives one to
  * another component.
  * <p>
  * A component keeps its sentence-case text and shows it upper-cased, in the role's caps tracking, when its role is
- * upper case in its screen's mode. Code may keep calling {@code setText}, {@code setTitleAt} and {@code setFont}: the
+ * upper case in its screen's mode, and in the condensed face when its role is condensed in that mode (game-mode framing
+ * labels and names). Code may keep calling {@code setText}, {@code setTitleAt} and {@code setFont}: the
  * new value becomes the source and is shown in the screen's case. {@code getText} returns the shown text.
  */
 public final class TokenPresentation {
@@ -44,7 +45,7 @@ public final class TokenPresentation {
     private static final String SOURCE = "MegaMek.textSource";
     private static final String TAB_SOURCES = "MegaMek.textTabSources";
     private static final String BASE_FONT = "MegaMek.textBaseFont";
-    private static final String CAPS_FONT = "MegaMek.textCapsFont";
+    private static final String ROLE_FONT = "MegaMek.textRoleFont";
     private static final String ACCESSIBLE_NAME = "MegaMek.textAccessibleName";
     private static final String APPLYING = "MegaMek.textApplying";
 
@@ -55,7 +56,8 @@ public final class TokenPresentation {
     public static void setMode(JComponent root, Presentation mode) {
         root.putClientProperty(MODE, mode);
         refresh(root);
-        // Sliders pick their thumb shape while painting
+        // Sliders pick their thumb shape and section headers their width while painting
+        root.revalidate();
         root.repaint();
     }
 
@@ -154,7 +156,7 @@ public final class TokenPresentation {
                     apply(tabs);
                 }
             }
-            // A look and feel change or a view's own font replaces the caps font: track the new one
+            // A look and feel change or a view's own font replaces the role's font: track the new one
             case "UI", "font" -> apply(component);
             default -> {
             }
@@ -189,35 +191,39 @@ public final class TokenPresentation {
                 }
                 accessibleName(component, upper ? source : null);
             }
-            font(component, upper ? tokens.roleStyle(role) : null);
+            font(component, tokens.roleStyle(role), upper, tokens.condensed(role, mode));
         } finally {
             component.putClientProperty(APPLYING, null);
         }
     }
 
-    /** Swaps the component's font for one tracked for upper case, or back to the font it replaced. */
-    private static void font(JComponent component, TypeStyle caps) {
+    /**
+     * Swaps the component's font for one tracked for upper case and, when {@code condensed}, in the condensed face, or
+     * back to the font it replaced when the role is neither.
+     */
+    private static void font(JComponent component, TypeStyle style, boolean upper, boolean condensed) {
         Font current = component.getFont();
-        Font capsFont = (Font) component.getClientProperty(CAPS_FONT);
-        Font base = capsFont != null && current == capsFont ? (Font) component.getClientProperty(BASE_FONT) : current;
-        if (caps == null) {
-            if (capsFont != null && current == capsFont) {
+        Font roleFont = (Font) component.getClientProperty(ROLE_FONT);
+        Font base = roleFont != null && current == roleFont ? (Font) component.getClientProperty(BASE_FONT) : current;
+        if (!upper && !condensed) {
+            if (roleFont != null && current == roleFont) {
                 component.setFont(base);
             }
-            component.putClientProperty(CAPS_FONT, null);
+            component.putClientProperty(ROLE_FONT, null);
             component.putClientProperty(BASE_FONT, null);
             return;
         }
         if (base == null) {
             return;
         }
-        Font derived = base.deriveFont(Map.of(TextAttribute.TRACKING, caps.capsTracking()));
+        Font derived = condensed ? TokenFonts.condensed(base, style, upper)
+              : base.deriveFont(Map.of(TextAttribute.TRACKING, style.tracking(upper)));
         // A look and feel's font stays replaceable by the next look and feel
         if (base instanceof UIResource) {
             derived = new FontUIResource(derived);
         }
         component.putClientProperty(BASE_FONT, base);
-        component.putClientProperty(CAPS_FONT, derived);
+        component.putClientProperty(ROLE_FONT, derived);
         component.setFont(derived);
     }
 

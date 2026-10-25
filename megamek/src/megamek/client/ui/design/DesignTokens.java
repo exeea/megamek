@@ -47,8 +47,8 @@ public final class DesignTokens {
     /**
      * A screen's presentation mode (docs/design-system/tokens.md, Presentation mode): whether it is an app or a game
      * screen. It sets the text case (app screens upper-case only overline tags, game screens also the short framing
-     * labels) and the few control shapes that differ, such as the slider's thumb. The mode belongs to a screen, not
-     * to an app.
+     * labels), the type width (game screens set the framing labels and names condensed) and the few control shapes
+     * that differ, such as the slider's thumb. The mode belongs to a screen, not to an app.
      */
     public enum Presentation {
         APP,
@@ -95,6 +95,9 @@ public final class DesignTokens {
     private final Map<String, TypeStyle> typeStyles;
     private final Map<String, String> textRoles;
     private final Map<Presentation, Set<String>> upperRoles;
+    private final String widthRule;
+    private final int condensedWidth;
+    private final Map<Presentation, Set<String>> condensedRoles;
     private final Map<String, Float> space;
     private final Map<String, Float> radius;
     private final Map<String, Float> size;
@@ -162,6 +165,22 @@ public final class DesignTokens {
             upper.put(presentation, Collections.unmodifiableSet(upperInMode));
         }
         upperRoles = Collections.unmodifiableMap(upper);
+
+        JsonNode width = typography.path("width");
+        widthRule = width.path("rule").asText();
+        condensedWidth = width.path("condensed").asInt(100);
+        Map<Presentation, Set<String>> condensed = new EnumMap<>(Presentation.class);
+        for (Presentation presentation : Presentation.values()) {
+            Set<String> condensedInMode = new LinkedHashSet<>();
+            for (JsonNode role : width.path("roles").path(presentation.name().toLowerCase(Locale.ROOT))) {
+                if (!roles.containsKey(role.asText())) {
+                    throw new IllegalArgumentException("Condensed role " + role.asText() + " is not a text role");
+                }
+                condensedInMode.add(role.asText());
+            }
+            condensed.put(presentation, Collections.unmodifiableSet(condensedInMode));
+        }
+        condensedRoles = Collections.unmodifiableMap(condensed);
 
         space = numbers(root.path("space"));
         radius = numbers(root.path("radius"));
@@ -308,6 +327,27 @@ public final class DesignTokens {
     public boolean upperCase(String role, Presentation presentation) {
         roleStyle(role);
         return upperRoles.get(presentation).contains(role);
+    }
+
+    /** Whether text of {@code role} is set in the condensed width on a screen in {@code presentation}. */
+    public boolean condensed(String role, Presentation presentation) {
+        roleStyle(role);
+        return condensedRoles.get(presentation).contains(role);
+    }
+
+    /** The roles set in the condensed width on a screen in {@code presentation}, in file order. */
+    public Set<String> condensedRoles(Presentation presentation) {
+        return condensedRoles.get(presentation);
+    }
+
+    /** The font width (wdth axis, 100 is regular) of condensed text roles. */
+    public int condensedWidth() {
+        return condensedWidth;
+    }
+
+    /** When text is set condensed rather than at regular width. */
+    public String widthRule() {
+        return widthRule;
     }
 
     /**

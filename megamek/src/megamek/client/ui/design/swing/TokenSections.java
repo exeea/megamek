@@ -20,6 +20,8 @@ import javax.swing.border.TitledBorder;
 
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.UIScale;
+import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.design.DesignTokens.Presentation;
 
 /**
  * Section headers of the MegaMek look and feels (docs/design-system/tokens.md, Sections): an upper-case
@@ -70,6 +72,17 @@ public final class TokenSections {
 
     static Font titleFont() {
         return TokenFonts.font("overline");
+    }
+
+    /** The title font for {@code c}'s screen: overline, condensed in game mode. */
+    static Font titleFont(Component c) {
+        Presentation mode = c == null ? Presentation.APP : TokenPresentation.mode(c);
+        return TokenFonts.font("overline", true, DesignTokens.shipped().condensed("overline", mode));
+    }
+
+    /** The font a header in {@code c} draws its title in: {@code set}, unless it is the theme's title font. */
+    static Font titleFont(Component c, Font set) {
+        return set == null || set.equals(titleFont()) ? titleFont(c) : set;
     }
 
     static String upperCase(String title, Component c) {
@@ -133,7 +146,7 @@ public final class TokenSections {
     /** The narrowest a header can be: its title and a short stretch of line. */
     static int minimumWidth(String title, Component c) {
         String text = upperCase(title, c);
-        Font font = titleFont();
+        Font font = titleFont(c);
         FontRenderContext context = c == null ? new FontRenderContext(null, true, true)
               : c.getFontMetrics(font).getFontRenderContext();
         return (int) Math.ceil(advance(text, font, context)) + 2 * titleGap();
@@ -176,8 +189,8 @@ public final class TokenSections {
                 g.fillRect(0, 0, getWidth(), getHeight());
             }
             Insets insets = getInsets();
-            paintHeader(g, this, getText(), getFont(), titleColor(this, false), insets.left, insets.top,
-                  getWidth() - insets.left - insets.right, getHeight() - insets.top - insets.bottom);
+            paintHeader(g, this, getText(), titleFont(this, getFont()), titleColor(this, false), insets.left,
+                  insets.top, getWidth() - insets.left - insets.right, getHeight() - insets.top - insets.bottom);
         }
     }
 }

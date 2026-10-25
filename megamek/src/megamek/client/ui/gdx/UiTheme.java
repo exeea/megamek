@@ -86,8 +86,9 @@ public final class UiTheme implements Disposable {
     public record HudFont(String name, int instance, float size, float tracking, Color color) { }
 
     /**
-     * hud-medium upper-cased: the font of the token buttons' and tabs' labels in game mode (docs/design-system/
-     * tokens.md, Text case). Fonts bake their letter spacing in, so caps text at its own tracking needs its own font.
+     * The label style upper-cased and condensed: the font of the token buttons' and tabs' labels in game mode
+     * (docs/design-system/tokens.md, Text case and Type width). Fonts bake their letter spacing in, so caps text at its
+     * own tracking needs its own font.
      */
     public static final String CAPS_FONT = "hud-medium-caps";
 
@@ -106,11 +107,17 @@ public final class UiTheme implements Disposable {
           new HudFont("hud-heading", CONDENSED_BOLD, 20, .04f, TEXT),
           new HudFont("hud-phase", CONDENSED_BOLD, 23, .02f, TEXT),
           new HudFont("hud-main", CONDENSED_BOLD, 17, .1f, TEXT),
-          // The token buttons' and tabs' label in game mode: upper case at the label style's caps tracking
-          new HudFont(CAPS_FONT, MEDIUM, 12.5f, DesignTokens.shipped().roleStyle("button").tracking(true), TEXT));
+          // The token buttons' and tabs' label in game mode: upper case and condensed at the label style's caps tracking
+          new HudFont(CAPS_FONT, CONDENSED_MEDIUM, 12.5f, DesignTokens.shipped().roleStyle("button").tracking(true),
+                TEXT));
 
     /** The prefix of a Token v0 type style's Label style name, such as {@code type-body}. */
     public static final String TYPE = "type-";
+    /**
+     * The suffix of a type style's condensed game mode copy in sentence case, such as {@code type-body.strong-condensed}
+     * for the name role; its upper-case game mode copy ends in {@link #CAPS}.
+     */
+    public static final String CONDENSED = "-condensed";
 
     /**
      * Token v0's type scale in regular-width Roboto, read from the tokens; each entry is registered as a Label style
@@ -130,6 +137,14 @@ public final class UiTheme implements Disposable {
         boolean upper = tokens.textRoles().containsKey(style.name())
               && tokens.upperCase(style.name(), DesignTokens.Presentation.APP);
         return new HudFont(style.name(), instance, style.size(), style.tracking(upper), TEXT);
+    }
+
+    /** The condensed Roboto instance of {@code style}; every condensed role is medium (docs/design-system/tokens.md). */
+    static int condensedInstance(DesignTokens.TypeStyle style) {
+        if (style.weight() != 500) {
+            throw new IllegalStateException("No condensed Roboto instance for weight " + style.weight());
+        }
+        return CONDENSED_MEDIUM;
     }
 
     private static final String ICON_FONT = "Icons/MaterialSymbolsRounded[FILL,GRAD,opsz,wght].ttf";
@@ -256,12 +271,17 @@ public final class UiTheme implements Disposable {
             BitmapFont face = font(TYPE + type.name(), ROBOTO, type.instance(), type.size(), type.tracking(), 0,
                   hudGlyphs);
             skin.add(TYPE + type.name(), new Label.LabelStyle(face, type.color()));
-            DesignTokens.TypeStyle style = DesignTokens.shipped().typeStyles().get(type.name());
-            // Game mode's upper-case headings: the style at its caps tracking (overline is upper case already)
-            if (style != null && style.hasCaps() && !"overline".equals(type.name())) {
-                BitmapFont caps = font(TYPE + type.name() + CAPS, ROBOTO, type.instance(), type.size(),
-                      style.tracking(true), 0, hudGlyphs);
-                skin.add(TYPE + type.name() + CAPS, new Label.LabelStyle(caps, type.color()));
+        }
+        // Game mode's copies of the styles its roles show condensed: upper case at the caps tracking, or sentence case
+        DesignTokens tokens = DesignTokens.shipped();
+        for (String role : tokens.condensedRoles(DesignTokens.Presentation.GAME)) {
+            DesignTokens.TypeStyle style = tokens.roleStyle(role);
+            boolean upper = tokens.upperCase(role, DesignTokens.Presentation.GAME);
+            String name = TYPE + style.name() + (upper ? CAPS : CONDENSED);
+            if (!skin.has(name, Label.LabelStyle.class)) {
+                BitmapFont face = font(name, ROBOTO, condensedInstance(style), style.size(), style.tracking(upper), 0,
+                      hudGlyphs);
+                skin.add(name, new Label.LabelStyle(face, TEXT));
             }
         }
         // A count badge's digits: caption's size in label's medium face
@@ -500,7 +520,10 @@ public final class UiTheme implements Disposable {
           "icon", "special");
     /** The suffix of a button style's compact size. */
     public static final String COMPACT = "-compact";
-    /** The suffix of a labelled button style's game mode copy, which draws its label in {@link #CAPS_FONT}. */
+    /**
+     * The suffix of a labelled button style's game mode copy, which draws its label in {@link #CAPS_FONT}, and of a
+     * type style's upper-case condensed game mode copy.
+     */
     public static final String CAPS = "-caps";
 
     /** A button style built from the design tokens, with the focus ring its button draws over its face. */

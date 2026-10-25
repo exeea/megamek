@@ -107,6 +107,11 @@ public final class UiKit {
         return DesignTokens.shipped().upperCase(role, presentation);
     }
 
+    /** Whether text role {@code role} ("title", "name"...) is set condensed in the kit's text mode. */
+    public boolean condensed(String role) {
+        return DesignTokens.shipped().condensed(role, presentation);
+    }
+
     /** {@code text} in the case of text role {@code role} in the kit's text mode and locale. */
     public String cased(String role, String text) {
         return DesignTokens.shipped().cased(role, presentation, text, locale);
@@ -372,15 +377,20 @@ public final class UiKit {
     }
 
     /**
-     * A label for heading text role {@code textRole} ("title", "headline", "display") in its type style and the color
-     * of {@code colorRole}: upper case in the style's caps font when the role is upper case in the kit's text mode.
+     * A label for text role {@code textRole} ("title", "headline", "display", "overline", "name") in its type style
+     * and the color of {@code colorRole}, in the kit's text mode: upper case when the role is, and in the style's
+     * condensed copy (upper case at its caps tracking, or sentence case) when the role is condensed.
      */
     public Label roleTypeLabel(String textRole, String text, String colorRole) {
         String type = DesignTokens.shipped().roleStyle(textRole).name();
-        if (upperCase(textRole) && skin.has(UiTheme.TYPE + type + UiTheme.CAPS, Label.LabelStyle.class)) {
-            return typeLabel(cased(textRole, text), type + UiTheme.CAPS, colorRole);
+        boolean upper = upperCase(textRole);
+        if (condensed(textRole)) {
+            String copy = type + (upper ? UiTheme.CAPS : UiTheme.CONDENSED);
+            if (skin.has(UiTheme.TYPE + copy, Label.LabelStyle.class)) {
+                return typeLabel(cased(textRole, text), copy, colorRole);
+            }
         }
-        return typeLabel(text, type, colorRole);
+        return typeLabel(cased(textRole, text), type, colorRole);
     }
 
     /** The prototype's caption (.cap): upper-case condensed muted text. */
@@ -388,15 +398,12 @@ public final class UiKit {
         return new Label(UiTheme.upper(text), skin, "hud-caption");
     }
 
-    /** A caption as {@link #caption(String)}; with {@code token}, the upper-case overline type in text.muted. */
+    /**
+     * A caption as {@link #caption(String)}; with {@code token}, the overline role in text.muted, condensed in game
+     * mode.
+     */
     public Label caption(String text, boolean token) {
-        if (!token) {
-            return caption(text);
-        }
-        Label caption = new Label(UiTheme.upper(text), new Label.LabelStyle(skin.get(UiTheme.TYPE + "overline",
-              Label.LabelStyle.class)));
-        caption.getStyle().fontColor = UiTheme.tokenColor("text.muted");
-        return caption;
+        return token ? roleTypeLabel("overline", text, "text.muted") : caption(text);
     }
 
     /**

@@ -371,6 +371,12 @@ class GpuHudSkinSmokeTest {
                 assertNotNull(skin.get(font.name(), Label.LabelStyle.class).font, font.name());
             }
             BUTTON_STYLES.forEach(name -> assertNotNull(skin.get(name, TextButton.TextButtonStyle.class), name));
+            DesignTokens tokens = DesignTokens.shipped();
+            for (String role : tokens.condensedRoles(DesignTokens.Presentation.GAME)) {
+                String copy = UiTheme.TYPE + tokens.roleStyle(role).name()
+                      + (tokens.upperCase(role, DesignTokens.Presentation.GAME) ? UiTheme.CAPS : UiTheme.CONDENSED);
+                assertNotNull(skin.get(copy, Label.LabelStyle.class).font, role + " has its condensed game copy");
+            }
             assertNotNull(skin.get("hud", TextField.TextFieldStyle.class));
             DRAWABLES.forEach(name -> assertNotNull(skin.getDrawable(name), name));
             for (String icon : UiTheme.ICONS.keySet()) {

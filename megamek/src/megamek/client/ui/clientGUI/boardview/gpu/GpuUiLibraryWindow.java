@@ -136,6 +136,13 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
           Map.entry("hud-mini", "label"), Map.entry("hud-button", "label"), Map.entry("hud-name", "body.strong"),
           Map.entry("hud-title", "title"), Map.entry("hud-heading", "headline"), Map.entry("hud-phase", "display"),
           Map.entry("hud-main", "label"));
+    /**
+     * The text role whose token type replaces a hud-v3 font, where one does; the gallery shows the role in its
+     * presentation mode, condensed and upper case as the role is.
+     */
+    private static final Map<String, String> FONT_ROLES = Map.ofEntries(
+          Map.entry("hud-caption", "overline"), Map.entry("hud-button", "button"), Map.entry("hud-name", "name"),
+          Map.entry("hud-title", "title"), Map.entry("hud-heading", "headline"), Map.entry("hud-phase", "display"));
 
     /** The open gallery; read and written on the EDT. */
     private static GpuUiLibraryWindow open;
@@ -468,8 +475,10 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
                 continue;
             }
             UiTheme.HudFont type = typeStyle(FONT_MOVES.get(font.name()));
+            String role = FONT_ROLES.get(font.name());
             compare(page, font.name(), fontSample(font.name(), font, font.name(), TODAY_WIDTH),
-                  fontSample(type.name(), type, UiTheme.TYPE + type.name(), MIGRATED_WIDTH));
+                  role != null ? roleSample(role, MIGRATED_WIDTH)
+                        : fontSample(type.name(), type, UiTheme.TYPE + type.name(), MIGRATED_WIDTH));
         }
         // Game mode's caps font is new: hud-v3 upper-cases its labels in its condensed fonts instead
         UiTheme.HudFont caps = UiTheme.HUD_FONTS.stream().filter(font -> font.name().equals(UiTheme.CAPS_FONT))
@@ -507,13 +516,21 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         badges.defaults().padRight(12);
         badges.add(kit.button("hud-utility", "report", text("UiLibrary.gdx.sampleLog"), null).badge("3"));
         badges.add(kit.button("hud-icon", "chat", null, null).badge("12"));
-        compare(page, "UiButton.badge", badges, null);
+        Table tokenBadges = new Table();
+        tokenBadges.defaults().padRight(20);
+        tokenBadges.add(kit.button("button-secondary", "report", text("UiLibrary.gdx.sampleLog"), null).badge("3"));
+        tokenBadges.add(kit.button("button-icon", "chat", null, null).badge("12"));
+        compare(page, "UiButton.badge", badges, tokenBadges);
         Table dots = new Table();
         dots.defaults().padRight(12);
         dots.add(kit.button("hud-utility", "settings", text("UiLibrary.gdx.sampleSettings"), null).dot(true));
         dots.add(kit.button("hud-icon", "chat", null, null).dot(true));
-        compare(page, "UiButton.dot", dots, null);
-        compare(page, "UiKit.closeButton", kit.closeButton(() -> { }), null);
+        Table tokenDots = new Table();
+        tokenDots.defaults().padRight(20);
+        tokenDots.add(kit.button("button-secondary", "settings", text("UiLibrary.gdx.sampleSettings"), null).dot(true));
+        tokenDots.add(kit.button("button-icon", "chat", null, null).dot(true));
+        compare(page, "UiButton.dot", dots, tokenDots);
+        compare(page, "UiKit.closeButton", kit.closeButton(() -> { }), kit.closeButton(() -> { }, true));
     }
 
     private void selection(Table page) {
@@ -1288,6 +1305,25 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             }
         }
         throw new IllegalArgumentException(name);
+    }
+
+    /**
+     * A text role's spec over a sample line as the kit draws the role in the gallery's presentation mode: upper case and
+     * condensed where the role is.
+     */
+    private Table roleSample(String role, float width) {
+        DesignTokens.TypeStyle style = tokens.roleStyle(role);
+        boolean condensed = kit.condensed(role);
+        int instance = condensed ? UiTheme.CONDENSED_MEDIUM : typeStyle(style.name()).instance();
+        Table sample = new Table();
+        sample.left().top();
+        sample.add(kit.label(String.format(Locale.ROOT, "%s (%s)  %s / %s", role, style.name(), trim(style.size()),
+              weight(instance)), "hud-small", 11, UiTheme.MUTED)).left().row();
+        String line = text("name".equals(role) ? "UiLibrary.type.nameSample" : "UiLibrary.type.sample");
+        Label label = kit.roleTypeLabel(role, line, "text.primary");
+        label.setEllipsis(true);
+        sample.add(label).width(width).left().padTop(2);
+        return sample;
     }
 
     /** A font's spec over a sample line drawn in its Label style; overline and the caps font are upper case. */

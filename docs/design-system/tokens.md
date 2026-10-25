@@ -165,7 +165,7 @@ One family, Roboto, on both platforms; icons are Material Symbols Rounded. Both 
 | `headline` | 20 | 500 | 0 | .05 | Page and dialog headings |
 | `title` | 16 | 500 | 0 | .06 | Panel and section titles |
 | `body` | 13 | 400 | 0 | | Default text |
-| `body.strong` | 13 | 500 | 0 | | Emphasis, names, values |
+| `body.strong` | 13 | 500 | 0 | | Emphasis, values, unit and pilot names (the `name` role) |
 | `label` | 12.5 | 500 | .01 | .08 | Buttons, tabs, field labels |
 | `small` | 11.5 | 400 | 0 | | Dense tables, secondary lines |
 | `caption` | 10.5 | 400 | .01 | | Hints, units, timestamps |
@@ -178,15 +178,16 @@ upper case have it, and the tokens fail to load if a role is upper case in a sty
 Rules:
 
 - **Case depends on the screen's mode**; see [Presentation mode](#presentation-mode).
-- **Two weights**, regular (400) and medium (500). Hierarchy comes from size and weight, not case or condensed faces.
-  hud-v3's condensed bold styles are retired.
+- **Two weights**, regular (400) and medium (500). Hierarchy comes from size and weight, not case or width. hud-v3's
+  condensed bold styles are retired.
+- **Two widths**, regular (`wdth` 100) and condensed (`wdth` 75), set by the screen's mode; see [Type width](#type-width).
 - Sizes are logical pixels at scale 1; both platforms multiply by the user's UI scale.
 
 ### Presentation mode
 
 Each screen is in one of two presentation modes, game or app. The mode belongs to the screen, not to the app, so MekHQ
 or MegaMek can mix both. It sets the text case below and the [slider thumb](#sliders); other differences may join it
-later, always as a whole-screen choice rather than per control.
+later, always as a whole-screen choice rather than per control. It also sets the [type width](#type-width).
 
 | Text | App mode | Game mode |
 | --- | --- | --- |
@@ -208,7 +209,7 @@ later, always as a whole-screen choice rather than per control.
 
 Case follows the text's **role**, not its style: field labels share `label` with buttons and tabs but stay sentence
 case. The tokens' `typography.case` block maps each role to its style (`display`, `headline`, `title`, `button` and
-`tab` on `label`, `overline`) and lists the roles each mode upper-cases; `DesignTokens.upperCase(role, mode)` and
+`tab` on `label`, `overline`, and `name` on `body.strong`) and lists the roles each mode upper-cases; `DesignTokens.upperCase(role, mode)` and
 `cased(role, mode, text, locale)` read it.
 
 - **Swing:** `TokenPresentation.setMode(root, Presentation.GAME)` marks a screen; a dialog follows its owner window, whose
@@ -217,19 +218,58 @@ case. The tokens' `typography.case` block maps each role to its style (`display`
   their headings the `title` or `headline` role; `TokenPresentation.role` gives one to another button, label or tab pane.
   A control keeps its sentence-case text and shows it upper-cased in the caps-tracked font, so views keep calling
   `setText`, `setTitleAt` and `setFont`; screen readers get the sentence-case text.
-- **libGDX:** fonts bake their spacing in, so caps text has its own fonts: `hud-medium-caps` with a `-caps` copy of
-  each labelled token button, tab and segment style, and `type-<style>-caps` for display, headline and title.
-  `UiKit.presentation` (game by default) picks them for the buttons, tabs, segmented controls and token panel and dialog
-  headers it builds; `UiKit.roleLabel`, `roleTypeLabel` and `cased` do the same for other text. The kit depends on no
-  game options, so its view passes in the player's locale (`UiKit.locale`).
+- **libGDX:** fonts bake their spacing in, so caps text has its own fonts, condensed as game mode sets it:
+  `hud-medium-caps` with a `-caps` copy of each labelled token button, tab and segment style, and `type-<style>-caps`
+  for display, headline, title, label and overline. `UiKit.presentation` (game by default) picks them for the buttons,
+  tabs, segmented controls and token panel and dialog headers it builds; `UiKit.roleLabel`, `roleTypeLabel` and `cased`
+  do the same for other text. The kit depends on no game options, so its view passes in the player's locale
+  (`UiKit.locale`).
+
+### Type width
+
+**Final.** Type is Roboto at regular width (`wdth` 100). In game mode the framing roles (`display`, `headline`,
+`title`, `button`, `tab`, `overline`) and the `name` role are set in Roboto Condensed (`wdth` 75), at the same weight
+(500) and the same tracking rules. Everything else stays regular width: body, small, caption, field labels, tables,
+values and running text. App mode is all regular width, its upper-case overline included.
+
+| Text | App mode | Game mode |
+| --- | --- | --- |
+| Phase banner, headlines, titles and section headers, buttons, tabs, `overline` tags | Regular | Condensed, UPPER CASE |
+| Unit and pilot names (`name`, on `body.strong`) | Regular | Condensed, sentence case |
+| Body text, values, tables, tooltips, field labels, helper text | Regular | Regular |
+
+- **Why condensed in game mode:** it packs some 15-20% more into the HUD's narrow columns, and reads as technical and
+  military, which suits the game.
+- **Why not everywhere:** condensed letters crowd at 10-12 px and tire the eye in long text, so it stays off running
+  text, tables and app mode.
+- **Tracking does not change.** Upper-case condensed text keeps its style's caps tracking; names are sentence case at
+  the style's normal tracking (0). hud-v3's wide tracking on mixed case is not adopted: it uses up the space condensed
+  saves.
+- **One extra face.** Every condensed role is medium (500), so condensed needs a single static face for Swing (see
+  [Fonts](#fonts)); the tokens test checks that every condensed role stays at 500.
+
+The tokens' `typography.width` block holds the condensed width and lists the roles each mode condenses (none in app);
+`DesignTokens.condensed(role, mode)`, `condensedRoles(mode)` and `condensedWidth()` read it. `name` is a text role like
+the framing ones but never upper case.
+
+- **Swing:** `TokenPresentation` swaps a role's font for the condensed face in game mode, upper-cased framing labels at
+  their caps tracking and names at normal tracking, and puts the original font back in app mode. Section headers and
+  table headers draw their overline condensed on game screens. `TokenFonts.font(style, upperCase, condensed)` gives the
+  font directly; give a name label the role with `TokenPresentation.role(label, "name")`.
+- **libGDX:** `hud-medium-caps` and the `type-<style>-caps` styles use the variable font's Condensed Medium instance,
+  and `type-body.strong-condensed` is the sentence-case name style. `UiKit.roleTypeLabel` (and `condensed(role)`) pick
+  them in game mode; hud-v3's own `hud-*` fonts are unchanged.
 
 ### Fonts
 
 Java2D can't select instances of the Roboto variable font: asking for medium draws regular. libGDX FreeType reaches
-every instance. So `mm-data` also ships `Roboto/Roboto-Medium.ttf`, a static instance (weight 500, width 100) that
-[make_static_roboto.py](make_static_roboto.py) generates from the variable font. Its family name is "Roboto Medium",
-which is how Swing asks for medium; regular comes from the variable font's default instance. libGDX keeps reading the
-variable font. Both platforms therefore draw the same outlines from one source.
+every instance. So `mm-data` also ships two static instances that [make_static_roboto.py](make_static_roboto.py)
+generates from the variable font: `Roboto/Roboto-Medium.ttf` (weight 500, width 100, family "Roboto Medium") and
+`Roboto/Roboto-CondensedMedium.ttf` (weight 500, width 75, family "Roboto Condensed Medium", for game mode's
+[condensed roles](#type-width)). Swing asks for them by family name; regular comes from the variable font's default
+instance. MegaMek registers every `.ttf` under `data/fonts` at startup (`FontHandler`), and the build stages the folder
+from `mm-data` (`stageDataFonts`). libGDX keeps reading the variable font's named instances. Both platforms therefore
+draw the same outlines from one source.
 
 libGDX registers each style as a Label style named `type-` plus the style (`UiTheme.TYPE_STYLES`), beside the hud-v3
 fonts it replaces.
@@ -242,7 +282,7 @@ fonts it replaces.
 | `hud-medium`, `hud-utility`, `hud-mini`, `hud-button`, `hud-main` | `label` (button and tab text) |
 | `hud-sub` | `caption` |
 | `hud-caption` | `overline` |
-| `hud-name` | `body.strong` |
+| `hud-name` | `body.strong`, as the `name` role: condensed in game mode |
 | `hud-title`, `hud-heading`, `hud-phase` | `title`, `headline`, `display` |
 
 The libGDX gallery's Colors and type tab shows each hud-v3 color and font beside the token that replaces it.
@@ -1114,7 +1154,7 @@ newest on top and the hover pause are the developers' work.
 | [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java) | Turns the tokens into FlatLaf values |
 | [`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java), [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java) | The Swing themes |
 | [`TokenButtons`](../../megamek/src/megamek/client/ui/design/swing/TokenButtons.java), [`SpecialButton`](../../megamek/src/megamek/client/ui/design/swing/SpecialButton.java) | The Swing button set |
-| [`TokenPresentation`](../../megamek/src/megamek/client/ui/design/swing/TokenPresentation.java), [`TokenFonts`](../../megamek/src/megamek/client/ui/design/swing/TokenFonts.java) | A Swing screen's presentation mode, and the caps-tracked fonts |
+| [`TokenPresentation`](../../megamek/src/megamek/client/ui/design/swing/TokenPresentation.java), [`TokenFonts`](../../megamek/src/megamek/client/ui/design/swing/TokenFonts.java) | A Swing screen's presentation mode, and the caps-tracked and condensed fonts |
 | [`FocusVisibility`](../../megamek/src/megamek/client/ui/design/swing/FocusVisibility.java), [`TokenCheckBoxIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenCheckBoxIcon.java), [`TokenRadioButtonIcon`](../../megamek/src/megamek/client/ui/design/swing/TokenRadioButtonIcon.java), [`TokenTabbedPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTabbedPaneUI.java) | Swing keyboard focus |
 | [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java), [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) | The libGDX button styles and focus ring |
 | [`TokenFields`](../../megamek/src/megamek/client/ui/design/swing/TokenFields.java), [`TokenFormField`](../../megamek/src/megamek/client/ui/design/swing/TokenFormField.java) | The Swing inputs and form field |

@@ -29,7 +29,7 @@ public class TokenTitledBorder extends TitledBorder {
     public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
         // The fields, not the getters: those fall back to the legacy TitledBorder keys
         Color color = titleColor != null ? titleColor : TokenSections.titleColor(c, false);
-        TokenSections.paintHeader(g, c, getTitle(), titleFont != null ? titleFont : TokenSections.titleFont(), color,
+        TokenSections.paintHeader(g, c, getTitle(), titleFont != null ? titleFont : TokenSections.titleFont(c), color,
               x, y, width, TokenSections.height());
     }
 
