@@ -66,7 +66,7 @@ Agreed so far:
 | Framed command button | `mekhq/gui/baseComponents/FramedCommandButton(Style)` | Swing | Corner ticks that grow into a full frame on hover (320 ms). Theme-derived teal, dark and light. Base of the Immersive dialogs' response buttons. |
 | Standalone launcher | `mm-launcher/.../gui/LauncherTheme` | Swing, **no FlatLaf and no megamek dependency** | A copy of the Immersive palette (identical RGB values). Honors Windows high-contrast mode. |
 | App startup screens | MegaMek `client/ui/widget/MegaMekButton` + `SkinSpecification`/`SkinXMLHandler` (`defaultSkin.xml`); used by MekHQ `StartupScreenPanel` and MegaMek's main menu | Swing, image-skinned | Bitmap backgrounds, text colors from skin XML (white / yellow active / grey disabled). |
-| Everything else in Swing | MM, MML, MHQ | FlatLaf | User picks one of four stock themes: Flat Light, Flat IntelliJ, Flat Dark, Flat Darcula (`MegaMek.java`); MML and MHQ apply the stored choice. No custom FlatLaf properties anywhere. |
+| Everything else in Swing | MM, MML, MHQ | FlatLaf | User picks one of four stock themes: Flat Light, Flat IntelliJ, Flat Dark, Flat Darcula (`MegaMek.java`); MML and MHQ apply the stored choice. No custom FlatLaf properties anywhere. (Since the Swing trial, MegaMek defaults to MegaMek Dark and lists the stock themes as classic ones.) |
 
 About 128 MekHQ source files reference an Immersive component or the interstellar map, so the blue palette has real
 reach.
@@ -361,6 +361,18 @@ work for Swing, and item 11 is under investigation.
   selection for items in collections, mint only for focus and accents, an outside focus ring on cream faces and a
   faint cream disabled-on look, in Swing and libGDX; see [tokens.md](tokens.md#color-roles).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
-  controls, so the developers can judge the system in real use.
+  controls, so the developers can judge the system in real use. The startup path is also reorganized where the old
+  layout gets in the way. Steps, one screen at a time:
+  1. ~~Theme~~: MegaMek Dark is MegaMek's default; settings list the MegaMek themes, the stock ones behind **Show
+     classic themes**. Players who picked a theme keep it.
+  2. Shared dialog footers on the token buttons (main action first, equal widths, centred).
+  3. Main menu: a full-window game screen over the battle art, opened by a skippable "Welcome back" greeting and reveal
+     on app launch (an instant cut with reduce motion), the menu bar hidden and Settings, Help and Tools on screen.
+     The reveal is waiting on a developer vote.
+  4. Host, Connect and Bot setup as modal cards in app mode.
+  5. The scenario flow.
+  6. The lobby as a briefing room in game mode: a top bar with Ready and summary chips, players on the left, forces in
+     the centre, the battlefield (map, conditions, victory) on the right and a chat dock.
+  7. The unit selector. 8. The lobby's dialogs. 9. A settings check.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.

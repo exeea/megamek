@@ -51,6 +51,8 @@ import javax.swing.UIManager;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
+import megamek.client.ui.design.swing.MegaMekDarkLaf;
+import megamek.client.ui.design.swing.MegaMekLightLaf;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
@@ -1098,7 +1100,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SOFT_CENTER, false);
         store.setDefault(AUTO_CENTER, true);
         store.setDefault(AUTO_SELECT_NEXT, true);
-        store.setDefault(UI_THEME, "com.formdev.flatlaf.FlatDarculaLaf");
+        store.setDefault(UI_THEME, MegaMekDarkLaf.class.getName());
         store.setDefault(REDUCE_MOTION, false);
         store.setDefault(COLOR_BLIND_PALETTE, false);
 
@@ -4407,10 +4409,20 @@ public class GUIPreferences extends PreferenceStoreProxy {
     // endregion Colours
 
     /**
-     * @return True when the MM suite supports the given laf, currently all formdev "Flat ..." and the system default.
+     * @return True when the MM suite supports the given laf: the MegaMek themes and all formdev "Flat ..." themes.
      */
     public static boolean isSupportedLookAndFeel(UIManager.LookAndFeelInfo lookAndFeelInfo) {
-        return lookAndFeelInfo.getClassName().toLowerCase().contains("formdev");
+        return isMegaMekTheme(lookAndFeelInfo.getClassName())
+              || lookAndFeelInfo.getClassName().toLowerCase().contains("formdev");
+    }
+
+    /**
+     * @return True for the design system's MegaMek Dark and MegaMek Light themes; every other supported theme is a
+     *       "classic" theme that the settings only list on request.
+     */
+    public static boolean isMegaMekTheme(@Nullable String lookAndFeelClassName) {
+        return MegaMekDarkLaf.class.getName().equals(lookAndFeelClassName)
+              || MegaMekLightLaf.class.getName().equals(lookAndFeelClassName);
     }
 
     public File[] getMinimapThemes() {

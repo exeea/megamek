@@ -35,8 +35,10 @@ The same checks run as a unit test, along with a test that the Swing themes pick
 **MegaMek Dark** and **MegaMek Light** are FlatLaf look and feels
 ([`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java),
 [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java)). They are registered next
-to the four stock themes, so any suite app can pick them in its settings; the stock themes and the current default are
-unchanged for now. They have no properties file: [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java)
+to the four stock themes, so any suite app can pick them in its settings. MegaMek Dark is MegaMek's default theme
+(MegaMekLab and MekHQ keep their own defaults for now). MegaMek's settings list only the two MegaMek themes; the four
+stock themes are "classic" themes, listed after them when **Show classic themes** is on, and a player who already uses
+one keeps it. They have no properties file: [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java)
 builds the FlatLaf values from the token file when the theme loads, so a token change reaches Swing with no second
 copy.
 
@@ -1183,7 +1185,7 @@ newest on top and the hover pause are the developers' work.
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
-panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. The Swing
-themes are selectable but not the default, and no view uses the new controls yet. The all-caps decision is final
-([Presentation mode](#presentation-mode)); next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
-developers accept the system.
+panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. MegaMek Dark is
+MegaMek's default theme, and the trial of MegaMek's Swing startup path on the new controls is under way (see the
+gap analysis's Next steps). The all-caps decision is final ([Presentation mode](#presentation-mode)); hud-v3 moves only
+once the developers accept the system.
