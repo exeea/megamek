@@ -205,9 +205,9 @@ class GpuBoardOverlaySmokeTest {
                             });
                             Pixmap ghost = hud.captureBackBuffer(name + "-ghost");
                             images.add(ghost);
-                            var field = GpuBoardOverlay.class.getDeclaredField("ghost");
+                            var field = GpuBoardOverlay.class.getDeclaredField("routeGhost");
                             field.setAccessible(true);
-                            ModelInstance hologram = (ModelInstance) field.get(overlay);
+                            ModelInstance hologram = ((GpuGhostModel) field.get(overlay)).current();
                             Vector3 center = hologram.calculateBoundingBox(new BoundingBox()).mul(hologram.transform)
                                   .getCenter(new Vector3());
                             assertTrue(peak(path, ghost, board.screen(center), 25) > 30,

@@ -93,6 +93,8 @@ final class GpuBoardSource implements BoardSource {
     /** The last tactical capture and its copy in board units (see {@link #tacticalGeometry}); EDT. */
     private BoardTactical tacticalSource, tacticalMapped;
     private final UnitCamouflage camouflage = new UnitCamouflage();
+    /** Aircraft moves held back until the firing results (Swing thread). */
+    private final HeldFlights heldFlights = new HeldFlights();
     private final GpuReportLog reports = new GpuReportLog();
     private final GpuBattleStatus battleStatus = new GpuBattleStatus();
     // The HUD services. Each reads currentView() per call, so a board swap needs no rebinding.
@@ -432,8 +434,13 @@ final class GpuBoardSource implements BoardSource {
                 points.add(captured.location());
             }
         }
+        boolean startKnown = start != null && start.boardId() == view.getBoardId();
+        if (holdsFlight(entity, startKnown, points, type, jumpMP, movementMP)) {
+            // Publish the hold with this frame, so the aircraft never shows at its destination first.
+            next = capture();
+        }
         synchronized (this) {
-            if (view == movingView) {
+            if (view == movingView && heldFlights.flight(entityId) == null) {
                 queueMovement(entity, captured, points, type, jumpMP, movementMP);
             }
             publishScene(next, false);
@@ -501,6 +508,14 @@ final class GpuBoardSource implements BoardSource {
     /** Copy authorized, then-visible appearance once; no Entity reaches the GL thread. */
     private void captureCombat(megamek.common.event.GameAttackResolvedEvent event) {
         requireSwingThread();
+        if (view.game.getPhase().isFiring()) {
+            // The first firing result releases every held aircraft move, so the aircraft fly ahead of the attacks.
+            List<HeldFlight> released = heldFlights.releaseForFiringResults();
+            if (!released.isEmpty()) {
+                queueAnimation(heldFlights.openBurst(released, view.getBoardId(), this::altitudeDrop));
+                released.forEach(this::playHeldFlight);
+            }
+        }
         var result = event.result();
         Entity attacker = event.attacker();
         Entity target = event.target() instanceof Entity entity ? entity : null;
@@ -717,6 +732,75 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /** A landed path endpoint uses the same whole-footprint support as its captured hull, not just its centre hex. */
+    /** Holds an aircraft's move back until the firing results, if it qualifies; see {@link HeldFlights}. */
+    private boolean holdsFlight(Entity entity, boolean startKnown, List<BoardScene.Waypoint> points,
+          EntityMovementType type, int jumpMP, int movementMP) {
+        if (!entity.isAero()) {
+            return false;
+        }
+        return heldFlights.hold(entity, view.game.getPhase(), new HeldFlight(entity.getId(), view.game.getRoundCount(),
+              points, startKnown, type, jumpMP, movementMP), "move packet");
+    }
+
+    /** This frame's held aircraft moves; see {@link HeldFlights#update}. */
+    private BoardAirspace heldFlightsForFrame() {
+        int round = view.game.getRoundCount();
+        heldFlights.update(view.game, view.getBoardId(), entity -> visible(entity) && !sensorContact(entity),
+              entity -> rebuiltFlight(entity, round)).forEach(this::playHeldFlight);
+        FiringBurst close = heldFlights.closeBurst(view.game.getPhase(), view.getBoardId());
+        if (close != null) {
+            queueAnimation(close);
+        }
+        return heldFlights.snapshot();
+    }
+
+    /** A held move from the flight path an aircraft carries, at its altitude now: its altitude at the start is lost. */
+    private HeldFlight rebuiltFlight(Entity entity, int round) {
+        List<Coords> hexes = entity.getPassedThrough();
+        List<Integer> facings = entity.getPassedThroughFacing();
+        List<BoardScene.Waypoint> path = new ArrayList<>();
+        for (int index = 0; index < hexes.size(); index++) {
+            int facing = (index < facings.size()) ? facings.get(index) : entity.getFacing();
+            path.add(unitWaypoint(entity, hexes.get(index), entity.getElevation(), facing, entity.getAltitude(),
+                  UnitLocation.Form.capture(entity)));
+        }
+        return new HeldFlight(entity.getId(), round, path, true, entity.moved, 0, movementMP(entity, entity.moved));
+    }
+
+    /**
+     * How many levels below its held move's end an aircraft is drawn now: the altitude its attacks cost it (a strike
+     * 1, a dive bomb 2), which the game applies when they are declared. None for a unit that is gone.
+     */
+    private float altitudeDrop(HeldFlight flight) {
+        Entity entity = view.game.getEntity(flight.entityId());
+        if (entity == null) {
+            return 0;
+        }
+        BoardScene.Waypoint end = flight.destination();
+        float now = unitWaypoint(entity, end.coords(), Math.round(end.facing())).elevation();
+        return Math.max(0, end.elevation() - now);
+    }
+
+    /** Plays a held aircraft move now, as the move it would have played when it was made. */
+    private void playHeldFlight(HeldFlight flight) {
+        Entity entity = view.game.getEntity(flight.entityId());
+        if (entity == null) {
+            return;
+        }
+        BoardScene.Unit captured = null;
+        if (frame != null && frame.scene() != null) {
+            for (BoardScene.Unit unit : frame.scene().units()) {
+                if ((unit.id() == flight.entityId()) && !unit.sensorContact()) {
+                    captured = unit;
+                    break;
+                }
+            }
+        }
+        synchronized (this) {
+            queueMovement(entity, captured, flight.path(), flight.type(), flight.jumpMP(), flight.movementMP());
+        }
+    }
+
     private static BoardScene.Waypoint supportedEndpoint(BoardScene.Waypoint point, Frame frame, int id) {
         if (frame == null || frame.scene() == null || point.aeroState() != BoardScene.AeroState.LANDED) {
             return point;
@@ -777,6 +861,7 @@ final class GpuBoardSource implements BoardSource {
                     pendingEvents.clear();
                     nuclearCapture = null;
                 }
+                heldFlights.dropAll("the board view changed");
             }
         }
         Board current = view.isClosed() ? null : view.getBoard();
@@ -801,6 +886,7 @@ final class GpuBoardSource implements BoardSource {
                 removalAttempts.clear();
                 voluntaryReleases.clear();
             }
+            heldFlights.dropAll("the board changed");
             if (board != null) { board.addBoardListener(boardListener); }
             terrain.changed(null);
         }
@@ -979,7 +1065,7 @@ final class GpuBoardSource implements BoardSource {
               view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
                     FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView,
-              view.electronicWarfare(), designations(), starShells());
+              view.electronicWarfare(), designations(), starShells()).withAirspace(heldFlightsForFrame());
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);
@@ -1459,6 +1545,8 @@ final class GpuBoardSource implements BoardSource {
             if (acceptsInput()) {
                 action.run();
                 refresh();
+            } else {
+                LOGGER.info("[FireOrders] HUD command dropped: a dialog is open or the board is closing");
             }
         });
     }

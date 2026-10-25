@@ -713,6 +713,16 @@ final class BoardCamera {
 
     /** Fit the complete rendered route once, with the smallest pan and no unnecessary zoom or rotation. */
     void frameMovement(BoardScene.Movement move, UnitMotion motion, BoardScene scene, float availableWidth) {
+        frameMovement(move, motion, scene, availableWidth, List.of());
+    }
+
+    /**
+     * Frames a movement and, for an aircraft's attack run, the hexes its shots strike as well.
+     *
+     * @param targets the hexes the move's shots strike; none for a plain move
+     */
+    void frameMovement(BoardScene.Movement move, UnitMotion motion, BoardScene scene, float availableWidth,
+          List<Coords> targets) {
         if (firstPerson) { return; }
         float width = MathUtils.clamp(availableWidth, 1, camera.viewportWidth);
         viewableWidth(width);
@@ -735,6 +745,11 @@ final class BoardCamera {
             for (var point : move.path()) {
                 addHex(points, point.coords(), point.elevation() - .25f, point.elevation() + 3);
             }
+        }
+        for (Coords target : targets) {
+            var tile = scene.tile(target);
+            float level = (tile == null) ? 0 : tile.elevation();
+            addHex(points, target, level - .25f, level + 3);
         }
         if (!points.isEmpty()) {
             animateTo(fittedPose(points, width, azimuth, tilt, camera.zoom, false,

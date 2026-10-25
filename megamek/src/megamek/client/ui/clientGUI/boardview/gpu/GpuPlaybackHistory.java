@@ -19,8 +19,9 @@ import megamek.common.units.Entity;
 /**
  * The round's playback history on the render thread (rebuild plan A.10; J4, J7, J8, J10, K8): the reviewable steps of
  * the round's log in report order, the shots the playback presented, the review cursor and the replay, the speed, and
- * the live events held back while a review runs. It feeds the playback; a review re-presents a retained shot and never
- * applies an event, so damage, heat and ammunition stay as the client reports them.
+ * the live events held back while a review runs. It feeds the playback; a review re-presents a retained action (a
+ * unit's volley, or an aircraft's attack run re-flown) and never applies an event, so damage, heat and ammunition stay
+ * as the client reports them.
  */
 final class GpuPlaybackHistory {
     /** Replay shows each step at least this long at 1x (replay: 900 / speed ms). */
@@ -59,6 +60,8 @@ final class GpuPlaybackHistory {
     private final Map<UUID, BoardScene.Combat> shots = new LinkedHashMap<>();
     /** Live events held back while a review runs, in arrival order (A.10). */
     private final List<BoardScene.Animation> held = new ArrayList<>();
+    /** The round's attack runs, built from the events seen, to group the steps into actions. */
+    private final ReplayActions actions = new ReplayActions();
     /** Steps presented since the board's pop-ups last took them. */
     private final List<Step> shown = new ArrayList<>();
     private GpuReportLog.Snapshot log = GpuReportLog.Snapshot.EMPTY;
@@ -69,8 +72,10 @@ final class GpuPlaybackHistory {
     private Set<Step> playedSet = Set.of();
     private List<GpuReportLog.CombatEvent> playedAttacks = List.of();
     private Step cursor;
-    /** The step whose re-presented shot has not landed yet; it pops up when it does. */
-    private Step landing;
+    /** The steps of the re-presented action whose shots have not landed yet, by shot id; each pops up as it lands. */
+    private final Map<UUID, Step> landing = new LinkedHashMap<>();
+    /** The action under the cursor, or null. */
+    private ReplayAction action;
     private boolean replaying;
     /** Real seconds, at the replay's speed, that the replayed step has shown. */
     private double dwell;
@@ -94,17 +99,20 @@ final class GpuPlaybackHistory {
     void accept(List<BoardScene.Animation> timeline, BoardScene scene, GpuReportLog.Snapshot reports,
           Predicate<BoardScene.Unit> transports) {
         read(reports);
+        actions.observe(timeline, scene.boardId());
         int concealed = -1;
         for (int index = 0; index < timeline.size(); index++) {
             if (timeline.get(index) instanceof BoardScene.Concealed hidden && hidden.boardId() == scene.boardId()) {
                 shots.values().removeIf(shot -> shot.attacker().id() == hidden.entityId()
                       || shot.target() != null && shot.target().id() == hidden.entityId());
                 concealed = index;
+                actions.retain(shots.keySet());
             } else if (timeline.get(index) instanceof BoardScene.Combat combat
                   && combat.result().kind() != ResolvedAttack.Kind.DEATH) {
                 shots.putIfAbsent(combat.result().id(), combat);
                 if (shots.size() > UnitPlayback.MAX_PENDING_EVENTS) {
                     shots.remove(shots.keySet().iterator().next());
+                    actions.retain(shots.keySet());
                 }
             }
         }
@@ -151,15 +159,9 @@ final class GpuPlaybackHistory {
      * {@code seconds} of real time, then updates the presented steps (GL, after {@link #accept}).
      */
     void advance(double seconds, Predicate<UnitPlayback> cameraReady) {
-        UnitAttack reviewed = playback.reviewing() ? playback.attack() : null;
+        List<UnitAttack> reviewed = playback.reviewing() ? playback.attacks() : List.of();
         playback.advance(seconds, speed(), cameraReady);
-        if (landing != null && (reviewed == null || reviewed.seconds >= reviewed.contactSeconds)) {
-            // A re-presented shot pops up as it lands, like a live one; a review cut short before that does not.
-            if (reviewed != null) {
-                show(List.of(landing));
-            }
-            landing = null;
-        }
+        land(reviewed);
         skipping &= playback.busy();
         if (replaying) {
             // At Instant a replay steps every frame.
@@ -167,7 +169,7 @@ final class GpuPlaybackHistory {
                   : seconds * speed.rate / UnitMotion.Speed.NORMAL.rate;
             if (dwell >= STEP_SECONDS && !playback.reviewing()) {
                 // The history's lists take no null: a card collapsed during the replay ends it here.
-                int next = cursor == null ? 0 : played.indexOf(cursor) + 1;
+                int next = cursor == null ? 0 : played.indexOf(lastOfAction()) + 1;
                 if (next > 0 && next < played.size()) {
                     present(played.get(next));
                 } else {
@@ -178,13 +180,42 @@ final class GpuPlaybackHistory {
         updatePlayed();
     }
 
+    /**
+     * Each re-presented shot of the action pops up as it lands, like a live one; one of a review cut short before that
+     * does not.
+     */
+    private void land(List<UnitAttack> reviewed) {
+        if (landing.isEmpty()) {
+            return;
+        }
+        Map<UUID, UnitAttack> byId = new HashMap<>();
+        for (UnitAttack shot : reviewed) {
+            byId.put(shot.event.result().id(), shot);
+        }
+        List<Step> landed = new ArrayList<>();
+        for (var waiting = landing.entrySet().iterator(); waiting.hasNext(); ) {
+            var entry = waiting.next();
+            UnitAttack shot = byId.get(entry.getKey());
+            if ((shot != null) && (shot.seconds >= shot.contactSeconds)) {
+                landed.add(entry.getValue());
+                waiting.remove();
+            }
+        }
+        show(landed);
+        if (!playback.reviewing()) {
+            landing.clear();
+        }
+    }
+
     /** A new board: nothing retained is valid. The board view clears its playback with it. */
     void clear() {
         shots.clear();
+        actions.clear();
         held.clear();
         shown.clear();
         cursor = null;
-        landing = null;
+        action = null;
+        landing.clear();
         replaying = false;
         primed = false;
         live = null;
@@ -211,8 +242,8 @@ final class GpuPlaybackHistory {
      */
     void step(int direction) {
         replaying = false;
-        // The history's lists take no null: without a cursor nothing is at a step.
-        int at = cursor == null ? -1 : played.indexOf(cursor);
+        // The history's lists take no null: without a cursor nothing is at a step. A step moves a whole action.
+        int at = cursor == null ? -1 : played.indexOf(direction > 0 ? lastOfAction() : firstOfAction());
         if (direction > 0 && running() && (at < 0 || at == played.size() - 1)) {
             pause();
             playback.stepOnce();
@@ -384,18 +415,45 @@ final class GpuPlaybackHistory {
     }
 
     /**
-     * Moves the cursor to a presented step and re-presents its retained shot, which pops up as it lands; a step
-     * without one pops up at once and ends a review.
+     * Moves the cursor to a presented step and re-presents the whole action it belongs to: a volley's shots together,
+     * or an aircraft's attack run re-flown. Each shot pops up as it lands; a step without one pops up at once, and an
+     * action without any ends a review.
      */
     private void present(Step step) {
         cursor = step;
         dwell = 0;
-        BoardScene.Combat shot = step.attack() == null ? null : shots.get(step.attack().id());
-        playback.review(shot);
-        landing = shot == null ? null : step;
-        if (shot == null) {
-            show(List.of(step));
+        action = ReplayActions.actionOf(step, actions.group(played, shots));
+        landing.clear();
+        if (action.run() != null) {
+            playback.reviewRun(action.run());
+        } else if (!action.volley().isEmpty()) {
+            playback.reviewVolley(action.volley());
+        } else {
+            playback.review(null);
         }
+        Set<UUID> animated = new HashSet<>();
+        for (BoardScene.Combat shot : action.run() != null ? action.run().shots() : action.volley()) {
+            animated.add(shot.result().id());
+        }
+        List<Step> cards = new ArrayList<>();
+        for (Step member : action.steps()) {
+            if ((member.attack() != null) && animated.contains(member.attack().id())) {
+                landing.put(member.attack().id(), member);
+            } else {
+                cards.add(member);
+            }
+        }
+        show(cards);
+    }
+
+    /** @return the last step of the action under the cursor, the cursor when it is in none */
+    private Step lastOfAction() {
+        return (action != null) && action.contains(cursor) ? action.steps().getLast() : cursor;
+    }
+
+    /** @return the first step of the action under the cursor, the cursor when it is in none */
+    private Step firstOfAction() {
+        return (action != null) && action.contains(cursor) ? action.steps().getFirst() : cursor;
     }
 
     private void show(List<Step> presented) {
@@ -412,8 +470,10 @@ final class GpuPlaybackHistory {
         }
         if (reports.round() != log.round()) {
             shots.clear();
+            actions.clear();
             shown.clear();
             cursor = null;
+            action = null;
             replaying = false;
             playback.review(null);
             primed = false;

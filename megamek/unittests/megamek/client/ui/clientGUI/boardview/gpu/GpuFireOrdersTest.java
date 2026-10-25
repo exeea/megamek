@@ -17,7 +17,6 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import java.awt.Window;
 import java.io.File;
@@ -528,6 +527,22 @@ class GpuFireOrdersTest {
             assertEquals(List.of(), queue(firing));
             verify(firing.gui, times(2)).addToast(ToastLevel.WARNING,
                   Messages.getString("GpuBoard.hud.fire.contactNotTargetable"));
+        }
+    }
+
+    @Test
+    void aTargetTheGameRefusesSaysSo() throws Exception {
+        try (GpuFiringFixture firing = firing()) {
+            onSwing(() -> {
+                firing.left.setHidden(true);
+                firing.board.source.refresh();
+                return null;
+            });
+            GpuFireOrders.Snapshot focused = command(firing,
+                  fire -> fire.focusTarget(TargetKey.unit(firing.left.getId())));
+            assertEquals(GpuFireOrders.Focus.NONE, focused.focus());
+            verify(firing.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.fire.notTargetable",
+                  firing.left.getShortName()));
         }
     }
 
