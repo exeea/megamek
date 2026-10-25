@@ -90,7 +90,6 @@ import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog;
 import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
-import megamek.client.ui.dialogs.gameConnectionDialogs.ConnectDialog;
 import megamek.client.ui.dialogs.gameConnectionDialogs.HostDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
@@ -199,7 +198,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         frame.setIconImages(iconList);
 
         installBugReportButtonOnErrorDialogs();
-        GpuStartWindow.install(frame, this::perform, this::host);
+        GpuStartWindow.install(frame, this::perform, this::host, this::connect);
         // init the cache
         MekSummaryCache.getInstance();
 
@@ -438,6 +437,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
                   Messages.getFormattedString("MegaMek.ServerConnectionError", serverAddress, port));
             client.die();
             gui.die();
+            client = null;
             return;
         }
 
@@ -855,48 +855,35 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         }
     }
 
-    /**
-     * Connect to an existing game
-     */
-    void connect() {
-        var cd = new ConnectDialog(frame);
-        cd.setVisible(true);
-        if (cd.isConfirmed() && cd.dataValidation("MegaMek.ConnectDialog.title")) {
-            startClient(cd.getPlayerName(), cd.getServerAddress(), cd.getPort());
-        }
-    }
-
-    /**
-     * Connect to an existing game
-     */
-    void connectSbf() {
-        var cd = new ConnectDialog(frame);
-        cd.setVisible(true);
-        if (cd.isConfirmed() && cd.dataValidation("MegaMek.ConnectDialog.title")) {
-            startClient(cd.getPlayerName(), cd.getServerAddress(), cd.getPort(), GameType.SBF);
-        }
-    }
-
-    /**
-     * Connect to a game as Princess
-     */
-    void connectBot() {
-        var cd = new ConnectDialog(frame);
-        cd.setVisible(true);
-        if (!cd.isConfirmed() || !cd.dataValidation("MegaMek.ConnectDialog.title")) {
+    /** Joins the game the start screen's Connect page describes, as the player or, after the bot dialog, a bot. */
+    private void connect(GpuStartWindow.ConnectRequest request) {
+        if (client != null) {
+            // A second click queued behind the first; that client is already joining
             return;
         }
+        ClientPreferences preferences = PreferenceManager.getClientPreferences();
+        preferences.setLastPlayerName(request.playerName());
+        preferences.setLastConnectAddr(request.serverAddress());
+        preferences.setLastConnectPort(request.port());
+        if (request.bot()) {
+            connectBot(request.playerName(), request.serverAddress(), request.port());
+        } else {
+            startClient(request.playerName(), request.serverAddress(), request.port(),
+                  request.sbf() ? GameType.SBF : GameType.TW);
+        }
+    }
 
-        // initialize game
-        var bcd = new BotConfigDialog(frame, cd.getPlayerName());
+    /** Sets up a bot in the bot dialog, starting from {@code botName}, and has it join the game. */
+    private void connectBot(String botName, String serverAddress, int port) {
+        var bcd = new BotConfigDialog(frame, botName);
         bcd.setVisible(true);
         if (bcd.getResult() == DialogResult.CANCELLED) {
             return;
         }
         client = BotFactory.createBot(bcd.getSelectedAIType(),
               bcd.getBotName(),
-              cd.getServerAddress(),
-              cd.getPort(),
+              serverAddress,
+              port,
               bcd.getBehaviorSettings());
         client.getGame().addGameListener(new BotGUI(frame, (BotClient) client));
         handOffStartBounds();
@@ -906,10 +893,14 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         AbstractClientGUI.setOpenMaximized(false);
         if (!client.connect()) {
             JOptionPane.showMessageDialog(frame,
-                  Messages.getFormattedString("MegaMek.ServerConnectionError", cd.getServerAddress(), cd.getPort()),
+                  Messages.getFormattedString("MegaMek.ServerConnectionError", serverAddress, port),
                   Messages.getString("MegaMek.ConnectDialog.title"),
                   JOptionPane.ERROR_MESSAGE);
             client.die();
+            gui.die();
+            // The start screen stays open, so the player can correct the address and try again
+            client = null;
+            return;
         }
         launch(gui.getFrame());
     }
@@ -1025,8 +1016,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             case SCENARIO -> scenario("");
             // As a dev convenience, start the last scenario again
             case LAST_SCENARIO -> scenario(PreferenceManager.getClientPreferences().getLastScenario());
-            case CONNECT -> connect();
-            case CONNECT_BOT -> connectBot();
             case MAP_EDITOR -> showEditor();
             case OPEN_MAP -> showEditorOpen();
             case SKIN_EDITOR -> showSkinEditor();

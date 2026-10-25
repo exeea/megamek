@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 import megamek.MMConstants;
 import megamek.codeUtilities.StringUtility;
 
-/** The start screen's Host page rules: which inputs are wrong, and the addresses friends connect to. */
+/** The start screen's Host and Connect page rules: which inputs are wrong, and the addresses friends connect to. */
 final class StartHostForm {
     /** The same service the Network information dialog asks; only asked when the player chooses to show it. */
     private static final String PUBLIC_ADDRESS_SERVICE = "https://checkip.amazonaws.com";

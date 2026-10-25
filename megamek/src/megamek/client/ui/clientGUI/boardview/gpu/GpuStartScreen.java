@@ -52,6 +52,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.SplashArt;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Action;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.ConnectRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.HostRequest;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
@@ -62,6 +63,8 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiOptionBar;
+import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Configuration;
 import megamek.common.preference.ClientPreferences;
@@ -71,8 +74,8 @@ import megamek.logging.MMLogger;
 
 /**
  * The start screen: a greeting typed over a dark field, the art revealed over it by hexes popping open, then the main
- * menu sliding in at the right with the version at the top left and a tip at the bottom left. Pages such as Host
- * replace the menu in the same column; Esc goes back. The art and its overlays are drawn once with Java2D and
+ * menu sliding in at the right with the version at the top left and a tip at the bottom left. Pages such as Host and
+ * Connect replace the menu in the same column; Esc goes back. The art and its overlays are drawn once with Java2D and
  * uploaded; the GPU only animates on top of them. Once the intro has played, only slow embers move, at 30 frames a
  * second.
  */
@@ -84,6 +87,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     private static final float TIP_WIDTH = 360;
     private static final float NOTES_WIDTH = 320;
     private static final float PORT_WIDTH = 110;
+    /** The Connect page's segment that has a bot join instead of the player. */
+    private static final int AS_BOT = 1;
     private static boolean probed;
 
     private record Hex(double x, double y, double at) { }
@@ -99,7 +104,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
-    private enum Page { MAIN, HELP, HOST }
+    private enum Page { MAIN, HELP, HOST, CONNECT }
 
     private final GpuStartWindow window;
     private final GUIPreferences preferences;
@@ -152,7 +157,10 @@ final class GpuStartScreen extends ApplicationAdapter {
     private long start;
     private boolean skipped;
     private boolean settledRate;
-    /** The Host page's inputs, kept while it shows so opening its online options keeps what was typed. */
+    /**
+     * The Host or Connect page's inputs, kept while it shows so opening its online options or switching to a bot keeps
+     * what was typed. The name and port belong to whichever of the two shows.
+     */
     private UiTextField nameInput;
     private UiFormField nameField;
     private UiButton onlineToggle;
@@ -169,6 +177,12 @@ final class GpuStartScreen extends ApplicationAdapter {
     private Label publicAddress;
     private UiButton hostButton;
     private UiButton backButton;
+    private UiSegmented roleBar;
+    private UiTextField addressInput;
+    private UiFormField addressField;
+    private Table addressRow;
+    private UiChoice sbfBox;
+    private UiButton connectButton;
 
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
         this.window = window;
@@ -268,6 +282,15 @@ final class GpuStartScreen extends ApplicationAdapter {
                 passwordBox.shown(true);
             }
         }
+        if (asked == Page.CONNECT) {
+            if (probe.has("bot")) {
+                roleBar.select(AS_BOT);
+                fillConnectColumn();
+            }
+            if (probe.has("sbf")) {
+                sbfBox.setChecked(true);
+            }
+        }
     }
 
     /** Saves the frame just drawn as the developer switch's PNG, then quits when it asks to. */
@@ -319,17 +342,16 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (shown == Page.HOST) {
             buildHostPage();
             fillHostColumn();
+        } else if (shown == Page.CONNECT) {
+            buildConnectPage();
+            fillConnectColumn();
         } else {
             List<Actor> items = new ArrayList<>();
             if (shown == Page.MAIN) {
-                UiButton newGame = kit.button("button-primary", null, Messages.getString("StartScreen.newGame"),
-                      null);
-                leftAligned(newGame);
-                UiKit.onChange(newGame, () -> showPage(Page.HOST));
-                items.add(newGame);
+                items.add(pageButton("button-primary", "StartScreen.newGame", Page.HOST));
                 items.add(item("button-secondary", "StartScreen.loadGame", Action.LOAD, Action.QUICK_LOAD));
                 items.add(item("button-secondary", "StartScreen.scenario", Action.SCENARIO, Action.LAST_SCENARIO));
-                items.add(item("button-secondary", "StartScreen.connect", Action.CONNECT, Action.CONNECT_BOT));
+                items.add(pageButton("button-secondary", "StartScreen.connect", Page.CONNECT));
                 items.add(overline("StartScreen.tools"));
                 items.add(item("button-quiet", "StartScreen.mapEditor", Action.MAP_EDITOR, null));
                 items.add(item("button-quiet", "StartScreen.openMap", Action.OPEN_MAP, null));
@@ -351,8 +373,9 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (start != 0) {
             pageShownAt = clock();
         }
-        stage.setKeyboardFocus(shown == Page.HOST ? nameInput : null);
-        if (shown == Page.HOST) {
+        boolean form = shown == Page.HOST || shown == Page.CONNECT;
+        stage.setKeyboardFocus(form ? nameInput : null);
+        if (form) {
             nameInput.selectAll();
         }
     }
@@ -383,7 +406,8 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     /** Adds the keyboard stops in {@code actor}: itself when it is a control, or the controls inside it. */
     private void stops(Actor actor) {
-        if (actor instanceof UiButton || actor instanceof UiChoice || actor instanceof TextField) {
+        if (actor instanceof UiButton || actor instanceof UiChoice || actor instanceof TextField
+              || actor instanceof UiOptionBar) {
             focusable.add(actor);
         } else if (actor instanceof Group group) {
             for (Actor child : group.getChildren()) {
@@ -397,6 +421,14 @@ final class GpuStartScreen extends ApplicationAdapter {
         UiButton button = kit.button(style, null, Messages.getString(key), null);
         leftAligned(button);
         UiKit.onChange(button, () -> window.dispatch(withControl != null && controlHeld() ? withControl : action));
+        return button;
+    }
+
+    /** A menu button that opens {@code shown} in the column. */
+    private UiButton pageButton(String style, String key, Page shown) {
+        UiButton button = kit.button(style, null, Messages.getString(key), null);
+        leftAligned(button);
+        UiKit.onChange(button, () -> showPage(shown));
         return button;
     }
 
@@ -556,8 +588,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         String name = nameInput.getText().trim();
         int port = StartHostForm.port(portInput.getText());
         nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
-        portField.error(port < 0 ? Messages.getString("MegaMek.GameConnection.portError",
-              String.valueOf(MMConstants.MIN_PORT), String.valueOf(MMConstants.MAX_PORT)) : null);
+        portField.error(portError(port));
         if (name.isEmpty()) {
             stage.setKeyboardFocus(nameInput);
             return;
@@ -574,6 +605,89 @@ final class GpuStartScreen extends ApplicationAdapter {
         boolean register = registerBox.isChecked();
         window.host(new HostRequest(name, passwordInput.getText(), port, register,
               register ? metaserverInput.getText().trim() : ""));
+    }
+
+    /** The port field's error for {@code port}, as {@link StartHostForm#port} reads it, or null when it is fine. */
+    private static String portError(int port) {
+        return port < 0 ? Messages.getString("MegaMek.GameConnection.portError",
+              String.valueOf(MMConstants.MIN_PORT), String.valueOf(MMConstants.MAX_PORT)) : null;
+    }
+
+    // ---- The Connect page ----
+
+    /** The Connect page's inputs, filled from the last game joined; the player joins unless Bot is chosen. */
+    private void buildConnectPage() {
+        ClientPreferences client = PreferenceManager.getClientPreferences();
+        roleBar = kit.tokenSegmented(false, Messages.getString("MegaMek.GameConnection.player"),
+              Messages.getString("MegaMek.GameConnection.bot"));
+        // The segments share the column's width
+        for (Cell<?> cell : roleBar.getCells()) {
+            cell.expandX();
+        }
+        UiKit.onChange(roleBar, this::fillConnectColumn);
+
+        nameInput = field(client.getLastPlayerName());
+        nameField = kit.formField(Messages.getString("MegaMek.GameConnection.name"), nameInput);
+        addressInput = field(client.getLastConnectAddr());
+        addressField = kit.formField(Messages.getString("MegaMek.GameConnection.address"), addressInput);
+        portInput = field(String.valueOf(client.getLastConnectPort()));
+        portField = kit.formField(Messages.getString("MegaMek.GameConnection.port"), portInput);
+        addressRow = new Table();
+        addressRow.top().left();
+        addressRow.add(addressField).growX().minWidth(0).top();
+        addressRow.add(portField).width(PORT_WIDTH).padLeft(12).top();
+
+        sbfBox = kit.check(Messages.getString("MegaMek.GameConnection.sbf"), false);
+        sbfBox.left();
+        connectButton = kit.button("button-primary", null, Messages.getString("MegaMek.GameConnection.connect"),
+              null);
+        leftAligned(connectButton);
+        UiKit.onChange(connectButton, this::submitConnect);
+        backButton = backButton();
+    }
+
+    private boolean asBot() {
+        return roleBar.getSelectedIndex() == AS_BOT;
+    }
+
+    /** Lays the Connect page's column out for the player or a bot; there is no Strategic BattleForce bot. */
+    private void fillConnectColumn() {
+        boolean bot = asBot();
+        nameField.helper(Messages.getString(bot ? "MegaMek.GameConnection.botNameHelper"
+              : "MegaMek.GameConnection.nameHelper"));
+        connectButton.setText(kit.cased("button", Messages.getString(bot ? "MegaMek.GameConnection.connectBot"
+              : "MegaMek.GameConnection.connect")));
+        List<Actor> items = new ArrayList<>();
+        items.add(overline("StartScreen.connect"));
+        items.add(roleBar);
+        items.add(nameField);
+        items.add(addressRow);
+        if (!bot) {
+            items.add(sbfBox);
+        }
+        items.add(connectButton);
+        items.add(backButton);
+        if (!column.isEmpty() && column.get(0) instanceof Label title) {
+            items.set(0, title);
+        }
+        setColumn(items);
+    }
+
+    /** Checks the Connect page; shows what is wrong under the inputs, or asks MegaMek to join the game. */
+    private void submitConnect() {
+        String name = nameInput.getText().trim();
+        String address = addressInput.getText().trim();
+        int port = StartHostForm.port(portInput.getText());
+        nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
+        addressField.error(address.isEmpty() ? Messages.getString("MegaMek.GameConnection.addressError") : null);
+        portField.error(portError(port));
+        Actor wrong = name.isEmpty() ? nameInput : address.isEmpty() ? addressInput : port < 0 ? portInput : null;
+        if (wrong != null) {
+            stage.setKeyboardFocus(wrong);
+            return;
+        }
+        boolean bot = asBot();
+        window.connect(new ConnectRequest(name, address, port, bot, !bot && sbfBox.isChecked()));
     }
 
     private Table bottomRow() {
@@ -684,6 +798,8 @@ final class GpuStartScreen extends ApplicationAdapter {
                             button.fire(new ChangeListener.ChangeEvent());
                         } else if (focus instanceof TextField && keycode != Keys.SPACE && page == Page.HOST) {
                             submitHost();
+                        } else if (focus instanceof TextField && keycode != Keys.SPACE && page == Page.CONNECT) {
+                            submitConnect();
                         } else {
                             return false;
                         }

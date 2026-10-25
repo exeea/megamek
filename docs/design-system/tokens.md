@@ -588,8 +588,9 @@ faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
 keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
 `focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no general Tab
 traversal yet; the start screen (`GpuStartScreen`) handles it itself: Up, Down and Tab move through every button, check
-box and text field on the page (its text fields turn their own Tab traversal off with `setFocusTraversal(false)`), Enter
-or Space presses a button, Enter in a text field submits the page, and Esc returns to the main menu.
+box, segmented control and text field on the page (its text fields turn their own Tab traversal off with
+`setFocusTraversal(false)`), Left and Right switch a segmented control, Enter or Space presses a button, Enter in a text
+field submits the page, and Esc returns to the main menu.
 
 hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
 `-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and
