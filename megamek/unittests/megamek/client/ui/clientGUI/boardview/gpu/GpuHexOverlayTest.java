@@ -21,7 +21,6 @@ import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.board.HexTile;
 import megamek.common.equipment.MiscType;
 import megamek.common.options.OptionsConstants;
 import org.junit.jupiter.api.Test;
@@ -74,13 +73,13 @@ class GpuHexOverlayTest {
                 marked.tactical().fills().forEach(fill -> assertNotNull(fill.planeAnchor(),
                       "Sheet borders and embedded-board indicators belong to their owner's flat plane"));
                 assertEquals(raster(before), raster(marked));
-                assertTrue(covers(marked.tactical(), Color.CYAN, new Coords(16, 8), 10.5, 18),
+                assertTrue(covers(marked.tactical(), Color.CYAN, new Coords(16, 8), NORTH_WEST_X, NORTH_WEST_Y),
                       "The second sheet's left edge must be drawn at the actual hex seam");
-                assertTrue(covers(marked.tactical(), Color.CYAN, new Coords(8, 17), 42, 0),
+                assertTrue(covers(marked.tactical(), Color.CYAN, new Coords(8, 17), 0, NORTH_Y),
                       "The second row of sheets needs its top edge");
-                assertFalse(covers(marked.tactical(), Color.CYAN, new Coords(8, 8), 42, 0),
+                assertFalse(covers(marked.tactical(), Color.CYAN, new Coords(8, 8), 0, NORTH_Y),
                       "Interior hexes must not acquire sheet borders");
-                assertTrue(covers(marked.tactical(), new Color(0, 140, 0, 120), embedded, 42, 36));
+                assertTrue(covers(marked.tactical(), new Color(0, 140, 0, 120), embedded, 0, 0));
                 List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
                 // On the column top itself: with hex transitions its edges would drape down its slopes.
                 BoardSculptTest.withTransitions(false, () -> BoardTacticalGeometry.drape(marked, triangles::add));
@@ -92,14 +91,15 @@ class GpuHexOverlayTest {
                     legacy2D.getComponent();
                     legacy2D.zoomOut();
                     float scale = legacy2D.getScale();
-                    assertEquals(marked.tactical(), fixture.view.captureTacticalGeometry().scaledX(HexTile.IMAGE_TO_MODEL_X));
+                    assertEquals(marked.tactical(), new BoardTacticalMarks().capture(fixture.view, false));
                     assertEquals(scale, legacy2D.getScale());
                 } finally {
                     legacy2D.dispose();
                 }
                 prefs.setMapSheetColor(Color.YELLOW);
                 fixture.source.refresh();
-                assertTrue(covers(fixture.source.takeFrame().scene().tactical(), Color.YELLOW, new Coords(8, 17), 42, 0));
+                assertTrue(covers(fixture.source.takeFrame().scene().tactical(), Color.YELLOW, new Coords(8, 17), 0,
+                      NORTH_Y));
                 prefs.setShowMapSheets(false);
                 fixture.game.getBoard().embeddedBoardCoords().clear();
                 fixture.source.refresh();
@@ -180,7 +180,7 @@ class GpuHexOverlayTest {
                 fixture.view.updateEcmList();
                 assertTrue(empty(fixture.view.electronicWarfare()),
                       "An emitter on another board must not leave a field or source at matching coordinates");
-                assertTrue(fixture.view.captureTacticalGeometry().fills().isEmpty());
+                assertTrue(new BoardTacticalMarks().capture(fixture.view, false).fills().isEmpty());
             });
         }
     }
@@ -193,10 +193,14 @@ class GpuHexOverlayTest {
         return scene.tiles().stream().map(BoardScene.Tile::tactical).toList();
     }
 
-    /** Whether a fill covers the point {@code x, y} of the 2D art's hex at {@code coords}, as the 3D board maps it. */
-    static boolean covers(BoardTactical tactical, Color color, Coords coords, double x, double y) {
-        double boardX = (coords.getX() * 63 + x) * HexTile.IMAGE_TO_MODEL_X;
-        double boardY = coords.getY() * 72 + (coords.getX() & 1) * 36 + y;
-        return tactical.fills().stream().anyMatch(fill -> fill.argb() == color.getRGB() && fill.shape().contains(boardX, boardY));
+    /** The midpoints of a hex's north and north-west sides, from its centre in tactical units. */
+    static final double NORTH_Y = -BoardGeometry.TILE_HEIGHT / 2, NORTH_WEST_X = -BoardGeometry.TILE_WIDTH * 3 / 8,
+          NORTH_WEST_Y = -BoardGeometry.TILE_HEIGHT / 4;
+
+    /** Whether a fill covers the point {@code dx, dy} from the centre of the hex at {@code coords}. */
+    static boolean covers(BoardTactical tactical, Color color, Coords coords, double dx, double dy) {
+        BoardTactical.Point centre = BoardTacticalGeometry.centre(coords);
+        return tactical.fills().stream().anyMatch(fill -> fill.argb() == color.getRGB()
+              && fill.shape().contains(centre.x() + dx, centre.y() + dy));
     }
 }

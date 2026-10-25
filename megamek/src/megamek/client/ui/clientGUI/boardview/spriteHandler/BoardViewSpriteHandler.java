@@ -34,9 +34,12 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.common.event.*;
 import megamek.common.event.board.GameBoardChangeEvent;
@@ -63,6 +66,7 @@ public abstract class BoardViewSpriteHandler implements GameListener {
 
     protected final AbstractClientGUI clientGUI;
     protected final Collection<Sprite> currentSprites = new ArrayList<>();
+    protected final Collection<TacticalMark> currentMarks = new ArrayList<>();
 
     public BoardViewSpriteHandler(AbstractClientGUI clientGUI) {
         this.clientGUI = clientGUI;
@@ -74,8 +78,22 @@ public abstract class BoardViewSpriteHandler implements GameListener {
      * When overriding this, call super.clear() or remember to perform clean up in the overriding method.
      */
     public void clear() {
-        clientGUI.boardStates().forEach(state -> state.removeSprites(currentSprites));
+        clientGUI.boardStates().forEach(state -> {
+            state.removeSprites(currentSprites);
+            state.removeMarks(currentMarks);
+        });
         currentSprites.clear();
+        currentMarks.clear();
+    }
+
+    /** Shows {@code marks} on {@code state} until {@link #clear()}. */
+    protected void addMarks(BoardClientState state, Collection<? extends TacticalMark> marks) {
+        currentMarks.addAll(marks);
+        state.addMarks(marks);
+    }
+
+    protected void addMark(BoardClientState state, TacticalMark mark) {
+        addMarks(state, List.of(mark));
     }
 
     /**

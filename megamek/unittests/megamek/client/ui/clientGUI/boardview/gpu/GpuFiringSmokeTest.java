@@ -16,8 +16,7 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.Hex;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
@@ -42,8 +41,8 @@ class GpuFiringSmokeTest {
             }
         }
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
-            List<FieldOfFireSprite> borders = new ArrayList<>();
-            List<TextMarkerSprite> labels = new ArrayList<>();
+            List<TacticalMark> borders = new ArrayList<>();
+            List<TacticalMark> labels = new ArrayList<>();
             SwingUtilities.invokeAndWait(() -> {
                 fixture.game.getBoard().setHex(new Coords(4, 4), new Hex(1, "pavement:1", ""));
                 fixture.game.getBoard().setHex(new Coords(2, 2), new Hex(0, "water:3", ""));
@@ -64,14 +63,14 @@ class GpuFiringSmokeTest {
                             }
                         }
                         if (edges != 0) {
-                            borders.add(new FieldOfFireSprite(fixture.view, bracket, coords, edges));
+                            borders.add(new TacticalMark.WeaponRange(coords, edges, bracket));
                         }
                     }
-                    labels.add(new TextMarkerSprite(fixture.view, source.translated(1, bracket + 1), bracket));
+                    labels.add(new TacticalMark.RangeLabel(source.translated(1, bracket + 1), bracket));
                 }
-                fixture.view.addSprites(borders);
-                labels.add(new TextMarkerSprite(fixture.view, new Coords(2, 2), RangeType.RANGE_SHORT));
-                fixture.view.addSprites(labels);
+                fixture.view.addMarks(borders);
+                labels.add(new TacticalMark.RangeLabel(new Coords(2, 2), RangeType.RANGE_SHORT));
+                fixture.view.addMarks(labels);
                 fixture.source.refresh();
             });
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
@@ -106,8 +105,8 @@ class GpuFiringSmokeTest {
                             GpuBoardTestUi.capture(new File(output, "firing-volumes-top-rotated.png"));
                             SwingUtilities.invokeAndWait(() -> {
                                 fixture.view.clearAllAttacks();
-                                fixture.view.removeSprites(borders);
-                                fixture.view.removeSprites(labels);
+                                fixture.view.removeMarks(borders);
+                                fixture.view.removeMarks(labels);
                                 fixture.source.refresh();
                             });
                         } else if (tick == 20) {

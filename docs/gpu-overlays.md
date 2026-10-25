@@ -8,7 +8,7 @@ change how already-visible information is displayed.
 
 | Owner | Responsibility |
 | --- | --- |
-| `BoardClientState`, `BoardTacticalGraphics` | Capture the shared painters' tactical output and playback category on Swing. |
+| `BoardTacticalMarks`, `BoardTacticalGraphics` | Draw the client's markings (its `TacticalMark` records, highlights, deployment, sheets) on the hex lattice on Swing, with their playback category. |
 | `BoardFieldOfView`, `GpuFieldOfView` | Share the client LOS/sensor classification and upload its per-hex rendering mask. |
 | `BoardTacticalGeometry`, `BoardFiringGeometry`, `BoardDeploymentGeometry` | Convert captured paths, boundaries and footprints into common board geometry. |
 | `GpuTactical`, `GpuFireControl` | Draw tactical primitives, range walls and attack lines. |

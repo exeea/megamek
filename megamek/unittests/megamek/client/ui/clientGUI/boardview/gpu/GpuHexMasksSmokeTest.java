@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
-import java.awt.Point;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,9 +27,7 @@ import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.common.board.Coords;
-import megamek.common.board.HexTile;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -71,10 +68,11 @@ class GpuHexMasksSmokeTest {
             var graphics = new BoardTacticalGraphics();
             BoardTactical opaque;
             try {
-                graphics.setColor(new Color(73, 151, 227));
-                graphics.fillHexBorder(new Point(), 1, 1.5, 2.5, false);
-                // Drawn on the 2D board's hexes; the 3D board maps the capture onto its own (GpuBoardSource).
-                opaque = graphics.snapshot().scaledX(HexTile.IMAGE_TO_MODEL_X);
+                var hex = BoardTacticalGraphics.at(graphics, new Coords(0, 0));
+                hex.setColor(new Color(73, 151, 227));
+                hex.fillHexBorder(1.5, 2.5);
+                hex.dispose();
+                opaque = graphics.snapshot();
             } finally { graphics.dispose(); }
             BoardScene single = scene(1, 1, opaque);
             surfaces.put(new Coords(0, 0), surface(single.tiles().getFirst(), 0));
@@ -295,14 +293,15 @@ class GpuHexMasksSmokeTest {
             for (int layer = 0; layer < repetitions; layer++) {
                 for (int x = 0; x < width; x++) {
                     for (int y = 0; y < height; y++) {
-                        graphics.setColor(new Color(40 + (x * 23 + layer * 67) % 200,
+                        var hex = BoardTacticalGraphics.at(graphics, new Coords(x, y));
+                        hex.setColor(new Color(40 + (x * 23 + layer * 67) % 200,
                               35 + (y * 41 + layer * 53) % 210, 220 - layer * 35, layer == 0 && x % 3 == 0 ? 255 : 109));
-                        graphics.fillHexBorder(new Point(x * 63, y * 72 + (x & 1) * 36), 1,
-                              (x + y) % 3 + layer * .5, 1.5 + (x % 3), false);
+                        hex.fillHexBorder((x + y) % 3 + layer * .5, 1.5 + (x % 3));
+                        hex.dispose();
                     }
                 }
             }
-            return graphics.snapshot().scaledX(HexTile.IMAGE_TO_MODEL_X);
+            return graphics.snapshot();
         } finally { graphics.dispose(); }
     }
 

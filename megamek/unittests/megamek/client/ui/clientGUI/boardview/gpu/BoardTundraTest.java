@@ -35,7 +35,7 @@ class BoardTundraTest {
         assertEquals(BoardScene.Biome.TUNDRA, BoardBiome.kind(after));
         assertFalse(before.sameGeometry(after), "Editing tundra must invalidate captured ground/plant data");
         assertTrue(after.detailedGround());
-        assertFalse(GpuGroundCover.grows(scene, after), "Dense meadow blades must not obscure the crust");
+        assertEquals(!after.barren(), GpuGroundCover.grows(scene, after), "Tundra grows its dwarf shrubs where air is");
         assertEquals(1, board.getHex(at).terrainLevel(Terrains.TUNDRA));
         assertEquals(theme, board.getHex(at).getTheme());
         for (var lod : TerrainLod.values()) {
@@ -99,59 +99,50 @@ class BoardTundraTest {
         var center = new Coords(4, 4);
         var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
               c.getX() >= 5 ? BoardScene.Biome.TUNDRA : BoardScene.Biome.NONE, 0));
-        var tile = scene.tile(center);
-        var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-        var roots = GpuGroundCover.plant(scene, tile, support, null);
-        assertTrue(roots.size > 0, "The untreated meadow still grows grass");
-        for (int i = 0; i < roots.size; i += 4) {
-            assertTrue(BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA,
-                  roots.items[i], roots.items[i + 1], 0) < .45f, "Grass cannot fill the tundra side of the contact");
+        int blades = 0, shrubs = 0;
+        // The meadow's hex and the tundra's beside it.
+        for (var at : List.of(center, center.translated(1))) {
+            var tile = scene.tile(at);
+            var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
+            var roots = GpuGroundCover.plant(scene, tile, support, null);
+            for (int i = 0; i < roots.size; i += 4) {
+                float tundra = BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, roots.items[i], roots.items[i + 1], 0);
+                if (roots.items[i + 3] % 1 == 0) {
+                    blades++;
+                    assertTrue(tundra < .45f, "Grass cannot fill the tundra side of the contact");
+                } else {
+                    shrubs++;
+                    assertTrue(tundra > .5f, "Dwarf shrubs keep to the tundra side of the contact");
+                }
+            }
         }
+        assertTrue(blades > 0, "The untreated meadow still grows grass");
+        assertTrue(shrubs > 0, "The tundra grows its dwarf shrubs");
     }
 
     @Test
-    void dwarfShrubsAreSparseRootedWoodyAndOnlyAtFullDetail() {
-        var stones = List.of(new BoardScene.Feature("scatter-rock", 20, 0, 0, 1, .1f, 0,
-              BoardScene.FeatureKind.SCATTER));
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.TUNDRA, 0)
-              .withFeatures(stones));
-        var counts = new java.util.HashSet<Integer>();
-        int woody = 0, leafy = 0;
-        for (int x = 2; x < 6; x++) for (int y = 2; y < 6; y++) {
-            var tile = scene.tile(new Coords(x, y));
-            var surface = new BoardSurface(scene, tile, TerrainLod.FULL);
-            var plants = shrubs(surface);
-            assertTrue(plants.size() <= 3 * 660, "At most three existing dry-kit shrubs per hex");
-            assertEquals(0, plants.size() % 660, "Keep complete authored shrubs, not partial faces");
-            counts.add(plants.size() / 660);
-            assertEquals(plants, shrubs(new BoardSurface(scene, tile, TerrainLod.FULL)),
-                  "Rebuilding the same support must not move the shrubs");
-            for (var face : plants) {
-                var shade = surface.relief.shade(face.a());
-                if (shade.kind() == BoardRelief.Kind.PLANT) { woody++; }
-                if (shade.kind() == BoardRelief.Kind.LEAF) { leafy++; }
-                for (var p : List.of(face.a(), face.b(), face.c())) {
-                    assertTrue(p.z >= -BoardRelief.metres(.01f) && p.z <= BoardRelief.metres(.75f),
-                          "Dwarf plants stay rooted and below 75 cm, without changing tile level");
-                    assertTrue(Math.hypot(p.x - BoardGeometry.centerX(tile.coords()),
-                                p.y - BoardGeometry.centerY(tile.coords())) >= BoardGeometry.width() * .2f,
-                          "Leave the existing unit standing area clear");
-                }
-            }
-            for (var lod : List.of(TerrainLod.MEDIUM, TerrainLod.COARSE, TerrainLod.DISTANT)) {
-                assertTrue(shrubs(new BoardSurface(scene, tile, lod)).isEmpty(),
-                      "Unresolved dwarf vegetation must not fill distant chunks");
-            }
+    void tundraGrowsClumpedDwarfShrubsAndNoMeadowBlades() {
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.TUNDRA, 0));
+        var tile = scene.tile(new Coords(4, 4));
+        var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
+        var roots = GpuGroundCover.plant(scene, tile, support, null);
+        assertEquals(roots, GpuGroundCover.plant(scene, tile, support, null), "Rebuilding must not move the shrubs");
+        for (int i = 3; i < roots.size; i += 4) {
+            assertEquals(.5f, roots.items[i] % 1, "Every tundra root grows a dwarf shrub, never a blade over the carpet");
         }
-        assertTrue(counts.contains(0) && counts.stream().anyMatch(n -> n > 0), "Leave real open gaps between clumps");
-        assertTrue(woody > 0 && leafy > 0, "Authored woody branches and leaves both survive placement");
-    }
-
-    private static List<BoardSurface.Face> shrubs(BoardSurface surface) {
-        return surface.faces.stream().filter(face -> {
-            var shade = surface.relief.shade(face.a());
-            return shade != null && (shade.kind() == BoardRelief.Kind.PLANT || shade.kind() == BoardRelief.Kind.LEAF);
-        }).toList();
+        // Clumps leave the carpet open between them: of the hex's 1.5 m cells, some hold shrubs and some none.
+        var cells = new java.util.HashSet<Long>();
+        float cell = BoardRelief.metres(1.5f);
+        for (int i = 0; i < roots.size; i += 4) {
+            cells.add((long) Math.floor(roots.items[i] / cell) << 32 ^ (long) Math.floor(roots.items[i + 1] / cell));
+        }
+        float hexCells = (float) (Math.sqrt(3) / 2 * BoardGeometry.width() * BoardGeometry.width() / (cell * cell));
+        assertTrue(cells.size() > hexCells * .2f && cells.size() < hexCells * .9f,
+              "Shrubs grow in clumps with open carpet between them, not evenly everywhere: " + cells.size() + " of "
+                    + hexCells);
+        var full = new BoardSurface(scene, tile, TerrainLod.FULL);
+        assertTrue(full.faces.stream().map(face -> full.relief.shade(face.a())).noneMatch(shade ->
+              shade != null && shade.kind() == BoardRelief.Kind.PLANT), "No second, baked shrub kit on tundra");
     }
 
     static Board board(String theme, boolean tundra) {

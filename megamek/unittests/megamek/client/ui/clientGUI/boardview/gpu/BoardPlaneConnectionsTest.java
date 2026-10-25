@@ -4,26 +4,19 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import java.awt.Color;
-import java.awt.Point;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
-import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
-import megamek.common.board.HexTile;
 import org.junit.jupiter.api.Test;
 
 class BoardPlaneConnectionsTest {
@@ -75,10 +68,11 @@ class BoardPlaneConnectionsTest {
         var deployment = new BoardTacticalGraphics();
         try {
             BoardTacticalGraphics.drawDeployment(deployment, local -> {
-                local.setColor(Color.CYAN);
                 for (Coords coords : List.of(high, low)) {
-                    ((BoardTacticalGraphics) local).fillHexBorder(new Point(coords.getX() * 63,
-                          coords.getY() * 72 + (coords.getX() & 1) * 36), 1, 0, 7, true);
+                    var hex = BoardTacticalGraphics.onHexPlane(local, coords);
+                    hex.setColor(Color.CYAN);
+                    hex.fillHexBorder(0, 7);
+                    hex.dispose();
                 }
             });
             assertTrue(connections(raised, deployment.snapshot().fills()).isEmpty(),
@@ -93,13 +87,6 @@ class BoardPlaneConnectionsTest {
     }
 
     static BoardTactical range(Set<Coords> owners, boolean weapon, Color color) {
-        BoardGlyphContext context = mock(BoardGlyphContext.class);
-        when(context.glyphContext()).thenReturn(context);
-        when(context.getScale()).thenReturn(1f);
-        when(context.getHexLocation(any())).thenAnswer(call -> {
-            Coords coords = call.getArgument(0);
-            return new Point(coords.getX() * 63, coords.getY() * 72 + (coords.getX() & 1) * 36);
-        });
         var graphics = new BoardTacticalGraphics();
         try {
             for (Coords owner : owners.stream().sorted(java.util.Comparator.comparingInt(Coords::getX)
@@ -108,13 +95,15 @@ class BoardPlaneConnectionsTest {
                 for (int direction = 0; direction < 6; direction++) {
                     if (!owners.contains(owner.translated(direction))) { borders |= 1 << direction; }
                 }
-                MovementEnvelopeSprite sprite = weapon
-                      ? new FieldOfFireSprite(context, RangeType.RANGE_SHORT, owner, borders)
-                      : new MovementEnvelopeSprite(context, color, owner, borders);
-                sprite.drawTactical(graphics);
+                if (weapon) {
+                    BoardTacticalMarks.zone(graphics, owner, borders, TacticalStyle.withAlpha(
+                          TacticalStyle.rangeColor(RangeType.RANGE_SHORT), TacticalStyle.RANGE_BAND_OPACITY),
+                          TacticalStyle.RANGE_BAND_WIDTH, null);
+                } else {
+                    BoardTacticalMarks.envelope(graphics, new TacticalMark.Envelope(owner, borders, color));
+                }
             }
-            // The 2D painters draw on the image's hexes; the 3D board maps their capture onto its own (GpuBoardSource).
-            return graphics.snapshot().scaledX(HexTile.IMAGE_TO_MODEL_X);
+            return graphics.snapshot();
         } finally {
             graphics.dispose();
         }

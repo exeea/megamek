@@ -68,9 +68,9 @@ class GpuMagmaSmokeTest {
             Path textures = root.resolve("models/board/textures");
             // The final repeat changes coverage to zero while retaining exactly the same emitted light.
             int alpha = index == 3 ? 0 : 255;
-            BoardMaterialFiles.relief(textures, "terrain/lava/lava", filled(0xff000000), filled(0xff8080ff),
+            BoardMaterialFiles.relief(textures, "terrain/lava/lava-flow", filled(0xff000000), filled(0xff8080ff),
                   filled(0x0080ccff));
-            BoardMaterialFiles.heat(textures, "terrain/lava/lava", filled((alpha << 24) | 0x004080c0),
+            BoardMaterialFiles.heat(textures, "terrain/lava/lava-flow", filled((alpha << 24) | 0x004080c0),
                   index == 3 ? 2 : index * 2);
             roots.add(root);
         }

@@ -1,6 +1,6 @@
 # Grass and shared vegetation wind
 
-`GpuGroundCover` draws low grass over finished terrain. Crops and wetland plants
+`GpuGroundCover` draws low grass, and tundra's dwarf shrubs, over finished terrain. Crops and wetland plants
 belong to `GpuBiomeVegetation`; trees belong to `GpuTreeInstances`. Grass, crops
 and reeds follow one ground-cover contract, described in
 [fields and marsh](gpu-fields-marsh.md#one-pipeline-for-ground-cover): terrain
@@ -14,9 +14,9 @@ density and mesh rules.
 | --- | --- |
 | `BoardVegetation`, `BoardBiome` | Terrain eligibility, deterministic placement inputs and shared growth fields. |
 | `BoardPlants` | What each terrain detail level plants; grass and bank turf on medium and full detail. |
-| `GpuGroundCover` | Root planting for terrain workers, projected density, blade templates and per-chunk submission. |
+| `GpuGroundCover` | Root planting for terrain workers, projected density, blade and shrub templates and per-chunk submission. |
 | `GpuBankTurf` | Six curved turf-edge cutouts, fitted to finished bank contours and retained with the grass chunk. |
-| `terrain-grass.glsl` | Blade shape, root-fixed bending and per-root detail selection. |
+| `terrain-grass.glsl` | Blade and dwarf-shrub shape, root-fixed bending and per-root detail selection. |
 | `terrain-meadow.glsl` | Growth variation shared by ground color and grass shape. |
 | `terrain-vegetation-wind.glsl` | World-space gust used by grass, crops and marsh plants. |
 | `terrain-vegetation.frag` | Plant surface lighting, root darkening and wetness. |
@@ -122,7 +122,21 @@ grass-to-sand gradients. The Grass blades control also hides these crowns.
 
 Two shared blade templates contain three or seven triangles. The vertex shader
 derives curvature, orientation, color variation and wind from the root; the
-fragment shader adds lighting and wetness. The grass color pass has no draws
+fragment shader adds lighting and wetness.
+
+Tundra grows dwarf shrubs on the same roots instead of blades. Where its
+coverage (`BoardBiome`) times a clump field about 1.6 m across outgrows the
+grass, a root becomes a shrub, at 40 % of a blade's chance since a shrub spreads
+far wider; the root carries rank + .5, so the prefix by whole rank still draws
+both kinds. Each chunk keeps a third buffer of these roots for the shrub
+template: twelve diamond leaves, which the vertex shader arranges into a
+mound, steeper on its crown than at its rim. Each shrub draws one of four forms
+(a low mat of needles, a prostrate spread of round leaves, upright bushes of round
+or narrow leaves) and its size, mostly small with a few broad ones, and takes one
+colour from colonies metres across of crowberry, bearberry, dwarf birch and willow. Shrubs
+share the blades' density, wind (less sway), scars, lighting and Grass blades
+control, and are drawn at every grass scale. No blade grows on full tundra, so the
+carpet's own detail stays visible between the clumps. The grass color pass has no draws
 below its visible scale, one at a uniform orthographic scale, and at most two in
 perspective. Grass receives shadows but does not cast a separate shadow per blade.
 

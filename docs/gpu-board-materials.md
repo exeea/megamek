@@ -142,9 +142,9 @@ standard material would misread. Each is a `ShaderMaterial` of the `<name>.gdsha
 
 | Material | Extra parameter (map) | Colour space |
 | --- | --- | --- |
-| `terrain/lava/lava` | `texture_coverage` (`lava_coverage.png`): exposed-melt coverage | `texture_emission` is linear radiance, times `emission_energy` (5) |
-| `terrain/lava/crust` | `texture_glow` (`crust_glow.png`): fissure glow | `texture_emission` is linear heat in R, which the shader colours |
-| `terrain/ice/sheet` | `texture_cracks` (`sheet_cracks.png`): cracks and bubbles | `texture_albedo` is a tint whose hue alone matters |
+| `terrain/lava/lava-flow` | `texture_coverage` (`lava-flow_coverage.png`): exposed-melt coverage | `texture_emission` is linear radiance, times `emission_energy` (5) |
+| `terrain/lava/lava-crust` | `texture_glow` (`lava-crust_glow.png`): fissure glow | `texture_emission` is linear heat in R, which the shader colours |
+| `terrain/ice/ice-sheet` | `texture_cracks` (`ice-sheet_cracks.png`): cracks and bubbles | `texture_albedo` is a tint whose hue alone matters |
 
 The standard maps and factors take the names of Godot's own converted shaders: `albedo`,
 `texture_albedo`, `roughness`, `metallic`, `texture_normal`, `normal_scale`,
@@ -259,28 +259,28 @@ these values safely).
 | --- | --- | --- |
 | `roads/asphalt`, `roads/dirt`, `roads/gravel` | 1024 | 12 |
 | `structures/industrial/paint`, `structures/industrial/steel` | 1024 | – |
-| `terrain/ice/sheet` | 1024 | – |
-| `terrain/lava/crust`, `terrain/lava/lava` | 1024 | – |
+| `terrain/ice/ice-sheet` | 1024 | – |
+| `terrain/lava/lava-crust`, `terrain/lava/lava-flow` | 1024 | – |
 | `terrain/surfaces/concrete-mulch` | 512 | 1 |
-| `terrain/surfaces/arid-cliff`, `arid-debris`, `concrete-bank`, `concrete-ground`, `desert-cap`, `desert-ground`, `dirt-debris`, `dirt-ground`, `fungus-bank`, `fungus-cliff`, `fungus-debris`, `grassland-ground`, `lunar-cliff`, `lunar-debris`, `lunar-ground`, `mars-cap`, `mars-cliff`, `mars-ground`, `rock-ground`, `sand-ground`, `sand-verge`, `scatter-stone`, `snow-ground`, `temperate-bank`, `temperate-cliff`, `temperate-debris`, `tropical-ground`, `volcano-cap`, `volcano-cliff`, `volcano-ground` | 512 | 12 |
+| `terrain/surfaces/arid-cliff`, `arid-debris`, `concrete-bank`, `concrete-ground`, `desert-cap`, `desert-ground`, `dirt-debris`, `dirt-ground`, `fungus-bank`, `fungus-cliff`, `fungus-debris`, `grassland-ground`, `lunar-cliff`, `lunar-debris`, `lunar-ground`, `mars-cap`, `mars-cliff`, `mars-ground`, `rock-ground`, `sand-ground`, `sand-verge`, `scatter-stone`, `snow-ground`, `temperate-bank`, `temperate-cliff`, `temperate-debris`, `tropical-ground`, `tundra-ground`, `tundra-ground-variant`, `volcano-cap`, `volcano-cliff`, `volcano-ground` | 512 | 12 |
 | `terrain/surfaces/biome-soil` | 512 | 20 |
 | `terrain/surfaces/fungus-ground` | 512 | 22 |
-| `terrain/surfaces/tundra-ground`, `tundra-ground-variant`, `tundra-mat` | 512 | 24 |
+| `terrain/surfaces/tundra-mat` | 512 | 24 |
 | `terrain/surfaces/tundra-crust` | 512 | 28 |
 | `terrain/surfaces/biome-mud`, `ground-scorch` | 512 | 64 |
 
-### Constrained (71)
+### Constrained (78)
 
-- `scenery/`: `demolition-fines`, `demolition-materials`, `geyser-travertine`, `pool-water`, `tunnel-concrete`
-- `structures/facades/`: `fortress`, `hangar`, `hard`, `heavy`, `industrial`, `light`, `medium`, `tank`
+- `scenery/`: `demolition-materials`, `geyser-travertine`, `pool-water`, `rubble-brick`, `rubble-debris-concrete`, `rubble-debris-masonry`, `rubble-debris-timber`, `rubble-fines`, `rubble-slab`, `rubble-steel`, `rubble-timber`, `tunnel-concrete`
+- `structures/facades/`: `facade-fortress`, `facade-hangar`, `facade-hard`, `facade-heavy`, `facade-industrial`, `facade-light`, `facade-medium`, `facade-tank`
 - `structures/industrial/`: `fan`
-- `terrain/classic/`: `concrete`, `dirt`, `fungus`, `high_incline_dark`, `incline_dark`, `lunar`, `mars`, `rock`, `sand`, `snow`, `volcano`, `water_bed`
-- `terrain/damage/`: `ballistic-blast`, `ballistic-gouge`, `blast`, `burn`, `laser-blast`, `laser-gouge`, `plasma-splash`, `ppc-blast`, `ppc-gouge`
-- `vegetation/`: `bank-turf`, `bark`, `bark-birch`, `bark-palm`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `crop-row-front`, `crop-row-side`, `crop-row-top`, `fern-cutout`, `fronds-palm`, `marsh-sedge`, `palm-frond-cutout`, `shrub-cutout`, `snow`
-- `vegetation/fungus/`: `fungus-organic-atlas`
-- `vegetation/mars/`: `coral-mineral-atlas`
+- `terrain/classic/`: `concrete`, `dirt`, `fungus`, `high-incline-dark`, `incline-dark`, `lunar`, `mars`, `rock`, `sand`, `snow`, `volcano`, `water-bed`
+- `terrain/damage/`: `ballistic-blast`, `ballistic-gouge`, `explosive-blast`, `fire-burn`, `laser-blast`, `laser-gouge`, `plasma-splash`, `ppc-blast`, `ppc-gouge`
+- `vegetation/`: `bank-turf`, `bark`, `birch-bark`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `crop-row-front`, `crop-row-side`, `crop-row-top`, `fern-cutout`, `marsh-sedge`, `palm-bark`, `palm-frond-cutout`, `palm-fronds`, `shrub-cutout`, `snow`
+- `vegetation/fungus/`: `fungus-atlas`
+- `vegetation/mars/`: `mars-coral-atlas`
 - `vegetation/orchard/`: `orchard-leaning`, `orchard-round`, `orchard-spreading`, `orchard-upright`, `orchard-vase`, `orchard-young`
-- `vegetation/shrubs/`: `barren`, `desert`, `highland`, `rocky`, `snow`, `temperate`, `wetland`
+- `vegetation/shrubs/`: `shrub-barren`, `shrub-desert`, `shrub-highland`, `shrub-rocky`, `shrub-snow`, `shrub-temperate`, `shrub-wetland`
 - `vegetation/volcano/`: `cinder-bark`, `cinder-cutout`
 
 The three crop-row views keep their plants' stem and crown anchors in

@@ -36,6 +36,7 @@ import java.util.Map;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.BridgeRepairedSprite;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -79,7 +80,6 @@ public class BridgeRepairedSpriteHandler extends BoardViewSpriteHandler {
             }
             addBadgesForBoard(boardEntry.getKey(), board);
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     /**
@@ -98,7 +98,7 @@ public class BridgeRepairedSpriteHandler extends BoardViewSpriteHandler {
                 Coords coords = new Coords(x, y);
                 BoardClientState boardView = clientGUI.getBoardState(BoardLocation.of(coords, boardId));
                 if (boardView != null) {
-                    currentSprites.add(new BridgeRepairedSprite(boardView, coords));
+                    addMark(boardView, new TacticalMark.BridgeRepaired(coords));
                 }
             }
         }

@@ -889,7 +889,7 @@ final class UnitAnimator {
         }
         float loft = attack.arcing(request.binding()) ? MathUtils.PI * UnitAttack.arcHeight(origin, aim) : 0;
         return trackingRotation(joint, forward, aim.sub(origin).add(0, 0, loft).nor(), limit,
-              request.binding().pitchOnly() && joint.id.equals(request.binding().aimNode()));
+              request.binding().pitchOnly() && joint.id.equals(request.binding().aimNode()), request.binding().depression());
     }
 
     /** Deterministic rigid collapse; restored wrecks use the terminal pose without replaying an event. */
@@ -1107,10 +1107,12 @@ final class UnitAnimator {
     }
 
     private Quaternion trackingRotation(Node joint, Vector3 forward, Vector3 target, float limit) {
-        return trackingRotation(joint, forward, target, limit, false);
+        return trackingRotation(joint, forward, target, limit, false, 0);
     }
 
-    private Quaternion trackingRotation(Node joint, Vector3 forward, Vector3 target, float limit, boolean pitchOnly) {
+    /** @param depression a pitch-only mount's visual depression stop in degrees */
+    private Quaternion trackingRotation(Node joint, Vector3 forward, Vector3 target, float limit, boolean pitchOnly,
+          float depression) {
         var inverse = parentWorld(joint).inv();
         forward.rot(inverse).nor();
         target.rot(inverse).nor();
@@ -1119,7 +1121,9 @@ final class UnitAnimator {
             // A cradle's transverse trunnion is a hinge, not a ball joint.
             float angle = MathUtils.atan2(forward.y * target.z - forward.z * target.y,
                   forward.y * target.y + forward.z * target.z) * MathUtils.radiansToDegrees;
-            return new Quaternion(Vector3.X, MathUtils.clamp(angle, -limit, limit));
+            // The external cradle kit clears the hull down to its binding's stop (-20 degrees unless front bays
+            // sit below the barrel). This is a visual mechanical stop; it does not alter legal firing arcs.
+            return new Quaternion(Vector3.X, MathUtils.clamp(angle, Math.max(-limit, -depression), limit));
         }
         if (buildingTurret(joint)) {
             // The bearing can yaw; barrel elevation belongs to the weapon's aim joint.

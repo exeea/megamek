@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
-package megamek.client.ui.clientGUI.boardview;
+package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
@@ -10,7 +10,6 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsConfiguration;
 import java.awt.Image;
-import java.awt.Point;
 import java.awt.Shape;
 import java.awt.font.TextLayout;
 import java.awt.geom.AffineTransform;
@@ -28,16 +27,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-import megamek.client.ui.tileset.HexTileset;
+import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.board.Coords;
 import org.apache.batik.ext.awt.g2d.AbstractGraphics2D;
 import org.apache.batik.ext.awt.g2d.GraphicContext;
 
 /**
- * Records the existing tactical painters as vectors instead of allocating their bitmap buffers.
- * Batik supplies the ordinary Graphics2D state/primitive operations; no SVG or board image is produced.
+ * Records Graphics2D drawing in tactical units (board units at hex scale 1, y down) as the 3D board's tactical
+ * commands. Batik supplies the ordinary Graphics2D state/primitive operations; no SVG or image is produced.
  */
-public final class BoardTacticalGraphics extends AbstractGraphics2D {
+final class BoardTacticalGraphics extends AbstractGraphics2D {
     private record BorderStyle(double padding, double width) { }
 
     private final List<BoardTactical.Fill> fills;
@@ -52,7 +52,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
     private BoardTactical.Playback playback = BoardTactical.Playback.LIVE;
     private boolean deploymentZone;
 
-    public BoardTacticalGraphics() {
+    BoardTacticalGraphics() {
         super(false);
         gc = new GraphicContext();
         fills = new ArrayList<>();
@@ -78,21 +78,11 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         deploymentZone = parent.deploymentZone;
     }
 
-    public BoardTactical snapshot() {
+    BoardTactical snapshot() {
         return new BoardTactical(fills, labels, walls, flatWalls);
     }
 
-    /** Reuse a scratch recorder after publishing immutable commands for one hex. */
-    BoardTactical takeSnapshot() {
-        BoardTactical captured = snapshot();
-        fills.clear();
-        labels.clear();
-        walls.clear();
-        flatWalls.clear();
-        return captured;
-    }
-
-    /** Append already captured commands in the same unscaled board coordinates and painter order. */
+    /** Append already captured commands in the same tactical units and drawing order. */
     void append(BoardTactical captured) {
         fills.addAll(captured.fills());
         labels.addAll(captured.labels());
@@ -100,41 +90,29 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         flatWalls.addAll(captured.flatWalls());
     }
 
-    /** Repeated deployment and highlight borders share the expensive, unscaled Area subtraction. */
-    public void fillHexBorder(Point point, float scale, double padding, double lineWidth) {
-        fillHexBorder(point, scale, padding, lineWidth, false);
-    }
-
-    public void fillHexBorder(Point point, float scale, double padding, double lineWidth, boolean floating) {
+    /**
+     * The band between the hex outline moved {@code padding} and {@code padding + lineWidth} towards the centre, about
+     * this graphics' origin. A band only moved and scaled carries its hex for the analytic mask; repeated styles share
+     * one Area.
+     */
+    void fillHexBorder(double padding, double lineWidth) {
         Shape border = borderShapes.computeIfAbsent(new BorderStyle(padding, lineWidth),
-              style -> HexDrawUtilities.getHexFullBorderArea(style.width(), style.padding()));
-        Shape shape = AffineTransform.getTranslateInstance(point.x, point.y)
-              .createTransformedShape(AffineTransform.getScaleInstance(scale, scale).createTransformedShape(border));
+              style -> BoardTacticalGeometry.ring(style.padding(), style.width()));
         AffineTransform transform = getTransform();
         BoardTactical.HexBorder metadata = null;
-        BoardTactical.Point owner = planeAnchor;
-        double combinedScale = transform.getScaleX() * scale;
         if (transform.getShearX() == 0 && transform.getShearY() == 0
               && transform.getScaleX() == transform.getScaleY() && transform.getScaleX() > 0
-              && combinedScale > 0 && Float.isFinite((float) combinedScale)
-              && (floating || padding >= 0 && lineWidth > 0 && padding + lineWidth < HexDrawUtilities.HEX_HGT / 2)) {
-            Point2D center = transform.transform(new Point2D.Double(point.x + HexTileset.HEX_W * scale / 2,
-                  point.y + HexTileset.HEX_H * scale / 2), null);
-            if (Float.isFinite((float) center.getX()) && Float.isFinite((float) center.getY())) {
-                var position = new BoardTactical.Point((float) center.getX(), (float) center.getY());
-                metadata = new BoardTactical.HexBorder(position, padding, lineWidth, (float) combinedScale, deploymentZone);
-                if (floating) { owner = position; }
-            }
+              && padding >= 0 && lineWidth > 0 && padding + lineWidth < BoardGeometry.TILE_HEIGHT / 2) {
+            var centre = new BoardTactical.Point((float) transform.getTranslateX(), (float) transform.getTranslateY());
+            metadata = new BoardTactical.HexBorder(centre, padding, lineWidth, (float) transform.getScaleX(),
+                  deploymentZone);
         }
-        fill(shape, fills, metadata, argb(), owner);
+        fill(border, fills, metadata, argb(), planeAnchor);
     }
 
-    /** Tags only the native capture; Legacy 2D painters keep their existing graphics state and behavior. */
-    public static void draw(Graphics2D graphics, BoardTactical.Playback playback, Consumer<Graphics2D> painter) {
-        if (!(graphics instanceof BoardTacticalGraphics)) {
-            painter.accept(graphics);
-            return;
-        }
+    /** Tag what {@code painter} records with {@code playback}. */
+    static void draw(BoardTacticalGraphics graphics, BoardTactical.Playback playback,
+          Consumer<BoardTacticalGraphics> painter) {
         BoardTacticalGraphics local = (BoardTacticalGraphics) graphics.create();
         try {
             local.playback = playback;
@@ -144,34 +122,28 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         }
     }
 
-    /** Only the selected deployer's existing painter supplies zone membership; Legacy 2D drawing is unchanged. */
-    public static void drawDeployment(Graphics2D graphics, Consumer<Graphics2D> painter) {
+    /** The selected deployer's legal hexes: their borders form the deployment zone. */
+    static void drawDeployment(BoardTacticalGraphics graphics, Consumer<BoardTacticalGraphics> painter) {
         draw(graphics, BoardTactical.Playback.HIDE_DURING_MOVEMENT, local -> {
-            if (local instanceof BoardTacticalGraphics tactical) { tactical.deploymentZone = true; }
+            local.deploymentZone = true;
             painter.accept(local);
         });
     }
 
-    /** Local hex coordinates, with a common anchor for camera-facing text. */
-    public static Graphics2D at(Graphics2D graph, java.awt.Point location) {
-        Graphics2D copy = (Graphics2D) graph.create();
-        copy.translate(location.x, location.y);
-        if (copy instanceof BoardTacticalGraphics tactical) {
-            tactical.anchor = new BoardTactical.Point(location.x + HexTileset.HEX_W / 2f,
-                  location.y + HexTileset.HEX_H / 2f);
-        }
+    /** Units about {@code coords}' centre, which also anchors camera-facing text. */
+    static BoardTacticalGraphics at(BoardTacticalGraphics graph, Coords coords) {
+        BoardTactical.Point centre = BoardTacticalGeometry.centre(coords);
+        BoardTacticalGraphics copy = (BoardTacticalGraphics) graph.create();
+        copy.translate(centre.x(), centre.y());
+        AffineTransform transform = copy.getTransform();
+        copy.anchor = new BoardTactical.Point((float) transform.getTranslateX(), (float) transform.getTranslateY());
         return copy;
     }
 
-    /** Flat hex annotations share one owner plane in 3D; the Legacy 2D painter still draws the same shapes. */
-    public static Graphics2D onHexPlane(Graphics2D graph, Point location) {
-        Graphics2D copy = at(graph, location);
-        if (copy instanceof BoardTacticalGraphics tactical) {
-            Point2D center = copy.getTransform().transform(new Point2D.Float(HexTileset.HEX_W / 2f,
-                  HexTileset.HEX_H / 2f), null);
-            tactical.planeAnchor = new BoardTactical.Point((float) center.getX(), (float) center.getY());
-            tactical.anchor = tactical.planeAnchor;
-        }
+    /** {@link #at}, with every shape on the hex's flat annotation plane in 3D. */
+    static BoardTacticalGraphics onHexPlane(BoardTacticalGraphics graph, Coords coords) {
+        BoardTacticalGraphics copy = at(graph, coords);
+        copy.planeAnchor = copy.anchor;
         return copy;
     }
 
@@ -198,29 +170,15 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         fill(getStroke().createStrokedShape(shape));
     }
 
-    /** Preserve the painter's path as upright segments, carrying its outline to the top edge. */
-    public void wall(Shape shape, Shape footprint, Coords coords, float height, Color outlineColor) {
-        BoardTactical.Outline outline = outlineColor == null ? null
-              : new BoardTactical.Outline(outlineColor.getRGB(), (BasicStroke) getStroke());
-        wall(shape, footprint, coords, new BoardRangeBorder(height, argb(), outline));
-    }
-
-    public void wall(Shape shape, Shape footprint, Coords coords, BoardRangeBorder border) {
+    /** {@code shape} as upright segments of {@code border} on {@code coords}, over the flat {@code footprint}. */
+    void wall(Shape shape, Shape footprint, Coords coords, BoardRangeBorder border) {
         fill(footprint, flatWalls, null, border.argb(), null);
         border.append(coords, shape, getTransform(), playback, walls::add);
     }
 
     @Override
     public void fill(Shape shape) {
-        fill(shape, fills);
-    }
-
-    private void fill(Shape shape, List<BoardTactical.Fill> destination) {
-        fill(shape, destination, null);
-    }
-
-    private void fill(Shape shape, List<BoardTactical.Fill> destination, BoardTactical.HexBorder border) {
-        fill(shape, destination, border, argb(), planeAnchor);
+        fill(shape, fills, null, argb(), planeAnchor);
     }
 
     private void fill(Shape shape, List<BoardTactical.Fill> destination, BoardTactical.HexBorder border, int color,

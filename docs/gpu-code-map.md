@@ -96,6 +96,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardAtmosphere` | Maps settings to linear light, sun/moon direction, fog/sky colors, exposure and visual condition parameters. |
 | `AtmospherePreset`, `GpuAtmosphereControls` | Describe complete condition previews and manage their window-local overrides/default reset. |
 | `GpuAtmosphere` | Owns scene color/depth targets, fog/shafts, grading, glare and final composition. |
+| `GpuDepthCues` | Measures and eases the distance the view centres on, behind which the composite hazes the scene. |
 | `GpuClouds` | Generates and advects the common cloud-transmission atlas. |
 | `GpuCloudShadow` | Shares the cloud atlas and its coordinates with every lit material. |
 | `GpuWeatherParticles` | Maintains the bounded precipitation pool and supplies weather-specific particle programs. |

@@ -39,6 +39,9 @@ uniform vec3 u_spaceLightColor;
 uniform float u_sceneScaled; // 1 at a render resolution below 100%: scale the scene up; 0 reads it 1:1.
 uniform vec4 u_flash; // a nuclear flash (GpuAtmosphere.setFlash): display-linear RGB; a, its glare's falloff
 uniform vec3 u_flashCentre; // the fireball on screen (uv, far off-screen when behind the camera), the view's aspect
+uniform sampler2D u_depthFocus; // GpuDepthCues: R the eased distance the view centres on, less the origin
+uniform vec3 u_depthCues; // haze strength (0 off), 1 / the depth behind the focus it approaches over, the origin
+uniform vec3 u_depthHaze; // the haze's linear radiance
 // SCENE_RADIANCE
 // GROUND_LAYER
 // WEATHER_SAND
@@ -88,6 +91,12 @@ void main() {
     float surfaceDepth = u_fogEnabled > 0.5 || u_sand.x > 0.0 ? atmosphereDepthAt(v_uv) : depth;
     vec4 scene = sceneSample(u_scene, v_uv);
     scene.rgb = loadScene(scene.rgb);
+    if (u_depthCues.x > 0.0 && depth < 1.0) {
+        // Depth cues: what lies behind the view's focus hazes with its depth there; the focus and all in front of it
+        // keep their colour.
+        float behind = cameraDepth(atmosphereDepthAt(v_uv)) - u_depthCues.z - texelFetch(u_depthFocus, ivec2(0), 0).r;
+        scene.rgb = mix(scene.rgb, u_depthHaze, u_depthCues.x * (1.0 - exp(-max(behind, 0.0) * u_depthCues.y)));
+    }
     vec4 atmosphere = vec4(0, 0, 0, 1);
     bool solidBase = false;
     if (u_fogEnabled > 0.5) solidBase = groundBaseSide(world(surfaceDepth), surfaceDepth, u_sand.z);

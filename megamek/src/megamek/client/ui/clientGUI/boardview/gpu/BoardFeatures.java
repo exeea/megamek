@@ -633,6 +633,20 @@ final class BoardFeatures {
         return List.copyOf(result);
     }
 
+    /** The trenches of a dug-in platoon ({@link #withTrench}). */
+    static final String TRENCH = "scenery/military/trench";
+
+    /**
+     * {@code tile} with the trenches of a platoon dug in there (TO:AR p.106): scenery like a terrain-owned row's, which
+     * no hex stores, turned by its hex so neighbouring trenches differ.
+     */
+    static BoardScene.Tile withTrench(BoardScene.Tile tile) {
+        List<BoardScene.Feature> features = new ArrayList<>(tile.features());
+        features.add(new BoardScene.Feature(TRENCH, 0, 0, 60 * Math.floorMod(tile.coords().hashCode(), 6), 1, 1, 0,
+              BoardScene.FeatureKind.SCENERY, 0, true));
+        return tile.withFeatures(features);
+    }
+
     /**
      * The id prefix of the decals terrain-owned rows paint ({@link #features}), of the buffer stops a rail owns and of a
      * vegetation skin's rows ({@link #decorations}): no stored object has it.

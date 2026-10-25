@@ -41,7 +41,7 @@ import javax.swing.ImageIcon;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -60,15 +60,6 @@ public class BridgeBuildSprite extends HexSprite {
     private static final MMLogger LOGGER = MMLogger.create(BridgeBuildSprite.class);
 
     private static final Color TEXT_OUTLINE_COLOR = new Color(40, 40, 50);
-
-    /** Stroke width (unscaled hex pixels) of the yellow/black hazard outline drawn around an emphasized hex. */
-    private static final float HAZARD_OUTLINE_WIDTH = 4.0f;
-
-    /** Dash length (unscaled hex pixels) for the alternating yellow/black hazard stripes. */
-    private static final float HAZARD_DASH_LENGTH = 8.0f;
-
-    /** Solid backing behind the caution-coloured stripes, giving the high-contrast yellow/black hazard-tape look. */
-    private static final Color HAZARD_BACKING_COLOR = Color.BLACK;
 
     private static final int HEX_CENTER_X = HexTileset.HEX_W / 2;
     private static final int FONT_SIZE = 11;
@@ -123,20 +114,13 @@ public class BridgeBuildSprite extends HexSprite {
     }
 
     @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.BRIDGE_BUILD, loc, turnsWorked + "/" + turnsRequired);
-    }
-
-    @Override
     public void prepare() {
         Graphics2D graph = spriteSetup();
         drawGhostBridge(graph);
         if (hazardOutline) {
             drawHazardOutline(graph);
         }
-        if (!bv.isGpuCapture()) {
-            drawProgressIndicator(graph);
-        }
+        drawProgressIndicator(graph);
         graph.dispose();
     }
 
@@ -152,12 +136,12 @@ public class BridgeBuildSprite extends HexSprite {
         graph.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         Stroke oldStroke = graph.getStroke();
         // Solid black base, then caution-yellow dashes on top: the gaps reveal the black underneath for hazard tape.
-        graph.setColor(HAZARD_BACKING_COLOR);
-        graph.setStroke(new BasicStroke(HAZARD_OUTLINE_WIDTH));
+        graph.setColor(TacticalStyle.HAZARD_BACKING_COLOR);
+        graph.setStroke(new BasicStroke(TacticalStyle.HAZARD_OUTLINE_WIDTH));
         graph.drawPolygon(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
         graph.setColor(GUIPreferences.getInstance().getCautionColor());
-        graph.setStroke(new BasicStroke(HAZARD_OUTLINE_WIDTH, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f,
-              new float[] { HAZARD_DASH_LENGTH, HAZARD_DASH_LENGTH }, 0.0f));
+        graph.setStroke(new BasicStroke(TacticalStyle.HAZARD_OUTLINE_WIDTH, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f,
+              new float[] { TacticalStyle.BRIDGE_HAZARD_DASH, TacticalStyle.BRIDGE_HAZARD_DASH }, 0.0f));
         graph.drawPolygon(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
         graph.setStroke(oldStroke);
     }

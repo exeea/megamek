@@ -116,13 +116,12 @@ final class BoardDeploymentGeometry {
      * where the perimeter continues through the same-colour neighbour.
      */
     private static BoardTactical.Contour segment(Edge edge) {
-        int side = Math.floorMod(1 - edge.direction(), 6);
-        double outer = edge.padding(), inner = edge.padding() + edge.width();
-        return new BoardTactical.Contour(List.of(
-              BoardTacticalGeometry.insetCorner(side, outer, side + 1, edge.left() ? outer : 0),
-              BoardTacticalGeometry.insetCorner(side, outer, side - 1, edge.right() ? outer : 0),
-              BoardTacticalGeometry.insetCorner(side, inner, side - 1, edge.right() ? inner : 0),
-              BoardTacticalGeometry.insetCorner(side, inner, side + 1, edge.left() ? inner : 0)));
+        double outerInset = edge.padding(), innerInset = edge.padding() + edge.width();
+        var outer = BoardTacticalGeometry.sideLine(edge.direction(), edge.left(), edge.right(), outerInset);
+        var inner = BoardTacticalGeometry.sideLine(edge.direction(), edge.left(), edge.right(), innerInset);
+        return new BoardTactical.Contour(List.of(new BoardTactical.Point(outer.x1, outer.y1),
+              new BoardTactical.Point(outer.x2, outer.y2), new BoardTactical.Point(inner.x2, inner.y2),
+              new BoardTactical.Point(inner.x1, inner.y1)));
     }
 
     /** Straight-alpha SRC_OVER in captured 8-bit colors, without allocating an image for each hex. */

@@ -43,8 +43,8 @@ import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.sprite.HexFlagSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.RouteDotSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -217,10 +217,8 @@ public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
         for (TrailDot dot : routeTrails(units, localPlayer())) {
             BoardClientState board = clientGUI.getBoardState(dot.boardId());
             if (board != null) {
-                RouteDotSprite sprite = new RouteDotSprite(board, dot.hex(),
-                      ROUTE_COLORS.get(dot.colorIndex() % ROUTE_COLORS.size()), RouteDotSprite.TRAIL_DIAMETER);
-                currentSprites.add(sprite);
-                board.addSprites(List.of(sprite));
+                addMark(board, new TacticalMark.RouteDot(dot.hex(),
+                      ROUTE_COLORS.get(dot.colorIndex() % ROUTE_COLORS.size()), TacticalStyle.ROUTE_TRAIL_DIAMETER));
             }
         }
         for (RouteFlag flag : routeFlags(units, localPlayer())) {
@@ -230,18 +228,13 @@ public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
             }
             if (flag.isPlanned()) {
                 // a turning point the bot planned is a dot on the way, not a flag of its own
-                RouteDotSprite sprite = new RouteDotSprite(board, flag.hex(),
-                      ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()), RouteDotSprite.TURN_DIAMETER);
-                currentSprites.add(sprite);
-                board.addSprites(List.of(sprite));
+                addMark(board, new TacticalMark.RouteDot(flag.hex(),
+                      ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()), TacticalStyle.ROUTE_TURN_DIAMETER));
                 continue;
             }
-            int arrowFacing = (flag.facing() == UnitOrders.FACING_AUTO) ? HexFlagSprite.NO_FACING : flag.facing();
-            HexFlagSprite sprite = new HexFlagSprite(board, flag.hex(),
-                  ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()), flag.label(), flag.progressText(),
-                  arrowFacing);
-            currentSprites.add(sprite);
-            board.addSprites(List.of(sprite));
+            int arrowFacing = (flag.facing() == UnitOrders.FACING_AUTO) ? TacticalMark.Flag.NO_FACING : flag.facing();
+            addMark(board, new TacticalMark.Flag(flag.hex(), ROUTE_COLORS.get(flag.colorIndex() % ROUTE_COLORS.size()),
+                  flag.label(), flag.progressText(), arrowFacing));
         }
     }
 

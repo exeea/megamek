@@ -34,6 +34,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.BridgeBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -80,11 +81,10 @@ public class BridgeBuildSpriteHandler extends BoardViewSpriteHandler {
                 int turnsStanding = convInfantry.isDismantlingBridge()
                       ? convInfantry.getBridgeDismantleRemaining()
                       : Math.min(convInfantry.getBridgeBuildTurns(), turnsRequired);
-                currentSprites.add(new BridgeBuildSprite(boardView, convInfantry.getBridgeTargetCoords(),
-                      turnsStanding, turnsRequired, convInfantry.getBridgeExits()));
+                addMark(boardView, new TacticalMark.BridgeBuild(convInfantry.getBridgeTargetCoords(),
+                      turnsStanding, turnsRequired, convInfantry.getBridgeExits(), convInfantry.getBridgeType(), false));
             }
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     @Override

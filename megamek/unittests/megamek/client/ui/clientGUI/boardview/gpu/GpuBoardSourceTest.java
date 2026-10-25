@@ -33,6 +33,7 @@ import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.tileset.HexTileset;
@@ -725,9 +726,9 @@ class GpuBoardSourceTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords coords = new Coords(3, 4);
             BoardScene.Tile before = fixture.source.takeFrame().scene().tile(coords);
-            MovementEnvelopeSprite range = new MovementEnvelopeSprite(fixture.view, Color.MAGENTA, coords, 63);
+            var range = new TacticalMark.Envelope(coords, 63, Color.MAGENTA);
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.addSprites(List.of(range));
+                fixture.view.addMarks(List.of(range));
                 fixture.source.refresh();
             });
             BoardScene.Tile ranged = fixture.source.takeFrame().scene().tile(coords);
@@ -735,7 +736,7 @@ class GpuBoardSourceTest {
             assertTrue(samePixels(before.tactical(), ranged.tactical()));
             assertFalse(fixture.source.takeFrame().scene().tactical().fills().isEmpty());
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.removeSprites(List.of(range));
+                fixture.view.removeMarks(List.of(range));
                 fixture.player.setStartingPos(Board.START_ANY);
                 fixture.view.markDeploymentHexesFor(fixture.entity);
                 fixture.source.refresh();

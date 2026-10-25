@@ -57,7 +57,7 @@ final class BoardMaterialFiles {
     static void heat(Path textures, String material, BufferedImage heat, float energy) throws IOException {
         Path folder = textures.resolve(material).getParent();
         String name = textures.resolve(material).getFileName().toString();
-        boolean molten = name.equals("lava");
+        boolean molten = name.equals("lava-flow");
         String extra = molten ? "coverage" : "glow";
         write(folder, name + "_emission.png", molten ? channels(heat, 0, 1, 2, -1) : channels(heat, 0, 0, 0, -1));
         write(folder, name + "_" + extra + ".png", gray(heat, 3));

@@ -169,7 +169,7 @@ final class GpuHexSurface implements Disposable {
     }
 
     private static void liftedBounds(BoundingBox bounds) {
-        // Current painter lift is capped at 1.35 unscaled pixels; keep culling conservative after vertex lift.
+        // Current painter lift is capped at 1.35 tactical units; keep culling conservative after vertex lift.
         bounds.max.z += 2 * BoardGeometry.hexScale();
         bounds.update();
     }

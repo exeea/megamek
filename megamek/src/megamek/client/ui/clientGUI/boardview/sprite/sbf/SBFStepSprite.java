@@ -37,7 +37,7 @@ import java.awt.geom.AffineTransform;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.sprite.HexLabelFitter;
+import megamek.client.ui.clientGUI.boardview.HexLabelFitter;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;

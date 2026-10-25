@@ -60,7 +60,7 @@ final class GpuGroundDamage implements Disposable {
     enum Style {
         LASER("laser-gouge"), PPC("ppc-gouge"), BALLISTIC("ballistic-gouge"),
         LASER_BLAST("laser-blast"), PPC_BLAST("ppc-blast"), BALLISTIC_BLAST("ballistic-blast"),
-        BLAST("blast"), BURN("burn"), PLASMA("plasma-splash");
+        BLAST("explosive-blast"), BURN("fire-burn"), PLASMA("plasma-splash");
 
         private final String file;
         Style(String file) { this.file = file; }

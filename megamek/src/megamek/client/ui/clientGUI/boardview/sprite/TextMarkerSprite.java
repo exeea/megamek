@@ -33,16 +33,11 @@
 package megamek.client.ui.clientGUI.boardview.sprite;
 
 import java.awt.Color;
-import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
-import java.awt.Point;
-import java.awt.geom.Rectangle2D;
 
-import megamek.MMConstants;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.util.StringDrawer;
-import megamek.client.ui.util.UIUtil;
+import megamek.client.ui.clientGUI.boardview.TacticalGlyphs;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.common.board.Coords;
 
 public class TextMarkerSprite extends HexSprite {
@@ -56,8 +51,8 @@ public class TextMarkerSprite extends HexSprite {
     }
 
     public TextMarkerSprite(BoardGlyphContext boardView, Coords loc, int rangeBracket) {
-        this(boardView, loc, FieldOfFireSprite.getRangeText(rangeBracket),
-              FieldOfFireSprite.getFieldOfFireColor(rangeBracket), rangeBracket);
+        this(boardView, loc, TacticalStyle.rangeText(rangeBracket), TacticalStyle.rangeColor(rangeBracket),
+              rangeBracket);
     }
 
     private TextMarkerSprite(BoardGlyphContext boardView1, Coords loc, String text, Color color, int rangeBracket) {
@@ -85,33 +80,9 @@ public class TextMarkerSprite extends HexSprite {
         image = createNewHexImage();
         Graphics2D graph = (Graphics2D) image.getGraphics();
         try {
-            drawMarker(graph, spriteText, textColor, bounds.width, bounds.height, bv.getScale());
+            TacticalGlyphs.paintHexText(graph, spriteText, textColor, bounds.width, bounds.height, bv.getScale());
         } finally {
             graph.dispose();
         }
-    }
-
-    /** Shared flat artwork for the Legacy 2D sprite and the GPU's camera-facing range labels. */
-    public static void drawMarker(Graphics2D graph, String text, Color color, int width, int height, float scale) {
-        UIUtil.setHighQualityRendering(graph);
-        Font textFont = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 1000);
-        FontMetrics fm = graph.getFontMetrics(textFont);
-        Rectangle2D rect = fm.getStringBounds(text, graph);
-        new StringDrawer(text).color(color).center().at(new Point(width / 2, height / 2))
-              .outline(Color.BLACK, scale).font(getFont(rect, width, height)).draw(graph);
-    }
-
-    private static Font getFont(Rectangle2D rect, int width, int height) {
-        float factor = 1;
-        if (rect.getHeight() > height) {
-            factor = height / (float) rect.getHeight();
-        }
-
-        if ((rect.getWidth() * factor) > width) {
-            factor = Math.min(factor, width / (float) rect.getWidth());
-        }
-        // make smaller to actually fit the hex shape
-        factor = factor * 0.7f;
-        return new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, (int) (factor * 1000));
     }
 }

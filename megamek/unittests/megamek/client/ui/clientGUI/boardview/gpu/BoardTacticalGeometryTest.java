@@ -8,8 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.Point;
+import java.awt.Shape;
 import java.awt.geom.Area;
+import java.awt.geom.Line2D;
+import java.awt.geom.PathIterator;
+import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,13 +20,62 @@ import java.util.List;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class BoardTacticalGeometryTest {
+    /**
+     * A range zone's run across a hex starts and ends on corners its neighbours share, and its band ends on the outline
+     * where a side band of the same width meets that side, so the zone's bands join across hexes.
+     */
+    @Test
+    void hexCrossingsRunBetweenCornersAndTheirBandsEndWhereSideBandsDo() {
+        double width = 10, alongSide = width * 2 / Math.sqrt(3);
+        List<Point2D> corners = new ArrayList<>();
+        for (int k = 0; k < 6; k++) {
+            Vector3 corner = BoardGeometry.modelCorner(k);
+            corners.add(new Point2D.Double(corner.x, -corner.y));
+        }
+        for (int sides = 2; sides <= 5; sides++) {
+            for (int turn = 0; turn < 6; turn++) {
+                var crossing = BoardTacticalGeometry.crossing(sides, turn, width);
+                List<Point2D> line = points(crossing.line()), band = points(crossing.band());
+                assertEquals(2 * line.size(), band.size());
+                for (Point2D end : List.of(line.getFirst(), line.getLast())) {
+                    assertTrue(corners.stream().anyMatch(corner -> corner.distance(end) < 1e-6), sides + "/" + turn);
+                }
+                for (Point2D point : band) {
+                    assertTrue(BoardTacticalGeometry.insetHexagon(-1e-4).contains(point),
+                          sides + "/" + turn + ": " + point);
+                }
+                for (Point2D[] end : List.of(new Point2D[] { line.getLast(), band.get(line.size()) },
+                      new Point2D[] { line.getFirst(), band.getLast() })) {
+                    double outline = Double.MAX_VALUE;
+                    for (int k = 0; k < 6; k++) {
+                        Point2D a = corners.get(k), b = corners.get((k + 1) % 6);
+                        outline = Math.min(outline, Line2D.ptSegDist(a.getX(), a.getY(), b.getX(), b.getY(),
+                              end[1].getX(), end[1].getY()));
+                    }
+                    assertEquals(0, outline, 1e-4, "The band ends on the outline: " + sides + "/" + turn);
+                    assertEquals(alongSide, end[0].distance(end[1]), 1e-3,
+                          "As far along it as a side band: " + sides + "/" + turn);
+                }
+            }
+        }
+    }
+
+    private static List<Point2D> points(Shape shape) {
+        List<Point2D> points = new ArrayList<>();
+        double[] xy = new double[6];
+        for (PathIterator path = shape.getPathIterator(null); !path.isDone(); path.next()) {
+            if (path.currentSegment(xy) != PathIterator.SEG_CLOSE) { points.add(new Point2D.Double(xy[0], xy[1])); }
+        }
+        return points;
+    }
+
     @Test
     void mines0708RoadRampDoesNotRaiseTheFlatMarkerPlane() throws Exception {
         BoardScene scene = GpuRoadSourceTest.minesScene();
@@ -116,13 +168,22 @@ class BoardTacticalGeometryTest {
     private static BoardTactical.Fill hexBorder(Coords coords, boolean floating) {
         var graphics = new BoardTacticalGraphics();
         try {
-            graphics.setColor(new Color(45, 160, 215, 109));
-            graphics.fillHexBorder(new Point(coords.getX() * 63, coords.getY() * 72 + (coords.getX() & 1) * 36),
-                  1, 1.5, 2.25, floating);
+            var hex = floating ? BoardTacticalGraphics.onHexPlane(graphics, coords)
+                  : BoardTacticalGraphics.at(graphics, coords);
+            hex.setColor(new Color(45, 160, 215, 109));
+            hex.fillHexBorder(1.5, 2.25);
             return graphics.snapshot().fills().getFirst();
         } finally {
             graphics.dispose();
         }
+    }
+
+    /** An upright boundary in the graphics' colour, its outline in the graphics' stroke. */
+    private static void wall(BoardTacticalGraphics graphics, Shape line, Shape footprint, Coords coords, float height,
+          Color outline) {
+        var stroke = (BasicStroke) graphics.getStroke();
+        graphics.wall(line, footprint, coords, new BoardRangeBorder(height, graphics.getColor().getRGB(),
+              outline == null ? null : new BoardTactical.Outline(outline.getRGB(), stroke)));
     }
 
     private static BoardScene borderScene(BoardTactical.Fill fill, int level, int depth, boolean frozen) {
@@ -146,7 +207,7 @@ class BoardTacticalGeometryTest {
             graphics.setColor(new Color(35, 150, 200, 128));
             graphics.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10,
                   new float[] { 2, 2 }, 0));
-            graphics.wall(HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
+            wall(graphics, HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
                   coords, 0.5f, Color.WHITE);
             var tile = new BoardScene.Tile(coords, 2, 4, false, 0,
                   BoardScene.Surface.GRASS, null, null, null, List.of(), List.of());
@@ -186,7 +247,7 @@ class BoardTacticalGeometryTest {
                 var local = (BoardTacticalGraphics) graphics.create();
                 try {
                     local.translate(0, y * BoardGeometry.TILE_HEIGHT);
-                    local.wall(HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
+                    wall(local, HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
                           coords, 0.5f, null);
                 } finally {
                     local.dispose();
@@ -222,7 +283,7 @@ class BoardTacticalGeometryTest {
             Coords coords = new Coords(0, 0);
             graphics.setColor(new Color(35, 150, 200, 128));
             graphics.setStroke(new BasicStroke(1.4f));
-            graphics.wall(HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
+            wall(graphics, HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
                   coords, 0.5f, Color.WHITE);
             for (int level : new int[] { -2, 0, 3 }) {
                 for (boolean frozen : new boolean[] { false, true }) {
@@ -257,7 +318,7 @@ class BoardTacticalGeometryTest {
         try {
             Coords coords = new Coords(0, 0);
             graphics.setColor(new Color(255, 204, 255, 96));
-            graphics.wall(HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
+            wall(graphics, HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
                   coords, 0.5f, null);
             for (int level : new int[] { -2, 0, 3 }) {
                 for (int depth : new int[] { -1, 0, 5 }) {

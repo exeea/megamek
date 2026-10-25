@@ -55,7 +55,7 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.preferences.JWindowPreference;
 import megamek.client.ui.preferences.PreferencesNode;
 import megamek.client.ui.util.UIUtil;
@@ -188,7 +188,7 @@ public class HexEditDialog extends JDialog {
     private Distractable suppressedDisplay;
 
     /** The highlight drawn on each painted hex, so the work is visible on the board and not only in the list. */
-    private final Map<Coords, FieldOfFireSprite> hexHighlights = new LinkedHashMap<>();
+    private final Map<Coords, TacticalMark> hexHighlights = new LinkedHashMap<>();
 
     /** Listens for clicks on the board while painting is on. */
     private final BoardViewListenerAdapter brushListener = new BoardViewListenerAdapter() {
@@ -802,13 +802,12 @@ public class HexEditDialog extends JDialog {
     /** Draws a highlight on every painted hex and takes away the ones no longer painted. */
     private void refreshHexHighlights() {
         clientGUI.boardStates().stream().findFirst().ifPresent(boardView -> {
-            boardView.removeSprites(hexHighlights.values());
+            boardView.removeMarks(hexHighlights.values());
             hexHighlights.clear();
             for (Coords coords : paintedHexes.keySet()) {
-                hexHighlights.put(coords,
-                      new FieldOfFireSprite(boardView, RangeType.RANGE_SHORT, coords, ALL_HEX_BORDERS));
+                hexHighlights.put(coords, new TacticalMark.WeaponRange(coords, ALL_HEX_BORDERS, RangeType.RANGE_SHORT));
             }
-            boardView.addSprites(hexHighlights.values());
+            boardView.addMarks(hexHighlights.values());
         });
     }
 
@@ -913,7 +912,7 @@ public class HexEditDialog extends JDialog {
         clientGUI.getClient().getGame().removeGameListener(phaseListener);
         setPainting(false);
         clientGUI.boardStates().stream().findFirst().ifPresent(boardView -> {
-            boardView.removeSprites(hexHighlights.values());
+            boardView.removeMarks(hexHighlights.values());
             hexHighlights.clear();
         });
         dispose();

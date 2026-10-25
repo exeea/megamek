@@ -111,6 +111,8 @@ class BoardSurfaceContactTest {
                 var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
                       c.equals(at) ? upper : receiving, c.equals(at) ? rise : 0));
                 var high = scene.tile(at);
+                // Lava melts snow and burns turf beside it: the upper cover may show as what it leaves.
+                int melted = lower >= BoardSurfaceBlend.CRUST ? BoardSurfaceBlend.melted(upper) : upper;
                 for (int direction = 0; direction < 6; direction++) {
                     var low = scene.tile(at.translated(direction));
                     var foot = BoardGeometry.center(at, 0).lerp(BoardGeometry.center(low.coords(), 0), .5f);
@@ -130,7 +132,8 @@ class BoardSurfaceContactTest {
                         for (int sample = -4; sample <= 4; sample++) {
                             var p = foot.cpy().mulAdd(across, sample * BoardRelief.metres(BoardSurfaceBlend.WIDTH_METRES) / 4);
                             var near = BoardSurfaceBlend.sampleCliff(scene, high, p.x, p.y, p.z);
-                            mixed |= near.weight(upper) > .05f && near.weight(lower) > .05f;
+                            float shown = near.weight(upper) + (melted == upper ? 0 : near.weight(melted));
+                            mixed |= shown > .05f && near.weight(lower) > .05f;
                         }
                         assertTrue(mixed, "A natural contact must contain a blend of both materials");
                     }
@@ -138,13 +141,14 @@ class BoardSurfaceContactTest {
                     for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
                         float weight = cover.weight(family);
                         assertTrue(Float.isFinite(weight) && weight >= 0 && weight <= 1);
-                        if (family != upper && family != lower) { assertEquals(0, weight); }
+                        if (family != upper && family != lower && family != melted) { assertEquals(0, weight); }
                         sum += weight;
                     }
                     assertEquals(1, sum, .00001f);
                     foot.z += BoardRelief.metres(BoardSurfaceBlend.FOOT_METRES + .1f);
-                    assertEquals(BoardSurfaceBlend.solid(upper),
-                          BoardSurfaceBlend.sampleCliff(scene, high, foot.x, foot.y, foot.z));
+                    var above = BoardSurfaceBlend.sampleCliff(scene, high, foot.x, foot.y, foot.z);
+                    assertEquals(0, lower == upper ? 0 : above.weight(lower), "Receiving terrain stays near the foot");
+                    assertEquals(1, above.weight(upper) + (melted == upper ? 0 : above.weight(melted)), .00001f);
                 }
             }
         }

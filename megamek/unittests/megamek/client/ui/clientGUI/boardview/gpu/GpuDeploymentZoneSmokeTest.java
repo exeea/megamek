@@ -32,7 +32,6 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -159,7 +158,8 @@ class GpuDeploymentZoneSmokeTest {
         Coords coords = new Coords(0, 0);
         var tile = new BoardScene.Tile(coords, 0, -1, false, 0,
               BoardScene.Surface.GRASS, null, null, null, List.of(), List.of());
-        var wall = new BoardTactical.Wall(coords, new BoardTactical.Point(21, 0), new BoardTactical.Point(63, 0),
+        var wall = new BoardTactical.Wall(coords, new BoardTactical.Point(BoardGeometry.TILE_WIDTH / 4, 0),
+              new BoardTactical.Point(BoardGeometry.TILE_WIDTH * 3 / 4, 0),
               .5f, 0xA6FFFF00, null, 0, BoardTactical.Playback.LIVE);
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), null,
               List.of(), List.of(), List.of(), new BoardTactical(List.of(), List.of(), List.of(wall), List.of()));
@@ -168,8 +168,9 @@ class GpuDeploymentZoneSmokeTest {
         var skirt = builder.part("coplanar-cliff", GL20.GL_TRIANGLES, VertexAttributes.Usage.Position,
               new Material(ColorAttribute.createDiffuse(Color.BLUE), IntAttribute.createCullFace(GL20.GL_NONE)));
         float scale = BoardGeometry.HEX_SCALE;
-        skirt.rect(new Vector3(0, 0, -5).scl(scale), new Vector3(84, 0, -5).scl(scale),
-              new Vector3(84, 0, 20).scl(scale), new Vector3(0, 0, 20).scl(scale), new Vector3(0, 1, 0));
+        float width = BoardGeometry.TILE_WIDTH;
+        skirt.rect(new Vector3(0, 0, -5).scl(scale), new Vector3(width, 0, -5).scl(scale),
+              new Vector3(width, 0, 20).scl(scale), new Vector3(0, 0, 20).scl(scale), new Vector3(0, 1, 0));
         var occluder = builder.part("foreground", GL20.GL_TRIANGLES, VertexAttributes.Usage.Position,
               new Material(ColorAttribute.createDiffuse(Color.RED), IntAttribute.createCullFace(GL20.GL_NONE)));
         occluder.rect(new Vector3(45, 2, 3).scl(scale), new Vector3(53, 2, 3).scl(scale),
@@ -251,8 +252,9 @@ class GpuDeploymentZoneSmokeTest {
                         int level = ((x / 4 + y / 4) & 1) == 0 ? 0 : 12;
                         tiles.add(new BoardScene.Tile(new Coords(x, y), level, -1, false, 0,
                               BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
-                        ((BoardTacticalGraphics) local).fillHexBorder(new Point(x * 63, y * 72 + (x & 1) * 36),
-                              1, 0, 1, true);
+                        var hex = BoardTacticalGraphics.onHexPlane(local, new Coords(x, y));
+                        hex.fillHexBorder(0, 1);
+                        hex.dispose();
                     }
                 }
             });

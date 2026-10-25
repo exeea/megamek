@@ -1184,10 +1184,30 @@ final class BoardRoad {
 
     /** Symmetric feathering changes tyre wear intensity, never the axle spacing or tyre width. */
     float wheelCoverage(float x, float y) {
-        PathSample nearest = pathSample(x, y, paintPaths());
-        float axle = Math.abs(nearest.distance() - laneCenter(nearest.width()));
-        float t = Math.clamp((TRACK_HALF_WIDTH - Math.abs(axle - WHEEL_OFFSET)) / TRACK_HALF_WIDTH, 0, 1);
+        float t = Math.clamp((TRACK_HALF_WIDTH - Math.abs(laneOffset(x, y) - WHEEL_OFFSET)) / TRACK_HALF_WIDTH, 0, 1);
         return t * t * (3 - 2 * t);
+    }
+
+    /** How far a point lies from the centre line of its lane, whichever side. */
+    private float laneOffset(float x, float y) {
+        PathSample nearest = pathSample(x, y, paintPaths(), true);
+        return Math.abs(nearest.distance() - laneCenter(nearest.width()));
+    }
+
+    /**
+     * Where a point lies across its lane for paved wear (terrain-road.frag): 0 on the lane's centre line, 1 at its edge,
+     * a two-way road's middle or kerb, so its wheel paths lie at WHEEL_OFFSET of that.
+     */
+    float wearLane(float x, float y) { return Math.min(1, laneOffset(x, y) / (Kind.PAVED.halfWidth / 2)); }
+
+    /**
+     * How far into a junction's hub a point lies for paved wear: 1 where the approaches' lanes cross and turning
+     * traffic wears the whole surface, fading to 0 on the arms, whose lanes carry their own wear.
+     */
+    float wearHub(float x, float y) {
+        if (borders.size() < 3 || circle != null) { return 0; }
+        float t = Math.clamp(((float) Math.hypot(x, y) - 14) / 10, 0, 1);
+        return 1 - t * t * (3 - 2 * t);
     }
 
     /** Disturbed soil/fines thin out in patches; their final extent still stays inside the terminal plane. */
@@ -1225,13 +1245,26 @@ final class BoardRoad {
     }
 
     private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths) {
+        return pathSample(x, y, sampledPaths, false);
+    }
+
+    /**
+     * With {@code open}, a path's open ends run straight on, so a point past one (an oblique border crossing leaves a
+     * wedge of carriageway beyond it) still measures across the lane rather than round the end.
+     */
+    private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths, boolean open) {
         float distance = Float.POSITIVE_INFINITY, edge = Float.POSITIVE_INFINITY, alongX = 0, alongY = 1, width = 0;
         for (var path : sampledPaths) {
+            // A ring closes on itself (to rounding): it has no ends.
+            boolean ends = open && Math.hypot(path.getFirst().x - path.getLast().x, path.getFirst().y - path.getLast().y) > .01;
             for (int i = 1; i < path.size(); i++) {
                 Point a = path.get(i - 1), b = path.get(i);
                 float dx = b.x - a.x, dy = b.y - a.y;
-                float t = Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy), 0, 1);
+                float along = ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy);
+                float t = Math.clamp(along, ends && i == 1 ? Float.NEGATIVE_INFINITY : 0,
+                      ends && i == path.size() - 1 ? Float.POSITIVE_INFINITY : 1);
                 float near = (float) Math.hypot(x - a.x - t * dx, y - a.y - t * dy);
+                t = Math.clamp(t, 0, 1);
                 edge = Math.min(edge, near - a.width - t * (b.width - a.width));
                 if (near < distance) { distance = near; alongX = dx; alongY = dy; width = a.width + t * (b.width - a.width); }
             }

@@ -9,7 +9,7 @@ import java.util.stream.Stream;
 
 import megamek.common.board.Coords;
 
-/** Immutable drawing commands in unscaled board pixels; game state remains on the Swing thread. */
+/** Immutable drawing commands in tactical units (board units at hex scale 1, y down); game state stays on Swing. */
 public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> walls, List<Fill> flatWalls, Ruler ruler) {
     /** Range contour labels are a presentation choice shared by capture and rendering. */
     public static final boolean SCROLLING_RANGE_LABELS = false;
@@ -28,15 +28,6 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
 
     public BoardTactical withRuler(Ruler ruler) {
         return new BoardTactical(fills, labels, walls, flatWalls, ruler);
-    }
-
-    /** These commands with every x times {@code factor}: from the 2D board's pixels onto hexes of another width. */
-    public BoardTactical scaledX(float factor) {
-        return new BoardTactical(fills.stream().map(fill -> fill.scaledX(factor)).toList(),
-              labels.stream().map(label -> new Label(label.anchor().scaledX(factor), label.text(), label.playback())).toList(),
-              walls.stream().map(wall -> new Wall(wall.coords(), wall.a().scaledX(factor), wall.b().scaledX(factor),
-                    wall.border(), wall.outlineDistance(), wall.playback(), wall.aNeighbors(), wall.bNeighbors())).toList(),
-              flatWalls.stream().map(fill -> fill.scaledX(factor)).toList(), ruler);
     }
 
     /** EDT-owned measurement snapshot. Heights are absolute display levels; null blockedAt means clear LOS. */
@@ -67,9 +58,7 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         return playback != Playback.LIVE && (!hideMovement || playback == Playback.HOLD_DURING_PLAYBACK);
     }
 
-    public record Point(float x, float y) {
-        Point scaledX(float factor) { return new Point(x * factor, y); }
-    }
+    public record Point(float x, float y) { }
 
     /** A straight upright segment anchored to its hex's surface; height is in board elevation levels. */
     public record Wall(Coords coords, Point a, Point b, BoardRangeBorder border, float outlineDistance, Playback playback,
@@ -102,7 +91,7 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         }
     }
 
-    /** Anchor is the transformed hex center in board pixels; captured contours remain the generic fallback. */
+    /** Anchor is the hex centre in tactical units; the fill's contours remain the generic fallback. */
     public record HexBorder(Point anchor, double padding, double width, float scale, boolean zone) {
         public HexBorder(Point anchor, double padding, double width, float scale) {
             this(anchor, padding, width, scale, false);
@@ -126,14 +115,6 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
 
         public Fill {
             contours = List.copyOf(contours);
-        }
-
-        Fill scaledX(float factor) {
-            return new Fill(contours.stream().map(contour -> new Contour(contour.points().stream()
-                        .map(point -> point.scaledX(factor)).toList())).toList(), winding, argb, playback,
-                  border == null ? null : new HexBorder(border.anchor().scaledX(factor), border.padding(), border.width(),
-                        border.scale(), border.zone()),
-                  planeAnchor == null ? null : planeAnchor.scaledX(factor));
         }
 
         public Path2D shape() {

@@ -50,7 +50,7 @@ import megamek.common.units.Entity;
 
 /** GL-owned geometry and cached text. Camera movement never rebuilds the surface meshes or label artwork. */
 final class GpuTactical implements Disposable {
-    /** White dash travel in unscaled board pixels per second. 0f is static; negative values reverse direction. */
+    /** White dash travel in tactical units per second. 0f is static; negative values reverse direction. */
     static final float OUTLINE_SCROLL_SPEED = 4f;
     /** A small depth bias keeps range curtains/tints stable where they share a vertical terrain face. */
     static final float COPLANAR_DEPTH_FAR = 1f - .000001f;

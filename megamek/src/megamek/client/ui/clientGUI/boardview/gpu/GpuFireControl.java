@@ -34,7 +34,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.MMConstants;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalGlyphs;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
@@ -46,7 +46,7 @@ final class GpuFireControl implements Disposable {
     static final float TARGET_ARROW_SIZE = 1f;
     /** Blank spaces between repeated range labels on the contour. */
     static final int RANGE_LABEL_SPACES = 3;
-    /** Travel along the contour in unscaled board pixels per second; negative values reverse it. */
+    /** Travel along the contour in tactical units per second; negative values reverse it. */
     static final float RANGE_SCROLL_SPEED = 20;
     /** Keep the entire flat label above the hex surface while it follows the camera. */
     static final float RANGE_LABEL_CLEARANCE_LEVELS = 1f / 3;
@@ -213,7 +213,7 @@ final class GpuFireControl implements Disposable {
               (int) BoardGeometry.TILE_HEIGHT * LABEL_ART_SCALE, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();
         try {
-            TextMarkerSprite.drawMarker(graphics, label, java.awt.Color.WHITE,
+            TacticalGlyphs.paintHexText(graphics, label, java.awt.Color.WHITE,
                   image.getWidth(), image.getHeight(), LABEL_ART_SCALE);
         } finally {
             graphics.dispose();

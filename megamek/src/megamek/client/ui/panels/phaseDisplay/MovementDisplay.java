@@ -56,10 +56,9 @@ import megamek.client.ui.SharedUtility;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.CollapseWarning;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.overlay.AbstractBoardViewOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.client.ui.clientGUI.boardview.sprite.CraneUnloadTargetSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.FlyOverSprite;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.*;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay.DeploymentPosition;
@@ -275,7 +274,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
     private final Set<Coords> validUnloadHexes = new HashSet<>();
 
     /** The markers on the hexes the unit can be unloaded into, shown while the player chooses. */
-    private final List<CraneUnloadTargetSprite> unloadTargetSprites = new ArrayList<>();
+    private final List<TacticalMark> unloadTargetMarks = new ArrayList<>();
 
     // buttons
     private Map<MoveCommand, MegaMekButton> buttons;
@@ -306,7 +305,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
     /**
      * The ground map flight path of an aero on an atmospheric map
      */
-    private FlyOverSprite flightPath;
+    private TacticalMark flightPath;
 
     // is the shift key held?
     private boolean shiftHeld;
@@ -1895,7 +1894,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
 
     private void clearFlightPath() {
         if (flightPath != null) {
-            clientgui.onAllBoardStates(bv -> bv.removeSprite(flightPath));
+            clientgui.onAllBoardStates(bv -> bv.removeMarks(List.of(flightPath)));
         }
         flightPathPosition = null;
         flightPath = null;
@@ -2950,7 +2949,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             && (boardViewEvent.getBoardId() == flightPathTarget(currentlySelectedEntity))
             && (boardViewEvent.getType() == BoardViewEvent.BOARD_HEX_CLICKED)) {
             if (flightPath != null) {
-                boardViewEvent.getBoardState().removeSprite(flightPath);
+                boardViewEvent.getBoardState().removeMarks(List.of(flightPath));
             }
             clearFlightPath();
             flightPathPosition = boardViewEvent.getCoords();
@@ -2958,8 +2957,8 @@ public class MovementDisplay extends ActionPhaseDisplay {
                                                        flightPathPosition,
                                                        finalFacing());
             currentlySelectedEntity.setPassedThrough(new Vector<>(line));
-            flightPath = new FlyOverSprite(boardViewEvent.getBoardState(), currentlySelectedEntity);
-            boardViewEvent.getBoardState().addSprite(flightPath);
+            flightPath = new TacticalMark.FlyOver(currentlySelectedEntity);
+            boardViewEvent.getBoardState().addMarks(List.of(flightPath));
             updateDonePanel();
             return;
         }
@@ -5244,9 +5243,9 @@ public class MovementDisplay extends ActionPhaseDisplay {
         BoardClientState boardView = clientgui.getBoardState(carrier);
         if (boardView != null) {
             for (Coords coords : validUnloadHexes) {
-                unloadTargetSprites.add(new CraneUnloadTargetSprite(boardView, coords, GUIP.getMoveDefaultColor()));
+                unloadTargetMarks.add(new TacticalMark.CraneTarget(coords, GUIP.getMoveDefaultColor()));
             }
-            boardView.addSprites(unloadTargetSprites);
+            boardView.addMarks(unloadTargetMarks);
         }
         String selectHexKey = CraneRules.isCraneOnlyUnit(unit)
               ? "MovementDisplay.CraneUnload.selectHex"
@@ -5330,8 +5329,8 @@ public class MovementDisplay extends ActionPhaseDisplay {
     private void cancelUnloadHexSelection() {
         unloadHexUnit = null;
         validUnloadHexes.clear();
-        clientgui.boardStates().forEach(boardView -> boardView.removeSprites(unloadTargetSprites));
-        unloadTargetSprites.clear();
+        clientgui.boardStates().forEach(boardView -> boardView.removeMarks(unloadTargetMarks));
+        unloadTargetMarks.clear();
         clientgui.clearMovementEnvelope();
     }
 

@@ -48,7 +48,6 @@ import javax.swing.ImageIcon;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -117,18 +116,10 @@ public class RubbleClearSprite extends HexSprite {
     }
 
     @Override
-    public BoardMarker boardMarker() {
-        return overlayCounter ? bv.boardMarker(BoardMarker.Kind.RUBBLE_CLEAR, loc,
-              displayTurn() + "/" + turnsRequired) : null;
-    }
-
-    @Override
     public void prepare() {
         Graphics2D graph = spriteSetup();
         if (overlayCounter) {
-            if (!bv.isGpuCapture()) {
-                drawProgressIndicator(graph);
-            }
+            drawProgressIndicator(graph);
         } else {
             drawClearedReveal(graph);
         }

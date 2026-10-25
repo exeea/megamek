@@ -98,6 +98,63 @@ vec3 worn(vec3 turf, float height, float amount) {
     return mix(turf, soil, clamp(amount * 1.6 - height * .9, 0.0, 1.0));
 }
 
+float hash(vec3 p); // terrain-concrete.glsl
+
+// Impact craters on lunar ground, placed in world cells so they never follow the material's 12 m repeat: three scales
+// (cells of 26, 9 and 3.5 m), each cell holding at most one crater, kept by its hash. Each is a bowl with a sharp raised
+// rim and an ejecta apron that fades out, in units of its radius, so every size has the same shape; most are old and
+// shallow, a few fresh, deep and bright, with rays. A high sun barely shades their walls, so as on Moon photos their tone
+// carries them too: a pale rim and a duller bowl. Shading only (normal, cavity, albedo): support, movement and
+// line of sight keep the actual ground. A crater a pixel (of pixel metres) covers much of fades out, so small ones never turn into grain.
+// A crater forms only where its bowl and apron fit on level ground: clear is the pixel's distance in metres to the nearest
+// drop or rise and its gradient over the ground, from which each crater estimates that distance at its own centre, so
+// it keeps or drops whole and a step never cuts one.
+void lunarCraters(vec3 world, float pixel, float clear, vec2 clearGradient, float amount, inout vec3 albedo,
+      inout vec3 normal, inout float cavity) {
+    vec2 slope = vec2(0.0);
+    float bowl = 0.0, ring = 0.0, fresh = 0.0;
+    for (int scale = 0; scale < 3; scale++) {
+        float cell = scale == 0 ? 26.0 : scale == 1 ? 9.0 : 3.5;
+        vec2 radius = scale == 0 ? vec2(3.0, 8.0) : scale == 1 ? vec2(1.0, 3.0) : vec2(.4, 1.1);
+        float chance = scale == 0 ? .35 : scale == 1 ? .16 : .08;
+        vec2 cellOf = floor(world.xy / cell);
+        for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+                vec3 id = vec3(cellOf + vec2(x, y), float(scale) * 17.0 + 3.1);
+                if (hash(id) > chance) continue;
+                vec2 centre = (cellOf + vec2(x, y) + .2 + .6 * vec2(hash(id + 1.3), hash(id + 2.7))) * cell;
+                float pick = hash(id + 4.1);
+                float r = mix(radius.x, radius.y, pick * pick);
+                vec2 d = world.xy - centre;
+                float s = length(d) / r;
+                float seen = (1.0 - smoothstep(.12, .4, pixel / r))
+                      * smoothstep(1.8 * r, 2.8 * r, clear - dot(clearGradient, d));
+                if (s > 2.5 || seen <= 0.0) continue;
+                // Most craters are old and worn shallow; a few are fresh.
+                float age = hash(id + 6.7);
+                float isFresh = step(.86, age);
+                float depth = mix(.12, .3, age) + .05 * isFresh;
+                // Bowl h = depth (s^2 - 1) + rim inside, rim exp(-3 (s - 1)) outside: the slope dh/ds, along d.
+                float rim = .25 * depth;
+                float dh = s < 1.0 ? 2.0 * depth * s : -3.0 * rim * exp(-3.0 * (s - 1.0));
+                vec2 along = d / max(length(d), 1e-4);
+                slope += dh * along * seen;
+                bowl = max(bowl, (1.0 - smoothstep(.55, 1.0, s)) * depth / .35 * seen);
+                ring = max(ring, exp(-(s - 1.0) * (s - 1.0) / .02) * depth / .35 * seen);
+                if (isFresh > 0.0) {
+                    float angle = atan(d.y, d.x);
+                    float rays = smoothstep(.55, 1.0, sin(angle * 7.0 + pick * 40.0) * sin(angle * 11.0 + age * 30.0));
+                    float apron = smoothstep(.8, 1.0, s) * (1.0 - smoothstep(1.0, 2.5, s));
+                    fresh = max(fresh, max(1.0 - smoothstep(.9, 1.15, s), rays * apron) * seen);
+                }
+            }
+        }
+    }
+    normal = normalize(normal - vec3(slope, 0.0) * 1.6 * amount);
+    cavity *= 1.0 - .25 * bowl * amount;
+    albedo *= (1.0 - .14 * bowl * amount) * (1.0 + .16 * ring * amount) * (1.0 + .22 * fresh * amount);
+}
+
 // How strongly debris shows on open ground: at rims, at cliff feet, on slopes and in scattered patches.
 vec4 debrisWeights() {
     if (family(0.0)) return vec4(.55, 1.0, .45, 0.0);  // grass: rocky edges and scree, turf elsewhere
@@ -191,6 +248,12 @@ void main() {
     vec2 p = vec2(world.x, -world.y);
     // Capture numerical-map gradients before varying material/coverage branches.
     mat2 groundGradient = mat2(dFdx(p), dFdy(p));
+    // Ground's distance to the nearest drop or rise (BoardRelief.Shade: rim and foot, metres) and its gradient over the
+    // ground, which keep the lunar craters clear of steps.
+    float stepClear = min(surfaceUV.x, surfaceUV.y);
+    mat2 groundFrame = mat2(worldDx.x, worldDy.x, worldDx.y, worldDy.y);
+    vec2 stepGradient = abs(determinant(groundFrame)) > 1e-12
+          ? inverse(groundFrame) * vec2(dFdx(stepClear), dFdy(stepClear)) : vec2(0.0);
     mat2 wallXGradient = mat2(vec2(worldDx.y * sign(projection.x), -worldDx.z),
           vec2(worldDy.y * sign(projection.x), -worldDy.z));
     mat2 wallYGradient = mat2(vec2(-worldDx.x * sign(projection.y), -worldDx.z),
@@ -217,6 +280,8 @@ void main() {
 #endif
     float caustic = 0.0;
     float grass = family(0.0) ? 1.0 : 0.0;
+    // The lunar share of the final cover: its craters and its moon-dust light (Surface.regolith).
+    float lunar = 0.0;
     float sand = family(2.0) ? 1.0 : 0.0;
     vec3 bounce = groundBounce();
     float response = u_groundResponse;
@@ -463,10 +528,22 @@ void main() {
                   rainCover, finish, volcanic, materialCoverage);
         }
 #endif
+        lunar = family(LUNAR_FAMILY) ? 1.0 : 0.0;
+#ifdef terrainBlendFlag
+        if (ground || cliff) lunar = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - LUNAR_FAMILY)));
+#endif
+        // Lunar ground keeps its impact craters, on level faces of its actual share of the cover.
+        if (ground && !shore && face.z > .85 && lunar > 0.0) {
+            lunarCraters(world, pixelMetres, stepClear, stepGradient, lunar * smoothstep(.85, .97, face.z), albedo,
+                  normal, cavity);
+        }
         // biomeMaskFlag: the board has biomes or liquids of two palettes (GpuBiomeSurface); without them this stage
         // finds no cover and leaves everything as it is.
 #ifdef biomeMaskFlag
         if (ground || cliff || bedrock) {
+            // Ground carries its distance to the nearest drop and rise; walls their depth below the rim and height above
+            // the foot.
+            tundraLandform = ground ? surfaceUV.xy : surfaceUV.yx;
             biomeSurface(world, face, shore, above, cliff || bedrock ? surfaceUV.x : 0.0,
                   cliff || bedrock ? surfaceUV.y : surfaceUV.x, materialHeight, sand, deckMud, region,
                   albedo, normal, cavity, finish, grass, bounce, biomePool, biomeDamp);
@@ -629,6 +706,7 @@ void main() {
     surface.heat = volcanic;
     surface.bounce = bounce;
     surface.emission = finish.emission;
+    surface.regolith = lunar * (1.0 - volcanic);
     vec3 result = shadeSurface(surface, caustic, submerged);
 #else
     vec3 result = albedo + finish.emission;

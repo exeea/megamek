@@ -101,7 +101,7 @@ final class GpuHexMasks implements Disposable {
                 return null;
             }
             Coords coords = BoardTacticalGeometry.borderCoords(scene, border);
-            // Captured anchors are mapped from the 2D art's pixels, so far columns round a little off the centre.
+            // The anchor is the unscaled centre; the scaled one rounds a little differently.
             if (coords == null || !owners.add(coords)
                   || Math.abs(border.anchor().x() - BoardGeometry.centerX(coords) / BoardGeometry.hexScale()) > .01f
                   || Math.abs(border.anchor().y() + BoardGeometry.centerY(coords) / BoardGeometry.hexScale()) > .01f) {

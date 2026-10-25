@@ -180,7 +180,7 @@ class GpuBuildingMaterialsSmokeTest {
                     var wall = model.getMaterial(role);
                     assertNotNull(wall, feature.asset());
                     Texture texture = wall.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture;
-                    assertSame(assets.material("structures/facades/" + family), texture, feature.asset());
+                    assertSame(assets.material("structures/facades/facade-" + family), texture, feature.asset());
                     assertEquals(128, texture.getWidth());
                     assertEquals(128, texture.getHeight());
                     assertEquals(Texture.TextureWrap.Repeat, texture.getUWrap());

@@ -15,7 +15,6 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
-import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -59,7 +58,8 @@ class GpuLargeMapTest {
             });
             BoardScene overview = fixture.source.takeFrame().scene();
             assertTrue(GpuHexOverlayTest.covers(overview.tactical(), preferences.getMapsheetColor(),
-                  new Coords(192, 190), 10.5, 18), "Far sheet borders must survive full-board capture as native geometry");
+                  new Coords(192, 190), GpuHexOverlayTest.NORTH_WEST_X, GpuHexOverlayTest.NORTH_WEST_Y),
+                  "Far sheet borders must survive full-board capture as native geometry");
             assertNull(overview.tile(new Coords(192, 190)).tactical(), "Native sheet borders need no per-hex raster");
             Set<BoardScene.Pixels> markings = new HashSet<>();
             overview.tiles().forEach(tile -> {
@@ -72,12 +72,13 @@ class GpuLargeMapTest {
             assertTrue(markings.size() < 1_000, "Sheet borders must share atlas artwork even in full overview");
             long captured = System.nanoTime();
             Coords far = new Coords(190, 190);
-            // Auto-hit is now a native icon; a hit still exercises compatibility-raster capture and eviction.
-            SpecialHexDisplay marker = new SpecialHexDisplay(SpecialHexDisplay.Type.ARTILLERY_HIT,
-                  SpecialHexDisplay.NO_ROUND, fixture.player, "Large-board capture");
+            // Hex plugins are the raster pass's one user: a marking far out exercises its capture and eviction.
+            boolean[] marked = { true };
             SwingUtilities.invokeAndWait(() -> {
+                fixture.view.addHexDrawPlugin((graphics, hex, game, coords, view) -> {
+                    if (marked[0] && coords.equals(far)) { graphics.fillRect(90, 90, 20, 20); }
+                });
                 fixture.source.setVisibleArea(new Rectangle(185, 185, 15, 15));
-                fixture.game.getBoard().addSpecialHexDisplay(far, marker, true);
                 fixture.source.refresh();
             });
             assertNotNull(fixture.source.takeFrame().scene().tile(far).tactical());
@@ -87,7 +88,7 @@ class GpuLargeMapTest {
             });
             assertNull(fixture.source.takeFrame().scene().tile(far).tactical(), "Panning must release offscreen markings");
             SwingUtilities.invokeAndWait(() -> {
-                fixture.game.getBoard().removeSpecialHexDisplay(far, marker, true);
+                marked[0] = false;
                 fixture.game.getBoard().setHex(far, new Hex(4));
                 fixture.source.setVisibleArea(new Rectangle(185, 185, 15, 15));
                 fixture.source.refresh();

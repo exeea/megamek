@@ -29,7 +29,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -159,8 +159,8 @@ class GpuBoardSmokeTest {
                             Gdx.input.getInputProcessor().keyUp(Input.Keys.ESCAPE);
                             SwingUtilities.invokeAndWait(() -> {
                                 fixture.view.markDeploymentHexesFor(fixture.entity);
-                                fixture.view.addSprites(List.of(new MovementEnvelopeSprite(fixture.view, Color.MAGENTA,
-                                      new Coords(4, 4), 63)));
+                                fixture.view.addMarks(List.of(new TacticalMark.Envelope(new Coords(4, 4), 63,
+                                      Color.MAGENTA)));
                                 fixture.source.refresh();
                             });
                         } else if (frames() == 205) {
@@ -352,7 +352,7 @@ class GpuBoardSmokeTest {
                 entity.setDeployed(true);
                 entity.setPosition(id == 2 ? new Coords(8, 5) : new Coords(id * 7 % 48, id * 13 % 51));
                 fixture.game.addEntity(entity, false);
-                fixture.view.addSprites(List.of(new MovementEnvelopeSprite(fixture.view, Color.CYAN, entity.getPosition(), 63)));
+                fixture.view.addMarks(List.of(new TacticalMark.Envelope(entity.getPosition(), 63, Color.CYAN)));
             }
             // A hovering unit exercises airborne tokens and their hex stems in the native render.
             Entity hovering = new MekFileParser(

@@ -36,7 +36,7 @@ import megamek.client.Client;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.sprite.ScanSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.Player;
 import megamek.common.actions.ScanAction;
 import megamek.common.board.BoardLocation;
@@ -100,14 +100,12 @@ public class ScanSpriteHandler extends BoardViewSpriteHandler {
             // the same amber the SCANNING and SCANNED labels use, rather than the player's own colour: only
             // this player sees the sweep anyway, so telling them whose it is buys nothing, and a player whose
             // colour is a dark grey could not make it out against the ground
-            currentSprites.add(new ScanSprite(boardView, scanner.getPosition(), targetHex,
-                  GUIP.getPrecautionColor()));
+            addMark(boardView, new TacticalMark.Scan(scanner.getPosition(), targetHex, GUIP.getPrecautionColor()));
             drawn++;
         }
         if (drawn > 0) {
             LOGGER.debug("[Scan] drawing {} sweep(s) for {}", drawn, localPlayer.getName());
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     @Override

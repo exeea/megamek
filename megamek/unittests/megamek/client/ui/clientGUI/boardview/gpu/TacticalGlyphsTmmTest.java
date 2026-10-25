@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
-package megamek.client.ui.clientGUI.boardview.sprite;
+package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -9,8 +9,8 @@ import java.util.concurrent.FutureTask;
 import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.TacticalGlyphs;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -25,7 +25,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /** The target movement modifier a plotted path shows under its last step (a Dervish: walk 5, run 8, jump 5). */
-class StepSpriteTmmTest {
+class TacticalGlyphsTmmTest {
 
     @BeforeAll
     static void initializeEquipment() {
@@ -79,7 +79,7 @@ class StepSpriteTmmTest {
             BoardView view = new BoardView(game, null, null, 0);
             try {
                 BoardTacticalGraphics graphics = new BoardTacticalGraphics();
-                new StepSprite(view, path.getLastStep(), true).drawTactical(graphics);
+                TacticalGlyphs.paintStep(graphics, view, path.getLastStep(), true);
                 return graphics.snapshot().labels().stream().map(label -> label.text().value())
                       .filter(text -> text.startsWith("+") || text.startsWith("-")).collect(Collectors.toSet());
             } finally {

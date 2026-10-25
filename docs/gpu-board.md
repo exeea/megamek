@@ -69,9 +69,9 @@ different inputs:
   undo history remain with the existing editor.
 
 Both use `BoardArtwork` for tileset lookup, ground artwork, decals and model selection,
-and turn each hex into a tile with the same `BoardScene.captureTile`. A game adds only
-its tactical marking and labels (`HexImage.withTactical`, `Tile.withMarkings`, which keep
-every other field), so it shows the board exactly as the 3D preview and editor do.
+and turn each hex into a tile with the same `BoardScene.captureTile`. A game only relabels
+its visible hexes (`BoardArtwork.labels`, `Tile.withText`, which keeps every other field),
+so it shows the board exactly as the 3D preview and editor do.
 `GpuSourceParityTest` compares both sources' tiles on a board with legacy scenery.
 They publish a `BoardScene` containing terrain and unit presentation data.
 A `BoardSource.Frame` packages that scene with the animation events, command descriptions,
@@ -86,7 +86,7 @@ tripwire. It draws each hex without the legacy tokens the conversion took
 converted where it is loaded (docs/3d-board-editor.md, Legacy conversion), so the game and
 the previews draw what the editor and the saved `.board2` hold. A board that reaches a
 view unconverted logs one warning and draws nothing for those tokens. `BoardClientState`
-keeps only the game's tactical pass. `GpuSourceParityTest` now compares the game source,
+captures no tiles. `GpuSourceParityTest` now compares the game source,
 the preview and the editor on one converted fixture.
 
 On a render update, `GpuBattleView` takes a frame and feeds its events into

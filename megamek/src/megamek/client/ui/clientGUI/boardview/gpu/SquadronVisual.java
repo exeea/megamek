@@ -47,7 +47,8 @@ final class SquadronVisual {
                         bindings.add(new UnitEquipmentAssembly.Binding(binding.index(), binding.location(),
                               prefix + "-" + binding.node(), binding.asset(), binding.embedded(), emitters, member.id(),
                               binding.aimNode() == null ? null : prefix + "-" + binding.aimNode(),
-                              binding.recoilNode() == null ? null : prefix + "-" + binding.recoilNode(), binding.pitchOnly()));
+                              binding.recoilNode() == null ? null : prefix + "-" + binding.recoilNode(), binding.pitchOnly(),
+                              binding.depression()));
                     }
                 } finally {
                     model.dispose();

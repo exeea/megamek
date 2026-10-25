@@ -19,7 +19,7 @@ final class GpuScatter {
     // The white fifth swatch preserves the bushes' authored bark and leaf colours; the sixth shares Mars cliff stone.
     private static final String[] MATERIALS = { "terrain/surfaces/scatter-stone", "terrain/surfaces/biome-soil",
           "terrain/surfaces/arid-cliff",
-          "vegetation/fronds-palm", null, "terrain/surfaces/mars-cliff", "terrain/surfaces/volcano-cliff" };
+          "vegetation/palm-fronds", null, "terrain/surfaces/mars-cliff", "terrain/surfaces/volcano-cliff" };
     private static final int HEIGHT = (MATERIALS.length + 1) / 2 * CELL;
 
     private GpuScatter() { }

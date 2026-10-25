@@ -27,7 +27,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.sprite.CollapseWarningSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.SpecialHexDisplay;
@@ -67,7 +67,7 @@ class GpuMarkersSmokeTest {
                 }
                 fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
                 fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
-                fixture.view.addSprites(List.of(new CollapseWarningSprite(fixture.view, stack)));
+                fixture.view.addMarks(List.of(new TacticalMark.CollapseWarning(stack)));
                 board.addSpecialHexDisplay(stack, new SpecialHexDisplay(SpecialHexDisplay.Type.ARTILLERY_INCOMING,
                       SpecialHexDisplay.NO_ROUND, enemy, "Incoming artillery"));
                 board.addSpecialHexDisplay(stack, new SpecialHexDisplay(SpecialHexDisplay.Type.PLAYER_NOTE,
@@ -235,8 +235,8 @@ class GpuMarkersSmokeTest {
                 fixture.entity.addBeenDetectedBy(fixture.player);
                 fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
                 fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
-                fixture.view.addSprites(List.of(new CollapseWarningSprite(fixture.view, building),
-                      new CollapseWarningSprite(fixture.view, bridge)));
+                fixture.view.addMarks(List.of(new TacticalMark.CollapseWarning(building),
+                      new TacticalMark.CollapseWarning(bridge)));
                 fixture.source.refresh();
             });
             BoardScene scene = fixture.source.takeFrame().scene();
@@ -399,9 +399,12 @@ class GpuMarkersSmokeTest {
         }
         String[] labels = { "Sensor", "Collapse", "Minefield", "Charges", "Incoming", "Target", "Adjusted", "Auto hit",
               "Orbital", "Nuclear", "Objective", "Note", "Cargo", "Flare", "Saw clearing", "Bridge repair",
-              "Bridge build", "Fortify", "Clear rubble", "Dig in" };
+              "Bridge build", "Fortify", "Clear rubble", "Dig in", "Tagged" };
         List<BoardMarker> symbols = new ArrayList<>();
         for (var kind : BoardMarker.Kind.values()) {
+            if (kind == BoardMarker.Kind.ARTILLERY_DRIFT) {
+                continue; // a line to where the round came down, not a symbol
+            }
             int index = kind.ordinal();
             symbols.add(new BoardMarker(kind, new Coords(1 + (index % 5) * 3, 1 + (index / 5) * 3),
                   0, kind.rgb(), labels[index]));

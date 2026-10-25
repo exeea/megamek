@@ -35,6 +35,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.DugInSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -44,18 +45,12 @@ import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
 
 /**
- * Manages the dug-in trench overlay sprites on the board view (TO:AR p.106 Digging In). Creates and removes
- * {@link DugInSprite} instances on the hexes of infantry platoons that are digging in or dug in; the state is read from
- * the synced entities. The multi-turn fortified-hex build (sandbags) is handled separately by
- * {@link FortifyBuildSpriteHandler}.
+ * Publishes the dug-in marks on the board view (TO:AR p.106 Digging In) on the hexes of infantry platoons that are
+ * digging in or dug in; the state is read from the synced entities. The Legacy 2D board draws them as
+ * {@link DugInSprite} trench overlays, the 3D board as trenches. The multi-turn fortified-hex build (sandbags) is handled
+ * separately by {@link FortifyBuildSpriteHandler}.
  */
 public class DugInSpriteHandler extends BoardViewSpriteHandler {
-
-    /** Opacity of the trench overlay while the platoon is still digging in (not yet protected). */
-    private static final float DIGGING_IN_ALPHA = 0.4f;
-
-    /** Opacity of the trench overlay once the platoon is dug in (protected). */
-    private static final float DUG_IN_ALPHA = 1.0f;
 
     private final Game game;
 
@@ -65,8 +60,8 @@ public class DugInSpriteHandler extends BoardViewSpriteHandler {
     }
 
     /**
-     * Rebuilds the dug-in trench sprites from the current entity states: one trench overlay on the hex of every
-     * infantry platoon that is digging in (faint) or dug in (full).
+     * Rebuilds the dug-in marks from the current entity states: one on the hex of every infantry platoon that is
+     * digging in or dug in (not the multi-turn fortifying states, which show sandbags instead).
      */
     public void updateDugInSprites() {
         clear();
@@ -80,29 +75,17 @@ public class DugInSpriteHandler extends BoardViewSpriteHandler {
             if (!(entity instanceof Infantry infantry) || !entity.isDeployed() || (entity.getPosition() == null)) {
                 continue;
             }
-            float alpha = trenchAlphaFor(infantry);
-            if (alpha <= 0f) {
+            int dugIn = infantry.getDugIn();
+            if ((dugIn != Infantry.DUG_IN_COMPLETE) && (dugIn != Infantry.DUG_IN_WORKING)) {
                 continue;
             }
             BoardLocation location = BoardLocation.of(entity.getPosition(), entity.getBoardId());
             BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView != null) {
-                currentSprites.add(new DugInSprite(boardView, entity.getPosition(), alpha, trenchLabelFor(infantry)));
+                addMark(boardView, new TacticalMark.DugIn(entity.getPosition(), dugIn == Infantry.DUG_IN_COMPLETE,
+                      trenchLabelFor(infantry)));
             }
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
-    }
-
-    /**
-     * @return the trench overlay opacity for the platoon: full when dug in, faint while still digging in, or 0 when it
-     *       is neither (including the multi-turn fortifying states, which show sandbags instead).
-     */
-    private static float trenchAlphaFor(Infantry infantry) {
-        return switch (infantry.getDugIn()) {
-            case Infantry.DUG_IN_COMPLETE -> DUG_IN_ALPHA;
-            case Infantry.DUG_IN_WORKING -> DIGGING_IN_ALPHA;
-            default -> 0f;
-        };
     }
 
     /**

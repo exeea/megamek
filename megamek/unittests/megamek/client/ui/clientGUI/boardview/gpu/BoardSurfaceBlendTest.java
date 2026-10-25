@@ -63,6 +63,25 @@ class BoardSurfaceBlendTest {
     }
 
     @Test
+    void lavaMeltsSnowAndBurnsTurfAtTheFootOfTheirCliffs() {
+        for (var hill : new BoardScene.Surface[] { BoardScene.Surface.SNOW, BoardScene.Surface.GRASS }) {
+            int upper = hill.ordinal(), melted = BoardSurfaceBlend.melted(upper);
+            var scene = scene(c -> tile(c, c.equals(CENTER) ? upper : BoardSurfaceBlend.BANK, c.equals(CENTER) ? 2 : 0));
+            var high = scene.tile(CENTER);
+            var next = CENTER.translated(0);
+            var foot = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
+            foot.z = BoardGeometry.groundZ(scene.tile(next));
+            var cover = BoardSurfaceBlend.sampleCliff(scene, high, foot.x, foot.y, foot.z);
+            assertEquals(0, cover.weight(upper), .00001f, hill + " at the lava's edge");
+            assertTrue(cover.weight(melted) > .05f, cover.toString());
+            // A hex's width away the heat is gone.
+            var top = BoardGeometry.center(CENTER, 0);
+            top.z = BoardGeometry.groundZ(high);
+            assertEquals(BoardSurfaceBlend.solid(upper), BoardSurfaceBlend.sample(scene, high, top.x, top.y, top.z));
+        }
+    }
+
+    @Test
     void naturalCliffsDoNotSpillTheirCoverAcrossLowerPavement() {
         for (int rise : new int[] { 1, 2, 3, 4, 8 }) {
             var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND,

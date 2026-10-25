@@ -24,8 +24,6 @@ import megamek.common.units.Entity;
 /** Drawing inputs for shared tactical symbols and unit labels, independent of a board window. */
 public interface BoardGlyphContext {
     default BoardGlyphContext glyphContext() { return this; }
-    int C3_LINE_WIDTH = 1;
-    int FLY_OVER_LINE_WIDTH = 3;
     void addSprite(Sprite sprite);
     List<AttackSprite> getAttackSprites();
     void drawHexBorder(Graphics2D graphics, Point point, Color color, double padding, double lineWidth);
@@ -46,11 +44,8 @@ public interface BoardGlyphContext {
     Shape getDownArrow();
     Image getScaledImage(Image image, boolean useCache);
     BufferedImage createShadowMask(Image image);
-    boolean isGpuCapture();
     void repaint();
     void drawHexBorder(Graphics2D graphics, Color color, double padding, double lineWidth);
-    BoardMarker boardMarker(BoardMarker.Kind kind, Coords coords, String label);
-    BoardMarker boardMarker(BoardMarker.Kind kind, Coords coords, int rgb, String label);
 
     FontMetrics getFontMetrics(Font font);
     int getDropShadowDistance();

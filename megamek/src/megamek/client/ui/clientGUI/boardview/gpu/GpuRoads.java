@@ -167,12 +167,24 @@ final class GpuRoads {
 
     private static float finish(Patch patch) {
         boolean transition = patch.fade() != null && patch.fade().join() != null;
-        // Positive: material joins. Negative: loose (-1), wheels (-2), landing asphalt (-3) or aggregate/soil (-4).
+        // Positive: material joins (1, 2) or paint (3). Negative: loose (-1), wheels (-2: tyre tracks, or a paved
+        // carriageway's wear), landing asphalt (-3) or aggregate/soil (-4).
         float finish = patch.fade() != null && patch.fade().wheels() ? -2
-              : patch.fade() != null && patch.fade().landing() ? patch.texture().equals("roads/asphalt") ? -3 : -4
-              : patch.texture().equals("roads/dirt") || patch.texture().equals("roads/gravel") ? -1 : 0;
+              : patch.fade() != null && patch.fade().landing() ? asphalt(patch) ? -3 : -4
+              : patch.texture().equals("roads/dirt") || patch.texture().equals("roads/gravel") ? -1
+              : paint(patch) ? 3 : 0;
         return transition ? patch.texture().equals("roads/dirt") ? 2 : 1 : finish;
     }
+
+    private static boolean asphalt(Patch patch) { return patch.texture().equals("roads/asphalt"); }
+
+    /** Road markings: concrete-ground tinted with paint, at the paint's lift. */
+    private static boolean paint(Patch patch) {
+        return patch.texture().equals("concrete-ground") && patch.lift() == PAINT_LIFT;
+    }
+
+    /** Markings lie over the asphalt and its wear, under nothing. */
+    private static final float PAINT_LIFT = .065f;
 
     /**
      * A merged coat's vertex colour: its maps (a {@link #MATERIALS} index, or 3 plus a sculpt material's index), its
@@ -394,7 +406,8 @@ final class GpuRoads {
             var fade = patch.fade();
             result.add(new Patch(tail, patch.texture(), patch.tint(), patch.repeat(), patch.lift(),
                   new Fade(0, paved ? -FEATHER : -LOOSE_FEATHER, apron - setback,
-                        fade != null && fade.wheels(), fade == null ? null : fade.join(), setback, true)));
+                        fade != null && fade.wheels() && !asphalt(patch), fade == null ? null : fade.join(), setback,
+                        true)));
         }
         return result;
     }
@@ -422,7 +435,8 @@ final class GpuRoads {
             patches.add(new Patch(verge, snow ? "snow-ground" : sand ? "sand-verge" : "roads/gravel", Color.WHITE,
                   1, .025f, new Fade(BoardRoad.SHOULDER, -.2f, endFade)));
         }
-        patches.add(new Patch(core, texture, tint, repeat, SURFACE_LIFT, null));
+        // A paved core carries its traffic: the mask gives the shader the heading and lane its wear follows.
+        patches.add(new Patch(core, texture, tint, repeat, SURFACE_LIFT, paved ? new Fade(0, 0, 0, true, null) : null));
         if (!tail.isEmpty()) {
             patches.add(new Patch(tail, texture, tint, repeat, SURFACE_LIFT, new Fade(0, 0, endFade)));
         }
@@ -460,7 +474,7 @@ final class GpuRoads {
                 Area box = keepClear(road, exits, approaches);
                 box.subtract(crossing.clearance());
                 if (!box.isEmpty()) {
-                    patches.add(new Patch(box, "concrete-ground", new Color(1, .78f, .08f, 1), 1.5f, .065f, null));
+                    patches.add(new Patch(box, "concrete-ground", new Color(1, .78f, .08f, 1), 1.5f, PAINT_LIFT, null));
                 }
             }
             var divider = markings(road, coords, exits);
@@ -471,12 +485,12 @@ final class GpuRoads {
             stops.add(road.flowMarkings());
             stops.subtract(crossing.clearance());
             if (!stops.isEmpty()) {
-                patches.add(new Patch(stops, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
+                patches.add(new Patch(stops, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT, null));
             }
             Area median = road.medianLines();
             median.subtract(crossing.clearance());
             if (!median.isEmpty()) {
-                patches.add(new Patch(median, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
+                patches.add(new Patch(median, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT, null));
             }
         } else if (!paved) {
             Area tracks = road.tracks(exits);
@@ -549,7 +563,7 @@ final class GpuRoads {
     }
 
     static Patch markings(BoardRoad road, Coords coords, int exits) {
-        return new Patch(road.markings(coords, exits), "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, .065f,
+        return new Patch(road.markings(coords, exits), "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT,
               null);
     }
 
@@ -778,18 +792,23 @@ final class GpuRoads {
             // from the surface's grain, instead of stretching a few large noise blobs into fingers.
             float fan = .35f + .65f * (float) Math.sin(Math.PI * t);
             float outer = fade.outer() * fan;
-            boolean asphalt = patch.texture().equals("roads/asphalt");
+            boolean asphalt = asphalt(patch);
             float inner = fade.inner() - (asphalt ? (1 - t) * 4 : 0);
             float edge = Math.clamp((outer - road.distance(x, y)) / (outer - inner), 0, 1);
             // Aggregate remains substantial beyond the last asphalt fragments, then separates into grains.
             if (!asphalt) { t = Math.min(1, t / .6f); }
             float alpha = t * t * (3 - 2 * t) * edge;
-            return fade.wheels() ? alpha * road.wheelCoverage(x, y) : alpha;
+            return alpha * wheels(road, patch, x, y);
         }
         float alpha = fade.outer() > fade.inner()
               ? Math.clamp((fade.outer() - road.distance(x, y)) / (fade.outer() - fade.inner()), 0, 1) : 1;
-        if (fade.wheels()) { alpha *= road.wheelCoverage(x, y); }
+        alpha *= wheels(road, patch, x, y);
         return fade.end() > 0 ? alpha * road.endCoverage(x, y, fade.end()) : alpha;
+    }
+
+    /** A paved carriageway's wear covers it whole (the shader places it); tyre tracks only their wheel paths. */
+    private static float wheels(BoardRoad road, Patch patch, float x, float y) {
+        return patch.fade().wheels() && !asphalt(patch) ? road.wheelCoverage(x, y) : 1;
     }
 
     static float materialCoverage(Patch patch, float x, float y) {
@@ -811,10 +830,12 @@ final class GpuRoads {
             tint.b = 0;
         } else if (patch.fade() != null && patch.fade().wheels()) {
             var direction = road.wheelDirection(x, y);
-            // Road UVs point down in Y. RG carries the wear direction, not an albedo tint.
-            tint.r = Math.round(128 + direction.x * 127) / 255f;
-            tint.g = Math.round(128 - direction.y * 127) / 255f;
-            tint.b = 0;
+            // Road UVs point down in Y. RG carries the wear direction, not an albedo tint. On paved wear its length
+            // falls to a half across a junction's hub, and B is the lane position (BoardRoad#wearHub, #wearLane).
+            float length = asphalt(patch) ? 1 - .5f * road.wearHub(x, y) : 1;
+            tint.r = Math.round(128 + direction.x * 127 * length) / 255f;
+            tint.g = Math.round(128 - direction.y * 127 * length) / 255f;
+            tint.b = asphalt(patch) ? road.wearLane(x, y) : 0;
         }
         return tint;
     }

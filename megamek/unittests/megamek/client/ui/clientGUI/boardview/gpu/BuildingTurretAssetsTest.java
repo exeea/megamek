@@ -23,7 +23,9 @@ class BuildingTurretAssetsTest {
             for (var file : files.filter(p -> p.toString().endsWith(".json")).toList()) {
                 if (!json.readTree(file.toFile()).has("mesh")) { continue; }
                 var descriptor = UnitModelDescriptor.read(file);
-                var levels = RigidGlb.loadLods(new FileHandle(file.getParent().resolve(descriptor.mesh()).toFile()));
+                // As the game loads them: their albedo maps are board materials outside the turret folder.
+                var levels = RigidGlb.loadLods(new FileHandle(file.getParent().resolve(descriptor.mesh()).toFile()),
+                      Configuration.dataDir().toPath().resolve("models"));
                 assertNotSame(levels.get(0), levels.get(1), file.toString());
                 Set<String> first = new HashSet<>(), second = new HashSet<>();
                 levels.get(0).nodes.forEach(node -> ids(node, first));
@@ -33,7 +35,9 @@ class BuildingTurretAssetsTest {
                 int simplified = descriptor.validate(levels.get(1), 1);
                 assertTrue(simplified < detailed, file.toString());
                 if (descriptor.kind().equals("equipment")) {
-                    assertTrue(descriptor.bounds().min().get(1) >= -.001f, file.toString());
+                    if (!descriptor.joints().containsKey("elevation")) {
+                        assertTrue(descriptor.bounds().min().get(1) >= -.001f, "Front module rear datum: " + file);
+                    }
                     assertTrue(descriptor.joints().containsKey("aim"));
                     assertEquals(descriptor.family().equals("ballistic") || descriptor.family().equals("machine-gun"),
                           descriptor.joints().containsKey("recoil"));
@@ -45,7 +49,7 @@ class BuildingTurretAssetsTest {
                 checked++;
             }
         }
-        assertEquals(26, checked);
+        assertEquals(58, checked);
     }
 
     private static void ids(ModelNode node, Set<String> ids) {

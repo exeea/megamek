@@ -133,7 +133,7 @@ class GpuHexPickTest {
                 game.source().players().endPick(true);
                 assertNull(pick(game), "Done ends the pick");
                 assertEquals(legacy2D, List.copyOf(game.sent()), "the Legacy 2D picker's order and toasts");
-                assertTrue(game.view().getWeaponRangeSprites().isEmpty(), "the highlights go with the pick");
+                assertTrue(game.view().getWeaponRanges().isEmpty(), "the highlights go with the pick");
             } finally {
                 dismiss();
             }
@@ -152,7 +152,7 @@ class GpuHexPickTest {
                 game.source().players().endPick(false);
                 assertNull(pick(game), "Esc ends the pick");
                 assertTrue(game.sent().stream().noneMatch(line -> line.startsWith("chat: ")), "and sends no order");
-                assertTrue(game.view().getWeaponRangeSprites().isEmpty());
+                assertTrue(game.view().getWeaponRanges().isEmpty());
 
                 nativeStrategicTarget(game);
                 var first = onSwing(() -> game.view().getHexPick());
@@ -160,7 +160,7 @@ class GpuHexPickTest {
                 assertNotSame(first, onSwing(() -> game.view().getHexPick()),
                       "one pick at a time: a new order's pick ends the running one");
                 game.source().click(FIRST, false, 0);
-                assertEquals(1, onSwing(() -> game.view().getWeaponRangeSprites().size()),
+                assertEquals(1, onSwing(() -> game.view().getWeaponRanges().size()),
                       "and the ended pick takes no clicks");
                 assertNotNull(pick(game));
                 onSwing(() -> {
@@ -197,7 +197,7 @@ class GpuHexPickTest {
                           "a board click adds a waypoint");
                     game.source().players().endPick(true);
                     assertNull(pick(game), "the HUD's Done stops picking");
-                    assertEquals(1, onSwing(() -> game.view().getWeaponRangeSprites().size()),
+                    assertEquals(1, onSwing(() -> game.view().getWeaponRanges().size()),
                           "the draft route stays on the board while the editor is open");
                     onSwing(() -> {
                         button(editor, Messages.getString("BotCommandPanel.MoveOrder.pick")).doClick(0);
@@ -215,7 +215,7 @@ class GpuHexPickTest {
                         return null;
                     });
                 }
-                assertTrue(onSwing(() -> game.view().getWeaponRangeSprites().isEmpty()), "and goes with the editor");
+                assertTrue(onSwing(() -> game.view().getWeaponRanges().isEmpty()), "and goes with the editor");
             } finally {
                 dismiss();
             }

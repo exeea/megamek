@@ -19,11 +19,9 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.client.ui.clientGUI.boardview.toolTip.TWBoardViewTooltip;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
-import megamek.common.board.HexTile;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -137,11 +135,9 @@ class BoardImpassableTest {
         var fills = BoardImpassable.fills(scene, null, false);
         Area legalArea = new Area();
         for (Coords coords : marked) {
-            // The 2D art's hex outline, mapped onto the board's narrower hex at its place.
-            double x = coords.getX() * .75 * BoardGeometry.TILE_WIDTH, y = coords.getY() * 72 + (coords.getX() & 1) * 36;
-            var placed = AffineTransform.getTranslateInstance(x, y);
-            placed.scale(HexTile.IMAGE_TO_MODEL_X, 1);
-            legalArea.add(new Area(placed.createTransformedShape(HexDrawUtilities.getHexFullBorderLine(0))));
+            var centre = BoardTacticalGeometry.centre(coords);
+            legalArea.add(new Area(AffineTransform.getTranslateInstance(centre.x(), centre.y())
+                  .createTransformedShape(BoardTacticalGeometry.insetHexagon(0))));
         }
         for (var fill : fills) {
             Area spill = new Area(fill.shape());

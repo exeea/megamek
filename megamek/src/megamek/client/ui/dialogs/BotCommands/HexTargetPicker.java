@@ -56,9 +56,8 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardHexPick;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -89,9 +88,9 @@ public class HexTargetPicker implements BoardHexPick {
     private final Consumer<String> onTargetsSelected;
 
     // insertion order matters: waypoints are followed in the order they were picked
-    private final Map<Coords, FieldOfFireSprite> pickedHexes = new LinkedHashMap<>();
+    private final Map<Coords, TacticalMark> pickedHexes = new LinkedHashMap<>();
     // the picked hexes numbered in click order, so a route shows the order it will be followed in
-    private final List<TextMarkerSprite> orderNumbers = new ArrayList<>();
+    private final List<TacticalMark> orderNumbers = new ArrayList<>();
     private JDialog controlDialog;
     private JLabel statusLabel;
     private BoardViewListenerAdapter hexClickListener;
@@ -193,8 +192,8 @@ public class HexTargetPicker implements BoardHexPick {
     private void addHex(Coords coords) {
         if (pickedHexes.containsKey(coords)) {
             // clicking a selected hex again deselects it
-            FieldOfFireSprite highlight = pickedHexes.remove(coords);
-            boardView.removeSprites(List.of(highlight));
+            TacticalMark highlight = pickedHexes.remove(coords);
+            boardView.removeMarks(List.of(highlight));
             renumber();
             clientGUI.addToast(ToastLevel.INFO, Messages.getString("BotCommandPanel.HexPicker.hexRemoved",
                   coords.getBoardNum()));
@@ -206,10 +205,9 @@ public class HexTargetPicker implements BoardHexPick {
             clientGUI.addToast(ToastLevel.WARNING, Messages.getString("BotCommandPanel.HexPicker.tooMany", maxHexes));
             return;
         }
-        FieldOfFireSprite highlight = new FieldOfFireSprite(boardView, RangeType.RANGE_SHORT, coords,
-              ALL_HEX_BORDERS);
+        TacticalMark highlight = new TacticalMark.WeaponRange(coords, ALL_HEX_BORDERS, RangeType.RANGE_SHORT);
         pickedHexes.put(coords, highlight);
-        boardView.addSprites(List.of(highlight));
+        boardView.addMarks(List.of(highlight));
         renumber();
         clientGUI.addToast(ToastLevel.INFO, Messages.getString("BotCommandPanel.HexPicker.hexAdded",
               coords.getBoardNum(), pickedHexes.size()));
@@ -224,17 +222,17 @@ public class HexTargetPicker implements BoardHexPick {
      * Numbers the picked hexes in the order they were clicked. A single-hex pick needs no number.
      */
     private void renumber() {
-        boardView.removeSprites(orderNumbers);
+        boardView.removeMarks(orderNumbers);
         orderNumbers.clear();
         if (singleHex) {
             return;
         }
         int number = 1;
         for (Coords coords : pickedHexes.keySet()) {
-            orderNumbers.add(new TextMarkerSprite(boardView, coords, String.valueOf(number), Color.WHITE));
+            orderNumbers.add(new TacticalMark.HexText(coords, String.valueOf(number), Color.WHITE));
             number++;
         }
-        boardView.addSprites(orderNumbers);
+        boardView.addMarks(orderNumbers);
     }
 
     private void createControlDialog() {
@@ -298,8 +296,8 @@ public class HexTargetPicker implements BoardHexPick {
         if (controlDialog != null) {
             controlDialog.dispose();
         }
-        boardView.removeSprites(pickedHexes.values());
-        boardView.removeSprites(orderNumbers);
+        boardView.removeMarks(pickedHexes.values());
+        boardView.removeMarks(orderNumbers);
         if (sendSelection && !pickedHexes.isEmpty()) {
             String targets = pickedHexes.keySet().stream()
                   .map(coords -> coords.hexCode(boardView.getBoard()))

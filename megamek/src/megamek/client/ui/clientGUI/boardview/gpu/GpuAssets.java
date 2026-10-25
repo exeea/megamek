@@ -158,7 +158,7 @@ final class GpuAssets implements Disposable {
         return maps;
     }
 
-    static String magmaName(boolean molten) { return molten ? "terrain/lava/lava" : "terrain/lava/crust"; }
+    static String magmaName(boolean molten) { return molten ? "terrain/lava/lava-flow" : "terrain/lava/lava-crust"; }
 
     /** The exported linear emission's scale and area mean, owned with the corresponding material maps. */
     record LavaEmission(float scale, float red, float green, float blue) { }
@@ -963,7 +963,7 @@ final class GpuAssets implements Disposable {
 
     Ice ice() {
         if (ice == null) {
-            String name = "terrain/ice/sheet";
+            String name = "terrain/ice/ice-sheet";
             Texture color = texture(name, GpuMaterialMaps.Layout.COLOR, true);
             var maps = List.of(layer(name, GpuMaterialMaps.Layout.NORMAL), layer(name, GpuMaterialMaps.Layout.ICE));
             int width = Math.max(maps.get(0).width(), maps.get(1).width());
@@ -1003,7 +1003,7 @@ final class GpuAssets implements Disposable {
     /** Original rim lightness mask for drops up to two levels, without normalization or generated normals. */
     BoardScene.Pixels inclineMask() {
         if (incline == null) {
-            incline = loadRimMask("terrain/classic/incline_dark");
+            incline = loadRimMask("terrain/classic/incline-dark");
         }
         return incline;
     }
@@ -1011,7 +1011,7 @@ final class GpuAssets implements Disposable {
     /** The coarser lightness mask of a drop above two levels, the board's own high-incline split. */
     BoardScene.Pixels highInclineMask() {
         if (highIncline == null) {
-            highIncline = loadRimMask("terrain/classic/high_incline_dark");
+            highIncline = loadRimMask("terrain/classic/high-incline-dark");
         }
         return highIncline;
     }

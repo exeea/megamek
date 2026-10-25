@@ -23,10 +23,7 @@ public final class HexTile {
      * bit-identically; every edge midpoint lies within 0.005 of {@code HEIGHT / 2} from the centre.
      */
     public static final float MODEL_WIDTH = 83.125f;
-    /**
-     * An x in the {@link #WIDTH}-wide image's pixels times this is the x on the 3D board's hex (y stays): for what is
-     * still drawn or modelled for the image, the 2D tactical painters' capture and the older 84-wide structure models.
-     */
+    /** Narrows the older structure models, authored {@link #WIDTH} wide like the 2D hex, onto the 3D board's hex. */
     public static final float IMAGE_TO_MODEL_X = MODEL_WIDTH / WIDTH;
     /** One level in authored board models, in board model units. */
     public static final int LEVEL_HEIGHT = 18;

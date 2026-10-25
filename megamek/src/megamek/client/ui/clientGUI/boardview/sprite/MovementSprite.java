@@ -34,18 +34,15 @@ package megamek.client.ui.clientGUI.boardview.sprite;
 
 import java.awt.Color;
 import java.awt.Graphics;
-import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StraightArrowPolygon;
 import megamek.common.board.Coords;
-import megamek.common.compute.Compute;
-import megamek.common.units.Entity;
 
 /**
  * Sprite and info for movement vector (AT2 advanced movement). Does not actually use the image buffer as this can be
@@ -56,7 +53,7 @@ import megamek.common.units.Entity;
  * TODO: Different color depending upon whether
  * entity has already moved this turn
  */
-public class MovementSprite extends Sprite implements TacticalSprite {
+public class MovementSprite extends Sprite {
 
     private final double angle;
     private StraightArrowPolygon movePoly;
@@ -66,43 +63,12 @@ public class MovementSprite extends Sprite implements TacticalSprite {
     private final Coords end;
     private int vel;
 
-    private static final GUIPreferences GUIP = GUIPreferences.getInstance();
-
-    public MovementSprite(BoardGlyphContext boardView, Entity entity, int[] v, Color color, boolean isCurrent) {
+    public MovementSprite(BoardGlyphContext boardView, TacticalMark.MovementVector vector) {
         super(boardView);
-        // private MovementVector mv;
-        // get the starting and ending position
-        start = entity.getPosition();
-        end = Compute.getFinalPosition(start, v);
-
-        // what is the velocity
-        vel = 0;
-        for (int element : v) {
-            vel += element;
-        }
-
-        // color?
-        // player colors
-        moveColor = entity.getOwner().getColour().getColour();
-        // TODO: Its not going transparent. Oh well, it is a minor issue at the moment
-        /*
-         * if (isCurrent) { int colour = color.getRGB(); int transparency =
-         * GUIPreferences.getInstance().getInt(GUIPreferences.
-         * ADVANCED_ATTACK_ARROW_TRANSPARENCY); moveColor = new Color(colour
-         * | (transparency << 24), true); }
-         */
-        // red if offboard
-        if (!this.bv.getGame().getBoard().contains(end)) {
-            int colour = 0xff0000; // red
-            int transparency = GUIP.getAttackArrowTransparency();
-            moveColor = new Color(colour | (transparency << 24), true);
-        }
-        // dark gray if done
-        if (entity.isDone()) {
-            int colour = 0x696969; // gray
-            int transparency = GUIP.getAttackArrowTransparency();
-            moveColor = new Color(colour | (transparency << 24), true);
-        }
+        start = vector.start();
+        end = vector.end();
+        vel = vector.velocity();
+        moveColor = vector.color();
 
         // angle of line connecting two hexes
         angle = (start.radian(end) + (Math.PI * 1.5)) % (Math.PI * 2); // angle
@@ -186,10 +152,4 @@ public class MovementSprite extends Sprite implements TacticalSprite {
     public boolean isInside(Point point) {
         return movePoly.contains(point.x - bounds.x, point.y - bounds.y);
     }
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Rectangle location = getBounds();
-        drawOnto(graphics, location.x, location.y, null);
-    }
-
 }

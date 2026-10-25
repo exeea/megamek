@@ -73,23 +73,6 @@ class RubbleClearingHandler extends AbstractTWRuleHandler {
     }
 
     /**
-     * The {@link Terrains#FLUFF} level used for the cosmetic cleared-rubble path overlay, derived from the destroyed
-     * structure type so the tileset draws the matching "_path" tile. Ultra rubble (level 6) and any other level reuse
-     * the heavy artwork, mirroring the saxarba tileset's rubble image mapping.
-     *
-     * @param rubbleLevel the {@link Terrains#RUBBLE} level that was cleared (1 light .. 4 hardened, 5 wall, 6+ ultra)
-     *
-     * @return the fluff terrain level for the cleared-rubble path overlay
-     */
-    private static int clearedRubbleFluffLevel(int rubbleLevel) {
-        int structureType = switch (rubbleLevel) {
-            case 1, 2, 4, 5 -> rubbleLevel;
-            default -> 3;
-        };
-        return Terrains.CLEARED_RUBBLE_FLUFF_BASE + structureType;
-    }
-
-    /**
      * End-phase check for every vehicle clearing rubble: abandons work whose vehicle was destroyed, displaced, or lost
      * its bulldozer; otherwise banks a turn of clearing and removes the rubble once the work is done. TacOps.
      */
@@ -167,12 +150,7 @@ class RubbleClearingHandler extends AbstractTWRuleHandler {
         Hex hex = getGame().getBoard(boardId).getHex(target);
         Terrain rubble = (hex == null) ? null : hex.getTerrain(Terrains.RUBBLE);
         if (rubble != null) {
-            // The rubble is bulldozed away: the hex is clear terrain now, with only cosmetic overlays left. Two
-            // stacked super layers (both gameplay-free): a GROUND_FLUFF "scraped ground" layer (quicksand_0) under a
-            // FLUFF "_path" layer (the debris pushed into the wedges). Tilesets without these entries just draw clear.
-            hex.removeTerrain(Terrains.RUBBLE);
-            hex.addTerrain(new Terrain(Terrains.GROUND_FLUFF, Terrains.CLEARED_RUBBLE_FLUFF_BASE));
-            hex.addTerrain(new Terrain(Terrains.FLUFF, clearedRubbleFluffLevel(rubble.getLevel())));
+            BulldozerRules.clearRubble(hex);
             gameManager.sendChangedHex(target, boardId);
             LOGGER.info("[Bulldozer] {} finished clearing rubble (level {}) at {}; the hex is now clear",
                   entity.getShortName(), rubble.getLevel(), target);

@@ -4175,10 +4175,12 @@ final class GpuTerrain implements Disposable {
 
     /**
      * What the Classic graphics build of a hex's features: buildings, fuel tanks and industrial
-     * plants, generated bridges, rail and maglev routes, and placed objects other than plants. The tileset art draws the rest.
+     * plants, generated bridges, rail and maglev routes, placed objects other than plants, and a dug-in platoon's trench,
+     * which no tileset art draws. The tileset art draws the rest.
      */
     private boolean columnFeature(BoardScene.Feature feature) {
-        return feature.asset().equals("bridge") || feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/")
+        return feature.asset().equals("bridge") || feature.asset().equals(BoardFeatures.TRENCH)
+              || feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/")
               || feature.decoration() != null
               && (BoardRail.route(feature) || !foliageModel(assets.slotted(feature.asset())));
     }
@@ -4287,10 +4289,7 @@ final class GpuTerrain implements Disposable {
                       || material.id.startsWith("fortified-")) {
                     // Terrain scenery shares the ground's lighting and weather response.
                     material.set(new Ground(.15f));
-                    if (material.id.equals("rubble-concrete")) {
-                        material.set(TextureAttribute.createNormal(
-                              assets.materialNormal("terrain/surfaces/concrete-ground")));
-                    } else if (material.id.equals("geyser-rock")) {
+                    if (material.id.equals("geyser-rock")) {
                         material.set(TextureAttribute.createNormal(assets.materialNormal(feature.asset().endsWith("magma")
                               ? "terrain/surfaces/volcano-cliff" : "terrain/surfaces/rock-ground")));
                     } else if (material.id.equals("geyser-lava")) {
@@ -4362,17 +4361,12 @@ final class GpuTerrain implements Disposable {
                 instance.transform.val[Matrix4.M13] += py - placed.getCenterY();
                 instance.transform.val[Matrix4.M23] += base - placed.min.z + .12f * BoardGeometry.hexScale();
             } else if (feature.authoredPlacement()) {
-                // Components share their composition's supporting plane and retain their local origins and offsets.
-                float scale = feature.scale() * BoardGeometry.hexScale();
                 // As import's receiver: on a bridge hex everything but trees stands on the deck.
                 base = scenerySupport(ground, ground.deck(), supports,
                       BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
                       feature.kind() != BoardScene.FeatureKind.TREE && BoardBridge.feature(tile) != null
                             ? BoardBridge.deckZ(tile) : Float.NEGATIVE_INFINITY);
-                instance.transform.setToTranslation(px, py,
-                            base + feature.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale())
-                      .rotate(Vector3.Z, feature.rotation()).scale(scale * (float) feature.stretch().x(),
-                            scale * (float) feature.stretch().y(), scale * (float) feature.stretch().z());
+                placeAuthored(instance, px, py, base, feature);
             } else {
                 // Trees and structures retain inspectable proportions; their actual Z extent fits the rules' height.
                 // Fuel tanks and industrial structures also use the building catalog, without building cutaways.
@@ -6716,6 +6710,34 @@ final class GpuTerrain implements Disposable {
             placeDecoration(ghost, coords, feature, z + feature.elevation() * BoardGeometry.level());
             return ghost;
         });
+    }
+
+    /**
+     * A ghost of the authored scenery {@code feature} of {@code coords}, such as the sandbags of a hex being fortified
+     * (GpuEditorPreview#work): its model placed as the chunk builder places authored scenery, on the installed hex's
+     * ground at its centre; null off the installed board. The model is the assets' own; the instance is the caller's.
+     */
+    ModelInstance sceneryGhost(Coords coords, BoardScene.Feature feature) {
+        if (editorTile(coords) == null) { return null; }
+        return installedSettings.call(() -> {
+            float x = BoardGeometry.centerX(coords), y = BoardGeometry.centerY(coords);
+            Chunk receiving = chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE);
+            var support = tacticalSurface(coverScene, receiving, coords, floor);
+            float base = BoardSurface.sampleHeight(support.faces(), x, y, BoardGeometry.groundZ(coverScene.tile(coords)));
+            ModelInstance ghost = new ModelInstance(assets.model(feature.asset(), feature.colours()));
+            placeAuthored(ghost, x + feature.x() * BoardGeometry.hexScale(), y + feature.y() * BoardGeometry.hexScale(),
+                  base, feature);
+            return ghost;
+        });
+    }
+
+    /** Components share their composition's supporting plane {@code base} and keep their local origins and offsets. */
+    private static void placeAuthored(ModelInstance instance, float x, float y, float base, BoardScene.Feature feature) {
+        float scale = feature.scale() * BoardGeometry.hexScale();
+        instance.transform.setToTranslation(x, y,
+                    base + feature.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale())
+              .rotate(Vector3.Z, feature.rotation()).scale(scale * (float) feature.stretch().x(),
+                    scale * (float) feature.stretch().y(), scale * (float) feature.stretch().z());
     }
 
     /** Infrastructure uses exactly the same feature collection and placement in a preview and a committed chunk. */

@@ -15,7 +15,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.sprite.CollapseWarningSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -214,11 +214,11 @@ class GpuMarkersTest {
         board.setHex(building, new Hex(2, "building:1;bldg_elev:4;bldg_cf:10", ""));
         board.setHex(bridge, new Hex(-1, "bridge:1:9;bridge_elev:3;bridge_cf:10", ""));
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
-            var warnings = List.of(new CollapseWarningSprite(fixture.view, building),
-                  new CollapseWarningSprite(fixture.view, bridge));
+            var warnings = List.of(new TacticalMark.CollapseWarning(building),
+                  new TacticalMark.CollapseWarning(bridge));
             BoardScene before = fixture.source.takeFrame().scene();
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.addSprites(warnings);
+                fixture.view.addMarks(warnings);
                 fixture.source.refresh();
             });
             BoardScene scene = fixture.source.takeFrame().scene();
@@ -229,12 +229,12 @@ class GpuMarkersTest {
             assertEquals(before.tile(building).tactical(), scene.tile(building).tactical());
             assertEquals(before.tile(bridge).tactical(), scene.tile(bridge).tactical());
             SwingUtilities.invokeAndWait(() -> {
-                warnings.getFirst().setHidden(true);
+                fixture.view.removeMarks(List.of(warnings.getFirst()));
                 fixture.source.refresh();
             });
             assertEquals(1, fixture.source.takeFrame().scene().markers().size());
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.removeSprites(warnings);
+                fixture.view.removeMarks(warnings);
                 fixture.source.refresh();
             });
             assertTrue(fixture.source.takeFrame().scene().markers().isEmpty());
