@@ -315,13 +315,11 @@ public final class SwingUiLibrary extends JFrame {
         }
         page.add(header);
         Locale locale = MegaMek.getMMOptions().getLocale();
-        String sample = Messages.getString("UiLibrary.type.roleSample");
-        String nameSample = Messages.getString("UiLibrary.type.nameSample");
         tokens.textRoles().forEach((role, styleName) -> {
             JPanel row = roleRow(color("surface.panel"), text(role + "  (" + styleName + ")", "caption", "text.muted"));
             for (Presentation sampleMode : Presentation.values()) {
-                JLabel shown = new JLabel(tokens.cased(role, sampleMode, role.equals("name") ? nameSample : sample,
-                      locale));
+                JLabel shown = new JLabel(tokens.cased(role, sampleMode,
+                      Messages.getString("UiLibrary.type.roleSample." + role), locale));
                 shown.setFont(TokenFonts.font(styleName, tokens.upperCase(role, sampleMode),
                       tokens.condensed(role, sampleMode)));
                 shown.setForeground(color("text.primary"));

@@ -141,8 +141,12 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
      * presentation mode, condensed and upper case as the role is.
      */
     private static final Map<String, String> FONT_ROLES = Map.ofEntries(
-          Map.entry("hud-caption", "overline"), Map.entry("hud-button", "button"), Map.entry("hud-name", "name"),
-          Map.entry("hud-title", "title"), Map.entry("hud-heading", "headline"), Map.entry("hud-phase", "display"));
+          Map.entry("hud-utility", "button"), Map.entry("hud-caption", "overline"), Map.entry("hud-mini", "button"),
+          Map.entry("hud-button", "button"), Map.entry("hud-name", "name"), Map.entry("hud-title", "title"),
+          Map.entry("hud-heading", "headline"), Map.entry("hud-phase", "display"), Map.entry("hud-main", "button"));
+    /** The hud-v3 fonts whose text hud-v3 upper-cases where it draws them (labels, buttons, titles, the phase). */
+    private static final Set<String> HUD_UPPER = Set.of("hud-caption", "hud-mini", "hud-button", "hud-title",
+          "hud-heading", "hud-phase", "hud-main");
 
     /** The open gallery; read and written on the EDT. */
     private static GpuUiLibraryWindow open;
@@ -476,15 +480,20 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             }
             UiTheme.HudFont type = typeStyle(FONT_MOVES.get(font.name()));
             String role = FONT_ROLES.get(font.name());
-            compare(page, font.name(), fontSample(font.name(), font, font.name(), TODAY_WIDTH),
-                  role != null ? roleSample(role, MIGRATED_WIDTH)
-                        : fontSample(type.name(), type, UiTheme.TYPE + type.name(), MIGRATED_WIDTH));
+            // Each row shows the kind of text the font carries: short framing labels, or a sentence for body text
+            String line = text("UiLibrary.gdx.fontSample." + font.name());
+            String today = HUD_UPPER.contains(font.name()) ? UiTheme.upper(line) : line;
+            compare(page, font.name(), fontSample(font.name(), font, font.name(), today, TODAY_WIDTH),
+                  role != null ? roleSample(role, line, MIGRATED_WIDTH)
+                        : fontSample(type.name(), type, UiTheme.TYPE + type.name(), line, MIGRATED_WIDTH));
         }
         // Game mode's caps font is new: hud-v3 upper-cases its labels in its condensed fonts instead
         UiTheme.HudFont caps = UiTheme.HUD_FONTS.stream().filter(font -> font.name().equals(UiTheme.CAPS_FONT))
               .findFirst().orElseThrow();
         compare(page, UiTheme.CAPS_FONT, kit.label(text("UiLibrary.gdx.capsToday"), "hud-small", 11.5f,
-              UiTheme.MUTED), fontSample(UiTheme.CAPS_FONT, caps, UiTheme.CAPS_FONT, MIGRATED_WIDTH));
+              UiTheme.MUTED), fontSample(UiTheme.CAPS_FONT, caps, UiTheme.CAPS_FONT,
+              tokens.cased("button", Presentation.GAME, text("UiLibrary.gdx.fontSample.hud-button"),
+                    MegaMek.getMMOptions().getLocale()), MIGRATED_WIDTH));
     }
 
     private void buttons(Table page) {
@@ -1311,7 +1320,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
      * A text role's spec over a sample line as the kit draws the role in the gallery's presentation mode: upper case and
      * condensed where the role is.
      */
-    private Table roleSample(String role, float width) {
+    private Table roleSample(String role, String line, float width) {
         DesignTokens.TypeStyle style = tokens.roleStyle(role);
         boolean condensed = kit.condensed(role);
         int instance = condensed ? UiTheme.CONDENSED_MEDIUM : typeStyle(style.name()).instance();
@@ -1319,24 +1328,19 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         sample.left().top();
         sample.add(kit.label(String.format(Locale.ROOT, "%s (%s)  %s / %s", role, style.name(), trim(style.size()),
               weight(instance)), "hud-small", 11, UiTheme.MUTED)).left().row();
-        String line = text("name".equals(role) ? "UiLibrary.type.nameSample" : "UiLibrary.type.sample");
         Label label = kit.roleTypeLabel(role, line, "text.primary");
         label.setEllipsis(true);
         sample.add(label).width(width).left().padTop(2);
         return sample;
     }
 
-    /** A font's spec over a sample line drawn in its Label style; overline and the caps font are upper case. */
-    private Table fontSample(String name, UiTheme.HudFont font, String style, float width) {
+    /** A font's spec over a sample line drawn in its Label style, the line cased as the caller shows it. */
+    private Table fontSample(String name, UiTheme.HudFont font, String style, String line, float width) {
         Table sample = new Table();
         sample.left().top();
         sample.add(kit.label(String.format(Locale.ROOT, "%s  %s / %s", name, trim(font.size()),
               weight(font.instance())), "hud-small", 11, UiTheme.MUTED)).left().row();
-        String line = text("UiLibrary.type.sample");
-        if (UiTheme.CAPS_FONT.equals(name)) {
-            line = tokens.cased("button", Presentation.GAME, line, MegaMek.getMMOptions().getLocale());
-        }
-        Label label = new Label("overline".equals(name) ? UiTheme.upper(line) : line, kit.skin, style);
+        Label label = new Label(line, kit.skin, style);
         label.setEllipsis(true);
         sample.add(label).width(width).left().padTop(2);
         return sample;
