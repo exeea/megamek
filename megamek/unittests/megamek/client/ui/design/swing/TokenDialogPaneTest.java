@@ -111,6 +111,34 @@ class TokenDialogPaneTest {
     }
 
     @Test
+    void aFailedCheckKeepsTheDialogOpenButCancelStillCloses() {
+        TokenDialogPane pane = new TokenDialogPane("Host").body(new JTextField());
+        JButton cancel = pane.cancel("Cancel");
+        JButton go = pane.primary("Go");
+        boolean[] valid = {false};
+        List<JButton> checked = new ArrayList<>();
+        pane.check(button -> {
+            checked.add(button);
+            return valid[0];
+        });
+        List<JButton> closes = new ArrayList<>();
+        pane.assemble(true, closes::add);
+
+        go.doClick();
+        pane.getActionMap().get("accept").actionPerformed(new ActionEvent(pane, ActionEvent.ACTION_PERFORMED, ""));
+        assertTrue(closes.isEmpty());
+        assertEquals(List.of(go, go), checked);
+
+        cancel.doClick();
+        valid[0] = true;
+        go.doClick();
+        assertEquals(2, closes.size());
+        assertNull(closes.get(0));
+        assertSame(go, closes.get(1));
+        assertEquals(3, checked.size());
+    }
+
+    @Test
     void footerButtonsShareOneCentredWidth() {
         int minWidth = UIUtil.scaleForGUI(TokenDialogPane.BUTTON_MIN_WIDTH);
         JPanel row = new JPanel(new TokenDialogPane.EqualRow(8, minWidth));

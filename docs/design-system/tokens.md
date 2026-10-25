@@ -936,7 +936,9 @@ that the user moves around or keeps open beside the game open as a **window** wi
 card (a [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) in the window's layered
 pane) and returns the pressed button, or null when cancelled; it waits like a modal dialog. When the window has no
 room for the card it opens a window instead, which `TokenDialogs.window(owner, pane)` also does on request. The
-shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. While a card is open
+shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. A form checks its inputs with
+`check(button -> ...)`: giving false keeps the dialog open, so the form can show its errors under the inputs and move
+the focus to the first wrong one; cancelling is never checked. While a card is open
 `UIUtil.isModalDialogDisplayed()` is true, so MegaMek's hotkeys stand down as they do for a modal dialog.
 
 Existing `JOptionPane` dialogs keep their windows but take the footer's layout through the MegaMek themes: the token
@@ -944,7 +946,8 @@ status icons, `xxl` padding, buttons centred, as wide as each other, at least 88
 titles stay in the title bar. Moving them to `TokenDialogs` gives them the card. Other existing dialog windows take
 the same footer from `TokenDialogs.footer(buttons...)`: the buttons restyled with `TokenButtons.style`, the main one
 first, centred `md` apart, as wide as each other, at least 88 wide and `control.md` high, `xl` below the content and
-`xxl` from the window's edges. MegaMek's `AbstractButtonDialog` family and its Host and Connect dialogs use it.
+`xxl` from the window's edges. MegaMek's `AbstractButtonDialog` family uses it; its Host and Connect dialogs are
+cards.
 
 **libGDX.** `UiKit.dialog(title, close, true)` is the card: the token panel frame padded `xl` above the header and
 `xxl` elsewhere, the title in `headline`, sentence case, and the compact icon button for close, `xl` above the body. Its
