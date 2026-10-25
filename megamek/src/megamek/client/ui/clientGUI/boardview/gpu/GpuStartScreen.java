@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -32,12 +33,15 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.Align;
@@ -48,23 +52,29 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.SplashArt;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Action;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.HostRequest;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.design.swing.TokenFonts;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiChoice;
+import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Configuration;
+import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.util.TipOfTheDay;
 import megamek.logging.MMLogger;
 
 /**
- * The start screen: a greeting typed over a dark field, the art revealed over it (hexes popping open, or a tuning
- * band), then the main menu sliding in at the left with the version at the top right and a tip at the bottom right.
- * The art and its overlays are drawn once with Java2D and uploaded; the GPU only animates on top of them. Once the
- * intro has played, only slow embers move, at 30 frames a second.
+ * The start screen: a greeting typed over a dark field, the art revealed over it by hexes popping open, then the main
+ * menu sliding in at the right with the version at the top left and a tip at the bottom left. Pages such as Host
+ * replace the menu in the same column; Esc goes back. The art and its overlays are drawn once with Java2D and
+ * uploaded; the GPU only animates on top of them. Once the intro has played, only slow embers move, at 30 frames a
+ * second.
  */
 final class GpuStartScreen extends ApplicationAdapter {
     private static final MMLogger LOGGER = MMLogger.create(GpuStartScreen.class);
@@ -73,6 +83,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     private static final int EMBERS = 140;
     private static final float TIP_WIDTH = 360;
     private static final float NOTES_WIDTH = 320;
+    private static final float PORT_WIDTH = 110;
 
     private record Hex(double x, double y, double at) { }
 
@@ -87,7 +98,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
-    private enum Page { MAIN, HELP }
+    private enum Page { MAIN, HELP, HOST }
 
     private final GpuStartWindow window;
     private final GUIPreferences preferences;
@@ -101,7 +112,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     private final List<float[]> particles = new ArrayList<>();
     private final Matrix4 pixels = new Matrix4();
     private final List<Actor> column = new ArrayList<>();
-    private final List<UiButton> focusable = new ArrayList<>();
+    private final List<Actor> focusable = new ArrayList<>();
     private final List<String> tips;
     private final boolean motion;
 
@@ -137,6 +148,22 @@ final class GpuStartScreen extends ApplicationAdapter {
     private long start;
     private boolean skipped;
     private boolean settledRate;
+    /** The Host page's inputs, kept while it shows so opening its online options keeps what was typed. */
+    private UiTextField nameInput;
+    private UiFormField nameField;
+    private UiButton onlineToggle;
+    private boolean onlineOpen;
+    private UiTextField passwordInput;
+    private UiTextField portInput;
+    private UiFormField portField;
+    private Table passwordRow;
+    private UiChoice registerBox;
+    private UiTextField metaserverInput;
+    private UiFormField metaserverField;
+    private Table addresses;
+    private Label publicAddress;
+    private UiButton hostButton;
+    private UiButton backButton;
 
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
         this.window = window;
@@ -212,48 +239,95 @@ final class GpuStartScreen extends ApplicationAdapter {
         page = shown;
         column.forEach(Actor::remove);
         column.clear();
-        focusable.clear();
-        if (shown == Page.MAIN) {
-            item("button-primary", "StartScreen.newGame", Action.HOST, null);
-            item("button-secondary", "StartScreen.loadGame", Action.LOAD, Action.QUICK_LOAD);
-            item("button-secondary", "StartScreen.scenario", Action.SCENARIO, Action.LAST_SCENARIO);
-            item("button-secondary", "StartScreen.connect", Action.CONNECT, Action.CONNECT_BOT);
-            overline("StartScreen.tools");
-            item("button-quiet", "StartScreen.mapEditor", Action.MAP_EDITOR, null);
-            item("button-quiet", "StartScreen.openMap", Action.OPEN_MAP, null);
-            item("button-quiet", "StartScreen.unitBrowser", Action.UNIT_BROWSER, null);
-            item("button-quiet", "StartScreen.randomArmy", Action.RANDOM_ARMY, null);
-            item("button-quiet", "StartScreen.skinEditor", Action.SKIN_EDITOR, null);
+        if (shown == Page.HOST) {
+            buildHostPage();
+            fillHostColumn();
         } else {
-            overline("StartScreen.help");
-            item("button-quiet", "StartScreen.helpContents", Action.HELP_CONTENTS, null);
-            item("button-quiet", "StartScreen.helpSkinning", Action.HELP_SKINNING, null);
-            item("button-quiet", "StartScreen.reportBug", Action.REPORT_BUG, null);
-            item("button-quiet", "StartScreen.copySystemData", Action.COPY_SYSTEM_DATA, null);
-            item("button-quiet", "StartScreen.resetPrompts", Action.RESET_PROMPTS, null);
-            item("button-quiet", "StartScreen.about", Action.ABOUT, null);
-            UiButton back = kit.button("button-secondary", "chevron-left", Messages.getString("StartScreen.back"), null);
-            leftAligned(back);
-            UiKit.onChange(back, () -> showPage(Page.MAIN));
-            add(back);
-        }
-        for (Actor actor : bottomRow.getChildren()) {
-            if (actor instanceof UiButton button) {
-                focusable.add(button);
+            List<Actor> items = new ArrayList<>();
+            if (shown == Page.MAIN) {
+                UiButton newGame = kit.button("button-primary", null, Messages.getString("StartScreen.newGame"),
+                      null);
+                leftAligned(newGame);
+                UiKit.onChange(newGame, () -> showPage(Page.HOST));
+                items.add(newGame);
+                items.add(item("button-secondary", "StartScreen.loadGame", Action.LOAD, Action.QUICK_LOAD));
+                items.add(item("button-secondary", "StartScreen.scenario", Action.SCENARIO, Action.LAST_SCENARIO));
+                items.add(item("button-secondary", "StartScreen.connect", Action.CONNECT, Action.CONNECT_BOT));
+                items.add(overline("StartScreen.tools"));
+                items.add(item("button-quiet", "StartScreen.mapEditor", Action.MAP_EDITOR, null));
+                items.add(item("button-quiet", "StartScreen.openMap", Action.OPEN_MAP, null));
+                items.add(item("button-quiet", "StartScreen.unitBrowser", Action.UNIT_BROWSER, null));
+                items.add(item("button-quiet", "StartScreen.randomArmy", Action.RANDOM_ARMY, null));
+                items.add(item("button-quiet", "StartScreen.skinEditor", Action.SKIN_EDITOR, null));
+            } else {
+                items.add(overline("StartScreen.help"));
+                items.add(item("button-quiet", "StartScreen.helpContents", Action.HELP_CONTENTS, null));
+                items.add(item("button-quiet", "StartScreen.helpSkinning", Action.HELP_SKINNING, null));
+                items.add(item("button-quiet", "StartScreen.reportBug", Action.REPORT_BUG, null));
+                items.add(item("button-quiet", "StartScreen.copySystemData", Action.COPY_SYSTEM_DATA, null));
+                items.add(item("button-quiet", "StartScreen.resetPrompts", Action.RESET_PROMPTS, null));
+                items.add(item("button-quiet", "StartScreen.about", Action.ABOUT, null));
+                items.add(backButton());
             }
+            setColumn(items);
         }
         if (start != 0) {
             pageShownAt = clock();
         }
-        stage.setKeyboardFocus(null);
+        stage.setKeyboardFocus(shown == Page.HOST ? nameInput : null);
+        if (shown == Page.HOST) {
+            nameInput.selectAll();
+        }
+    }
+
+    /**
+     * Shows {@code items} in the column, in order, and makes them, then the bottom row, the keyboard's stops. Items
+     * already showing stay on the stage, so they keep their keyboard focus and text.
+     */
+    private void setColumn(List<Actor> items) {
+        for (Actor actor : column) {
+            if (!items.contains(actor)) {
+                actor.remove();
+            }
+        }
+        column.clear();
+        column.addAll(items);
+        focusable.clear();
+        for (Actor item : items) {
+            if (item.getStage() == null) {
+                stage.addActor(item);
+            }
+            stops(item);
+        }
+        for (Actor actor : bottomRow.getChildren()) {
+            stops(actor);
+        }
+    }
+
+    /** Adds the keyboard stops in {@code actor}: itself when it is a control, or the controls inside it. */
+    private void stops(Actor actor) {
+        if (actor instanceof UiButton || actor instanceof UiChoice || actor instanceof TextField) {
+            focusable.add(actor);
+        } else if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                stops(child);
+            }
+        }
     }
 
     /** A menu button; with Ctrl held, it asks for {@code withControl} instead, where there is one. */
-    private void item(String style, String key, Action action, Action withControl) {
+    private UiButton item(String style, String key, Action action, Action withControl) {
         UiButton button = kit.button(style, null, Messages.getString(key), null);
         leftAligned(button);
         UiKit.onChange(button, () -> window.dispatch(withControl != null && controlHeld() ? withControl : action));
-        add(button);
+        return button;
+    }
+
+    private UiButton backButton() {
+        UiButton back = kit.button("button-secondary", "chevron-left", Messages.getString("StartScreen.back"), null);
+        leftAligned(back);
+        UiKit.onChange(back, () -> showPage(Page.MAIN));
+        return back;
     }
 
     private static boolean controlHeld() {
@@ -265,16 +339,162 @@ final class GpuStartScreen extends ApplicationAdapter {
         button.getLabelCell().left().expandX();
     }
 
-    private void overline(String key) {
-        Label label = kit.roleTypeLabel("overline", Messages.getString(key), "text.muted");
-        column.add(label);
-        stage.addActor(label);
+    private Label overline(String key) {
+        return kit.roleTypeLabel("overline", Messages.getString(key), "text.muted");
     }
 
-    private void add(UiButton button) {
-        column.add(button);
-        focusable.add(button);
-        stage.addActor(button);
+    // ---- The Host page ----
+
+    /** The Host page's inputs, filled from the last game's choices. */
+    private void buildHostPage() {
+        ClientPreferences client = PreferenceManager.getClientPreferences();
+        nameInput = field(client.getLastPlayerName());
+        nameField = kit.formField(Messages.getString("MegaMek.GameConnection.name"), nameInput)
+              .helper(Messages.getString("MegaMek.GameConnection.nameHelper"));
+
+        String lastPassword = client.getLastServerPass();
+        onlineOpen = StartHostForm.onlineOpen(lastPassword, client.getLastServerPort());
+        onlineToggle = kit.button("button-quiet", onlineOpen ? "chevron-down" : "chevron-right",
+              Messages.getString("MegaMek.GameConnection.online"), null);
+        leftAligned(onlineToggle);
+        // A section heading: its chevron lines up with the fields under it
+        onlineToggle.padLeft(0);
+        UiKit.onChange(onlineToggle, () -> {
+            onlineOpen = !onlineOpen;
+            chevron(onlineToggle, onlineOpen);
+            fillHostColumn();
+        });
+
+        passwordInput = kit.password(false);
+        passwordInput.setText(lastPassword == null ? "" : lastPassword);
+        passwordInput.setFocusTraversal(false);
+        UiFormField passwordField = kit.formField(Messages.getString("MegaMek.GameConnection.password"),
+              passwordInput).helper(Messages.getString("MegaMek.GameConnection.passwordHelper"));
+        portInput = field(String.valueOf(client.getLastServerPort()));
+        portField = kit.formField(Messages.getString("MegaMek.GameConnection.port"), portInput);
+        passwordRow = new Table();
+        passwordRow.top().left();
+        passwordRow.add(passwordField).growX().minWidth(0).top();
+        passwordRow.add(portField).width(PORT_WIDTH).padLeft(12).top();
+
+        registerBox = kit.check(Messages.getString("MegaMek.GameConnection.register"), false);
+        registerBox.left();
+        UiKit.onChange(registerBox, this::fillHostColumn);
+        metaserverInput = field(client.getMetaServerName());
+        metaserverField = kit.formField(Messages.getString("MegaMek.GameConnection.metaserver"), metaserverInput);
+
+        addresses = addresses();
+        hostButton = kit.button("button-primary", null, Messages.getString("MegaMek.GameConnection.host"), null);
+        leftAligned(hostButton);
+        UiKit.onChange(hostButton, this::submitHost);
+        backButton = backButton();
+    }
+
+    private UiTextField field(String text) {
+        UiTextField field = kit.input(text == null ? "" : text, false);
+        // The screen moves the keyboard between all its controls, not only between text fields
+        field.setFocusTraversal(false);
+        return field;
+    }
+
+    private void chevron(UiButton button, boolean open) {
+        if (!button.icons.isEmpty() && button.icons.get(0) instanceof Image icon) {
+            icon.setDrawable(boardSkin.skin.getDrawable("icon-" + (open ? "chevron-down" : "chevron-right")));
+        }
+    }
+
+    /** Lays the Host page's column out for the online options' and server browser's current state. */
+    private void fillHostColumn() {
+        List<Actor> items = new ArrayList<>();
+        items.add(overline("StartScreen.newGame"));
+        items.add(nameField);
+        items.add(onlineToggle);
+        if (onlineOpen) {
+            items.add(passwordRow);
+            items.add(registerBox);
+            if (registerBox.isChecked()) {
+                items.add(metaserverField);
+            }
+            items.add(addresses);
+        }
+        items.add(hostButton);
+        items.add(backButton);
+        // Keep the title label: a new one would slide in again
+        if (!column.isEmpty() && column.get(0) instanceof Label title) {
+            items.set(0, title);
+        }
+        setColumn(items);
+    }
+
+    /**
+     * The addresses friends type to join: the local one, found at once, and the public one, which is only asked of an
+     * outside service when the player chooses to show it, since it would also show on a stream or a screenshot.
+     */
+    private Table addresses() {
+        Table table = new Table();
+        table.left().top();
+        UiButton show = kit.button("button-quiet-compact", null, Messages.getString("StartScreen.showAddress"),
+              null);
+        // Rows keep the button's height so the page doesn't shift when the address replaces it
+        table.defaults().left().minHeight(show.getPrefHeight()).padBottom(4);
+        Label local = kit.typeLabel(Messages.getString("StartScreen.findingAddress"), "small", "text.primary");
+        table.add(kit.typeLabel(Messages.getString("StartScreen.localAddress"), "small", "text.muted"))
+              .padRight(12);
+        table.add(local).expandX().row();
+        table.add(kit.typeLabel(Messages.getString("StartScreen.publicAddress"), "small", "text.muted"))
+              .padRight(12);
+        publicAddress = kit.typeLabel("", "small", "text.primary");
+        Cell<Actor> publicCell = table.add((Actor) show);
+        UiKit.onChange(show, () -> {
+            publicAddress.setText(Messages.getString("StartScreen.findingAddress"));
+            publicCell.setActor(publicAddress);
+            int at = focusable.indexOf(show);
+            if (at >= 0) {
+                focusable.remove(at);
+            }
+            if (stage.getKeyboardFocus() == show) {
+                stage.setKeyboardFocus(hostButton);
+            }
+            lookUp(StartHostForm::publicAddress, publicAddress);
+        });
+        lookUp(StartHostForm::localAddress, local);
+        return table;
+    }
+
+    /** Finds an address off the GPU thread, then shows it, or that it wasn't found, in {@code label}. */
+    private void lookUp(Supplier<String> address, Label label) {
+        Thread thread = new Thread(() -> {
+            String found = address.get();
+            Gdx.app.postRunnable(() -> label.setText(found == null
+                  ? Messages.getString("StartScreen.noAddress") : found));
+        }, "MegaMek-start-address");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** Checks the Host page; shows what is wrong under the inputs, or asks MegaMek to host the game. */
+    private void submitHost() {
+        String name = nameInput.getText().trim();
+        int port = StartHostForm.port(portInput.getText());
+        nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
+        portField.error(port < 0 ? Messages.getString("MegaMek.GameConnection.portError",
+              String.valueOf(MMConstants.MIN_PORT), String.valueOf(MMConstants.MAX_PORT)) : null);
+        if (name.isEmpty()) {
+            stage.setKeyboardFocus(nameInput);
+            return;
+        }
+        if (port < 0) {
+            if (!onlineOpen) {
+                onlineOpen = true;
+                chevron(onlineToggle, true);
+                fillHostColumn();
+            }
+            stage.setKeyboardFocus(portInput);
+            return;
+        }
+        boolean register = registerBox.isChecked();
+        window.host(new HostRequest(name, passwordInput.getText(), port, register,
+              register ? metaserverInput.getText().trim() : ""));
     }
 
     private Table bottomRow() {
@@ -380,12 +600,17 @@ final class GpuStartScreen extends ApplicationAdapter {
                     case Keys.UP -> move(-1);
                     case Keys.TAB -> move(shift ? -1 : 1);
                     case Keys.ENTER, Keys.NUMPAD_ENTER, Keys.SPACE -> {
-                        if (stage.getKeyboardFocus() instanceof UiButton button) {
+                        Actor focus = stage.getKeyboardFocus();
+                        if (focus instanceof UiButton button) {
                             button.fire(new ChangeListener.ChangeEvent());
+                        } else if (focus instanceof TextField && keycode != Keys.SPACE && page == Page.HOST) {
+                            submitHost();
+                        } else {
+                            return false;
                         }
                     }
                     case Keys.ESCAPE -> {
-                        if (page == Page.HELP) {
+                        if (page != Page.MAIN) {
                             showPage(Page.MAIN);
                         }
                     }

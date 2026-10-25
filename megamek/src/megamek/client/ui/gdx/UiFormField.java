@@ -33,7 +33,8 @@ public class UiFormField extends Table {
         top().left();
         defaults().left().growX();
         add(kit.label(labelText, "hud-medium", 12.5f, color("text.secondary"))).row();
-        add(input).padTop(gap).row();
+        // The input fills the width the form gives it, rather than TextField's fixed 150 minimum
+        add(input).minWidth(0).padTop(gap).row();
         messageCell = add(message).padTop(gap);
         refresh();
     }

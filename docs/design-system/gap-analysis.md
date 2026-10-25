@@ -376,11 +376,16 @@ work for Swing, and item 11 is under investigation.
      sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
      left. The window opens maximized the first time and remembers its bounds;
      the lobby opens at the same bounds. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
-     notice waits for the reveal to end. The old splash medal is dropped. ~~G1, the window and menu~~ is done; next
-     come its pages, which show Host (G2, with the network information), Connect (G3, with a Player/Bot switch and SBF connect), Load
-     game (G4), the scenario browser (G5) and the briefing (G6) in the menu's own column, with Back (Esc) to return,
-     so the art stays in view. Until then, the Swing dialogs open over the start window, Ctrl+click reaches
-     connect-as-bot, quick load and the last scenario, and SBF connect and network information are off the menu.
+     notice waits for the reveal to end. The old splash medal is dropped. Its pages replace the menu in the menu's own
+     column, with Back (Esc) to return, so the art stays in view. ~~G1, the window and menu~~ and ~~G2, the Host
+     page~~ are done. **New game** opens the Host page: the player name, then a closed **Online options** section
+     (password, port, the server browser and the local and public addresses), **Host game** and Back. The section
+     opens by itself when the password or port was changed before or the port is wrong; errors show under the
+     inputs, and Enter in a field hosts. The local address shows at once; the public one is only asked of
+     checkip.amazonaws.com when the player clicks **Show**, so it stays off streams and screenshots and MegaMek makes no
+     outside request unasked. Next come Connect (G3, with a Player/Bot switch and SBF connect), Load game (G4), the
+     scenario browser (G5) and the briefing (G6). Until then, the Swing dialogs open over the start window, Ctrl+click
+     reaches connect-as-bot, quick load and the last scenario, and SBF connect is off the menu.
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
      main action named for what it does (**Host game**, **Connect**) and errors under the inputs instead of popups.
      Host keeps the password, port and server browser in a closed **Online options** section, which opens when the

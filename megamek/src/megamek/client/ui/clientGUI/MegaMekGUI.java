@@ -117,6 +117,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.loaders.MekSummaryCache;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
+import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.preference.PreferenceManager;
@@ -198,7 +199,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         frame.setIconImages(iconList);
 
         installBugReportButtonOnErrorDialogs();
-        GpuStartWindow.install(frame, this::perform);
+        GpuStartWindow.install(frame, this::perform, this::host);
         // init the cache
         MekSummaryCache.getInstance();
 
@@ -290,24 +291,24 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.openEditor(frame, null, true);
     }
 
-    /**
-     * Start instances of both the client and the server.
-     */
-    void host() {
-        HostDialog hd = new HostDialog(frame);
-        hd.setVisible(true);
-
-        if (!hd.dataValidation("MegaMek.HostGameAlert.title")) {
+    /** Starts the server and the client for the game the start screen's Host page describes. */
+    private void host(GpuStartWindow.HostRequest request) {
+        if (server != null) {
+            // A second click queued behind the first; that game is already starting
             return;
         }
-
-        startHost(hd.getServerPass(),
-              hd.getPort(),
-              hd.isRegister(),
-              hd.isRegister() ? hd.getMetaserver() : "",
+        ClientPreferences preferences = PreferenceManager.getClientPreferences();
+        preferences.setLastPlayerName(request.playerName());
+        preferences.setLastConnectPort(request.port());
+        preferences.setLastServerPass(request.password());
+        preferences.setValue("megamek.megamek.metaservername", request.metaserver());
+        startHost(request.password(),
+              request.port(),
+              request.register(),
+              request.register() ? request.metaserver() : "",
               null,
               null,
-              hd.getPlayerName());
+              request.playerName());
     }
 
     public void startHost(@Nullable String serverPassword, int port, boolean isRegister, @Nullable String metaServer,
@@ -1019,7 +1020,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
     /** Carries out what the player picked on the start screen. Runs on the event dispatch thread. */
     private void perform(GpuStartWindow.Action action) {
         switch (action) {
-            case HOST -> host();
             case LOAD -> loadGame();
             case QUICK_LOAD -> quickLoadGame();
             case SCENARIO -> scenario("");

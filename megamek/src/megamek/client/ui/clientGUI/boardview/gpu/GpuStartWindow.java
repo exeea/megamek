@@ -49,14 +49,23 @@ public final class GpuStartWindow {
 
     /** What the start screen asks MegaMek to do; each runs on the Swing thread. */
     public enum Action {
-        HOST, LOAD, QUICK_LOAD, SCENARIO, LAST_SCENARIO, CONNECT, CONNECT_BOT, MAP_EDITOR, OPEN_MAP, UNIT_BROWSER,
+        LOAD, QUICK_LOAD, SCENARIO, LAST_SCENARIO, CONNECT, CONNECT_BOT, MAP_EDITOR, OPEN_MAP, UNIT_BROWSER,
         RANDOM_ARMY, SKIN_EDITOR, SETTINGS, HELP_CONTENTS, HELP_SKINNING, REPORT_BUG, COPY_SYSTEM_DATA, RESET_PROMPTS,
         ABOUT, QUIT
     }
 
+    /**
+     * A new game the Host page asks MegaMek to host, its inputs already checked.
+     *
+     * @param password   the game's password, or blank for an open game
+     * @param metaserver the server browser's URL, or blank when the game is not listed
+     */
+    public record HostRequest(String playerName, String password, int port, boolean register, String metaserver) { }
+
     private static GpuStartWindow open;
     private static JFrame anchor;
     private static Consumer<Action> actions;
+    private static Consumer<HostRequest> hosts;
 
     private final boolean greet;
     private final GpuWindowBounds startBounds;
@@ -86,13 +95,14 @@ public final class GpuStartWindow {
     }
 
     /**
-     * EDT: sets the hidden frame that owns the forms the start screen opens and the handler of its actions. Call once
-     * before {@link #open}; MegaMek's main frame does it even when it starts without the screen (a command-line game),
-     * so the screen can open when that game ends.
+     * EDT: sets the hidden frame that owns the forms the start screen opens and the handlers of its actions and its
+     * Host page. Call once before {@link #open}; MegaMek's main frame does it even when it starts without the screen (a
+     * command-line game), so the screen can open when that game ends.
      */
-    public static void install(JFrame owner, Consumer<Action> handler) {
+    public static void install(JFrame owner, Consumer<Action> handler, Consumer<HostRequest> hostHandler) {
         anchor = owner;
         actions = handler;
+        hosts = hostHandler;
     }
 
     /** EDT: opens the start window, with the greeting when {@code greet}, or brings the open one to the front. */
@@ -306,6 +316,14 @@ public final class GpuStartWindow {
         Consumer<Action> handler = actions;
         if (handler != null) {
             SwingUtilities.invokeLater(() -> handler.accept(action));
+        }
+    }
+
+    /** Any thread: asks MegaMek, on the Swing thread, to host the game the Host page describes. */
+    void host(HostRequest request) {
+        Consumer<HostRequest> handler = hosts;
+        if (handler != null) {
+            SwingUtilities.invokeLater(() -> handler.accept(request));
         }
     }
 

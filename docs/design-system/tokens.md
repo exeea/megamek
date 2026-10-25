@@ -480,7 +480,8 @@ still step.
 read-only). [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java) adds the hover scene2d lacks,
 the status icon, `status(Status)` and `readOnly(true)`; `UiTextField.Area` is the text area. `UiKit` builds them:
 `input(text, compact)`, `password(compact)`, `tokenSearch(placeholder, compact)`, `area(text, rows)` and
-`formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)). It is the
+`formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)), whose input
+fills the width the form gives it, down to none, instead of `TextField`'s fixed 150 minimum. It is the
 in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD's number control), and read-only text
 can not be selected, because scene2d has no read-only field. hud-v3's own fields take the look without new controls:
 `UiKit.search(placeholder, true)` builds the search field on `input-search` with a leading glyph and a compact icon
@@ -582,7 +583,9 @@ faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
 `tokenTabs(compact, labels...)` and `tokenSegmented(compact, labels...)`. A click, or Left and Right while the bar has
 keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
 `focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no general Tab
-traversal yet; the start screen's menu (`GpuStartScreen`) handles Up, Down, Tab and Enter itself.
+traversal yet; the start screen (`GpuStartScreen`) handles it itself: Up, Down and Tab move through every button, check
+box and text field on the page (its text fields turn their own Tab traversal off with `setFocusTraversal(false)`), Enter
+or Space presses a button, Enter in a text field submits the page, and Esc returns to the main menu.
 
 hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
 `-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and
