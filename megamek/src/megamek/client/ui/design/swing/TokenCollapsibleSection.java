@@ -300,7 +300,8 @@ public class TokenCollapsibleSection extends JPanel {
             int textX = leftToRight ? x : padding;
             Color titleColor = TokenMotion.color(this, TITLE, TokenSections.titleColor(this, hovered),
                   TokenMotion.hover(hovered));
-            TokenSections.paintHeader(g, this, title, getFont(), titleColor, textX, 0, width - x - padding, height);
+            TokenSections.paintHeader(g, this, title, TokenSections.titleFont(this, getFont()), titleColor, textX, 0,
+                  width - x - padding, height);
             if (isEnabled() && FocusVisibility.shows(this)) {
                 paintFocus(g, width, height, arc);
             }

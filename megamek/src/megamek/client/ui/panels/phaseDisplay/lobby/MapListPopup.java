@@ -38,7 +38,6 @@ import java.util.List;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 
-import megamek.MMConstants;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.util.ScalingPopup;

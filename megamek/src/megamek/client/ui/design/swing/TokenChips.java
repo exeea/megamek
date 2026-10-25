@@ -33,6 +33,7 @@ import javax.swing.SwingUtilities;
 
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import megamek.client.ui.Messages;
+import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.UIUtil;
@@ -260,8 +261,10 @@ public final class TokenChips {
     /**
      * A toggle that filters a view, {@code control.sm} (28) high. At rest a {@code border.control} edge and
      * {@code text.secondary}; hover a {@code surface.hover} wash, a {@code border.strong} edge and {@code text.primary};
-     * on, the {@code selected.background} wash, a {@code selected.primary} edge and a leading check. Keyboard focus draws
-     * the {@code focus.ring} in place of the edge.
+     * on, the inverse face and edge with a leading check, all in {@code text.onInverse}, hover and press leaning toward
+     * that color like the primary button; disabled and on, a faint inverse face. Keyboard focus draws the
+     * {@code focus.ring} in place of the edge, or around an on chip a gap away ({@link FocusHalo}) when that fits, else
+     * inside it as two lines in the text colors.
      */
     public static final class FilterChip extends JToggleButton {
         private boolean grouped;
@@ -329,17 +332,35 @@ public final class TokenChips {
                 boolean on = isSelected();
                 boolean hovered = hovered();
                 int duration = TokenMotion.buttonState(this);
-                Color fill = on ? TokenDialogPane.token("selected.background")
+                Color fill = on ? onFace(enabled, hovered, enabled && getModel().isPressed())
                       : hovered ? TokenDialogPane.token("surface.hover") : null;
                 paintShape(g, width, height, TokenMotion.color(this, FILL, fill, duration), null, 0);
-                if (showsFocus(this)) {
+                boolean focused = showsFocus(this);
+                float arc = radius() * 2f;
+                if (focused && on && FocusHalo.around(this, new RoundRectangle2D.Float(0, 0, width, height, arc, arc))) {
+                    paintShape(g, width, height, null, TokenMotion.color(this, EDGE, edge(enabled, on, hovered),
+                          duration), TokenFrame.line());
+                } else if (focused && on) {
+                    // No room outside: the label color inside a primary-text edge, as on the primary button
+                    int line = TokenFrame.line();
+                    paintShape(g, width, height, null, TokenDialogPane.token("text.primary"), line);
+                    Graphics2D inner = (Graphics2D) g.create(line, line, width - 2 * line, height - 2 * line);
+                    try {
+                        paintShape(inner, width - 2 * line, height - 2 * line, null,
+                              TokenDialogPane.token("text.onInverse"), line);
+                    } finally {
+                        inner.dispose();
+                    }
+                } else if (focused) {
+                    FocusHalo.clear(this);
                     paintShape(g, width, height, null, TokenDialogPane.token("focus.ring"), scaledSize("focus.width"));
                 } else {
+                    FocusHalo.clear(this);
                     paintShape(g, width, height, null, TokenMotion.color(this, EDGE, edge(enabled, on, hovered),
                           duration), TokenFrame.line());
                 }
-                Color ink = TokenDialogPane.token(!enabled ? "text.disabled"
-                      : on || hovered ? "text.primary" : "text.secondary");
+                Color ink = TokenDialogPane.token(on ? "text.onInverse" : !enabled ? "text.disabled"
+                      : hovered ? "text.primary" : "text.secondary");
                 boolean leftToRight = getComponentOrientation().isLeftToRight();
                 int textWidth = getFontMetrics(getFont()).stringWidth(getText());
                 int start = leading();
@@ -356,13 +377,31 @@ public final class TokenChips {
         }
 
         private static Color edge(boolean enabled, boolean on, boolean hovered) {
+            if (on && !enabled) {
+                return null;
+            }
             if (!enabled) {
                 return TokenDialogPane.token("border.subtle");
             }
             if (on) {
-                return TokenDialogPane.token("selected.primary");
+                return TokenDialogPane.token(hovered ? "border.strong" : "surface.inverse");
             }
             return TokenDialogPane.token(hovered ? "border.strong" : "border.control");
+        }
+
+        /** An on chip's face: the inverse color, leaning toward its label under the pointer; faint when disabled. */
+        private static Color onFace(boolean enabled, boolean hovered, boolean pressed) {
+            if (!enabled) {
+                return TokenDialogPane.token("surface.inverseDisabled");
+            }
+            Color inverse = TokenDialogPane.token("surface.inverse");
+            if (!hovered && !pressed) {
+                return inverse;
+            }
+            DesignTokens tokens = DesignTokens.shipped();
+            int lean = ColorMath.withAlpha(TokenDialogPane.token("text.onInverse").getRGB(),
+                  tokens.alpha(pressed ? "tint.pressed" : "tint.hover"));
+            return new Color(ColorMath.over(lean, inverse.getRGB()), true);
         }
 
         @Override

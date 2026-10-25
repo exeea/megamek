@@ -3,6 +3,7 @@ package megamek.client.ui.design.swing;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -20,12 +21,14 @@ import com.formdev.flatlaf.ui.FlatSliderUI;
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.HiDPIUtils;
 import com.formdev.flatlaf.util.UIScale;
+import megamek.client.ui.design.DesignTokens.Presentation;
 
 /**
- * Sliders of the MegaMek look and feels (docs/design-system/tokens.md, Sliders): an accent fill up to a round thumb on
- * a pill track, with or without ticks and labels. The pointer anywhere over the slider gives the thumb its hover look,
- * because a click on the track moves the thumb there, and grows it a pixel each side; keyboard focus rings the thumb a
- * gap away, as on check boxes.
+ * Sliders of the MegaMek look and feels (docs/design-system/tokens.md, Sliders): an accent fill up to the thumb on a
+ * pill track, with or without ticks and labels. The thumb follows the screen's presentation mode
+ * ({@link TokenPresentation}): a round disc in app screens, a thin light bar across the track in game screens. The
+ * pointer anywhere over the slider gives the thumb its hover look, because a click on the track moves the thumb there,
+ * and grows it a pixel each side; keyboard focus rings the thumb a gap away, as on check boxes.
  */
 public class TokenSliderUI extends FlatSliderUI {
     /** Client property freezing a slider in {@link #HOVER} or {@link #PRESSED}, for the design gallery. */
@@ -44,6 +47,12 @@ public class TokenSliderUI extends FlatSliderUI {
     private int ringWidth;
     private int tickLength;
     private int tickWidth;
+    private Color barColor;
+    private Color barActiveColor;
+    private int barWidth;
+    private int barLength;
+    private int barArc;
+    private int barFocusGap;
 
     public static ComponentUI createUI(JComponent c) {
         return new TokenSliderUI();
@@ -61,6 +70,13 @@ public class TokenSliderUI extends FlatSliderUI {
         ringWidth = UIManager.getInt("Slider.focusRingWidth");
         tickLength = UIManager.getInt("Slider.tickLength");
         tickWidth = UIManager.getInt("Slider.tickWidth");
+        barColor = UIManager.getColor("Slider.barThumbColor");
+        barActiveColor = UIManager.getColor("Slider.barThumbActiveColor");
+        Dimension bar = UIManager.getDimension("Slider.barThumbSize");
+        barWidth = bar == null ? 4 : bar.width;
+        barLength = bar == null ? 16 : bar.height;
+        barArc = UIManager.getInt("Slider.barThumbArc");
+        barFocusGap = UIManager.getInt("Slider.barThumbFocusGap");
     }
 
     @Override
@@ -143,6 +159,10 @@ public class TokenSliderUI extends FlatSliderUI {
         Color easedEdge = edge == null ? null : TokenMotion.color(slider, EDGE, edge, duration);
         float grow = TokenMotion.value(slider, GROW, hover || pressed, duration);
         boolean focused = FlatUIUtils.isPermanentFocusOwner(slider);
+        if (TokenPresentation.mode(slider) == Presentation.GAME) {
+            paintBar(g, enabled, pressed, hover, duration, focused, grow);
+            return;
+        }
         // At fractional scales the disc is painted at 1x, as FlatLaf does, so its right and bottom edges aren't clipped
         Graphics2D copy = (Graphics2D) g.create();
         try {
@@ -181,5 +201,43 @@ public class TokenSliderUI extends FlatSliderUI {
 
     private static Ellipse2D disc(float centerX, float centerY, float diameter) {
         return new Ellipse2D.Float(centerX - diameter / 2f, centerY - diameter / 2f, diameter, diameter);
+    }
+
+    /**
+     * The game presentation's thumb: hud-v3's flat bar across the track, xs wide and icon.sm long, in the inverse
+     * color; under the pointer or dragged it leans toward the inverse ink and widens a pixel each side. The
+     * whole thumb rectangle stays its hit area, and focus rings the bar a gap away.
+     */
+    private void paintBar(Graphics g, boolean enabled, boolean pressed, boolean hover, int duration,
+          boolean focused, float grow) {
+        Color face = !enabled ? disabledThumbColor : pressed || hover ? barActiveColor : barColor;
+        Color easedFace = TokenMotion.color(slider, FACE, face, duration);
+        boolean horizontal = slider.getOrientation() == JSlider.HORIZONTAL;
+        Graphics2D copy = (Graphics2D) g.create();
+        try {
+            HiDPIUtils.paintAtScale1x(copy, thumbRect.x, thumbRect.y, thumbRect.width, thumbRect.height,
+                  (g2, x, y, width, height, scale) -> {
+                      float thickness = (float) ((UIScale.scale(barWidth) + UIScale.scale(GROWTH) * grow) * scale);
+                      float length = (float) (UIScale.scale(barLength) * scale);
+                      float arc = (float) (UIScale.scale(barArc) * scale) * 2;
+                      float barWidthNow = horizontal ? thickness : length;
+                      float barHeightNow = horizontal ? length : thickness;
+                      float left = x + (width - barWidthNow) / 2f;
+                      float top = y + (height - barHeightNow) / 2f;
+                      if (focused) {
+                          float ring = (float) (UIScale.scale((float) ringWidth) * scale);
+                          float gap = (float) (UIScale.scale(barFocusGap) * scale);
+                          float out = gap + ring / 2f;
+                          g2.setColor(focusedColor);
+                          g2.setStroke(new BasicStroke(ring));
+                          g2.draw(new RoundRectangle2D.Float(left - out, top - out, barWidthNow + 2 * out,
+                                barHeightNow + 2 * out, arc + 2 * out, arc + 2 * out));
+                      }
+                      g2.setColor(easedFace);
+                      g2.fill(new RoundRectangle2D.Float(left, top, barWidthNow, barHeightNow, arc, arc));
+                  });
+        } finally {
+            copy.dispose();
+        }
     }
 }

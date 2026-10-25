@@ -13,8 +13,8 @@ import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.client.ui.boardeditor.BoardEditorSession.Selection;
 import megamek.common.board.BoardDecoration;
-import megamek.common.board.HexIssue;
 import megamek.common.board.Coords;
+import megamek.common.board.HexIssue;
 import org.junit.jupiter.api.Test;
 
 /**

@@ -20,6 +20,7 @@
     <allow class="megamek.logging.MMLogger" />
     <allow class="megamek.client.ui.design.DesignTokens" />
     <allow class="megamek.client.ui.design.DesignTokens.Mode" />
+    <allow class="megamek.client.ui.design.DesignTokens.Presentation" />
     <allow class="megamek.client.ui.design.ColorMath" />
     <allow pkg="org.junit" />
     <file name="UiTestStage">

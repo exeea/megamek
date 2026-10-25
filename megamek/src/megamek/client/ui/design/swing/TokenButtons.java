@@ -28,7 +28,7 @@ public final class TokenButtons {
         QUIET("quiet"),
         /** Destructive actions: danger text and edge. */
         DANGER("danger"),
-        /** An on/off choice: a secondary button that shows selection with a violet wash and edge. */
+        /** An on/off choice: a secondary button that shows selection with the inverse face and edge. */
         TOGGLE(null),
         /** A square, quiet button with a Material Symbols glyph; it needs a tooltip. */
         ICON("icon"),
@@ -101,7 +101,7 @@ public final class TokenButtons {
 
     /**
      * A square icon button showing the Material Symbols glyph {@code codePoint}; {@code tooltip} names the action,
-     * since the glyph alone does not. A toggle shows selection with a violet wash and glyph.
+     * since the glyph alone does not. A selected toggle is on: the inverse face, the glyph in {@code text.onInverse}.
      */
     public static AbstractButton icon(int codePoint, String tooltip, boolean toggle, Size size) {
         String glyph = new String(Character.toChars(codePoint));
@@ -115,17 +115,18 @@ public final class TokenButtons {
     public static SpecialButton special(String text, Size size) {
         SpecialButton button = new SpecialButton(text, size);
         button.putClientProperty(FlatClientProperties.STYLE_CLASS, size.styleClass);
-        return button;
+        return TokenPresentation.role(button, "button");
     }
 
     /**
      * Gives an existing button the look and padding of {@code kind} at {@code size}, for migrating a view. The height
      * is not enforced: buttons from the factories grow to the size's height, restyled ones keep their natural height.
+     * Labelled buttons follow their screen's text case mode ({@link TokenPresentation}); icon buttons show a glyph.
      */
     public static <T extends AbstractButton> T style(T button, Kind kind, Size size) {
         String classes = kind.styleClass == null ? size.styleClass : kind.styleClass + " " + size.styleClass;
         button.putClientProperty(FlatClientProperties.STYLE_CLASS, classes);
-        return button;
+        return kind == Kind.ICON ? button : TokenPresentation.role(button, "button");
     }
 
     /**

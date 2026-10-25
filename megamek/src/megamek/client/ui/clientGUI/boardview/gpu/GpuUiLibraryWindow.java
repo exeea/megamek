@@ -5,6 +5,7 @@ import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -34,6 +35,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import megamek.MegaMek;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
@@ -41,10 +43,13 @@ import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.ColorToken;
 import megamek.client.ui.design.DesignTokens.Mode;
+import megamek.client.ui.design.DesignTokens.Palette;
+import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiAngleDial;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiCardGrid;
+import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiChoiceGrid;
 import megamek.client.ui.gdx.UiConfirmation;
 import megamek.client.ui.gdx.UiFlow;
@@ -119,7 +124,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
           new ColorMove("MINT", UiTheme.MINT, "accent.primary"),
           new ColorMove("CORAL", UiTheme.CORAL, "status.danger"),
           new ColorMove("AMBER", UiTheme.AMBER, "status.warning"),
-          new ColorMove("VIOLET", UiTheme.VIOLET, "selected.primary"),
+          new ColorMove("VIOLET", UiTheme.VIOLET, "status.gamemaster"),
           new ColorMove("BLIP", UiTheme.BLIP, null));
     /** Mint meant both active and success; its success uses move to their own token. */
     private static final String MINT_SUCCESS = "status.success";
@@ -131,12 +136,25 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
           Map.entry("hud-mini", "label"), Map.entry("hud-button", "label"), Map.entry("hud-name", "body.strong"),
           Map.entry("hud-title", "title"), Map.entry("hud-heading", "headline"), Map.entry("hud-phase", "display"),
           Map.entry("hud-main", "label"));
+    /**
+     * The text role whose token type replaces a hud-v3 font, where one does; the gallery shows the role in its
+     * presentation mode, condensed and upper case as the role is.
+     */
+    private static final Map<String, String> FONT_ROLES = Map.ofEntries(
+          Map.entry("hud-utility", "button"), Map.entry("hud-caption", "overline"), Map.entry("hud-mini", "button"),
+          Map.entry("hud-button", "button"), Map.entry("hud-name", "name"), Map.entry("hud-title", "title"),
+          Map.entry("hud-heading", "headline"), Map.entry("hud-phase", "display"), Map.entry("hud-main", "button"));
+    /** The hud-v3 fonts whose text hud-v3 upper-cases where it draws them (labels, buttons, titles, the phase). */
+    private static final Set<String> HUD_UPPER = Set.of("hud-caption", "hud-mini", "hud-button", "hud-title",
+          "hud-heading", "hud-phase", "hud-main");
 
     /** The open gallery; read and written on the EDT. */
     private static GpuUiLibraryWindow open;
 
     private final float preference;
-    private final DesignTokens tokens = DesignTokens.shipped();
+    private DesignTokens tokens = DesignTokens.shipped();
+    /** The palette when the gallery opened, put back when it closes. */
+    private final Palette previousPalette = DesignTokens.palette();
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     private final Table[] pages = new Table[TABS.length];
     private volatile Lwjgl3Application application;
@@ -148,6 +166,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private UiKit kit;
     private Stage stage;
     private UiKit.Segmented tabs;
+    /** The tab shown. */
+    private int tab;
     private ScrollPane scroll;
     private UiModal modal;
     private UiModal tokenModal;
@@ -242,6 +262,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         boardSkin = new GpuBoardSkin();
         hud = new GpuHudKit(boardSkin.skin);
         kit = hud.ui;
+        kit.presentation(Presentation.GAME);
         stage = new Stage(new ScreenViewport());
         Gdx.input.setInputProcessor(stage);
         sprite = loadSprite();
@@ -255,7 +276,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         head.add(kit.label(text("UiLibrary.gdx.title"), "hud-heading", 20, UiTheme.TEXT)).row();
         Label note = kit.label(text("UiLibrary.gdx.note"), "hud-small", 11.5f, UiTheme.MUTED);
         note.setWrap(true);
-        head.add(note).width(NAME_WIDTH + TODAY_WIDTH + MIGRATED_WIDTH + 2 * COLUMN_GAP).padTop(4);
+        head.add(note).width(NAME_WIDTH + TODAY_WIDTH + MIGRATED_WIDTH + 2 * COLUMN_GAP).padTop(4).row();
+        head.add(presentationSwitch()).padTop(8);
         root.add(head).growX().row();
         String[] labels = new String[TABS.length];
         for (int index = 0; index < TABS.length; index++) {
@@ -274,20 +296,73 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
         modal = modal(false);
         stage.addActor(modal);
-        tokenModal = modal(true);
-        stage.addActor(tokenModal);
         confirmation = new UiConfirmation(kit, "library-confirm", () -> { });
         confirmation.text(text("UiLibrary.gdx.confirmHeading"), text("UiLibrary.gdx.confirmDetail"),
               text("UiLibrary.gdx.confirmYes"), text("UiLibrary.gdx.confirmNo"));
         stage.addActor(confirmation.actor());
-        tokenConfirmation = new UiConfirmation(kit, "library-token-confirm", () -> { }, UiTheme.TOKEN);
-        tokenConfirmation.text(text("UiLibrary.gdx.confirmHeading"), text("UiLibrary.gdx.confirmDetail"),
-              text("UiLibrary.gdx.confirmYes"), text("UiLibrary.gdx.confirmNo"));
-        stage.addActor(tokenConfirmation.actor());
+        tokenOverlays();
         selectTab(0);
         if (closeRequested) {
             Gdx.app.exit();
         }
+    }
+
+    /** Builds the token modal and confirmation, whose buttons follow the kit's text mode, in place of earlier ones. */
+    private void tokenOverlays() {
+        if (tokenModal != null) {
+            tokenModal.remove();
+            tokenConfirmation.actor().remove();
+        }
+        tokenModal = modal(true);
+        stage.addActor(tokenModal);
+        tokenConfirmation = new UiConfirmation(kit, "library-token-confirm", () -> { }, UiTheme.TOKEN);
+        tokenConfirmation.text(text("UiLibrary.gdx.confirmHeading"), text("UiLibrary.gdx.confirmDetail"),
+              text("UiLibrary.gdx.confirmYes"), text("UiLibrary.gdx.confirmNo"));
+        stage.addActor(tokenConfirmation.actor());
+        tokenConfirmation.resize(stage.getWidth(), stage.getHeight());
+    }
+
+    /**
+     * The text case mode the token controls are built in: game, as in-game views are, or app. Switching rebuilds the
+     * pages and the token overlays, and shows the current tab where it was scrolled to.
+     */
+    private Actor presentationSwitch() {
+        UiButton toggle = kit.button("button-toggle" + UiTheme.COMPACT, null, text("UiLibrary.presentation.game"), null);
+        toggle.setChecked(kit.presentation() == Presentation.GAME);
+        UiKit.onChange(toggle, () -> {
+            Presentation mode = toggle.isChecked() ? Presentation.GAME : Presentation.APP;
+            rebuildPages(() -> kit.presentation(mode));
+        });
+        UiButton colorBlind = kit.button("button-toggle" + UiTheme.COMPACT, null, text("UiLibrary.palette.colorBlind"),
+              null);
+        colorBlind.setChecked(DesignTokens.palette() == Palette.COLORBLIND);
+        UiKit.onChange(colorBlind, () -> {
+            Palette palette = colorBlind.isChecked() ? Palette.COLORBLIND : Palette.STANDARD;
+            rebuildPages(() -> {
+                DesignTokens.setPalette(palette);
+                tokens = DesignTokens.shipped();
+                boardSkin.refreshTokens();
+            });
+        });
+        Table row = new Table();
+        row.defaults().padRight(8);
+        row.add(toggle);
+        row.add(colorBlind);
+        return row;
+    }
+
+    /** Applies a change after this event, as the rebuilt pages replace the actors under the pointer. */
+    private void rebuildPages(Runnable change) {
+        Gdx.app.postRunnable(() -> {
+            change.run();
+            float scrollY = scroll.getScrollY();
+            Arrays.fill(pages, null);
+            tokenOverlays();
+            selectTab(tab);
+            scroll.layout();
+            scroll.setScrollY(scrollY);
+            scroll.updateVisualScroll();
+        });
     }
 
     @Override
@@ -309,6 +384,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        DesignTokens.setPalette(previousPalette);
         if (stage != null) {
             stage.dispose();
         }
@@ -322,6 +398,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     /** Shows tab {@code index}; each page is built when first shown and keeps its state afterwards. */
     private void selectTab(int index) {
+        tab = index;
         tabs.select(index);
         if (pages[index] == null) {
             pages[index] = page(index);
@@ -398,10 +475,25 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
               kit.label(text("UiLibrary.gdx.noHudColor"), "hud-small", 11.5f, UiTheme.MUTED), added);
         heading(page, "UiLibrary.gdx.fonts");
         for (UiTheme.HudFont font : UiTheme.HUD_FONTS) {
+            if (font.name().equals(UiTheme.CAPS_FONT)) {
+                continue;
+            }
             UiTheme.HudFont type = typeStyle(FONT_MOVES.get(font.name()));
-            compare(page, font.name(), fontSample(font.name(), font, font.name(), TODAY_WIDTH),
-                  fontSample(type.name(), type, UiTheme.TYPE + type.name(), MIGRATED_WIDTH));
+            String role = FONT_ROLES.get(font.name());
+            // Each row shows the kind of text the font carries: short framing labels, or a sentence for body text
+            String line = text("UiLibrary.gdx.fontSample." + font.name());
+            String today = HUD_UPPER.contains(font.name()) ? UiTheme.upper(line) : line;
+            compare(page, font.name(), fontSample(font.name(), font, font.name(), today, TODAY_WIDTH),
+                  role != null ? roleSample(role, line, MIGRATED_WIDTH)
+                        : fontSample(type.name(), type, UiTheme.TYPE + type.name(), line, MIGRATED_WIDTH));
         }
+        // Game mode's caps font is new: hud-v3 upper-cases its labels in its condensed fonts instead
+        UiTheme.HudFont caps = UiTheme.HUD_FONTS.stream().filter(font -> font.name().equals(UiTheme.CAPS_FONT))
+              .findFirst().orElseThrow();
+        compare(page, UiTheme.CAPS_FONT, kit.label(text("UiLibrary.gdx.capsToday"), "hud-small", 11.5f,
+              UiTheme.MUTED), fontSample(UiTheme.CAPS_FONT, caps, UiTheme.CAPS_FONT,
+              tokens.cased("button", Presentation.GAME, text("UiLibrary.gdx.fontSample.hud-button"),
+                    MegaMek.getMMOptions().getLocale()), MIGRATED_WIDTH));
     }
 
     private void buttons(Table page) {
@@ -433,13 +525,21 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         badges.defaults().padRight(12);
         badges.add(kit.button("hud-utility", "report", text("UiLibrary.gdx.sampleLog"), null).badge("3"));
         badges.add(kit.button("hud-icon", "chat", null, null).badge("12"));
-        compare(page, "UiButton.badge", badges, null);
+        Table tokenBadges = new Table();
+        tokenBadges.defaults().padRight(20);
+        tokenBadges.add(kit.button("button-secondary", "report", text("UiLibrary.gdx.sampleLog"), null).badge("3"));
+        tokenBadges.add(kit.button("button-icon", "chat", null, null).badge("12"));
+        compare(page, "UiButton.badge", badges, tokenBadges);
         Table dots = new Table();
         dots.defaults().padRight(12);
         dots.add(kit.button("hud-utility", "settings", text("UiLibrary.gdx.sampleSettings"), null).dot(true));
         dots.add(kit.button("hud-icon", "chat", null, null).dot(true));
-        compare(page, "UiButton.dot", dots, null);
-        compare(page, "UiKit.closeButton", kit.closeButton(() -> { }), null);
+        Table tokenDots = new Table();
+        tokenDots.defaults().padRight(20);
+        tokenDots.add(kit.button("button-secondary", "settings", text("UiLibrary.gdx.sampleSettings"), null).dot(true));
+        tokenDots.add(kit.button("button-icon", "chat", null, null).dot(true));
+        compare(page, "UiButton.dot", dots, tokenDots);
+        compare(page, "UiKit.closeButton", kit.closeButton(() -> { }), kit.closeButton(() -> { }, true));
     }
 
     private void selection(Table page) {
@@ -466,6 +566,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
               new Container<>(kit.select(value, false, true)).width(220));
         compare(page, "hud-select-inline", kit.select(value, true), kit.select(value, true, true));
         compare(page, "UiKit.checkbox", checkboxes(false), checkboxes(true));
+        compare(page, "UiChoice", null, choices());
+        compare(page, text("UiLibrary.gdx.onDisabled"), null, disabledOn(all, mine, critical));
         heading(page, "UiLibrary.gdx.menus");
         compare(page, "hud-menu-row", menuRows("hud-menu-row"), menuRows(UiTheme.TOKEN_MENU_ROW));
         compare(page, "UiMenuList", new Container<>(menuPanel()).width(280),
@@ -478,6 +580,46 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         checks.add(kit.checkbox(text("UiLibrary.gdx.ticked"), true, token));
         checks.add(kit.checkbox(text("UiLibrary.gdx.clear"), false, token));
         return checks;
+    }
+
+    /** The token check box, radio button and switch, on: enabled above, disabled below. */
+    private Table choices() {
+        Table choices = new Table();
+        choices.defaults().left().padRight(20).padBottom(8);
+        for (boolean disabled : new boolean[] { false, true }) {
+            UiChoice[] row = { kit.check(text("UiLibrary.gdx.ticked"), true),
+                  kit.radio(text("UiLibrary.gdx.radioOn"), true),
+                  kit.toggleSwitch(text("UiLibrary.gdx.switchOn"), true) };
+            for (UiChoice choice : row) {
+                choice.setDisabled(disabled);
+                choices.add(choice);
+            }
+            choices.row();
+        }
+        return choices;
+    }
+
+    /** A checked toggle, a checked icon toggle and the segmented controls, each disabled while on. */
+    private Table disabledOn(String... labels) {
+        Table samples = new Table();
+        samples.defaults().left().padBottom(8);
+        Table buttons = new Table();
+        buttons.defaults().padRight(12);
+        UiButton toggle = kit.button("button-toggle", null, text("UiLibrary.gdx.sampleAction"), null).pressed(true);
+        toggle.setDisabled(true);
+        UiButton icon = kit.button("button-icon", "search", null, null).pressed(true);
+        icon.setDisabled(true);
+        buttons.add(toggle);
+        buttons.add(icon);
+        samples.add(buttons).row();
+        UiKit.Segmented segments = kit.segmented(UiTheme.TOKEN_SEGMENT + UiTheme.COMPACT, false, labels).select(1);
+        segments.buttons.forEach(button -> button.setDisabled(true));
+        samples.add(segments).row();
+        var segmented = kit.tokenSegmented(true, labels);
+        segmented.select(1);
+        segmented.setDisabled(true);
+        samples.add(segmented);
+        return samples;
     }
 
     private Table menuRows(String style) {
@@ -629,7 +771,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         rails.setBackground(kit.skin.getDrawable("panel-rails"));
         rails.add(kit.label(text("UiLibrary.gdx.tacticalView"), "hud-medium", 12, UiTheme.TEXT));
         Table frame = new Table();
-        frame.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_FRAME));
+        frame.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_RAILS));
         frame.add(kit.typeLabel(text("UiLibrary.gdx.tacticalView"), "body", "text.primary"));
         compare(page, "panel-rails", rails, topLeft(frame));
         compare(page, "rule", new Container<>(new Image(kit.skin.getDrawable("rule"))).size(320, 1),
@@ -1061,11 +1203,11 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         pill.setBackground(kit.skin.getDrawable(GpuBoardSkin.TOKEN_PILL + state));
         if (on) {
             pill.add(kit.icon("check", DesignTokens.shipped().size().get("icon.sm"), UiTheme.tokenColor(
-                  "text.primary"))).padRight(DesignTokens.shipped().space().get("xs"));
+                  "text.onInverse"))).padRight(DesignTokens.shipped().space().get("xs"));
         }
         pill.add(hud.letter(letter, false, true)).padRight(DesignTokens.shipped().space().get("sm"));
         pill.add(kit.typeLabel(text("UiLibrary.gdx.foeName"), "label", state.isEmpty() ? "text.secondary"
-              : "text.primary"));
+              : on ? "text.onInverse" : "text.primary"));
         return pill;
     }
 
@@ -1174,14 +1316,31 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         throw new IllegalArgumentException(name);
     }
 
-    /** A font's spec over a sample line drawn in its Label style; overline is the one upper-case style. */
-    private Table fontSample(String name, UiTheme.HudFont font, String style, float width) {
+    /**
+     * A text role's spec over a sample line as the kit draws the role in the gallery's presentation mode: upper case and
+     * condensed where the role is.
+     */
+    private Table roleSample(String role, String line, float width) {
+        DesignTokens.TypeStyle style = tokens.roleStyle(role);
+        boolean condensed = kit.condensed(role);
+        int instance = condensed ? UiTheme.CONDENSED_MEDIUM : typeStyle(style.name()).instance();
+        Table sample = new Table();
+        sample.left().top();
+        sample.add(kit.label(String.format(Locale.ROOT, "%s (%s)  %s / %s", role, style.name(), trim(style.size()),
+              weight(instance)), "hud-small", 11, UiTheme.MUTED)).left().row();
+        Label label = kit.roleTypeLabel(role, line, "text.primary");
+        label.setEllipsis(true);
+        sample.add(label).width(width).left().padTop(2);
+        return sample;
+    }
+
+    /** A font's spec over a sample line drawn in its Label style, the line cased as the caller shows it. */
+    private Table fontSample(String name, UiTheme.HudFont font, String style, String line, float width) {
         Table sample = new Table();
         sample.left().top();
         sample.add(kit.label(String.format(Locale.ROOT, "%s  %s / %s", name, trim(font.size()),
               weight(font.instance())), "hud-small", 11, UiTheme.MUTED)).left().row();
-        String line = text("UiLibrary.type.sample");
-        Label label = new Label("overline".equals(name) ? UiTheme.upper(line) : line, kit.skin, style);
+        Label label = new Label(line, kit.skin, style);
         label.setEllipsis(true);
         sample.add(label).width(width).left().padTop(2);
         return sample;

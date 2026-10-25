@@ -97,11 +97,14 @@ import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.ui.FlatEmptyBorder;
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.UIScale;
+import megamek.MegaMek;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.ColorToken;
 import megamek.client.ui.design.DesignTokens.Mode;
+import megamek.client.ui.design.DesignTokens.Palette;
+import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.design.DesignTokens.TypeStyle;
 import megamek.client.ui.design.TokenChecks;
 import megamek.client.ui.design.Vision;
@@ -133,15 +136,17 @@ public final class SwingUiLibrary extends JFrame {
     /** Masked in the samples; not a real password. */
     private static final String SAMPLE_PASSWORD = "atlas-as7d";
 
-    private final DesignTokens tokens = DesignTokens.shipped();
+    private DesignTokens tokens = DesignTokens.shipped();
     private final VisionLayerUI visionLayer = new VisionLayerUI();
     private final JPanel content = new JPanel(new BorderLayout());
     private final JLayer<JComponent> layer = new JLayer<>(content, visionLayer);
     private final Map<String, Font> fonts = new HashMap<>();
     private final List<TokenChoices.Switch> reduceSwitches = new ArrayList<>();
     private Mode mode = Mode.DARK;
+    private Presentation presentation = Presentation.APP;
     private int selectedTab;
     private final String previousLookAndFeel;
+    private final Palette previousPalette = DesignTokens.palette();
 
     /** Shows the gallery, or brings the open one to the front. */
     public static void showLibrary(Component owner) {
@@ -171,6 +176,18 @@ public final class SwingUiLibrary extends JFrame {
             mode = light.isSelected() ? Mode.LIGHT : Mode.DARK;
             applyLookAndFeel();
         });
+        JToggleButton game = new JToggleButton(Messages.getString("UiLibrary.presentation.game"));
+        game.addActionListener(event -> {
+            presentation = game.isSelected() ? Presentation.GAME : Presentation.APP;
+            rebuild();
+        });
+        JToggleButton colorBlind = new JToggleButton(Messages.getString("UiLibrary.palette.colorBlind"));
+        colorBlind.setSelected(previousPalette == Palette.COLORBLIND);
+        colorBlind.addActionListener(event -> {
+            DesignTokens.setPalette(colorBlind.isSelected() ? Palette.COLORBLIND : Palette.STANDARD);
+            tokens = DesignTokens.shipped();
+            applyLookAndFeel();
+        });
         JComboBox<Vision> vision = new JComboBox<>(Vision.values());
         vision.setRenderer((list, value, index, selected, focused) -> new JLabel(
               Messages.getString("UiLibrary.vision." + value.name())));
@@ -178,6 +195,8 @@ public final class SwingUiLibrary extends JFrame {
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEADING, scaleForGUI(8), scaleForGUI(6)));
         toolbar.add(light);
+        toolbar.add(game);
+        toolbar.add(colorBlind);
         toolbar.add(new JLabel(Messages.getString("UiLibrary.vision")));
         toolbar.add(vision);
         toolbar.add(new JLabel(Messages.getString("UiLibrary.version", tokens.version())));
@@ -204,7 +223,10 @@ public final class SwingUiLibrary extends JFrame {
     }
 
     private void restoreLookAndFeel() {
-        if (previousLookAndFeel == null || previousLookAndFeel.equals(UIManager.getLookAndFeel().getClass().getName())) {
+        boolean paletteChanged = DesignTokens.palette() != previousPalette;
+        DesignTokens.setPalette(previousPalette);
+        if (previousLookAndFeel == null || (!paletteChanged
+              && previousLookAndFeel.equals(UIManager.getLookAndFeel().getClass().getName()))) {
             return;
         }
         try {
@@ -216,6 +238,8 @@ public final class SwingUiLibrary extends JFrame {
     }
 
     private void rebuild() {
+        // Dialogs the samples open follow this window's mode
+        TokenPresentation.setMode(getRootPane(), presentation);
         if (content.getComponentCount() > 0 && content.getComponent(0) instanceof JTabbedPane tabs) {
             selectedTab = tabs.getSelectedIndex();
         }
@@ -279,20 +303,58 @@ public final class SwingUiLibrary extends JFrame {
         JPanel page = column(color("surface.base"));
         page.add(heading(Messages.getString("UiLibrary.type.rule")));
         page.add(paragraph(tokens.caseRule(), "body", "text.secondary"));
+        page.add(heading(Messages.getString("UiLibrary.type.width")));
+        page.add(paragraph(tokens.widthRule(), "body", "text.secondary"));
+
+        page.add(heading(Messages.getString("UiLibrary.type.roles")));
+        page.add(paragraph(Messages.getString("UiLibrary.type.rolesNote"), "small", "text.muted"));
+        JPanel header = roleRow(color("surface.base"), text(Messages.getString("UiLibrary.type.role"), "caption",
+              "text.muted"));
+        for (Presentation sampleMode : Presentation.values()) {
+            header.add(text(Messages.getString("UiLibrary.presentation." + sampleMode.name()), "caption", "text.muted"));
+        }
+        page.add(header);
+        Locale locale = MegaMek.getMMOptions().getLocale();
+        tokens.textRoles().forEach((role, styleName) -> {
+            JPanel row = roleRow(color("surface.panel"), text(role + "  (" + styleName + ")", "caption", "text.muted"));
+            for (Presentation sampleMode : Presentation.values()) {
+                JLabel shown = new JLabel(tokens.cased(role, sampleMode,
+                      Messages.getString("UiLibrary.type.roleSample." + role), locale));
+                shown.setFont(TokenFonts.font(styleName, tokens.upperCase(role, sampleMode),
+                      tokens.condensed(role, sampleMode)));
+                shown.setForeground(color("text.primary"));
+                row.add(shown);
+            }
+            page.add(row);
+        });
+
+        page.add(heading(Messages.getString("UiLibrary.type.styles")));
         page.add(paragraph(Messages.getString("UiLibrary.type.weightNote"), "small", "text.muted"));
         for (TypeStyle style : tokens.typeStyles().values()) {
             JPanel row = row(color("surface.panel"));
             row.setLayout(new BorderLayout(scaleForGUI(16), 0));
+            String caps = style.hasCaps()
+                  ? " / " + Messages.getString("UiLibrary.type.caps", trim(style.capsTracking())) : "";
             JLabel spec = text(String.format(Locale.ROOT, "%s  %s / %d%s", style.name(), trim(style.size()),
-                  style.weight(), style.upperCase() ? " / upper" : ""), "caption", "text.muted");
+                  style.weight(), caps), "caption", "text.muted");
             spec.setPreferredSize(new Dimension(scaleForGUI(200), spec.getPreferredSize().height));
             row.add(spec, BorderLayout.WEST);
-            String sample = Messages.getString("UiLibrary.type.sample");
-            row.add(text(style.upperCase() ? sample.toUpperCase(Locale.getDefault()) : sample, style.name(),
-                  "text.primary"), BorderLayout.CENTER);
+            row.add(text(Messages.getString("UiLibrary.type.sample"), style.name(), "text.primary"),
+                  BorderLayout.CENTER);
             page.add(row);
         }
         return page;
+    }
+
+    /** A row of the role table: the role, then one cell per text mode. */
+    private JPanel roleRow(Color background, JLabel role) {
+        JPanel row = new JPanel(new GridLayout(1, 1 + Presentation.values().length, scaleForGUI(16), 0));
+        row.setBackground(background);
+        row.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(4), scaleForGUI(8), scaleForGUI(4),
+              scaleForGUI(8)));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.add(role);
+        return row;
     }
 
     private JComponent shapePage() {
@@ -2398,7 +2460,7 @@ public final class SwingUiLibrary extends JFrame {
 
     /** Every button kind at {@code size} in every state, the transient states frozen through the button model. */
     private JComponent buttonMatrix(TokenButtons.Size size) {
-        List<String> states = List.of("rest", "hover", "pressed", "focus", "selected", "disabled");
+        List<String> states = List.of("rest", "hover", "pressed", "focus", "selected", "disabled", "disabledSelected");
         JPanel matrix = new JPanel(new GridBagLayout());
         matrix.setBackground(color("surface.base"));
         matrix.setAlignmentX(LEFT_ALIGNMENT);
@@ -2417,7 +2479,7 @@ public final class SwingUiLibrary extends JFrame {
             boolean selectable = kind == TokenButtons.Kind.TOGGLE || kind == TokenButtons.Kind.ICON
                   || kind == TokenButtons.Kind.SPECIAL;
             for (String state : states) {
-                if (state.equals("selected") && !selectable) {
+                if (state.endsWith("elected") && !selectable) {
                     matrix.add(Box.createHorizontalStrut(0), cell);
                     continue;
                 }
@@ -2432,8 +2494,8 @@ public final class SwingUiLibrary extends JFrame {
                               (Predicate<JComponent>) component -> true);
                     }
                     case "selected" -> button.setModel(new FrozenModel(false, false, true));
-                    case "disabled" -> {
-                        button.setModel(new FrozenModel(false, false, false));
+                    case "disabled", "disabledSelected" -> {
+                        button.setModel(new FrozenModel(false, false, state.equals("disabledSelected")));
                         button.setEnabled(false);
                     }
                     default -> { }
@@ -2659,6 +2721,8 @@ public final class SwingUiLibrary extends JFrame {
     }
 
     private JComponent page(JComponent body) {
+        // Before measuring: the controls' text is cased by the page's mode, so rows are sized for it
+        TokenPresentation.setMode(body, presentation);
         body.setBorder(BorderFactory.createEmptyBorder(scaleForGUI(8), scaleForGUI(16), scaleForGUI(16),
               scaleForGUI(16)));
         // Rows stretch to the page width but keep their own height.

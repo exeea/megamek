@@ -37,7 +37,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import jakarta.annotation.Nullable;
-
 import megamek.common.Hex;
 import megamek.common.enums.BasementType;
 import megamek.common.units.BuildingTerrain;

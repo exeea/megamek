@@ -10,8 +10,8 @@ import java.util.Map;
 
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.board.Board;
-import megamek.common.board.BoardFile;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;

@@ -49,6 +49,7 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
 import org.junit.jupiter.api.Tag;
@@ -353,6 +354,15 @@ class GpuHudSkinSmokeTest {
         GpuBoardSkin theme = new GpuBoardSkin();
         System.out.printf("GpuBoardSkin built in %.0f ms; GL renderer %s%n", (System.nanoTime() - start) / 1e6,
               Gdx.gl.glGetString(GL20.GL_RENDERER));
+        // The galleries' color-blind switch builds the token styles again over the old ones
+        DesignTokens.Palette palette = DesignTokens.palette();
+        try {
+            DesignTokens.setPalette(DesignTokens.Palette.COLORBLIND);
+            theme.refreshTokens();
+        } finally {
+            DesignTokens.setPalette(palette);
+            theme.refreshTokens();
+        }
         Set<Texture> textures = new LinkedHashSet<>();
         Stage stage = new Stage(new ScreenViewport());
         try {
@@ -361,6 +371,12 @@ class GpuHudSkinSmokeTest {
                 assertNotNull(skin.get(font.name(), Label.LabelStyle.class).font, font.name());
             }
             BUTTON_STYLES.forEach(name -> assertNotNull(skin.get(name, TextButton.TextButtonStyle.class), name));
+            DesignTokens tokens = DesignTokens.shipped();
+            for (String role : tokens.condensedRoles(DesignTokens.Presentation.GAME)) {
+                String copy = UiTheme.TYPE + tokens.roleStyle(role).name()
+                      + (tokens.upperCase(role, DesignTokens.Presentation.GAME) ? UiTheme.CAPS : UiTheme.CONDENSED);
+                assertNotNull(skin.get(copy, Label.LabelStyle.class).font, role + " has its condensed game copy");
+            }
             assertNotNull(skin.get("hud", TextField.TextFieldStyle.class));
             DRAWABLES.forEach(name -> assertNotNull(skin.getDrawable(name), name));
             for (String icon : UiTheme.ICONS.keySet()) {

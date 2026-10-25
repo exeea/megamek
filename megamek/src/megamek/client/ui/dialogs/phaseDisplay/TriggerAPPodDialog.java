@@ -58,10 +58,10 @@ import javax.swing.JTextArea;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.common.units.Entity;
+import megamek.common.actions.TriggerAPPodAction;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
-import megamek.common.actions.TriggerAPPodAction;
+import megamek.common.units.Entity;
 
 /**
  * A dialog displayed to the player when they have an opportunity to trigger an Anti-Personal Pod on one of their

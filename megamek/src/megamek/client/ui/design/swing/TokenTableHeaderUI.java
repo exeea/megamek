@@ -25,13 +25,17 @@ import javax.swing.table.TableColumn;
 
 import com.formdev.flatlaf.ui.FlatTableHeaderUI;
 import com.formdev.flatlaf.util.UIScale;
+import megamek.client.ui.design.DesignTokens;
 
 /**
  * Table headers of the MegaMek look and feels (docs/design-system/tokens.md, Tables): upper-case {@code overline}
- * labels in the secondary text color on the table's own surface, aligned like their column's cells. The label under
- * the pointer, the one being dragged and the sorted one turn primary; the sorted one also shows its chevron.
+ * labels in the secondary text color on the table's own surface, condensed on a game screen, aligned like their
+ * column's cells. The label under the pointer, the one being dragged and the sorted one turn primary; the sorted one
+ * also shows its chevron.
  */
 public class TokenTableHeaderUI extends FlatTableHeaderUI {
+    private Font condensedBase;
+    private Font condensedFont;
 
     public static ComponentUI createUI(JComponent c) {
         return new TokenTableHeaderUI();
@@ -91,6 +95,22 @@ public class TokenTableHeaderUI extends FlatTableHeaderUI {
               && table.convertColumnIndexToView(keys.get(0).getColumn()) == column;
     }
 
+    /**
+     * The font a header label is painted in: the theme's overline is condensed on a game screen, a font a view set
+     * stays.
+     */
+    private Font shownFont(Font font) {
+        if (font == null || !(header.getFont() instanceof UIResource) || !font.equals(header.getFont())
+              || !DesignTokens.shipped().condensed("overline", TokenPresentation.mode(header))) {
+            return font;
+        }
+        if (!font.equals(condensedBase)) {
+            condensedBase = font;
+            condensedFont = TokenFonts.condensed(font, DesignTokens.shipped().roleStyle("overline"), true);
+        }
+        return condensedFont;
+    }
+
     /** The alignment of the column's cells when its renderer is a label, such as right for numbers. */
     private int alignmentOf(int column, int fallback) {
         JTable table = header.getTable();
@@ -122,6 +142,8 @@ public class TokenTableHeaderUI extends FlatTableHeaderUI {
             if (text != null && !BasicHTML.isHTMLString(text)) {
                 label.setText(text.toUpperCase(header.getLocale()));
             }
+            Font font = label.getFont();
+            label.setFont(shownFont(font));
             label.setHorizontalAlignment(alignmentOf(column, alignment));
             label.setEnabled(enabled && header.isEnabled());
             label.setIconTextGap(UIScale.scale(UIManager.getInt(TokenTables.SORT_ICON_GAP)));
@@ -141,6 +163,7 @@ public class TokenTableHeaderUI extends FlatTableHeaderUI {
                 super.paintComponent(g, c, p, x, y, w, h, shouldValidate);
             }
             label.setText(text);
+            label.setFont(font);
             label.setHorizontalAlignment(alignment);
             label.setForeground(foreground);
             label.setEnabled(enabled);

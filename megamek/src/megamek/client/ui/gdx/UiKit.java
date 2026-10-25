@@ -3,6 +3,7 @@ package megamek.client.ui.gdx;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import com.badlogic.gdx.graphics.Color;
@@ -23,6 +24,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.SplitPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
@@ -33,6 +35,7 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.design.DesignTokens.Presentation;
 
 /**
  * The hud-v3 widgets that native views build from a UiTheme's skin (rebuild plan C.3), and the helpers they all use: a
@@ -67,11 +70,60 @@ public final class UiKit {
     /** The skin the widgets are built from: a UiTheme's, or one that a view's own skin composes with it. */
     public final Skin skin;
     private final Texture white;
+    private Presentation presentation = Presentation.GAME;
+    private Locale locale = Locale.getDefault();
 
     /** A kit over {@code skin}, which holds a UiTheme's styles; the kit only reads it. */
     public UiKit(Skin skin) {
         this.skin = skin;
         white = skin.get("white", Texture.class);
+    }
+
+    /**
+     * The text case mode of the token controls the kit builds (docs/design-system/tokens.md, Text case): game, as the
+     * in-game HUD is, unless a view sets app.
+     */
+    public Presentation presentation() {
+        return presentation;
+    }
+
+    /** Builds the following token controls in {@code mode}; controls already built keep theirs. */
+    public UiKit presentation(Presentation mode) {
+        presentation = mode;
+        return this;
+    }
+
+    /**
+     * Upper-cases the following text in {@code value}, the player's language; the kit depends on no game options, so
+     * its view passes it in. The system's locale until then.
+     */
+    public UiKit locale(Locale value) {
+        locale = value;
+        return this;
+    }
+
+    /** Whether text role {@code role} ("button", "tab"...) is upper case in the kit's text mode. */
+    public boolean upperCase(String role) {
+        return DesignTokens.shipped().upperCase(role, presentation);
+    }
+
+    /** Whether text role {@code role} ("title", "name"...) is set condensed in the kit's text mode. */
+    public boolean condensed(String role) {
+        return DesignTokens.shipped().condensed(role, presentation);
+    }
+
+    /** {@code text} in the case of text role {@code role} in the kit's text mode and locale. */
+    public String cased(String role, String text) {
+        return DesignTokens.shipped().cased(role, presentation, text, locale);
+    }
+
+    /**
+     * A label for a token control's text role {@code role}, "button" or "tab", at {@code size}: hud-medium, or
+     * {@link UiTheme#CAPS_FONT} with upper-cased text when the role is upper case in the kit's text mode.
+     */
+    public Label roleLabel(String role, String text, float size, Color color) {
+        return upperCase(role) ? label(cased(role, text), UiTheme.CAPS_FONT, size, color)
+              : label(text, "hud-medium", size, color);
     }
 
     /** A message; a pattern only with arguments, so that plain texts keep their apostrophes. */
@@ -324,20 +376,34 @@ public final class UiKit {
         return new Label(text, style);
     }
 
+    /**
+     * A label for text role {@code textRole} ("title", "headline", "display", "overline", "name") in its type style
+     * and the color of {@code colorRole}, in the kit's text mode: upper case when the role is, and in the style's
+     * condensed copy (upper case at its caps tracking, or sentence case) when the role is condensed.
+     */
+    public Label roleTypeLabel(String textRole, String text, String colorRole) {
+        String type = DesignTokens.shipped().roleStyle(textRole).name();
+        boolean upper = upperCase(textRole);
+        if (condensed(textRole)) {
+            String copy = type + (upper ? UiTheme.CAPS : UiTheme.CONDENSED);
+            if (skin.has(UiTheme.TYPE + copy, Label.LabelStyle.class)) {
+                return typeLabel(cased(textRole, text), copy, colorRole);
+            }
+        }
+        return typeLabel(cased(textRole, text), type, colorRole);
+    }
+
     /** The prototype's caption (.cap): upper-case condensed muted text. */
     public Label caption(String text) {
         return new Label(UiTheme.upper(text), skin, "hud-caption");
     }
 
-    /** A caption as {@link #caption(String)}; with {@code token}, the upper-case overline type in text.muted. */
+    /**
+     * A caption as {@link #caption(String)}; with {@code token}, the overline role in text.muted, condensed in game
+     * mode.
+     */
     public Label caption(String text, boolean token) {
-        if (!token) {
-            return caption(text);
-        }
-        Label caption = new Label(UiTheme.upper(text), new Label.LabelStyle(skin.get(UiTheme.TYPE + "overline",
-              Label.LabelStyle.class)));
-        caption.getStyle().fontColor = UiTheme.tokenColor("text.muted");
-        return caption;
+        return token ? roleTypeLabel("overline", text, "text.muted") : caption(text);
     }
 
     /**
@@ -405,8 +471,8 @@ public final class UiKit {
 
     /**
      * A panel header as {@link #header(String, String, Actor...)}; with {@code token}, the Token v0 header for a token
-     * panel: the sentence-case title in the {@code title} type and text.primary, the count in text.muted, the tools
-     * xs apart, and md above the body.
+     * panel: the title in the {@code title} type (upper case in game mode) and text.primary, the count in text.muted,
+     * the tools xs apart, and md above the body.
      */
     public Table header(String title, String count, boolean token, Actor... tools) {
         return token ? tokenHeader(title, count, "title", tools) : header(title, count, tools);
@@ -415,7 +481,7 @@ public final class UiKit {
     private Table tokenHeader(String title, String count, String type, Actor... tools) {
         Table header = new Table();
         header.padBottom(space("md"));
-        Label heading = typeLabel(title, type, "text.primary");
+        Label heading = roleTypeLabel(type, title, "text.primary");
         heading.setEllipsis(true);
         header.add(heading).minWidth(0);
         if (count != null) {
@@ -463,8 +529,9 @@ public final class UiKit {
 
     /**
      * A dialog as {@link #dialog(String, Runnable)}; with {@code token}, the Token v0 dialog card: the token panel
-     * padded xl above the header and xxl elsewhere, and a header with the sentence-case title in the {@code headline}
-     * type and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or wider.
+     * padded xl above the header and xxl elsewhere, and a header with the title in the {@code headline} type (upper
+     * case in game mode) and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or
+     * wider.
      */
     public Table dialog(String title, Runnable close, boolean token) {
         if (!token) {
@@ -535,10 +602,13 @@ public final class UiKit {
      * caption on one line. Styles: hud (quiet, .b), hud-plain (normal-case .brow .b), hud-main (commit), hud-mini,
      * hud-icon (30-unit .b.ib), hud-seg, hud-utility (icon over label), hud-utility-row (.b.util.row) and
      * hud-utility-small (.b.brk.sm); and the token button set, button-&lt;kind&gt; and button-&lt;kind&gt;-compact
-     * ({@link UiTheme#BUTTON_KINDS}), in sentence case, which new views use.
+     * ({@link UiTheme#BUTTON_KINDS}), which new views use: their labels follow the kit's {@link #presentation()}.
      */
     public UiButton button(String style, String icon, String text, String sub) {
-        UiButton button = new UiButton(this, style);
+        // Labelled token buttons, tabs and segments have a caps copy; icon buttons show a glyph and have none
+        String role = style.startsWith(UiTheme.TOKEN_TAB) || style.startsWith(UiTheme.TOKEN_SEGMENT) ? "tab" : "button";
+        boolean tokenCaps = skin.has(style + UiTheme.CAPS, TextButton.TextButtonStyle.class) && upperCase(role);
+        UiButton button = new UiButton(this, tokenCaps ? style + UiTheme.CAPS : style);
         boolean column = style.equals("hud-utility") || sub != null;
         float gap = gap(style, column);
         if (icon != null) {
@@ -550,7 +620,11 @@ public final class UiKit {
             }
         }
         if (text != null) {
-            button.setText(UPPER_CASE.contains(style) ? UiTheme.upper(text) : text);
+            if (tokenCaps) {
+                button.setText(cased(role, text));
+            } else {
+                button.setText(UPPER_CASE.contains(style) ? UiTheme.upper(text) : text);
+            }
             if (style.equals("hud-plain")) {
                 // .brow .b is 12 units, half a unit smaller than hud-medium.
                 size(button.getLabel(), "hud-medium", 12);
@@ -652,7 +726,7 @@ public final class UiKit {
 
     /**
      * A menu item as {@link #menuRow(String, String, Boolean, boolean)} in {@code style}: hud-menu-row, or
-     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a violet check and a text.secondary chevron.
+     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a selection-color check and a text.secondary chevron.
      */
     public UiButton menuRow(String style, String text, String detail, Boolean checked, boolean group) {
         UiButton row = new UiButton(this, style);
@@ -773,10 +847,14 @@ public final class UiKit {
         return field;
     }
 
-    /** The token slider (docs/design-system/tokens.md, Sliders): a pill track, the accent fill and an accent disc. */
+    /**
+     * The token slider (docs/design-system/tokens.md, Sliders): a pill track and the accent fill up to the thumb, a thin
+     * light bar in the game presentation and an accent disc in the app one.
+     */
     public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle tokenSliderStyle() {
         return new com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle(
-              skin.get(UiTheme.TOKEN, com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle.class));
+              skin.get(presentation == Presentation.GAME ? UiTheme.TOKEN_BAR : UiTheme.TOKEN,
+                    com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle.class));
     }
 
     /** A token text input (docs/design-system/tokens.md, Inputs); compact is control.sm high, otherwise control.md. */
@@ -927,9 +1005,6 @@ public final class UiKit {
         /** The segments or tabs, in the order of their labels. */
         public final List<UiButton> buttons = new ArrayList<>();
 
-        /** The hairlines between two sections of a token segmented control, hidden beside the selected one. */
-        private final List<Image> dividers = new ArrayList<>();
-
         private Segmented(String style, boolean flex, String... labels) {
             if (style.startsWith(UiTheme.TOKEN_SEGMENT) || style.startsWith(UiTheme.TOKEN_TAB)) {
                 tokenSections(style, flex, labels);
@@ -960,26 +1035,18 @@ public final class UiKit {
         }
 
         /**
-         * The Token v0 look: tabs side by side on a border.subtle hairline, or segments of one width in a raised
-         * frame with hairlines between them (docs/design-system/tokens.md, Tabs and Segmented control).
+         * The Token v0 look: tabs side by side on a border.subtle hairline, or segments of one width that stand apart,
+         * xs between them, each with its own edge (docs/design-system/tokens.md, Tabs and Segmented control).
          */
         private void tokenSections(String style, boolean flex, String... labels) {
             boolean tabs = style.startsWith(UiTheme.TOKEN_TAB);
-            float border = DesignTokens.shipped().size().get("border");
             if (tabs) {
                 setBackground(skin.getDrawable("token-tabs"));
-            } else {
-                setBackground(skin.getDrawable("seg-frame"));
-                pad(border);
             }
+            float gap = DesignTokens.shipped().space().get("xs");
             for (String text : labels) {
-                if (!tabs && !buttons.isEmpty()) {
-                    Image divider = new Image(skin.getDrawable("token-divider"));
-                    dividers.add(divider);
-                    add(divider).width(border).fillY().padTop(6).padBottom(6);
-                }
                 UiButton button = button(style, null, text, null);
-                Cell<UiButton> cell = add(button).fillY();
+                Cell<UiButton> cell = add(button).fillY().padLeft(tabs || buttons.isEmpty() ? 0 : gap);
                 if (flex) {
                     cell.growX().uniformX();
                 } else if (!tabs) {
@@ -993,9 +1060,6 @@ public final class UiKit {
         public Segmented select(int index) {
             for (int i = 0; i < buttons.size(); i++) {
                 buttons.get(i).pressed(i == index);
-            }
-            for (int i = 0; i < dividers.size(); i++) {
-                dividers.get(i).setVisible(i != index && i + 1 != index);
             }
             return this;
         }

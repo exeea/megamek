@@ -47,11 +47,11 @@ import java.util.StringTokenizer;
 import java.util.stream.Collectors;
 
 import jakarta.annotation.Nullable;
-import megamek.common.board.Coords;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardFile;
+import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
-import megamek.common.board.BoardFile;
 import megamek.common.enums.BasementType;
 import megamek.common.equipment.Minefield;
 import megamek.common.rolls.PilotingRollData;

@@ -8,9 +8,9 @@ import java.util.function.Predicate;
 import javax.swing.JComponent;
 
 import jakarta.annotation.Nullable;
-import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay.PhysicalCommand;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay.PhysicalOption;

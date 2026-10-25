@@ -10,11 +10,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.LinkedHashSet;
 import java.util.UUID;
 import java.util.function.Consumer;
 import javax.swing.JFileChooser;
@@ -35,11 +35,11 @@ import megamek.common.board.BoardConnectivityCheck;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
-import megamek.common.board.HexIssue;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.HexIssue;
 import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
 import megamek.common.enums.BuildingType;
@@ -1978,7 +1978,7 @@ public final class BoardEditorSession {
      * A stamped train on a hex that holds a route of its kind rides it: its centre snaps onto the track nearest the hex
      * centre, and each vehicle stands its offset along the train further along the track, round curves and across
      * joined hexes ({@link RailRoute#follow}), turned along it, on the marker it stands on and in that marker's hex
-     * (a wagon that runs onto a deck rides the deck). Only the vehicles that fit on the track are placed: 
+     * (a wagon that runs onto a deck rides the deck). Only the vehicles that fit on the track are placed:
      * a vehicle reaches half the way to the nearest other car of the train on each side of its centre (a
      * coupler, which rides between two cars, is no measure of their length), and both those ends must lie on the
      * track. Returns each placed member with the hex it belongs to.

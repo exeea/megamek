@@ -290,7 +290,7 @@ public class Terrains implements Serializable {
           Terrains.TUNDRA,
           Terrains.HAZARDOUS_LIQUID,
           Terrains.ULTRA_SUBLEVEL);
-    
+
     public static final Set<Integer> INVALID_TRIPWIRE_TERRAIN = Set.of(Terrains.WOODS,
     		Terrains.WATER,
     		Terrains.JUNGLE,
@@ -310,7 +310,7 @@ public class Terrains implements Serializable {
     		Terrains.SKY,
     		Terrains.HAZARDOUS_LIQUID,
     		Terrains.ULTRA_SUBLEVEL);
-    
+
     public static final Set<Integer> INVALID_PITFALL_TERRAIN = Set.of(Terrains.WOODS,
     		Terrains.WATER,
     		Terrains.JUNGLE,

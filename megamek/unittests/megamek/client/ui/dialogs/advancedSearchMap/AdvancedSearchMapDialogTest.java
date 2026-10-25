@@ -18,13 +18,12 @@ import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
 import megamek.common.Configuration;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.utilities.BoardClassifier;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class AdvancedSearchMapDialogTest {
 

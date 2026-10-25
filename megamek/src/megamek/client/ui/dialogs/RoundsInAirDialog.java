@@ -202,7 +202,7 @@ public class RoundsInAirDialog extends JDialog {
         if (player == null) {
             return Messages.getString("RoundsInAirDialog.unknownPlayer");
         }
-        
+
         return player.getTeamName();
     }
 

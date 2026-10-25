@@ -45,7 +45,7 @@ public final class TokenToast extends JComponent {
         WARNING(0xE002, "status.warning", "TokenToast.level.warning", 1),
         DANGER(0xE000, "status.danger", "TokenToast.level.danger", 2),
         /** A Game Master's action: violet with its own icon, so it reads as the GM's hand, not a game outcome. */
-        GAMEMASTER(0xF650, "selected.primary", "TokenToast.level.gamemaster", 1);
+        GAMEMASTER(0xF650, "status.gamemaster", "TokenToast.level.gamemaster", 1);
 
         private final int glyph;
         private final String role;

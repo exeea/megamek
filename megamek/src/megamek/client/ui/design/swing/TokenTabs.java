@@ -10,7 +10,7 @@ import megamek.client.ui.design.swing.TokenButtons.Size;
 
 /**
  * The design system's tabs for Swing (docs/design-system/tokens.md, Tabs): secondary labels on the window surface, a
- * violet underline under the selected tab and a hairline under the strip. The MegaMek look and feels draw every tab
+ * selection-color underline under the selected tab and a hairline under the strip. The MegaMek look and feels draw every tab
  * pane this way at the compact size; this gives a tab pane the regular size, for top-level page switching.
  */
 public final class TokenTabs {
@@ -21,11 +21,14 @@ public final class TokenTabs {
         return size(new JTabbedPane(), size);
     }
 
-    /** Gives a tab pane the tab height and side padding of {@code size}. */
+    /**
+     * Gives a tab pane the tab height and side padding of {@code size}; its titles follow their screen's text case
+     * mode ({@link TokenPresentation}).
+     */
     public static <T extends JTabbedPane> T size(T tabs, Size size) {
         int side = Math.round(DesignTokens.shipped().space().get(size == Size.REGULAR ? "lg" : "md"));
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_HEIGHT, size.height());
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_INSETS, new Insets(0, side, 0, side));
-        return tabs;
+        return TokenPresentation.role(tabs, "tab");
     }
 }

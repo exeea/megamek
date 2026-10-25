@@ -338,7 +338,7 @@ public class TokenDialogPane extends JPanel {
     }
 
     private JComponent header() {
-        JLabel heading = new JLabel(title, status.icon(), JLabel.LEADING);
+        JLabel heading = TokenPresentation.role(new JLabel(title, status.icon(), JLabel.LEADING), "headline");
         heading.setFont(TokenFonts.font("headline"));
         heading.setForeground(token("text.primary"));
         heading.setIconTextGap(space("md"));

@@ -7,11 +7,13 @@ import java.util.List;
 import megamek.client.ui.design.DesignTokens.ContrastCheck;
 import megamek.client.ui.design.DesignTokens.DistinctCheck;
 import megamek.client.ui.design.DesignTokens.Mode;
+import megamek.client.ui.design.DesignTokens.Palette;
 
 /**
- * Runs the accessibility checks that the token file declares, for both modes: WCAG contrast of foreground and
- * background roles, and the CIEDE2000 separation of color roles under every simulated {@link Vision}. The unit test
- * fails on any failing result; the Swing gallery lists them all.
+ * Runs the accessibility checks that the token file declares, for both modes of one palette: WCAG contrast of
+ * foreground and background roles, and the CIEDE2000 separation of color roles under the palette's simulated
+ * {@link Vision} types ({@link #visions}). The unit test fails on any failing result in either palette; the Swing
+ * gallery lists them all for the active palette.
  */
 public final class TokenChecks {
     private TokenChecks() {
@@ -61,7 +63,7 @@ public final class TokenChecks {
         int b = tokens.color(second, mode);
         double worst = Double.MAX_VALUE;
         Vision worstVision = Vision.NORMAL;
-        for (Vision vision : Vision.values()) {
+        for (Vision vision : visions(tokens.tokenPalette())) {
             double difference = ColorMath.deltaE(a, b, vision);
             if (difference < worst) {
                 worst = difference;
@@ -69,6 +71,11 @@ public final class TokenChecks {
             }
         }
         return new Result(mode, first + " vs " + second, worst, check.minDeltaE(), worstVision, check.why());
+    }
+
+    /** The vision types a palette is measured for: normal vision for the standard one, every type for color-blind. */
+    public static List<Vision> visions(Palette palette) {
+        return palette == Palette.STANDARD ? List.of(Vision.NORMAL) : List.of(Vision.values());
     }
 
     private static int opaque(int color, int backdrop) {

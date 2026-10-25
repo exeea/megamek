@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.awt.event.InputEvent;
 import java.io.File;
 
-import megamek.common.Player;
 import megamek.common.LosEffects;
+import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;

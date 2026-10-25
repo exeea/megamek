@@ -8,11 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 import megamek.client.ui.design.DesignTokens.ContrastCheck;
 import megamek.client.ui.design.DesignTokens.DistinctCheck;
 import megamek.client.ui.design.DesignTokens.Mode;
+import megamek.client.ui.design.DesignTokens.Palette;
+import megamek.client.ui.design.DesignTokens.Presentation;
 import org.junit.jupiter.api.Test;
 
 class DesignTokensTest {
@@ -77,22 +80,99 @@ class DesignTokensTest {
             check.colors().forEach(tokens::colorToken);
         }
         assertTrue(tokens.typeStyles().containsKey("body"));
-        assertEquals(1, tokens.typeStyles().values().stream().filter(DesignTokens.TypeStyle::upperCase).count(),
-              "Only one upper-case text style");
     }
 
     @Test
-    void everyAccessibilityCheckPassesInBothModes() {
-        List<String> failures = new ArrayList<>();
-        List<TokenChecks.Result> results = TokenChecks.run(DesignTokens.shipped());
-        for (TokenChecks.Result result : results) {
-            if (!result.passes()) {
-                failures.add(String.format("%s %s: %.2f < %.2f%s (%s)", result.mode(), result.subject(),
-                      result.value(), result.min(), result.vision() == null ? "" : " for " + result.vision(),
-                      result.why()));
+    void appModeUpperCasesOnlyOverlinesAndGameModeTheFramingLabels() {
+        DesignTokens tokens = DesignTokens.shipped();
+        for (String role : tokens.textRoles().keySet()) {
+            assertEquals(role.equals("overline"), tokens.upperCase(role, Presentation.APP), role + " in app mode");
+            if (tokens.upperCase(role, Presentation.APP)) {
+                assertTrue(tokens.upperCase(role, Presentation.GAME), role + " is upper case in game mode too");
             }
         }
-        assertTrue(results.stream().anyMatch(result -> result.mode() == Mode.LIGHT));
+        for (String role : List.of("display", "headline", "title", "button", "tab")) {
+            assertTrue(tokens.upperCase(role, Presentation.GAME), role + " in game mode");
+        }
+        assertFalse(tokens.typeStyle("body").hasCaps(), "Body text is never upper case");
+        assertFalse(tokens.typeStyle("small").hasCaps(), "Table text is never upper case");
+        assertTrue(tokens.roleStyle("button").capsTracking() > tokens.roleStyle("button").tracking(),
+              "Upper case is tracked wider");
+        assertEquals("END TURN", tokens.cased("button", Presentation.GAME, "End turn", Locale.ROOT));
+        assertEquals("End turn", tokens.cased("button", Presentation.APP, "End turn", Locale.ROOT));
+        assertEquals("<html>End turn", tokens.cased("button", Presentation.GAME, "<html>End turn", Locale.ROOT));
+        assertEquals("\u0130PTAL", tokens.cased("button", Presentation.GAME, "iptal", Locale.forLanguageTag("tr")));
+        assertThrows(IllegalArgumentException.class, () -> tokens.upperCase("no.such", Presentation.GAME));
+    }
+
+    @Test
+    void gameModeCondensesTheFramingLabelsAndNamesAndAppModeNothing() {
+        DesignTokens tokens = DesignTokens.shipped();
+        assertEquals(75, tokens.condensedWidth());
+        assertFalse(tokens.widthRule().isBlank());
+        assertEquals(List.of("display", "headline", "title", "button", "tab", "overline", "name"),
+              List.copyOf(tokens.condensedRoles(Presentation.GAME)));
+        assertTrue(tokens.condensedRoles(Presentation.APP).isEmpty(), "App mode is all regular width");
+        for (String role : tokens.textRoles().keySet()) {
+            assertFalse(tokens.condensed(role, Presentation.APP), role + " in app mode");
+            assertEquals(tokens.condensedRoles(Presentation.GAME).contains(role),
+                  tokens.condensed(role, Presentation.GAME), role + " in game mode");
+            if (tokens.upperCase(role, Presentation.GAME)) {
+                assertTrue(tokens.condensed(role, Presentation.GAME), "Upper-case " + role + " is condensed");
+            }
+        }
+        for (String role : tokens.condensedRoles(Presentation.GAME)) {
+            assertEquals(500, tokens.roleStyle(role).weight(), role + " fits the one condensed static face");
+        }
+        assertEquals("body.strong", tokens.textRoles().get("name"));
+        for (Presentation presentation : Presentation.values()) {
+            assertFalse(tokens.upperCase("name", presentation), "Names keep their case in " + presentation);
+        }
+        assertEquals(0, tokens.roleStyle("name").tracking(false), "Condensed names keep normal tracking");
+        assertThrows(IllegalArgumentException.class, () -> tokens.condensed("no.such", Presentation.GAME));
+    }
+
+    @Test
+    void everyAccessibilityCheckPassesInBothModesOfBothPalettes() {
+        List<String> failures = new ArrayList<>();
+        for (Palette palette : Palette.values()) {
+            List<TokenChecks.Result> results = TokenChecks.run(DesignTokens.shipped(palette));
+            for (TokenChecks.Result result : results) {
+                if (!result.passes()) {
+                    failures.add(String.format("%s %s %s: %.2f < %.2f%s (%s)", palette, result.mode(),
+                          result.subject(), result.value(), result.min(),
+                          result.vision() == null ? "" : " for " + result.vision(), result.why()));
+                }
+            }
+            assertTrue(results.stream().anyMatch(result -> result.mode() == Mode.LIGHT));
+        }
         assertTrue(failures.isEmpty(), String.join("\n", failures));
+    }
+
+    @Test
+    void theColorBlindPaletteOverridesOnlyTheStatusColors() {
+        DesignTokens standard = DesignTokens.shipped(Palette.STANDARD);
+        DesignTokens safe = DesignTokens.shipped(Palette.COLORBLIND);
+        assertEquals(Palette.COLORBLIND, safe.tokenPalette());
+        for (String name : standard.colors().keySet()) {
+            boolean differs = standard.colorToken(name).dark() != safe.colorToken(name).dark()
+                  || standard.colorToken(name).light() != safe.colorToken(name).light();
+            assertEquals(List.of("status.danger", "status.warning", "status.success").contains(name), differs, name);
+        }
+        for (Mode mode : Mode.values()) {
+            assertEquals(standard.color("surface.inverse", mode), safe.color("selected.primary", mode),
+                  "Selection is the inverse color in both palettes");
+        }
+    }
+
+    @Test
+    void shippedFollowsTheActivePalette() {
+        try {
+            DesignTokens.setPalette(Palette.COLORBLIND);
+            assertEquals(Palette.COLORBLIND, DesignTokens.shipped().tokenPalette());
+        } finally {
+            DesignTokens.setPalette(Palette.STANDARD);
+        }
+        assertEquals(Palette.STANDARD, DesignTokens.shipped().tokenPalette());
     }
 }

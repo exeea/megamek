@@ -482,5 +482,3 @@ final class BoardBridgeTruss {
         }
     }
 }
-
-

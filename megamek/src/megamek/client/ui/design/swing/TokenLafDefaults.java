@@ -141,8 +141,18 @@ public final class TokenLafDefaults {
             put(prefix + ".placeholderForeground", color("text.muted"));
         }
 
+        // The inverse face, hud-v3's cream: the primary button and every control that is on. A surface wash barely shows
+        // on it, so hover and press lean it toward the label color, press further. A disabled control that is on keeps a
+        // faint cream face with the same label, as faint as other disabled text.
+        int inverse = color("surface.inverse");
+        int onInverse = color("text.onInverse");
+        int inverseHover = over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.hover")), inverse);
+        int inversePressed = over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.pressed")), inverse);
+        int inverseDisabled = color("surface.inverseDisabled");
+
         // Secondary (default) button: raised face, control edge; hover adds a wash, a strong edge and brighter text.
-        // Every kind is disabled the same way: raised face, subtle edge, disabled text.
+        // Every kind is disabled the same way: raised face, subtle edge, disabled text. A selected toggle is on: the
+        // inverse face and edge, in a toolbar too.
         for (String prefix : new String[] { "Button.", "ToggleButton." }) {
             put(prefix + "background", raised);
             put(prefix + "foreground", color("text.secondary"));
@@ -153,16 +163,25 @@ public final class TokenLafDefaults {
             put(prefix + "focusedBackground", raised);
             put(prefix + "disabledBackground", raised);
             put(prefix + "disabledText", color("text.disabled"));
-            put(prefix + "selectedBackground", over(selected, raised));
-            put(prefix + "selectedForeground", color("text.primary"));
+            put(prefix + "selectedBackground", inverse);
+            put(prefix + "selectedForeground", onInverse);
+            put(prefix + "selectedHoverBackground", inverseHover);
+            put(prefix + "selectedPressedBackground", inversePressed);
+            put(prefix + "selectedHoverForeground", onInverse);
+            put(prefix + "selectedPressedForeground", onInverse);
+            put(prefix + "disabledSelectedBackground", over(inverseDisabled, raised));
+            put(prefix + "disabledSelectedForeground", onInverse);
             put(prefix + "toolbar.hoverBackground", over(hover, base));
             put(prefix + "toolbar.hoverForeground", color("text.primary"));
             put(prefix + "toolbar.pressedBackground", over(pressed, base));
             put(prefix + "toolbar.pressedForeground", color("text.primary"));
-            put(prefix + "toolbar.selectedBackground", over(selected, base));
-            put(prefix + "toolbar.selectedForeground", color("selected.primary"));
+            put(prefix + "toolbar.selectedBackground", inverse);
+            put(prefix + "toolbar.selectedForeground", onInverse);
+            put(prefix + "toolbar.disabledSelectedBackground", over(inverseDisabled, base));
+            put(prefix + "toolbar.disabledSelectedForeground", onInverse);
         }
-        // Edges are shared by plain and toggle buttons; a selected toggle keeps a violet edge in every state
+        // Edges are shared by plain and toggle buttons. A selected toggle's edge is its face, strong under the pointer;
+        // focus rings it from outside (TokenButtonUI), or with the label-colored inner line where that has no room.
         values.put("ButtonUI", TokenButtonUI.class.getName());
         values.put("ToggleButtonUI", TokenButtonUI.Toggle.class.getName());
         values.put("Button.border", TokenButtonUI.Border.class.getName());
@@ -172,42 +191,40 @@ public final class TokenLafDefaults {
         put("Button.hoverBorderColor", color("border.strong"));
         put("Button.pressedBorderColor", color("border.strong"));
         put("Button.focusedBorderColor", color("focus.ring"));
-        put("Button.selectedBorderColor", color("selected.primary"));
-        put("Button.hoverSelectedBorderColor", color("selected.primary"));
-        put("Button.pressedSelectedBorderColor", color("selected.primary"));
-        put("Button.focusedSelectedBorderColor", color("focus.ring"));
-        put("Button.disabledSelectedBorderColor", color("border.subtle"));
+        put("Button.selectedBorderColor", inverse);
+        put("Button.hoverSelectedBorderColor", color("border.strong"));
+        put("Button.pressedSelectedBorderColor", color("border.strong"));
+        put("Button.focusedSelectedBorderColor", color("text.primary"));
+        put("Button.disabledSelectedBorderColor", over(inverseDisabled, raised));
+        put(TokenButtonUI.INVERSE_FOCUS_COLOR, onInverse);
 
-        // Primary (default) button: accent fill; its focus shows as an inner line in the on-accent color. A wash of the
-        // surface color is invisible on the accent, so hover leans toward the label color and press away from it.
         int accent = color("accent.primary");
-        int accentHover = over(ColorMath.withAlpha(color("text.onAccent"), tokens.alpha("tint.hover")), accent);
-        int accentPressed = over(ColorMath.withAlpha(color("text.primary"), tokens.alpha("tint.pressed")), accent);
-        put("Button.default.background", accent);
-        put("Button.default.foreground", color("text.onAccent"));
-        put("Button.default.hoverForeground", color("text.onAccent"));
-        put("Button.default.pressedForeground", color("text.onAccent"));
-        put("Button.default.hoverBackground", accentHover);
-        put("Button.default.pressedBackground", accentPressed);
-        put("Button.default.focusedBackground", accent);
-        put("Button.default.borderColor", accent);
+        // Primary (default) button: the inverse face, focused like a selected toggle
+        put("Button.default.background", inverse);
+        put("Button.default.foreground", onInverse);
+        put("Button.default.hoverForeground", onInverse);
+        put("Button.default.pressedForeground", onInverse);
+        put("Button.default.hoverBackground", inverseHover);
+        put("Button.default.pressedBackground", inversePressed);
+        put("Button.default.focusedBackground", inverse);
+        put("Button.default.borderColor", inverse);
         put("Button.default.hoverBorderColor", color("border.strong"));
         put("Button.default.focusedBorderColor", color("text.primary"));
-        put("Button.default.focusColor", color("text.onAccent"));
+        put("Button.default.focusColor", onInverse);
         values.put("Button.default.boldText", "false");
         values.put("[style]Button.primary", style(
-              "background", accent,
-              "foreground", color("text.onAccent"),
-              "hoverForeground", color("text.onAccent"),
-              "pressedForeground", color("text.onAccent"),
-              "hoverBackground", accentHover,
-              "pressedBackground", accentPressed,
-              "focusedBackground", accent,
-              "borderColor", accent,
+              "background", inverse,
+              "foreground", onInverse,
+              "hoverForeground", onInverse,
+              "pressedForeground", onInverse,
+              "hoverBackground", inverseHover,
+              "pressedBackground", inversePressed,
+              "focusedBackground", inverse,
+              "borderColor", inverse,
               "hoverBorderColor", color("border.strong"),
               "pressedBorderColor", color("border.strong"),
               "focusedBorderColor", color("text.primary"),
-              "focusColor", color("text.onAccent")));
+              "focusColor", onInverse));
 
         // Danger: the danger color on text and edge; hover and press tint the face with it
         int danger = color("status.danger");
@@ -221,7 +238,7 @@ public final class TokenLafDefaults {
               "hoverBackground", over(ColorMath.withAlpha(danger, tokens.alpha("tint.hover")), raised),
               "pressedBackground", over(ColorMath.withAlpha(danger, tokens.alpha("tint.pressed")), raised)));
 
-        // Quiet and icon buttons have no face or edge until hovered; a selected icon toggle is a violet wash and glyph
+        // Quiet and icon buttons have no face or edge until hovered; a selected icon toggle is on, the inverse face
         for (String type : new String[] { "Button", "ToggleButton" }) {
             values.put("[style]" + type + ".quiet", "buttonType: borderless");
             values.put("[style]" + type + ".icon", "buttonType: borderless; squareSize: true");
@@ -229,12 +246,9 @@ public final class TokenLafDefaults {
             values.put("[style]" + type + ".compact", padding("md"));
         }
 
-        // Toggle: selection is a violet wash and edge, never only a lighter face
-        put("ToggleButton.disabledSelectedBackground",
-              over(ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2), raised));
-
-        // Check boxes and radio buttons: accent fill when selected. Focus never changes the box, it adds a ring around
-        // it a gap away, so a checked box still looks checked.
+        // Check boxes and radio buttons: the inverse fill when selected, the mark in its label color; disabled, the faint
+        // inverse fill keeps the mark. Focus never changes the box, it adds a ring around it a gap away, so a checked
+        // box still looks checked.
         float ringAround = tokens.size().get("focus.width") + tokens.size().get("focus.gap");
         values.put("CheckBox.icon", TokenCheckBoxIcon.class.getName());
         values.put("RadioButton.icon", TokenRadioButtonIcon.class.getName());
@@ -245,25 +259,29 @@ public final class TokenLafDefaults {
         put("CheckBox.icon.focusColor", color("focus.ring"));
         put("CheckBox.icon.borderColor", color("border.control"));
         put("CheckBox.icon.background", input);
-        put("CheckBox.icon.selectedBorderColor", accent);
-        put("CheckBox.icon.selectedBackground", accent);
-        put("CheckBox.icon.checkmarkColor", color("text.onAccent"));
+        put("CheckBox.icon.selectedBorderColor", inverse);
+        put("CheckBox.icon.selectedBackground", inverse);
+        put("CheckBox.icon.checkmarkColor", onInverse);
         put("CheckBox.icon.disabledBorderColor", color("border.subtle"));
         put("CheckBox.icon.disabledCheckmarkColor", color("text.disabled"));
+        // The faint fill is opaque: FlatLaf fills a translucent one over the full selected fill first
+        put("CheckBox.icon.disabledSelectedBackground", over(inverseDisabled, base));
+        put("CheckBox.icon.disabledSelectedBorderColor", over(inverseDisabled, base));
+        put(TokenCheckBoxIcon.DISABLED_SELECTED_CHECKMARK_COLOR, onInverse);
         put("CheckBox.icon.focusedBorderColor", color("border.control"));
         put("CheckBox.icon.focusedBackground", input);
-        put("CheckBox.icon.focusedSelectedBorderColor", accent);
-        put("CheckBox.icon.focusedSelectedBackground", accent);
-        put("CheckBox.icon.focusedCheckmarkColor", color("text.onAccent"));
+        put("CheckBox.icon.focusedSelectedBorderColor", inverse);
+        put("CheckBox.icon.focusedSelectedBackground", inverse);
+        put("CheckBox.icon.focusedCheckmarkColor", onInverse);
         put("CheckBox.icon.hoverBorderColor", color("border.strong"));
         put("CheckBox.icon.pressedBorderColor", color("border.strong"));
         put("CheckBox.icon.hoverBackground", over(hover, input));
         put("CheckBox.icon.pressedBackground", over(pressed, input));
-        // A checked box hovers and presses like a primary button: a surface wash is invisible on the accent
+        // A checked box hovers and presses like a primary button
         put("CheckBox.icon.hoverSelectedBorderColor", color("border.strong"));
         put("CheckBox.icon.pressedSelectedBorderColor", color("border.strong"));
-        put("CheckBox.icon.hoverSelectedBackground", accentHover);
-        put("CheckBox.icon.pressedSelectedBackground", accentPressed);
+        put("CheckBox.icon.hoverSelectedBackground", inverseHover);
+        put("CheckBox.icon.pressedSelectedBackground", inversePressed);
         // An off switch's thumb (TokenSwitchIcon); on, it takes the check mark color
         put("CheckBox.icon.switchThumbColor", color("text.secondary"));
 
@@ -284,8 +302,8 @@ public final class TokenLafDefaults {
         values.put("TitledBorder.border", TokenTitledBorder.LegacyLine.class.getName());
         put("TitledBorder.titleColor", color("text.secondary"));
         // Lists and trees (TokenListUI, TokenTreeUI): rows at least control.sm high, inset and rounded like the popup
-        // list. The pointer's row gets the hover wash; a selected row keeps the violet wash, focused or not, and adds a
-        // violet marker at its leading edge, so selection never relies on color alone. Text starts past the marker.
+        // list. The pointer's row gets the hover wash; a selected row keeps the selection wash, focused or not, and adds
+        // a selection marker at its leading edge, so selection never relies on color alone. Text starts past the marker.
         values.put("ListUI", TokenListUI.class.getName());
         values.put("TreeUI", TokenTreeUI.class.getName());
         String rowArc = number(tokens.radius().get("sm") * 2);
@@ -367,7 +385,7 @@ public final class TokenLafDefaults {
         // Focus is a ring inside the selected tab (TokenTabbedPaneUI), not a tint that reads like hover
         put("TabbedPane.focusColor", base);
         values.put("TabbedPaneUI", TokenTabbedPaneUI.class.getName());
-        // Tabs: secondary labels that brighten under the pointer; the selected tab has a violet underline whether or
+        // Tabs: secondary labels that brighten under the pointer; the selected tab has a selection-color underline whether or
         // not the strip has focus. Plain tab panes are compact; TokenTabs makes regular ones.
         put("TabbedPane.contentAreaColor", color("border.subtle"));
         put("TabbedPane.foreground", color("text.secondary"));
@@ -384,7 +402,7 @@ public final class TokenLafDefaults {
         values.put("TabbedPane.tabInsets", "0," + tabSide + ",0," + tabSide);
         put("PopupMenu.borderColor", color("border.control"));
         // Select (TokenSelects): the shared popup list. Rows under the pointer or the keyboard get the hover wash, not
-        // the selection violet; the current value has a violet check instead.
+        // the selection color; the current value has a check in that color instead.
         put("ComboBox.popupBackground", popover);
         put("ComboBox.selectionBackground", over(hover, popover));
         put("ComboBox.selectionForeground", color("text.primary"));
@@ -400,7 +418,7 @@ public final class TokenLafDefaults {
         put(TokenSelects.INLINE_HOVER_FOREGROUND, color("text.primary"));
         put(TokenSelects.PLACEHOLDER_FOREGROUND, color("text.muted"));
         // Menus: the select's popup and rows. The row under the pointer or the keyboard gets the hover wash (the
-        // @menu* variables above), checks and radios are violet, and accelerators are muted.
+        // @menu* variables above), checks and radios take the selection color, and accelerators are muted.
         int rowSide = Math.round(tokens.space().get("xs") + tokens.space().get("md"));
         int border = Math.round(tokens.size().get("border"));
         values.put("Popup.borderCornerRadius", number(tokens.radius().get("md")));
@@ -470,8 +488,8 @@ public final class TokenLafDefaults {
         put(TokenProgressBarUI.VALUE_FOREGROUND, color("text.primary"));
         put(TokenProgressBarUI.DISABLED_TRACK, color("border.subtle"));
         values.put(TokenProgressBarUI.TEXT_GAP, number(tokens.space().get("xs")));
-        // Sliders (TokenSliderUI): an accent fill up to a round icon.sm thumb on an xs pill track, the same with ticks
-        // and labels. Hover and drag lean the thumb as on a checked box and give it a strong edge; focus rings it a gap
+        // Sliders (TokenSliderUI): an accent fill up to a round inverse icon.sm thumb on an xs pill track, the same with
+        // ticks and labels. Hover and drag lean the thumb as on the primary button and give it a strong edge; focus rings it a gap
         // away. Ticks are tick.width pills under the track, labels small and muted.
         values.put("SliderUI", TokenSliderUI.class.getName());
         values.put("Slider.trackWidth", number(tokens.space().get("xs")));
@@ -482,12 +500,18 @@ public final class TokenLafDefaults {
         values.put("Slider.thumbBorderWidth", number(tokens.size().get("border")));
         values.put("Slider.tickLength", number(tokens.space().get("sm")));
         values.put("Slider.tickWidth", number(tokens.size().get("tick.width")));
+        // The game presentation's thumb (TokenSliderUI): a flat inverse xs bar, icon.sm long, as in hud-v3
+        values.put("Slider.barThumbSize", number(tokens.space().get("xs")) + "," + thumb);
+        values.put("Slider.barThumbArc", "0");
+        values.put("Slider.barThumbFocusGap", number(tokens.size().get("focus.gap")));
+        put("Slider.barThumbColor", inverse);
+        put("Slider.barThumbActiveColor", inverseHover);
         put("Slider.trackColor", color("border.control"));
         put("Slider.trackValueColor", accent);
-        put("Slider.thumbColor", accent);
-        put("Slider.thumbBorderColor", accent);
-        put("Slider.hoverThumbColor", accentHover);
-        put("Slider.pressedThumbColor", accentPressed);
+        put("Slider.thumbColor", inverse);
+        put("Slider.thumbBorderColor", inverse);
+        put("Slider.hoverThumbColor", inverseHover);
+        put("Slider.pressedThumbColor", inversePressed);
         put("Slider.hoverThumbBorderColor", color("border.strong"));
         put("Slider.focusedColor", color("focus.ring"));
         put("Slider.tickColor", color("border.control"));

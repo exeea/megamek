@@ -62,7 +62,6 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.LosEffects;
-import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.equipment.MiscType;

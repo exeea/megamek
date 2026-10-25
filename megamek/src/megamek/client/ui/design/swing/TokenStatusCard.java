@@ -68,6 +68,7 @@ public class TokenStatusCard extends JPanel {
         setOpaque(false);
         getAccessibleContext().setAccessibleName(title);
         heading.setText(title);
+        TokenPresentation.role(heading, "headline");
         tools.setOpaque(false);
         bar.setStringPainted(true);
         bar.putClientProperty(TokenProgressBarUI.SHOW_PERCENT, Boolean.TRUE);

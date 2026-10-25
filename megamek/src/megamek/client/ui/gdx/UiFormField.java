@@ -94,7 +94,7 @@ public class UiFormField extends Table {
 
     private static Color color(String role) {
         Color color = new Color();
-        Color.argb8888ToColor(color, TOKENS.color(role, Mode.DARK));
+        Color.argb8888ToColor(color, DesignTokens.shipped().color(role, Mode.DARK));
         return color;
     }
 }

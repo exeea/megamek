@@ -9,13 +9,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
 import megamek.common.Configuration;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.utilities.BoardClassifier;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class BoardTableModelTest {
 

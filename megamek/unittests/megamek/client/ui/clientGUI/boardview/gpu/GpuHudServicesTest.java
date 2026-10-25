@@ -28,11 +28,11 @@ import javax.swing.Timer;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
-import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;

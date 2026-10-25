@@ -34,6 +34,7 @@ package megamek.client.ui.clientGUI;
 
 import java.io.File;
 import javax.swing.filechooser.FileFilter;
+
 import megamek.common.board.BoardFile;
 
 /**

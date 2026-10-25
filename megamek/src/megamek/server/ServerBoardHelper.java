@@ -41,7 +41,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import megamek.MMConstants;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;

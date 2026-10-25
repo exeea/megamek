@@ -51,7 +51,7 @@ import megamek.logging.MMLogger;
  * glows, the other targets' rings, the hovered unit's ring), drawn every frame
  * where the units stand, level as selection bands, so that the pointer lays no mark on the terrain
  * again. MegaMek's own movement envelope belongs to the tactical capture (GpuTactical), the displayed weapon's range
- * walls to GpuFireControl, and the view draws the hovered hex's ring. 
+ * walls to GpuFireControl, and the view draws the hovered hex's ring.
  * It draws the frame's snapshots and decides no rule; the marks and meshes are made again only when what
  * they show changed. Owns its meshes, its pulse, its batch and its shape renderer on the GL thread.
  */

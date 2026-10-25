@@ -71,7 +71,6 @@ import megamek.common.Configuration;
 import megamek.common.ToHitData;
 import megamek.common.enums.WeaponSortOrder;
 import megamek.common.equipment.AmmoMounted;
-import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.equipment.WeaponType;
 import megamek.common.game.Game;

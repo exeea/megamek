@@ -58,29 +58,21 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Player;
-import megamek.common.actions.LayExplosivesAttackAction;
 import megamek.common.actions.ScanAction;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
-import megamek.common.compute.VirtualRealityPilotingPod;
-import megamek.common.compute.VirtualRealityPilotingPod.Interference;
-import megamek.common.compute.VirtualRealityPilotingPod.InterferenceState;
 import megamek.common.enums.GamePhase;
-import megamek.common.equipment.HandheldWeapon;
 import megamek.common.units.AbstractBuildingEntity;
-import megamek.common.units.Aero;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.FighterSquadron;
 import megamek.common.units.IAero;
-import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
 import megamek.common.units.ProtoMek;
 import megamek.common.units.QuadVee;
 import megamek.common.units.ReconCameraRules;
-import megamek.common.units.Tank;
 
 /**
  * Shared unit label, status and facing painter. It reads game state through drawing inputs and owns no board view.

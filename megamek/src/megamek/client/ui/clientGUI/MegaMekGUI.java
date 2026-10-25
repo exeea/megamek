@@ -85,6 +85,8 @@ import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.ui.BugReportMessages;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.tooltip.PilotToolTip;
+import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.design.DesignTokens.Palette;
 import megamek.client.ui.design.swing.TokenMotion;
 import megamek.client.ui.dialogs.LicensingDialog;
 import megamek.client.ui.dialogs.MMAboutDialog;
@@ -240,6 +242,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
 
         GUIPreferences.getInstance().addPreferenceChangeListener(this);
         TokenMotion.setReduced(GUIPreferences.getInstance().getReduceMotion());
+        applyPalette();
 
         // TODO : Move Theme setup to MegaMek::initializeSuiteSetups as part of implementing it in SuiteOptions
         updateGuiScaling();
@@ -1830,7 +1833,17 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             case GUIPreferences.REDUCE_MOTION:
                 TokenMotion.setReduced(GUIPreferences.getInstance().getReduceMotion());
                 break;
+            case GUIPreferences.COLOR_BLIND_PALETTE:
+                applyPalette();
+                setLookAndFeel();
+                break;
         }
+    }
+
+    /** Sets the design tokens' palette from the color vision setting; the look and feel picks it up when set. */
+    private static void applyPalette() {
+        DesignTokens.setPalette(GUIPreferences.getInstance().getColorBlindPalette() ? Palette.COLORBLIND
+              : Palette.STANDARD);
     }
 
     private @Nullable Image getImage(final String filename) {

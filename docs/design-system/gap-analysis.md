@@ -27,13 +27,21 @@ Agreed so far:
 | Swing themes | The four stock FlatLaf themes are replaced by MegaMek Dark and MegaMek Light. |
 | Button family | Collapse the 19 hud-v3 styles into a small variant × size set. |
 | Focus | Designed for Swing first, then ported to libGDX. |
-| Selected color | A dedicated selected role, chosen for contrast and colorblind safety (orange or another hue). |
+| On, selected and focus | **Final.** Three looks. **On** (checked toggle, selected segment, on chip, check box, radio, switch) is the solid cream `surface.inverse` face with `text.onInverse` marks, as hud-v3's `button-checked`; a checked toggle looks like the primary button, as in hud-v3. **Selected** (list, table and tree rows, tabs, selectable panels, unit rows, menu and select checks) is a neutral wash plus a `selected.primary` (inverse color) marker, underline, edge or check. **Mint** is only focus, progress, slider fill, links, info and badges. Focus on a cream face is the mint ring `focus.gap` outside it, falling back to two inside lines where it would be clipped. On while disabled is the faint `surface.inverseDisabled` face with a `text.onInverse` label. This replaces the earlier "mint selection everywhere". Violet stays only for the Game Master (`status.gamemaster`). See [tokens.md](tokens.md#color-roles). |
+| Palettes | **Final.** Four themes: dark and light, each in a standard and a color-blind safe palette, picked by a user setting ("Color-blind safe colors"). Standard statuses use the expected red, amber and green and are checked for typical vision; the color-blind palette changes only the statuses and is checked for all simulated vision types. Contrast is checked in all four. Player and team colors are out of scope; whether MekHQ and MegaMekLab share the setting is decided when they adopt the tokens. Both galleries have a switch. See [tokens.md](tokens.md#palettes). |
 | Frames | Corner ticks for regular frames; Immersive dialogs may keep their own style. |
 | Startup screens | `MegaMekButton` bitmap skins will probably be replaced by the shared button (not final). |
 | libGDX light mode | Deferred; the HUD is dark only for now. The Java2D board has no light/dark theming either. |
 | Accent | hud-v3 mint, retuned as needed; it stops doubling as the success color. |
 | Migration | The stock themes stay behind a hidden "classic" option until migration is done. |
-| Text case | Reduce all caps on both platforms; case, weight and size rules are shared. |
+| Presentation mode | **Final.** Two modes, chosen per screen: **game** and **app**. The mode sets the text case, the [type width](tokens.md#type-width) and the slider thumb (game: hud-v3's thin bar; app: a disc), and later differences join it as whole-screen choices. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token (values signed off: display .04, headline .05, title .06, label .08, overline .1 em). Both galleries have a switch between the modes. See [tokens.md](tokens.md#presentation-mode). |
+| Type width | **Final.** Roboto Condensed (`wdth` 75) for game mode's framing roles (display, headline, title, button, tab, overline) and a new `name` role for unit and pilot names (`body.strong`, sentence case), at the same weight (500) and tracking rules; body, small, caption, field labels, tables, values and running text stay regular width, and app mode is all regular width. Condensed packs some 15-20% more into narrow HUD columns and reads as technical and military; it stays off running text, tables and app mode because condensed letters crowd at 10-12 px and tire in long text. hud-v3's wide tracking on mixed case is not adopted: it uses up the space condensed saves. All condensed roles are medium, so Swing needs one more static face, Roboto Condensed Medium. See [tokens.md](tokens.md#type-width). |
+| Panels and rails | **Final.** Ticked frames (panels, dialog cards, status cards) draw their edge only at the top and bottom, a paper roll, since the ticks close the sides. The edge stays the quiet `border.subtle` so busy screens don't fill with lines (revisited and kept). Only the outermost frame has ticks: cards in a card grid stay plain, so a grid doesn't repeat a tick set per card. hud-v3's `panel-rails` (the Tactical View chip) keeps its rails as `token-rails`; `token-frame` is the plain frame. See [tokens.md](tokens.md#panels). |
+| Dialog buttons | **Final.** Centred, equal width, main action first, in both presentation modes. hud-v3 puts them in the bottom-right corner, but that is a desktop OS habit, and one rule for both modes means shared dialogs don't move their buttons. See [tokens.md](tokens.md#dialogs). |
+| Segmented control | **Final.** Separate segments, `xs` apart, each with its own edge, instead of a joined frame with hairlines, in both sizes: hud-v3's joined `hud-pill` becomes the compact size, not a second look. See [tokens.md](tokens.md#segmented-control). |
+| Primary button | **Final.** The `surface.inverse` face, hud-v3's cream `hud-main` (dark in light mode), not mint, so mint stays for focus; checked toggles share its look. See [tokens.md](tokens.md#buttons). |
+| Menus and popups | **Final.** A plain popup frame without corner ticks in both modes; ticks frame lasting containers (panels, dialogs, status cards), and submenus would stack them. See [tokens.md](tokens.md#menus). |
+| Dial | **Final.** The angle dial keeps hud-v3's mint hub ring, and the needle stops at it. See [tokens.md](tokens.md#inputs). |
 | Framed button | Corner ticks that become a full frame on hover (hud-v3 bracket, Immersive `FramedCommandButton`) are one shared special-purpose variant. |
 | MekHQ `hud` library | Folded into the new library. |
 | Launcher | Retune its colors to the tokens for now; shared controls wait for the planned monorepo. |
@@ -112,10 +120,14 @@ Gaps:
 - Swing needs to load Roboto (variable font) at runtime. Java2D does not select variable-font named instances;
   static Roboto/Roboto Condensed weights may need to ship alongside, or FlatLaf's bundled Roboto font extension used.
   To investigate in step 4.
-- Swing has no letter-spacing beyond `TextAttribute.TRACKING`; verify it is good enough for the condensed caps styles.
+- Swing has no letter-spacing beyond `TextAttribute.TRACKING`. **Resolved:** the tokens give each style a tracking
+  and, where it can be upper case, a wider caps tracking; Swing applies them through `TextAttribute.TRACKING`
+  (`TokenFonts`), libGDX bakes them into the font.
 - 13 sizes is a HUD scale; desktop forms need a body size that reads well at 100% scaling. Decide whether Swing uses
   the same scale or a subset.
 - Uppercase-at-display is a style rule both platforms must apply the same way (and it must be locale-aware for i18n).
+  **Resolved:** the [presentation](tokens.md#presentation-mode) modes; both platforms read the same role rules from the tokens
+  and upper-case with the player's locale when the text is drawn.
 
 ### Shape, spacing and size
 
@@ -282,7 +294,7 @@ work for Swing, and item 11 is under investigation.
 ## Next steps
 
 - ~~Token v0~~: done, see [tokens.md](tokens.md).
-- ~~Shared assets~~: static Roboto Medium for Swing is in `mm-data`.
+- ~~Shared assets~~: static Roboto Medium and Roboto Condensed Medium for Swing are in `mm-data`.
 - ~~FlatLaf theme~~: MegaMek Dark and MegaMek Light are built from the tokens and selectable; see
   [tokens.md](tokens.md#swing-themes). Making them the default and hiding the stock themes behind a classic option
   comes after the controls are settled.
@@ -295,23 +307,23 @@ work for Swing, and item 11 is under investigation.
   subset (no number spinner yet); see [tokens.md](tokens.md#inputs).
 - ~~Choices~~: check box (with a mixed state), radio button and switch, with hover, focus and disabled looks, in
   Swing and libGDX; see [tokens.md](tokens.md#choices).
-- ~~Tabs and segmented control~~: violet-underlined tabs and a joined segmented control with a violet selected
-  section, in two sizes, in Swing and libGDX; see [tokens.md](tokens.md#tabs).
+- ~~Tabs and segmented control~~: underlined tabs and a segmented control of separate segments with a cream
+  selected one, in two sizes, in Swing and libGDX; see [tokens.md](tokens.md#tabs).
 - ~~Select~~: an input-faced select in two sizes and an inline one with a dotted underline, sharing one popup list
-  (neutral wash, violet check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
-- ~~Lists and trees~~: inset rounded rows at least 28 high, a neutral hover wash, and a violet wash plus a leading
-  marker for the selection, with two-line rows and an empty state, in Swing; libGDX keeps hud-v3's `UiList` and
+  (neutral wash, a check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
+- ~~Lists and trees~~: inset rounded rows at least 28 high, a neutral hover wash, and a stronger neutral wash plus a
+  leading marker for the selection, with two-line rows and an empty state, in Swing; libGDX keeps hud-v3's `UiList` and
   `UiTree` until the developers accept the system; see [tokens.md](tokens.md#lists-and-trees).
-- ~~Menus~~: menu bars, menus and context menus on the select's popup, with neutral hover rows, violet checks and
+- ~~Menus~~: menu bars, menus and context menus on the select's popup, with neutral hover rows, checks and
   radios, and muted shortcuts, in Swing; see [tokens.md](tokens.md#menus).
 - ~~Tooltips~~: small cards on the popup surface that wrap at 280, with a key chip for shortcuts and a title over
   secondary detail for info cards, in Swing; see [tokens.md](tokens.md#tooltips).
 - ~~Scrollbars~~: a thin pill thumb with no track or arrows of its own, sitting on the content it scrolls, with a
   rail and a brighter thumb under the pointer, in Swing; see [tokens.md](tokens.md#scrollbars).
-- ~~Sliders~~: an accent fill up to a round thumb on a pill track, the same with ticks and labels, with an optional
+- ~~Sliders~~: an accent fill up to a cream `surface.inverse` thumb (a round disc in app mode, hud-v3's flat thin bar in game mode) on a pill track, the same with ticks and labels, with an optional
   value readout, in Swing; see [tokens.md](tokens.md#sliders).
-- ~~Tables~~: the list's rows across every column with faint zebra stripes, a hover wash over the cells, the violet
-  selection and marker, and upper-case overline headers aligned like their column, in Swing; see
+- ~~Tables~~: the list's rows across every column with faint zebra stripes, a hover wash over the cells, the
+  selection wash and marker, and upper-case overline headers aligned like their column, in Swing; see
   [tokens.md](tokens.md#tables).
 - ~~The rest of the gallery~~: progress bars (a thin accent pill with its text above it), section headers (titled
   panels, collapsible sections and separators share one upper-case header with a line) and split panes (a subtle line
@@ -327,8 +339,8 @@ work for Swing, and item 11 is under investigation.
   the header, a percentage on the bar and a failed state with Close and Retry, in Swing; see
   [tokens.md](tokens.md#status-cards).
 - ~~Panels and frames~~: the dialog card's corner-ticked frame for anything that isn't a dialog, with an optional
-  header, status ticks with their icon, selectable unit cards (hover, violet selection, focus ring, one at a time),
-  plain frames for groups inside a panel and a border for existing panels, in Swing; see
+  header, status ticks with their icon, selectable unit cards (hover, selection, focus ring, one at a time),
+  plain frames for groups inside a panel and a border for existing panels, with paper-roll edges, in Swing; see
   [tokens.md](tokens.md#panels).
 - ~~Chips and badges~~: status chips with their icon and an edge in the status color, filter chips (a check when on,
   one at a time in a group), tag chips removed by their ✕ or Delete, and count and dot badges in the accent or a status
@@ -336,8 +348,18 @@ work for Swing, and item 11 is under investigation.
 - ~~Toasts~~: short notices at the top centre of a view, a bar and an icon in the level's color (the Game Master in
   violet with a shield), the newest on top and at most five, paused by the pointer, closed by their ✕, with clicks
   passing through, in Swing; see [tokens.md](tokens.md#toasts).
-- All-caps: decide whether HUD labels, section overlines and the libGDX status card stay in capitals or move to
-  sentence case, before the trial so nothing is restyled twice.
+- ~~All-caps~~ (discussion closed): a game and an app presentation mode, chosen per screen. Game mode upper-cases only
+  the short framing labels, with signed-off caps tracking, and sets them and unit names in condensed type (see Type
+  width); content stays sentence case in both modes. Both galleries switch between the modes and compare each hud-v3
+  font with its token type as a game screen draws them, on a realistic sample for that kind of text. In Swing and
+  libGDX; see [tokens.md](tokens.md#presentation-mode).
+- ~~Drake's feedback~~: presentation mode (text case plus the slider thumb), violet kept only for the Game Master, standard and color-blind safe palettes as a user setting, paper-roll panel edges, rails
+  kept for `panel-rails`, separate segments and the dial's mint hub, in Swing and libGDX.
+- ~~Type width~~: game mode sets the framing labels and unit names in Roboto Condensed Medium (a second static face for
+  Swing in `mm-data`), the rest regular width, in Swing and libGDX; see [tokens.md](tokens.md#type-width).
+- ~~On state~~: cream for every "on" control (toggles, segments, chips, check boxes, radios, switches), neutral
+  selection for items in collections, mint only for focus and accents, an outside focus ring on cream faces and a
+  faint cream disabled-on look, in Swing and libGDX; see [tokens.md](tokens.md#color-roles).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`

@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.event.KeyListener;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;

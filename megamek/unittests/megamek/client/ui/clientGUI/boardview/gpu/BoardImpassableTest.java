@@ -19,7 +19,6 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.toolTip.TWBoardViewTooltip;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
