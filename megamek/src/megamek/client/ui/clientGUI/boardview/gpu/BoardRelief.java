@@ -857,8 +857,8 @@ final class BoardRelief {
             for (Site site : around) {
                 if (site != null) { natural &= site.sculpted() && site.detailed() && !site.fixedRoad() && !site.ultraSublevel(); }
             }
-            // At a dry board edge the slope and the cut face share the same corner profile; beside a road the cut stays
-            // on the lattice, where the road leaving the board ends.
+            // At a dry board edge the slope and the cut face share one corner profile, kept on the board's outline
+            // (boardBandOffset); beside a road the cut stays on the lattice, where the road leaving the board ends.
             banded = natural && (!pinned || around[1] != null && around[2] == null
                   && !around[0].liquid() && !around[1].liquid() && !around[0].road() && !around[1].road());
             if (pinned) {
@@ -1081,6 +1081,7 @@ final class BoardRelief {
     }
 
     private float[] computeBandOffset(Corner corner, float z) {
+        if (corner.around[2] == null) { return boardBandOffset(corner, z); }
         float[] result = new float[2];
         float level = BoardGeometry.level(), reach = .35f * level, a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0, widest = 0;
         for (int i = 0; i < 3; i++) {
@@ -1121,6 +1122,25 @@ final class BoardRelief {
             result[1] *= limit / length;
         }
         return result;
+    }
+
+    /**
+     * The band of a corner on the board's edge, which only its two hexes share. Their step stays in the upper hex
+     * there, its foot on the corner and its rim as far back as elsewhere, and the corner slides along the upper hex's
+     * own edge of the board, so the board's cut keeps its hex outline at every height.
+     */
+    private float[] boardBandOffset(Corner corner, float z) {
+        Site upper = corner.around[0].level() > corner.around[1].level() ? corner.around[0] : corner.around[1];
+        Site lower = upper == corner.around[0] ? corner.around[1] : corner.around[0];
+        float level = BoardGeometry.level(), b = band(upper, lower, z, corner.x, corner.y);
+        float foot = band(upper, lower, lower.level() * level, corner.x, corner.y);
+        float rim = band(upper, lower, upper.level() * level, corner.x, corner.y);
+        if (foot > 0) { b = rim * (foot - b) / (foot - rim); }
+        // The upper hex's edge of the board runs from this corner directly away from the lower hex's centre.
+        float ux = corner.x - lower.x(), uy = corner.y - lower.y(), length = (float) Math.hypot(ux, uy);
+        Vector3 normal = bandNormal(upper, lower);
+        float slide = b * length / (ux * normal.x + uy * normal.y);
+        return new float[] { ux / length * slide, uy / length * slide };
     }
 
     /** Slopes offset the shared fitted boundary, including edges that no longer follow the hex lattice. */

@@ -117,8 +117,9 @@ class BoardConcreteMeshTest {
         float rimDistance = Float.NaN;
         for (Coords at : List.of(new Coords(0, 14), first, last)) {
             BoardSurface surface = new BoardSurface(scene, scene.tile(at));
-            // At 0115 edge 3 is the board cut; the fitted slope begins at corner 4.
-            int start = at.getX() == 0 ? 4 : 3;
+            // At 0115 edge 3 is the board cut and corner 4 keeps its place on the board's edge; the fitted slope begins
+            // at corner 5.
+            int start = at.getX() == 0 ? 5 : 3;
             for (int k = start; k <= 5; k++) {
                 Vector3 rim = surface.relief.seam(k, k, 0).sub(a);
                 float distance = direction.x * rim.y - direction.y * rim.x;

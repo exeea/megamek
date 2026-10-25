@@ -797,16 +797,20 @@ class BoardConcreteShoreTest {
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 2 })
-    void aeroBaseTaxiwayKeepsItsDiagonalSidePastTheJunctionAndToTheMapEdge(int elevation) {
+    void aeroBaseTaxiwayKeepsItsDiagonalSidePastTheJunctionUpToTheMapEdge(int elevation) {
         BoardScene scene = aeroBaseAtElevation(elevation);
         BoardConcrete shape = BoardConcrete.of(scene);
         Coords arm = new Coords(12, 3);
         Vector3 a = shape.corner(arm, 3), b = shape.corner(arm, 4);
-        for (int[] vertex : new int[][] { { 13, 4, 0 }, { 14, 4, 4 }, { 14, 4, 5 }, { 15, 4, 4 }, { 15, 4, 5 } }) {
+        for (int[] vertex : new int[][] { { 13, 4, 0 }, { 14, 4, 4 }, { 14, 4, 5 }, { 15, 4, 4 } }) {
             Vector3 p = shape.corner(new Coords(vertex[0], vertex[1]), vertex[2]);
             assertEquals(0, distance(a, b, p), .003f,
                   "No extra concrete apron below the diagonal taxiway: " + p);
         }
+        // Its corner on the map's edge keeps its place, so the board keeps its hex outline.
+        Coords edge = new Coords(15, 4);
+        assertEquals(0, shape.corner(edge, 5).dst(BoardGeometry.corner(edge, 0, 5)), .003f,
+              "The taxiway turns back to the board's corner");
         assertEquals(shape.corner(new Coords(13, 5), 0).x, shape.corner(new Coords(13, 4), 0).x, .003f,
               "The two taxiway sides meet at one corner");
     }

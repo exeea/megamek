@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
+import java.util.function.ToIntFunction;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
@@ -200,6 +202,69 @@ class BoardReliefTest {
                 assertEquals(center.z, surface.height(center.x, center.y), .001f, "Pits never raise what stands there");
             }
         }
+    }
+
+    @Test
+    void stepsAndPavingReachingTheBoardEdgeKeepItsHexOutline() {
+        // A hill on the board's top edge, whose steps down to the hexes beside it run into the board's cut.
+        Coords hill = new Coords(2, 0), corner = new Coords(0, 0);
+        assertKeepsHexOutline(edgeBoard(coords -> coords.equals(hill) ? 1 : 0, coords -> false));
+        // Paving in the board's corner below a plateau: its fitted outline ends on the board's edge.
+        assertKeepsHexOutline(edgeBoard(coords -> coords.equals(corner) ? 0 : 1, corner::equals));
+    }
+
+    private static BoardScene edgeBoard(ToIntFunction<Coords> level, Predicate<Coords> paved) {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 3; y++) {
+                Coords coords = new Coords(x, y);
+                tiles.add(new BoardScene.Tile(coords, level.applyAsInt(coords), -1, false, 0,
+                      paved.test(coords) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, null, null,
+                      null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+            }
+        }
+        return new BoardScene(0, 5, 3, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    /** Nothing reaches past the board's outline, and its cut still meets every lattice corner of that outline. */
+    private static void assertKeepsHexOutline(BoardScene scene) {
+        BoardSculptTest.withTransitions(true, () -> {
+            List<Vector3> points = new ArrayList<>();
+            for (BoardScene.Tile tile : scene.tiles()) {
+                BoardSurface surface = new BoardSurface(scene, tile);
+                List<BoardSurface.Face> faces = new ArrayList<>(surface.faces);
+                faces.addAll(surface.walls(scene, BoardGeometry.floor(scene)));
+                for (BoardSurface.Face face : faces) {
+                    Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
+                    points.addAll(List.of(face.a(), face.b(), face.c(), middle));
+                }
+            }
+            float tolerance = 1e-4f * BoardGeometry.width();
+            for (Vector3 p : points) {
+                float beyond = Float.MAX_VALUE;
+                for (BoardScene.Tile tile : scene.tiles()) {
+                    float outside = -Float.MAX_VALUE;
+                    for (int edge = 0; edge < 6; edge++) {
+                        Vector3 a = BoardGeometry.corner(tile.coords(), 0, edge);
+                        Vector3 b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
+                        float length = (float) Math.hypot(b.x - a.x, b.y - a.y);
+                        // Corners run counterclockwise, so the outside lies right of each edge.
+                        outside = Math.max(outside, ((p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)) / length);
+                    }
+                    beyond = Math.min(beyond, outside);
+                }
+                assertTrue(beyond < tolerance, "Nothing reaches past the board's outline, at " + p);
+            }
+            for (BoardScene.Tile tile : scene.tiles()) {
+                for (int k = 0; k < 6; k++) {
+                    if (scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(k))) != null
+                          && scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(k + 5))) != null) { continue; }
+                    Vector3 lattice = BoardGeometry.corner(tile.coords(), 0, k);
+                    assertTrue(points.stream().anyMatch(p -> Math.hypot(p.x - lattice.x, p.y - lattice.y) < tolerance),
+                          "The board's cut keeps its corner at " + lattice);
+                }
+            }
+        });
     }
 
     @Test

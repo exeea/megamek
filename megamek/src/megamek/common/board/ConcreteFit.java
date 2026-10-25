@@ -315,7 +315,9 @@ public final class ConcreteFit {
         Set<Coords> fitted = new HashSet<>();
         corners.forEach((key, corner) -> {
             float dx = corner.point.x - corner.original.x, dy = corner.point.y - corner.original.y;
-            if (Math.hypot(dx, dy) > .001f) {
+            // A corner on the board's edge keeps its place, or one of its hexes' edges would leave the board's hex
+            // outline: the side fitted through it there turns back to it after the last corner before the edge.
+            if (Math.hypot(dx, dy) > .001f && !corner.border) {
                 shifts[slot(key)] = new Shift(dx, dy);
                 corner.tiles.forEach(tile -> fitted.add(tile.coords()));
             }
@@ -668,7 +670,7 @@ public final class ConcreteFit {
         Point[] points = new Point[last - first + 1];
         points[0] = chain.get(first).point;
         points[points.length - 1] = chain.get(last).point;
-        // A run ends where the map ends; an unprotected border corner must not introduce a final hex bevel.
+        // A run ends where the map ends: fit it on to the map's edge, whose corner itself keeps its place (#fit).
         if (!runs.isEmpty()) {
             if (chain.get(first).border && !chain.get(first).pinned) {
                 points[0] = runs.getFirst().line.project(chain.get(first).point);
