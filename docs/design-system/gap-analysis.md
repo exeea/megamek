@@ -370,11 +370,13 @@ work for Swing, and item 11 is under investigation.
      footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
   3. Main menu: a full-window game screen over the battle art, opened by a skippable "Welcome back" greeting and reveal
      on app launch (an instant cut with reduce motion), the menu bar hidden and Settings, Help and Tools on screen.
-     The reveal is waiting on a developer vote.
+     The reveal is waiting on a developer vote. Host, Connect, Load game and the scenario choice open as pages in the
+     menu's own column, with Back (Esc) to return, so the art stays in view.
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
      main action named for what it does (**Host game**, **Connect**) and errors under the inputs instead of popups.
      Host keeps the password, port and server browser in a closed **Online options** section, which opens when the
-     password or port was changed before or one of them is wrong. Bot setup moves with the lobby's dialogs (step 8).
+     password or port was changed before or one of them is wrong. Bot setup moves with the lobby's dialogs (step 8). The new main menu shows these forms as
+     its own pages; the card stays for MekHQ.
   5. The scenario flow.
   6. The lobby as a briefing room in game mode: a top bar with Ready and summary chips, players on the left, forces in
      the centre, the battlefield (map, conditions, victory) on the right and a chat dock.
