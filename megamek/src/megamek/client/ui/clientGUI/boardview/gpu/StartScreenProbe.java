@@ -11,7 +11,9 @@ import java.util.TreeSet;
  * A developer switch for looking at the start screen without clicking through it, read from the environment:
  * <ul>
  *     <li>{@code MM_START_PAGE}: the page to open at once, without the greeting, such as {@code host}, with options
- *     after a plus: {@code host+online+reveal} opens the Host page's online options and shows its password.</li>
+ *     after a plus: {@code host+online+reveal} opens the Host page's online options and shows its password;
+ *     {@code resume} reads the newest save and {@code briefing} opens the scenario file {@code MM_START_SCENARIO}
+ *     names, or the last one played.</li>
  *     <li>{@code MM_START_SHOT}: a PNG file the screen saves from its own frame buffer, {@code MM_START_SHOT_AT}
  *     seconds after its first frame (by default once the page has slid in, or the greeting has played).</li>
  *     <li>{@code MM_START_QUIT}: {@code true} to quit MegaMek once the shot is saved.</li>

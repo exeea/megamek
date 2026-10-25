@@ -14,13 +14,19 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -32,6 +38,7 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -40,13 +47,17 @@ import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
+import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.MMConstants;
+import megamek.SuiteConstants;
 import megamek.Version;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -54,6 +65,9 @@ import megamek.client.ui.clientGUI.SplashArt;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Action;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.ConnectRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.HostRequest;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.LoadRequest;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Role;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.ScenarioRequest;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
@@ -63,12 +77,18 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiListPopup;
 import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiSegmented;
+import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Configuration;
+import megamek.common.Player;
+import megamek.common.game.IGame;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
+import megamek.common.scenario.Scenario;
+import megamek.common.scenario.ScenarioLoader;
 import megamek.common.util.TipOfTheDay;
 import megamek.logging.MMLogger;
 
@@ -89,6 +109,13 @@ final class GpuStartScreen extends ApplicationAdapter {
     private static final float PORT_WIDTH = 110;
     /** The Connect page's segment that has a bot join instead of the player. */
     private static final int AS_BOT = 1;
+    /** The narrowest the column gets on the pages that list or describe something. */
+    private static final float WIDE_COLUMN = 340;
+    /** The least height a list or description keeps when the window is short. */
+    private static final float MIN_FILLER = 96;
+    private static final float ROLE_WIDTH = 130;
+    private static final DateTimeFormatter SAVED_AT = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM,
+          FormatStyle.SHORT);
     private static boolean probed;
 
     private record Hex(double x, double y, double at) { }
@@ -104,7 +131,10 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
-    private enum Page { MAIN, HELP, HOST, CONNECT }
+    private enum Page { MAIN, HELP, HOST, CONNECT, LOAD, RESUME, SCENARIOS, BRIEFING }
+
+    /** A scenario read and its game made for the briefing, or why that failed. */
+    private record Briefing(Scenario scenario, IGame game, String error) { }
 
     private final GpuStartWindow window;
     private final GUIPreferences preferences;
@@ -183,6 +213,33 @@ final class GpuStartScreen extends ApplicationAdapter {
     private Table addressRow;
     private UiChoice sbfBox;
     private UiButton connectButton;
+    /** Counts pages shown and reads asked for; a background read whose count is no longer current is dropped. */
+    private int generation;
+    /** The Load game page's list, kept while it shows so its scroll stays; and its note, or null. */
+    private Actor saveList;
+    private Label loadNote;
+    private UiButton browseSaves;
+    /** The save the Resume page loads, what it says about itself, and the player the host takes. */
+    private StartSaves.Summary resume;
+    private Table resumeHeader;
+    private UiSelect playAs;
+    private UiFormField playAsField;
+    /** The scenarios, read once per start screen; null until they are. */
+    private List<StartScenarios.Entry> catalog;
+    private int groupIndex;
+    private UiSelect groupSelect;
+    private Table scenarioRows;
+    private ScrollPane scenarioList;
+    private UiButton openScenario;
+    /** The briefing's scenario file, the page Back returns to, and the briefing once it's made. */
+    private File briefingFile;
+    private Page briefingBack = Page.SCENARIOS;
+    private Briefing briefing;
+    private Table briefingHeader;
+    private ScrollPane briefingText;
+    private Table playerRows;
+    private final List<UiSelect> roleSelects = new ArrayList<>();
+    private UiButton startButton;
 
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
         this.window = window;
@@ -268,8 +325,21 @@ final class GpuStartScreen extends ApplicationAdapter {
             LOGGER.warn("MM_START_PAGE names no start page: {}", probe.page());
             return;
         }
-        if (asked != Page.MAIN) {
+        if (asked == Page.BRIEFING) {
+            // The scenario MM_START_SCENARIO names, or the last one played
+            String file = System.getenv("MM_START_SCENARIO");
+            openBriefing(new File(file == null || file.isBlank()
+                  ? PreferenceManager.getClientPreferences().getLastScenario() : file), Page.SCENARIOS);
+        } else if (asked == Page.RESUME) {
+            List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
+            showPage(Page.LOAD);
+            if (!saves.isEmpty()) {
+                readSave(saves.get(0));
+            }
+        } else if (asked != Page.MAIN) {
             showPage(asked);
+        }
+        if (asked != Page.MAIN) {
             pageShownAt = 0;
         }
         if (asked == Page.HOST) {
@@ -337,20 +407,35 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     private void showPage(Page shown) {
         page = shown;
+        generation++;
         column.forEach(Actor::remove);
         column.clear();
         if (shown == Page.HOST) {
-            buildHostPage();
+            buildHostPage(this::submitHost, Page.MAIN);
+            fillHostColumn();
+        } else if (shown == Page.RESUME) {
+            buildHostPage(this::submitResume, Page.LOAD);
+            buildResume();
             fillHostColumn();
         } else if (shown == Page.CONNECT) {
             buildConnectPage();
             fillConnectColumn();
+        } else if (shown == Page.LOAD) {
+            buildLoadPage();
+            fillLoadColumn();
+        } else if (shown == Page.SCENARIOS) {
+            showScenarios();
+        } else if (shown == Page.BRIEFING) {
+            showBriefing();
         } else {
             List<Actor> items = new ArrayList<>();
             if (shown == Page.MAIN) {
                 items.add(pageButton("button-primary", "StartScreen.newGame", Page.HOST));
-                items.add(item("button-secondary", "StartScreen.loadGame", Action.LOAD, Action.QUICK_LOAD));
-                items.add(item("button-secondary", "StartScreen.scenario", Action.SCENARIO, Action.LAST_SCENARIO));
+                items.add(pageItem("button-secondary", "StartScreen.loadGame", () -> showPage(Page.LOAD),
+                      () -> window.dispatch(Action.QUICK_LOAD)));
+                // As a dev convenience, Ctrl opens the last scenario's briefing
+                items.add(pageItem("button-secondary", "StartScreen.scenario", () -> showPage(Page.SCENARIOS),
+                      this::lastScenario));
                 items.add(pageButton("button-secondary", "StartScreen.connect", Page.CONNECT));
                 items.add(overline("StartScreen.tools"));
                 items.add(item("button-quiet", "StartScreen.mapEditor", Action.MAP_EDITOR, null));
@@ -373,10 +458,14 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (start != 0) {
             pageShownAt = clock();
         }
-        boolean form = shown == Page.HOST || shown == Page.CONNECT;
-        stage.setKeyboardFocus(form ? nameInput : null);
-        if (form) {
-            nameInput.selectAll();
+        Actor first = switch (shown) {
+            case HOST, CONNECT -> nameInput;
+            case RESUME -> playAs != null ? playAs : nameInput;
+            default -> null;
+        };
+        stage.setKeyboardFocus(first);
+        if (first instanceof TextField field) {
+            field.selectAll();
         }
     }
 
@@ -407,7 +496,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     /** Adds the keyboard stops in {@code actor}: itself when it is a control, or the controls inside it. */
     private void stops(Actor actor) {
         if (actor instanceof UiButton || actor instanceof UiChoice || actor instanceof TextField
-              || actor instanceof UiOptionBar) {
+              || actor instanceof UiOptionBar || actor instanceof UiSelect) {
             focusable.add(actor);
         } else if (actor instanceof Group group) {
             for (Actor child : group.getChildren()) {
@@ -424,6 +513,14 @@ final class GpuStartScreen extends ApplicationAdapter {
         return button;
     }
 
+    /** A menu button that opens a page; with Ctrl held, it runs {@code withControl} instead. */
+    private UiButton pageItem(String style, String key, Runnable action, Runnable withControl) {
+        UiButton button = kit.button(style, null, Messages.getString(key), null);
+        leftAligned(button);
+        UiKit.onChange(button, () -> (controlHeld() ? withControl : action).run());
+        return button;
+    }
+
     /** A menu button that opens {@code shown} in the column. */
     private UiButton pageButton(String style, String key, Page shown) {
         UiButton button = kit.button(style, null, Messages.getString(key), null);
@@ -433,10 +530,62 @@ final class GpuStartScreen extends ApplicationAdapter {
     }
 
     private UiButton backButton() {
+        return backButton(Page.MAIN);
+    }
+
+    /** Back, to {@code target}. */
+    private UiButton backButton(Page target) {
         UiButton back = kit.button("button-secondary", "chevron-left", Messages.getString("StartScreen.back"), null);
         leftAligned(back);
-        UiKit.onChange(back, () -> showPage(Page.MAIN));
+        UiKit.onChange(back, () -> showPage(target));
         return back;
+    }
+
+    /** The page Back and Esc return to from {@code from}. */
+    private Page parent(Page from) {
+        return switch (from) {
+            case RESUME -> Page.LOAD;
+            case BRIEFING -> briefingBack;
+            default -> Page.MAIN;
+        };
+    }
+
+    /** Whether {@code shown} lists or describes something and so takes a wider column. */
+    private static boolean wide(Page shown) {
+        return shown == Page.LOAD || shown == Page.SCENARIOS || shown == Page.BRIEFING;
+    }
+
+    /** A line of wrapped text in the column, such as a page's status or an error. */
+    private Label note(String text, String role) {
+        Label note = kit.typeLabel(text, "body", role);
+        note.setWrap(true);
+        note.setAlignment(Align.left);
+        return note;
+    }
+
+    /** One line of text that shortens with an ellipsis rather than wrap. */
+    private Label line(String text, String type, String role) {
+        Label line = kit.typeLabel(text, type, role);
+        line.setEllipsis(true);
+        return line;
+    }
+
+    /**
+     * Runs {@code work} off the GPU thread, then hands its result to {@code done} on it, unless another page or read
+     * has been asked for since.
+     */
+    private <T> void background(String name, Supplier<T> work, Consumer<T> done) {
+        int asked = generation;
+        Thread thread = new Thread(() -> {
+            T result = work.get();
+            Gdx.app.postRunnable(() -> {
+                if (asked == generation) {
+                    done.accept(result);
+                }
+            });
+        }, "MegaMek-start-" + name);
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static boolean controlHeld() {
@@ -445,7 +594,8 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     private static void leftAligned(UiButton button) {
         button.left();
-        button.getLabelCell().left().expandX();
+        button.getCells().forEach(cell -> cell.left());
+        button.getLabelCell().expandX();
     }
 
     private Label overline(String key) {
@@ -454,8 +604,8 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     // ---- The Host page ----
 
-    /** The Host page's inputs, filled from the last game's choices. */
-    private void buildHostPage() {
+    /** The Host page's inputs, filled from the last game's choices; the main button runs {@code submit}. */
+    private void buildHostPage(Runnable submit, Page back) {
         ClientPreferences client = PreferenceManager.getClientPreferences();
         nameInput = field(client.getLastPlayerName());
         nameField = kit.formField(Messages.getString("MegaMek.GameConnection.name"), nameInput)
@@ -474,19 +624,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             fillHostColumn();
         });
 
-        UiKit.TokenPassword password = kit.tokenPassword(false);
-        passwordBox = password;
-        passwordInput = password.field;
-        passwordInput.setText(lastPassword == null ? "" : lastPassword);
-        passwordInput.setFocusTraversal(false);
-        UiFormField passwordField = kit.formField(Messages.getString("MegaMek.GameConnection.password"),
-              password).helper(Messages.getString("MegaMek.GameConnection.passwordHelper"));
-        portInput = field(String.valueOf(client.getLastServerPort()));
-        portField = kit.formField(Messages.getString("MegaMek.GameConnection.port"), portInput);
-        passwordRow = new Table();
-        passwordRow.top().left();
-        passwordRow.add(passwordField).growX().minWidth(0).top();
-        passwordRow.add(portField).width(PORT_WIDTH).padLeft(12).top();
+        buildServerInputs(lastPassword, client.getLastServerPort());
 
         registerBox = kit.check(Messages.getString("MegaMek.GameConnection.register"), false);
         registerBox.left();
@@ -497,8 +635,25 @@ final class GpuStartScreen extends ApplicationAdapter {
         addresses = addresses();
         hostButton = kit.button("button-primary", null, Messages.getString("MegaMek.GameConnection.host"), null);
         leftAligned(hostButton);
-        UiKit.onChange(hostButton, this::submitHost);
-        backButton = backButton();
+        UiKit.onChange(hostButton, submit);
+        backButton = backButton(back);
+    }
+
+    /** The game's password and port, side by side in {@link #passwordRow}. */
+    private void buildServerInputs(String lastPassword, int lastPort) {
+        UiKit.TokenPassword password = kit.tokenPassword(false);
+        passwordBox = password;
+        passwordInput = password.field;
+        passwordInput.setText(lastPassword == null ? "" : lastPassword);
+        passwordInput.setFocusTraversal(false);
+        UiFormField passwordField = kit.formField(Messages.getString("MegaMek.GameConnection.password"),
+              password).helper(Messages.getString("MegaMek.GameConnection.passwordHelper"));
+        portInput = field(String.valueOf(lastPort));
+        portField = kit.formField(Messages.getString("MegaMek.GameConnection.port"), portInput);
+        passwordRow = new Table();
+        passwordRow.top().left();
+        passwordRow.add(passwordField).growX().minWidth(0).top();
+        passwordRow.add(portField).width(PORT_WIDTH).padLeft(12).top();
     }
 
     private UiTextField field(String text) {
@@ -516,9 +671,13 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     /** Lays the Host page's column out for the online options' and server browser's current state. */
     private void fillHostColumn() {
+        boolean resuming = page == Page.RESUME;
         List<Actor> items = new ArrayList<>();
-        items.add(overline("StartScreen.newGame"));
-        items.add(nameField);
+        items.add(overline(resuming ? "StartScreen.loadGame" : "StartScreen.newGame"));
+        if (resuming) {
+            items.add(resumeHeader);
+        }
+        items.add(resuming && playAsField != null ? playAsField : nameField);
         items.add(onlineToggle);
         if (onlineOpen) {
             items.add(passwordRow);
@@ -690,6 +849,433 @@ final class GpuStartScreen extends ApplicationAdapter {
         window.connect(new ConnectRequest(name, address, port, bot, !bot && sbfBox.isChecked()));
     }
 
+    // ---- The Load game page ----
+
+    /** The saves in MegaMek's save folder, newest first, each a button that reads it. */
+    private void buildLoadPage() {
+        loadNote = null;
+        browseSaves = kit.button("button-quiet", null, Messages.getString("StartScreen.browseSaves"), null);
+        leftAligned(browseSaves);
+        UiKit.onChange(browseSaves, () -> window.chooseFile(new File(MMConstants.SAVEGAME_DIR),
+              Messages.getString("MegaMek.SaveGameDialog.title"), new FileNameExtensionFilter(
+                    Messages.getString("StartScreen.saveFiles"), "sav", "gz"), this::readSave));
+        List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
+        if (saves.isEmpty()) {
+            saveList = null;
+            loadNote = note(Messages.getString("StartScreen.noSaves"), "text.muted");
+            return;
+        }
+        Table rows = new Table();
+        rows.top().left();
+        rows.defaults().growX().left();
+        for (File save : saves) {
+            UiButton row = kit.button("button-quiet", null, StartSaves.title(save), savedAt(save));
+            leftAligned(row);
+            UiKit.onChange(row, () -> readSave(save));
+            rows.add(row).row();
+        }
+        saveList = kit.scrollList(rows, true);
+    }
+
+    private void fillLoadColumn() {
+        List<Actor> items = new ArrayList<>();
+        items.add(overline("StartScreen.loadGame"));
+        if (saveList != null) {
+            items.add(saveList);
+        }
+        if (loadNote != null) {
+            items.add(loadNote);
+        }
+        items.add(browseSaves);
+        items.add(backButton());
+        if (!column.isEmpty() && column.get(0) instanceof Label title) {
+            items.set(0, title);
+        }
+        setColumn(items);
+    }
+
+    /** When {@code file} was last written, in the player's locale. */
+    private static String savedAt(File file) {
+        return SAVED_AT.format(Instant.ofEpochMilli(file.lastModified()).atZone(ZoneId.systemDefault()));
+    }
+
+    /** Reads {@code save} off the GPU thread, then opens it on the Resume page, or says why it can't be loaded. */
+    private void readSave(File save) {
+        if (page != Page.LOAD) {
+            return;
+        }
+        generation++;
+        showLoadNote(Messages.getString("StartScreen.readingSave", StartSaves.title(save)), "text.muted");
+        background("save", () -> StartSaves.read(save), summary -> {
+            if (summary.loadable()) {
+                resume = summary;
+                showPage(Page.RESUME);
+            } else {
+                showLoadNote(saveProblem(summary), "status.danger");
+            }
+        });
+    }
+
+    private void showLoadNote(String text, String role) {
+        loadNote = note(text, role);
+        fillLoadColumn();
+    }
+
+    /** Why {@code summary}'s save can't be loaded, for the page to say. */
+    static String saveProblem(StartSaves.Summary summary) {
+        String name = StartSaves.title(summary.file());
+        return switch (summary.problem()) {
+            case NO_VERSION -> Messages.getString("StartScreen.saveNoVersion", name, SuiteConstants.VERSION);
+            case WRONG_VERSION -> Messages.getString("StartScreen.saveWrongVersion", name, summary.version(),
+                  SuiteConstants.VERSION);
+            default -> Messages.getString("StartScreen.saveUnreadable", name);
+        };
+    }
+
+    /**
+     * The Resume page: the Host page for the chosen save, whose name field becomes a choice of the save's players
+     * (the last name played, where the save has it), and whose main button loads it.
+     */
+    private void buildResume() {
+        hostButton.setText(kit.cased("button", Messages.getString("StartScreen.loadGame")));
+        resumeHeader = new Table();
+        resumeHeader.left().top();
+        resumeHeader.defaults().left().growX().minWidth(0);
+        resumeHeader.add(line(StartSaves.title(resume.file()), "body", "text.primary")).row();
+        resumeHeader.add(line(savedAt(resume.file()), "small", "text.muted"));
+        playAs = null;
+        playAsField = null;
+        List<String> players = resume.players();
+        if (!players.isEmpty()) {
+            playAs = kit.tokenSelect(false, players.toArray(String[]::new));
+            int last = players.indexOf(PreferenceManager.getClientPreferences().getLastPlayerName());
+            playAs.select(Math.max(last, 0));
+            playAsField = kit.formField(Messages.getString("StartScreen.playAs"), playAs)
+                  .helper(Messages.getString("StartScreen.playAsHelper"));
+        }
+    }
+
+    /** Checks the Resume page as the Host page; asks MegaMek to host the save as the chosen player. */
+    private void submitResume() {
+        String name = playAs != null ? playAs.getSelected() : nameInput.getText().trim();
+        int port = StartHostForm.port(portInput.getText());
+        if (playAs == null) {
+            nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
+        }
+        portField.error(portError(port));
+        if (name == null || name.isEmpty()) {
+            stage.setKeyboardFocus(nameInput);
+            return;
+        }
+        if (port < 0) {
+            if (!onlineOpen) {
+                onlineOpen = true;
+                chevron(onlineToggle, true);
+                fillHostColumn();
+            }
+            stage.setKeyboardFocus(portInput);
+            return;
+        }
+        boolean register = registerBox.isChecked();
+        window.load(new LoadRequest(resume.file(), new HostRequest(name, passwordInput.getText(), port, register,
+              register ? metaserverInput.getText().trim() : "")));
+    }
+
+    // ---- The scenario browser ----
+
+    /** Shows the scenarios, reading them first the first time. */
+    private void showScenarios() {
+        openScenario = kit.button("button-quiet", null, Messages.getString("StartScreen.openScenario"), null);
+        leftAligned(openScenario);
+        UiKit.onChange(openScenario, () -> window.chooseFile(Configuration.scenariosDir(),
+              Messages.getString("MegaMek.SelectScenarioDialog.title"), new FileNameExtensionFilter(
+                    Messages.getString("StartScreen.scenarioFiles"), SuiteConstants.SCENARIO_EXT.substring(1)),
+              file -> {
+                  if (page == Page.SCENARIOS) {
+                      openBriefing(file, Page.SCENARIOS);
+                  }
+              }));
+        if (catalog != null) {
+            buildScenarioPage();
+            fillScenarioColumn();
+            return;
+        }
+        setColumn(List.of(overline("StartScreen.scenario"),
+              note(Messages.getString("StartScreen.readingScenarios"), "text.muted"), openScenario, backButton()));
+        background("scenarios", StartScenarios::read, entries -> {
+            catalog = entries;
+            buildScenarioPage();
+            fillScenarioColumn();
+        });
+    }
+
+    private void buildScenarioPage() {
+        List<String> groups = StartScenarios.groups(catalog);
+        groupSelect = null;
+        if (groups.size() > 1) {
+            List<String> names = new ArrayList<>();
+            names.add(Messages.getString("StartScreen.allScenarios"));
+            groups.forEach(group -> names.add(groupName(group)));
+            groupSelect = kit.tokenSelect(false, names.toArray(String[]::new));
+            groupIndex = Math.min(groupIndex, names.size() - 1);
+            groupSelect.select(groupIndex);
+            UiKit.onChange(groupSelect, () -> {
+                groupIndex = groupSelect.getSelectedIndex();
+                fillScenarioRows();
+                scenarioList.setScrollY(0);
+                fillScenarioColumn();
+            });
+        } else {
+            groupIndex = 0;
+        }
+        scenarioRows = new Table();
+        scenarioRows.top().left();
+        scenarioRows.defaults().growX().left();
+        scenarioList = kit.scrollList(scenarioRows, true);
+        fillScenarioRows();
+    }
+
+    /** The scenarios of the chosen group, or all of them. */
+    private void fillScenarioRows() {
+        scenarioRows.clearChildren();
+        List<String> groups = StartScenarios.groups(catalog);
+        String group = groupIndex == 0 ? null : groups.get(groupIndex - 1);
+        for (StartScenarios.Entry entry : catalog) {
+            if (group != null && !group.equals(entry.group())) {
+                continue;
+            }
+            List<String> about = new ArrayList<>();
+            if (group == null && groups.size() > 1) {
+                about.add(groupName(entry.group()));
+            }
+            String planet = entry.scenario().getPlanet();
+            if (planet != null && !planet.isBlank()) {
+                about.add(planet.trim());
+            }
+            UiButton row = kit.button("button-quiet", null, entry.name(),
+                  about.isEmpty() ? null : String.join("  \u00b7  ", about));
+            leftAligned(row);
+            UiKit.onChange(row, () -> openBriefing(new File(entry.scenario().getFileName()), Page.SCENARIOS));
+            scenarioRows.add(row).row();
+        }
+    }
+
+    private void fillScenarioColumn() {
+        List<Actor> items = new ArrayList<>();
+        items.add(overline("StartScreen.scenario"));
+        if (catalog.isEmpty()) {
+            items.add(note(Messages.getString("StartScreen.noScenarios"), "text.muted"));
+        } else {
+            if (groupSelect != null) {
+                items.add(groupSelect);
+            }
+            items.add(scenarioList);
+        }
+        items.add(openScenario);
+        items.add(backButton());
+        if (!column.isEmpty() && column.get(0) instanceof Label title) {
+            items.set(0, title);
+        }
+        setColumn(items);
+    }
+
+    /** A group's name as the browser shows it: the scenarios folder's own are the basic ones. */
+    static String groupName(String group) {
+        if (group.isBlank()) {
+            return Messages.getString("StartScreen.basicScenarios");
+        }
+        return group.substring(0, 1).toUpperCase(Locale.ROOT) + group.substring(1);
+    }
+
+    /** Ctrl+Scenario: the last scenario's briefing, or the browser when there is none. */
+    private void lastScenario() {
+        String last = PreferenceManager.getClientPreferences().getLastScenario();
+        if (last == null || last.isBlank() || !new File(last).isFile()) {
+            showPage(Page.SCENARIOS);
+        } else {
+            openBriefing(new File(last), Page.MAIN);
+        }
+    }
+
+    // ---- The briefing ----
+
+    /** Opens the briefing for the scenario in {@code file}; Back returns to {@code back}. */
+    private void openBriefing(File file, Page back) {
+        briefingFile = file;
+        briefingBack = back;
+        briefing = null;
+        showPage(Page.BRIEFING);
+    }
+
+    /** Reads the scenario and makes its game off the GPU thread, then shows the briefing. */
+    private void showBriefing() {
+        File file = briefingFile;
+        setColumn(List.of(overline("StartScreen.briefing"),
+              note(Messages.getString("StartScreen.preparingBriefing"), "text.muted"), backButton(briefingBack)));
+        background("briefing", () -> prepare(file), made -> {
+            briefing = made;
+            if (made.error() == null) {
+                buildBriefing();
+            }
+            fillBriefingColumn();
+            stage.setKeyboardFocus(startButton);
+        });
+    }
+
+    /** Blocks: reads {@code file}'s scenario and makes its game, or says why it couldn't. */
+    private static Briefing prepare(File file) {
+        try {
+            Scenario scenario = new ScenarioLoader(file).load();
+            return new Briefing(scenario, scenario.createGame(), null);
+        } catch (Exception ex) {
+            LOGGER.error(ex, "The start screen could not prepare the scenario {}", file);
+            return new Briefing(null, null, Messages.getString("StartScreen.briefingFailed", file.getName(),
+                  ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
+        }
+    }
+
+    /**
+     * The briefing's parts: its name, where and how it's played, its description, and who plays each side. In a
+     * single-player scenario the host takes the first side and bots the rest; in a multiplayer one each side is the
+     * host's, another person's or a bot's, and the host names the game's password and port.
+     */
+    private void buildBriefing() {
+        Scenario scenario = briefing.scenario();
+        StartScenarios.Entry entry = new StartScenarios.Entry("", scenario);
+        briefingHeader = new Table();
+        briefingHeader.left().top();
+        briefingHeader.defaults().left().growX().minWidth(0);
+        Label title = kit.roleTypeLabel("title", entry.name(), "text.primary");
+        title.setEllipsis(true);
+        briefingHeader.add(title).row();
+        List<String> about = new ArrayList<>();
+        String planet = scenario.getPlanet();
+        if (planet != null && !planet.isBlank()) {
+            about.add(planet.trim());
+        }
+        about.add(Messages.getString(scenario.isSinglePlayer() ? "StartScreen.singlePlayer"
+              : "StartScreen.multiplayer"));
+        briefingHeader.add(line(String.join("  \u00b7  ", about), "small", "text.muted")).padTop(2);
+
+        String description = scenario.getDescription();
+        briefingText = null;
+        if (description != null && !description.isBlank()) {
+            Label text = kit.typeLabel(description.trim(), "body", "text.secondary");
+            text.setWrap(true);
+            text.setAlignment(Align.topLeft);
+            briefingText = kit.scrollList(text);
+        }
+
+        roleSelects.clear();
+        playerRows = new Table();
+        playerRows.left().top();
+        playerRows.defaults().left().padBottom(4);
+        List<Player> players = briefing.game().getPlayersList();
+        String[] roles = { Messages.getString("StartScreen.you"), Messages.getString("StartScreen.human"),
+                           Messages.getString("StartScreen.bot") };
+        for (int i = 0; i < players.size(); i++) {
+            playerRows.add(line(players.get(i).getName(), "body", "text.primary")).growX().minWidth(0);
+            if (scenario.isSinglePlayer()) {
+                playerRows.add(kit.typeLabel(roles[i == 0 ? 0 : 2], "body", "text.muted")).width(ROLE_WIDTH)
+                      .padLeft(12);
+            } else {
+                UiSelect role = kit.tokenSelect(true, roles);
+                role.select(i == 0 ? Role.YOU.ordinal() : Role.HUMAN.ordinal());
+                UiKit.onChange(role, () -> roleChosen(role));
+                roleSelects.add(role);
+                playerRows.add(role).width(ROLE_WIDTH).padLeft(12);
+            }
+            playerRows.row();
+        }
+
+        ClientPreferences client = PreferenceManager.getClientPreferences();
+        nameInput = field(client.getLastPlayerName());
+        nameField = kit.formField(Messages.getString("StartScreen.observerName"), nameInput)
+              .helper(Messages.getString("StartScreen.observerHelper"));
+        buildServerInputs(client.getLastServerPass(), client.getLastServerPort());
+        startButton = kit.button("button-primary", null, Messages.getString("StartScreen.startScenario"), null);
+        leftAligned(startButton);
+        UiKit.onChange(startButton, this::submitBriefing);
+    }
+
+    /** A side became {@code chosen}'s choice; the host takes one side at most, so You moves rather than copies. */
+    private void roleChosen(UiSelect chosen) {
+        if (chosen.getSelectedIndex() == Role.YOU.ordinal()) {
+            for (UiSelect other : roleSelects) {
+                if (other != chosen && other.getSelectedIndex() == Role.YOU.ordinal()) {
+                    other.select(Role.HUMAN.ordinal());
+                }
+            }
+        }
+        fillBriefingColumn();
+    }
+
+    private void fillBriefingColumn() {
+        List<Actor> items = new ArrayList<>();
+        items.add(overline("StartScreen.briefing"));
+        if (briefing.error() != null) {
+            items.add(note(briefing.error(), "status.danger"));
+        } else {
+            items.add(briefingHeader);
+            if (briefingText != null) {
+                items.add(briefingText);
+            }
+            items.add(overline("StartScreen.players"));
+            items.add(playerRows);
+            if (!briefing.scenario().isSinglePlayer()) {
+                if (!roles().contains(Role.YOU)) {
+                    items.add(nameField);
+                }
+                items.add(passwordRow);
+            }
+            items.add(startButton);
+        }
+        items.add(backButton(briefingBack));
+        if (!column.isEmpty() && column.get(0) instanceof Label title) {
+            items.set(0, title);
+        }
+        setColumn(items);
+    }
+
+    /** Who plays each of the scenario's sides, as the briefing shows it. */
+    private List<Role> roles() {
+        int count = briefing.game().getPlayersList().size();
+        List<Role> roles = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            if (briefing.scenario().isSinglePlayer()) {
+                roles.add(i == 0 ? Role.YOU : Role.BOT);
+            } else {
+                roles.add(Role.values()[roleSelects.get(i).getSelectedIndex()]);
+            }
+        }
+        return roles;
+    }
+
+    /** Checks the briefing; asks MegaMek to host the scenario with its sides as chosen. */
+    private void submitBriefing() {
+        List<Role> roles = roles();
+        boolean single = briefing.scenario().isSinglePlayer();
+        int you = roles.indexOf(Role.YOU);
+        String name = you >= 0 ? briefing.game().getPlayersList().get(you).getName() : nameInput.getText().trim();
+        int port = single ? MMConstants.DEFAULT_PORT : StartHostForm.port(portInput.getText());
+        if (you < 0) {
+            nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
+        }
+        if (!single) {
+            portField.error(portError(port));
+        }
+        if (name.isEmpty()) {
+            stage.setKeyboardFocus(nameInput);
+            return;
+        }
+        if (port < 0) {
+            stage.setKeyboardFocus(portInput);
+            return;
+        }
+        window.scenario(new ScenarioRequest(briefing.scenario(), briefing.game(), roles, name,
+              single ? "" : passwordInput.getText(), port));
+    }
+
     private Table bottomRow() {
         Table row = new Table();
         row.left();
@@ -787,6 +1373,12 @@ final class GpuStartScreen extends ApplicationAdapter {
                     skip();
                     return true;
                 }
+                // An open list, and a select's own opening keys, are the select's; the event reaches here after
+                Actor target = event.getTarget();
+                if (target instanceof UiListPopup || target instanceof UiSelect && (keycode == Keys.DOWN
+                      || keycode == Keys.ENTER || keycode == Keys.NUMPAD_ENTER || keycode == Keys.SPACE)) {
+                    return false;
+                }
                 boolean shift = Gdx.input.isKeyPressed(Keys.SHIFT_LEFT) || Gdx.input.isKeyPressed(Keys.SHIFT_RIGHT);
                 switch (keycode) {
                     case Keys.DOWN -> move(1);
@@ -796,17 +1388,15 @@ final class GpuStartScreen extends ApplicationAdapter {
                         Actor focus = stage.getKeyboardFocus();
                         if (focus instanceof UiButton button) {
                             button.fire(new ChangeListener.ChangeEvent());
-                        } else if (focus instanceof TextField && keycode != Keys.SPACE && page == Page.HOST) {
-                            submitHost();
-                        } else if (focus instanceof TextField && keycode != Keys.SPACE && page == Page.CONNECT) {
-                            submitConnect();
+                        } else if (focus instanceof TextField && keycode != Keys.SPACE && submitsOnEnter()) {
+                            submit();
                         } else {
                             return false;
                         }
                     }
                     case Keys.ESCAPE -> {
                         if (page != Page.MAIN) {
-                            showPage(Page.MAIN);
+                            showPage(parent(page));
                         }
                     }
                     default -> {
@@ -818,6 +1408,23 @@ final class GpuStartScreen extends ApplicationAdapter {
         });
     }
 
+    /** Whether Enter in a text field sends the page's form. */
+    private boolean submitsOnEnter() {
+        return page == Page.HOST || page == Page.RESUME || page == Page.CONNECT
+              || page == Page.BRIEFING && briefing != null && briefing.error() == null;
+    }
+
+    private void submit() {
+        switch (page) {
+            case HOST -> submitHost();
+            case RESUME -> submitResume();
+            case CONNECT -> submitConnect();
+            case BRIEFING -> submitBriefing();
+            default -> {
+            }
+        }
+    }
+
     private void skip() {
         skipped = true;
         pageShownAt = -1;
@@ -826,7 +1433,16 @@ final class GpuStartScreen extends ApplicationAdapter {
     private void move(int step) {
         int index = focusable.indexOf(stage.getKeyboardFocus());
         int next = index < 0 ? (step > 0 ? 0 : focusable.size() - 1) : Math.floorMod(index + step, focusable.size());
-        stage.setKeyboardFocus(focusable.get(next));
+        Actor focus = focusable.get(next);
+        stage.setKeyboardFocus(focus);
+        // A list's row the keyboard reaches scrolls into view
+        for (Group parent = focus.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof ScrollPane scroll && scroll.getActor() != null) {
+                Vector2 at = focus.localToAscendantCoordinates(scroll.getActor(), new Vector2());
+                scroll.scrollTo(at.x, at.y, focus.getWidth(), focus.getHeight());
+                break;
+            }
+        }
     }
 
     /** How far column item {@code index} has slid in, from 0 to 1. */
@@ -841,17 +1457,21 @@ final class GpuStartScreen extends ApplicationAdapter {
               / StartTimeline.ITEM_SLIDE);
     }
 
-    /** The menu sits in a column at the right, clear of the art's main subject on the left, and slides in from the edge. */
+    /**
+     * The menu sits in a column at the right, clear of the art's main subject on the left, and slides in from the edge.
+     * A page's list or description takes the height the other items leave it above the bottom row, and scrolls.
+     */
     private void layoutMenu() {
         float margin = Math.max(40, w * 0.05f);
-        float columnWidth = Math.max(260, w * 0.2f);
+        float menuWidth = Math.max(260, w * 0.2f);
+        float columnWidth = wide(page) ? Math.max(WIDE_COLUMN, w * 0.28f) : menuWidth;
         float left = w - margin - columnWidth;
         float top = Math.max(32, h * 0.07f);
         double t = introTime();
         double logoIn = motion ? StartTimeline.ease((t - StartTimeline.MENU_START) / 0.5) : 1;
         float y = top;
         if (logo != null) {
-            float logoWidth = columnWidth * 0.8f;
+            float logoWidth = menuWidth * 0.8f;
             float logoHeight = logoWidth * logoTexture.getHeight() / logoTexture.getWidth();
             logo.setBounds(w - margin - logoWidth + (float) ((1 - logoIn) * 60), h - top - logoHeight, logoWidth,
                   logoHeight);
@@ -859,21 +1479,33 @@ final class GpuStartScreen extends ApplicationAdapter {
             logo.setVisible(logoIn > 0);
             y += logoHeight + 28;
         }
+        float[] heights = new float[column.size()];
+        float taken = 0;
+        int filler = -1;
+        for (int i = 0; i < column.size(); i++) {
+            Actor item = column.get(i);
+            // A wrapped label's height follows its width
+            item.setWidth(columnWidth);
+            if (item instanceof ScrollPane scroll && filler < 0) {
+                filler = i;
+                fitScrolled(scroll, columnWidth);
+            }
+            heights[i] = item instanceof Layout layout ? layout.getPrefHeight() : item.getHeight();
+            taken += gapAbove(item) + gapBelow(item, i) + (i == filler ? 0 : heights[i]);
+        }
+        if (filler >= 0) {
+            float room = h - y - taken - (32 + bottomRow.getHeight() + 16);
+            heights[filler] = Math.min(heights[filler], Math.max(room, MIN_FILLER));
+        }
         float offscreen = columnWidth + margin + 40;
         for (int i = 0; i < column.size(); i++) {
             Actor item = column.get(i);
-            float itemHeight = item instanceof com.badlogic.gdx.scenes.scene2d.utils.Layout layout
-                  ? layout.getPrefHeight() : item.getHeight();
+            float itemHeight = heights[i];
             double p = slide(i);
             float dx = (float) ((1 - p) * offscreen);
-            if (item instanceof Label) {
-                y += 14;
-                item.setBounds(left + dx + 4, h - y - itemHeight, columnWidth, itemHeight);
-                y += itemHeight + 6;
-            } else {
-                item.setBounds(left + dx, h - y - itemHeight, columnWidth, itemHeight);
-                y += itemHeight + (i == 0 && page == Page.MAIN ? 14 : 8);
-            }
+            y += gapAbove(item);
+            item.setBounds(left + dx + (item instanceof Label ? 4 : 0), h - y - itemHeight, columnWidth, itemHeight);
+            y += itemHeight + gapBelow(item, i);
             item.setVisible(p > 0);
         }
         double rowIn = slide(column.size());
@@ -886,6 +1518,32 @@ final class GpuStartScreen extends ApplicationAdapter {
         tipCard.setVisible(settled && !tips.isEmpty());
         if (settled && clock() - tipShownAt > TIP_SECONDS) {
             showTip(tipIndex + 1);
+        }
+    }
+
+    /** Labels in the column are its section headings and notes, with room above them. */
+    private static float gapAbove(Actor item) {
+        return item instanceof Label ? 14 : 0;
+    }
+
+    private float gapBelow(Actor item, int index) {
+        if (item instanceof Label) {
+            return 6;
+        }
+        return index == 0 && page == Page.MAIN ? 14 : 8;
+    }
+
+    /** Gives a scrolled wrapped text its width, so the pane's preferred height is the text's at that width. */
+    private static void fitScrolled(ScrollPane scroll, float width) {
+        Actor inner = scroll.getActor();
+        if (!(inner instanceof Label label) || !label.getWrap()) {
+            return;
+        }
+        Drawable frame = scroll.getStyle().background;
+        float innerWidth = width - (frame == null ? 0 : frame.getLeftWidth() + frame.getRightWidth());
+        if (label.getWidth() != innerWidth) {
+            label.setWidth(innerWidth);
+            scroll.invalidate();
         }
     }
 

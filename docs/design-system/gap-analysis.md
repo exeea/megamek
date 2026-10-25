@@ -378,7 +378,8 @@ work for Swing, and item 11 is under investigation.
      the lobby opens at the same bounds. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
      notice waits for the reveal to end. The old splash medal is dropped. Its pages replace the menu in the menu's own
      column, with Back (Esc) to return, so the art stays in view. ~~G1, the window and menu~~, ~~G2, the Host
-     page~~ and ~~G3, the Connect page~~ are done. **New game** opens the Host page: the player name, then a closed
+     page~~, ~~G3, the Connect page~~, ~~G4, Load game~~, ~~G5, the scenario browser~~ and ~~G6, the briefing~~ are
+     done. **New game** opens the Host page: the player name, then a closed
      **Online options** section
      (password, port, the server browser and the local and public addresses), **Host game** and Back. The section
      opens by itself when the password or port was changed before or the port is wrong; errors show under the
@@ -390,10 +391,21 @@ work for Swing, and item 11 is under investigation.
      the top, the name, the server address beside its port, a **Strategic BattleForce game** check box for the player
      only (there is no SBF bot), **Connect** (**Connect bot**, which opens the bot setup) and Back; errors show under
      the inputs as on Host. It has no password: joining a game never asks for one, since MegaMek's server password
-     only guards game options and server commands, which ask for it when they need it. Next come Load game (G4), the
-     scenario browser (G5) and the briefing (G6). Until then, the Swing dialogs open over the start window, and
-     Ctrl+click reaches quick load and the last scenario. To review a page without clicking through it, set
-     `MM_START_PAGE` (such as `host+online+reveal` or `connect+bot`) before `gradlew :megamek:run`;
+     only guards game options and server commands, which ask for it when they need it. **Load game** opens a list
+     of the saves in `savegames`, newest first, with when each was saved, and **Browse files…** for others; picking
+     one reads it in the background and opens the Host form titled Load game, with the save's name and date on top
+     and a **Play as** select of the saved players in place of the name field. A save that cannot be read, has no
+     version or comes from another version says so in the page instead of a popup. **Scenario** opens the scenario
+     browser: a group select (All scenarios or one folder) over a list of names, each with its group and planet,
+     and **Open a file…**. Picking one opens the **briefing**: the title, single player or multiplayer, the
+     description and the players. In single player you are the first player and the others are bots; in
+     multiplayer each player has a You | Human | Bot select, an observer name shows when nobody is You, and the
+     server password and port follow. **Start scenario** still opens the Swing game options and planetary
+     conditions, which move with the lobby's dialogs. The load and scenario pages are wider than the menu, so long
+     names fit, and their list fills the room left in the column. Ctrl+click on Load game and Scenario still
+     reaches quick load and the last scenario. To review a page without clicking through it, set
+     `MM_START_PAGE` (such as `host+online+reveal`, `connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with
+     `MM_START_SCENARIO` naming the scenario file) before `gradlew :megamek:run`;
      `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
      `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`).
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the

@@ -12,14 +12,19 @@ import java.awt.Window;
 import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
 import java.awt.event.WindowEvent;
+import java.io.File;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileFilter;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
@@ -32,6 +37,8 @@ import com.badlogic.gdx.utils.SharedLibraryLoader;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.util.ScreenFit;
+import megamek.common.game.IGame;
+import megamek.common.scenario.Scenario;
 import megamek.logging.MMLogger;
 import org.lwjgl.glfw.GLFW;
 
@@ -49,7 +56,7 @@ public final class GpuStartWindow {
 
     /** What the start screen asks MegaMek to do; each runs on the Swing thread. */
     public enum Action {
-        LOAD, QUICK_LOAD, SCENARIO, LAST_SCENARIO, MAP_EDITOR, OPEN_MAP, UNIT_BROWSER,
+        QUICK_LOAD, MAP_EDITOR, OPEN_MAP, UNIT_BROWSER,
         RANDOM_ARMY, SKIN_EDITOR, SETTINGS, HELP_CONTENTS, HELP_SKINNING, REPORT_BUG, COPY_SYSTEM_DATA, RESET_PROMPTS,
         ABOUT, QUIT
     }
@@ -76,11 +83,65 @@ public final class GpuStartWindow {
         }
     }
 
+    /**
+     * A saved game the Load game page asks MegaMek to host, its inputs already checked.
+     *
+     * @param host the server's settings and the save's player the host takes
+     */
+    public record LoadRequest(File saveGame, HostRequest host) {
+        public LoadRequest {
+            Objects.requireNonNull(saveGame);
+            Objects.requireNonNull(host);
+        }
+    }
+
+    /** Who plays one of a scenario's players. */
+    public enum Role {
+        /** The host. */
+        YOU,
+        /** Another person, who connects to the host. */
+        HUMAN,
+        /** A bot the host starts. */
+        BOT
+    }
+
+    /**
+     * A scenario the briefing asks MegaMek to host, with the game already made from it.
+     *
+     * @param roles      who plays each of the game's players, in the game's player order
+     * @param playerName the host's name: the player they take, or the observer's name when they take none
+     * @param password   the game's password, or blank for an open game
+     */
+    public record ScenarioRequest(Scenario scenario, IGame game, List<Role> roles, String playerName, String password,
+          int port) {
+        public ScenarioRequest {
+            Objects.requireNonNull(scenario);
+            Objects.requireNonNull(game);
+            roles = List.copyOf(roles);
+            if (roles.size() != game.getPlayersList().size()) {
+                throw new IllegalArgumentException("Each of the scenario's players needs a role");
+            }
+            if (roles.stream().filter(role -> role == Role.YOU).count() > 1) {
+                throw new IllegalArgumentException("The host takes one player at most");
+            }
+            if (playerName == null || playerName.isBlank()) {
+                throw new IllegalArgumentException("The host needs a name");
+            }
+        }
+
+        /** Whether the host takes one of the scenario's players rather than watching. */
+        public boolean hasSlot() {
+            return roles.contains(Role.YOU);
+        }
+    }
+
     private static GpuStartWindow open;
     private static JFrame anchor;
     private static Consumer<Action> actions;
     private static Consumer<HostRequest> hosts;
     private static Consumer<ConnectRequest> connects;
+    private static Consumer<LoadRequest> loads;
+    private static Consumer<ScenarioRequest> scenarios;
 
     private final boolean greet;
     private final GpuWindowBounds startBounds;
@@ -111,15 +172,18 @@ public final class GpuStartWindow {
 
     /**
      * EDT: sets the hidden frame that owns the forms the start screen opens and the handlers of its actions and its
-     * Host and Connect pages. Call once before {@link #open}; MegaMek's main frame does it even when it starts without
-     * the screen (a command-line game), so the screen can open when that game ends.
+     * Host, Connect, Load game and briefing pages. Call once before {@link #open}; MegaMek's main frame does it even
+     * when it starts without the screen (a command-line game), so the screen can open when that game ends.
      */
     public static void install(JFrame owner, Consumer<Action> handler, Consumer<HostRequest> hostHandler,
-          Consumer<ConnectRequest> connectHandler) {
+          Consumer<ConnectRequest> connectHandler, Consumer<LoadRequest> loadHandler,
+          Consumer<ScenarioRequest> scenarioHandler) {
         anchor = owner;
         actions = handler;
         hosts = hostHandler;
         connects = connectHandler;
+        loads = loadHandler;
+        scenarios = scenarioHandler;
     }
 
     /** EDT: opens the start window, with the greeting when {@code greet}, or brings the open one to the front. */
@@ -350,6 +414,42 @@ public final class GpuStartWindow {
         if (handler != null) {
             SwingUtilities.invokeLater(() -> handler.accept(request));
         }
+    }
+
+    /** Any thread: asks MegaMek, on the Swing thread, to host the saved game the Load game page describes. */
+    void load(LoadRequest request) {
+        Consumer<LoadRequest> handler = loads;
+        if (handler != null) {
+            SwingUtilities.invokeLater(() -> handler.accept(request));
+        }
+    }
+
+    /** Any thread: asks MegaMek, on the Swing thread, to host the scenario the briefing describes. */
+    void scenario(ScenarioRequest request) {
+        Consumer<ScenarioRequest> handler = scenarios;
+        if (handler != null) {
+            SwingUtilities.invokeLater(() -> handler.accept(request));
+        }
+    }
+
+    /**
+     * Any thread: shows a file chooser, a form of the hidden frame and so above this window, at {@code directory}, and
+     * hands the file the player opens to {@code chosen} on the GPU thread; nothing when they cancel.
+     */
+    void chooseFile(File directory, String title, FileFilter filter, Consumer<File> chosen) {
+        SwingUtilities.invokeLater(() -> {
+            JFileChooser chooser = new JFileChooser(directory);
+            chooser.setDialogTitle(title);
+            chooser.setFileFilter(filter);
+            if (chooser.showOpenDialog(anchor) != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
+                return;
+            }
+            File file = chooser.getSelectedFile();
+            Lwjgl3Application app = application;
+            if (app != null) {
+                app.postRunnable(() -> chosen.accept(file));
+            }
+        });
     }
 
     /**

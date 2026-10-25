@@ -40,31 +40,23 @@ import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
-import java.util.Vector;
-import java.util.zip.GZIPInputStream;
-import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
-import javax.swing.filechooser.FileFilter;
 
 import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.MegaMek;
 import megamek.SuiteConstants;
-import megamek.Version;
 import megamek.client.Client;
 import megamek.client.IClient;
 import megamek.client.SBFClient;
@@ -83,23 +75,21 @@ import megamek.client.ui.design.DesignTokens.Palette;
 import megamek.client.ui.design.swing.TokenMotion;
 import megamek.client.ui.dialogs.LicensingDialog;
 import megamek.client.ui.dialogs.MMAboutDialog;
-import megamek.client.ui.dialogs.ScenarioDialog;
 import megamek.client.ui.dialogs.UnitLoadingDialog;
 import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog;
 import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
-import megamek.client.ui.dialogs.gameConnectionDialogs.HostDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
 import megamek.client.ui.dialogs.randomArmy.AbstractRandomArmyDialog;
 import megamek.client.ui.dialogs.randomArmy.MMMainMenuRandomArmyDialog;
-import megamek.client.ui.dialogs.scenario.ScenarioChooserDialog;
 import megamek.client.ui.dialogs.unitSelectorDialogs.MainMenuUnitBrowserDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.panels.skinEditor.SkinEditorMainGUIPanel;
 import megamek.client.ui.util.MegaMekController;
+import megamek.client.ui.util.PlayerColour;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Configuration;
@@ -121,7 +111,6 @@ import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.scenario.Scenario;
-import megamek.common.scenario.ScenarioLoader;
 import megamek.common.util.EmailService;
 import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.common.weapons.handlers.WeaponOrderHandler;
@@ -130,11 +119,6 @@ import megamek.server.IGameManager;
 import megamek.server.Server;
 import megamek.server.sbf.SBFGameManager;
 import megamek.server.totalWarfare.TWGameManager;
-import megamek.utilities.xml.MMXMLUtility;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
 
 public class MegaMekGUI implements IPreferenceChangeListener {
     private static final MMLogger LOGGER = MMLogger.create(MegaMekGUI.class);
@@ -198,7 +182,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         frame.setIconImages(iconList);
 
         installBugReportButtonOnErrorDialogs();
-        GpuStartWindow.install(frame, this::perform, this::host, this::connect);
+        GpuStartWindow.install(frame, this::perform, this::host, this::connect, this::load, this::scenario);
         // init the cache
         MekSummaryCache.getInstance();
 
@@ -466,209 +450,25 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         AbstractClientGUI.setOpenMaximized(GpuStartWindow.lastMaximized());
     }
 
-    void loadGame() {
-        JFileChooser fc = new JFileChooser(MMConstants.SAVEGAME_DIR);
-        fc.setLocation(frame.getLocation().x + 150, frame.getLocation().y + 100);
-        fc.setDialogTitle(Messages.getString("MegaMek.SaveGameDialog.title"));
-        fc.setFileFilter(new FileFilter() {
-            @Override
-            public boolean accept(File dir) {
-                return dir.getName().endsWith(MMConstants.SAVE_FILE_EXT) ||
-                      dir.getName().endsWith(MMConstants.SAVE_FILE_GZ_EXT) ||
-                      dir.isDirectory();
-            }
-
-            @Override
-            public String getDescription() {
-                return "Savegames";
-            }
-        });
-        int returnVal = fc.showOpenDialog(frame);
-        if ((returnVal != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
+    /** Hosts the saved game the start screen's Load game page describes, as the player it names. */
+    private void load(GpuStartWindow.LoadRequest request) {
+        if (server != null) {
+            // A second click queued behind the first; that game is already starting
             return;
         }
-
-        final Vector<String> playerNames = new Vector<>();
-
-        // Hand rolled extraction, as we require Server initialization to use XStream and don't need the additional
-        // overhead of initializing everything twice
-        try (InputStream is = new FileInputStream(fc.getSelectedFile())) {
-            InputStream gzi;
-
-            if (fc.getSelectedFile().getName().toLowerCase().endsWith(".gz")) {
-                gzi = new GZIPInputStream(is);
-            } else {
-                gzi = is;
-            }
-
-            // Parse to a DOM representation, raising the JAXP entity size limit if a large save exceeds it
-            final Document xmlDocument = MMXMLUtility.parseDocument(gzi);
-
-            final Element gameElement = xmlDocument.getDocumentElement();
-            gameElement.normalize();
-
-            final NodeList nl = gameElement.getChildNodes();
-            for (int i = 0; i < nl.getLength(); i++) {
-                final Node n = nl.item(i);
-                if (n.getNodeType() != Node.ELEMENT_NODE) {
-                    continue;
-                }
-
-                switch (n.getNodeName()) {
-                    case "version":
-                        if (!validateSaveVersion(n)) {
-                            return;
-                        }
-                        break;
-                    case "players":
-                        parsePlayerNames(n, playerNames);
-                        break;
-                    default:
-                        break;
-                }
-            }
-        } catch (Exception ex) {
-            LOGGER.errorDialog(ex,
-                  Messages.getFormattedString("MegaMek.LoadGameAlert.message", fc.getSelectedFile().getAbsolutePath()),
-                  Messages.getString("MegaMek.LoadGameAlert.title"));
-            return;
-        }
-
-        HostDialog hd = new HostDialog(frame, playerNames);
-        hd.setVisible(true);
-
-        if (!hd.dataValidation("MegaMek.LoadGameAlert.title")) {
-            return;
-        }
-
-        startHost(hd.getServerPass(),
-              hd.getPort(),
-              hd.isRegister(),
-              hd.isRegister() ? hd.getMetaserver() : "",
+        GpuStartWindow.HostRequest host = request.host();
+        ClientPreferences preferences = PreferenceManager.getClientPreferences();
+        preferences.setLastPlayerName(host.playerName());
+        preferences.setLastConnectPort(host.port());
+        preferences.setLastServerPass(host.password());
+        preferences.setValue("megamek.megamek.metaservername", host.metaserver());
+        startHost(host.password(),
+              host.port(),
+              host.register(),
+              host.register() ? host.metaserver() : "",
               null,
-              fc.getSelectedFile(),
-              hd.getPlayerName());
-    }
-
-    private boolean validateSaveVersion(final Node n) {
-        String ignoreVersionValidation = System.getenv("IGNORE_VERSION_VALIDATION");
-        if (ignoreVersionValidation != null && ignoreVersionValidation.equalsIgnoreCase("true")) {
-            return true;
-        }
-
-        if (!n.hasChildNodes()) {
-            final String message = String.format(Messages.getString("MegaMek.LoadGameMissingVersion.message"),
-                  SuiteConstants.VERSION);
-            JOptionPane.showMessageDialog(frame,
-                  message,
-                  Messages.getString("MegaMek.LoadGameAlert.title"),
-                  JOptionPane.ERROR_MESSAGE);
-            LOGGER.error(message);
-            return false;
-        }
-
-        final Version version = getVersion(n);
-        if (SuiteConstants.VERSION.is(version)) {
-            return true;
-        } else if (version.toString().toLowerCase().contains("nightly") &&
-              (version.getMajor() == SuiteConstants.VERSION.getMajor() &&
-                    version.getMinor() == SuiteConstants.VERSION.getMinor() &&
-                    version.getPatch() == SuiteConstants.VERSION.getPatch())
-              && version.toString().contains(SuiteConstants.VERSION.toString())) {
-            // Nightly version of current development version
-            return true;
-        } else {
-            LOGGER.errorDialog(Messages.getString("MegaMek.LoadGameAlert.title"),
-                  Messages.getString("MegaMek.LoadGameIncorrectVersion.message"),
-                  version,
-                  SuiteConstants.VERSION);
-            return false;
-        }
-    }
-
-    /**
-     * Rebuilds the {@link Version} a save game was written by, from the components stored in its version node.
-     *
-     * @param versionNode the save game's version node
-     *
-     * @return the version the save game was written by
-     */
-    private static Version getVersion(Node versionNode) {
-        final NodeList versionChildren = versionNode.getChildNodes();
-        String major = null;
-        String minor = null;
-        String patch = null;
-        String revision = null;
-        String extra = null;
-        for (int childIndex = 0; childIndex < versionChildren.getLength(); childIndex++) {
-            final Node versionComponent = versionChildren.item(childIndex);
-            if (versionComponent.getNodeType() != Node.ELEMENT_NODE) {
-                continue;
-            }
-
-            switch (versionComponent.getNodeName()) {
-                case "major":
-                    major = versionComponent.getTextContent();
-                    break;
-                case "minor":
-                    minor = versionComponent.getTextContent();
-                    break;
-                case "patch":
-                    patch = versionComponent.getTextContent();
-                    break;
-                // Absent from saves written by an ordinary release, and by every release before the revision
-                // component existed.
-                case "revision":
-                    revision = versionComponent.getTextContent();
-                    break;
-                case "snapshot":
-                case "extra":
-                    extra = versionComponent.getTextContent();
-                    break;
-                default:
-                    break;
-            }
-        }
-
-        return new Version(major, minor, patch, revision, extra);
-    }
-
-    private void parsePlayerNames(final Node nodePlayers, final Vector<String> playerNames) {
-        if (!nodePlayers.hasChildNodes()) {
-            return;
-        }
-
-        final NodeList nodePlayersChildren = nodePlayers.getChildNodes();
-        for (int i = 0; i < nodePlayersChildren.getLength(); i++) {
-            final Node nodeEntry = nodePlayersChildren.item(i);
-            if ((nodeEntry.getNodeType() != Node.ELEMENT_NODE) ||
-                  !nodeEntry.hasChildNodes() ||
-                  !"entry".equals(nodeEntry.getNodeName())) {
-                continue;
-            }
-
-            final NodeList nodeEntryChildren = nodeEntry.getChildNodes();
-            for (int k = 0; k < nodeEntryChildren.getLength(); k++) {
-                final Node nodePlayerClass = nodeEntryChildren.item(k);
-                if ((nodePlayerClass.getNodeType() != Node.ELEMENT_NODE) ||
-                      !nodePlayerClass.hasChildNodes() ||
-                      !Player.class.getName().equals(nodePlayerClass.getNodeName())) {
-                    continue;
-                }
-
-                final NodeList nodePlayerClassChildren = nodePlayerClass.getChildNodes();
-                for (int j = 0; j < nodePlayerClassChildren.getLength(); j++) {
-                    final Node n3 = nodePlayerClassChildren.item(j);
-                    if (n3.getNodeType() != Node.ELEMENT_NODE) {
-                        continue;
-                    }
-
-                    if ("name".equals(n3.getNodeName())) {
-                        playerNames.add(n3.getTextContent());
-                    }
-                }
-            }
-        }
+              request.saveGame(),
+              host.playerName());
     }
 
     /**
@@ -709,36 +509,18 @@ public class MegaMekGUI implements IPreferenceChangeListener {
     }
 
     /**
-     * Host a game constructed from a scenario file
+     * Hosts the scenario the start screen's briefing describes: the scenario's open game options and planetary
+     * conditions first, then the server, the host's client and the bots the briefing asked for.
      */
-    void scenario(String fileName) {
-        String chosenFileName;
-        if (fileName.isBlank()) {
-            ScenarioChooserDialog scenarioChooser = new ScenarioChooserDialog(frame);
-            scenarioChooser.setVisible(true);
-            chosenFileName = scenarioChooser.getSelectedScenarioFilename();
-            if (chosenFileName == null) {
-                return;
-            }
-            PreferenceManager.getClientPreferences().setLastScenario(chosenFileName);
-        } else {
-            chosenFileName = fileName;
-        }
-
-        Scenario scenario;
-        IGame game;
-        try {
-            ScenarioLoader sl = new ScenarioLoader(new File(chosenFileName));
-            scenario = sl.load();
-            game = scenario.createGame();
-        } catch (Exception e) {
-            LOGGER.errorDialog(e,
-                  Messages.getString("MegaMek.HostScenarioAlert.message", e.getMessage()),
-                  Messages.getString("MegaMek.HostScenarioAlert.title"));
+    private void scenario(GpuStartWindow.ScenarioRequest request) {
+        if (server != null) {
+            // A second click queued behind the first; that game is already starting
             return;
         }
+        Scenario scenario = request.scenario();
+        IGame game = request.game();
+        PreferenceManager.getClientPreferences().setLastScenario(scenario.getFileName());
 
-        // popup options dialog
         if (!scenario.hasFixedGameOptions() && game instanceof Game twGame) {
             GameOptionsDialog god = new GameOptionsDialog(frame, twGame.getOptions(), false);
             god.update(twGame.getOptions());
@@ -752,7 +534,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             }
         }
 
-        // popup planetary conditions dialog
         if ((game instanceof PlanetaryConditionsUsing plGame) && !scenario.hasFixedPlanetaryConditions()) {
             PlanetaryConditionsDialog pcd = new PlanetaryConditionsDialog(frame, plGame.getPlanetaryConditions());
             pcd.update(plGame.getPlanetaryConditions());
@@ -760,95 +541,57 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             plGame.setPlanetaryConditions(pcd.getConditions());
         }
 
-        int port = MMConstants.DEFAULT_PORT;
-        String serverPW = "";
-        Player[] pa = game.getPlayersList().toArray(new Player[0]);
-        int[] playerTypes = new int[pa.length];
-        String playerName = pa[0].getName();
-        String localName = playerName;
-        boolean hasSlot = scenario.isSinglePlayer();
-
-        // get player types and colors set
+        Player[] players = game.getPlayersList().toArray(new Player[0]);
         if (!scenario.isSinglePlayer()) {
-            ScenarioDialog sd = new ScenarioDialog(frame, pa);
-            sd.setVisible(true);
-            if (!sd.bSet) {
-                return;
-            }
-
-            HostDialog hd = new HostDialog(frame);
-            if (!sd.localName.isEmpty()) {
-                hasSlot = true;
-            }
-            hd.setPlayerName(sd.localName);
-            hd.setVisible(true);
-
-            if (!hd.dataValidation("MegaMek.HostScenarioAlert.title")) {
-                return;
-            }
-
-            sd.localName = hd.getPlayerName();
-            localName = hd.getPlayerName();
-            playerName = hd.getPlayerName();
-            port = hd.getPort();
-            serverPW = hd.getServerPass();
-            playerTypes = Arrays.copyOf(sd.playerTypes, playerTypes.length);
-
-        } else {
-            playerTypes[0] = 0;
-            for (int i = 1; i < playerTypes.length; i++) {
-                playerTypes[i] = ScenarioDialog.T_BOT;
+            // As the old players dialog did, a multiplayer scenario's players take the colours in order
+            PlayerColour[] colours = PlayerColour.values();
+            for (int i = 0; i < players.length; i++) {
+                players[i].setColour(colours[i % colours.length]);
             }
         }
 
-        // kick off a RNG check
         Compute.d6();
-
-        // start server
-        if (!startServer(serverPW, port, false, null, null, null, scenario.getGameType())) {
+        int port = request.port();
+        if (!startServer(request.password(), port, false, null, null, null, scenario.getGameType())) {
             return;
         }
         server.setGame(game);
         scenario.applyDamage(gameManager);
-
-        if (!localName.isBlank()) {
-            startClient(playerName, MMConstants.LOCALHOST, port, scenario.getGameType());
-        }
-
+        startClient(request.playerName(), MMConstants.LOCALHOST, port, scenario.getGameType());
         gameManager.calculatePlayerInitialCounts();
 
-        // Setup bots; currently, we have no bot that supports anything other than TW
+        // Currently no bot supports anything other than TW
         if (scenario.getGameType() == GameType.TW) {
-            for (int x = 0; x < pa.length; x++) {
-                if (playerTypes[x] == ScenarioDialog.T_BOT) {
-                    AIType aiType = AIType.PRINCESS;
-                    BehaviorSettings scenarioBehavior = null;
-                    if (scenario.hasBotInfo(pa[x].getName()) &&
-                          scenario.getBotInfo(pa[x].getName()) instanceof BotParser.PrincessRecord(
-                                AIType recordAIType, BehaviorSettings behaviorSettings
-                          )) {
-                        aiType = recordAIType;
-                        scenarioBehavior = behaviorSettings;
-                    }
-                    LOGGER.info("Adding bot {} as {}", pa[x].getName(), aiType);
-                    BotClient botClient = BotFactory.createBot(aiType, pa[x].getName(), MMConstants.LOCALHOST, port);
-                    if (scenarioBehavior != null) {
-                        botClient.setBehaviorSettings(scenarioBehavior);
-                    }
-                    botClient.getGame().addGameListener(new BotGUI(frame, botClient));
-                    if (!botClient.connect()) {
-                        LOGGER.error("Bot {} failed to connect; shutting it down", pa[x].getName());
-                        botClient.die();
-                    }
+            for (int x = 0; x < players.length; x++) {
+                if (request.roles().get(x) != GpuStartWindow.Role.BOT) {
+                    continue;
+                }
+                AIType aiType = AIType.PRINCESS;
+                BehaviorSettings scenarioBehavior = null;
+                if (scenario.hasBotInfo(players[x].getName()) &&
+                      scenario.getBotInfo(players[x].getName()) instanceof BotParser.PrincessRecord(
+                            AIType recordAIType, BehaviorSettings behaviorSettings
+                      )) {
+                    aiType = recordAIType;
+                    scenarioBehavior = behaviorSettings;
+                }
+                LOGGER.info("Adding bot {} as {}", players[x].getName(), aiType);
+                BotClient botClient = BotFactory.createBot(aiType, players[x].getName(), MMConstants.LOCALHOST, port);
+                if (scenarioBehavior != null) {
+                    botClient.setBehaviorSettings(scenarioBehavior);
+                }
+                botClient.getGame().addGameListener(new BotGUI(frame, botClient));
+                if (!botClient.connect()) {
+                    LOGGER.error("Bot {} failed to connect; shutting it down", players[x].getName());
+                    botClient.die();
                 }
             }
         }
 
-        // If he didn't have a name when hasSlot was set, then the host should be an
-        // observer.
-        if (!hasSlot) {
+        // A host who takes none of the scenario's players watches
+        if (!request.hasSlot()) {
             for (Player player : server.getGame().getPlayersList()) {
-                if (player.getName().equals(localName)) {
+                if (player.getName().equals(request.playerName())) {
                     player.setObserver(true);
                 }
             }
@@ -1011,11 +754,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
     /** Carries out what the player picked on the start screen. Runs on the event dispatch thread. */
     private void perform(GpuStartWindow.Action action) {
         switch (action) {
-            case LOAD -> loadGame();
             case QUICK_LOAD -> quickLoadGame();
-            case SCENARIO -> scenario("");
-            // As a dev convenience, start the last scenario again
-            case LAST_SCENARIO -> scenario(PreferenceManager.getClientPreferences().getLastScenario());
             case MAP_EDITOR -> showEditor();
             case OPEN_MAP -> showEditorOpen();
             case SKIN_EDITOR -> showSkinEditor();
