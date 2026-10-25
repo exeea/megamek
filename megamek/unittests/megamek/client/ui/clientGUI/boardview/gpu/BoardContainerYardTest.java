@@ -80,8 +80,8 @@ class BoardContainerYardTest {
             assertTrue(crane.getDecorations().isEmpty(), "81:" + (i + 1));
             var rows = skin(crane, base);
             var boom = rows.stream().filter(f -> f.asset().equals(BOOM)).findFirst().orElseThrow();
-            // The boom segment lies over the neighbour's centre (an 84 x 72 hex is not regular: within a pixel).
-            float dx = HexTile.centerX(over, HexTile.WIDTH) - HexTile.centerX(base, HexTile.WIDTH);
+            // The boom segment lies over the neighbour's centre (authored on the 2D art's hex: within a pixel).
+            float dx = HexTile.centerX(over, HexTile.MODEL_WIDTH) - HexTile.centerX(base, HexTile.MODEL_WIDTH);
             float dy = HexTile.centerY(over, HexTile.HEIGHT) - HexTile.centerY(base, HexTile.HEIGHT);
             assertEquals(0, Math.hypot(boom.x() - dx, boom.y() - dy), 1, "81:" + (i + 1) + " booms over " + over);
             // The segment and the crane turn alike, along the boom: a turn's sign error would point them elsewhere.
@@ -111,7 +111,7 @@ class BoardContainerYardTest {
             Coords base = turned(new Coords(2 + i % 6 * 3, 2 + i / 6 * 3)), over = base.translated((HEADINGS[i / 12][i % 12 / 3] + 3) % 6);
             Hex crane = turned.getHex(base);
             var boom = skin(crane, base).stream().filter(f -> f.asset().equals(BOOM)).findFirst().orElseThrow();
-            float dx = HexTile.centerX(over, HexTile.WIDTH) - HexTile.centerX(base, HexTile.WIDTH);
+            float dx = HexTile.centerX(over, HexTile.MODEL_WIDTH) - HexTile.centerX(base, HexTile.MODEL_WIDTH);
             float dy = HexTile.centerY(over, HexTile.HEIGHT) - HexTile.centerY(base, HexTile.HEIGHT);
             assertEquals(0, Math.hypot(boom.x() - dx, boom.y() - dy), 1, "81:" + (i + 1) + " booms over " + over);
             // The 2D board draws the legacy sprite of the turned look.

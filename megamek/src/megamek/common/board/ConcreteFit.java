@@ -21,7 +21,8 @@ import megamek.common.units.Terrains;
  * The fitted concrete outline: where pavement meets water, other ground or another level, its edges become straight
  * sides and square or mitred corners instead of hex steps. The 3D board's {@code BoardConcrete} (terrain, water,
  * artwork and picking in every view) and the legacy board conversion read this one fit. Plain Java over one {@link Cell}
- * per hex, in board units (a hex {@link HexTile#WIDTH} by {@link HexTile#HEIGHT} at scale 1). Immutable once built.
+ * per hex, in board units (a hex {@link HexTile#MODEL_WIDTH} by {@link HexTile#HEIGHT} at scale 1). Immutable once
+ * built.
  */
 public final class ConcreteFit {
     /**
@@ -70,6 +71,8 @@ public final class ConcreteFit {
     private final int width, height;
     private final List<Cell> cells;
     private final float scale, hexWidth, hexHeight;
+    /** The farthest a fitted corner moves: one side of the hex, the lattice's longest (its slanted sides). */
+    private final float maxMove;
     private final boolean everywhere;
     /** Null for material boundaries; otherwise the higher owner of a dry concrete level boundary. */
     private final Integer plateau;
@@ -97,8 +100,9 @@ public final class ConcreteFit {
         this.height = height;
         this.cells = cells;
         this.scale = scale;
-        hexWidth = HexTile.WIDTH * scale;
+        hexWidth = HexTile.MODEL_WIDTH * scale;
         hexHeight = HexTile.HEIGHT * scale;
+        maxMove = Math.max(hexWidth / 2, (float) Math.hypot(hexWidth / 4, hexHeight / 2));
         this.everywhere = everywhere;
         this.plateau = plateau;
         this.previous = previous;
@@ -410,7 +414,7 @@ public final class ConcreteFit {
                 Line previous = edges[(i + chain.size() - 1) % chain.size()], next = edges[i];
                 if (previous != next) { turns++; }
                 Point p = previous == next ? next.project(chain.get(i).original) : previous.intersection(next);
-                if (p == null || p.dst(chain.get(i).original) > 42 * scale) { fits = false; break; }
+                if (p == null || p.dst(chain.get(i).original) > maxMove) { fits = false; break; }
                 points[i] = p;
                 error += p.dst2(chain.get(i).original);
             }
@@ -696,7 +700,7 @@ public final class ConcreteFit {
         // A failed fit leaves the original rectangle intact. Never taper a pier to accommodate its landing.
         for (int i = first; i <= last; i++) {
             Point p = points[i - first];
-            if (p == null || p.dst(chain.get(i).original) > 42.001f * scale) { return null; }
+            if (p == null || p.dst(chain.get(i).original) > maxMove + .001f * scale) { return null; }
             if (i < last && points[i + 1 - first] == null) { return null; }
             if (i < last && !clearEdge(chain.get(i), p, points[i + 1 - first])) { return null; }
         }
@@ -717,6 +721,8 @@ public final class ConcreteFit {
             for (int e = 0; e < 6; e++) {
                 Point a = fittedPoint(tile.coords(), e, points, corners);
                 Point b = fittedPoint(tile.coords(), (e + 1) % 6, points, corners);
+                // Walls mitred round a lattice corner's neighbours meet on that corner, and the edge there collapses.
+                if (a.dst2(b) <= .0001f * scale * scale) { continue; }
                 float side = (b.x - a.x) * (center.y - a.y) - (b.y - a.y) * (center.x - a.x);
                 if (side <= .001f * scale * scale) { return false; }
             }
@@ -746,8 +752,8 @@ public final class ConcreteFit {
             fitQuay(chain, middle, last, runs);
             return;
         }
-        float angle = (float) (Math.round(Math.atan2(dy, dx) / (Math.PI / 6)) * Math.PI / 6);
-        float nx = -(float) Math.sin(angle), ny = (float) Math.cos(angle);
+        float[] along = construction(dx, dy);
+        float nx = -along[1], ny = along[0];
         float offset = 0;
         int begin = last - first > 1 ? first + 1 : first, end = last - first > 1 ? last - 1 : last;
         for (int i = begin; i <= end; i++) { offset += nx * chain.get(i).point.x + ny * chain.get(i).point.y; }
@@ -770,12 +776,26 @@ public final class ConcreteFit {
         float error = 0;
         for (int i = first + 1; i < last; i++) {
             float distance = Math.abs(line.side(chain.get(i).point));
-            if (distance > error) { error = distance; split = i; }
+            // Corners mirrored across a regular hex lie equally far: the first is split at, never what rounding picks.
+            if (distance > error + .01f * scale) { error = distance; split = i; }
         }
         if (last - first > 1 && (error > 24 * scale || low > high)) {
             fitQuay(chain, first, split, runs);
             fitQuay(chain, split, last, runs);
         } else { runs.add(new Run(first, last, line, false)); }
+    }
+
+    /**
+     * The construction axis nearest a run's direction, as a unit vector: one of the lattice's six edge and six
+     * centre-to-centre directions, so walls along it meet the lattice's corners where they should.
+     */
+    private float[] construction(float dx, float dy) {
+        int k = Math.floorMod(Math.round((float) (Math.atan2(dy, dx) / (Math.PI / 6))), 12);
+        float[][] axes = { { 1, 0 }, { .75f * hexWidth, hexHeight / 2 }, { hexWidth / 4, hexHeight / 2 }, { 0, 1 },
+              { -hexWidth / 4, hexHeight / 2 }, { -.75f * hexWidth, hexHeight / 2 } };
+        float[] axis = axes[k % 6];
+        float sign = k < 6 ? 1 : -1, length = (float) Math.hypot(axis[0], axis[1]);
+        return new float[] { sign * axis[0] / length, sign * axis[1] / length };
     }
 
     private boolean clearEdge(Corner corner, Point a, Point b) {
@@ -858,7 +878,7 @@ public final class ConcreteFit {
 
     /**
      * The shortest move that puts a convex footprint in hex {@code at} on the land side of every fitted wall and bank of
-     * its hex ({@link #wall}), half a pixel clear (at scale 1); null when none exists within 42 px.
+     * its hex ({@link #wall}), half a pixel clear (at scale 1); null when none exists within one side of the hex.
      */
     public Shift clearance(List<Point> footprint, Coords at) {
         Point c = center(at);
@@ -893,7 +913,7 @@ public final class ConcreteFit {
             boolean feasible = rows.stream().allMatch(row -> row[0] * t[0] + row[1] * t[1] <= row[2] + 1e-3f);
             if (feasible && (best == null || Math.hypot(t[0], t[1]) < Math.hypot(best[0], best[1]))) { best = t; }
         }
-        return best == null || Math.hypot(best[0], best[1]) > 42 * scale ? null : new Shift(best[0], best[1]);
+        return best == null || Math.hypot(best[0], best[1]) > maxMove ? null : new Shift(best[0], best[1]);
     }
 
     /** A convex polygon clipped by a convex polygon, both counter-clockwise (Sutherland-Hodgman). */

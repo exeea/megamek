@@ -23,6 +23,7 @@ import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import org.junit.jupiter.api.Test;
 
 class BoardPlaneConnectionsTest {
@@ -112,7 +113,8 @@ class BoardPlaneConnectionsTest {
                       : new MovementEnvelopeSprite(context, color, owner, borders);
                 sprite.drawTactical(graphics);
             }
-            return graphics.snapshot();
+            // The 2D painters draw on the image's hexes; the 3D board maps their capture onto its own (GpuBoardSource).
+            return graphics.snapshot().scaledX(HexTile.IMAGE_TO_MODEL_X);
         } finally {
             graphics.dispose();
         }

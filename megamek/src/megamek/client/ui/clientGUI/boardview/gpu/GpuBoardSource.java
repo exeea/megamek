@@ -54,6 +54,7 @@ import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.Flare;
 import megamek.common.event.GameAttackResolvedEvent;
@@ -89,6 +90,8 @@ final class GpuBoardSource implements BoardSource {
     private GpuBoardActions actions;
     volatile UiPreferences uiPreferences;
     private final Map<Image, BoardScene.Pixels> unitImages = new IdentityHashMap<>();
+    /** The last tactical capture and its copy in board units (see {@link #tacticalGeometry}); EDT. */
+    private BoardTactical tacticalSource, tacticalMapped;
     private final UnitCamouflage camouflage = new UnitCamouflage();
     private final GpuReportLog reports = new GpuReportLog();
     private final GpuBattleStatus battleStatus = new GpuBattleStatus();
@@ -1016,7 +1019,8 @@ final class GpuBoardSource implements BoardSource {
      * EDT: the board state's tactical capture without MegaMek's sprites the HUD draws itself (G4, a consumer filter):
      * the firing solutions always (the board labels' to-hit badges), and the path's step arrows and costs while the
      * plan draws the route. MegaMek's movement envelope stays.
-     * The sprites are hidden only for this capture, on the thread that paints the Legacy 2D board.
+     * The sprites are hidden only for this capture, on the thread that paints the Legacy 2D board. The capture is in the
+     * 2D board's pixels; the 3D board's hexes are narrower, so its x is mapped once per changed capture.
      */
     private BoardTactical tacticalGeometry(boolean planner) {
         List<Sprite> skipped = Stream.concat(view.getAllSprites().stream(), view.getPathSprites().stream())
@@ -1025,7 +1029,12 @@ final class GpuBoardSource implements BoardSource {
               .toList();
         skipped.forEach(sprite -> sprite.setHidden(true));
         try {
-            return view.captureTacticalGeometry();
+            BoardTactical captured = view.captureTacticalGeometry();
+            if (captured != tacticalSource) {
+                tacticalSource = captured;
+                tacticalMapped = captured.scaledX(HexTile.IMAGE_TO_MODEL_X);
+            }
+            return tacticalMapped;
         } finally {
             skipped.forEach(sprite -> sprite.setHidden(false));
         }

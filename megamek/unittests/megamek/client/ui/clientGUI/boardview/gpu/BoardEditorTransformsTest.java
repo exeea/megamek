@@ -25,7 +25,7 @@ class BoardEditorTransformsTest {
         var features = BoardFeatures.capture(hex, at, Map.of()).stream().filter(f -> f.decoration() != null).toList();
         assertEquals(1, features.size());
         var feature = features.getFirst();
-        assertEquals(object.x() * 84, feature.x(), .0001);
+        assertEquals(object.x() * BoardGeometry.TILE_WIDTH, feature.x(), .0001);
         assertEquals(object.y() * 72, feature.y(), .0001);
         assertEquals(0, feature.elevation(), .0001);
         Vector3 modelPoint = new Vector3(2, 3, 5);
@@ -69,7 +69,7 @@ class BoardEditorTransformsTest {
         // Paint stretches its stamp the same way: the texture still spans the stretched rectangle.
         var paint = new BoardDecoration("paint", "decal", "paint", null, 0, 0, 35, false, 2,
               BoardDecoration.Placement.ground(), 0, false, 0, 0).withStretch(new BoardDecoration.Stretch(2, .5, 1));
-        double[] sample = paint.rotateVector(84 * 2 * 2 * .25, 72 * 2 * .5 * -.3, 0);
+        double[] sample = paint.rotateVector(BoardGeometry.TILE_WIDTH * 2 * 2 * .25, 72 * 2 * .5 * -.3, 0);
         assertEquals(.75, BoardDecals.paintUv(paint).u(sample[0], sample[1]), .00001);
         assertEquals(.8, BoardDecals.paintUv(paint).v(sample[0], sample[1]), .00001);
         // Layout rows hand the same stretch to the drawn terrain-owned rows and to imported objects.
@@ -92,7 +92,7 @@ class BoardEditorTransformsTest {
     @Test void tiltedPaintHasMatchingUvsAndNoFootprintWhenEdgeOn() {
         var object = new BoardDecoration("paint", "decal", "paint", null, 0, 0, 35, false, 2,
               BoardDecoration.Placement.ground(), 0, false, 60, 20);
-        double[] sample = object.rotateVector(84 * 2 * .25, 72 * 2 * -.3, 0);
+        double[] sample = object.rotateVector(BoardGeometry.TILE_WIDTH * 2 * .25, 72 * 2 * -.3, 0);
         var uv = BoardDecals.paintUv(object);
         assertEquals(.75, uv.u(sample[0], sample[1]), .00001);
         assertEquals(.8, uv.v(sample[0], sample[1]), .00001);

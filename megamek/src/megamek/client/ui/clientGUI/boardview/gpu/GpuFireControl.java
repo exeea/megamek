@@ -209,7 +209,7 @@ final class GpuFireControl implements Disposable {
     }
 
     private static BoardScene.Pixels labelArtwork(String label) {
-        BufferedImage image = new BufferedImage((int) BoardGeometry.TILE_WIDTH * LABEL_ART_SCALE,
+        BufferedImage image = new BufferedImage((int) Math.ceil(BoardGeometry.TILE_WIDTH) * LABEL_ART_SCALE,
               (int) BoardGeometry.TILE_HEIGHT * LABEL_ART_SCALE, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();
         try {

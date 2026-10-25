@@ -15,7 +15,7 @@ import megamek.common.board.HexTile;
 
 /** Z-up, tightly tiled hex columns. Rendering and picking use these same surfaces. */
 final class BoardGeometry {
-    /** One level in authored board models, using the same units as an 84 by 72 hex. */
+    /** One level in authored board models, in board model units. */
     static final int MODEL_LEVEL_HEIGHT = HexTile.LEVEL_HEIGHT;
     /** Independent default for a whole unit occupying more than one game hex. */
     static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 1.0f;
@@ -77,7 +77,7 @@ final class BoardGeometry {
      * an edge a marker is coplanar with the terrain there and flickers against it while the camera rotates.
      */
     static final float MARKER_INSET = 0.1f;
-    static final float TILE_WIDTH = HexTile.WIDTH;
+    static final float TILE_WIDTH = HexTile.MODEL_WIDTH;
     static final float TILE_HEIGHT = HexTile.HEIGHT;
     static float HEX_SCALE;
     static float WIDTH;
@@ -176,6 +176,22 @@ final class BoardGeometry {
 
     static int edgeDirection(int edge) {
         return HexTile.edgeDirection(edge);
+    }
+
+    /**
+     * How far (x, y) lies from the hex's centre towards its edge in this direction, square to that edge: 0 on the line
+     * through the centre parallel to it, 1 all along it, so both hexes sharing the edge agree there.
+     */
+    static float share(Coords coords, int direction, float x, float y) {
+        int edge = Math.floorMod(1 - direction, 6);
+        float ax = HexTile.cornerOffsetX(edge, TILE_WIDTH), ay = HexTile.cornerOffsetY(edge, TILE_HEIGHT);
+        float bx = HexTile.cornerOffsetX((edge + 1) % 6, TILE_WIDTH);
+        float by = HexTile.cornerOffsetY((edge + 1) % 6, TILE_HEIGHT);
+        float scale = hexScale(), px = (x - centerX(coords)) / scale, py = (y - centerY(coords)) / scale;
+        // Signed distance towards the centre is positive; both corners of a lattice edge lie at the same distance.
+        float inradius = (ax * by - ay * bx) / (float) Math.hypot(bx - ax, by - ay);
+        float inside = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) / (float) Math.hypot(bx - ax, by - ay);
+        return 1 - inside / inradius;
     }
 
     /** Pulls a point toward a hex center inside the hex plane; the point keeps its elevation. */

@@ -318,8 +318,8 @@ class BoardNaturalBridgeTest {
                 var seam = new Vector3(center).add(gate);
                 var normal = new Vector3(gate).nor();
                 // The mouth's corners, top and underside, or the hex corners that replace them where the joint closes
-                // against its cliff. Those lie on the hex edge itself, which a diagonal neighbour's 84 by 72 hex does
-                // not quite meet square. Beyond them, each span's own bank mouth meets the edge's line.
+                // against its cliff. Those lie on the hex edge itself, a hair off the centres' midline, as the hex is
+                // regular only to a 32nd. Beyond them, each span's own bank mouth meets the edge's line.
                 var first = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(1 - d, 6));
                 var edge = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(2 - d, 6)).sub(first).nor();
                 float half = BoardRelief.metres(BoardBridge.NATURAL_HALF_WIDTH * 1.04f) + .001f;

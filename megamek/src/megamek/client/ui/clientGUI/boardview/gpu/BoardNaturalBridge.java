@@ -201,7 +201,7 @@ final class BoardNaturalBridge {
                 point.z -= exposed * Math.min(BoardRelief.metres(1.3f), space * .16f) * t * t
                       * (.6f + .4f * noise(point.x, point.y));
                 top[r][i] = point;
-                bottom[r][i] = new Vector3(point).add(0, 0, -thickness(scene, tile, center, space, point));
+                bottom[r][i] = new Vector3(point).add(0, 0, -thickness(scene, tile, space, point));
                 if (exposed > 0) {
                     var inward = new Vector3(center).sub(point); inward.z = 0; inward.nor();
                     bottom[r][i].mulAdd(inward, BoardRelief.metres(.8f) * t * t * t * t * exposed);
@@ -247,7 +247,7 @@ final class BoardNaturalBridge {
         for (var tongue : tongues) {
             int corner = rim.indexOf(tongue.vertex()), mouth = rim.indexOf(tongue.mouth());
             var deep = tongue.deep();
-            var under = new Vector3(deep).add(0, 0, -thickness(scene, tile, center, space, deep));
+            var under = new Vector3(deep).add(0, 0, -thickness(scene, tile, space, deep));
             var outward = new Vector3(deep).add(tongue.mouth().point()).scl(.5f).sub(tongue.vertex().point());
             outward.z = 0;
             facing(facets, top[rings][corner], new Vector3(deep), top[rings][mouth], Part.TOP, Vector3.Z);
@@ -277,14 +277,12 @@ final class BoardNaturalBridge {
      * The rock's depth below a top point: a thin crown, thickening where banks anchor it and kept clear of the last whole
      * level below; joined spans weigh their own anchors and room across their shared edge, so both agree there.
      */
-    private static float thickness(BoardScene scene, BoardScene.Tile tile, Vector3 center, float space, Vector3 point) {
-        float level = deck(tile);
+    private static float thickness(BoardScene scene, BoardScene.Tile tile, float space, Vector3 point) {
         float anchored = anchoring(scene, tile, point), room = space;
         for (int d = 0; d < 6; d++) {
             var next = scene.tile(tile.coords().translated(d));
             if (!BoardBridge.connected(tile, next, d)) { continue; }
-            var gate = BoardGeometry.center(next.coords(), level).sub(center).scl(.5f);
-            float u = Math.clamp(new Vector3(point).sub(center).dot(gate) / gate.len2(), 0, 1);
+            float u = Math.clamp(BoardGeometry.share(tile.coords(), d, point.x, point.y), 0, 1);
             float join = Math.clamp(2 * u - 1, 0, 1);
             anchored = Math.max(anchored, anchoring(scene, next, point) * join);
             float nextLevel = (next.elevation() + BoardBridge.feature(next).elevation()) * BoardGeometry.level();
@@ -671,12 +669,10 @@ final class BoardNaturalBridge {
     }
 
     private static float anchoring(BoardScene scene, BoardScene.Tile tile, Vector3 point) {
-        var center = BoardGeometry.center(tile.coords(), tile.elevation() + BoardBridge.feature(tile).elevation());
         float anchored = 0;
         for (int d = 0; d < 6; d++) {
             if (!BoardBridge.abutment(tile, scene.tile(tile.coords().translated(d)), d)) { continue; }
-            var gate = BoardGeometry.center(tile.coords().translated(d), 0).sub(BoardGeometry.center(tile.coords(), 0)).scl(.5f);
-            float u = Math.clamp(new Vector3(point).sub(center).dot(gate) / gate.len2(), 0, 1);
+            float u = Math.clamp(BoardGeometry.share(tile.coords(), d, point.x, point.y), 0, 1);
             anchored = Math.max(anchored, u * u);
         }
         return anchored;

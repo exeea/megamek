@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Shape;
 import java.awt.geom.Area;
+import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,6 +20,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 
 /** Tessellation and terrain clipping only; all tactical decisions are supplied by the client painters. */
 final class BoardTacticalGeometry {
@@ -91,6 +93,68 @@ final class BoardTacticalGeometry {
     }
 
     private BoardTacticalGeometry() { }
+
+    /** A hex's centre in tactical units: board units at hex scale 1, y down. */
+    static BoardTactical.Point centre(Coords coords) {
+        return new BoardTactical.Point(HexTile.centerX(coords, BoardGeometry.TILE_WIDTH),
+              -HexTile.centerY(coords, BoardGeometry.TILE_HEIGHT));
+    }
+
+    /**
+     * Where edge {@code a}'s line, moved {@code insetA} towards the hex centre, meets edge {@code b}'s line moved
+     * {@code insetB}, in tactical units from the centre. Edge k runs from corner k to corner k + 1.
+     */
+    static BoardTactical.Point insetCorner(int a, double insetA, int b, double insetB) {
+        double[] p = insetLine(a, insetA), q = insetLine(b, insetB);
+        double t = ((q[0] - p[0]) * q[3] - (q[1] - p[1]) * q[2]) / (p[2] * q[3] - p[3] * q[2]);
+        return new BoardTactical.Point((float) (p[0] + p[2] * t), (float) -(p[1] + p[3] * t));
+    }
+
+    /** Edge k's line moved {@code inset} towards the centre: a point on it and its direction, y up. */
+    private static double[] insetLine(int edge, double inset) {
+        Vector3 a = BoardGeometry.modelCorner(edge), b = BoardGeometry.modelCorner(edge + 1);
+        double dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
+        // The corners run counter-clockwise: the inward normal lies to the left of each edge.
+        return new double[] { a.x - dy / length * inset, a.y + dx / length * inset, dx, dy };
+    }
+
+    /** The hex outline moved {@code inset} towards its centre, in tactical units from the centre. */
+    static Path2D.Float insetHexagon(double inset) {
+        Path2D.Float outline = new Path2D.Float();
+        for (int k = 0; k < 6; k++) {
+            var corner = insetCorner(k - 1, inset, k, inset);
+            if (k == 0) { outline.moveTo(corner.x(), corner.y()); } else { outline.lineTo(corner.x(), corner.y()); }
+        }
+        outline.closePath();
+        return outline;
+    }
+
+    /** The band between the hex outline moved {@code padding} and {@code padding + width} towards its centre. */
+    static Area ring(double padding, double width) {
+        Area ring = new Area(insetHexagon(padding));
+        ring.subtract(new Area(insetHexagon(padding + width)));
+        return ring;
+    }
+
+    /** {@code shape}, in tactical units from {@code origin}, as one fill. */
+    static BoardTactical.Fill fill(Shape shape, BoardTactical.Point origin, int argb, BoardTactical.Playback playback,
+          BoardTactical.HexBorder border, BoardTactical.Point plane) {
+        List<BoardTactical.Contour> contours = new ArrayList<>();
+        List<BoardTactical.Point> points = new ArrayList<>();
+        PathIterator path = shape.getPathIterator(null, .25);
+        float[] xy = new float[6];
+        while (!path.isDone()) {
+            int segment = path.currentSegment(xy);
+            if (segment == PathIterator.SEG_MOVETO && !points.isEmpty()) {
+                contours.add(new BoardTactical.Contour(points));
+                points = new ArrayList<>();
+            }
+            if (segment != PathIterator.SEG_CLOSE) { points.add(new BoardTactical.Point(origin.x() + xy[0], origin.y() + xy[1])); }
+            path.next();
+        }
+        if (!points.isEmpty()) { contours.add(new BoardTactical.Contour(points)); }
+        return new BoardTactical.Fill(contours, path.getWindingRule(), argb, playback, border, plane);
+    }
 
     /** Horizontal trapezoids preserve holes, dashed strokes, concave polygons and glyph counters. */
     static List<Triangle> flat(BoardTactical.Fill fill) {

@@ -209,7 +209,7 @@ class BoardRailTest {
                         assertEquals(RailRoute.stub(mask), first.len() - last.len(), .01f, kind + " " + mask);
                         assertEquals(0, first.crs(last).len(), .01f);
                     } else if (Math.abs(turn - 180) > .5f) {
-                        // Edges two apart lie 120 degrees apart round the centre (to within the 84 x 72 hex's stretch).
+                        // Edges two apart lie 120 degrees apart round the centre.
                         assertEquals(120, turn, 1, kind + " " + mask + ": an arc joins edges two apart, never adjacent ones");
                         // The arc's centre is the centre of the hex across the edge between its ends.
                         var centre = new Vector3(first).add(last).scl(2);

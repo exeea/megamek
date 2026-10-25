@@ -45,6 +45,7 @@ import megamek.common.ResolvedAttack;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameAttackResolvedEvent;
 import megamek.common.event.GameNuclearDetonationEvent;
@@ -281,18 +282,18 @@ class GpuBoardSourceTest {
                 fixture.view.checkLOS(coords);
                 fixture.source.refresh();
             });
-            Rectangle outline = null;
+            java.awt.geom.Rectangle2D outline = null;
             for (var fill : fixture.source.takeFrame().scene().tactical().fills()) {
                 if ((fill.argb() & 0xFFFFFF) == (Color.RED.getRGB() & 0xFFFFFF)) {
-                    Rectangle bounds = fill.shape().getBounds();
-                    outline = outline == null ? bounds : outline.union(bounds);
+                    var bounds = fill.shape().getBounds2D();
+                    outline = outline == null ? bounds : outline.createUnion(bounds);
                 }
             }
             assertTrue(outline != null, "The measurement cursor must be captured as native geometry");
-            assertEquals(coords.getX() * 63, outline.x, 1);
-            assertEquals(coords.getY() * 72, outline.y, 1);
-            assertTrue(outline.width >= 83, "The red cursor must reach both sides of its hex");
-            assertTrue(outline.height >= 71, "The red cursor must reach the top and bottom edges");
+            assertEquals(coords.getX() * .75f * BoardGeometry.TILE_WIDTH, outline.getX(), 1);
+            assertEquals(coords.getY() * BoardGeometry.TILE_HEIGHT, outline.getY(), 1);
+            assertTrue(outline.getWidth() >= BoardGeometry.TILE_WIDTH - 1, "The red cursor must reach both sides of its hex");
+            assertTrue(outline.getHeight() >= 71, "The red cursor must reach the top and bottom edges");
         }
     }
 
@@ -492,8 +493,8 @@ class GpuBoardSourceTest {
                 }
             });
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
-            assertEquals((int) BoardGeometry.TILE_WIDTH, after.ground().width());
-            assertEquals((int) BoardGeometry.TILE_HEIGHT, after.ground().height());
+            assertEquals(HexTile.WIDTH, after.ground().width());
+            assertEquals(HexTile.HEIGHT, after.ground().height());
             assertTrue(samePixels(tile.ground(), after.ground()));
         } finally {
             SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMapZoomIndex(originalZoom));

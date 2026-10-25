@@ -37,9 +37,11 @@ final class BoardRelief {
     private static final int[] CORNER_DX = { 2, 1, -1, -2, -1, 1 };
     private static final int[] CORNER_DY = { 0, 1, 1, 0, -1, -1 };
     private static final float EPSILON = .0005f;
+    /** The most of a neck's shared edge, in edges, that each of its ends recedes: at least 30 % stays a usable top. */
+    private static final float NECK_END = .34f;
     /**
      * How far, in edges, a water hex's bank strips may stitch ahead of their parameter order: a third of an edge,
-     * about as far as the steps through a corner slide the boundary's samples along it (12.9 of 42 world units).
+     * about as far as the steps through a corner slide the boundary's samples along it.
      */
     private static final float LEAD = 1 / 3f;
     /**
@@ -1039,6 +1041,14 @@ final class BoardRelief {
             solids++;
         }
         d *= pin / solids;
+        // Two tops joined beside a lower hex end in this corner: its relief slides it along their shared edge (see
+        // cornerDirection), and however the rock falls the neck keeps the middle of that edge (NECK_END).
+        if (solids == 2) {
+            float[] fillet = new float[2];
+            filletOffset(corner, z, fillet);
+            float moved = (band[0] + fillet[0]) * direction[0] + (band[1] + fillet[1]) * direction[1];
+            d = Math.max(d, -NECK_END * BoardGeometry.width() / 2 - moved);
+        }
         // The bank must support the free end of a fall. Keep its rounded rock masses, but do not excavate the
         // shared shoulder from underneath the mouth; the adjoining faces retain their own recesses.
         if (corner.waterfall) { d = Math.max(0, d); }
@@ -2938,8 +2948,9 @@ final class BoardRelief {
     private float along(int e, Vector3 p) {
         Corner a = corner(self, e), b = corner(self, e + 1);
         float ax = a.x + a.move()[0], ay = a.y + a.move()[1];
-        float dx = b.x + b.move()[0] - ax, dy = b.y + b.move()[1] - ay;
-        return Math.clamp(((p.x - ax) * dx + (p.y - ay) * dy) / (dx * dx + dy * dy), 0, 1);
+        float dx = b.x + b.move()[0] - ax, dy = b.y + b.move()[1] - ay, length2 = dx * dx + dy * dy;
+        // A concrete fit can collapse an edge where two mitred walls meet on its corner: it has no length to run along.
+        return length2 == 0 ? 0 : Math.clamp(((p.x - ax) * dx + (p.y - ay) * dy) / length2, 0, 1);
     }
 
     /**

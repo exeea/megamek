@@ -3,9 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.Shape;
 import java.awt.geom.Path2D;
-import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -14,7 +12,6 @@ import java.util.Map;
 
 import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.board.Coords;
 
 /** Presentation of the selected deployer's captured legal hexes; no deployment rules are repeated here. */
@@ -26,7 +23,8 @@ final class BoardDeploymentGeometry {
     private static final float FLAT_BAND_WIDTH = 10;
     private static final BoardTactical.Outline OUTLINE = new BoardTactical.Outline(Color.WHITE.getRGB(),
           new BasicStroke(2.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10, new float[] { 5, 3 }, 0));
-    private record Edge(int direction, int cut, double padding, double width) { }
+    /** A band's side and whether its right (clockwise) and left neighbouring sides are exposed too. */
+    private record Edge(int direction, boolean right, boolean left, double padding, double width) { }
 
     private BoardDeploymentGeometry() { }
 
@@ -80,17 +78,13 @@ final class BoardDeploymentGeometry {
                 if ((edges & (1 << direction)) == 0) { continue; }
                 // The movement-envelope painter uses the same cuts: meet the next exposed edge inside the hex,
                 // or extend to the shared side when the perimeter continues through its same-color neighbor.
-                int cut = (edges & (1 << ((direction + 1) % 6))) == 0
-                      ? HexDrawUtilities.CUT_RIGHT_BORDER : HexDrawUtilities.CUT_RIGHT_INSIDE;
-                cut |= (edges & (1 << ((direction + 5) % 6))) == 0
-                      ? HexDrawUtilities.CUT_LEFT_BORDER : HexDrawUtilities.CUT_LEFT_INSIDE;
+                boolean right = (edges & (1 << ((direction + 1) % 6))) != 0, left = (edges & (1 << ((direction + 5) % 6))) != 0;
                 BoardTactical.Contour segment = segments.computeIfAbsent(
-                      new Edge(direction, cut, border.padding(), FLAT_BAND_WIDTH), BoardDeploymentGeometry::segment);
+                      new Edge(direction, right, left, border.padding(), FLAT_BAND_WIDTH), BoardDeploymentGeometry::segment);
                 List<BoardTactical.Point> points = new ArrayList<>(4);
                 for (BoardTactical.Point point : segment.points()) {
-                    points.add(new BoardTactical.Point(border.anchor().x()
-                          + (point.x() - BoardGeometry.TILE_WIDTH / 2) * border.scale(), border.anchor().y()
-                          + (point.y() - BoardGeometry.TILE_HEIGHT / 2) * border.scale()));
+                    points.add(new BoardTactical.Point(border.anchor().x() + point.x() * border.scale(),
+                          border.anchor().y() + point.y() * border.scale()));
                 }
                 contours.add(new BoardTactical.Contour(points));
             }
@@ -116,24 +110,19 @@ final class BoardDeploymentGeometry {
         return result;
     }
 
+    /**
+     * The band along an exposed side, from the hex's centre: its outer line {@code padding} in from the side, its inner
+     * line {@code width} further. Each end meets the next exposed side's band in a mitre, or runs out to the outline
+     * where the perimeter continues through the same-colour neighbour.
+     */
     private static BoardTactical.Contour segment(Edge edge) {
-        List<BoardTactical.Point> outer = points(HexDrawUtilities.getHexBorderLine(edge.direction(), edge.cut(), edge.padding()));
-        List<BoardTactical.Point> inner = points(HexDrawUtilities.getHexBorderLine(edge.direction(), edge.cut(),
-              edge.padding() + edge.width()));
-        return new BoardTactical.Contour(List.of(outer.get(0), outer.get(1), inner.get(1), inner.get(0)));
-    }
-
-    private static List<BoardTactical.Point> points(Shape line) {
-        List<BoardTactical.Point> result = new ArrayList<>(2);
-        PathIterator path = line.getPathIterator(null);
-        float[] point = new float[6];
-        while (!path.isDone()) {
-            if (path.currentSegment(point) != PathIterator.SEG_CLOSE) {
-                result.add(new BoardTactical.Point(point[0], point[1]));
-            }
-            path.next();
-        }
-        return result;
+        int side = Math.floorMod(1 - edge.direction(), 6);
+        double outer = edge.padding(), inner = edge.padding() + edge.width();
+        return new BoardTactical.Contour(List.of(
+              BoardTacticalGeometry.insetCorner(side, outer, side + 1, edge.left() ? outer : 0),
+              BoardTacticalGeometry.insetCorner(side, outer, side - 1, edge.right() ? outer : 0),
+              BoardTacticalGeometry.insetCorner(side, inner, side - 1, edge.right() ? inner : 0),
+              BoardTacticalGeometry.insetCorner(side, inner, side + 1, edge.left() ? inner : 0)));
     }
 
     /** Straight-alpha SRC_OVER in captured 8-bit colors, without allocating an image for each hex. */

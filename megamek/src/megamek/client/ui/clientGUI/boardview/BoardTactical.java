@@ -30,6 +30,15 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         return new BoardTactical(fills, labels, walls, flatWalls, ruler);
     }
 
+    /** These commands with every x times {@code factor}: from the 2D board's pixels onto hexes of another width. */
+    public BoardTactical scaledX(float factor) {
+        return new BoardTactical(fills.stream().map(fill -> fill.scaledX(factor)).toList(),
+              labels.stream().map(label -> new Label(label.anchor().scaledX(factor), label.text(), label.playback())).toList(),
+              walls.stream().map(wall -> new Wall(wall.coords(), wall.a().scaledX(factor), wall.b().scaledX(factor),
+                    wall.border(), wall.outlineDistance(), wall.playback(), wall.aNeighbors(), wall.bNeighbors())).toList(),
+              flatWalls.stream().map(fill -> fill.scaledX(factor)).toList(), ruler);
+    }
+
     /** EDT-owned measurement snapshot. Heights are absolute display levels; null blockedAt means clear LOS. */
     public record Ruler(Coords start, Coords end, int startHeight, int endHeight, Coords blockedAt,
           int startArgb, int endArgb) { }
@@ -58,7 +67,9 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         return playback != Playback.LIVE && (!hideMovement || playback == Playback.HOLD_DURING_PLAYBACK);
     }
 
-    public record Point(float x, float y) { }
+    public record Point(float x, float y) {
+        Point scaledX(float factor) { return new Point(x * factor, y); }
+    }
 
     /** A straight upright segment anchored to its hex's surface; height is in board elevation levels. */
     public record Wall(Coords coords, Point a, Point b, BoardRangeBorder border, float outlineDistance, Playback playback,
@@ -115,6 +126,14 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
 
         public Fill {
             contours = List.copyOf(contours);
+        }
+
+        Fill scaledX(float factor) {
+            return new Fill(contours.stream().map(contour -> new Contour(contour.points().stream()
+                        .map(point -> point.scaledX(factor)).toList())).toList(), winding, argb, playback,
+                  border == null ? null : new HexBorder(border.anchor().scaledX(factor), border.padding(), border.width(),
+                        border.scale(), border.zone()),
+                  planeAnchor == null ? null : planeAnchor.scaledX(factor));
         }
 
         public Path2D shape() {

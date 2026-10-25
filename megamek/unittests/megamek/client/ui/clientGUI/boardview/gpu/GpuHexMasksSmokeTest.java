@@ -30,6 +30,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -72,7 +73,8 @@ class GpuHexMasksSmokeTest {
             try {
                 graphics.setColor(new Color(73, 151, 227));
                 graphics.fillHexBorder(new Point(), 1, 1.5, 2.5, false);
-                opaque = graphics.snapshot();
+                // Drawn on the 2D board's hexes; the 3D board maps the capture onto its own (GpuBoardSource).
+                opaque = graphics.snapshot().scaledX(HexTile.IMAGE_TO_MODEL_X);
             } finally { graphics.dispose(); }
             BoardScene single = scene(1, 1, opaque);
             surfaces.put(new Coords(0, 0), surface(single.tiles().getFirst(), 0));
@@ -300,7 +302,7 @@ class GpuHexMasksSmokeTest {
                     }
                 }
             }
-            return graphics.snapshot();
+            return graphics.snapshot().scaledX(HexTile.IMAGE_TO_MODEL_X);
         } finally { graphics.dispose(); }
     }
 

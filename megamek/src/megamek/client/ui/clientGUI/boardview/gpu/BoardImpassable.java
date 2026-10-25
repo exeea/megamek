@@ -1,16 +1,12 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.Color;
-import java.awt.Point;
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.util.ArrayList;
 import java.util.List;
 
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.board.Coords;
 
 /** Floating hex markings for the captured restriction flag; never physical obstacles or movement rules. */
@@ -29,13 +25,12 @@ final class BoardImpassable {
         for (BoardScene.Tile tile : scene.tiles()) {
             if (!tile.impassable()) { continue; }
             Coords coords = tile.coords();
-            float x = coords.getX() * BoardGeometry.TILE_WIDTH * .75f;
-            float y = (coords.getY() + (coords.getX() & 1) * .5f) * BoardGeometry.TILE_HEIGHT;
-            var anchor = new BoardTactical.Point(x + BoardGeometry.TILE_WIDTH / 2, y + BoardGeometry.TILE_HEIGHT / 2);
+            var anchor = BoardTacticalGeometry.centre(coords);
             boolean emphasized = planning || coords.equals(hover);
             for (BoardTactical.Fill fill : TEMPLATE) {
                 var contours = fill.contours().stream().map(contour -> new BoardTactical.Contour(contour.points().stream()
-                      .map(point -> new BoardTactical.Point(x + point.x(), y + point.y())).toList())).toList();
+                      .map(point -> new BoardTactical.Point(anchor.x() + point.x(), anchor.y() + point.y())).toList()))
+                      .toList();
                 int color = emphasized ? ink(fill.border() == null ? 112 : 240) : fill.argb();
                 // Both the border and stripes use the existing floating-marker plane for this owner hex.
                 var border = fill.border() == null ? null : new BoardTactical.HexBorder(anchor, INSET, BORDER_WIDTH, 1);
@@ -46,29 +41,24 @@ final class BoardImpassable {
         return List.copyOf(result);
     }
 
-    /** Build the two local shapes once; each hex only translates and recolors their immutable contours. */
+    /** Build the two shapes once, about the hex centre; each hex only translates and recolors their contours. */
     private static List<BoardTactical.Fill> template() {
-        float width = BoardGeometry.TILE_WIDTH, height = BoardGeometry.TILE_HEIGHT;
+        float half = BoardGeometry.TILE_WIDTH / 2 + BoardGeometry.TILE_HEIGHT;
         Path2D stripes = new Path2D.Float();
-        for (float offset = 0; offset < width + height; offset += HATCH_SPACING) {
-            stripes.moveTo(offset, 0);
-            stripes.lineTo(offset + HATCH_WIDTH, 0);
-            stripes.lineTo(offset + HATCH_WIDTH - height, height);
-            stripes.lineTo(offset - height, height);
+        for (float offset = -half; offset < half; offset += HATCH_SPACING) {
+            stripes.moveTo(offset, -BoardGeometry.TILE_HEIGHT / 2);
+            stripes.lineTo(offset + HATCH_WIDTH, -BoardGeometry.TILE_HEIGHT / 2);
+            stripes.lineTo(offset + HATCH_WIDTH - BoardGeometry.TILE_HEIGHT, BoardGeometry.TILE_HEIGHT / 2);
+            stripes.lineTo(offset - BoardGeometry.TILE_HEIGHT, BoardGeometry.TILE_HEIGHT / 2);
             stripes.closePath();
         }
         Area hatch = new Area(stripes);
-        hatch.intersect(new Area(HexDrawUtilities.getHexFullBorderLine(INSET + BORDER_WIDTH)));
-        var graphics = new BoardTacticalGraphics();
-        try {
-            graphics.setColor(new Color(ink(48), true));
-            graphics.fill(hatch);
-            graphics.setColor(new Color(ink(180), true));
-            graphics.fillHexBorder(new Point(), 1, INSET, BORDER_WIDTH, true);
-            return graphics.snapshot().fills();
-        } finally {
-            graphics.dispose();
-        }
+        hatch.intersect(new Area(BoardTacticalGeometry.insetHexagon(INSET + BORDER_WIDTH)));
+        var origin = new BoardTactical.Point(0, 0);
+        var border = new BoardTactical.HexBorder(origin, INSET, BORDER_WIDTH, 1);
+        return List.of(BoardTacticalGeometry.fill(hatch, origin, ink(48), BoardTactical.Playback.LIVE, null, null),
+              BoardTacticalGeometry.fill(BoardTacticalGeometry.ring(INSET, BORDER_WIDTH), origin, ink(180),
+                    BoardTactical.Playback.LIVE, border, null));
     }
 
     private static int ink(int alpha) { return alpha << 24 | RED; }

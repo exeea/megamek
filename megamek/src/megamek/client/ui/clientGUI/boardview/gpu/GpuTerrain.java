@@ -550,6 +550,10 @@ final class GpuTerrain implements Disposable {
                         if (relief.length > 0 && program.hasUniform("u_finishRelief[0]")) {
                             program.setUniform2fv("u_finishRelief[0]", relief, 0, relief.length);
                         }
+                        float[] distant = finishArrays.distant();
+                        if (distant.length > 0 && program.hasUniform("u_finishDistant[0]")) {
+                            program.setUniform2fv("u_finishDistant[0]", distant, 0, distant.length);
+                        }
                     }
                     if (program.hasUniform("u_roadRelief[0]")) {
                         float[] relief = assets.roadRelief();
@@ -4386,7 +4390,8 @@ final class GpuTerrain implements Disposable {
                       base + feature.elevation() * BoardGeometry.level()
                             - (metal ? bounds.min.z * verticalScale + .02f * BoardGeometry.level() : 0))
                       .rotate(Vector3.Z, feature.rotation())
-                      .scale(horizontalScale, horizontalScale, verticalScale);
+                      .scale(horizontalScale * (float) feature.stretch().x(), horizontalScale * (float) feature.stretch().y(),
+                            verticalScale * (float) feature.stretch().z());
             }
             bounds.mul(instance.transform);
             if (metal && !BoardMetalDeposits.accepts(scene, tile, surface, feature)) { continue; }

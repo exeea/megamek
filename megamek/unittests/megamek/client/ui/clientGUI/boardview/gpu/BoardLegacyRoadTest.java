@@ -29,8 +29,8 @@ class BoardLegacyRoadTest {
                 var road = BoardRoad.layout(at, exits, BoardRoad.capture(hex), direction -> BoardRoad.Kind.NONE);
                 for (int edge = 0; edge < 6; edge++) {
                     int next = (edge + 1) % 6;
-                    float x = (HexTile.cornerOffsetX(edge, HexTile.WIDTH)
-                          + HexTile.cornerOffsetX(next, HexTile.WIDTH)) * .49f;
+                    float x = (HexTile.cornerOffsetX(edge, HexTile.MODEL_WIDTH)
+                          + HexTile.cornerOffsetX(next, HexTile.MODEL_WIDTH)) * .49f;
                     float y = (HexTile.cornerOffsetY(edge, HexTile.HEIGHT)
                           + HexTile.cornerOffsetY(next, HexTile.HEIGHT)) * .49f;
                     assertEquals((exits & 1 << HexTile.edgeDirection(edge)) != 0, road.footprint(0).contains(x, y),

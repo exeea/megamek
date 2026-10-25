@@ -114,7 +114,7 @@ public final class BoardEditorBlueprint {
             return Math.min(difference, period - difference);
         }
     }
-    /** Local X/Y use hex width/height; Z uses board levels. Heading is the connector's outward XY direction. */
+    /** Local X/Y in board units, Z in board levels. Heading is the connector's outward XY direction. */
     public record Connector(double x, double y, double z, double heading) { }
     public record Snap(String set, List<Connector> connectors, double radius, double angleTolerance) { }
     /**
@@ -449,8 +449,10 @@ public final class BoardEditorBlueprint {
     private static Snap snap(JsonNode asset) throws IOException {
         if (!asset.has("snap")) { return null; }
         JsonNode definition = asset.path("snap");
-        double radius = definition.path("radius").asDouble(.1), angle = definition.path("angleTolerance").asDouble(2);
-        if (!Double.isFinite(radius) || radius <= 0 || radius > .5 || !Double.isFinite(angle) || angle < 0 || angle > 15) {
+        // The radius in board units: how far apart two ends may lie and still join.
+        double radius = definition.path("radius").asDouble(8), angle = definition.path("angleTolerance").asDouble(2);
+        if (!Double.isFinite(radius) || radius <= 0 || radius > HexTile.HEIGHT / 2.0 || !Double.isFinite(angle) || angle < 0
+              || angle > 15) {
             throw new IOException("Invalid snapping tolerance for " + asset.path("id"));
         }
         List<Connector> connectors = new ArrayList<>();

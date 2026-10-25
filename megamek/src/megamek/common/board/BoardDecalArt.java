@@ -20,7 +20,7 @@ import megamek.common.Configuration;
  */
 public final class BoardDecalArt {
     /** A hex in model px; a decal without a footprint entry covers one hex. */
-    private static final Footprint HEX = new Footprint(84, 72, List.of(), null);
+    private static final Footprint HEX = new Footprint(HexTile.MODEL_WIDTH, HexTile.HEIGHT, List.of(), null);
 
     /** A parking place in the decal's frame: model px from its centre, and the car's heading (CCW degrees). */
     public record Slot(double x, double y, double heading) { }

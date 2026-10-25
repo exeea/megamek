@@ -605,9 +605,16 @@ both cameras, without rebuilding geometry or making mesh LOD authoritative for s
 
 At zero detail the material branches skip normal/AO texture reads. Colour and height
 used for terrain contact blending remain sampled, preserving slope bands, shore
-materials and concrete joints. Fine cavity AO fades to 0.9; vertex/contact occlusion
-and geometry shadows remain. This approximates small pores at distance rather than
-turning off the terrain's broad shading.
+materials and concrete joints. A natural layer keeps its average look instead
+(`distantLayer`, from `u_finishDistant`: its means, read once at load from its smallest
+mip, so the far path reads no texture for them): its cavity fades to the layer's mean,
+and its relief, the length of its mean normal, takes the share of direct sun its
+tilted facets would turn away (`sunOnRelief`: much under a high sun, little under a
+low one, never more than flat ground gets). The relief is softened as the close view
+softens it (power .25), so far zoom matches the close view averaged into its pixels:
+across every family, flat and stepped, noon to evening, the mean brightness is off by
+0.85 sRGB levels on average and 2.4 at most. Other surfaces'
+cavity fades to 0.9. Vertex/contact occlusion and geometry shadows remain.
 
 Volcanic materials also skip their relief trace when normals fade out. Their surface
 map (height, roughness, AO, relief range) fades out by 1.25 metres per pixel, using a

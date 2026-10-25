@@ -1,6 +1,7 @@
 #version 330 core
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // One hexagon per tile (GpuHexGrid): the grid, or the Tactical View's ground layer with its style and arc codes.
+// BOARD_HEX
 in vec3 a_position;
 in vec3 a_hex;
 in vec4 a_style;
@@ -32,7 +33,7 @@ void main() {
         position.z = liquid ? a_hex.z * u_hexSize.z - u_planes.y * 1.05 : u_planes.x;
     }
     v_board = position.xy / u_hexSize.x;
-    v_local = a_position.xy * vec2(84.0, 72.0);
+    v_local = a_position.xy * BOARD_HEX;
     v_overlay = a_overlay;
     v_level = a_hex.z;
     gl_Position = u_projTrans * vec4(position, 1.0);

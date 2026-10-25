@@ -355,7 +355,7 @@ class BoardConcreteShoreTest {
                 Vector3 p = BoardGeometry.corner(at, 0, k);
                 var shift = coast.corners(at).get(k);
                 p.add(shift.x(), shift.y(), 0);
-                assertEquals(21 * BoardGeometry.HEX_SCALE, Math.abs(p.x - BoardGeometry.centerX(tip)), .002f,
+                assertEquals(BoardGeometry.TILE_WIDTH / 4 * BoardGeometry.HEX_SCALE, Math.abs(p.x - BoardGeometry.centerX(tip)), .002f,
                       "Every pier vertex remains on its parallel sides, including the landing end");
             }
         }
@@ -383,7 +383,7 @@ class BoardConcreteShoreTest {
                     if (Math.hypot(shift[0], shift[1]) > 10 * BoardGeometry.HEX_SCALE) { clipped++; }
                     corner.add(shift[0], shift[1], 0);
                     float across = (corner.x - a.x) * -axis.y + (corner.y - a.y) * axis.x;
-                    assertTrue(Math.abs(across) <= 21.01f * BoardGeometry.HEX_SCALE,
+                    assertTrue(Math.abs(across) <= (BoardGeometry.TILE_WIDTH / 4 + .01f) * BoardGeometry.HEX_SCALE,
                           "A dock follows its whole chain, direction=" + direction);
                 }
                 Vector3 center = BoardGeometry.center(coords, 0);
@@ -621,7 +621,8 @@ class BoardConcreteShoreTest {
                         Vector3 axis = BoardGeometry.center(CENTER.translated(direction), 0).sub(center).nor();
                         float ca = (a.x - center.x) * -axis.y + (a.y - center.y) * axis.x;
                         float cb = (b.x - center.x) * -axis.y + (b.y - center.y) * axis.x;
-                        parallel |= Math.abs(ca - cb) < .002f && Math.abs(Math.abs(ca) / BoardGeometry.HEX_SCALE - 21) < .2f;
+                        parallel |= Math.abs(ca - cb) < .002f
+                              && Math.abs(Math.abs(ca) / BoardGeometry.HEX_SCALE - BoardGeometry.TILE_WIDTH / 4) < .2f;
                     }
                     assertTrue(parallel, "Each angled bank follows a rectangular arm: " + first + ", " + second + ", edge " + e);
                 }
@@ -785,8 +786,13 @@ class BoardConcreteShoreTest {
               "The connector meets the continued runway edge");
         assertEquals(0, distance(a, b, shape.corner(join, 2)), .003f,
               "The runway reaches the trunk without a triangular notch");
-        assertEquals(shape.corner(new Coords(5, 1), 0).x, shape.corner(join, 2).x, .003f,
-              "The continued runway meets the trunk's vertical side");
+        // Where the continued runway edge reaches the trunk's vertical side, a fitted corner joins the two.
+        float x = shape.corner(new Coords(5, 1), 0).x, y = a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x);
+        boolean meets = false;
+        for (Coords at : join.allAtDistanceOrLess(1)) {
+            for (int k = 0; k < 6; k++) { meets |= Math.hypot(shape.corner(at, k).x - x, shape.corner(at, k).y - y) < .003f; }
+        }
+        assertTrue(meets, "The continued runway meets the trunk's vertical side");
     }
 
     @ParameterizedTest

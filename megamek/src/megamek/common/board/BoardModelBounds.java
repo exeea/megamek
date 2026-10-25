@@ -56,7 +56,7 @@ public final class BoardModelBounds {
     public static List<ConcreteFit.Point> footprint(Coords at, BoardDecoration object) {
         float[] bounds = bounds(object.asset());
         if (bounds == null) { return null; }
-        double x = HexTile.centerX(at, HexTile.WIDTH) + object.x() * HexTile.WIDTH;
+        double x = HexTile.centerX(at, HexTile.MODEL_WIDTH) + object.x() * HexTile.MODEL_WIDTH;
         double y = HexTile.centerY(at, HexTile.HEIGHT) + object.y() * HexTile.HEIGHT;
         var stretch = object.stretch();
         double scale = object.scale() * RailRoute.visualScale(object.asset());

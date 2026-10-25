@@ -30,6 +30,7 @@ import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.VTOLAttackSprite;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.enums.MoveStepType;
 import megamek.common.moves.MovePath;
 import megamek.common.units.EntityMovementType;
@@ -94,14 +95,16 @@ class GpuTacticalTest {
                 fixture.view.addSprites(List.of(first, second));
                 fixture.source.refresh();
                 var captured = fixture.source.takeFrame().scene().tactical();
-                assertEquals(before.fills(), captured.fills(), "The flat band and dashed line must be replaced");
+                // The 3D board receives the capture mapped onto its narrower hexes.
+                assertEquals(before.scaledX(HexTile.IMAGE_TO_MODEL_X).fills(), captured.fills(),
+                      "The flat band and dashed line must be replaced");
                 assertEquals(2, captured.walls().size());
                 assertEquals(2, captured.flatWalls().size());
                 captured.flatWalls().forEach(fill -> assertNull(fill.planeAnchor(),
                       "The top-view presentation of upright walls keeps its terrain-following footprint"));
                 for (var wall : captured.walls()) {
-                    assertEquals(147, wall.a().x(), 0.001f);
-                    assertEquals(147, wall.b().x(), 0.001f);
+                    assertEquals(147 * HexTile.IMAGE_TO_MODEL_X, wall.a().x(), 0.001f);
+                    assertEquals(147 * HexTile.IMAGE_TO_MODEL_X, wall.b().x(), 0.001f);
                     assertEquals(72, Math.abs(wall.b().y() - wall.a().y()), 0.001f);
                     assertTrue(wall.height() > 0);
                     assertTrue((wall.argb() >>> 24) > 0 && (wall.argb() >>> 24) < 255);
@@ -221,7 +224,7 @@ class GpuTacticalTest {
                 fixture.view.addSprites(List.of(sprites.getLast()));
                 sprites.forEach(sprite -> sprite.setHidden(true));
                 cursor.setHexLocation(new Coords(3, 3));
-                BoardTactical expected = fixture.view.captureTacticalGeometry();
+                BoardTactical expected = fixture.view.captureTacticalGeometry().scaledX(HexTile.IMAGE_TO_MODEL_X);
                 sprites.forEach(sprite -> sprite.setHidden(false));
                 zone.setHidden(true);
                 fixture.view.addSprites(List.of(new FieldOfFireSprite(fixture.view, Color.ORANGE, new Coords(7, 4), 63)));
@@ -284,7 +287,7 @@ class GpuTacticalTest {
                     legacy2D.zoomOut();
                     float zoom = legacy2D.getScale();
                     BoardTactical legacy = fixture.view.captureTacticalGeometry();
-                    assertEquals(captured.tactical(), legacy.withRuler(null),
+                    assertEquals(captured.tactical(), legacy.withRuler(null).scaledX(HexTile.IMAGE_TO_MODEL_X),
                           "Sprites share geometry; the native frame takes its ruler from the native LOS model");
                     assertNotNull(legacy.ruler(), "The Legacy 2D measurement remains available to its renderer");
                     assertNull(captured.tactical().ruler(), "No native measurement was started");

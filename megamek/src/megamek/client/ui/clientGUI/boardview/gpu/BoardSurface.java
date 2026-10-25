@@ -1073,9 +1073,12 @@ final class BoardSurface {
         return fraction == 0 ? point : new Vector3(point).lerp(new Vector3(center.x, center.y, point.z), fraction);
     }
 
-    private static boolean turns(Vector3 a, Vector3 b, Vector3 c) {
-        float turn = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
-        return Math.abs(turn) > .00001f * BoardGeometry.hexScale() * BoardGeometry.hexScale();
+    private static boolean turns(Vector3 a, Vector3 b, Vector3 c) { return turns(a.x, a.y, b.x, b.y, c.x, c.y); }
+
+    /** Whether a run turns at b, beyond the hair by which rounding bends samples of one straight edge. */
+    static boolean turns(float ax, float ay, float bx, float by, float cx, float cy) {
+        float turn = (bx - ax) * (cy - by) - (by - ay) * (cx - bx);
+        return Math.abs(turn) > 1e-4f * (float) Math.hypot(bx - ax, by - ay) * (float) Math.hypot(cx - bx, cy - by);
     }
 
     /**
@@ -2315,7 +2318,13 @@ final class BoardSurface {
             }
             if (!changed) { break; }
         }
+        // Coincident outline points, as where a concrete fit collapses an edge, leave a face with no plane: it covers
+        // nothing, and picking would hit it at the ray's origin.
+        destination.subList(start, destination.size())
+              .removeIf(face -> same(face.a(), face.b()) || same(face.b(), face.c()) || same(face.c(), face.a()));
     }
+
+    private static boolean same(Vector3 p, Vector3 q) { return p.x == q.x && p.y == q.y; }
 
     /** The carriageways that may reserve ground here: this hex's own, then its neighbours'. */
     private List<BoardRoadGrade> grades(boolean corners) {

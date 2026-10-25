@@ -213,9 +213,9 @@ class RailRouteEditorTest {
 
     /** {@code object}'s anchor, owned by {@code home}, in {@code frame}'s model px. */
     private static float[] inFrame(Coords home, Coords frame, BoardDecoration object) {
-        return new float[] { (float) object.x() * megamek.common.board.HexTile.WIDTH
-              + megamek.common.board.HexTile.centerX(home, megamek.common.board.HexTile.WIDTH)
-              - megamek.common.board.HexTile.centerX(frame, megamek.common.board.HexTile.WIDTH),
+        return new float[] { (float) object.x() * megamek.common.board.HexTile.MODEL_WIDTH
+              + megamek.common.board.HexTile.centerX(home, megamek.common.board.HexTile.MODEL_WIDTH)
+              - megamek.common.board.HexTile.centerX(frame, megamek.common.board.HexTile.MODEL_WIDTH),
               (float) object.y() * megamek.common.board.HexTile.HEIGHT
                     + megamek.common.board.HexTile.centerY(home, megamek.common.board.HexTile.HEIGHT)
                     - megamek.common.board.HexTile.centerY(frame, megamek.common.board.HexTile.HEIGHT) };
@@ -225,8 +225,8 @@ class RailRouteEditorTest {
     private static double onTrack(BoardEditorSession session, java.util.List<Coords> cells, Coords at, float x, float y, double rotation) {
         double best = Double.POSITIVE_INFINITY;
         for (Coords cell : cells) {
-            float lx = x - (megamek.common.board.HexTile.centerX(cell, megamek.common.board.HexTile.WIDTH)
-                  - megamek.common.board.HexTile.centerX(at, megamek.common.board.HexTile.WIDTH));
+            float lx = x - (megamek.common.board.HexTile.centerX(cell, megamek.common.board.HexTile.MODEL_WIDTH)
+                  - megamek.common.board.HexTile.centerX(at, megamek.common.board.HexTile.MODEL_WIDTH));
             float ly = y - (megamek.common.board.HexTile.centerY(cell, megamek.common.board.HexTile.HEIGHT)
                   - megamek.common.board.HexTile.centerY(at, megamek.common.board.HexTile.HEIGHT));
             var hex = session.board().getHex(cell);

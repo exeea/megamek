@@ -207,6 +207,7 @@ void main() {
     vec3 albedo = toLinear(vec3(.52));
     vec3 normal = face;
     float cavity = 1.0;
+    float relief = 1.0;
     float materialHeight = .5;
     // Each material path sets its finish; covers, wear, damage and scorch change it after.
     Finish finish = Finish(.9, 0.0, 0.0, vec3(0.0));
@@ -274,6 +275,7 @@ void main() {
                 albedo = material.color;
                 normal = material.normal;
                 cavity = material.cavity;
+                relief = material.relief;
                 materialHeight = material.height;
                 finish = material.finish;
                 volcanic = material.volcanic;
@@ -457,8 +459,8 @@ void main() {
             float rock = ground ? rockiness(steps) : v_color.g;
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
             blendCovers(world, face, foot, rim, rock, ground ? .5 : hardness, sediment,
-                  broad, fine, region, albedo, normal, cavity, materialHeight, grass, sand, bounce, response, rainCover,
-                  finish, volcanic, materialCoverage);
+                  broad, fine, region, albedo, normal, cavity, relief, materialHeight, grass, sand, bounce, response,
+                  rainCover, finish, volcanic, materialCoverage);
         }
 #endif
         // biomeMaskFlag: the board has biomes or liquids of two palettes (GpuBiomeSurface); without them this stage
@@ -614,8 +616,9 @@ void main() {
     // Natural cliffs approximate a curved surface with shared vertex normals. Use that unmapped surface for
     // incident sidedness: a triangle cutoff exposes their tessellation at the light horizon. Planar panels and
     // other geometry retain triangle support; normal-map detail cannot move this incident hemisphere.
+    // Where distance flattens natural relief, its share of the sun comes off here, so far zoom keeps its tone.
     Surface surface = opaqueSurface(albedo, normal, cliff && !panel ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light));
+          sculptShadow(receiver, light) * sunOnRelief(relief, dot(face, light)));
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.
     metallicShare(surface, clamp(finish.metallic, 0.0, 1.0));
     surface.scatter = clamp(finish.scatter, 0.0, 1.0);

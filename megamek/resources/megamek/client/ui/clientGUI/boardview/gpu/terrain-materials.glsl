@@ -15,6 +15,7 @@ struct TerrainMaterial {
     float height;
     Finish finish;
     float volcanic;
+    float relief; // its normals' mean height where distance flattens them, 1 for none (sunOnRelief)
 };
 
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
@@ -320,6 +321,27 @@ Finish materialFinish(float colorMap, float tile, float weight, MaterialProjecti
 }
 #endif
 
+// A layer's average look where distance flattens its maps (u_finishDistant, its means at load): x its cavity term,
+// y its relief from the length of its mean normal (1 flat; the lower, the more of it turns away from a high sun). The
+// close view softens that relief (a flatter second read on tops, two projections on walls): the power .25 matches it,
+// averaged to far pixels, across every family, flat and stepped, noon to evening.
+vec2 distantLayer(float layer) {
+    vec2 mean = u_finishDistant[int(layer + .5)];
+    return vec2(mix(.55, 1.0, mean.x), pow(mean.y, .25));
+}
+
+// Direct sunlight on flattened relief whose normals average `relief`, relative to its flat face lit at
+// s = cos(incidence): facets tilted acos(relief) every way round, those turned from the sun taking none. A high sun
+// loses the tilted share; a low one, caught by the facets facing it, loses less, and never gains (nor does the close
+// view).
+float sunOnRelief(float relief, float s) {
+    if (relief > .999 || s <= 0.0) return 1.0;
+    float a = sqrt((1.0 - relief * relief) * (1.0 - s * s)), b = relief * s;
+    if (b >= a) return relief;
+    float turn = acos(-b / a);
+    return min(1.0, (a * sin(turn) + b * turn) / (PI * s));
+}
+
 // Legacy planar/slab/rock paths retain their own colour-map projection. Far away the surface settles to its means.
 Finish planarFinish(float layer, vec2 p, mat2 gradient, float tile, float mixer) {
     Finish value = mixFinish(finishTexel(layer, p / tile, gradient / tile),
@@ -355,7 +377,9 @@ Finish wallFinish(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side) {
 vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation,
       bool fungus, bool singleScale) {
     if (weight <= 0.0 || u_normalMaps <= .5) return vec4(face, 1.0);
-    if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
+    // Where distance flattens the maps, the normal's length carries the layer's relief (distantLayer).
+    vec2 distant = terrainNormalDetail < 1.0 ? distantLayer((normalMap - 1.0) * .5) : vec2(1.0);
+    if (terrainNormalDetail <= 0.0) return vec4(face * distant.y, distant.x);
     vec3 normal = face;
     float cavity = 1.0;
     if (p.lying > 0.0) {
@@ -380,13 +404,13 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
         normal = normalize(mix(wall, normal, p.lying));
         cavity = mix(mix(ny.a, nx.a, p.side), cavity, p.lying);
     }
-    return vec4(normalize(mix(face, normal, terrainNormalDetail)),
-          mix(TERRAIN_DISTANT_CAVITY, mix(.55, 1.0, cavity), terrainNormalDetail));
+    return vec4(normalize(mix(face, normal, terrainNormalDetail)) * mix(distant.y, 1.0, terrainNormalDetail),
+          mix(distant.x, mix(.55, 1.0, cavity), terrainNormalDetail));
 }
 
 TerrainMaterial volcanicMaterial(Volcanic material, float strength) {
     return TerrainMaterial(material.albedo, material.normal, material.surface.b, material.surface.r,
-          Finish(material.surface.g, 0.0, 0.0, magmaEmission(material.heat, strength)), 1.0);
+          Finish(material.surface.g, 0.0, 0.0, magmaEmission(material.heat, strength)), 1.0, 1.0);
 }
 
 TerrainMaterial volcanicMaterial(Volcanic material, float familyId, float bankHeat) {
@@ -575,6 +599,7 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
     result.color = a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w;
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);
     result.cavity = dot(vec4(na.a, nb.a, nc.a, nd.a), weights);
+    result.relief = dot(vec4(length(na.rgb), length(nb.rgb), length(nc.rgb), length(nd.rgb)), weights);
     result.height = dot(vec4(a.a, b.a, c.a, d.a), weights);
     result.finish = weighFinish(materialFinish(layers.x, tiles.x, weights.x, pa, broad, fungus, sand),
           materialFinish(layers.w, tiles.w, weights.y, pb, mantleVariation, fungus, plates),
@@ -617,8 +642,8 @@ void coverEffects(vec4 weights, float sediment, out float grass, out float sand,
 
 void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float hardness, float sediment,
       float broad, float fine, float region,
-      inout vec3 color, inout vec3 normal, inout float cavity, inout float height, inout float grass, inout float sand,
-      inout vec3 bounce, inout float response, inout float rainCover,
+      inout vec3 color, inout vec3 normal, inout float cavity, inout float relief, inout float height,
+      inout float grass, inout float sand, inout vec3 bounce, inout float response, inout float rainCover,
       inout Finish finish, out float volcanic, out vec4 weights) {
     vec4 raw = max(v_coverWeights, vec4(0.0));
 #ifndef volcanicFlag
@@ -672,7 +697,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     ordinaryNeeded = max(raw, vec4(lessThan(abs(coverFamilies - sculptFamily), vec4(.5))));
     ordinaryNeeded.x = 1.0;
 #endif
-    TerrainMaterial ordinary = TerrainMaterial(vec3(0.0), face, 1.0, 0.0, Finish(1.0, 0.0, 0.0, vec3(0.0)), 0.0);
+    TerrainMaterial ordinary = TerrainMaterial(vec3(0.0), face, 1.0, 0.0, Finish(1.0, 0.0, 0.0, vec3(0.0)), 0.0, 1.0);
     if (dot(ordinaryNeeded, vec4(equal(coverFamilies, vec4(float(VOLCANIC_ORDINARY_FAMILY))))) > 0.0) {
         ordinary = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine,
               region, float(VOLCANIC_ORDINARY_FAMILY), ordinaryTiles, ordinaryLayers, sediment);
@@ -683,7 +708,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     a = volcanicMaterial(magmaMaterial, coverFamilies.x, bankHeat);
 #else
     if (abs(coverFamilies.x - 4.0) < .5) {
-        a = TerrainMaterial(color, normal, cavity, height, finish, 0.0);
+        a = TerrainMaterial(color, normal, cavity, height, finish, 0.0, relief);
 #ifdef volcanicFlag
     } else if (coverFamilies.x > VOLCANIC_CRUST_FAMILY - .5) {
         a = volcanicMaterial(magmaMaterial, coverFamilies.x, bankHeat);
@@ -836,6 +861,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     color = a.color * weights.x + b.color * weights.y + c.color * weights.z + d.color * weights.w;
     normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z + d.normal * weights.w);
     cavity = dot(vec4(a.cavity, b.cavity, c.cavity, d.cavity), weights);
+    relief = dot(vec4(a.relief, b.relief, c.relief, d.relief), weights);
     height = dot(vec4(a.height, b.height, c.height, d.height), weights);
     finish = weighFinish(a.finish, b.finish, c.finish, d.finish, weights);
     volcanic = dot(vec4(a.volcanic, b.volcanic, c.volcanic, d.volcanic), weights);
@@ -1024,7 +1050,9 @@ vec4 rockNormal(float layer, float tile, MaterialProjection p, vec3 face, bool s
       bool translated) {
     tile = sampledTile(tile);
     if (u_normalMaps <= .5) return vec4(face, 1.0);
-    if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
+    // Where distance flattens the maps, the normal's length carries the layer's relief (distantLayer).
+    vec2 distant = terrainNormalDetail < 1.0 ? distantLayer(layer) : vec2(1.0);
+    if (terrainNormalDetail <= 0.0) return vec4(face * distant.y, distant.x);
     vec3 normal;
     float cavity;
     if (!sides) {
@@ -1055,8 +1083,8 @@ vec4 rockNormal(float layer, float tile, MaterialProjection p, vec3 face, bool s
             cavity = mix(cavity, t.a, p.lying);
         }
     }
-    return vec4(normalize(mix(face, normal, terrainNormalDetail)),
-          mix(TERRAIN_DISTANT_CAVITY, mix(.55, 1.0, cavity), terrainNormalDetail));
+    return vec4(normalize(mix(face, normal, terrainNormalDetail)) * mix(distant.y, 1.0, terrainNormalDetail),
+          mix(distant.x, mix(.55, 1.0, cavity), terrainNormalDetail));
 }
 
 // A light film of the local hardpan, ash or fines left on exposed level stone.
@@ -1259,6 +1287,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     }
     result.normal = normalize(mix(na.rgb, nb.rgb, share));
     result.cavity = mix(na.a, nb.a, share);
+    result.relief = mix(length(na.rgb), length(nb.rgb), share);
     result.height = mix(a.a, b.a, share);
     result.finish = mixFinish(surfaceA, surfaceB, share);
     result.volcanic = 0.0;
@@ -1297,6 +1326,7 @@ TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float ab
     a.color = mix(a.color, b.color, t);
     a.normal = normalize(mix(a.normal, b.normal, t));
     a.cavity = mix(a.cavity, b.cavity, t);
+    a.relief = mix(a.relief, b.relief, t);
     a.height = mix(a.height, b.height, t);
     a.finish = mixFinish(a.finish, b.finish, t);
     return a;

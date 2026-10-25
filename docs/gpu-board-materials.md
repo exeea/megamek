@@ -249,10 +249,9 @@ ground a road texture covers. Road paint that lays a sculpted material takes tha
 catalogued metres too (`GpuAssets.sculptCoverage`), times the paint's own factor
 (`GpuRoads.Patch.repeat`): a sandy or snowy verge meets the sand or snow beside it at the same
 scale; markings take concrete at 1.5 times, a metal deposit's halo earth at 0.3 times. A terrain
-surface's Material Maker project measures its relief and crack shading per repeat, so the catalogue
-alone sets its size. A road project gives its *RepeatMetres*, the ground its exported tile covers,
-which must agree with the catalogue, or its normals are too steep or too flat (mm-data's
-`tools/materials/README.md`, which also says how to edit these values safely).
+surface's or road's Material Maker project measures its relief and crack shading per repeat, so the
+catalogue alone sets its size (mm-data's `tools/materials/README.md`, which also says how to edit
+these values safely).
 
 ### Loose (47)
 

@@ -224,12 +224,16 @@ final class BoardFeatures {
                 case Terrains.FUEL_TANK -> Terrains.FUEL_TANK_ELEV;
                 default -> Terrains.INDUSTRIAL;
             };
-            result.add(new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
+            var feature = new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
                   Math.max(1, hex.terrainLevel(heightTerrain)), 0, switch (structure.getKey()) {
                       case Terrains.BUILDING -> BoardScene.FeatureKind.BUILDING;
                       case Terrains.INDUSTRIAL -> BoardScene.FeatureKind.INDUSTRIAL;
                       default -> BoardScene.FeatureKind.PROP;
-                  }));
+                  });
+            // A hex-filling model authored on the 2D art's wider hex is narrowed to meet its neighbours at the edges.
+            result.add(BoardWall.supports(feature.asset()) || BoardIndustrial.supports(feature) ? feature
+                  : new BoardScene.Feature(feature.asset(), 0, 0, 0, 1, feature.height(), 0, feature.kind(), 0, false, null,
+                        new BoardDecoration.Stretch(HexTile.IMAGE_TO_MODEL_X, 1, 1), BoardDecoration.Colours.NONE));
         }
         addBridge(hex, result);
         result.addAll(BoardMetalDeposits.capture(hex, coords));
@@ -283,10 +287,10 @@ final class BoardFeatures {
                 if (fungus || mars) { radius *= .8f; }
                 float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
                 if (orchard) {
-                    // Light orchard rows align across the 63x72 staggered vegetation lattice.
+                    // Light orchard rows align across the staggered lattice: three to a column's three-quarter hex.
                     int columns = density >= 3 ? 4 : 3;
                     int rows = count / columns;
-                    float spacing = density >= 3 ? 15 : 21;
+                    float spacing = density >= 3 ? 15 : BoardGeometry.TILE_WIDTH / 4;
                     x = (index % columns - (columns - 1) * .5f) * spacing;
                     y = (index / columns - (rows - 1) * .5f) * (density == 1 ? 36 : spacing);
                 }
@@ -439,7 +443,7 @@ final class BoardFeatures {
                 double rotation = Math.toDegrees(Math.atan2(-approach.nx(), approach.ny()));
                 String id = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":" + owner + ":stop:" + approach.direction();
                 result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
-                      x / HexTile.WIDTH, y / HexTile.HEIGHT, rotation, false, 1,
+                      x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
                       BoardDecoration.Placement.on(deck ? "bridge" : "ground", 0), 0, false, 0, 0, null, false, 0, stretch)));
             }
         }
@@ -492,14 +496,14 @@ final class BoardFeatures {
                       || !controlSupported(hex, coords, board, deck, x, y)) { continue; }
                 float px = x, py = y;
                 boolean authored = hex.getDecorations().stream().anyMatch(object -> object.asset().equals(asset)
-                      && object.placement().equals(placement) && Math.hypot(object.x() * HexTile.WIDTH - px,
-                            object.y() * HexTile.HEIGHT - py) < 6);
+                      && object.placement().equals(placement) && Math.hypot(object.x() * BoardGeometry.TILE_WIDTH - px,
+                            object.y() * BoardGeometry.TILE_HEIGHT - py) < 6);
                 if (!authored) {
                     String id = TERRAIN_OWNED + coords.getX() + "_" + coords.getY()
                           + (deck ? ":bridgeRoad" : ":road") + ":rail-crossing:" + approach.direction();
                     double rotation = Math.toDegrees(Math.atan2(-approach.nx(), approach.ny()));
                     result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
-                          x / HexTile.WIDTH, y / HexTile.HEIGHT, rotation, false, 1,
+                          x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
                           placement, 0, false)));
                 }
                 break;
@@ -515,8 +519,10 @@ final class BoardFeatures {
         for (var other : nearby) {
             // Keep this approach's exact road/rail layout, without rounding its shoulder through world coordinates.
             if (other.coords().equals(road.coords())) { continue; }
-            float dx = HexTile.centerX(road.coords(), HexTile.WIDTH) - HexTile.centerX(other.coords(), HexTile.WIDTH);
-            float dy = HexTile.centerY(road.coords(), HexTile.HEIGHT) - HexTile.centerY(other.coords(), HexTile.HEIGHT);
+            float dx = HexTile.centerX(road.coords(), BoardGeometry.TILE_WIDTH)
+                  - HexTile.centerX(other.coords(), BoardGeometry.TILE_WIDTH);
+            float dy = HexTile.centerY(road.coords(), BoardGeometry.TILE_HEIGHT)
+                  - HexTile.centerY(other.coords(), BoardGeometry.TILE_HEIGHT);
             distance = Math.min(distance, other.distance(x + dx, y + dy));
         }
         return distance;
@@ -561,11 +567,12 @@ final class BoardFeatures {
     private static boolean controlSupported(Hex hex, Coords coords, Function<Coords, Hex> board,
           boolean deck, float x, float y) {
         if (deck) { return true; }
-        float worldX = HexTile.centerX(coords, HexTile.WIDTH) + x;
-        float worldY = HexTile.centerY(coords, HexTile.HEIGHT) + y;
+        float worldX = HexTile.centerX(coords, BoardGeometry.TILE_WIDTH) + x;
+        float worldY = HexTile.centerY(coords, BoardGeometry.TILE_HEIGHT) + y;
         for (int direction = -1; direction < 6; direction++) {
             Coords at = direction < 0 ? coords : coords.translated(direction);
-            if (!HexTile.contains(at.getX(), at.getY(), worldX, worldY, HexTile.WIDTH, HexTile.HEIGHT)) { continue; }
+            if (!HexTile.contains(at.getX(), at.getY(), worldX, worldY, BoardGeometry.TILE_WIDTH,
+                  BoardGeometry.TILE_HEIGHT)) { continue; }
             Hex support = direction < 0 ? hex : board.apply(at);
             if (support != null && support.getLevel() == hex.getLevel() && !HexTile.liquid(support)
                   && !support.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return true; }
@@ -732,7 +739,8 @@ final class BoardFeatures {
             var corridor = RailRoute.onDeck(object) ? deck : ground;
             for (var stop : RailRoute.stops(RailRoute.drawnSides(object, bridgeExits), corridor)) {
                 result.add(feature(hex, new megamek.common.board.BoardDecoration(stops + "#" + index++, "prop",
-                      RailRoute.BUFFER_STOP, null, object.x() + stop.x() / HexTile.WIDTH, object.y() + stop.y() / HexTile.HEIGHT,
+                      RailRoute.BUFFER_STOP, null, object.x() + stop.x() / BoardGeometry.TILE_WIDTH,
+                      object.y() + stop.y() / BoardGeometry.TILE_HEIGHT,
                       stop.rotation(), false, 1, RailRoute.ride(object), 0, false)));
             }
         }
@@ -755,7 +763,7 @@ final class BoardFeatures {
         var kind = onDeck ? BoardRoad.deck(hex) : BoardRoad.capture(hex);
         var corridor = onDeck ? deck : ground;
         var road = BoardRoad.layout(coords, hex.getTerrain(terrain).getExits(), kind, d -> kind).corridor(corridor);
-        float x = (float) object.x() * HexTile.WIDTH, y = (float) object.y() * HexTile.HEIGHT;
+        float x = (float) object.x() * BoardGeometry.TILE_WIDTH, y = (float) object.y() * BoardGeometry.TILE_HEIGHT;
         if (!road.street(x, y)) { return false; }
         for (var marker : objects) {
             if (RailRoute.kind(marker) != RailRoute.Kind.RAIL || !marker.placement().equals(object.placement())) { continue; }

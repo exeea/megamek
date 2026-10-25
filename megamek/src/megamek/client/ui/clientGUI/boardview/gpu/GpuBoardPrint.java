@@ -192,7 +192,7 @@ final class GpuBoardPrint implements Disposable {
     private void camera(int width, int height, int left, int top) {
         var view = camera.camera;
         view.perspective = false;
-        // The game's 84-by-72 artwork lattice differs slightly from the printed mapsheet's aspect ratio.
+        // The board's regular hex and the printed mapsheet's 1.5-by-1.3-inch hex differ slightly in aspect ratio.
         view.viewportWidth = width * zoomX / zoomY;
         view.viewportHeight = height;
         view.zoom = zoomY;

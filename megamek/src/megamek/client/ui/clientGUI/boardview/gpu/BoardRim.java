@@ -47,8 +47,8 @@ final class BoardRim {
         List<BoardSurface.Side> sides = surface.sides(scene, floor);
         if (sides.isEmpty()) { return ground; }
         Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
-        int width = Math.max(ground.color().width(), (int) BoardGeometry.TILE_WIDTH);
-        int height = Math.max(ground.color().height(), (int) BoardGeometry.TILE_HEIGHT);
+        int width = Math.max(ground.color().width(), (int) Math.ceil(BoardGeometry.TILE_WIDTH));
+        int height = Math.max(ground.color().height(), (int) Math.ceil(BoardGeometry.TILE_HEIGHT));
         BitSet coverage = new BitSet(width * height);
         for (BoardSurface.Face face : surface.faces) {
             if (face.finish() == BoardSurface.Finish.TOP) {
@@ -121,8 +121,8 @@ final class BoardRim {
             patches.add(new Patch(edge, quantize(middle + mouth), Float.POSITIVE_INFINITY, high));
         }
         if (patches.isEmpty() || tile.liquid().present()) { return art; }
-        int width = Math.max(art.width(), (int) BoardGeometry.TILE_WIDTH);
-        int height = Math.max(art.height(), (int) BoardGeometry.TILE_HEIGHT);
+        int width = Math.max(art.width(), (int) Math.ceil(BoardGeometry.TILE_WIDTH));
+        int height = Math.max(art.height(), (int) Math.ceil(BoardGeometry.TILE_HEIGHT));
         BitSet coverage = new BitSet(width * height);
         coverage.set(0, width * height);
         Key key = new Key(new Images(art, null), coverage, List.copyOf(patches));
@@ -177,8 +177,8 @@ final class BoardRim {
 
     private static Images compose(Key key, BoardScene.Pixels incline, BoardScene.Pixels high) {
         BoardScene.Pixels ground = key.ground().color();
-        int width = Math.max(ground.width(), (int) BoardGeometry.TILE_WIDTH);
-        int height = Math.max(ground.height(), (int) BoardGeometry.TILE_HEIGHT);
+        int width = Math.max(ground.width(), (int) Math.ceil(BoardGeometry.TILE_WIDTH));
+        int height = Math.max(ground.height(), (int) Math.ceil(BoardGeometry.TILE_HEIGHT));
         BufferedImage color = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         BoardScene.Pixels baseNormal = key.ground().normal();
         // Custom artwork can be smaller than a rim. Keep its existing normals aligned with the enlarged color slot.

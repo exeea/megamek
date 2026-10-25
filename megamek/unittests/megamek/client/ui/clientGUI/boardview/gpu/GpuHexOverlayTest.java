@@ -21,6 +21,7 @@ import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.equipment.MiscType;
 import megamek.common.options.OptionsConstants;
 import org.junit.jupiter.api.Test;
@@ -91,7 +92,7 @@ class GpuHexOverlayTest {
                     legacy2D.getComponent();
                     legacy2D.zoomOut();
                     float scale = legacy2D.getScale();
-                    assertEquals(marked.tactical(), fixture.view.captureTacticalGeometry());
+                    assertEquals(marked.tactical(), fixture.view.captureTacticalGeometry().scaledX(HexTile.IMAGE_TO_MODEL_X));
                     assertEquals(scale, legacy2D.getScale());
                 } finally {
                     legacy2D.dispose();
@@ -192,8 +193,9 @@ class GpuHexOverlayTest {
         return scene.tiles().stream().map(BoardScene.Tile::tactical).toList();
     }
 
+    /** Whether a fill covers the point {@code x, y} of the 2D art's hex at {@code coords}, as the 3D board maps it. */
     static boolean covers(BoardTactical tactical, Color color, Coords coords, double x, double y) {
-        double boardX = coords.getX() * 63 + x;
+        double boardX = (coords.getX() * 63 + x) * HexTile.IMAGE_TO_MODEL_X;
         double boardY = coords.getY() * 72 + (coords.getX() & 1) * 36 + y;
         return tactical.fills().stream().anyMatch(fill -> fill.argb() == color.getRGB() && fill.shape().contains(boardX, boardY));
     }

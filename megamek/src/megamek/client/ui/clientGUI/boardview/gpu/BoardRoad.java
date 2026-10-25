@@ -594,7 +594,10 @@ final class BoardRoad {
      */
     static IntFunction<Vector2> bends(Coords coords, Function<Coords, Node> nodes) {
         return direction -> {
-            if (!bent(coords, direction, nodes)) { return null; }
+            // A straight road through a bridge's hex crosses as a plain straight road does: square to its border.
+            if (!bent(coords, direction, nodes)) {
+                return straightThrough(coords, direction, nodes) ? border(direction).nor() : null;
+            }
             Coords after = coords.translated(direction);
             int mine = other(nodes.apply(coords), direction), theirs = other(nodes.apply(after), (direction + 3) % 6);
             Vector2 normal = border(direction);
@@ -627,6 +630,14 @@ final class BoardRoad {
         Node self = nodes.apply(coords), next = nodes.apply(coords.translated(direction));
         return self != null && next != null && self.simple() && next.simple() && self.elevation() == next.elevation()
               && (self.exits() & 1 << direction) != 0 && (next.exits() & 1 << (direction + 3) % 6) != 0;
+    }
+
+    /** Whether a straight road crosses this border at one level into a straight road, plain or not. */
+    private static boolean straightThrough(Coords coords, int direction, Function<Coords, Node> nodes) {
+        Node self = nodes.apply(coords), next = nodes.apply(coords.translated(direction));
+        int opposite = (direction + 3) % 6, through = 1 << direction | 1 << opposite;
+        return self != null && next != null && self.elevation() == next.elevation() && self.exits() == through
+              && next.exits() == through;
     }
 
     /** A two-way road's exit other than the given one. */
@@ -1003,8 +1014,8 @@ final class BoardRoad {
 
     /** Bend a point past the bank's shared border, retaining its offset across the incoming carriageway. */
     Vector2 bendFrom(Coords origin, int direction, float x, float y) {
-        float dx = HexTile.centerX(origin, HexTile.WIDTH) - HexTile.centerX(coords, HexTile.WIDTH);
-        float dy = HexTile.centerY(origin, HexTile.HEIGHT) - HexTile.centerY(coords, HexTile.HEIGHT);
+        float dx = HexTile.centerX(origin, BoardGeometry.TILE_WIDTH) - HexTile.centerX(coords, BoardGeometry.TILE_WIDTH);
+        float dy = HexTile.centerY(origin, BoardGeometry.TILE_HEIGHT) - HexTile.centerY(coords, BoardGeometry.TILE_HEIGHT);
         var gate = border(direction);
         var axis = new Vector2(gate).nor();
         float along = (x + dx) * axis.x + (y + dy) * axis.y;
@@ -1259,8 +1270,8 @@ final class BoardRoad {
     /**
      * The unit normal {x, y} of {@link #throughStation}'s section at each vertex of the course: square to the bisector of
      * the segments meeting there. Where the course crosses a border, the section is the border itself, so both hexes
-     * measure one station all along their shared edge: the 84x72 lattice is not regular, and a square crossing is not
-     * quite square to it.
+     * measure one station all along their shared edge: the lattice is regular only to a 32nd, and a square crossing is
+     * not exactly square to it.
      */
     private float[] sections() {
         float[] result = sections;
@@ -1292,9 +1303,10 @@ final class BoardRoad {
     /** The normal of the hex edge a course point lies on, turned along (dx, dy); null off the hex outline. */
     private static float[] borderNormal(Point p, float dx, float dy) {
         for (int k = 0; k < 6; k++) {
-            float ax = HexTile.cornerOffsetX(k, HexTile.WIDTH), ay = HexTile.cornerOffsetY(k, HexTile.HEIGHT);
-            float ex = HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH) - ax;
-            float ey = HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT) - ay;
+            float ax = HexTile.cornerOffsetX(k, BoardGeometry.TILE_WIDTH);
+            float ay = HexTile.cornerOffsetY(k, BoardGeometry.TILE_HEIGHT);
+            float ex = HexTile.cornerOffsetX((k + 1) % 6, BoardGeometry.TILE_WIDTH) - ax;
+            float ey = HexTile.cornerOffsetY((k + 1) % 6, BoardGeometry.TILE_HEIGHT) - ay;
             float length = (float) Math.hypot(ex, ey), along = ((p.x - ax) * ex + (p.y - ay) * ey) / (length * length);
             if (along < 0 || along > 1 || Math.abs((p.x - ax) * ey - (p.y - ay) * ex) > .01f * length) { continue; }
             float nx = ey / length, ny = -ex / length, sign = nx * dx + ny * dy < 0 ? -1 : 1;

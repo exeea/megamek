@@ -23,6 +23,7 @@ import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.client.ui.clientGUI.boardview.toolTip.TWBoardViewTooltip;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -136,9 +137,11 @@ class BoardImpassableTest {
         var fills = BoardImpassable.fills(scene, null, false);
         Area legalArea = new Area();
         for (Coords coords : marked) {
-            double x = coords.getX() * 63, y = coords.getY() * 72 + (coords.getX() & 1) * 36;
-            legalArea.add(new Area(AffineTransform.getTranslateInstance(x, y)
-                  .createTransformedShape(HexDrawUtilities.getHexFullBorderLine(0))));
+            // The 2D art's hex outline, mapped onto the board's narrower hex at its place.
+            double x = coords.getX() * .75 * BoardGeometry.TILE_WIDTH, y = coords.getY() * 72 + (coords.getX() & 1) * 36;
+            var placed = AffineTransform.getTranslateInstance(x, y);
+            placed.scale(HexTile.IMAGE_TO_MODEL_X, 1);
+            legalArea.add(new Area(placed.createTransformedShape(HexDrawUtilities.getHexFullBorderLine(0))));
         }
         for (var fill : fills) {
             Area spill = new Area(fill.shape());
@@ -147,7 +150,7 @@ class BoardImpassableTest {
                   Math.abs((triangle.b().x - triangle.a().x) * (triangle.c().y - triangle.a().y)
                         - (triangle.c().x - triangle.a().x) * (triangle.b().y - triangle.a().y)) / 2).sum();
             assertTrue(spillArea < .01, "Only float-rounding slivers may leave the region; pixel area: " + spillArea);
-            assertFalse(fill.shape().contains(3 * 63 + 42, 3 * 72 + 72));
+            assertFalse(fill.shape().contains(3 * .75 * BoardGeometry.TILE_WIDTH + BoardGeometry.TILE_WIDTH / 2, 3 * 72 + 72));
         }
         assertTrue(BoardImpassable.fills(scene(Set.of()), null, false).isEmpty());
     }

@@ -104,8 +104,8 @@ hex and token. Empty `""` terrain remains clear ground.
 
 Enhanced draws `building:5` as solid modular walls joined by the stored building
 exits. Wall geometry is shared by rendering, picking and vegetation clearance.
-The layered GLBs in `data/models/buildings/walls/<family>/` supply straight bays,
-half-bays, piers and terminals. The game and editor select the family from pristine
+The layered GLBs in `data/models/buildings/walls/<family>/` supply straight sections,
+piers and terminals; their arms are connected-kit pieces (`data/models/buildings/README.md`). The game and editor select the family from pristine
 map CF (`BLDG_CF`): civilian 1–10, light 11–15, medium 16–40, heavy 41–90,
 hardened 91–150, Castle Brian 151+. Damage never changes the family. Editing map CF
 across a tier boundary rebuilds the geometry; explicit model overrides keep their artwork.

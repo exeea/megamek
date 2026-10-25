@@ -12,11 +12,23 @@ import megamek.common.units.Terrains;
  * board's geometry, liquid, road and rough art call these, so each has one statement.
  */
 public final class HexTile {
-    /** The width of a hex image, and of a hex in authored board model units. */
+    /** The width of a hex image in pixels (2D tiles, the Legacy 2D board); the 3D board's is {@link #MODEL_WIDTH}. */
     public static final int WIDTH = 84;
-    /** The height of a hex image, and of a hex in authored board model units. */
+    /** The height of a hex image, and of a hex in board model units. */
     public static final int HEIGHT = 72;
-    /** One level in authored board models, in the units of an 84 by 72 hex. */
+    /**
+     * The width of a hex in board model units: the 3D board's hexes are regular, {@link #HEIGHT} across their flats, so
+     * a piece turned by 60 degrees meets the next edge. It is the regular width (83.138) to a 32nd, so the lattice's
+     * quarter widths, centres and midpoints are exact floats and neighbouring hexes compute their shared edges
+     * bit-identically; every edge midpoint lies within 0.005 of {@code HEIGHT / 2} from the centre.
+     */
+    public static final float MODEL_WIDTH = 83.125f;
+    /**
+     * An x in the {@link #WIDTH}-wide image's pixels times this is the x on the 3D board's hex (y stays): for what is
+     * still drawn or modelled for the image, the 2D tactical painters' capture and the older 84-wide structure models.
+     */
+    public static final float IMAGE_TO_MODEL_X = MODEL_WIDTH / WIDTH;
+    /** One level in authored board models, in board model units. */
     public static final int LEVEL_HEIGHT = 18;
     /** Half the ordinary two-lane road's width in authored model units, shared by roads and their rail corridors. */
     public static final float ROAD_HALF_WIDTH = 15;
@@ -66,7 +78,9 @@ public final class HexTile {
     public static boolean contains(int column, int row, float x, float y, float width, float height) {
         float dx = Math.abs(x - (column * width * 0.75f + width / 2));
         float dy = Math.abs(y - -(row * height + (column & 1) * height / 2 + height / 2));
-        return dy <= height / 2 + 0.001f && (height / 2) * dx + (width / 4) * dy <= width * height / 4 + 0.001f;
+        // Every edge allows the same hair: the slanted edges' test measures it along their gradient.
+        float slack = 0.001f * (float) Math.hypot(height / 2, width / 4);
+        return dy <= height / 2 + 0.001f && (height / 2) * dx + (width / 4) * dy <= width * height / 4 + slack;
     }
 
     /**
