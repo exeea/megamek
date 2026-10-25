@@ -6,7 +6,6 @@ import static org.mockito.Mockito.*;
 
 import java.awt.event.InputEvent;
 import java.io.File;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Vector;
@@ -168,28 +167,6 @@ class GpuGameplayStateTest {
                     session.source().refresh();
                     assertEquals(BoardFieldOfView.Visibility.BLOCKED,
                           GpuFieldOfViewTest.at(session.source().takeFrame().scene().fieldOfView(), target).visibility());
-                    assertTrue(views.constructed().isEmpty());
-                }
-                return null;
-            });
-        }
-    }
-
-    @Test
-    void nativeLocalEditsKeepTacticalPaintingLocal() throws Exception {
-        try (var options = new GpuFieldOfViewTest.Options()) {
-            onClient(() -> {
-                try (var views = mockConstruction(BoardView.class); var session = Session.create()) {
-                    var painted = new HashSet<Coords>();
-                    session.state().addHexDrawPlugin((graphics, hex, game, coords, context) -> painted.add(coords));
-                    session.state().select(session.unit().getPosition());
-                    session.source().refresh();
-                    painted.clear();
-                    var edited = new Coords(4, 4);
-                    session.game().getBoard().setHex(edited, new Hex(3));
-                    session.source().refresh();
-                    assertTrue(painted.contains(edited));
-                    assertTrue(painted.size() <= 9, "A local edit repainted " + painted.size() + " tactical hexes");
                     assertTrue(views.constructed().isEmpty());
                 }
                 return null;

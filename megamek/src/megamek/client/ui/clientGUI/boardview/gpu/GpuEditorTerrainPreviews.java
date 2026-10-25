@@ -189,7 +189,7 @@ final class GpuEditorTerrainPreviews implements Disposable {
             atmosphere.begin(WIDTH, HEIGHT, 0);
             if (current.component().isEmpty()) {
                 for (Coords coords : THEME_HEXES) { terrain.renderEditorSection(camera.camera, coords, ""); }
-            } else { terrain.render(camera.camera, false); terrain.renderTransparent(camera.camera); }
+            } else { terrain.render(camera.camera); terrain.renderTransparent(camera.camera); }
             atmosphere.end(camera.camera, terrain, scene, 0, null, false, buffer);
             buffer.getColorBufferTexture().setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
             return buffer;

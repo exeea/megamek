@@ -148,7 +148,7 @@ class GpuTerrainMaterialReviewSmokeTest {
                     var layout = GpuTerrainShowcaseSmokeTest.scene(FAMILIES.get(scenario / 8));
                     var tiles = layout.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
                           tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(),
-                          null, null, null, null, List.of(), List.of(), tile.liquid(), null, true)).toList();
+                          null, null, null, List.of(), List.of(), tile.liquid(), null, true)).toList();
                     scene = new BoardScene(0, layout.width(), layout.height(), tiles, List.of(), List.of(), -1, "", List.of());
                     terrain.update(scene);
                     focus = BoardGeometry.center(new Coords(7, 5), 1);

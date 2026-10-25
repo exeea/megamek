@@ -30,7 +30,7 @@
  * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
  * affiliated with Microsoft.
  */
-package megamek.client.ui.clientGUI.boardview.sprite;
+package megamek.client.ui.clientGUI.boardview;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -94,7 +94,7 @@ class HexLabelFitterTest {
         when(step.getWiGEBonus()).thenReturn(10);
         when(step.isDanger()).thenReturn(true);
 
-        StepSprite.drawMovementCost(step, false, new Point(0, 0), graph, Color.GREEN, true);
+        TacticalGlyphs.drawMovementCost(step, false, new Point(0, 0), graph, Color.GREEN, true);
 
         assertTrue(countDrawnPixels(0, HexTileset.HEX_W) > 0, "the label was not drawn at all");
         assertEquals(0, countDrawnPixels(0, EDGE_COLUMNS), "the label runs off the left side of the hex");
@@ -113,7 +113,7 @@ class HexLabelFitterTest {
         when(step.getWiGEBonus()).thenReturn(4);
         when(step.isPastDanger()).thenReturn(true);
 
-        StepSprite.drawMovementCost(step, false, new Point(1, 15), graph, Color.GREEN, false);
+        TacticalGlyphs.drawMovementCost(step, false, new Point(1, 15), graph, Color.GREEN, false);
 
         assertTrue(countDrawnPixels(0, HexTileset.HEX_W) > 0, "the label was not drawn at all");
         assertEquals(0, countDrawnPixels(HexTileset.HEX_W - EDGE_COLUMNS, HexTileset.HEX_W),
@@ -127,7 +127,7 @@ class HexLabelFitterTest {
         when(step.getMpUsed()).thenReturn(12);
         when(step.getWiGEBonus()).thenReturn(10);
 
-        StepSprite.drawMovementCost(step, false, new Point(0, 0), graph, Color.GREEN, true);
+        TacticalGlyphs.drawMovementCost(step, false, new Point(0, 0), graph, Color.GREEN, true);
 
         assertEquals(26, graph.getFont().getSize());
     }

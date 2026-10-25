@@ -69,7 +69,7 @@ vec4 iceFloes(vec2 p) {
 // frozen land, or black ice as well for paved ground (glazed); a frozen lake ends at its own shore.
 vec3 iceBorder(vec2 world, float z, bool fringe, bool glazed) {
     if (u_iceBoard.x < 1.0) return vec3(1e4, 1e4, 0.0);
-    const float width = 30.0, height = 30.0 * 72.0 / 84.0;
+    const float width = 30.0, height = 30.0 * BOARD_HEX.y / BOARD_HEX.x;
     int column = int(floor(world.x / (width * .75)));
     int kinds[9];
     float levels[9], distances[9];

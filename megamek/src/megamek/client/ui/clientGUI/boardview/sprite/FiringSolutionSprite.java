@@ -43,7 +43,6 @@ import java.awt.geom.AffineTransform;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
@@ -54,7 +53,7 @@ import megamek.common.util.FiringSolution;
  * Sprite for displaying generic firing information. This is used for the firing phase and displays either range and
  * target modifier or a big red X if the target cannot be hit.
  */
-public class FiringSolutionSprite extends HexSprite implements TacticalSprite {
+public class FiringSolutionSprite extends HexSprite {
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
@@ -136,16 +135,6 @@ public class FiringSolutionSprite extends HexSprite implements TacticalSprite {
     protected int getSpritePriority() {
         return 80;
     }
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
-        try {
-            paintTactical(local);
-        } finally {
-            local.dispose();
-        }
-    }
-
     protected void paintTactical(Graphics2D graph) {
         String fontName = GUIP.getMoveFontType();
         int fontStyle = GUIP.getMoveFontStyle();

@@ -36,6 +36,7 @@ import java.util.Map;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.SawClearingSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.board.GameBoardChangeEvent;
@@ -69,13 +70,10 @@ public class SawClearingSpriteHandler extends BoardViewSpriteHandler {
                 BoardLocation location = entry.getKey();
                 BoardClientState boardView = clientGUI.getBoardState(location);
                 if (boardView != null) {
-                    SawClearingSprite sprite = new SawClearingSprite(
-                          boardView, location.coords(), entry.getValue());
-                    currentSprites.add(sprite);
+                    addMark(boardView, new TacticalMark.SawClearing(location.coords(), entry.getValue()));
                 }
             }
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     @Override

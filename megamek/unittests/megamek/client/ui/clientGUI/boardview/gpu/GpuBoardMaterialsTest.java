@@ -95,7 +95,7 @@ class GpuBoardMaterialsTest {
     @Test
     void readsShaderMaterialsAsGodotDoes() throws Exception {
         Path folder = Files.createDirectories(textures.resolve("terrain/ice"));
-        Files.writeString(folder.resolve("sheet.gdshader"), """
+        Files.writeString(folder.resolve("ice-sheet.gdshader"), """
               // Comments, groups, global and instance uniforms are not material parameters.
               shader_type spatial;
               /* uniform float commented = 1.0; */
@@ -112,13 +112,13 @@ class GpuBoardMaterialsTest {
               void fragment() { ALBEDO = albedo.rgb; }
               """);
         // As Godot saves it: res:// paths, generated ids, values in any order.
-        Files.writeString(folder.resolve("sheet.tres"), """
+        Files.writeString(folder.resolve("ice-sheet.tres"), """
               [gd_resource type="ShaderMaterial" load_steps=4 format=3 uid="uid://ice"]
 
-              [ext_resource type="Shader" path="res://terrain/ice/sheet.gdshader" id="1_enbsj"]
-              [ext_resource type="Texture2D" path="res://terrain/ice/sheet_cracks.png" id="2_d0eaq"]
-              [ext_resource type="Texture2D" path="sheet_albedo.png" id="3_hfjrh"]
-              [ext_resource type="Texture2D" path="sheet_orm.png" id="4_5ap6k"]
+              [ext_resource type="Shader" path="res://terrain/ice/ice-sheet.gdshader" id="1_enbsj"]
+              [ext_resource type="Texture2D" path="res://terrain/ice/ice-sheet_cracks.png" id="2_d0eaq"]
+              [ext_resource type="Texture2D" path="ice-sheet_albedo.png" id="3_hfjrh"]
+              [ext_resource type="Texture2D" path="ice-sheet_orm.png" id="4_5ap6k"]
 
               [resource]
               render_priority = 0
@@ -129,10 +129,10 @@ class GpuBoardMaterialsTest {
               shader_parameter/texture_orm = ExtResource("4_5ap6k")
               shader_parameter/heightmap_scale = 0.509804
               """);
-        var ice = GodotMaterial.read(folder.resolve("sheet.tres").toFile(), textures.toFile());
+        var ice = GodotMaterial.read(folder.resolve("ice-sheet.tres").toFile(), textures.toFile());
         assertEquals(GodotMaterial.Kind.SHADER, ice.kind);
-        assertEquals(folder.resolve("sheet_albedo.png").toFile(), ice.albedo());
-        File orm = folder.resolve("sheet_orm.png").toFile();
+        assertEquals(folder.resolve("ice-sheet_albedo.png").toFile(), ice.albedo());
+        File orm = folder.resolve("ice-sheet_orm.png").toFile();
         assertEquals(orm, ice.occlusion());
         assertEquals(orm, ice.roughnessMap());
         assertEquals(orm, ice.metallicMap());
@@ -144,7 +144,7 @@ class GpuBoardMaterialsTest {
         assertEquals(1, ice.normalScale(), "An undeclared parameter has no effect, whatever the resource says");
         assertEquals(.509804f, ice.heightmapScale());
         assertArrayEquals(new float[] { .5f, .5f, .5f, .5f }, ice.albedoColor());
-        assertEquals(folder.resolve("sheet_cracks.png").toFile().getCanonicalFile(), ice.extra("cracks").getCanonicalFile());
+        assertEquals(folder.resolve("ice-sheet_cracks.png").toFile().getCanonicalFile(), ice.extra("cracks").getCanonicalFile());
         assertNull(ice.normal());
         assertNull(ice.emission());
         assertFalse(ice.heightmapFlipped());
@@ -155,14 +155,14 @@ class GpuBoardMaterialsTest {
         assertTrue(error.getMessage().contains("shader_parameter/texture_coverage"), error.getMessage());
 
         // An editor export replaces the ShaderMaterial with Material Maker's StandardMaterial3D: refuse it.
-        Files.writeString(folder.resolve("sheet.tres"), """
+        Files.writeString(folder.resolve("ice-sheet.tres"), """
               [gd_resource type="StandardMaterial3D" format=2]
-              [ext_resource path="sheet_albedo.png" type="Texture" id=1]
+              [ext_resource path="ice-sheet_albedo.png" type="Texture" id=1]
               [resource]
               albedo_texture = ExtResource( 1 )
               """);
         error = assertThrows(IllegalArgumentException.class,
-              () -> GodotMaterial.read(folder.resolve("sheet.tres").toFile(), textures.toFile()));
+              () -> GodotMaterial.read(folder.resolve("ice-sheet.tres").toFile(), textures.toFile()));
         assertTrue(error.getMessage().contains("Godot 4 ShaderMaterial target"), error.getMessage());
     }
 
@@ -272,9 +272,9 @@ class GpuBoardMaterialsTest {
         assertPixels(surface, GpuMaterialMaps.pack(gravel, GpuMaterialMaps.Layout.RELIEF), "relief surface");
 
         var heat = image(16, 16, 10);
-        BoardMaterialFiles.relief(textures, "terrain/lava/lava", opaque, opaqueNormal, surface);
-        BoardMaterialFiles.heat(textures, "terrain/lava/lava", heat, 5);
-        assertPixels(heat, GpuMaterialMaps.pack(new GpuAssets().definition("terrain/lava/lava"),
+        BoardMaterialFiles.relief(textures, "terrain/lava/lava-flow", opaque, opaqueNormal, surface);
+        BoardMaterialFiles.heat(textures, "terrain/lava/lava-flow", heat, 5);
+        assertPixels(heat, GpuMaterialMaps.pack(new GpuAssets().definition("terrain/lava/lava-flow"),
               GpuMaterialMaps.Layout.MOLTEN_HEAT), "molten heat");
 
         // Mud keeps roughness in its normal's blue channel; the file's normal is complete.
@@ -457,14 +457,14 @@ class GpuBoardMaterialsTest {
         heat.setRGB(0, 0, 0x00ff0000); // Emitted RGB is independent of the coverage mask.
         heat.setRGB(1, 0, 0xff008040);
         var opaque = BoardMaterialFiles.channels(image(2, 1, 1), 0, 1, 2, -1);
-        BoardMaterialFiles.relief(textures, "terrain/lava/lava", opaque, opaque, opaque);
-        BoardMaterialFiles.heat(textures, "terrain/lava/lava", heat, 2);
+        BoardMaterialFiles.relief(textures, "terrain/lava/lava-flow", opaque, opaque, opaque);
+        BoardMaterialFiles.heat(textures, "terrain/lava/lava-flow", heat, 2);
         var emission = new GpuAssets().lavaEmission();
         assertEquals(2, emission.scale());
         assertEquals(1, emission.red(), 1e-7);
         assertEquals(128f / 255, emission.green(), 1e-7);
         assertEquals(64f / 255, emission.blue(), 1e-7);
-        Path tres = textures.resolve("terrain/lava/lava.tres");
+        Path tres = textures.resolve("terrain/lava/lava-flow.tres");
         Files.writeString(tres, Files.readString(tres).replace("shader_parameter/emission_energy = 2.0",
               "shader_parameter/emission_energy = -1.0"));
         assertThrows(IllegalArgumentException.class, () -> new GpuAssets().lavaEmission());
@@ -524,8 +524,8 @@ class GpuBoardMaterialsTest {
         assertEquals(catalogued, names, "Every catalogued material exists");
         assertFalse(names.isEmpty());
         // The maps StandardMaterial3D has no slot for (docs/gpu-board-materials.md).
-        for (String[] extra : new String[][] { { "terrain/lava/lava", "coverage" }, { "terrain/lava/crust", "glow" },
-              { "terrain/ice/sheet", "cracks" } }) {
+        for (String[] extra : new String[][] { { "terrain/lava/lava-flow", "coverage" }, { "terrain/lava/lava-crust", "glow" },
+              { "terrain/ice/ice-sheet", "cracks" } }) {
             var material = GodotMaterial.read(new File(shipped, extra[0] + ".tres"), shipped);
             assertTrue(material.extra(extra[1]).isFile(), extra[0]);
         }

@@ -166,7 +166,7 @@ class GpuSceneryColourSmokeTest {
         List<BoardScene.Tile> gameTiles;
         try (var fixture = GpuBoardFixture.create(BoardFile.loadSheet(file, false, true))) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);
-            gameTiles = fixture.source.takeFrame().scene().tiles().stream().map(tile -> tile.withMarkings(null, List.of())).toList();
+            gameTiles = fixture.source.takeFrame().scene().tiles().stream().map(tile -> tile.withText(List.of())).toList();
         }
         var scene = new BoardScene(0, imported.getWidth(), imported.getHeight(), gameTiles, List.of(), List.of(), -1, "",
               List.of());
@@ -545,7 +545,7 @@ class GpuSceneryColourSmokeTest {
                         frame.render(terrain, camera, scene);
                         profiler.enable();
                         profiler.reset();
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         draws[index] = profiler.getDrawCalls();
                         profiler.disable();
                     }

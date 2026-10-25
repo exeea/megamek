@@ -23,6 +23,7 @@ import megamek.common.board.Coords;
 import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponType;
+import megamek.common.equipment.enums.BombType;
 import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.common.weapons.handlers.DamageFalloff;
 import megamek.common.weapons.handlers.NukeStats;
@@ -367,12 +368,15 @@ final class GpuArtilleryBlast {
         return BoardGeometry.height() * .55f * scale;
     }
 
-    /** The shape of the blast: a nuclear round always mushrooms and fuel-air or anti-air rounds burn as a fireball. */
+    /**
+     * The shape of the blast: a nuclear round always mushrooms, a fuel-air round burns as one, and anti-air rounds and
+     * inferno bombs burn as a fireball.
+     */
     static Style style(@Nullable ResolvedAttack.Shot profile, int seed) {
         Set<String> munitions = profile == null ? Set.of() : profile.munitions();
         if (nuclearStats(profile) != null) { return Style.NUCLEAR; }
         if (munitions.contains("M_FAE")) { return Style.FUEL_AIR; }
-        if (munitions.contains("M_ADA")) { return Style.FIREBALL; }
+        if (munitions.contains("M_ADA") || munitions.contains("M_INFERNO")) { return Style.FIREBALL; }
         // Crowns are what a shell landing in earth mostly throws up; the other two keep a barrage varied.
         float pick = random(seed, 7);
         return pick < .5f ? Style.CROWN : pick < .75f ? Style.MUSHROOM : Style.FIREBALL;
@@ -389,15 +393,20 @@ final class GpuArtilleryBlast {
     /**
      * The area the shell damages, with the R value of the Artillery Ordnance Table: 0 is the target hex alone, 2 is a
      * Long Tom's target hex and the two rings around it. It is asked of the same rule the server deals the damage with,
-     * for the round whose munitions the shot carried.
+     * for the round whose munitions the shot carried, or for a dropped bomb (its mount fires the landing).
      *
-     * @param weaponName the internal name of the weapon that fired, or {@code null} when unknown
+     * @param weaponName the internal name of the weapon that fired or the bomb dropped, or {@code null} when unknown
      * @param profile    the shot, or {@code null} when unknown
      *
      * @return the area; {@link AreaEffect#TARGET_HEX_ONLY} when the weapon or its round cannot be found
      */
     static AreaEffect areaEffect(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
         if (weaponName == null || profile == null) { return AreaEffect.TARGET_HEX_ONLY; }
+        if (EquipmentType.get(weaponName) instanceof BombType bomb) {
+            DamageFalloff falloff = AreaEffectHelper.calculateDamageFallOff(bomb, 0, false);
+            return new AreaEffect(Math.max(0, falloff.radius), falloff.damage, falloff.falloff,
+                  falloff.clusterMunitionsFlag);
+        }
         if (!(EquipmentType.get(weaponName) instanceof WeaponType weapon)) {
             LOGGER.debug("[ArtilleryBlast] {} is not a weapon, the blast stays in its hex", weaponName);
             return AreaEffect.TARGET_HEX_ONLY;

@@ -683,7 +683,7 @@ class GpuContextMenuSmokeTest {
     private static GpuMovePlan.Snapshot move(GpuMovePlan.Mode mode) {
         return new GpuMovePlan.Snapshot(true, true, false, ATLAS, mode, mode != GpuMovePlan.Mode.AUTO, "", List.of(),
               List.of(), List.of(), null, 0, 0, 3, EntityMovementType.MOVE_NONE, "", true, 0, 0, true, List.of(), false,
-              false, Map.of(), Set.of(), 0);
+              false, true, Map.of(), Set.of(), 0);
     }
 
     /** MegaMek's context of hex 1512 as the source captures it: the map menu's items, a group among them. */
@@ -740,7 +740,7 @@ class GpuContextMenuSmokeTest {
     private static BoardScene called(boolean enabled) {
         BoardScene scene = mock(BoardScene.class);
         when(scene.tile(any())).thenAnswer(call -> new BoardScene.Tile(call.getArgument(0), 0, -1, false, 0,
-              BoardScene.Surface.GRASS, null, null, null, null, null, List.of(), List.of()));
+              BoardScene.Surface.GRASS, null, null, null, null, List.of(), List.of()));
         when(scene.commands()).thenReturn(List.of(new BoardScene.Command(FiringCommand.FIRE_CALLED.getCmd(),
               "Called shot", "", enabled, false, List.of(), () -> { })));
         return scene;

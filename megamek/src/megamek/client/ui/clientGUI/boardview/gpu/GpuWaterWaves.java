@@ -45,9 +45,17 @@ final class GpuWaterWaves {
         if (lod == TerrainLod.DISTANT) {
             if (!convex) { return source; }
             // Displacement fades before this LOD's refinement threshold, including its hysteresis. Edge samples cannot
-            // affect its flat silhouette, so a distant open hex needs four triangles rather than seventy.
+            // affect its flat silhouette, so a distant open hex needs four triangles rather than seventy. The hull
+            // closes on its first point; of the samples along a straight shore it keeps only the ends.
             points.clear();
-            points.addAll(hull, 0, hull.length - 2);
+            int count = hull.length / 2 - 1;
+            for (int i = 0; i < count; i++) {
+                int before = (i + count - 1) % count * 2, at = i * 2, after = (i + 1) % count * 2;
+                if (BoardSurface.turns(hull[before], hull[before + 1], hull[at], hull[at + 1], hull[after],
+                      hull[after + 1])) {
+                    points.add(hull[at], hull[at + 1]);
+                }
+            }
         } else {
             addLattice(points, source, edges.keySet(), BoardRelief.metres(switch (lod) {
                 case FULL -> 3;

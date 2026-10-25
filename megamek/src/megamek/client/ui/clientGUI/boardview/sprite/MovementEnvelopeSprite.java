@@ -39,24 +39,18 @@ import static megamek.client.ui.clientGUI.boardview.HexDrawUtilities.CUT_RIGHT_I
 import static megamek.client.ui.clientGUI.boardview.HexDrawUtilities.getHexBorderArea;
 import static megamek.client.ui.clientGUI.boardview.HexDrawUtilities.getHexBorderLine;
 
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 
 /**
  * Sprite for displaying information about where a unit can move to.
  */
-public class MovementEnvelopeSprite extends HexSprite implements TacticalSprite {
-
-    // control values
-    private static final int BORDER_THICKNESS = 10;
-    private static final int BORDER_OPACITY = 60;
-    private static final float LINE_THICKNESS = 2;
+public class MovementEnvelopeSprite extends HexSprite {
 
     // sprite settings
     protected final Color drawColor;
@@ -86,19 +80,13 @@ public class MovementEnvelopeSprite extends HexSprite implements TacticalSprite 
         graph.dispose();
     }
 
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
-        try {
-            paintTactical(local);
-        } finally {
-            local.dispose();
-        }
+    /** Bit field of the six sides (by direction) on the envelope's outside. */
+    public int getBorders() {
+        return borders;
     }
 
     protected void paintTactical(Graphics2D graph) {
-        graph.setStroke(new BasicStroke(LINE_THICKNESS, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
-              10f, new float[] { 5f, 3f }, 0f));
+        graph.setStroke(TacticalStyle.ENVELOPE_LINE_STROKE);
 
         // cycle through directions
         for (int i = 0; i < 6; i++) {
@@ -108,12 +96,12 @@ public class MovementEnvelopeSprite extends HexSprite implements TacticalSprite 
                 cut |= ((borders & (1 << ((i + 5) % 6))) == 0) ? CUT_LEFT_BORDER : CUT_LEFT_INSIDE;
 
                 graph.setColor(new Color(drawColor.getRed(), drawColor.getGreen(),
-                      drawColor.getBlue(), BORDER_OPACITY));
-                graph.fill(getHexBorderArea(i, cut, BORDER_THICKNESS));
+                      drawColor.getBlue(), TacticalStyle.ENVELOPE_BAND_OPACITY));
+                graph.fill(getHexBorderArea(i, cut, TacticalStyle.ENVELOPE_BAND_WIDTH));
 
                 // 2) thin dashed line border
                 graph.setColor(drawColor);
-                graph.draw(getHexBorderLine(i, cut, LINE_THICKNESS / 2));
+                graph.draw(getHexBorderLine(i, cut, TacticalStyle.ENVELOPE_LINE_THICKNESS / 2));
             }
         }
     }

@@ -157,7 +157,7 @@ final class GpuAssets implements Disposable {
         return maps;
     }
 
-    static String magmaName(boolean molten) { return molten ? "terrain/lava/lava" : "terrain/lava/crust"; }
+    static String magmaName(boolean molten) { return molten ? "terrain/lava/lava-flow" : "terrain/lava/lava-crust"; }
 
     /** The exported linear emission's scale and area mean, owned with the corresponding material maps. */
     record LavaEmission(float scale, float red, float green, float blue) { }
@@ -224,10 +224,13 @@ final class GpuAssets implements Disposable {
      * without a map), and its constant glow. The sculpt maps set the array's grid, which the road materials' maps take;
      * road materials keep their roughness in their own surface map, so theirs is sent as its mean alone. {@code relief}
      * is each sculpted surface's heightmap parallax (GpuMaterialMaps.ModelFinish): its depth along U and V in UV units,
-     * zero without a heightmap; the road materials take theirs from {@link #roadRelief}. {@code maps} is the sculpt data
-     * array, which the asset owner disposes with the sculpt arrays.
+     * zero without a heightmap; the road materials take theirs from {@link #roadRelief}. {@code distant} is each
+     * sculpted surface where distance flattens its maps: the mean occlusion of its normal/AO layer and the length of its
+     * mean tangent normal, read once from the layer's smallest mip. {@code maps} is the sculpt data array, which the asset
+     * owner disposes with the sculpt arrays.
      */
-    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow, float[] relief) { }
+    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow, float[] relief,
+          float[] distant) { }
 
     FinishArrays finishArrays(List<String> materials, int firstRoad) {
         if (terrainArrays == null) {
@@ -303,7 +306,27 @@ final class GpuAssets implements Disposable {
         finishes.addAll(emissions);
         MaterialArrays arrays = repeatingArray(layers, 2, finishes);
         return new TerrainArrays(List.copyOf(materials), arrays,
-              new FinishArrays(arrays.data(), surface, tint, glow, relief));
+              new FinishArrays(arrays.data(), surface, tint, glow, relief, distantMeans(arrays.data(), firstRoad)));
+    }
+
+    /**
+     * The first {@code count} layers of a raw data array at its smallest mip, the mean of each layer: per layer its
+     * mean occlusion (alpha) and the length of its mean tangent normal (RGB).
+     */
+    private static float[] distantMeans(TextureArray data, int count) {
+        int level = 31 - Integer.numberOfLeadingZeros(Math.max(data.getWidth(), data.getHeight()));
+        var texels = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(data.getDepth() * 4);
+        data.bind();
+        org.lwjgl.opengl.GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, level, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE,
+              texels);
+        float[] distant = new float[count * 2];
+        for (int layer = 0; layer < count; layer++) {
+            float x = (texels.get(layer * 4) & 255) / 127.5f - 1, y = (texels.get(layer * 4 + 1) & 255) / 127.5f - 1;
+            float z = (texels.get(layer * 4 + 2) & 255) / 127.5f - 1;
+            distant[layer * 2] = (texels.get(layer * 4 + 3) & 255) / 255f;
+            distant[layer * 2 + 1] = (float) Math.sqrt(x * x + y * y + z * z);
+        }
+        return distant;
     }
 
     private static Pixmap rgbaPixmap(byte[] rgba, int width, int height) {
@@ -939,7 +962,7 @@ final class GpuAssets implements Disposable {
 
     Ice ice() {
         if (ice == null) {
-            String name = "terrain/ice/sheet";
+            String name = "terrain/ice/ice-sheet";
             Texture color = texture(name, GpuMaterialMaps.Layout.COLOR, true);
             var maps = List.of(layer(name, GpuMaterialMaps.Layout.NORMAL), layer(name, GpuMaterialMaps.Layout.ICE));
             int width = Math.max(maps.get(0).width(), maps.get(1).width());
@@ -979,7 +1002,7 @@ final class GpuAssets implements Disposable {
     /** Original rim lightness mask for drops up to two levels, without normalization or generated normals. */
     BoardScene.Pixels inclineMask() {
         if (incline == null) {
-            incline = loadRimMask("terrain/classic/incline_dark");
+            incline = loadRimMask("terrain/classic/incline-dark");
         }
         return incline;
     }
@@ -987,7 +1010,7 @@ final class GpuAssets implements Disposable {
     /** The coarser lightness mask of a drop above two levels, the board's own high-incline split. */
     BoardScene.Pixels highInclineMask() {
         if (highIncline == null) {
-            highIncline = loadRimMask("terrain/classic/high_incline_dark");
+            highIncline = loadRimMask("terrain/classic/high-incline-dark");
         }
         return highIncline;
     }

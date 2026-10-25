@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
-package megamek.client.ui.clientGUI.boardview;
+package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.Point;
 import java.awt.Polygon;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
@@ -22,36 +21,44 @@ import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.List;
 
+import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class BoardTacticalGraphicsTest {
+    private static final Coords HEX = new Coords(0, 0);
+
     @Test
     void hexPlaneScopeSurvivesTransformsCopiesAndClippingWithoutLeakingIntoWallsOrParent() {
         var graphics = new BoardTacticalGraphics();
         try {
             graphics.translate(126, 72);
             graphics.scale(2, 2);
-            var local = (BoardTacticalGraphics) BoardTacticalGraphics.onHexPlane(graphics, new Point(63, 36));
+            Coords coords = new Coords(1, 0);
+            var local = BoardTacticalGraphics.onHexPlane(graphics, coords);
             try {
-                local.setClip(0, 0, 60, 72);
+                local.setClip(-42, -36, 60, 72);
                 BoardTacticalGraphics.draw(local, BoardTactical.Playback.HIDE_DURING_MOVEMENT, copy -> {
                     copy.setColor(new Color(20, 100, 200, 128));
-                    copy.fillRect(0, 0, 84, 72);
-                    copy.drawString("4", 42, 36);
+                    copy.fillRect(-42, -36, 84, 72);
+                    copy.drawString("4", 0, 0);
                 });
-                local.wall(HexDrawUtilities.getHexBorderLine(0), HexDrawUtilities.getHexBorderArea(0, 0, 10),
-                      new Coords(1, 0), .5f, null);
+                local.wall(BoardTacticalGeometry.sideLine(0, false, false, 0),
+                      BoardTacticalGeometry.sideBand(0, false, false, 0, 10), coords,
+                      new BoardRangeBorder(.5f, Color.BLACK.getRGB(), null));
             } finally {
                 local.dispose();
             }
             graphics.fillRect(0, 0, 2, 2);
             var captured = graphics.snapshot();
             var fill = captured.fills().getFirst();
-            assertEquals(new BoardTactical.Point(336, 216), fill.planeAnchor());
+            var centre = BoardTacticalGeometry.centre(coords);
+            var anchor = new BoardTactical.Point(126 + 2 * centre.x(), 72 + 2 * centre.y());
+            assertEquals(anchor, fill.planeAnchor());
             assertEquals(fill.planeAnchor(), captured.labels().getFirst().anchor());
             assertNull(fill.border(), "Arbitrary shapes need no fake hex-border metadata");
-            assertEquals(new Rectangle2D.Float(252, 144, 120, 144), fill.shape().getBounds2D());
+            assertEquals(new Rectangle2D.Float(anchor.x() - 84, anchor.y() - 72, 120, 144), fill.shape().getBounds2D());
             assertEquals(128, fill.argb() >>> 24);
             assertEquals(BoardTactical.Playback.HIDE_DURING_MOVEMENT, fill.playback());
             assertNull(captured.fills().getLast().planeAnchor(), "The parent keeps its terrain-following scope");
@@ -100,7 +107,7 @@ class BoardTacticalGraphicsTest {
             path.moveTo(1, 2); path.lineTo(4, 2); path.lineTo(4, 6); path.closePath();
             path.moveTo(10, 1); path.lineTo(10, 3);
             BoardTacticalGraphics.draw(graphics, BoardTactical.Playback.HOLD_DURING_PLAYBACK,
-                  local -> ((BoardTacticalGraphics) local).wall(path, new Rectangle2D.Float(0, 0, 20, 20),
+                  local -> local.wall(path, new Rectangle2D.Float(0, 0, 20, 20),
                         new Coords(0, 0), border));
             var captured = graphics.snapshot();
             assertEquals(4, captured.walls().size());
@@ -128,21 +135,22 @@ class BoardTacticalGraphicsTest {
         var expected = capturedBorder(transform, null, false);
         var actual = capturedBorder(transform, null, true);
         assertNotNull(actual.border());
-        assertEquals(new BoardTactical.Point(215.25f, 189), actual.border().anchor());
+        var centre = BoardTacticalGeometry.centre(HEX);
+        assertEquals(new BoardTactical.Point(126 + 1.5f * centre.x(), 108 + 1.5f * centre.y()), actual.border().anchor());
         assertEquals(1.875f, actual.border().scale());
         assertEquals(1.5, actual.border().padding());
         assertEquals(3.25, actual.border().width());
         assertEquals(actual.border().anchor(), actual.planeAnchor());
-        assertEquals(expected, new BoardTactical.Fill(actual.contours(), actual.winding(), actual.argb(), actual.playback()));
+        assertEquals(expected, withoutBorder(actual));
         assertEquals(93, actual.argb() >>> 24, "The painter's composite alpha remains part of the command");
         assertEquals(BoardTactical.Playback.HOLD_DURING_PLAYBACK, actual.playback());
 
         var graphics = new BoardTacticalGraphics();
         try {
-            graphics.fillHexBorder(new Point(0, 0), 1, 0, 1);
+            BoardTacticalGraphics.at(graphics, HEX).fillHexBorder(0, 1);
             assertNotNull(graphics.snapshot().fills().getFirst().border());
             assertNull(graphics.snapshot().fills().getFirst().planeAnchor(),
-                  "Existing callers retain terrain-following presentation unless explicitly changed");
+                  "A border off the hex plane keeps its terrain-following presentation");
         } finally {
             graphics.dispose();
         }
@@ -164,13 +172,16 @@ class BoardTacticalGraphicsTest {
             assertNotNull(actual.border(), "Clipping must not turn a floating border back into draped geometry");
             assertEquals(actual.border().anchor(), actual.planeAnchor());
             var expected = capturedBorder(new AffineTransform(), clip, false);
-            assertEquals(expected,
-                  new BoardTactical.Fill(actual.contours(), actual.winding(), actual.argb(), actual.playback()),
-                  "The floating plane must still use the exact clipped outline");
+            assertEquals(expected, withoutBorder(actual), "The floating plane must still use the exact clipped outline");
             var draped = capturedBorder(new AffineTransform(), clip, true, false);
             assertNull(draped.border(), "An analytic terrain mask cannot restore pixels removed by the painter's clip");
-            assertEquals(expected, draped);
+            assertEquals(capturedBorder(new AffineTransform(), clip, false, false), draped);
         }
+    }
+
+    /** The fill without its analytic hex-border hint, on the same plane. */
+    private static BoardTactical.Fill withoutBorder(BoardTactical.Fill fill) {
+        return new BoardTactical.Fill(fill.contours(), fill.winding(), fill.argb(), fill.playback(), null, fill.planeAnchor());
     }
 
     private static BoardTactical.Fill capturedBorder(AffineTransform transform, Shape clip, boolean specialized) {
@@ -185,15 +196,15 @@ class BoardTacticalGraphicsTest {
             graphics.transform(transform);
             graphics.setColor(new Color(120, 50, 220, 155));
             graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, .6f));
-            BoardTacticalGraphics.draw(graphics, BoardTactical.Playback.HOLD_DURING_PLAYBACK, local -> {
-                Point point = new Point(7, 9);
+            BoardTacticalGraphics.draw(graphics, BoardTactical.Playback.HOLD_DURING_PLAYBACK, layer -> {
+                var local = floating ? BoardTacticalGraphics.onHexPlane(layer, HEX) : BoardTacticalGraphics.at(layer, HEX);
+                local.scale(1.25, 1.25);
                 if (specialized) {
-                    ((BoardTacticalGraphics) local).fillHexBorder(point, 1.25f, 1.5, 3.25, floating);
+                    local.fillHexBorder(1.5, 3.25);
                 } else {
-                    local.fill(AffineTransform.getTranslateInstance(point.x, point.y)
-                          .createTransformedShape(AffineTransform.getScaleInstance(1.25f, 1.25f)
-                                .createTransformedShape(HexDrawUtilities.getHexFullBorderArea(3.25, 1.5))));
+                    local.fill(BoardTacticalGeometry.ring(1.5, 3.25));
                 }
+                local.dispose();
             });
             return graphics.snapshot().fills().getFirst();
         } finally {
@@ -210,7 +221,7 @@ class BoardTacticalGraphicsTest {
         try {
             reference.setClip(clip);
             capture.setClip(clip);
-            for (Point origin : List.of(new Point(0, 0), new Point(23, 17))) {
+            for (Coords origin : List.of(HEX, new Coords(1, 2))) {
                 var expected = BoardTacticalGraphics.at(reference, origin);
                 var actual = BoardTacticalGraphics.at(capture, origin);
                 try {
@@ -218,16 +229,20 @@ class BoardTacticalGraphicsTest {
                     actual.rotate(.15);
                     expected.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, .6f));
                     actual.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, .6f));
-                    for (Point point : List.of(new Point(7, 9), new Point(-35, 42), new Point(98, 85))) {
+                    for (double[] offset : List.of(new double[] { 7, 9 }, new double[] { -35, 42 }, new double[] { 98, 85 })) {
                         for (Color color : List.of(Color.CYAN, new Color(210, 85, 120, 117))) {
                             expected.setColor(color);
                             actual.setColor(color);
-                            BoardTacticalGraphics.draw(expected, BoardTactical.Playback.HOLD_DURING_PLAYBACK,
-                                  graphics -> graphics.fill(AffineTransform.getTranslateInstance(point.x, point.y)
-                                        .createTransformedShape(AffineTransform.getScaleInstance(1.25f, 1.25f)
-                                              .createTransformedShape(HexDrawUtilities.getHexFullBorderArea(3.25, 1.5)))));
-                            BoardTacticalGraphics.draw(actual, BoardTactical.Playback.HOLD_DURING_PLAYBACK,
-                                  graphics -> ((BoardTacticalGraphics) graphics).fillHexBorder(point, 1.25f, 1.5, 3.25));
+                            BoardTacticalGraphics.draw(expected, BoardTactical.Playback.HOLD_DURING_PLAYBACK, graphics -> {
+                                graphics.translate(offset[0], offset[1]);
+                                graphics.scale(1.25, 1.25);
+                                graphics.fill(BoardTacticalGeometry.ring(1.5, 3.25));
+                            });
+                            BoardTacticalGraphics.draw(actual, BoardTactical.Playback.HOLD_DURING_PLAYBACK, graphics -> {
+                                graphics.translate(offset[0], offset[1]);
+                                graphics.scale(1.25, 1.25);
+                                graphics.fillHexBorder(1.5, 3.25);
+                            });
                         }
                     }
                 } finally {

@@ -13,7 +13,7 @@ import megamek.common.board.Coords;
 final class BoardFiringGeometry {
     /** Contour height above the highest adjoining surface, in board elevation levels. */
     static final float RANGE_HEIGHT = 1;
-    /** Clearance above the surface, in unscaled board pixels. */
+    /** Clearance above the surface, in tactical units. */
     static final float RANGE_CLEARANCE = 0.6f;
     /** tan(30 degrees), for joins between inset edges of the hex contour. */
     private static final float MITER = 0.5774f;

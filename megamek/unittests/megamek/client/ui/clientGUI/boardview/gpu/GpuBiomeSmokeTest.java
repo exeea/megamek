@@ -454,7 +454,7 @@ class GpuBiomeSmokeTest {
                 tiles.add(new BoardScene.Tile(coords, hex.getLevel(), hex.containsTerrain(Terrains.WATER)
                       ? hex.terrainLevel(Terrains.WATER) : -1, hex.containsTerrain(Terrains.ICE),
                       hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0,
-                      BoardFeatures.surface(hex), base.ground(), null, null, null, null,
+                      BoardFeatures.surface(hex), base.ground(), null, null, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.capture(hex), null,
                       BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex), BoardFireSmoke.NONE, BoardFeatures.biome(hex)));
             }

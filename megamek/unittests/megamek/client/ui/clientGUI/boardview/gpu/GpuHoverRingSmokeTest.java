@@ -66,7 +66,7 @@ class GpuHoverRingSmokeTest {
         when(source.editorBrush(HOVER, 0)).thenReturn(BRUSH);
         var view = new GpuBattleView(source);
         var scene = new BoardScene(0, 2, 1, BRUSH.stream().map(coords -> new BoardScene.Tile(coords, 0, -1,
-              false, 0, BoardScene.Surface.GRASS, null, null, null, List.of(), List.of())).toList(),
+              false, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of())).toList(),
               List.of(), List.of(), -1, "", List.of());
         set(view, "scene", scene);
         set(view, "hovered", HOVER);

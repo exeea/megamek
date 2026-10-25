@@ -51,7 +51,7 @@ class BoardRoadSlopeTest {
                 if (c.equals(bridge)) {
                     var span = BoardBridgeSlopeTest.bridge(c, 0, 1, exits);
                     return new BoardScene.Tile(c, 0, depth, false, 0, BoardScene.Surface.GRASS,
-                          span.ground(), null, null, null, null, span.features(), List.of(),
+                          span.ground(), null, null, null, span.features(), List.of(),
                           depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
                 }
                 return BoardRoadTest.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,

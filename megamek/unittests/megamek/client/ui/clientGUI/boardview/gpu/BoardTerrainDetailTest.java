@@ -247,7 +247,7 @@ class BoardTerrainDetailTest {
             for (int x = 0; x < 84; x++) { image.setRGB(x, y, 0xff7b875b); }
         }
         BoardScene.Pixels pixels = new BoardScene.Pixels(image);
-        return new BoardScene.Tile(coords, level, depth, false, road, family, pixels, null, null, null, null,
+        return new BoardScene.Tile(coords, level, depth, false, road, family, pixels, null, null, null,
               features, List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, road == 0);
     }
 }

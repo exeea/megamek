@@ -395,7 +395,7 @@ class BoardBridgeFootingTest {
             BoardScene plain = BoardRiverTest.commCenterRiverScene();
             var hex = new Hex(0, "water:1;bridge:4:36;bridge_cf:120;bridge_elev:1", "");
             var bridgeTile = new BoardScene.Tile(bridge, 0, 1, false, 0, BoardScene.Surface.GRASS,
-                  null, null, null, null, null, BoardFeatures.capture(hex, bridge, Map.of()), List.of(),
+                  null, null, null, null, BoardFeatures.capture(hex, bridge, Map.of()), List.of(),
                   BoardLiquid.WATER, null, true);
             var bare = BoardNaturalBridgeTest.replace(plain, bridgeTile);
             var scene = BoardNaturalBridgeTest.replace(bare, withRoad(bare.tile(road), 36));
@@ -747,10 +747,10 @@ class BoardBridgeFootingTest {
         var features = new java.util.ArrayList<BoardScene.Feature>();
         RailRoute.derived(hex, "terrain").forEach(marker -> features.add(feature(marker)));
         if (deck) { features.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, level, BoardScene.FeatureKind.PROP, sides)); }
-        var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null, null,
+        var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null,
               features, List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
               t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), hex.getAppearance(),
               t.cover(), t.barren(), BoardRoad.Kind.NONE, 0, false, RailRoute.groundSides(hex));
@@ -806,7 +806,7 @@ class BoardBridgeFootingTest {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, deck));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
         var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0).ground();
-        return new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null, null,
+        return new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null,
               BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true,
               BoardRoad.Kind.NONE);
     }
@@ -826,7 +826,7 @@ class BoardBridgeFootingTest {
     /** The tile as an ultra sublevel, a chasm. */
     private static BoardScene.Tile chasm(BoardScene.Tile t) {
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
               t.groundCover(), t.bridge(), true, t.tilesetDecals(), t.tilesetScenery(), t.appearance());
     }
@@ -834,7 +834,7 @@ class BoardBridgeFootingTest {
     /** The tile with its bridge's Pillars toggle on. */
     static BoardScene.Tile pillared(BoardScene.Tile t) {
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
               t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
               Map.of("bridge", HexAppearance.PILLARS));
@@ -845,7 +845,7 @@ class BoardBridgeFootingTest {
         var features = new java.util.ArrayList<>(t.features());
         features.addAll(added);
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), List.copyOf(features), t.text(), t.liquid(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), List.copyOf(features), t.text(), t.liquid(),
               t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
               t.cliffTopExits(), t.bare(), t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(),
               t.tilesetScenery(), t.appearance());
@@ -853,7 +853,7 @@ class BoardBridgeFootingTest {
 
     private static BoardScene.Tile withRoad(BoardScene.Tile t, int exits) {
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), exits, t.surface(), t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround(), BoardRoad.Kind.PAVED, t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(),
               t.bare(), t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance());
     }

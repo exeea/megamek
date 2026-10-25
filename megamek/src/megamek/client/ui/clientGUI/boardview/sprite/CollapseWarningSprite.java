@@ -36,7 +36,7 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.StringDrawer;
@@ -52,7 +52,6 @@ import megamek.common.board.Coords;
  */
 public class CollapseWarningSprite extends HexSprite {
 
-    public static final String WARNING_SIGN = "\ue160";
     private static final int TEXT_SIZE = HexTileset.HEX_H / 2;
     private static final Color TEXT_COLOR = new Color(255, 255, 40, 128);
     private static final Color OUTLINE_COLOR = new Color(40, 40, 40, 200);
@@ -61,7 +60,7 @@ public class CollapseWarningSprite extends HexSprite {
     private static final int HEX_CENTER_Y = HexTileset.HEX_H / 2;
 
     // Draw a special character 'warning sign'.
-    private final StringDrawer xWriter = new StringDrawer(WARNING_SIGN)
+    private final StringDrawer xWriter = new StringDrawer(TacticalStyle.WARNING_SIGN)
           .at(HEX_CENTER_X, HEX_CENTER_Y)
           .color(TEXT_COLOR)
           .fontSize(TEXT_SIZE)
@@ -73,11 +72,6 @@ public class CollapseWarningSprite extends HexSprite {
      */
     public CollapseWarningSprite(BoardGlyphContext boardView1, Coords loc) {
         super(boardView1, loc);
-    }
-
-    @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.COLLAPSE_WARNING, loc, "");
     }
 
     @Override

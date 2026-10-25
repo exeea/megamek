@@ -1,0 +1,343 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import java.io.File;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelMesh;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelMeshPart;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
+import com.badlogic.gdx.math.Matrix3;
+import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.ShortArray;
+import megamek.common.board.HexTile;
+
+/**
+ * Connected structure kits ({@code models/buildings/README.md}): one GLB whose module nodes may carry tags for the
+ * hexsides the structure connects across. {@link #parts} reads the node names of every building kit; {@link #model}
+ * merges the pieces that hold for a hex's connections into one model, the single source of drawing, picking and
+ * ground-cover clearance. A symmetric kit authors only the north (and north-east) pieces; the others are those turned.
+ */
+final class ConnectedKit {
+    /** Tag directions in MegaMek's order, clockwise from north. */
+    static final List<String> DIRECTIONS = List.of("n", "ne", "se", "s", "sw", "nw");
+    private static final String DIRECTION = "(?:ne|nw|se|sw|n|s)";
+    private static final Pattern NODE = Pattern.compile(
+          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)");
+    private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
+    /** How far a link arm's far end may lie from its edge line (authored seams overlap the neighbour's slightly). */
+    private static final float REACH_TOLERANCE = 1;
+    private static final Map<File, BoardKit<Kit>> KITS = new ConcurrentHashMap<>();
+
+    private ConnectedKit() { }
+
+    /** One mesh node: its module role ({@code base0}, {@code floor1}, ...) and the directions that must (not) connect. */
+    record Piece(String node, String role, int links, int ends) {
+        boolean core() { return links == 0 && ends == 0; }
+
+        boolean holds(int connected) { return (connected & links) == links && (connected & ends) == 0; }
+
+        Piece turned(int steps) { return new Piece(node, role, turn(links, steps), turn(ends, steps)); }
+
+        /** The same tags, as an identity shared by every module role. */
+        long tags() { return (long) links << 6 | ends; }
+    }
+
+    /**
+     * A kit file's levels of detail and pieces, read and checked once and shared by terrain workers. {@code grounds}: per
+     * level of detail, each role's lowest point over its core and all its tagged pieces, the height it stands on.
+     */
+    record Kit(List<RigidGlb.Data> lods, List<Piece> pieces, Map<String, String> roles, boolean symmetric,
+          List<Map<String, Float>> grounds) { }
+
+    /** Validate every node name before any assembly; a kit without tags has one core piece per role. */
+    static List<Piece> parts(ModelData data) {
+        List<Piece> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        // Terrain workers read kit metadata concurrently; libGDX's cached Array iterator is shared.
+        for (int index = 0; index < data.nodes.size; index++) {
+            var node = data.nodes.get(index);
+            require(!node.id.matches(".*\\.[0-9]{3}"), "Rename Blender's duplicate suffix: " + node.id);
+            var match = NODE.matcher(node.id);
+            require(match.matches(), "Expected -baseN, -floorN or -roofN, then -link-<dir> or -end-<dir> tags: " + node.id);
+            require(node.parts != null && node.parts.length > 0 && (node.children == null || node.children.length == 0),
+                  "Building modules must be mesh nodes: " + node.id);
+            int links = 0, ends = 0;
+            var tags = TAG.matcher(match.group(3));
+            while (tags.find()) {
+                int bit = 1 << DIRECTIONS.indexOf(tags.group(2));
+                require(((links | ends) & bit) == 0, "A direction appears twice: " + node.id);
+                if (tags.group(1).equals("link")) { links |= bit; } else { ends |= bit; }
+            }
+            require(Integer.bitCount(links | ends) <= 2, "At most two tags: " + node.id);
+            var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends);
+            require(seen.add(piece.role() + "/" + piece.tags()), "Duplicate building module: " + node.id);
+            result.add(piece);
+        }
+        for (String role : List.of("base", "floor", "roof")) {
+            require(result.stream().anyMatch(piece -> piece.role().startsWith(role)), "Building requires a " + role + " variant");
+        }
+        return List.copyOf(result);
+    }
+
+    /** A wall, fuel tank or building kit file, read once; a reload publishes a fresh one. */
+    static Kit kit(File file, Path textureRoot) {
+        return KITS.computeIfAbsent(file.getAbsoluteFile(),
+              key -> new BoardKit<>(() -> load(RigidGlb.loadLods(new FileHandle(key), textureRoot)))).get();
+    }
+
+    static void reload() { KITS.clear(); }
+
+    static Kit load(List<ModelData> lods) {
+        List<RigidGlb.Data> data = lods.stream().map(RigidGlb.Data.class::cast).toList();
+        List<Piece> pieces = parts(data.getFirst());
+        Set<String> signature = signature(pieces);
+        for (var lod : data) {
+            require(signature(parts(lod)).equals(signature), "Kit pieces must match across LODs: " + lod.id);
+        }
+        Map<String, String> roles = new LinkedHashMap<>();
+        pieces.forEach(piece -> roles.putIfAbsent(piece.role(), piece.node()));
+        Set<Long> identities = new HashSet<>();
+        pieces.stream().filter(piece -> !piece.core()).forEach(piece -> identities.add(piece.tags()));
+        boolean cores = pieces.stream().anyMatch(Piece::core);
+        for (String role : roles.keySet()) {
+            require(pieces.stream().filter(piece -> piece.role().equals(role) && !piece.core()).map(Piece::tags)
+                  .collect(Collectors.toSet()).equals(identities), "Every module needs the same tagged pieces: " + role);
+            require(!cores || pieces.stream().anyMatch(piece -> piece.role().equals(role) && piece.core()),
+                  "Every module needs its core piece when any has one: " + role);
+        }
+        // Symmetric: one-tag pieces face north, two-tag pieces the north/north-east corner; turned for the others.
+        boolean symmetric = pieces.stream().allMatch(piece -> piece.core()
+              || Integer.bitCount(piece.links() | piece.ends()) == 1 && (piece.links() | piece.ends()) == 1
+              || (piece.links() | piece.ends()) == 3);
+        if (!symmetric) {
+            for (var piece : pieces) {
+                for (int steps = 1; steps < 6 && !piece.core(); steps++) {
+                    int links = turn(piece.links(), steps), ends = turn(piece.ends(), steps);
+                    require(pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && other.links() == links
+                          && other.ends() == ends), "A kit tags north only, or every direction: " + piece.node());
+                }
+            }
+        }
+        for (var piece : pieces) {
+            int both = piece.links() | piece.ends();
+            if (Integer.bitCount(both) != 2) { continue; }
+            for (int links = 0; links < 4; links++) {
+                int state = (links & 1) * Integer.lowestOneBit(both) | (links >> 1) * Integer.highestOneBit(both);
+                require(pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && other.links() == state
+                      && other.ends() == (both & ~state)), "A corner piece needs all four link/end states: " + piece.node());
+            }
+        }
+        List<Map<String, Float>> grounds = new ArrayList<>();
+        for (var lod : data) {
+            Map<String, BoundingBox> bounds = new HashMap<>();
+            for (var piece : parts(lod)) {
+                var node = node(lod, piece.node());
+                bounds.computeIfAbsent(piece.role(), ignored -> new BoundingBox().inf()).ext(bounds(lod, node, new Matrix4()));
+                if (Integer.bitCount(piece.links()) == 1 && piece.ends() == 0) { reach(lod, node, piece); }
+            }
+            Map<String, Float> ground = new HashMap<>();
+            bounds.forEach((role, box) -> {
+                require(role.startsWith("roof") || Math.abs(box.getDepth() - GpuBuilding.LEVEL_HEIGHT) < .001f,
+                      role + " must be exactly one level (18 units) high, its tagged pieces included: " + lod.id);
+                ground.put(role, box.min.z);
+            });
+            grounds.add(Map.copyOf(ground));
+        }
+        return new Kit(data, pieces, Map.copyOf(roles), symmetric, List.copyOf(grounds));
+    }
+
+    private static Set<String> signature(List<Piece> pieces) {
+        Set<String> result = new HashSet<>();
+        pieces.forEach(piece -> result.add(piece.role() + "/" + piece.tags()));
+        return result;
+    }
+
+    /** A link arm runs out to its edge: its far end lies on the edge line through the midpoint. */
+    private static void reach(RigidGlb.Data data, ModelNode node, Piece piece) {
+        int direction = Integer.numberOfTrailingZeros(piece.links());
+        float angle = (float) Math.toRadians(90 - 60 * direction);
+        var axis = new Matrix4().rotateRad(Vector3.Z, (float) Math.PI / 2 - angle);
+        // Turned so that the arm points north, its far end is its highest y.
+        float far = bounds(data, node, axis).max.y;
+        require(Math.abs(far - HexTile.HEIGHT / 2f) <= REACH_TOLERANCE,
+              piece.node() + " must end on its edge, " + HexTile.HEIGHT / 2 + " units from the centre (ends at " + far + ")");
+    }
+
+    private static BoundingBox bounds(RigidGlb.Data data, ModelNode node, Matrix4 view) {
+        Matrix4 placement = new Matrix4(view).mul(new Matrix4(node.translation, node.rotation, node.scale));
+        var mesh = data.meshes.first();
+        Set<String> parts = new HashSet<>();
+        for (var part : node.parts) { parts.add(part.meshPartId); }
+        var result = new BoundingBox().inf();
+        var point = new Vector3();
+        for (var part : mesh.parts) {
+            if (!parts.contains(part.id)) { continue; }
+            for (short index : part.indices) {
+                int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                result.ext(point.set(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2]).mul(placement));
+            }
+        }
+        require(result.isValid(), "Empty building module: " + node.id);
+        return result;
+    }
+
+    private static ModelNode node(ModelData data, String id) {
+        for (int index = 0; index < data.nodes.size; index++) {
+            if (data.nodes.get(index).id.equals(id)) { return data.nodes.get(index); }
+        }
+        throw new IllegalArgumentException("Missing kit node " + id);
+    }
+
+    /** {@code mask} turned clockwise by {@code steps} sixths. */
+    static int turn(int mask, int steps) {
+        int s = Math.floorMod(steps, 6);
+        return (mask << s | mask >>> (6 - s)) & 63;
+    }
+
+    /**
+     * The kit assembled for one hex: {@code reach[d]} is how many levels from the ground the hex connects towards board
+     * direction {@code d} (0 where it does not), and the whole assembly turns clockwise by {@code steps} sixths. Each
+     * piece stacks through the levels where its tags hold: a base on the ground or a floor where it starts higher, and
+     * its own roof where it stops. Module variants are chosen as for a plain building ({@link GpuBuilding#select}).
+     * UVs, images and material factors remain authored. No GL resource belongs here.
+     */
+    static RigidGlb.Data model(Kit kit, int lod, int height, int[] reach, int steps, long seed, String id) {
+        var source = kit.lods().get(lod);
+        var ground = kit.grounds().get(lod);
+        List<String> selected = GpuBuilding.select(kit.roles(), height, seed);
+        Map<String, Map<Long, Piece>> byRole = new HashMap<>();
+        for (var piece : parts(source)) { byRole.computeIfAbsent(piece.role(), ignored -> new HashMap<>()).put(piece.tags(), piece); }
+        int[] connected = new int[height];
+        for (int level = 0; level < height; level++) {
+            for (int direction = 0; direction < 6; direction++) {
+                // Kit direction k lies along board direction k + steps.
+                if (level < reach[(direction + steps) % 6]) { connected[level] |= 1 << direction; }
+            }
+        }
+        var result = new RigidGlb.Data();
+        result.id = id;
+        result.images.putAll(source.images);
+        // libGDX Array reuses its iterator: immutable kit data is read concurrently by terrain workers.
+        for (int index = 0; index < source.materials.size; index++) {
+            var material = source.materials.get(index);
+            var copy = new ModelMaterial();
+            copy.id = material.id;
+            copy.ambient = material.ambient; copy.diffuse = material.diffuse; copy.specular = material.specular;
+            copy.emissive = material.emissive; copy.reflection = material.reflection;
+            copy.shininess = material.shininess; copy.opacity = material.opacity; copy.textures = material.textures;
+            result.materials.add(copy);
+        }
+        result.surfaces.putAll(source.surfaces);
+        result.alphaTests.putAll(source.alphaTests);
+        Set<Long> identities = new HashSet<>();
+        byRole.values().forEach(pieces -> identities.addAll(pieces.keySet()));
+        for (long tags : identities.stream().sorted().toList()) {
+            Piece any = byRole.values().stream().map(pieces -> pieces.get(tags)).filter(Objects::nonNull)
+                  .findFirst().orElseThrow();
+            for (int turn = 0; turn < (kit.symmetric() && !any.core() ? 6 : 1); turn++) {
+                Piece turned = any.turned(turn);
+                boolean before = false;
+                for (int level = 0; level <= height; level++) {
+                    boolean holds = level < height && turned.holds(connected[level]);
+                    // A run's modules, then its own roof where it stops: below the top, or at the top.
+                    String role = holds ? selected.get(level) : before ? selected.getLast() : null;
+                    Piece piece = role == null ? null : byRole.get(role).get(tags);
+                    if (piece != null) {
+                        append(result, source, node(source, piece.node()), level * GpuBuilding.LEVEL_HEIGHT
+                              - ground.get(role), turn + steps, piece.node() + "@" + turn + "/" + role + "-at-" + level + "/");
+                    }
+                    before = holds;
+                }
+            }
+        }
+        return result;
+    }
+
+    private static final float[] COS = { 1, .5f, -.5f, -1, -.5f, .5f };
+    private static final float[] SIN = { 0, (float) -Math.sqrt(.75), (float) -Math.sqrt(.75), 0, (float) Math.sqrt(.75),
+          (float) Math.sqrt(.75) };
+
+    private static void append(RigidGlb.Data result, RigidGlb.Data source, ModelNode node, float lift, int steps,
+          String prefix) {
+        // Clockwise sixths of a turn about the up axis: exact, so every turned copy meets its edge like the north one.
+        int turn = Math.floorMod(steps, 6);
+        Matrix4 placement = new Matrix4();
+        placement.val[Matrix4.M00] = COS[turn]; placement.val[Matrix4.M01] = -SIN[turn];
+        placement.val[Matrix4.M10] = SIN[turn]; placement.val[Matrix4.M11] = COS[turn];
+        placement.val[Matrix4.M23] = lift;
+        placement.mul(new Matrix4(node.translation, node.rotation, node.scale));
+        Matrix3 normals = new Matrix3().set(placement).inv().transpose();
+        var point = new Vector3();
+        var mesh = source.meshes.first();
+        var included = new HashSet<String>();
+        for (var part : node.parts) { included.add(part.meshPartId); }
+        var copy = new ModelMesh();
+        copy.id = prefix + mesh.id;
+        copy.attributes = mesh.attributes;
+        var vertices = new FloatArray();
+        int[] remap = new int[mesh.vertices.length / RigidGlb.STRIDE];
+        Arrays.fill(remap, -1);
+        List<ModelMeshPart> parts = new ArrayList<>();
+        for (var original : mesh.parts) {
+            if (!included.contains(original.id)) { continue; }
+            var indices = new ShortArray();
+            for (short originalIndex : original.indices) {
+                int old = Short.toUnsignedInt(originalIndex);
+                if (remap[old] < 0) {
+                    remap[old] = vertices.size / RigidGlb.STRIDE;
+                    int at = vertices.size;
+                    vertices.addAll(mesh.vertices, old * RigidGlb.STRIDE, RigidGlb.STRIDE);
+                    point.set(vertices.get(at), vertices.get(at + 1), vertices.get(at + 2)).mul(placement);
+                    vertices.set(at, point.x); vertices.set(at + 1, point.y); vertices.set(at + 2, point.z);
+                    point.set(vertices.get(at + 3), vertices.get(at + 4), vertices.get(at + 5)).mul(normals).nor();
+                    vertices.set(at + 3, point.x); vertices.set(at + 4, point.y); vertices.set(at + 5, point.z);
+                }
+                indices.add((short) remap[old]);
+            }
+            var part = new ModelMeshPart();
+            part.id = prefix + original.id;
+            part.primitiveType = original.primitiveType;
+            part.indices = indices.toArray();
+            parts.add(part);
+        }
+        copy.vertices = vertices.toArray();
+        copy.parts = parts.toArray(ModelMeshPart[]::new);
+        result.meshes.add(copy);
+        var copiedNode = new ModelNode();
+        copiedNode.id = prefix + node.id; copiedNode.meshId = copy.id;
+        copiedNode.children = new ModelNode[0];
+        List<ModelNodePart> nodeParts = new ArrayList<>();
+        for (var original : node.parts) {
+            var part = new ModelNodePart();
+            part.meshPartId = prefix + original.meshPartId;
+            part.materialId = original.materialId;
+            nodeParts.add(part);
+        }
+        copiedNode.parts = nodeParts.toArray(ModelNodePart[]::new);
+        result.nodes.add(copiedNode);
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) { throw new IllegalArgumentException(message); }
+    }
+}

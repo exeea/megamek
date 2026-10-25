@@ -41,12 +41,11 @@ import java.awt.Graphics2D;
 import java.awt.geom.Point2D;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Facing;
-import megamek.common.compute.DefensiveMovementModifier;
-import megamek.common.moves.MovePath;
 
 /**
  * Sprite for displaying information about movement modifier that can be achieved by provided MovePath. Multiple
@@ -54,32 +53,17 @@ import megamek.common.moves.MovePath;
  *
  * @author Saginatio
  */
-public class MovementModifierEnvelopeSprite extends HexSprite implements TacticalSprite {
-
-    private static final Color fontColor = Color.BLACK;
-    private static final float fontSize = 9;
-    private static final double borderW = 15;
-    private static final double inset = 1;
+public class MovementModifierEnvelopeSprite extends HexSprite {
 
     private final Color color;
     private final Facing facing;
     private final String modifier;
 
-    /**
-     * @param boardView The {@link BoardGlyphContext}
-     * @param movePath  The {@link MovePath} to the present hex
-     */
-    public MovementModifierEnvelopeSprite(BoardGlyphContext boardView, MovePath movePath) {
-        super(boardView, movePath.getFinalCoords());
-
-        facing = Facing.valueOfInt(movePath.getFinalFacing());
-
-        // One shared computation with the bot's position evaluation, so the overlay and the bot
-        // can never value destinations differently.
-        int movementModifier = DefensiveMovementModifier.forPath(movePath, boardView.getGame());
-        float hue = 0.7f - 0.15f * movementModifier;
-        color = new Color(Color.HSBtoRGB(hue, 1, 1));
-        modifier = String.format("%+d", movementModifier);
+    public MovementModifierEnvelopeSprite(BoardGlyphContext boardView, TacticalMark.FacingModifier mark) {
+        super(boardView, mark.coords());
+        facing = mark.facing();
+        color = mark.color();
+        modifier = mark.modifier();
     }
 
     @Override
@@ -99,30 +83,17 @@ public class MovementModifierEnvelopeSprite extends HexSprite implements Tactica
 
         graph.dispose();
     }
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
-        try {
-            paintTactical(local);
-        } finally {
-            local.dispose();
-        }
-    }
 
     protected void paintTactical(Graphics2D graph) {
         // colored polygon at the hex border
         graph.setColor(color);
-        graph.fill(getHexBorderArea(facing.getIntValue(), CUT_INSIDE, borderW, inset));
+        graph.fill(getHexBorderArea(facing.getIntValue(), CUT_INSIDE, TacticalStyle.MODIFIER_BAND_WIDTH, TacticalStyle.MODIFIER_INSET));
 
         // draw the movement modifier if it's readable
-        if (fontSize * bv.getScale() > 4) {
-            graph.setFont(graph.getFont().deriveFont(fontSize));
-            Point2D.Double pos = getHexBorderAreaMid(facing.getIntValue(), borderW, inset);
-            StringDrawer text = new StringDrawer(modifier).center().color(fontColor).at((int) pos.x, (int) pos.y);
-            if (graph instanceof BoardTacticalGraphics) {
-                text.asText();
-            }
-            text.draw(graph);
+        if (TacticalStyle.MODIFIER_FONT_SIZE * bv.getScale() > 4) {
+            graph.setFont(graph.getFont().deriveFont(TacticalStyle.MODIFIER_FONT_SIZE));
+            Point2D.Double pos = getHexBorderAreaMid(facing.getIntValue(), TacticalStyle.MODIFIER_BAND_WIDTH, TacticalStyle.MODIFIER_INSET);
+            new StringDrawer(modifier).center().color(TacticalStyle.MODIFIER_FONT_COLOR).at((int) pos.x, (int) pos.y).draw(graph);
         }
 
     }

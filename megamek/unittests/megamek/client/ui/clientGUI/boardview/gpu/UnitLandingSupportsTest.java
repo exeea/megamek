@@ -47,7 +47,7 @@ class UnitLandingSupportsTest {
                 var coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(center) ? 2 : 0, -1, false,
                       coords.equals(center) ? 1 << 2 : coords.equals(neighbor) ? 1 << 5 : 0, BoardScene.Surface.GRASS,
-                      null, null, null, List.of(new BoardScene.Feature("building", 0, 0, 0, 1, 4, 0, BoardScene.FeatureKind.BUILDING)), List.of()));
+                      null, null, List.of(new BoardScene.Feature("building", 0, 0, 0, 1, 4, 0, BoardScene.FeatureKind.BUILDING)), List.of()));
             }
         }
         var scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -60,7 +60,7 @@ class UnitLandingSupportsTest {
         for (int x = 0; x < 3; x++) {
             for (int y = 0; y < 3; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, waterDepth, frozen, 0, BoardScene.Surface.GRASS,
-                      null, null, null, List.of(), List.of()));
+                      null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());

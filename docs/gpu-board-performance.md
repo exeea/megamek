@@ -361,8 +361,7 @@ and 56af45d8 full on the reference block) and, for the atlas, the same rendered 
   build's pixel objects for every other hex (`terrainPixels`, `normalPixels`,
   `decalPixels` fields). The change scan therefore also compares each hex's decal,
   tileset decal and tileset scenery artwork, which the atlas comparison used to notice
-  for every hex (`GpuMarkingsSmokeTest` covers a decal added to an untouched chunk). A
-  changed limb model still recomposes everything.
+  for every hex. A changed limb model still recomposes everything.
 - **Editor: concrete fit.** `BoardConcrete.adopt` lets a scene whose fit inputs did not
   change (ground, water, level, roads, cliff tops, structures and props) keep the previous
   fit, and `prepareUpdate` then skips the corner comparison. A planting edit no longer

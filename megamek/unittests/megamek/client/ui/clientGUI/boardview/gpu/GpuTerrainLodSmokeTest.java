@@ -140,7 +140,7 @@ class GpuTerrainLodSmokeTest {
                     List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
                     BoardScene.Tile before = scene.tile(at);
                     tiles.set(tiles.indexOf(before), new BoardScene.Tile(at, before.elevation() + 2, -1, false, 0,
-                          before.surface(), before.ground(), null, null, null, null, List.of(), List.of(),
+                          before.surface(), before.ground(), null, null, null, List.of(), List.of(),
                           BoardLiquid.NONE, null, true));
                     BoardScene edited = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
                     var displayed = terrain.tacticalSurface(at);
@@ -278,7 +278,7 @@ class GpuTerrainLodSmokeTest {
         terrain.renderShadows(camera.camera, List.of());
         try (var outputFrame = new GpuSceneTestOutput()) {
             outputFrame.begin(.2f, .26f, .31f, 1);
-            terrain.render(camera.camera, false);
+            terrain.render(camera.camera);
             terrain.renderTransparent(camera.camera);
             outputFrame.display();
             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));

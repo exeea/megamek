@@ -6,7 +6,7 @@
 // so they hold still while the view pans.
 layout(location = 0) out vec4 fragColor;
 in vec2 v_board;
-in vec2 v_local;          // tile pixels from the hex centre, y north; the hex spans 84 x 72
+in vec2 v_local;          // tile pixels from the hex centre, y north; the hex spans BOARD_HEX
 flat in ivec3 v_style;    // x: cliffs topped (bits 0-5), cliffs below (6-11), 1-level (12-17) and 2-level steps (18-23)
                           // y: area outline (0-5), fill code (6-11); z: smoke (0-1), fire (2), on a liquid (3)
 flat in vec4 v_overlay;   // the enemy's arc code (1 rear, 2 side, 3 front), distance, rear rays, side dashes
@@ -20,10 +20,11 @@ uniform vec3 u_levels;    // level shading: the board's lowest level, the lighte
 // SCENE_RADIANCE
 // TERRAIN_PATTERNS
 
-const float APOTHEM = 36.0;
+// BOARD_HEX
+const float APOTHEM = BOARD_HEX.y * .5, HALF_WIDTH = BOARD_HEX.x * .5, QUARTER_WIDTH = BOARD_HEX.x * .25;
 // The hex corners counterclockwise from east, as BoardGeometry.corner; edge e joins corners e and e + 1.
-const vec2 CORNERS[6] = vec2[6](vec2(42.0, 0.0), vec2(21.0, 36.0), vec2(-21.0, 36.0), vec2(-42.0, 0.0),
-      vec2(-21.0, -36.0), vec2(21.0, -36.0));
+const vec2 CORNERS[6] = vec2[6](vec2(HALF_WIDTH, 0.0), vec2(QUARTER_WIDTH, APOTHEM), vec2(-QUARTER_WIDTH, APOTHEM),
+      vec2(-HALF_WIDTH, 0.0), vec2(-QUARTER_WIDTH, -APOTHEM), vec2(QUARTER_WIDTH, -APOTHEM));
 const vec3 INK = vec3(.085, .1, .105);
 const vec3 AMBER = vec3(1.0, .769, .329);
 const vec3 LIGHT = vec3(1.0, .980, .910);

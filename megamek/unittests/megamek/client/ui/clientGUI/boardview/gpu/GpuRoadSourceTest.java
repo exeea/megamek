@@ -45,7 +45,8 @@ class GpuRoadSourceTest {
             step.scl(1 / step.dot(across));
             var road = BoardRoad.of(scene, tile);
             var pavement = GpuRoads.patches(tile, road).stream()
-                  .filter(p -> p.texture().equals("roads/asphalt") && !p.blended()).findFirst().orElseThrow();
+                  .filter(p -> p.texture().equals("roads/asphalt") && p.lift() == GpuRoads.SURFACE_LIFT)
+                  .findFirst().orElseThrow();
             for (var lod : TerrainLod.values()) {
                 var surfaces = new HashMap<Coords, BoardSurface>();
                 surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod));

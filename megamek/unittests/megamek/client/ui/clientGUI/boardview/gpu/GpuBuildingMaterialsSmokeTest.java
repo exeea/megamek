@@ -121,7 +121,7 @@ class GpuBuildingMaterialsSmokeTest {
                         terrain.animate(0, List.of());
                         terrain.renderShadows(List.of());
                         outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         outputFrame.display();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         if (++frames == 4) {
@@ -180,7 +180,7 @@ class GpuBuildingMaterialsSmokeTest {
                     var wall = model.getMaterial(role);
                     assertNotNull(wall, feature.asset());
                     Texture texture = wall.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture;
-                    assertSame(assets.material("structures/facades/" + family), texture, feature.asset());
+                    assertSame(assets.material("structures/facades/facade-" + family), texture, feature.asset());
                     assertEquals(128, texture.getWidth());
                     assertEquals(128, texture.getHeight());
                     assertEquals(Texture.TextureWrap.Repeat, texture.getUWrap());

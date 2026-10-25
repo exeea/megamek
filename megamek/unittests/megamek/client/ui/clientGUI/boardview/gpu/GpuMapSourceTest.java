@@ -114,7 +114,6 @@ class GpuMapSourceTest {
                         assertTrue(tile.text().stream().anyMatch(label -> label.text().equals(tile.coords().getBoardNum())));
                         assertTrue(tile.text().stream().allMatch(label -> label.argb() == 0xFF000000));
                         assertSame(displayed.tile(tile.coords()).ground(), tile.ground(), "The print borrows captured 3D art");
-                        assertNull(tile.tactical(), "Editor/game annotations are not printed");
                     }
                     var labels = request.scene().tile(woods).text().stream().map(label -> label.text()).toList();
                     assertTrue(labels.contains("LIGHT"));

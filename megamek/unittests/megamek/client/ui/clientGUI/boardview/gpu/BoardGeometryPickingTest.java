@@ -37,7 +37,7 @@ class BoardGeometryPickingTest {
                 var hex = board.getHex(x, y);
                 int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0,
-                      BoardFeatures.surface(hex), null, null, null, null, null, List.of(), List.of(),
+                      BoardFeatures.surface(hex), null, null, null, null, List.of(), List.of(),
                       BoardLiquid.capture(hex), null, true));
             }
         }
@@ -175,7 +175,7 @@ class BoardGeometryPickingTest {
                 BoardLiquid liquid = x == 1 && y == 1 ? BoardLiquid.WATER : x == 3 && y == 1
                       ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, liquid == BoardLiquid.WATER ? 3 : liquid.present() ? 0 : -1,
-                      false, 0, BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                      false, 0, BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }
         BoardScene scene = new BoardScene(0, 5, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -216,7 +216,7 @@ class BoardGeometryPickingTest {
                 boolean water = ice || x == 3 && y >= 1 && y <= 5;
                 int level = y < 3 ? 3 : x == 5 && y == 5 ? 1 : 0;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, water ? 2 : -1, ice, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
                       water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

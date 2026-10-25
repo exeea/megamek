@@ -34,6 +34,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.CraneOperationSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -73,7 +74,6 @@ public class CraneOperationSpriteHandler extends BoardViewSpriteHandler {
                 }
             }
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     private void addOperationSprite(SmallCraft carrier, CraneOperation operation) {
@@ -93,7 +93,7 @@ public class CraneOperationSpriteHandler extends BoardViewSpriteHandler {
         Entity fadingUnit = operation.isLoading() ? null : unit;
         LOGGER.debug("[Crane] {}: sprite for {} ({} turn(s) to go)", carrier.getDisplayName(), operation,
               operation.getTurnsRequired() - operation.getTurnsCompleted());
-        currentSprites.add(new CraneOperationSprite(boardView, operation.getUnitPosition(), fadingUnit,
+        addMark(boardView, new TacticalMark.CraneOperation(operation.getUnitPosition(), fadingUnit,
               operation.getUnloadFacing(), operation.getTurnsCompleted(), operation.getTurnsRequired()));
     }
 

@@ -154,7 +154,7 @@ class GpuWaterFogSmokeTest {
         terrain.renderShadows(camera.camera, List.of());
         atmosphere.prepareClouds(terrain, scene, 0);
         atmosphere.begin(WIDTH, HEIGHT, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         atmosphere.end(camera.camera, terrain, scene, 0);
         return Pixmap.createFromFrameBuffer(0, 0, WIDTH, HEIGHT);

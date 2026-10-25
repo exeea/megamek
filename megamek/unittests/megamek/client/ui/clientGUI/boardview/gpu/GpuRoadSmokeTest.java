@@ -71,7 +71,7 @@ class GpuRoadSmokeTest {
                     var tiles = new ArrayList<>(scene.tiles());
                     var before = scene.tile(new Coords(8, 11));
                     tiles.set(tiles.indexOf(before), new BoardScene.Tile(before.coords(), before.elevation(), -1, false, 0,
-                          before.surface(), before.ground(), before.normals(), null, null, null, List.of(), List.of(),
+                          before.surface(), before.ground(), before.normals(), null, null, List.of(), List.of(),
                           BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.MUD));
                     var edited = new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles,
                           List.of(), List.of(), -1, "", List.of());
@@ -454,7 +454,7 @@ class GpuRoadSmokeTest {
                     hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
                 }
                 var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, 1, 0);
-                return new BoardScene.Tile(c, 0, 1, false, 0, tile.surface(), tile.ground(), null, null, null, null,
+                return new BoardScene.Tile(c, 0, 1, false, 0, tile.surface(), tile.ground(), null, null, null,
                       BoardFeatures.capture(hex, c, Map.of()), List.of(), BoardLiquid.WATER, null, true);
             }
             return BoardRoadTest.tile(c, c.getX() == 4 ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,

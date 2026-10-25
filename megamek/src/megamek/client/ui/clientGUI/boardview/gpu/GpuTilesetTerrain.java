@@ -92,7 +92,7 @@ final class GpuTilesetTerrain {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
             if (space) { continue; }
             if (face.finish() == BoardSurface.Finish.BANK || face.finish() == BoardSurface.Finish.BED) {
-                opaque.accept(classic(assets, rock != null ? rock : "terrain/classic/water_bed"),
+                opaque.accept(classic(assets, rock != null ? rock : "terrain/classic/water-bed"),
                       mesh -> bank(mesh, tile, face, false));
                 continue;
             }

@@ -1024,7 +1024,7 @@ class GpuHudInputTest {
     static GpuMovePlan.Snapshot move(boolean planner, List<GpuMovePlan.Step> route) {
         return new GpuMovePlan.Snapshot(true, planner, false, FIRST, GpuMovePlan.Mode.AUTO, false, "", route,
               List.of(), List.of(), route.isEmpty() ? null : HEX, 0, route.size(), 4, EntityMovementType.MOVE_WALK, "",
-              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), Map.of(), Set.of(), 0);
+              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), true, Map.of(), Set.of(), 0);
     }
 
     private static GpuUnitRecord.Snapshot record(int unitId) {

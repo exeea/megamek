@@ -17,7 +17,7 @@ class BoardSurfaceBlendTest {
     private static final BoardScene.Pixels PIXELS = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
 
     static BoardScene.Tile tile(Coords coords, BoardScene.Surface family, int level, int depth, int road) {
-        return new BoardScene.Tile(coords, level, depth, false, road, family, PIXELS, null, null, null, null,
+        return new BoardScene.Tile(coords, level, depth, false, road, family, PIXELS, null, null, null,
               List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true);
     }
 
@@ -33,7 +33,7 @@ class BoardSurfaceBlendTest {
         var surface = family >= BoardSurfaceBlend.CRUST ? BoardScene.Surface.ROCK : BoardScene.Surface.values()[family];
         var liquid = family < BoardSurfaceBlend.CRUST ? BoardLiquid.NONE : new BoardLiquid(
               family == BoardSurfaceBlend.CRUST ? BoardLiquid.Kind.MAGMA_CRUST : BoardLiquid.Kind.MAGMA, "", 0);
-        return new BoardScene.Tile(coords, level, -1, false, 0, surface, PIXELS, null, null, null, null,
+        return new BoardScene.Tile(coords, level, -1, false, 0, surface, PIXELS, null, null, null,
               List.of(), List.of(), liquid, null, true);
     }
 
@@ -59,6 +59,25 @@ class BoardSurfaceBlendTest {
                 assertEquals(0, above.weight(lower), "Receiving terrain stays near the foot");
                 assertEquals(1, above.weight(upper), .00001f);
             }
+        }
+    }
+
+    @Test
+    void lavaMeltsSnowAndBurnsTurfAtTheFootOfTheirCliffs() {
+        for (var hill : new BoardScene.Surface[] { BoardScene.Surface.SNOW, BoardScene.Surface.GRASS }) {
+            int upper = hill.ordinal(), melted = BoardSurfaceBlend.melted(upper);
+            var scene = scene(c -> tile(c, c.equals(CENTER) ? upper : BoardSurfaceBlend.BANK, c.equals(CENTER) ? 2 : 0));
+            var high = scene.tile(CENTER);
+            var next = CENTER.translated(0);
+            var foot = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
+            foot.z = BoardGeometry.groundZ(scene.tile(next));
+            var cover = BoardSurfaceBlend.sampleCliff(scene, high, foot.x, foot.y, foot.z);
+            assertEquals(0, cover.weight(upper), .00001f, hill + " at the lava's edge");
+            assertTrue(cover.weight(melted) > .05f, cover.toString());
+            // A hex's width away the heat is gone.
+            var top = BoardGeometry.center(CENTER, 0);
+            top.z = BoardGeometry.groundZ(high);
+            assertEquals(BoardSurfaceBlend.solid(upper), BoardSurfaceBlend.sample(scene, high, top.x, top.y, top.z));
         }
     }
 

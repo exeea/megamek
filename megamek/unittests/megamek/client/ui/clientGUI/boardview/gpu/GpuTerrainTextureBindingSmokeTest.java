@@ -123,7 +123,7 @@ class GpuTerrainTextureBindingSmokeTest {
                             // otherwise be the frame's last draw instead of a water surface.
                             boolean border = x == 0 || y == 0 || x == 71 || y == 39;
                             tiles.add(new BoardScene.Tile(new Coords(x, y), 0, border ? -1 : 1, false, 0,
-                                  BoardScene.Surface.GRASS, ground, null, null, List.of(), List.of()));
+                                  BoardScene.Surface.GRASS, ground, null, List.of(), List.of()));
                         }
                     }
                     BoardScene scene = new BoardScene(0, 72, 40, tiles, List.of(), List.of(), -1, "", List.of());
@@ -135,7 +135,7 @@ class GpuTerrainTextureBindingSmokeTest {
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     terrain.animate(.37f, List.of());
                     ScreenUtils.clear(.2f, .26f, .31f, 1, true);
-                    terrain.render(camera.camera, false);
+                    terrain.render(camera.camera);
                     terrain.renderTransparent(camera.camera);
                     ModelBatch batch = (ModelBatch) field(terrain, "batch");
                     var shaders = BaseShaderProvider.class.getDeclaredField("shaders");

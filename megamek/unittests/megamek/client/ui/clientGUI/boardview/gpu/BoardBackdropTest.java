@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -55,8 +54,7 @@ class BoardBackdropTest {
                 Vector3 center = BoardGeometry.center(CENTER, 0);
                 assertEquals(CENTER, BoardGeometry.pick(scene, new Ray(center.add(0, 0, 500), new Vector3(0, 0, -1))));
                 assertEquals(tile.backdrop(), tile.lunar(true).backdrop());
-                assertEquals(tile.backdrop(), tile.withTactical(
-                      new BoardScene.Pixels(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB))).backdrop());
+                assertEquals(tile.backdrop(), tile.withText(List.of()).backdrop());
             }
         }
     }
@@ -101,7 +99,7 @@ class BoardBackdropTest {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 Coords at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(source.apply(at), artwork, null, pool,
                       c -> c.getX() < 0 || c.getY() < 0 || c.getX() >= 5 || c.getY() >= 5 ? null : source.apply(c)));
             }

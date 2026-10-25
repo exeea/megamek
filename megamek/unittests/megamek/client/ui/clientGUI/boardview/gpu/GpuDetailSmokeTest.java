@@ -115,7 +115,7 @@ class GpuDetailSmokeTest {
     private static void drawTrees(GpuTerrain terrain, BoardCamera camera) {
         terrain.renderShadows(camera.camera, List.of());
         ScreenUtils.clear(.02f, .03f, .04f, 1, true);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
     }
 
@@ -133,7 +133,7 @@ class GpuDetailSmokeTest {
                 hex.addTerrain(new Terrain(Terrains.WOODS, 2));
                 hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
                 var coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, pixels, null, null,
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, pixels, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of()));
             }
         }
@@ -300,7 +300,7 @@ class GpuDetailSmokeTest {
                 camera.fit(scene);
                 model.place(instance, camera.camera, BoardGeometry.center(new Coords(7, 7), 2), 60, 2, false);
                 atmosphere.begin(width, height, 0);
-                terrain.render(camera.camera, false);
+                terrain.render(camera.camera);
                 colors.begin(camera.camera);
                 colors.render(units, terrain.environment());
                 colors.end();

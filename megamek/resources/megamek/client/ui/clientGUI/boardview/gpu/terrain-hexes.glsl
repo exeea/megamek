@@ -2,6 +2,7 @@
 // One nearest-filtered texel per board hex (GpuBiomeSurface) and the world fields every lit surface can share with it.
 // R biome/stencil quarters, low G aqueous palette + 1 (bit 4 uniform biome), B ice, A elevation + 64.
 // Unused samplers cost nothing: programs drop them.
+// BOARD_HEX
 uniform sampler2D u_biomeHexes;
 uniform vec2 u_biomeBoard;
 
@@ -43,13 +44,13 @@ float sandExposure(vec2 metres) {
 // Signed distance in metres from a hex's centre offset to its outline; negative inside.
 float biomeHexDistance(vec2 p) {
     p = abs(p);
-    const float a = 30.0 * 72.0 / 84.0 * .5, b = 7.5;
+    const float a = 30.0 * BOARD_HEX.y / BOARD_HEX.x * .5, b = 7.5;
     return max(p.y - a, (a * p.x + b * p.y - 15.0 * a) / sqrt(a*a + b*b));
 }
 
 // The centre, in metres, of the board hex at column x and row y.
 vec2 boardHexCenter(int x, int y) {
-    const float width = 30.0, height = 30.0 * 72.0 / 84.0;
+    const float width = 30.0, height = 30.0 * BOARD_HEX.y / BOARD_HEX.x;
     float parity = mod(float(x), 2.0);
     return vec2((3.0 * float(x) + 2.0) * width * .25, -(2.0 * float(y) + parity + 1.0) * height * .5);
 }

@@ -47,10 +47,8 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardHexPick;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
-import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -78,7 +76,7 @@ final class BoardRouteEditor implements BoardHexPick {
     private final IntConsumer onRowChanged;
     private final Runnable onPickEnded;
     private String instructions = "";
-    private final List<Sprite> routeSprites = new ArrayList<>();
+    private final List<TacticalMark> routeMarks = new ArrayList<>();
     // dragging a waypoint on the board: its row, or -1; whether it has moved; the display held still while it drags,
     // when picking was not already holding it; and the release that ended the last drag, which is no click
     private final BoardViewListenerAdapter dragListener = new BoardViewListenerAdapter() {
@@ -178,14 +176,14 @@ final class BoardRouteEditor implements BoardHexPick {
 
     /** Draws the draft route on the board: each waypoint outlined and numbered in route order. */
     void refreshSprites() {
-        boardView.removeSprites(routeSprites);
-        routeSprites.clear();
+        boardView.removeMarks(routeMarks);
+        routeMarks.clear();
         for (int row = 0; row < waypoints.getRowCount(); row++) {
             Coords hex = waypoints.getHex(row);
-            routeSprites.add(new FieldOfFireSprite(boardView, RangeType.RANGE_SHORT, hex, ALL_HEX_BORDERS));
-            routeSprites.add(new TextMarkerSprite(boardView, hex, String.valueOf(row + 1), Color.WHITE));
+            routeMarks.add(new TacticalMark.WeaponRange(hex, ALL_HEX_BORDERS, RangeType.RANGE_SHORT));
+            routeMarks.add(new TacticalMark.HexText(hex, String.valueOf(row + 1), Color.WHITE));
         }
-        boardView.addSprites(routeSprites);
+        boardView.addMarks(routeMarks);
     }
 
     /**
@@ -279,7 +277,7 @@ final class BoardRouteEditor implements BoardHexPick {
         boardView.removeBoardViewListener(dragListener);
         endDrag();
         stopPicking();
-        boardView.removeSprites(routeSprites);
-        routeSprites.clear();
+        boardView.removeMarks(routeMarks);
+        routeMarks.clear();
     }
 }

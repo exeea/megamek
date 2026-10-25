@@ -81,7 +81,7 @@ class BoardWaterfallTest {
     static BoardScene withWater(BoardScene scene) {
         var tiles = scene.tiles().stream().map(t -> !t.liquid().molten() ? t
               : new BoardScene.Tile(t.coords(), t.elevation(), 1, t.frozen(), t.roadExits(), t.surface(),
-                    t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(),
+                    t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(),
                     BoardLiquid.WATER, t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
@@ -423,6 +423,6 @@ class BoardWaterfallTest {
 
     private static BoardScene.Tile tile(Coords coords, int level, int depth) {
         return new BoardScene.Tile(coords, level, depth, false, 0, BoardScene.Surface.SAND, null,
-              null, null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
+              null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
     }
 }

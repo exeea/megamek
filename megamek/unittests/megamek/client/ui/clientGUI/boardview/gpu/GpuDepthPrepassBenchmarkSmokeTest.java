@@ -163,7 +163,7 @@ class GpuDepthPrepassBenchmarkSmokeTest {
                 GpuTerrain.prepassDepthFunction = GL20.GL_EQUAL;
                 GpuDepthPrepassBaselineSmokeTest.show(view, scene, camera);
                 GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
-                frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera, false));
+                frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera));
                 report.append(String.format(Locale.ROOT, "%s: loaded and settled %.1f s after the build began; %d twin"
                       + " draws a frame%n", view.name(), (System.nanoTime() - start) / 1e9, terrain.prepassDraws()));
                 for (int round = 0; round < ROUNDS; round++) {

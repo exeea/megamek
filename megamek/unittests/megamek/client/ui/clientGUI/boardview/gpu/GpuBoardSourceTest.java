@@ -10,8 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Point;
-import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.HashMap;
@@ -33,8 +31,7 @@ import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
-import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
@@ -45,6 +42,7 @@ import megamek.common.ResolvedAttack;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameAttackResolvedEvent;
 import megamek.common.event.GameNuclearDetonationEvent;
@@ -281,18 +279,18 @@ class GpuBoardSourceTest {
                 fixture.view.checkLOS(coords);
                 fixture.source.refresh();
             });
-            Rectangle outline = null;
+            java.awt.geom.Rectangle2D outline = null;
             for (var fill : fixture.source.takeFrame().scene().tactical().fills()) {
                 if ((fill.argb() & 0xFFFFFF) == (Color.RED.getRGB() & 0xFFFFFF)) {
-                    Rectangle bounds = fill.shape().getBounds();
-                    outline = outline == null ? bounds : outline.union(bounds);
+                    var bounds = fill.shape().getBounds2D();
+                    outline = outline == null ? bounds : outline.createUnion(bounds);
                 }
             }
             assertTrue(outline != null, "The measurement cursor must be captured as native geometry");
-            assertEquals(coords.getX() * 63, outline.x, 1);
-            assertEquals(coords.getY() * 72, outline.y, 1);
-            assertTrue(outline.width >= 83, "The red cursor must reach both sides of its hex");
-            assertTrue(outline.height >= 71, "The red cursor must reach the top and bottom edges");
+            assertEquals(coords.getX() * .75f * BoardGeometry.TILE_WIDTH, outline.getX(), 1);
+            assertEquals(coords.getY() * BoardGeometry.TILE_HEIGHT, outline.getY(), 1);
+            assertTrue(outline.getWidth() >= BoardGeometry.TILE_WIDTH - 1, "The red cursor must reach both sides of its hex");
+            assertTrue(outline.getHeight() >= 71, "The red cursor must reach the top and bottom edges");
         }
     }
 
@@ -492,8 +490,8 @@ class GpuBoardSourceTest {
                 }
             });
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
-            assertEquals((int) BoardGeometry.TILE_WIDTH, after.ground().width());
-            assertEquals((int) BoardGeometry.TILE_HEIGHT, after.ground().height());
+            assertEquals(HexTile.WIDTH, after.ground().width());
+            assertEquals(HexTile.HEIGHT, after.ground().height());
             assertTrue(samePixels(tile.ground(), after.ground()));
         } finally {
             SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMapZoomIndex(originalZoom));
@@ -678,7 +676,7 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void unitArtworkAndAnnotationsAreNotBakedIntoTiles() throws Exception {
+    void unitArtworkIsNotBakedIntoTiles() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords original = fixture.entity.getPosition();
             BoardScene.Tile occupied = fixture.source.takeFrame().scene().tile(original);
@@ -689,7 +687,6 @@ class GpuBoardSourceTest {
             });
             BoardScene.Tile empty = fixture.source.takeFrame().scene().tile(original);
             assertTrue(samePixels(occupied.ground(), empty.ground()));
-            assertTrue(samePixels(occupied.tactical(), empty.tactical()));
         }
     }
 
@@ -712,8 +709,6 @@ class GpuBoardSourceTest {
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(destination);
             assertTrue(samePixels(before.ground(), after.ground()),
                   "The Legacy 2D moving-unit ghost must not be baked into the captured terrain");
-            assertTrue(samePixels(before.tactical(), after.tactical()),
-                  "The Legacy 2D moving-unit ghost must not be baked into the captured layers");
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setShowMoveStep(moveStep));
         }
@@ -724,23 +719,20 @@ class GpuBoardSourceTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords coords = new Coords(3, 4);
             BoardScene.Tile before = fixture.source.takeFrame().scene().tile(coords);
-            MovementEnvelopeSprite range = new MovementEnvelopeSprite(fixture.view, Color.MAGENTA, coords, 63);
+            var range = new TacticalMark.Envelope(coords, 63, Color.MAGENTA);
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.addSprites(List.of(range));
+                fixture.view.addMarks(List.of(range));
                 fixture.source.refresh();
             });
             BoardScene.Tile ranged = fixture.source.takeFrame().scene().tile(coords);
             assertSame(before.ground(), ranged.ground());
-            assertTrue(samePixels(before.tactical(), ranged.tactical()));
             assertFalse(fixture.source.takeFrame().scene().tactical().fills().isEmpty());
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.removeSprites(List.of(range));
+                fixture.view.removeMarks(List.of(range));
                 fixture.player.setStartingPos(Board.START_ANY);
                 fixture.view.markDeploymentHexesFor(fixture.entity);
                 fixture.source.refresh();
             });
-            BoardScene.Tile deployment = fixture.source.takeFrame().scene().tile(coords);
-            assertTrue(samePixels(before.tactical(), deployment.tactical()));
             assertFalse(fixture.source.takeFrame().scene().tactical().fills().isEmpty(),
                   "Legal deployment borders belong to the native tactical geometry");
             SwingUtilities.invokeAndWait(() -> {
@@ -749,8 +741,6 @@ class GpuBoardSourceTest {
                 fixture.view.addStrafingCoords(coords);
                 fixture.source.refresh();
             });
-            BoardScene.Tile strafing = fixture.source.takeFrame().scene().tile(coords);
-            assertTrue(samePixels(before.tactical(), strafing.tactical()));
             assertFalse(fixture.source.takeFrame().scene().tactical().fills().isEmpty());
             SwingUtilities.invokeAndWait(() -> {
                 fixture.view.clearStrafingCoords();
@@ -759,37 +749,6 @@ class GpuBoardSourceTest {
             BoardScene.Tile cleared = fixture.source.takeFrame().scene().tile(coords);
             assertTrue(fixture.source.takeFrame().scene().tactical().fills().isEmpty());
             assertTrue(samePixels(before.ground(), cleared.ground()));
-            assertTrue(samePixels(before.tactical(), cleared.tactical()));
-        }
-    }
-
-    @Test
-    void planarCaptureRestoresLegacy2DProjectionAndSpriteBounds() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean original = preferences.getIsometricEnabled();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            SwingUtilities.invokeAndWait(() -> {
-                preferences.setIsometricEnabled(true);
-                Coords coords = new Coords(7, 5);
-                MovementEnvelopeSprite range = new MovementEnvelopeSprite(fixture.view, Color.CYAN, coords, 63);
-                CursorSprite cursor = new CursorSprite(fixture.view, Color.RED);
-                cursor.setHexLocation(coords);
-                fixture.view.addSprites(List.of(range, cursor));
-                range.prepare();
-                cursor.prepare();
-                Rectangle before = new Rectangle(range.getBounds());
-                Rectangle cursorBefore = new Rectangle(cursor.getBounds());
-                int offset = fixture.view.getVerticalOffset();
-                Point location = fixture.view.getHexLocation(coords);
-                fixture.view.capturePlanarTactical(new Rectangle(0, 0, 16, 17), hex -> { });
-                assertEquals(offset, fixture.view.getVerticalOffset());
-                assertEquals(location, fixture.view.getHexLocation(coords));
-                assertEquals(before, range.getBounds());
-                assertEquals(cursorBefore, cursor.getBounds());
-                assertEquals(fixture.view.getHexSize(), cursor.getBounds().getSize());
-            });
-        } finally {
-            SwingUtilities.invokeAndWait(() -> preferences.setIsometricEnabled(original));
         }
     }
 
@@ -859,14 +818,12 @@ class GpuBoardSourceTest {
             assertTrue(samePixels(before.ground(), marked.ground()));
             assertTrue(before.normals() != null);
             assertSame(before.normals(), marked.normals(), "Tactical-only refreshes retain the captured ground normals");
-            assertTrue(samePixels(before.tactical(), marked.tactical()), "The raised symbol must not be painted twice");
             assertTrue(markedScene.markers().stream().anyMatch(symbol -> symbol.coords().equals(coords)
                   && symbol.kind() == megamek.client.ui.clientGUI.boardview.BoardMarker.Kind.ARTILLERY_AUTO_HIT));
             SwingUtilities.invokeAndWait(() -> {
                 fixture.game.getBoard().removeSpecialHexDisplay(coords, marker, true);
                 fixture.source.refresh();
             });
-            assertTrue(samePixels(before.tactical(), fixture.source.takeFrame().scene().tile(coords).tactical()));
             assertTrue(fixture.source.takeFrame().scene().markers().isEmpty(), "Removed symbols must leave no stale marker");
         }
     }

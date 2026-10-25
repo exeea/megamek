@@ -58,10 +58,10 @@ final class GpuCommandDock implements GpuHud.Component {
 
     /**
      * What decides the dock's cells; they are rebuilt only when it changes. {@code buttons} are the ids of the option
-     * row's physical options or phase commands.
+     * row's physical options or phase commands; {@code turns} shows the plan's turn buttons.
      */
     private record Shape(Variant variant, List<String> buttons, boolean more, boolean primary, boolean secondary,
-          boolean stop, boolean legend, boolean steps, boolean backwards) { }
+          boolean stop, boolean legend, boolean steps, boolean backwards, boolean turns) { }
 
     /**
      * The More popover's content (plan A.7 G14, A.8 H38, C.2), which G12 shows above the More button: a title and
@@ -408,7 +408,8 @@ final class GpuCommandDock implements GpuHud.Component {
         Shape shape = new Shape(variant, buttons, hasMore(), variant != Variant.WAITING
               && (variant != Variant.GENERIC || done() != null), secondaryShown, stopShown,
               variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown(),
-              variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())));
+              variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
+              variant == Variant.PLAN && panels.move().facingMatters());
         if (!shape.equals(shown)) {
             shown = shape;
             layout(shape);
@@ -524,8 +525,10 @@ final class GpuCommandDock implements GpuHud.Component {
         switch (shape.variant()) {
             case PLAN -> {
                 modes.forEach(mode -> row1.add(mode).growX().uniformX().minWidth(0).height(TALL));
-                row1.add(turnLeft).width(SQUARE).height(TALL);
-                row1.add(turnRight).width(SQUARE).height(TALL);
+                if (shape.turns()) {
+                    row1.add(turnLeft).width(SQUARE).height(TALL);
+                    row1.add(turnRight).width(SQUARE).height(TALL);
+                }
                 row2.add(undo).width(SQUARE);
             }
             case FIRE -> {

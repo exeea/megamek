@@ -9,7 +9,7 @@ import java.util.stream.Stream;
 
 import megamek.common.board.Coords;
 
-/** Immutable drawing commands in unscaled board pixels; game state remains on the Swing thread. */
+/** Immutable drawing commands in tactical units (board units at hex scale 1, y down); game state stays on Swing. */
 public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> walls, List<Fill> flatWalls, Ruler ruler) {
     /** Range contour labels are a presentation choice shared by capture and rendering. */
     public static final boolean SCROLLING_RANGE_LABELS = false;
@@ -91,7 +91,7 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         }
     }
 
-    /** Anchor is the transformed hex center in board pixels; captured contours remain the generic fallback. */
+    /** Anchor is the hex centre in tactical units; the fill's contours remain the generic fallback. */
     public record HexBorder(Point anchor, double padding, double width, float scale, boolean zone) {
         public HexBorder(Point anchor, double padding, double width, float scale) {
             this(anchor, padding, width, scale, false);

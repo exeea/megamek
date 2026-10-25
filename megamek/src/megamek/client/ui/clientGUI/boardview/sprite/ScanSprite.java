@@ -32,18 +32,15 @@
  */
 package megamek.client.ui.clientGUI.boardview.sprite;
 
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
-import java.awt.RenderingHints;
-import java.awt.Stroke;
-import java.awt.geom.Arc2D;
 import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
+import megamek.client.ui.clientGUI.boardview.TacticalGlyphs;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.common.board.Coords;
 
@@ -58,28 +55,6 @@ import megamek.common.board.Coords;
  * @author Claude Code (Opus 5)
  */
 public class ScanSprite extends Sprite {
-
-    /** Distance in unscaled pixels between one arc and the next along the line, about half a hex. */
-    private static final int ARC_SPACING = 38;
-
-    /** The radius, in unscaled pixels, of the arc nearest the target. A hex is 84 wide, so this fills most of one. */
-    private static final int WIDEST_ARC = 58;
-
-    /** How much narrower the first arc is than the last, so the run reads as a direction rather than a ladder. */
-    private static final double NARROWEST_FRACTION = 0.55;
-
-    /** The arcs stop short of both hexes so neither the scout nor its target is drawn over. */
-    private static final int CLEARANCE = 26;
-
-    /** The arc sweep in degrees, centred on the direction of travel. A shallow curve, not a bowl. */
-    private static final int SWEEP_DEGREES = 58;
-
-    /** Stroke width in unscaled pixels. The sweep has to read at a glance across several hexes of terrain. */
-    private static final float STROKE_WIDTH = 5.5f;
-
-    /** Alpha of the arc nearest the scout, and of the one nearest the target. */
-    private static final int NEAR_ALPHA = 150;
-    private static final int FAR_ALPHA = 240;
 
     private final Coords scannerPosition;
     private final Coords targetPosition;
@@ -102,19 +77,10 @@ public class ScanSprite extends Sprite {
         image = null;
     }
 
-    /**
-     * Works out the two screen points the sweep runs between, pulled in from both hex centres so the arcs sit in the
-     * gap rather than over either unit.
-     */
+    /** Works out the two hex centres the sweep runs between, in board pixels. */
     private void locate() {
-        double angle = scannerPosition.radian(targetPosition) + (Math.PI * 1.5);
-        int clearance = (int) (CLEARANCE * boardScale());
         scannerPoint = hexCentre(scannerPosition);
         targetPoint = hexCentre(targetPosition);
-        scannerPoint.translate((int) Math.round(Math.cos(angle) * clearance),
-              (int) Math.round(Math.sin(angle) * clearance));
-        targetPoint.translate((int) Math.round(-Math.cos(angle) * clearance),
-              (int) Math.round(-Math.sin(angle) * clearance));
     }
 
     /**
@@ -142,7 +108,7 @@ public class ScanSprite extends Sprite {
     @Override
     public Rectangle getBounds() {
         locate();
-        int pad = (int) ((WIDEST_ARC + 4) * boardScale());
+        int pad = (int) (TacticalGlyphs.SCAN_REACH * boardScale());
         bounds = new Rectangle(Math.min(scannerPoint.x, targetPoint.x) - pad,
               Math.min(scannerPoint.y, targetPoint.y) - pad,
               Math.abs(targetPoint.x - scannerPoint.x) + (pad * 2),
@@ -158,7 +124,7 @@ public class ScanSprite extends Sprite {
      * @return the top left of this sprite's bounds, in board pixels
      */
     private Point boundsOrigin() {
-        int pad = (int) ((WIDEST_ARC + 4) * boardScale());
+        int pad = (int) (TacticalGlyphs.SCAN_REACH * boardScale());
         return new Point(Math.min(scannerPoint.x, targetPoint.x) - pad,
               Math.min(scannerPoint.y, targetPoint.y) - pad);
     }
@@ -177,47 +143,9 @@ public class ScanSprite extends Sprite {
     public void drawOnto(Graphics graphics, int x, int y, ImageObserver observer) {
         locate();
         Graphics2D graphics2D = (Graphics2D) graphics.create();
-        graphics2D.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        double scale = boardScale();
-
         Point origin = boundsOrigin();
-        double startX = scannerPoint.x - (double) origin.x;
-        double startY = scannerPoint.y - (double) origin.y;
-        double runX = targetPoint.x - (double) scannerPoint.x;
-        double runY = targetPoint.y - (double) scannerPoint.y;
-        double length = Math.hypot(runX, runY);
-        double spacing = Math.max(6.0, ARC_SPACING * scale);
-        // Measured from the scout end, starting half a gap out, so the run is evenly spaced from the unit to its
-        // target. Spacing the arcs as fractions of the line instead left a double-width gap at each end, which
-        // read as a missing arc next to the scout.
-        double firstOffset = spacing / 2.0;
-        int arcCount = (int) Math.floor((length - firstOffset) / spacing) + 1;
-        if (arcCount < 1) {
-            graphics2D.dispose();
-            return;
-        }
-
-        // Screen degrees run anticlockwise from east while the screen's y axis runs down, so the sweep's facing is
-        // the negated travel angle. Each arc opens toward the target.
-        double facingDegrees = Math.toDegrees(Math.atan2(-runY, runX));
-        Stroke stroke = new BasicStroke(Math.max(2.5f, (float) (STROKE_WIDTH * scale)),
-              BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
-        graphics2D.setStroke(stroke);
-
-        for (int index = 0; index < arcCount; index++) {
-            double along = (firstOffset + (index * spacing)) / length;
-            double centreX = startX + (runX * along) + x;
-            double centreY = startY + (runY * along) + y;
-            // the sweep widens and strengthens as it travels, so the run reads as a direction rather than a
-            // ladder of identical marks, and the eye is pulled toward what is being read
-            double growth = NARROWEST_FRACTION + ((1.0 - NARROWEST_FRACTION) * along);
-            double radius = Math.max(4.0, WIDEST_ARC * scale * growth);
-            Arc2D arc = new Arc2D.Double(centreX - radius, centreY - radius, radius * 2, radius * 2,
-                  facingDegrees - (SWEEP_DEGREES / 2.0), SWEEP_DEGREES, Arc2D.OPEN);
-            int alpha = (int) (NEAR_ALPHA + ((FAR_ALPHA - NEAR_ALPHA) * along));
-            graphics2D.setColor(new Color(sweepColor.getRed(), sweepColor.getGreen(), sweepColor.getBlue(), alpha));
-            graphics2D.draw(arc);
-        }
+        graphics2D.translate(x - origin.x, y - origin.y);
+        TacticalGlyphs.paintScan(graphics2D, scannerPoint, targetPoint, sweepColor, boardScale());
         graphics2D.dispose();
     }
 

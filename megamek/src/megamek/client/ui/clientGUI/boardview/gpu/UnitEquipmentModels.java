@@ -44,6 +44,11 @@ final class UnitEquipmentModels {
         return entry == null ? null : entry.getString("model", null);
     }
 
+    boolean hasProfile(UnitModelEquipment.Mount mount, String profile) {
+        JsonValue entry = equipment.get(mount.internalName());
+        return entry != null && entry.has("profiles") && entry.get("profiles").has(profile);
+    }
+
     Visual resolve(UnitModelEquipment.Mount mount, JsonValue placement) {
         if (mount.policy() == EquipmentModelPolicy.NONE || mount.policy() == EquipmentModelPolicy.MEMBERS) {
             return null;

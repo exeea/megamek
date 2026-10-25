@@ -175,6 +175,37 @@ public final class BulldozerRules {
     }
 
     /**
+     * Bulldozes {@code hex}'s rubble away: the hex is clear terrain then, with only cosmetic overlays left. Two stacked
+     * super layers (both gameplay-free): a GROUND_FLUFF "scraped ground" layer (quicksand_0) under a FLUFF "_path"
+     * layer (the debris pushed into the wedges). Tilesets without these entries just draw clear.
+     *
+     * @param hex a hex holding rubble
+     */
+    public static void clearRubble(Hex hex) {
+        int rubbleLevel = hex.terrainLevel(Terrains.RUBBLE);
+        hex.removeTerrain(Terrains.RUBBLE);
+        hex.addTerrain(new Terrain(Terrains.GROUND_FLUFF, Terrains.CLEARED_RUBBLE_FLUFF_BASE));
+        hex.addTerrain(new Terrain(Terrains.FLUFF, clearedRubbleFluffLevel(rubbleLevel)));
+    }
+
+    /**
+     * The {@link Terrains#FLUFF} level used for the cosmetic cleared-rubble path overlay, derived from the destroyed
+     * structure type so the tileset draws the matching "_path" tile. Ultra rubble (level 6) and any other level reuse
+     * the heavy artwork, mirroring the saxarba tileset's rubble image mapping.
+     *
+     * @param rubbleLevel the {@link Terrains#RUBBLE} level that was cleared (1 light .. 4 hardened, 5 wall, 6+ ultra)
+     *
+     * @return the fluff terrain level for the cleared-rubble path overlay
+     */
+    private static int clearedRubbleFluffLevel(int rubbleLevel) {
+        int structureType = switch (rubbleLevel) {
+            case 1, 2, 4, 5 -> rubbleLevel;
+            default -> 3;
+        };
+        return Terrains.CLEARED_RUBBLE_FLUFF_BASE + structureType;
+    }
+
+    /**
      * @param hex the hex to test, or {@code null}
      *
      * @return {@code true} if the hex exists and holds rubble a bulldozer could clear

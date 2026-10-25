@@ -45,7 +45,6 @@ import javax.swing.ImageIcon;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -68,6 +67,9 @@ public class DugInSprite extends HexSprite {
     private static final int FONT_SIZE = 11;
     private static final int BOTTOM_OFFSET = 24;
 
+    /** Opacity of the trench overlay while the platoon is still digging in (not yet protected). */
+    private static final float DIGGING_IN_ALPHA = 0.4f;
+
     /** The trench overlay image, loaded once and shared by all sprites. */
     private static Image trenchImage;
     private static boolean trenchImageLoaded;
@@ -80,27 +82,20 @@ public class DugInSprite extends HexSprite {
      *
      * @param boardView the parent board view
      * @param loc       the hex the platoon is dug in / digging in
-     * @param alpha     the opacity to draw the trench at (e.g. faint while digging in, full once dug in)
+     * @param complete  whether the platoon is dug in: the trench is drawn in full, else faintly
      * @param label     the status text to show in the hex (e.g. "Digging in" / "Dug in")
      */
-    public DugInSprite(BoardGlyphContext boardView, Coords loc, float alpha, String label) {
+    public DugInSprite(BoardGlyphContext boardView, Coords loc, boolean complete, String label) {
         super(boardView, loc);
-        this.alpha = alpha;
+        this.alpha = complete ? 1 : DIGGING_IN_ALPHA;
         this.label = label;
-    }
-
-    @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.DUG_IN, loc, label);
     }
 
     @Override
     public void prepare() {
         Graphics2D graph = spriteSetup();
         drawTrenches(graph);
-        if (!bv.isGpuCapture()) {
-            drawLabel(graph);
-        }
+        drawLabel(graph);
         graph.dispose();
     }
 

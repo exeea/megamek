@@ -37,7 +37,6 @@ import java.awt.Image;
 import java.awt.Rectangle;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.Configuration;
 import megamek.common.equipment.Flare;
 import megamek.common.util.ImageUtil;
@@ -71,11 +70,6 @@ public class FlareSprite extends Sprite {
         bounds = new Rectangle(dim);
         bounds.setLocation(bv.getHexLocation(flare.position));
         return bounds;
-    }
-
-    @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.FLARE, flare.position, Integer.toString(flare.turnsToBurn));
     }
 
     @Override

@@ -40,8 +40,7 @@ import java.util.Set;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.panels.phaseDisplay.PointblankShotDisplay;
 import megamek.common.Hex;
 import megamek.common.HexTarget;
@@ -274,6 +273,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
             return;
         }
         Board board = game.getBoard(firingEntity);
+        List<TacticalMark> marks = new ArrayList<>();
 
         // for all available range brackets Min/S/M/L/E ...
         for (int bracket = 0; bracket < fieldFire.size(); bracket++) {
@@ -291,11 +291,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
                 }
                 // create sprite if there's a border to paint
                 if (edgesToPaint > 0) {
-                    FieldOfFireSprite ffSprite = new FieldOfFireSprite(clientGUI.getBoardState(firingEntity),
-                          bracket,
-                          loc,
-                          edgesToPaint);
-                    currentSprites.add(ffSprite);
+                    marks.add(new TacticalMark.WeaponRange(loc, edgesToPaint, bracket));
                 }
             }
             // Add range markers (m, S, M, L, E)
@@ -331,11 +327,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
                 // add a text range marker if the found position is good
                 if (board.contains(mark) && fieldFire.get(bracket).contains(mark)
                       && ((bracket > 0) || (numMinMarkers < 2))) {
-                    TextMarkerSprite tS =
-                          new TextMarkerSprite(clientGUI.getBoardState(firingEntity),
-                                mark,
-                                bracket);
-                    currentSprites.add(tS);
+                    marks.add(new TacticalMark.RangeLabel(mark, bracket));
                     if (bracket == 0) {
                         numMinMarkers++;
                     }
@@ -343,7 +335,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
             }
         }
 
-        clientGUI.getBoardState(firingEntity).addSprites(currentSprites);
+        addMarks(clientGUI.getBoardState(firingEntity), marks);
     }
 
     @Override

@@ -64,7 +64,7 @@ class GpuTerrainNormalsSmokeTest {
             // so omit features that would occlude the normal-map samples; physical models have their own native tests.
             List<BoardScene.Tile> atlasTiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
                   tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(),
-                  tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), List.of(), tile.text(),
+                  tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), List.of(), tile.text(),
                   tile.liquid(), tile.tileset(), false)).toList();
             BoardScene scene = new BoardScene(0, 15, 9, atlasTiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(30, -20));
@@ -173,7 +173,7 @@ class GpuTerrainNormalsSmokeTest {
         // Only the normals change: every other layer (foliage, limb-free decals, biome...) must match the compared scene.
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), flat, tile.decals(),
-              tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(), tile.liquid(), tile.tileset(),
+              tile.decalsWithoutLimbs(), tile.features(), tile.text(), tile.liquid(), tile.tileset(),
               tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce())).toList();
         return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of(), scene.light());
     }
@@ -190,7 +190,7 @@ class GpuTerrainNormalsSmokeTest {
 
     private static int[] samples(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, Coords target) {
         outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         outputFrame.display();
         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
@@ -219,7 +219,7 @@ class GpuTerrainNormalsSmokeTest {
                 camera.setIsometric(row == 1);
                 camera.camera.zoom = row == 1 ? 0.3f : 0.27f;
                 camera.center(BoardGeometry.center(new Coords(family * 5 + 2, 4), 0));
-                terrain.render(camera.camera, false);
+                terrain.render(camera.camera);
             }
         }
         HdpiUtils.glViewport(0, 0, width, height);

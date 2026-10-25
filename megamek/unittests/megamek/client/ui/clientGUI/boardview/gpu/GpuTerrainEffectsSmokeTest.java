@@ -484,7 +484,7 @@ class GpuTerrainEffectsSmokeTest {
         effects.update(scene, surfaces, BoardAtmosphere.Effects.NONE, 0);
         ScreenUtils.clear(BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 1, true);
         atmosphere.begin((int) camera.viewportWidth, (int) camera.viewportHeight, 0);
-        terrain.render(camera, false);
+        terrain.render(camera);
         batch.begin(camera);
         units.forEach(unit -> batch.render(unit, terrain.environment()));
         batch.end();
@@ -637,7 +637,7 @@ class GpuTerrainEffectsSmokeTest {
         terrain.renderShadows(camera.camera, List.of());
         atmosphere.prepareClouds(terrain, board, 0);
         atmosphere.begin(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         if (fire) {
             depth.begin();
@@ -711,7 +711,7 @@ class GpuTerrainEffectsSmokeTest {
                 terrain.renderShadows(camera.camera, List.of());
                 atmosphere.prepareClouds(terrain, scene, 0);
                 atmosphere.begin(width, height, 0);
-                terrain.render(camera.camera, false);
+                terrain.render(camera.camera);
                 terrain.renderTransparent(camera.camera);
                 depth.begin();
                 effects.render(camera.camera, depth, atmosphere.sceneParticleLight(), atmosphere.lighting().direction());
@@ -797,8 +797,7 @@ class GpuTerrainEffectsSmokeTest {
                 var family = materials ? BoardScene.Surface.values()[x % 6] : BoardScene.Surface.GRASS;
                 var coords = new Coords(x, y);
                 var plain = BoardSurfaceBlendTest.tile(coords, family, 0, -1, 0);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, plain.ground(), null, null, null,
-                      null, List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, plain.ground(), null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
                       materials && y != 1 ? BoardFireSmoke.NONE : effects.apply(coords)));
             }
         }

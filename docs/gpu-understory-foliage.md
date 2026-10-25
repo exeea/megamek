@@ -23,7 +23,7 @@ The meshes and their textures are in the sibling `mm-data` repository:
   `foliage-{family}-lod0`, `-lod1`, `-lod2` node convention, plus the `-lod3`
   impostor cards that every plant carries (see
   [gpu-board-performance.md](gpu-board-performance.md)).
-- `data/models/board/textures/vegetation/shrubs/{family}_albedo.png`: original, opaque
+- `data/models/board/textures/vegetation/shrubs/shrub-{family}_albedo.png`: original, opaque
   1254 × 1254 botanical atlases.
 
 ## Families and triangle counts

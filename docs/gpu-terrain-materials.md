@@ -53,8 +53,10 @@ those fitted edge normals, keeping a straight rim and a constant slope width. Ea
 cast wall triangle retains its own face normal, including non-planar junctions.
 Cast wall rows join the canonical corners directly, so the face cannot bow away
 from its straight slab rim at a cliff-to-slope junction. At dry board edges the
-slope and the outer cut use the same corner profile; below the slope's foot the
-cut continues vertically from that position down to the board base. Straight-sided
+slope and the outer cut use the same corner profile: the slope stays in the upper
+hex with its foot on the lattice corner, and the cut follows the upper hex's edge,
+so the board keeps its hex outline at every height. Fitted concrete corners on the
+board edge keep their lattice place as well. Straight-sided
 panels split at adjoining terrain heights and use flat facets across their diagonals,
 preserving shared boundary samples without narrow triangle fans at the slope ends.
 Concrete and outer cut walls retain one texture orientation across their facets.
@@ -475,6 +477,16 @@ regolith, angular scree and fractured bedrock) and its own geology profile,
 independent of terrestrial rock. Editing either family must leave the other alone.
 The lunar pairs are 512 pixels square, span 12 metres each, and carry 3.75, 24 and
 12 centimetres of estimated shading relief.
+Lunar ground also carries impact craters placed in world cells, never on the maps' 12 m repeat
+(`lunarCraters` in terrain-sculpt.frag): three scales, from about half a metre to eight metres across, each a bowl
+with a sharp raised rim and a fading apron, mostly old and shallow, a few fresh and bright with rays. A high sun
+barely shades them, so a pale rim and a duller bowl carry them too. They are shading only (normal, cavity, albedo) on
+level ground: support, movement and line of sight keep the actual surface. A crater smaller than a few pixels fades
+out, so none turns into grain. A crater forms only where its bowl and apron clear the nearest drop or rise (each
+estimates the ground's rim and foot distance at its own centre), so a step or its talus never cuts one. Every lunar surface is lit as moon dust (`Surface.regolith`, `regolithResponse` in
+surface-shading.glsl): the sun's diffuse light follows Lommel-Seeliger, cos i / (cos i + cos e), instead of cos i, so
+faces turned from the sun darken far less, with a mild brightening toward the opposition point; normalized on level
+ground, so the board keeps its exposure.
 World-space projections keep coordinates continuous across hexes. Two differently
 oriented ground samples reduce repetition; walls use compatible vertical projections.
 Bare dirt, the soil mantle beneath grass/dirt and natural stone share one
@@ -502,8 +514,16 @@ and soil in its fissures, and `temperate-debris` is its talus of angular blocks.
 families whose wall is `temperate-cliff` reads the `rock-ground` map instead (`u_flatRock`), as the
 cliff's joints stand upright. `arid-debris` is varnished pebbles and red sandstone chips of about 25 to
 55 cm on a warm sandy crust, its hue shifted to the desert ground's in its project, 12 m with 15 cm:
-debris must read as big, distinct stones at board zoom. These, `grassland-ground` and the mulch's soil
-come from photographic studies. `sand-verge`, `grassland-ground` and `temperate-debris` have 5, 7.5 and
+debris must read as big, distinct stones at board zoom. These, `grassland-ground`, the mulch's soil and the
+arid cliff, Mars, sand, tundra ground, crust and mat, field soil and boulder
+(`scatter-stone`) surfaces come from photographic studies, each study's seamless tile one whole repeat so its
+plates, joints and stones keep their size at board zoom.
+`desert-ground` (pale veins between pebbles), `desert-cap` (the hardpan's cracked pale patches), the volcanic
+ground (its pale dusty patches kept at 55 % of their contrast, so the top view is less mottled, with the
+photographic study's cinder stones of 12 cm and more laid on it, in HEAD's tint) and cap, and the
+concrete pavement and walls, the lunar ground, debris and cliff, the snow and the tropical ground keep their own sources; `volcano-cliff` keeps its basalt,
+slightly sharpened (unsharp mask 0.4) with 17 cm of relief (1.4 % of its 12 m) instead of 14 cm.
+`sand-verge`, `grassland-ground` and `temperate-debris` have 5, 7.5 and
 30 cm of relief; lunar has its own `lunar-debris`. See [terrain realism](gpu-terrain-realism.md) for the visual
 references and acceptance rules.
 
@@ -552,7 +572,7 @@ the strata tint.
 | Every ground, debris, bank, cliff and cap map not listed below | 12 |
 | Cast concrete wall map | 12; panel joints have their own constructed dimensions |
 | Fungal ground | 22 |
-| Tundra ground / mat / crust | 24 / 24 / 28 |
+| Tundra ground (dry, wet) / mat / crust | 12 / 24 / 28 |
 | Tree-pit mulch / mud / ground scorch | 1 / 64 / 64 |
 | Wetland earth | 9; the shared earth map sampled at 45% of its 20 m source span |
 | Road and bridge deck maps | 6 for the ordinary repeat of one legacy detail unit |
@@ -569,7 +589,7 @@ scale and wind stretch. Solid crust bends its domain within a few repeats to red
 the visible plate grid while retaining one material sample and its matching Jacobian.
 The solid magma source uses varied broken crust, quiet cold faces and sparse narrow
 fissures instead of a few repeated large slabs. Its aligned maps are exported by
-the Material Maker project `mm-data/tools/materials/terrain/lava/crust`.
+the Material Maker project `mm-data/tools/materials/terrain/lava/lava-crust`.
 
 `GpuSurfaceScaleSmokeTest` captures 14 materials at identical overhead, oblique and
 close scales, including one-level slopes and three-level cliffs. These are visual
@@ -605,9 +625,16 @@ both cameras, without rebuilding geometry or making mesh LOD authoritative for s
 
 At zero detail the material branches skip normal/AO texture reads. Colour and height
 used for terrain contact blending remain sampled, preserving slope bands, shore
-materials and concrete joints. Fine cavity AO fades to 0.9; vertex/contact occlusion
-and geometry shadows remain. This approximates small pores at distance rather than
-turning off the terrain's broad shading.
+materials and concrete joints. A natural layer keeps its average look instead
+(`distantLayer`, from `u_finishDistant`: its means, read once at load from its smallest
+mip, so the far path reads no texture for them): its cavity fades to the layer's mean,
+and its relief, the length of its mean normal, takes the share of direct sun its
+tilted facets would turn away (`sunOnRelief`: much under a high sun, little under a
+low one, never more than flat ground gets). The relief is softened as the close view
+softens it (power .25), so far zoom matches the close view averaged into its pixels:
+across every family, flat and stepped, noon to evening, the mean brightness is off by
+0.85 sRGB levels on average and 2.4 at most. Other surfaces'
+cavity fades to 0.9. Vertex/contact occlusion and geometry shadows remain.
 
 Volcanic materials also skip their relief trace when normals fade out. Their surface
 map (height, roughness, AO, relief range) fades out by 1.25 metres per pixel, using a
@@ -641,8 +668,9 @@ and magma retain their established material precedence. Buildings block neighbou
 cover without discarding their own authored SAND; water keeps its bed treatment.
 Authored `ground_fluff` gradients mix themes (including Desert and Mars), not SAND.
 
-The shared sand-ground source has broad branching waves and finer cross-ripples.
-Its 512-square color/height and normal/AO pair repeats over 12 metres. Its
+The shared sand-ground source is a photograph of wind-rippled sand: sinuous crests about 2 m apart, capped
+with coarser grains, over fine sand in the troughs. Its tile is sheared by the crests' drift so they continue
+across both edges. Its 512-square color/height and normal/AO pair repeats over 12 metres. Its
 22-centimetre relief is an artistic estimate for normals, not mesh displacement.
 The shader translates source windows instead of rotating or resizing them, retaining
 the dominant wind direction and wave size. Existing material LOD filters detail at
@@ -669,8 +697,8 @@ two translated reads of the top projection, plus one read per side projection in
 volcanic programs.
 
 The existing biome snapshot, per-hex texture and nine-hex coverage stencil carry the
-tundra mask for both cameras. Four source materials (two complete earth-tundra
-mixtures, fungal colonies and barren mineral crust) occupy four colour/height and
+tundra mask for both cameras. Four source materials (dry and wet earth-tundra
+carpets, fungal colonies and barren mineral crust) occupy four colour/height and
 four normal/AO layers of the shared terrain arrays,
 with no new sampler or flat-ground geometry. The shader preserves their image
 pigments and internal detail rather than thresholding one gray source into flat
@@ -682,18 +710,26 @@ SAND or SNOW also covers it. A Snow *theme* can show exposed tundra between snow
 remnants. None of these appearance choices changes the board's terrain or rules.
 
 The `tundra-ground`, `tundra-ground-variant`, `tundra-mat` and `tundra-crust` color/height and normal/AO
-maps are 512 pixels square. Living mats repeat over 24 metres and mineral crust over
-28 metres. Both earth variants contain the same moss, pale lichen, humus and sparse
-rust-coloured vegetation palette, with different local arrangements. A world-space
-16-metre field blends these complete mixtures. Large contrasting moss-only or
-lichen-only regions are deliberately excluded: every tundra hex must read as the
-same terrain. This breaks repeated motifs without inventing apparent terrain
-boundaries. Earth, fungal and mineral shading relief is respectively 6, 8 and 4
-centimetres; these are artistic estimates, not measured geometry. Material Maker
-projects and their required source images remain the authoring source of truth.
+maps are 512 pixels square. Earth tundra is autumn: `tundra-ground` is a dry heath carpet (dwarf birch, bearberry,
+crowberry and moss mixed at a fine scale, rust, ochre and olive with faint lichen flecks) and `tundra-ground-variant` a
+wet sedge and moss carpet, both from photographic studies, repeating over 12 metres with 10 and 7 cm of relief. Like
+ordinary ground, each carpet is also read 2.37 times larger and turned, the two blended by a world field, so its
+repeat does not show; the fungal mat repeats over 24 metres and the mineral crust over 28. The land decides where each carpet lies
+(`tundraWetness` in terrain-tundra.glsl, from the ground's rim and foot distances): sedge fills the hollows at the
+foot of rises, broad low stretches and the damp troughs of frost polygons (12 m cells on open level ground, in some
+stretches only); pale reindeer lichen takes over the heath on dry rises near drops, and the heath drifts gently
+between rusty and olive stretches tens of metres across. Every transition is metres wide, so the carpets meet as
+tones, never as patches: no hard-edged single-species blobs, which read as camouflage. Material Maker projects and
+their required source images remain the authoring source of truth.
+
+Tundra's dwarf shrubs grow with the grass blades ([grass](gpu-grass-rendering.md)): crowberry, bearberry, dwarf
+birch and willow in their autumn colours, in clumps about 1.6 m across with the carpet open between them. Shapes and
+sizes mix shrub by shrub (needle mats, prostrate spreads, upright bushes, 2.5 times life size like the oversized
+blades, so they read at play distance); colours change by colonies metres across. No meadow blade grows over the carpet, and the
+relief's field dressing adds no second shrub kit there.
 
 `BoardTundraTest` checks native capture, theme preservation, precedence, cliff
-reach, connected coverage and grass roots. `GpuTundraSmokeTest` renders paired
+reach, connected coverage, grass roots and the dwarf shrubs' roots. `GpuTundraSmokeTest` renders paired
 base/tundra patches for ten themes, terraced slopes and paved lichen through the actual OpenGL renderer in both
 cameras, saving review images under `build/gpu-board-review/tundra`.
 

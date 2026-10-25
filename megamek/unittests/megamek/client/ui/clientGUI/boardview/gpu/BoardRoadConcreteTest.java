@@ -258,7 +258,8 @@ class BoardRoadConcreteTest {
         var tile = scene.tile(at);
         var road = BoardRoad.of(scene, tile);
         var asphalt = GpuRoads.patches(tile, road).stream()
-              .filter(patch -> patch.texture().equals("roads/asphalt") && !patch.blended()).findFirst().orElseThrow();
+              .filter(patch -> patch.texture().equals("roads/asphalt") && patch.lift() == GpuRoads.SURFACE_LIFT)
+              .findFirst().orElseThrow();
         var triangles = new ArrayList<BoardTacticalGeometry.Triangle>();
         for (int direction = -1; direction < 6; direction++) {
             var receiver = direction < 0 ? tile : scene.neighbor(tile, direction);

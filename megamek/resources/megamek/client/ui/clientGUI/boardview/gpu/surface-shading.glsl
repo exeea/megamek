@@ -42,13 +42,26 @@ struct Surface {
     vec3 bounce;             // albedo of the sunlit ground below, which the sky reflects into undersides
     vec3 emission;           // radiance the light does not scale
     float scatter;           // subsurface scattering (Godot's subsurf_scatter), 0 to 1: light wraps past the terminator
+    float regolith;          // share lit as moon dust (regolithResponse), 0 to 1; 0 elsewhere
 };
 
 // An opaque dielectric over GROUND_ALBEDO, without occlusion, transmission, heat, emission or scattering; callers set
 // what they have.
 Surface opaqueSurface(vec3 albedo, vec3 normal, vec3 geometric, float roughness, float film, float visibility) {
     return Surface(albedo, normal, geometric, roughness, film, vec3(.04), 0.0, 1.0, 1.0, 1.0, visibility, vec3(1.0),
-          vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0), 0.0);
+          vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0), 0.0, 0.0);
+}
+
+// Moon dust scatters the sun as lunar regolith does, not as a Lambertian surface: it takes cos i / (cos i + cos e)
+// rather than cos i, so a face turned from the sun darkens far less (the Moon's flat, even brightness), and it
+// brightens where the viewer looks along the sunlight (the opposition surge). Relative to the diffuse response, and
+// normalized on level ground, so the board keeps its exposure and only the slopes' shading and the surge change.
+float regolithResponse(vec3 normal, vec3 light, vec3 view) {
+    float nl = max(0.0, dot(normal, light)), nv = max(0.0, dot(normal, view));
+    float level = max(0.0, light.z) + max(0.0, view.z);
+    float shape = clamp(level / max(nl + nv, .05), .5, 2.0);
+    float phase = acos(clamp(dot(light, view), -1.0, 1.0));
+    return shape * (1.0 + .3 * exp(-phase / .15));
 }
 
 // Godot's metallic workflow, on a surface whose albedo is the material's colour: the metallic share reflects that colour
@@ -114,6 +127,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
         incidence = mix(incidence, diffuseBudget * wrapped, s.scatter);
     }
     vec3 incident = incidence * s.front;
+    if (s.regolith > 0.0) incident *= mix(1.0, regolithResponse(normal, light, view), s.regolith);
     if (tissue) {
         vec3 through = dot(s.geometric, light) < 0.0
               ? diffuseReflectance(-normal, light, -view, roughness, f0) : vec3(0.0);

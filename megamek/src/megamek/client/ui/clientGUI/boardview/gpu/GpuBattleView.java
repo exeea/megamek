@@ -699,6 +699,7 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
+        atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
         terrain.setGravity(atmosphereSettings.gravity());
         terrain.setVacuum(atmosphereSettings.pressure().isVacuum());
         // The 3D Graphics choose what the terrain builds; the first frame already has the saved choice, and a switch
@@ -884,9 +885,7 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
               ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
-        if (source.isEditor()) {
-            editorPreview.prepare(scene, terrain, editorPreviewShown() ? source.editorPreview() : GpuEditorPreview.Data.NONE);
-        }
+        editorPreview.prepare(scene, terrain, ghosts());
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, units);
         renderStage("cloud transmission");
@@ -960,15 +959,15 @@ class GpuBattleView extends ApplicationAdapter {
               terrain);
         if (source.isEditor()) { traceOverlay.render(boardCamera, source.trace(), Gdx.graphics.getDeltaTime()); }
         renderStage("tactical overlays");
-        terrain.render(boardCamera.camera, true);
         // Each artillery round in the air marks the hex it is coming down on, until it lands.
         overlay.setIncomingTargets(playback.attacks(), Gdx.graphics.getDeltaTime());
         // Movement annotations show through scenery; draw the destination ghost after the route and the units.
         overlay.renderMarks(boardCamera.camera, unitFootprints::get);
         overlay.render(boardCamera.camera);
         renderHoverRings();
-        if (source.isEditor() && editorPreviewShown()) {
-            editorPreview.render(boardCamera.camera, scene, terrain, source.editorPreview());
+        var ghosts = ghosts();
+        if (ghosts != GpuEditorPreview.Data.NONE) {
+            editorPreview.render(boardCamera.camera, scene, terrain, ghosts);
         }
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical(),
@@ -1125,6 +1124,15 @@ class GpuBattleView extends ApplicationAdapter {
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }
+    }
+
+    /** The ghosts over the frame: the editor's preview, or in a game the work under way. */
+    private GpuEditorPreview.Data ghosts() {
+        if (!source.isEditor()) {
+            // A stand-in source (a test's mock) may give none.
+            return java.util.Objects.requireNonNullElse(source.workGhosts(), GpuEditorPreview.Data.NONE);
+        }
+        return editorPreviewShown() ? source.editorPreview() : GpuEditorPreview.Data.NONE;
     }
 
     /**

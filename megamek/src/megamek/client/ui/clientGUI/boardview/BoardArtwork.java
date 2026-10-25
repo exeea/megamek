@@ -48,39 +48,34 @@ public final class BoardArtwork implements AutoCloseable {
      * {@code bridge} its bridge's art, which that view lays on the deck.
      */
     public record HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
-          BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+          BufferedImage decalsWithoutLimbs, List<BoardHexText> text,
           Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains,
           Scenery scenery, BufferedImage tilesetDecals, BufferedImage tilesetScenery) {
         public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
-              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              BufferedImage decalsWithoutLimbs, List<BoardHexText> text,
               Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains,
               Scenery scenery) {
-            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, tileset, bridge,
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, text, structureModels, tileset, bridge,
                   blankTerrains, scenery, null, null);
         }
         public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
-              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              BufferedImage decalsWithoutLimbs, List<BoardHexText> text,
               Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains) {
-            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, tileset, bridge,
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, text, structureModels, tileset, bridge,
                   blankTerrains, Scenery.EMPTY);
         }
         public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
-              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              BufferedImage decalsWithoutLimbs, List<BoardHexText> text,
               Map<Integer, String> structureModels, BufferedImage tileset) {
-            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, tileset, null);
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, text, structureModels, tileset, null);
         }
         public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
-              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              BufferedImage decalsWithoutLimbs, List<BoardHexText> text,
               Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge) {
-            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, tileset, bridge,
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, text, structureModels, tileset, bridge,
                   Set.of());
         }
         public HexImage { blankTerrains = Set.copyOf(blankTerrains); }
-        /** This capture with its tactical marking replaced; every other field is kept. */
-        public HexImage withTactical(BufferedImage marking) {
-            return marking == tactical ? this : new HexImage(coords, terrain, normals, decals, decalsWithoutLimbs, marking,
-                  text, structureModels, tileset, bridge, blankTerrains, scenery, tilesetDecals, tilesetScenery);
-        }
     }
     private record GroundArtwork(BufferedImage color, BufferedImage normal) { }
     private record DecalArtwork(BufferedImage full, BufferedImage withoutLimbs, BufferedImage tileset,
@@ -187,15 +182,14 @@ public final class BoardArtwork implements AutoCloseable {
         Set<Integer> blank = gpuTileset.blankTerrainTypes(hex);
         DecalArtwork decals = captureDecals(coords, hex, models, blank);
         gpuTileset.clearHex(hex);
-        return new HexImage(coords, ground.color(), ground.normal(), decals.full(), decals.withoutLimbs(), null,
+        return new HexImage(coords, ground.color(), ground.normal(), decals.full(), decals.withoutLimbs(),
               BoardHexText.capture(coords, hex, board, 1, LABEL_FONT, LABEL_FONT), models, decals.tileset(),
               decals.bridge(), blank, decals.scenery(), decals.tilesetDecals(), decals.tilesetScenery());
     }
 
-    /** Only the hex's labels, for the game's tactical pass, which adds its marking; the terrain is BoardTiles'. */
-    public static HexImage labels(Board board, Coords coords) {
-        return new HexImage(coords, null, null, null, null, null,
-              BoardHexText.capture(coords, board.getHex(coords), board, 1, LABEL_FONT, LABEL_FONT), Map.of(), null);
+    /** Only the hex's labels, which the game relabels as its state changes; the terrain is BoardTiles'. */
+    public static List<BoardHexText> labels(Board board, Coords coords) {
+        return BoardHexText.capture(coords, board.getHex(coords), board, 1, LABEL_FONT, LABEL_FONT);
     }
 
     public void invalidate(Coords coords) {

@@ -81,7 +81,7 @@ class GpuFoliageSmokeTest {
                         terrain.animate(0, List.of());
                         terrain.renderShadows(List.of());
                         outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         outputFrame.display();
                         GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                               "trees-" + (snow ? "snow" : "summer") + ".png"));
@@ -142,7 +142,7 @@ class GpuFoliageSmokeTest {
                         BoardScene.FeatureKind.TREE))
                   : List.of();
             tiles.add(new BoardScene.Tile(new Coords(index / 5, index % 5), 0, -1, false, 0,
-                  snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, pixels, null, null, tree, List.of()));
+                  snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, pixels, null, tree, List.of()));
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
     }
@@ -157,7 +157,7 @@ class GpuFoliageSmokeTest {
                 var hex = new Hex(0, cover + (x == 6 ? ";road:1:9" : ""), "", coords);
                 var base = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, 0);
                 tiles.add(new BoardScene.Tile(coords, 0, -1, false, x == 6 ? 9 : 0, BoardScene.Surface.GRASS,
-                      base.ground(), null, null, null, null, BoardTreeDistributionTest.capture(hex, coords, natural),
+                      base.ground(), null, null, null, BoardTreeDistributionTest.capture(hex, coords, natural),
                       List.of(), BoardLiquid.NONE, null, true, BoardRoad.capture(hex)));
             }
         }

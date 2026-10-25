@@ -395,7 +395,7 @@ final class GpuMapSource implements BoardSource {
             var labels = BoardHexText.capture(tile.coords(), hex, board, 1, font, font, true, true, true).stream()
                   .map(label -> new BoardHexText(label.text(), label.baseline(), label.font(), 0xFF000000,
                         label.fromTop(), label.elevation())).toList();
-            return tile.withMarkings(null, labels);
+            return tile.withText(labels);
         }).toList());
     }
 

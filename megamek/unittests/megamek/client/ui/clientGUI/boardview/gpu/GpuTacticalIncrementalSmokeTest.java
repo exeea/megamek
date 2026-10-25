@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.BasicStroke;
-import java.awt.Point;
 import java.awt.geom.Path2D;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -45,7 +44,6 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Pool;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -76,13 +74,10 @@ class GpuTacticalIncrementalSmokeTest {
         BoardTactical commands;
         try {
             graphics.setColor(java.awt.Color.ORANGE);
-            if (border) {
-                graphics.fillHexBorder(new Point(189, 36), 1, 1, 2, true);
-            } else {
-                var local = BoardTacticalGraphics.onHexPlane(graphics, new Point(189, 36));
-                try { local.fillOval(15, 10, 54, 52); }
-                finally { local.dispose(); }
-            }
+            var local = BoardTacticalGraphics.onHexPlane(graphics, new Coords(3, 0));
+            try {
+                if (border) { local.fillHexBorder(1, 2); } else { local.fillOval(-27, -26, 54, 52); }
+            } finally { local.dispose(); }
             commands = graphics.snapshot();
         } finally {
             graphics.dispose();
@@ -187,7 +182,7 @@ class GpuTacticalIncrementalSmokeTest {
             for (int y = 0; y < 2; y++) {
                 boolean owner = x == 3 && y == 0;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), owner ? level : neighbor, owner ? depth : -1,
-                      owner && frozen, 0, BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      owner && frozen, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 4, 2, tiles, List.of(), List.of(), -1, "", List.of(), null,
@@ -490,7 +485,7 @@ class GpuTacticalIncrementalSmokeTest {
             for (int y = 0; y < 2; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 3 && y == 0 ? raised : 0,
                       x == 2 ? 2 : -1, y == 1 && x == 2, 0, BoardScene.Surface.GRASS,
-                      null, null, null, List.of(), List.of()));
+                      null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 4, 2, tiles, List.of(), List.of(), -1, "", List.of(), null,

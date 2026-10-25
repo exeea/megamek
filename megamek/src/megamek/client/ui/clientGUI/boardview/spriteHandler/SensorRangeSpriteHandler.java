@@ -40,7 +40,7 @@ import java.util.Set;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.sprite.SensorRangeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
@@ -142,7 +142,7 @@ public class SensorRangeSpriteHandler extends BoardViewSpriteHandler implements 
 
         lBrackets.add(new RangeHelper(minSensorRange, maxSensorRange));
 
-        // The active probe's reach (SensorRangeSprite.ACTIVE_PROBE), none without an active probe
+        // The active probe's reach (TacticalStyle.ACTIVE_PROBE), none without an active probe
         lBrackets.add(new RangeHelper(0, Math.max(0, entity.getBAPRange())));
 
         // create the lists of hexes
@@ -178,6 +178,7 @@ public class SensorRangeSpriteHandler extends BoardViewSpriteHandler implements 
 
         // for all available range
         BoardClientState boardView = clientGUI.getBoardState(board.getBoardId());
+        List<TacticalMark> marks = new ArrayList<>();
         for (int b = 0; b < lBrackets.size(); b++) {
             if (sensorRanges.get(b) == null) {
                 continue;
@@ -197,11 +198,11 @@ public class SensorRangeSpriteHandler extends BoardViewSpriteHandler implements 
 
                 // create sprite if there's a border to paint
                 if (edgesToPaint > 0) {
-                    currentSprites.add(new SensorRangeSprite(boardView, b, loc, edgesToPaint));
+                    marks.add(new TacticalMark.SensorRange(loc, edgesToPaint, b));
                 }
             }
         }
-        boardView.addSprites(currentSprites);
+        addMarks(boardView, marks);
     }
 
     @Override

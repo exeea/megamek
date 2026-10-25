@@ -344,6 +344,18 @@ second camera-depth pass. The composite combines scene color, fog, shafts,
 grading, exposure and glare, then restores scene depth for later draws.
 Weather particles and tactical/UI passes must retain the intended depth/order.
 
+**Depth cues** (Tuning → Display, off until switched on, saved) separate nearer terrain from farther terrain in
+clear air, in either projection; the Tactical View keeps clear air. `GpuDepthCues` measures the focus, the mean camera
+distance of the surfaces in the middle two fifths of the view less the orbit pivot's, in a one-texel pass over the
+scene depth, eased over 0.3 s. Before fog, the composite hazes what lies behind the focus towards the fog colour,
+reaching `GpuDepthCues.STRENGTH` over half the depth the view spans (its height times the tangent of the tilt); the
+focus and all in front of it keep their colour. Each pixel depends only on its own depth, so nothing slides across
+the terrain as the camera moves; panning across a cliff edge refocuses the haze over that 0.3 s.
+
+The strength was chosen from `GpuDepthCuesSmokeTest` captures of Crystalline Canyon on NVIDIA; the pass is not timed
+on Iris Xe. A tiled print measures a focus per tile. The program links during loading when the option is on,
+otherwise at its first frame.
+
 Relevant helpers are `camera-depth.glsl`, `ground-layer.glsl`,
 `scattering-phase.glsl`, `sun-visibility.glsl`, `weather-sand.glsl`,
 `atmosphere-fov.glsl`, `atmosphere-grade.glsl` and `atmosphere-glare.glsl`.

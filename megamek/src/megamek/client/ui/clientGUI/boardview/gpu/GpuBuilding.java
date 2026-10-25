@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.function.Function;
-import java.util.regex.Pattern;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.Model;
@@ -27,7 +26,6 @@ import com.badlogic.gdx.utils.Disposable;
 /** One shared GLB kit and compact assembly recipes. Only the kit and generated interiors own GPU resources. */
 final class GpuBuilding implements Disposable {
     static final float LEVEL_HEIGHT = BoardGeometry.MODEL_LEVEL_HEIGHT;
-    private static final Pattern PART = Pattern.compile(".*-(base|floor|roof)(0|[1-9][0-9]*)");
     private final List<Model> models = new ArrayList<>();
     private final List<Map<String, String>> names;
     private final Map<Recipe, Assembly> assemblies = new HashMap<>();
@@ -100,19 +98,10 @@ final class GpuBuilding implements Disposable {
     /** Validate module roles before allocating GPU resources. Sparse variant numbers are supported. */
     static Map<String, String> parts(ModelData data) {
         Map<String, String> result = new LinkedHashMap<>();
-        // Wall kits also use this metadata on concurrent terrain workers; libGDX's cached iterator is shared.
-        for (int index = 0; index < data.nodes.size; index++) {
-            var node = data.nodes.get(index);
-            var match = PART.matcher(node.id);
-            require(match.matches(), "Expected -baseN, -floorN or -roofN: " + node.id);
-            require(node.parts != null && node.parts.length > 0 && (node.children == null || node.children.length == 0),
-                  "Building modules must be mesh nodes: " + node.id);
-            String role = match.group(1) + match.group(2);
-            require(result.put(role, node.id) == null, "Duplicate building module: " + role);
+        for (var piece : ConnectedKit.parts(data)) {
+            require(piece.core(), "A kit with connection tags is assembled as a connected kit: " + piece.node());
+            result.put(piece.role(), piece.node());
         }
-        require(result.keySet().stream().anyMatch(id -> id.startsWith("base")), "Building requires a base variant");
-        require(result.keySet().stream().anyMatch(id -> id.startsWith("floor")), "Building requires a floor variant");
-        require(result.keySet().stream().anyMatch(id -> id.startsWith("roof")), "Building requires a roof variant");
         return Map.copyOf(result);
     }
 

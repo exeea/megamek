@@ -36,7 +36,7 @@ import java.util.Collection;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.board.Coords;
 
 public class FleeZoneSpriteHandler extends BoardViewSpriteHandler {
@@ -57,10 +57,7 @@ public class FleeZoneSpriteHandler extends BoardViewSpriteHandler {
         clear();
         BoardClientState boardView = clientGUI.getBoardState(boardId);
         if (boardView != null) {
-            coords.stream()
-                  .map(c -> new FieldOfFireSprite(boardView, 1, c, 63))
-                  .forEach(currentSprites::add);
-            boardView.addSprites(currentSprites);
+            addMarks(boardView, coords.stream().map(c -> new TacticalMark.WeaponRange(c, 63, 1)).toList());
         }
     }
 }

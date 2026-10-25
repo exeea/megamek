@@ -13,16 +13,15 @@ import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.tileset.HexTileset;
 import megamek.logging.MMLogger;
 
 /**
  * The board editor's trace overlay: a translucent reference image, such as a scanned map to trace, laid over the board
  * from the Trace settings of the Client Settings. It is a view setting, never part of the board. The image fits the
  * hexes only when looking straight down, so it shows only in the top view ({@link #topView}) and fades out as soon as
- * the camera tilts away, and in again when it returns. It lies where the old 2D editor drew it at 100 % zoom: an image
- * pixel at scale 100 % is a pixel of the 2D board, whose hexes are 84 × 72, and the offsets count from that board's
- * corner, one hex left of and above the first hex. One pass after the scene, under the editor's markers. Render thread.
+ * the camera tilts away, and in again when it returns. An image pixel at scale 100 % is one board unit (a hex is 72
+ * high), and the offsets count board units from one hex left of and above the first hex, as the old 2D editor's did.
+ * One pass after the scene, under the editor's markers. Render thread.
  */
 final class GpuTraceOverlay implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(GpuTraceOverlay.class);
@@ -33,7 +32,7 @@ final class GpuTraceOverlay implements Disposable {
 
     /**
      * The Trace settings ({@link GUIPreferences}), copied on the Swing thread: shown or not, the image file, the opacity
-     * 0 to 255, the scale in percent and the offsets in 2D board pixels.
+     * 0 to 255, the scale in percent and the offsets in board units.
      */
     record Settings(boolean enabled, String file, int opacity, int scale, int x, int y) {
         static final Settings NONE = new Settings(false, "", 0, 100, 0, 0);
@@ -67,7 +66,8 @@ final class GpuTraceOverlay implements Disposable {
     static Rectangle bounds(Settings settings, int width, int height) {
         float pixel = BoardGeometry.hexScale(), scale = settings.scale() / 100f;
         float w = width * scale * pixel, h = height * scale * pixel;
-        float left = (settings.x() - HexTileset.HEX_W) * pixel, top = -(settings.y() - HexTileset.HEX_H) * pixel;
+        float left = (settings.x() - BoardGeometry.TILE_WIDTH) * pixel;
+        float top = -(settings.y() - BoardGeometry.TILE_HEIGHT) * pixel;
         return new Rectangle(left, top - h, w, h);
     }
 

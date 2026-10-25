@@ -226,15 +226,12 @@ final class GpuHexText implements Disposable {
 
     /**
      * Whether {@code next}, the scene's new tiles, give the labels the meshes hold, so that a rebuild would upload the
-     * same glyphs: only their markings changed (a path preview repaints the tactical images of the hexes it crosses,
-     * which recaptures equal labels) and every roof label's roof is where it was.
+     * same glyphs: the tiles are equal and every roof label's roof is where it was.
      */
     private boolean sameLabels(List<BoardScene.Tile> next, Function<Coords, BoundingBox> roofBounds) {
         if (tiles == null || tiles.size() != next.size()) { return false; }
         for (int index = 0; index < next.size(); index++) {
-            BoardScene.Tile old = tiles.get(index), tile = next.get(index);
-            if (old != tile && !(old.text().equals(tile.text())
-                  && old.withMarkings(tile.tactical(), tile.text()).equals(tile))) { return false; }
+            if (!tiles.get(index).equals(next.get(index))) { return false; }
         }
         for (Map.Entry<Coords, BoundingBox> roof : roofs.entrySet()) {
             BoundingBox now = roofBounds.apply(roof.getKey()), then = roof.getValue();

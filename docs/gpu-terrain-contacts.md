@@ -24,10 +24,12 @@ world-space field. The footprint containing a sample owns the neighbor query, ev
 when another hex's mesh emitted that sample. This is what makes both sides of a seam
 evaluate the same cover.
 
-The horizontal field starts with `WIDTH_METRES` (4.5 m) and varies in world space.
-Height limits keep the receiving soil/snow near the actual cliff foot: its influence
-reaches only 0.9 m up the face. A tall cliff can contribute its own material to the
-ground below. At stacked junctions the GPU palette can retain four families.
+The horizontal field starts with `WIDTH_METRES` (7 m) and varies in world space.
+Height limits keep the receiving ground near the actual cliff foot: it climbs the face
+in tongues that follow the contact's own patches, from a fifth of `FOOT_METRES` (2.7 m)
+to all of it, so the foot is a broken line, not the bank's contour. A tall cliff can
+contribute its own material to the ground below. At stacked junctions the GPU palette
+can retain four families.
 If authored mixtures contribute more than four at one point, small shading triangles
 retain the four strongest contributions; weaker covers at those crowded junctions
 are omitted to keep geometry and shader costs bounded.
@@ -53,8 +55,10 @@ are unchanged. Unknown ground artwork keeps its existing fallback handling.
 These weights feed the same world-space contact field as neighboring terrain, so
 the native shader blends color, normal, height, roughness and occlusion together;
 grass placement reads the same coverage. Authored gradients interpolate the complete
-materials, including their colors; ordinary terrain boundaries keep their existing
-height-based texture breakup. Lighting and each material's own texture still affect
+materials, including their colors, on level ground and banks alike (`coverGradient`), so
+a bank meets its foot in the same mixture. Ordinary boundaries keep about half their
+height-based breakup on level ground; on a bank the two families interlock by the height
+of their own relief, so snow or dust fills the hollows of the soil instead of fading over it. Lighting and each material's own texture still affect
 the displayed pixel color.
 An edited strength invalidates neighboring material meshes and grass coverage.
 
@@ -86,6 +90,11 @@ over its entire shore. Recessed banks and exposed bars participate; opposite sho
 must not paint each other. Beneath water, coverage becomes sediment/stone and living
 ground cover fades out. Clip dry/submerged portions before refining their materials so
 absorption and caustics apply only where water actually covers the surface.
+
+Lava melts the snow beside it off its rock and burns turf to its soil
+(`BoardSurfaceBlend.melted`): fully at its edge, then in broken tongues out to
+`HEAT_METRES` (5 m) from molten or crusted lava, and less far up a
+cliff above it. Like any cover, this is one CPU field that the material and grass both read.
 
 Molten banks do not receive water absorption or caustics. Volcanic interiors and boundary
 palettes call the same solid-material helper. Heat is added after reflected lighting

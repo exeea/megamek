@@ -81,11 +81,6 @@ public class EntitySprite extends Sprite {
         image = annotations.image();
     }
 
-    public BufferedImage captureAnnotations() { return annotations.captureAnnotations(); }
-    public UnitAnnotations.Annotations captureAnnotations(UnitAnnotations.Annotations previous, boolean selected, boolean affected) {
-        return annotations.captureAnnotations(previous, selected, affected);
-    }
-
     @Override
     protected int getSpritePriority() { return getEntity().getSpriteDrawPriority(); }
     @Override

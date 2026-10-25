@@ -37,9 +37,11 @@ final class BoardRelief {
     private static final int[] CORNER_DX = { 2, 1, -1, -2, -1, 1 };
     private static final int[] CORNER_DY = { 0, 1, 1, 0, -1, -1 };
     private static final float EPSILON = .0005f;
+    /** The most of a neck's shared edge, in edges, that each of its ends recedes: at least 30 % stays a usable top. */
+    private static final float NECK_END = .34f;
     /**
      * How far, in edges, a water hex's bank strips may stitch ahead of their parameter order: a third of an edge,
-     * about as far as the steps through a corner slide the boundary's samples along it (12.9 of 42 world units).
+     * about as far as the steps through a corner slide the boundary's samples along it.
      */
     private static final float LEAD = 1 / 3f;
     /**
@@ -855,8 +857,8 @@ final class BoardRelief {
             for (Site site : around) {
                 if (site != null) { natural &= site.sculpted() && site.detailed() && !site.fixedRoad() && !site.ultraSublevel(); }
             }
-            // At a dry board edge the slope and the cut face share the same corner profile; beside a road the cut stays
-            // on the lattice, where the road leaving the board ends.
+            // At a dry board edge the slope and the cut face share one corner profile, kept on the board's outline
+            // (boardBandOffset); beside a road the cut stays on the lattice, where the road leaving the board ends.
             banded = natural && (!pinned || around[1] != null && around[2] == null
                   && !around[0].liquid() && !around[1].liquid() && !around[0].road() && !around[1].road());
             if (pinned) {
@@ -1039,6 +1041,14 @@ final class BoardRelief {
             solids++;
         }
         d *= pin / solids;
+        // Two tops joined beside a lower hex end in this corner: its relief slides it along their shared edge (see
+        // cornerDirection), and however the rock falls the neck keeps the middle of that edge (NECK_END).
+        if (solids == 2) {
+            float[] fillet = new float[2];
+            filletOffset(corner, z, fillet);
+            float moved = (band[0] + fillet[0]) * direction[0] + (band[1] + fillet[1]) * direction[1];
+            d = Math.max(d, -NECK_END * BoardGeometry.width() / 2 - moved);
+        }
         // The bank must support the free end of a fall. Keep its rounded rock masses, but do not excavate the
         // shared shoulder from underneath the mouth; the adjoining faces retain their own recesses.
         if (corner.waterfall) { d = Math.max(0, d); }
@@ -1071,6 +1081,7 @@ final class BoardRelief {
     }
 
     private float[] computeBandOffset(Corner corner, float z) {
+        if (corner.around[2] == null) { return boardBandOffset(corner, z); }
         float[] result = new float[2];
         float level = BoardGeometry.level(), reach = .35f * level, a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0, widest = 0;
         for (int i = 0; i < 3; i++) {
@@ -1111,6 +1122,25 @@ final class BoardRelief {
             result[1] *= limit / length;
         }
         return result;
+    }
+
+    /**
+     * The band of a corner on the board's edge, which only its two hexes share. Their step stays in the upper hex
+     * there, its foot on the corner and its rim as far back as elsewhere, and the corner slides along the upper hex's
+     * own edge of the board, so the board's cut keeps its hex outline at every height.
+     */
+    private float[] boardBandOffset(Corner corner, float z) {
+        Site upper = corner.around[0].level() > corner.around[1].level() ? corner.around[0] : corner.around[1];
+        Site lower = upper == corner.around[0] ? corner.around[1] : corner.around[0];
+        float level = BoardGeometry.level(), b = band(upper, lower, z, corner.x, corner.y);
+        float foot = band(upper, lower, lower.level() * level, corner.x, corner.y);
+        float rim = band(upper, lower, upper.level() * level, corner.x, corner.y);
+        if (foot > 0) { b = rim * (foot - b) / (foot - rim); }
+        // The upper hex's edge of the board runs from this corner directly away from the lower hex's centre.
+        float ux = corner.x - lower.x(), uy = corner.y - lower.y(), length = (float) Math.hypot(ux, uy);
+        Vector3 normal = bandNormal(upper, lower);
+        float slide = b * length / (ux * normal.x + uy * normal.y);
+        return new float[] { ux / length * slide, uy / length * slide };
     }
 
     /** Slopes offset the shared fitted boundary, including edges that no longer follow the hex lattice. */
@@ -2938,8 +2968,9 @@ final class BoardRelief {
     private float along(int e, Vector3 p) {
         Corner a = corner(self, e), b = corner(self, e + 1);
         float ax = a.x + a.move()[0], ay = a.y + a.move()[1];
-        float dx = b.x + b.move()[0] - ax, dy = b.y + b.move()[1] - ay;
-        return Math.clamp(((p.x - ax) * dx + (p.y - ay) * dy) / (dx * dx + dy * dy), 0, 1);
+        float dx = b.x + b.move()[0] - ax, dy = b.y + b.move()[1] - ay, length2 = dx * dx + dy * dy;
+        // A concrete fit can collapse an edge where two mitred walls meet on its corner: it has no length to run along.
+        return length2 == 0 ? 0 : Math.clamp(((p.x - ax) * dx + (p.y - ay) * dy) / length2, 0, 1);
     }
 
     /**
@@ -3370,27 +3401,20 @@ final class BoardRelief {
 
     /**
      * Sparse field cover: loose stones and low shrubs on open ground, from the hex's own seed and outside the unit
-     * anchor. Hexes with features of their own (woods, buildings, rubble) keep only those. Placed on the finished top,
-     * after the road banks have eased it, so each stands whole on the ground.
+     * anchor. Hexes with features of their own (woods, buildings, rubble) keep only those, and biomes their own cover:
+     * tundra's dwarf shrubs grow with the grass (GpuGroundCover). Placed on the finished top, after the road banks have
+     * eased it, so each stands whole on the ground.
      */
     void field(List<BoardSurface.Face> destination) {
         // Cosmetic stones and shrubs share the full-detail tier; they never contribute gameplay cover.
-        boolean tundra = BoardBiome.kind(tile) == BoardScene.Biome.TUNDRA;
         if (!sculpted || detail != TerrainLod.FULL || !self.detailed() || !BoardScatter.allowed(tile)
-              || tile.surface() == BoardScene.Surface.FUNGUS
-              || tile.biome() != BoardScene.Biome.NONE && !tundra) { return; }
-        if (!tile.features().isEmpty() && (!tundra || tile.features().stream().anyMatch(feature ->
-              feature.kind() != BoardScene.FeatureKind.SCATTER || !BoardScatter.stone(feature.asset())))) { return; }
-        // The crust can cover pavement; woody roots cannot. Keep painted and airless ground clear too.
-        if (tundra && (tile.barren() || tile.surface() == BoardScene.Surface.CONCRETE
-              || BoardDecals.legacyPaint(tile) != null)) { return; }
+              || tile.surface() == BoardScene.Surface.FUNGUS || tile.biome() != BoardScene.Biome.NONE
+              || !tile.features().isEmpty()) { return; }
         Vector3 anchor = new Vector3(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()), 0);
         Random random = new Random(tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L ^ 0x5f1e1dL);
         float m = metres(1);
-        int stones = tundra ? 0 : Math.round(ROCKS[self.family()].stones() * (.3f + 1.4f * random.nextFloat()));
-        // At most three low woody clumps; moss and lichen stay entirely in the ground material.
-        int shrubs = tundra ? random.nextInt(4)
-              : Math.round(ROCKS[self.family()].shrubs() * (.3f + 1.4f * random.nextFloat()));
+        int stones = Math.round(ROCKS[self.family()].stones() * (.3f + 1.4f * random.nextFloat()));
+        int shrubs = Math.round(ROCKS[self.family()].shrubs() * (.3f + 1.4f * random.nextFloat()));
         // Nothing grows on airless ground (BoardScene.Tile.lunar): the same stones lie there alone.
         if (tile.barren()) { shrubs = 0; }
         for (int i = 0; i < stones + shrubs; i++) {
@@ -3401,11 +3425,9 @@ final class BoardRelief {
             float r = random.nextFloat();
             float size = m * (shrub ? .7f + .5f * r : .35f + 1.1f * r * r);
             float turn = random.nextFloat() * (float) Math.PI * 2;
-            // The dry kit preserves its authored olive leaves, ochre tips and brown woody stems.
-            BoardShape rock = shrub ? BoardScatter.bush(tundra ? BoardScene.Surface.DIRT : tile.surface(), random.nextInt(64))
+            BoardShape rock = shrub ? BoardScatter.bush(tile.surface(), random.nextInt(64))
                   : BoardScatter.rock(tile.surface(), random.nextInt(64), false);
-            float scale = tundra ? m * (.35f + .4f * r) / rock.height()
-                  : shrub ? BoardScatter.bushScale(rock, .7f + .5f * r) : size * .8f;
+            float scale = shrub ? BoardScatter.bushScale(rock, .7f + .5f * r) : size * .8f;
             // Wholly inside this hex and on its own top, so no neighbour's ground or picking ever meets half of it and
             // nothing hangs over a receding rim.
             float keep = shrub ? BoardScatter.BUSH_RADIUS * scale : size * .8f;
@@ -3416,7 +3438,6 @@ final class BoardRelief {
             float variation = random.nextFloat();
             float height = shrub ? scale * rock.height() : size * .8f * (.35f + .5f * variation);
             Vector3 base = new Vector3(x, y, topHeight(destination, x, y) - (shrub ? .02f * scale : height * .35f));
-            if (tundra && BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, base.z) < .6f) { continue; }
             float widthVariation = .7f + .3f * random.nextFloat();
             place(destination, rock, base, turn, scale, shrub ? scale : scale * widthVariation,
                   height / rock.height(), shrub ? Kind.PLANT : Kind.ROCK);

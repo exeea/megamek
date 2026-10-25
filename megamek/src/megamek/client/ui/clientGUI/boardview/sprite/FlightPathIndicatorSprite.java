@@ -32,20 +32,13 @@
  */
 package megamek.client.ui.clientGUI.boardview.sprite;
 
-import java.awt.*;
-import java.awt.geom.AffineTransform;
-import java.util.List;
+import java.awt.Graphics2D;
 
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.tileset.HexTileset;
+import megamek.client.ui.clientGUI.boardview.TacticalGlyphs;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.util.FontHandler;
-import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
-import megamek.common.enums.MoveStepType;
-import megamek.common.moves.MoveStep;
-import megamek.common.units.Entity;
 
 /**
  * The Flight Path Indicator Sprite paints a path in front of an aerospace movement path and indicates the turn status
@@ -56,252 +49,24 @@ import megamek.common.units.Entity;
  * indicates the craft has used all its remaining velocity on that hex. A yellow two-way diamond indicates the craft
  * will fly off the map with remaining velocity.
  */
-public class FlightPathIndicatorSprite extends HexSprite implements TacticalSprite {
+public class FlightPathIndicatorSprite extends HexSprite {
 
-    private static final GUIPreferences GUIP = GUIPreferences.getInstance();
-    private static final int TEXT_SIZE = 50;
-    private static final int ARROW_X_OFFSET = 14;
-    private static final int ARROW_Y_OFFSET = 4;
-    private static final Color COLOR_OUTLINE = new Color(40, 40, 40, 200);
+    private final TacticalMark.FlightPath indicator;
 
-    private static final Color COLOR_CIRCLE = new Color(255, 255, 255, 128);
-    private static final int CIRCLE_RADIUS = 60;
-
-    private static final int HEX_CENTER_X = HexTileset.HEX_W / 2;
-    private static final int HEX_CENTER_Y = HexTileset.HEX_H / 2;
-    private static final int TEXT_Y_OFFSET = 17;
-
-    private final MoveStep currentStep;
-    private final boolean isLast;
-    private final boolean isRepeated;
-
-    private static final String STRAIGHT_ARROW = "\uEB95";
-    private static final String FLAG = "\uf06e";
-    private static final String FLY_OFF = "\uf700";
-    private static final String RIGHT_TURN = "\uEB9A";
-    private static final String LEFT_TURN = "\uEBA4";
-
-    private final StringDrawer.StringDrawerConfig symbolConfig =
-          new StringDrawer.StringDrawerConfig().absoluteCenter().fontSize(TEXT_SIZE)
-                .outline(COLOR_OUTLINE, 2.5f);
-
-    // Setup 'StringDrawers' to write special characters as icons.
-    private final StringDrawer straight = new StringDrawer(STRAIGHT_ARROW)
-          .at(HEX_CENTER_X, HEX_CENTER_Y).useConfig(symbolConfig);
-
-    private final StringDrawer right = new StringDrawer(RIGHT_TURN)
-          .at(HEX_CENTER_X + ARROW_X_OFFSET, HEX_CENTER_Y + ARROW_Y_OFFSET).useConfig(symbolConfig);
-
-    private final StringDrawer left = new StringDrawer(LEFT_TURN)
-          .at(HEX_CENTER_X - ARROW_X_OFFSET, HEX_CENTER_Y + ARROW_Y_OFFSET).useConfig(symbolConfig);
-
-    private final StringDrawer flag = new StringDrawer(FLAG)
-          .at(HEX_CENTER_X, HEX_CENTER_Y).useConfig(symbolConfig);
-
-    private final StringDrawer flyOffIcon = new StringDrawer(FLY_OFF)
-          .at(HEX_CENTER_X, HEX_CENTER_Y).useConfig(symbolConfig);
-
-    public FlightPathIndicatorSprite(BoardGlyphContext boardView, List<MoveStep> steps, int index, boolean last) {
-        super(boardView, steps.get(index).getPosition());
-        currentStep = steps.get(index);
-        isLast = last;
-        isRepeated = (index > 0) && equalType(steps.get(index - 1));
+    public FlightPathIndicatorSprite(BoardGlyphContext boardView, TacticalMark.FlightPath indicator) {
+        super(boardView, indicator.steps().get(indicator.index()).getPosition());
+        this.indicator = indicator;
     }
 
     @Override
     public void prepare() {
-        Graphics2D graph = spriteSetup();
-        drawSprite(graph);
-        graph.dispose();
-    }
-
-
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
-        try {
-            local.setFont(FontHandler.symbolFont());
-            drawSprite(local);
-        } finally {
-            local.dispose();
-        }
-    }
-
-    /*
-     * Based on the condition of the MoveStep associated with this sprite, draw a
-     * green, yellow, or red flight path indicator to indicate turn status on that
-     * hex. Draw a flag for final hex and a special arrow to indicate flying
-     * off the map.
-     */
-    private void drawSprite(Graphics2D graph) {
-        Color green = GUIP.getOkColor();
-        Color yellow = GUIP.getCautionColor();
-        Color red = GUIP.getWarningColor();
-        if (!isRepeated) {
-            drawBackGroundCircle(graph);
-        }
-        if (isLastIndicator()) {
-            if (currentStep.getVelocityLeft() > 0) {
-                drawBackGroundCircle(graph);
-                flyOffIcon.color(green).rotate(angleForFacing(currentStep.getFacing())).draw(graph);
-                drawRemainingDistance(graph, currentStep);
-            } else {
-                if (canTurnForFree()) {
-                    flag.color(green).draw(graph);
-                } else if (canTurnWithThrustCost()) {
-                    if (costsTooMuchToTurn()) {
-                        flag.color(red).draw(graph);
-                    } else {
-                        flag.color(yellow).draw(graph);
-                    }
-                } else {
-                    flag.color(red).draw(graph);
-                }
-            }
-        } else {
-            AffineTransform oldTransForm = graph.getTransform();
-            graph.rotate(angleForFacing(currentStep.getFacing()), HEX_CENTER_X, HEX_CENTER_Y);
-            if (canTurnForFree()) {
-                if (!isRepeated) {
-                    left.color(green).draw(graph);
-                    right.color(green).draw(graph);
-                }
-                straight.color(green).draw(graph);
-            } else if (canTurnWithThrustCost()) {
-                if (costsTooMuchToTurn()) {
-                    straight.color(red).draw(graph);
-                } else {
-                    if (!isRepeated) {
-                        left.color(yellow).draw(graph);
-                        right.color(yellow).draw(graph);
-                    }
-                    straight.color(green).draw(graph);
-                }
-            } else {
-                straight.color(red).draw(graph);
-            }
-            graph.setTransform(oldTransForm);
-        }
-    }
-
-    private double angleForFacing(int facing) {
-        return facing * Math.PI / 3;
-    }
-
-    private void drawBackGroundCircle(Graphics2D graph) {
-        graph.setColor(COLOR_CIRCLE);
-        graph.fillOval(HEX_CENTER_X - CIRCLE_RADIUS / 2,
-              HEX_CENTER_Y - CIRCLE_RADIUS / 2,
-              CIRCLE_RADIUS,
-              CIRCLE_RADIUS);
-    }
-
-    /*
-     * Return true if the fighter would be able to turn at this step but doesn't have enough
-     * movement points left to actually make the turn.
-     */
-    private boolean costsTooMuchToTurn(MoveStep step) {
-        Entity entity = step.getEntity();
-        int maxMP = Integer.MAX_VALUE;
-        int turnCost = Integer.MIN_VALUE;
-
-
-        if (entity != null) {
-            maxMP = entity.getRunMP();
-            turnCost = step.asfTurnCost(step.getGame(), MoveStepType.TURN_LEFT, entity);
-        }
-
-        return ((step.getMpUsed() + turnCost) > maxMP);
-    }
-
-    private boolean costsTooMuchToTurn() {
-        return costsTooMuchToTurn(currentStep);
-    }
-
-    /*
-     * Returns true if the fighter can make a turn at this step given its current velocity
-     * and turn restrictions.
-     */
-    private boolean canTurnWithThrustCost(MoveStep step) {
-        return step.canAeroTurn(bv.getGame());
-    }
-
-    private boolean canTurnWithThrustCost() {
-        return canTurnWithThrustCost(currentStep);
-    }
-
-    /*
-     * Returns true if the fighter can make a free turn at this given step.
-     */
-    private boolean canTurnForFree() {
-        return canTurnForFree(currentStep);
-    }
-
-    private boolean canTurnForFree(MoveStep step) {
-        return step.dueFreeTurn();
-    }
-
-    private boolean equalType(MoveStep otherStep) {
-        return bothFreeTurn(otherStep)
-              || (!canTurnForFree() && bothTurnWithCost(otherStep))
-              || (bothOnlyStraight(otherStep));
-    }
-
-    private boolean bothFreeTurn(MoveStep otherStep) {
-        return canTurnForFree(otherStep) && canTurnForFree();
-    }
-
-    private boolean bothTurnWithCost(MoveStep otherStep) {
-        return canTurnWithThrustCost(otherStep) && canTurnWithThrustCost();
-    }
-
-    private boolean onlyStraight(MoveStep step) {
-        return !canTurnForFree(step) && !canTurnWithThrustCost(step);
-    }
-
-    private boolean bothOnlyStraight(MoveStep otherStep) {
-        return onlyStraight(otherStep) && onlyStraight(currentStep);
-    }
-
-    /*
-     * Standard Hex Sprite 2D Graphics setup.  Creates the context, base hex image
-     * settings, scale, and fonts.
-     */
-    private Graphics2D spriteSetup() {
         updateBounds();
         image = createNewHexImage();
         Graphics2D graph = (Graphics2D) image.getGraphics();
         UIUtil.setHighQualityRendering(graph);
         graph.scale(bv.getScale(), bv.getScale());
         graph.setFont(FontHandler.symbolFont());
-        return graph;
-    }
-
-    /*
-     * Return true if this sprite/step is the last of the flight path indicators in the
-     * flight path.
-     */
-    private boolean isLastIndicator() {
-        return isLast;
-    }
-
-    /*
-     * Render a number on the lower center of the hex that represents the distance remaining to
-     * travel for the given step.
-     */
-    private void drawRemainingDistance(Graphics2D graph, MoveStep moveStep) {
-        int velocity = moveStep.getVelocity();
-        if (bv.getBoard().isGround()) {
-            velocity *= 16;
-        }
-
-        int remainingDistance = velocity - moveStep.getDistance();
-        StringDrawer text = new StringDrawer(Integer.toString(remainingDistance)).at(HEX_CENTER_X, HEX_CENTER_Y - TEXT_Y_OFFSET)
-              .font(new Font(GUIP.getMoveFontType(), GUIP.getMoveFontStyle(), 16)).outline(COLOR_OUTLINE, 2.5f)
-              .color(GUIP.getOkColor()).centerX();
-        if (graph instanceof BoardTacticalGraphics) {
-            text.asText();
-        }
-        text.draw(graph);
+        TacticalGlyphs.paintFlightPath(graph, bv, indicator, false);
+        graph.dispose();
     }
 }

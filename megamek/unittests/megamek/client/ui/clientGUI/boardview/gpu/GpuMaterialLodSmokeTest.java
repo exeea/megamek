@@ -128,7 +128,8 @@ class GpuMaterialLodSmokeTest {
         String expectedRenderer = System.getProperty("megamek.gpu.expectedRenderer", "");
         assertTrue(renderer.contains(expectedRenderer), "Actual renderer must match " + expectedRenderer);
         String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
-        String begin = "void main() {", boundary = "        if (ground || cliff || bedrock) {";
+        // After the material and its cover blend, before the optional biome stage.
+        String begin = "void main() {", boundary = "        // biomeMaskFlag: the board has biomes or liquids of two palettes";
         String output = "fragColor = vec4(result, 1.0);";
         for (String anchor : List.of(begin, boundary, output)) {
             assertEquals(1, sculpt.split(java.util.regex.Pattern.quote(anchor), -1).length - 1,
@@ -229,7 +230,7 @@ class GpuMaterialLodSmokeTest {
             for (int y = 0; y < 7; y++) {
                 var family = x < 3 ? BoardScene.Surface.GRASS : BoardScene.Surface.ROCK;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x < 3 ? 3 : 0, -1, false, 0,
-                      family, pixels, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
+                      family, pixels, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
                       BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false,
                       x == 2 || x == 3 ? mixed : BoardSurfaceBlend.solid(family)));
             }
@@ -353,30 +354,35 @@ class GpuMaterialLodSmokeTest {
     private static double visiblePatchFraction(GpuSceneTestOutput surface, GpuShaderManager manager, GpuTerrain terrain,
           OrthographicCamera camera, byte[] original, String family) {
         String material = GpuShaderSource.readDisk("terrain-materials.glsl");
-        String coverOnly = material.replace("vec4 roles = vec4(cover,",
-              "cover = 1.0; soil = 0.0; deposit = 0.0; dust = 0.0; vec4 roles = vec4(cover,");
+        // Volcanic programs mix their roles in naturalMaterialFor, every other family in cliffMaterial.
+        String natural = "vec4 roles = vec4(cover, soil,", cliff = "vec4 roles = vec4(cover, clamp(mantle,";
+        String coverOnly = GpuShaderSource.replaceOnce(GpuShaderSource.replaceOnce(material, natural,
+              "cover = 1.0; soil = 0.0; deposit = 0.0; dust = 0.0; " + natural, "volcanic full cover"), cliff,
+              "cover = 1.0; mantle = 0.0; deposit = 0.0; " + cliff, "ordinary full cover");
         if (family.equals("rock")) {
             // Ground fines and exposed granite may have similar pigment. Read the final production role
             // weights instead of requiring an authored color gain, a light direction or a display contrast.
-            // The third channel also verifies that the bound cover and bedrock use distinct map layers.
-            String emission = "materialFinish(layers.z, tiles.z, weights.w, pd, broad, fungus, false), weights);";
-            String roles = emission
-                  + "\n    result.finish.emission = vec3(weights.w, weights.x, layers.z != layers.x ? 1.0 : 0.0);";
-            assertTrue(material.contains(emission), "The probe reads completed natural-material roles");
+            // Ordinary rock takes cliffMaterial; level tops read the rock map for bedrock too (u_flatRock).
+            String emission = "    result.finish = mixFinish(surfaceA, surfaceB, share);";
+            String roles = emission + "\n    result.finish.emission = vec3(roleShare.w, roleShare.x, 0.0);";
+            assertTrue(material.contains(emission), "The probe reads completed cliff-material roles");
             String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
             String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
             String output = "fragColor = vec4(result, 1.0);";
             assertTrue(sculpt.contains(result) && sculpt.contains(output), "The role probe uses the final scene writer");
             // Ground rock is opaque. An exact alpha tag excludes boulders, cliffs, clear color and other props;
             // alpha is not scaled, while linearPixels restores the production RGB storage units once.
-            sculpt = sculpt.replace(result, "vec3 result = finish.emission;")
+            // Keep the lighting call: the shaders include the lighting library only where it is used.
+            sculpt = sculpt.replace(result, result + "\n    result = finish.emission;")
                   .replace(output, "fragColor = vec4(result, ground ? .25 : 1.0);");
-            assertTrue(manager.apply(Map.of("terrain-sculpt.frag", sculpt,
-                  "terrain-materials.glsl", material.replace(emission, roles))).success());
+            var probe = manager.apply(Map.of("terrain-sculpt.frag", sculpt,
+                  "terrain-materials.glsl", material.replace(emission, roles)));
+            assertTrue(probe.success(), probe.message());
             render(surface, terrain, camera);
             float[] selected = linearPixels(surface);
-            assertTrue(manager.apply(Map.of("terrain-sculpt.frag", sculpt,
-                  "terrain-materials.glsl", coverOnly.replace(emission, roles))).success());
+            probe = manager.apply(Map.of("terrain-sculpt.frag", sculpt,
+                  "terrain-materials.glsl", coverOnly.replace(emission, roles)));
+            assertTrue(probe.success(), probe.message());
             render(surface, terrain, camera);
             float[] cover = linearPixels(surface);
             int ground = 0, patches = 0;
@@ -388,8 +394,6 @@ class GpuMaterialLodSmokeTest {
                 if (selected[i + 3] != .25f) { continue; }
                 ground++;
                 assertEquals(.25f, cover[i + 3], 0, "The control retains the same visible geometry");
-                assertEquals(1f, selected[i + 2], .001f, "Cover and bedrock bind distinct authored map layers");
-                assertEquals(1f, cover[i + 2], .001f, "The control preserves the same map-role bindings");
                 assertEquals(0f, cover[i], .00001f, "Forcing cover must remove bedrock contribution");
                 assertEquals(1f, cover[i + 1], .001f, "Forcing cover must leave complete cover contribution");
                 assertTrue(selected[i] >= 0 && selected[i] <= 1 && selected[i + 1] >= 0 && selected[i + 1] <= 1,
@@ -501,7 +505,7 @@ class GpuMaterialLodSmokeTest {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), elevation, -1, false, 0,
                       liquid.kind() == BoardLiquid.Kind.NONE ? BoardScene.Surface.valueOf(material.toUpperCase(Locale.ROOT))
                             : BoardScene.Surface.SAND,
-                      pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                      pixels, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

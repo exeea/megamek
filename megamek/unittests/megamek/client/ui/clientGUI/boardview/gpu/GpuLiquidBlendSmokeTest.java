@@ -152,7 +152,7 @@ class GpuLiquidBlendSmokeTest {
             hex.setTheme(LIQUIDS[palette].theme());
         }
         if (frozen) { hex.addTerrain(new Terrain(Terrains.ICE, 1)); }
-        return new BoardScene.Tile(coords, elevation, 1, frozen, 0, base.surface(), base.ground(), null, null, null, null,
+        return new BoardScene.Tile(coords, elevation, 1, frozen, 0, base.surface(), base.ground(), null, null, null,
               List.of(), List.of(), BoardLiquid.capture(hex), null, BoardFeatures.detailedGround(hex, Map.of()));
     }
 
@@ -167,8 +167,7 @@ class GpuLiquidBlendSmokeTest {
             this.mask = mask;
             shader = GpuGlsl.compile("liquid coverage probe", "in vec3 a_position; void main(){gl_Position=vec4(a_position,1);}",
                   "uniform float u_metre, u_levelHeight; uniform vec3 u_point; layout(location = 0) out vec4 result;\n"
-                        + Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-hexes.glsl").readString()
-                        + Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-mask.glsl").readString()
+                        + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl")
                         + "\nvoid main(){result=liquidCoverage(u_point,0.0);}");
             assertTrue(shader.isCompiled(), shader.getLog());
             mesh.setVertices(new float[] { -1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0 });

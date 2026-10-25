@@ -34,6 +34,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.BridgeBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -94,11 +95,10 @@ public class BridgeDeploySpriteHandler extends BoardViewSpriteHandler {
                 // strength (a solid "1/1" bridge ghost), and ring it with a yellow/black hazard outline so the target
                 // hex is unmistakable - playtesters (colour-blind players in particular) flagged the plain ghost as
                 // hard to see.
-                currentSprites.add(new BridgeBuildSprite(boardView, target, DEPLOY_TURNS_REQUIRED,
-                      DEPLOY_TURNS_REQUIRED, bridgeState.getDeployExits(), true));
+                addMark(boardView, new TacticalMark.BridgeBuild(target, DEPLOY_TURNS_REQUIRED, DEPLOY_TURNS_REQUIRED,
+                      bridgeState.getDeployExits(), BridgeLayerState.terrainBridgeType(bridgeLayer.getType()), true));
             }
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     @Override

@@ -69,7 +69,7 @@ class GpuRiverSmokeTest {
                     try {
                         terrain.renderShadows(List.of());
                         outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         terrain.renderTransparent(camera.camera);
                         outputFrame.display();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
@@ -182,7 +182,7 @@ class GpuRiverSmokeTest {
                         terrain.animate(1f / 12, List.of());
                         terrain.renderShadows(List.of());
                         outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         terrain.renderTransparent(camera.camera);
                         outputFrame.display();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
@@ -198,7 +198,7 @@ class GpuRiverSmokeTest {
                             GpuBoardTestUi.capture(new File(output, "waterfall-closeup.png"));
                             fallPixels = waterfallPixels(camera, scene);
                             outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-                            terrain.render(camera.camera, false);
+                            terrain.render(camera.camera);
                             terrain.renderTransparent(camera.camera);
                             outputFrame.display();
                             assertEquals(fallPixels, waterfallPixels(camera, scene),

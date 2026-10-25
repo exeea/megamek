@@ -211,7 +211,7 @@ class BoardScatterTest {
               BoardScene.Surface.MARS, BoardScene.Surface.SNOW, BoardScene.Surface.TROPICAL,
               BoardScene.Surface.VOLCANO)) {
             var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family,
-                  null, null, null, List.of(), List.of());
+                  null, null, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, tile);
             for (int rotation : new int[] { 0, 137, 359 }) {
@@ -257,7 +257,7 @@ class BoardScatterTest {
         encode.setAccessible(true);
         for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT)) {
             var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family,
-                  null, null, null, List.of(), List.of());
+                  null, null, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, tile);
             for (int variant = 0; variant < BoardScatter.BUSHES / 2; variant++) {
@@ -313,7 +313,7 @@ class BoardScatterTest {
     void capturedBushesPreserveTissueAndExistingPigmentVariation() {
         for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT)) {
             var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family,
-                  null, null, null, List.of(), List.of());
+                  null, null, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, tile);
             var polygons = BoardScatter.plant(family).polygons();

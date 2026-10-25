@@ -166,9 +166,10 @@ final class BoardRoadGrade {
     /** Distance in tile pixels from the hex centre to the edge in this direction. */
     private static float inradius(int direction) {
         int edge = Math.floorMod(1 - direction, 6);
-        float ax = HexTile.cornerOffsetX(edge, HexTile.WIDTH), ay = HexTile.cornerOffsetY(edge, HexTile.HEIGHT);
-        float bx = HexTile.cornerOffsetX((edge + 1) % 6, HexTile.WIDTH);
-        float by = HexTile.cornerOffsetY((edge + 1) % 6, HexTile.HEIGHT);
+        float ax = HexTile.cornerOffsetX(edge, BoardGeometry.TILE_WIDTH);
+        float ay = HexTile.cornerOffsetY(edge, BoardGeometry.TILE_HEIGHT);
+        float bx = HexTile.cornerOffsetX((edge + 1) % 6, BoardGeometry.TILE_WIDTH);
+        float by = HexTile.cornerOffsetY((edge + 1) % 6, BoardGeometry.TILE_HEIGHT);
         return Math.abs(ax * by - ay * bx) / (float) Math.hypot(bx - ax, by - ay);
     }
 
@@ -402,7 +403,8 @@ final class BoardRoadGrade {
         float rise = 0, weights = 0;
         for (int d = 0; d < 6; d++) {
             if ((arms & 1 << d) == 0) { continue; }
-            float share = share(d, x, y), t = Math.clamp((share - starts[d]) / (1 - starts[d]), 0, 1);
+            float share = BoardGeometry.share(tile.coords(), d, x, y);
+            float t = Math.clamp((share - starts[d]) / (1 - starts[d]), 0, 1);
             if (t <= 0) { continue; }
             float gap = Math.max(1 - share, 1e-5f), weight = t / (gap * gap);
             rise += weight * profile(d, share);
@@ -423,18 +425,6 @@ final class BoardRoadGrade {
         float end = firstHalf ? firstStation : lastStation;
         float t = Math.clamp((station - middle) / (end - middle), 0, 1);
         return level + profile(direction, t);
-    }
-
-    /** Share of the run from the line through the centre parallel to this direction's edge (0) to that edge (1). */
-    float share(int direction, float x, float y) {
-        int edge = Math.floorMod(1 - direction, 6);
-        float ax = HexTile.cornerOffsetX(edge, HexTile.WIDTH), ay = HexTile.cornerOffsetY(edge, HexTile.HEIGHT);
-        float bx = HexTile.cornerOffsetX((edge + 1) % 6, HexTile.WIDTH), by = HexTile.cornerOffsetY((edge + 1) % 6, HexTile.HEIGHT);
-        float scale = BoardGeometry.hexScale(), px = (x - cx) / scale, py = (y - cy) / scale;
-        // Signed distance towards the centre is positive; both corners of a lattice edge lie at the same distance.
-        float inradius = (ax * by - ay * bx) / (float) Math.hypot(bx - ax, by - ay);
-        float inside = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) / (float) Math.hypot(bx - ax, by - ay);
-        return 1 - inside / inradius;
     }
 
     /** Lines the surface bends across, in world coordinates: the mesh keeps a vertex row on each. */
@@ -479,9 +469,10 @@ final class BoardRoadGrade {
     private float[] crossSection(int direction, float run) {
         int edge = Math.floorMod(1 - direction, 6);
         float scale = BoardGeometry.hexScale();
-        float ax = HexTile.cornerOffsetX(edge, HexTile.WIDTH) * run, ay = HexTile.cornerOffsetY(edge, HexTile.HEIGHT) * run;
-        float bx = HexTile.cornerOffsetX((edge + 1) % 6, HexTile.WIDTH) * run;
-        float by = HexTile.cornerOffsetY((edge + 1) % 6, HexTile.HEIGHT) * run;
+        float ax = HexTile.cornerOffsetX(edge, BoardGeometry.TILE_WIDTH) * run;
+        float ay = HexTile.cornerOffsetY(edge, BoardGeometry.TILE_HEIGHT) * run;
+        float bx = HexTile.cornerOffsetX((edge + 1) % 6, BoardGeometry.TILE_WIDTH) * run;
+        float by = HexTile.cornerOffsetY((edge + 1) % 6, BoardGeometry.TILE_HEIGHT) * run;
         float dx = bx - ax, dy = by - ay, length = (float) Math.hypot(dx, dy), reach = PAST_CORNER / length;
         return new float[] { cx + (ax - dx * reach) * scale, cy + (ay - dy * reach) * scale,
               cx + (bx + dx * reach) * scale, cy + (by + dy * reach) * scale };
@@ -517,7 +508,8 @@ final class BoardRoadGrade {
                 Path2D.Float wedge = new Path2D.Float();
                 wedge.moveTo(0, 0);
                 wedge.lineTo(pa[0], pa[1]);
-                wedge.lineTo(HexTile.cornerOffsetX(corner, HexTile.WIDTH), HexTile.cornerOffsetY(corner, HexTile.HEIGHT));
+                wedge.lineTo(HexTile.cornerOffsetX(corner, BoardGeometry.TILE_WIDTH),
+                      HexTile.cornerOffsetY(corner, BoardGeometry.TILE_HEIGHT));
                 wedge.lineTo(pb[0], pb[1]);
                 wedge.closePath();
                 local.add(new Area(wedge));
@@ -536,8 +528,8 @@ final class BoardRoadGrade {
                     local.add(ramp);
                 }
                 // A ramp up onto this bank meets the deck below the bank's own wall on the edge: the mouth reserves a
-                // pixel either side of the edge, as the lane's square end is not the lattice edge (an 84 x 72 hex is not
-                // regular) and the shore fit can move the wall off it, so all of it gives way to the road.
+                // pixel either side of the edge, as the shore fit can move the wall off the lattice edge, so all of it
+                // gives way to the road.
                 float seal = edges[d] < level ? 1 / 36f : 0;
                 Area mouth = new Area(lane(d, BoardSurface.roadMouth(tile, next, d), 1 - seal, 1 + PAST_MOUTH / 36));
                 float[] across = RailRoute.border(d);
@@ -562,8 +554,8 @@ final class BoardRoadGrade {
                       AffineTransform.getTranslateInstance(2 * across[0], 2 * across[1])));
             }
         } else {
-            // Each lane runs a pixel past its edge, which the hex then cuts: its square end is not the lattice edge (an
-            // 84 x 72 hex is not regular), and short of it, it would leave a sliver of the apron's level along the edge.
+            // Each lane runs a pixel past its edge, which the hex then cuts: ending exactly on the edge, rounding would
+            // leave a sliver of the apron's level along it.
             local = new Area();
             for (int d = 0; d < 6; d++) {
                 if ((arms & 1 << d) != 0) {
@@ -653,7 +645,8 @@ final class BoardRoadGrade {
     private static Path2D.Float hexagon(float scale) {
         Path2D.Float outline = new Path2D.Float();
         for (int k = 0; k < 6; k++) {
-            float x = HexTile.cornerOffsetX(k, HexTile.WIDTH) * scale, y = HexTile.cornerOffsetY(k, HexTile.HEIGHT) * scale;
+            float x = HexTile.cornerOffsetX(k, BoardGeometry.TILE_WIDTH) * scale;
+            float y = HexTile.cornerOffsetY(k, BoardGeometry.TILE_HEIGHT) * scale;
             if (k == 0) { outline.moveTo(x, y); } else { outline.lineTo(x, y); }
         }
         outline.closePath();
@@ -663,9 +656,10 @@ final class BoardRoadGrade {
     /** Everything on this hex's side of an exit's edge line, within reach of the hex. */
     private static Path2D.Float inside(int direction) {
         int edge = Math.floorMod(1 - direction, 6);
-        float ax = HexTile.cornerOffsetX(edge, HexTile.WIDTH), ay = HexTile.cornerOffsetY(edge, HexTile.HEIGHT);
-        float bx = HexTile.cornerOffsetX((edge + 1) % 6, HexTile.WIDTH);
-        float by = HexTile.cornerOffsetY((edge + 1) % 6, HexTile.HEIGHT);
+        float ax = HexTile.cornerOffsetX(edge, BoardGeometry.TILE_WIDTH);
+        float ay = HexTile.cornerOffsetY(edge, BoardGeometry.TILE_HEIGHT);
+        float bx = HexTile.cornerOffsetX((edge + 1) % 6, BoardGeometry.TILE_WIDTH);
+        float by = HexTile.cornerOffsetY((edge + 1) % 6, BoardGeometry.TILE_HEIGHT);
         float dx = bx - ax, dy = by - ay, length = (float) Math.hypot(dx, dy);
         float ux = dx / length * 4 * PAST_CORNER, uy = dy / length * 4 * PAST_CORNER;
         // The inward normal of a counter-clockwise outline is to the left of its edge.
@@ -682,8 +676,10 @@ final class BoardRoadGrade {
     /** The outer half of an exit's run, open sideways past both corners of its edge. */
     private static Path2D.Float strip(int direction) {
         int edge = Math.floorMod(1 - direction, 6);
-        float ax = HexTile.cornerOffsetX(edge, HexTile.WIDTH), ay = HexTile.cornerOffsetY(edge, HexTile.HEIGHT);
-        float bx = HexTile.cornerOffsetX((edge + 1) % 6, HexTile.WIDTH), by = HexTile.cornerOffsetY((edge + 1) % 6, HexTile.HEIGHT);
+        float ax = HexTile.cornerOffsetX(edge, BoardGeometry.TILE_WIDTH);
+        float ay = HexTile.cornerOffsetY(edge, BoardGeometry.TILE_HEIGHT);
+        float bx = HexTile.cornerOffsetX((edge + 1) % 6, BoardGeometry.TILE_WIDTH);
+        float by = HexTile.cornerOffsetY((edge + 1) % 6, BoardGeometry.TILE_HEIGHT);
         float dx = bx - ax, dy = by - ay, length = (float) Math.hypot(dx, dy);
         float ux = dx / length * PAST_CORNER, uy = dy / length * PAST_CORNER;
         Path2D.Float strip = new Path2D.Float();

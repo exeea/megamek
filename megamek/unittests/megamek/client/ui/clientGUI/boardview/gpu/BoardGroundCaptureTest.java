@@ -12,9 +12,11 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import java.util.stream.IntStream;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.math.Vector3;
@@ -92,6 +94,11 @@ class BoardGroundCaptureTest {
         }
         points.sort(Comparator.comparingDouble(p -> -p.y));
         assertTrue(points.size() > 10, "Exercise the complete east boundary through the last board row");
+        // The last corner lies on the board's edge and keeps its place there; the fitted runs end at the one before it.
+        var end = points.removeLast();
+        assertTrue(scene.tiles().stream().anyMatch(tile -> IntStream.range(0, 6)
+              .anyMatch(k -> BoardGeometry.corner(tile.coords(), 0, k).epsilonEquals(end, .001f))),
+              "The board keeps its hex outline where the fitted edge reaches it");
         var directions = new ArrayList<Vector3>();
         for (int i = 1; i < points.size(); i++) {
             var direction = new Vector3(points.get(i)).sub(points.get(i - 1)).nor();
@@ -99,8 +106,7 @@ class BoardGroundCaptureTest {
         }
         assertEquals(3, directions.size(), "Two vertical runs meet through one diagonal, without residual hex steps");
         assertEquals(0, directions.getFirst().x, .001f);
-        assertEquals(0, directions.getLast().x, .001f, "The lower run stays vertical to the board edge");
-        var end = points.getLast();
+        assertEquals(0, directions.getLast().x, .001f, "The lower run stays vertical into the last board row");
         for (int side : new int[] { -1, 1 }) {
             var ray = new Ray(new Vector3(end.x + side * 2 * BoardGeometry.hexScale(),
                   end.y + 2 * BoardGeometry.hexScale(), 500), new Vector3(0, 0, -1));
@@ -361,7 +367,7 @@ class BoardGroundCaptureTest {
             assertEquals(mixed, BoardSurfaceBlend.sample(after, after.tile(next), p.x, p.y, p.z));
             assertTrue(mixed.desert() > 0 && mixed.desert() < .5f);
             assertEquals(1, mixed.grass() + mixed.desert(), .00001f);
-            assertEquals(after.tile(center).groundCover(), after.tile(center).withTactical(before.tile(center).ground()).groundCover());
+            assertEquals(after.tile(center).groundCover(), after.tile(center).withText(List.of()).groundCover());
             return null;
         });
     }

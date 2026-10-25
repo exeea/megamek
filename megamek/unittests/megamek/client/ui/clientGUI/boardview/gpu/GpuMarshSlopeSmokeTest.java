@@ -250,8 +250,7 @@ class GpuMarshSlopeSmokeTest {
 
     /** Sample the real GLSL mask, independently of lighting and vegetation hiding the bank. */
     private static void coverageChecks() {
-        String code = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-hexes.glsl").readString()
-              + Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-mask.glsl").readString();
+        String code = GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl");
         var shader = GpuGlsl.compile("marsh coverage probe", """
               in vec3 a_position;
               out vec3 world;

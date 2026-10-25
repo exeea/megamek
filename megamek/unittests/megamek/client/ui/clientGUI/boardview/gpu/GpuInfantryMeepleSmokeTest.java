@@ -237,7 +237,7 @@ class GpuInfantryMeepleSmokeTest {
         model.place(placed, new OrthographicCamera(), new Vector3(0, 0, 90), 0, unit);
         placed.transform.scale(1, 1, verticalScale);
         var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
-              null, null, null, List.of(), List.of());
+              null, null, List.of(), List.of());
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(unit), List.of(), -1, "MOVEMENT", List.of());
         animator.groundSupports(scene, unit, UnitMotion.Sample.STILL);
         Map<String, Float> offsets = new LinkedHashMap<>();

@@ -3,7 +3,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Shape;
 import java.awt.geom.Area;
+import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
+import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -14,13 +17,15 @@ import java.util.TreeSet;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 
-/** Tessellation and terrain clipping only; all tactical decisions are supplied by the client painters. */
+/** Tessellation and terrain clipping only; all tactical decisions are supplied by the client state. */
 final class BoardTacticalGeometry {
     private static final float WALL_CLEARANCE = 0.6f;
     /** Shared clearance in world units for flat hex annotations, independent of animated unit bands. */
@@ -91,6 +96,183 @@ final class BoardTacticalGeometry {
     }
 
     private BoardTacticalGeometry() { }
+
+    /** A hex's centre in tactical units: board units at hex scale 1, y down. */
+    static BoardTactical.Point centre(Coords coords) {
+        return new BoardTactical.Point(HexTile.centerX(coords, BoardGeometry.TILE_WIDTH),
+              -HexTile.centerY(coords, BoardGeometry.TILE_HEIGHT));
+    }
+
+    /**
+     * Where edge {@code a}'s line, moved {@code insetA} towards the hex centre, meets edge {@code b}'s line moved
+     * {@code insetB}, in tactical units from the centre. Edge k runs from corner k to corner k + 1.
+     */
+    static BoardTactical.Point insetCorner(int a, double insetA, int b, double insetB) {
+        double[] p = insetLine(a, insetA), q = insetLine(b, insetB);
+        double t = ((q[0] - p[0]) * q[3] - (q[1] - p[1]) * q[2]) / (p[2] * q[3] - p[3] * q[2]);
+        return new BoardTactical.Point((float) (p[0] + p[2] * t), (float) -(p[1] + p[3] * t));
+    }
+
+    /** Edge k's line moved {@code inset} towards the centre: a point on it and its direction, y up. */
+    private static double[] insetLine(int edge, double inset) {
+        Vector3 a = BoardGeometry.modelCorner(edge), b = BoardGeometry.modelCorner(edge + 1);
+        double dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
+        // The corners run counter-clockwise: the inward normal lies to the left of each edge.
+        return new double[] { a.x - dy / length * inset, a.y + dx / length * inset, dx, dy };
+    }
+
+    /** The hex outline moved {@code inset} towards its centre, in tactical units from the centre. */
+    static Path2D.Float insetHexagon(double inset) {
+        Path2D.Float outline = new Path2D.Float();
+        for (int k = 0; k < 6; k++) {
+            var corner = insetCorner(k - 1, inset, k, inset);
+            if (k == 0) { outline.moveTo(corner.x(), corner.y()); } else { outline.lineTo(corner.x(), corner.y()); }
+        }
+        outline.closePath();
+        return outline;
+    }
+
+    /** The band between the hex outline moved {@code padding} and {@code padding + width} towards its centre. */
+    static Area ring(double padding, double width) {
+        Area ring = new Area(insetHexagon(padding));
+        ring.subtract(new Area(insetHexagon(padding + width)));
+        return ring;
+    }
+
+    /**
+     * The band along the side facing {@code direction} (0 north, clockwise), from the outline moved {@code inset}
+     * towards the centre to {@code width} further, in tactical units from the centre. Each end meets the band along
+     * the neighbouring side in a mitre where that side is banded too ({@code left}: direction - 1, {@code right}:
+     * direction + 1), else runs out to the outline.
+     */
+    static Path2D.Float sideBand(int direction, boolean left, boolean right, double inset, double width) {
+        Line2D.Float outer = sideLine(direction, left, right, inset);
+        Line2D.Float inner = sideLine(direction, left, right, inset + width);
+        Path2D.Float band = new Path2D.Float();
+        band.moveTo(outer.x1, outer.y1);
+        band.lineTo(outer.x2, outer.y2);
+        band.lineTo(inner.x2, inner.y2);
+        band.lineTo(inner.x1, inner.y1);
+        band.closePath();
+        return band;
+    }
+
+    /** The side facing {@code direction} moved {@code inset} towards the centre, ends cut as {@link #sideBand}'s. */
+    static Line2D.Float sideLine(int direction, boolean left, boolean right, double inset) {
+        int side = Math.floorMod(1 - direction, 6);
+        var a = insetCorner(side, inset, side + 1, left ? inset : 0);
+        var b = insetCorner(side, inset, side - 1, right ? inset : 0);
+        return new Line2D.Float(a.x(), a.y(), b.x(), b.y());
+    }
+
+    /** A zone boundary's run in a hex and the band on the zone's side of it, in tactical units from the centre. */
+    record Run(Path2D.Double line, Path2D.Double band) { }
+
+    /**
+     * The line that cuts off {@code sides} (2 to 5) adjacent outside sides of a range zone in one straight run, as the
+     * 2D board's hex-cross borders do, for the layout turned {@code turn} sixths clockwise; and the band {@code width}
+     * wide on the zone's side of it, whose ends lie on the outline where the neighbours' side bands meet them. The
+     * line's points are corners, chord midpoints or a third of the way down a side, so neighbouring hexes share its
+     * ends.
+     */
+    static Run crossing(int sides, int turn, double width) {
+        // Corners of the unturned layout: 0 east, then counter-clockwise (1 north-east, 2 north-west, 3 west,
+        // 4 south-west, 5 south-east); each clockwise turn steps one corner back. The five-side run is drawn turned 5.
+        IntFunction<Point2D> c = k -> latticeCorner(k - turn - (sides == 5 ? 5 : 0));
+        List<Point2D> line = switch (sides) {
+            case 2 -> List.of(c.apply(2), c.apply(0));
+            case 3 -> List.of(c.apply(2), between(c.apply(1), c.apply(5), 1 / 3.0), c.apply(5));
+            case 4 -> List.of(c.apply(2), between(c.apply(2), c.apply(0), .5), between(c.apply(4), c.apply(0), .5),
+                  c.apply(4));
+            case 5 -> List.of(c.apply(2), c.apply(4), c.apply(5), c.apply(1));
+            default -> throw new IllegalArgumentException("A hex crossing cuts off 2 to 5 sides, not " + sides);
+        };
+        // A side band of this width extends width / sin 60 along the outline where it meets another side.
+        double offset = width * 2 / Math.sqrt(3);
+        List<Point2D> inner = new ArrayList<>();
+        for (int i = 0; i < line.size(); i++) {
+            if (i == 0 || i == line.size() - 1) {
+                Point2D end = line.get(i), next = line.get(i == 0 ? 1 : i - 1);
+                inner.add(endCut(end, next, offset));
+            } else {
+                inner.add(intersection(shifted(line.get(i - 1), line.get(i), offset),
+                      shifted(line.get(i), line.get(i + 1), offset)));
+            }
+        }
+        Path2D.Double path = new Path2D.Double(), band = new Path2D.Double();
+        path.moveTo(line.getFirst().getX(), line.getFirst().getY());
+        for (Point2D point : line.subList(1, line.size())) { path.lineTo(point.getX(), point.getY()); }
+        band.append(path, false);
+        for (int i = inner.size() - 1; i >= 0; i--) { band.lineTo(inner.get(i).getX(), inner.get(i).getY()); }
+        band.closePath();
+        return new Run(path, band);
+    }
+
+    /** Lattice corner {@code k} (0 east, counter-clockwise) in tactical units from the centre. */
+    private static Point2D latticeCorner(int k) {
+        Vector3 corner = BoardGeometry.modelCorner(k);
+        return new Point2D.Double(corner.x, -corner.y);
+    }
+
+    private static Point2D between(Point2D a, Point2D b, double t) {
+        return new Point2D.Double(a.getX() + (b.getX() - a.getX()) * t, a.getY() + (b.getY() - a.getY()) * t);
+    }
+
+    /** The segment {@code a}-{@code b} moved {@code offset} towards the hex centre: a point and its direction. */
+    private static double[] shifted(Point2D a, Point2D b, double offset) {
+        double dx = b.getX() - a.getX(), dy = b.getY() - a.getY(), length = Math.hypot(dx, dy);
+        double nx = -dy / length, ny = dx / length;
+        // Of the two normals, the one towards the centre (the origin).
+        if (nx * -a.getX() + ny * -a.getY() < 0) { nx = -nx; ny = -ny; }
+        return new double[] { a.getX() + nx * offset, a.getY() + ny * offset, dx, dy };
+    }
+
+    private static Point2D intersection(double[] p, double[] q) {
+        double t = ((q[0] - p[0]) * q[3] - (q[1] - p[1]) * q[2]) / (p[2] * q[3] - p[3] * q[2]);
+        return new Point2D.Double(p[0] + p[2] * t, p[1] + p[3] * t);
+    }
+
+    /**
+     * Where the band of the run from corner {@code end} towards {@code next} ends: on the side from that corner that
+     * leads inwards, so the end meets the neighbour's band.
+     */
+    private static Point2D endCut(Point2D end, Point2D next, double offset) {
+        double[] band = shifted(end, next, offset);
+        Point2D side = null;
+        double inward = Double.NEGATIVE_INFINITY;
+        for (int k = 0; k < 6; k++) {
+            Point2D corner = latticeCorner(k);
+            if (corner.distance(end) > 1e-3) { continue; }
+            for (int neighbour : new int[] { k - 1, k + 1 }) {
+                Point2D other = latticeCorner(neighbour);
+                double along = (other.getX() - end.getX()) * (band[0] - end.getX())
+                      + (other.getY() - end.getY()) * (band[1] - end.getY());
+                if (along > inward) { inward = along; side = other; }
+            }
+        }
+        return intersection(band,
+              new double[] { end.getX(), end.getY(), side.getX() - end.getX(), side.getY() - end.getY() });
+    }
+
+    /** {@code shape}, in tactical units from {@code origin}, as one fill. */
+    static BoardTactical.Fill fill(Shape shape, BoardTactical.Point origin, int argb, BoardTactical.Playback playback,
+          BoardTactical.HexBorder border, BoardTactical.Point plane) {
+        List<BoardTactical.Contour> contours = new ArrayList<>();
+        List<BoardTactical.Point> points = new ArrayList<>();
+        PathIterator path = shape.getPathIterator(null, .25);
+        float[] xy = new float[6];
+        while (!path.isDone()) {
+            int segment = path.currentSegment(xy);
+            if (segment == PathIterator.SEG_MOVETO && !points.isEmpty()) {
+                contours.add(new BoardTactical.Contour(points));
+                points = new ArrayList<>();
+            }
+            if (segment != PathIterator.SEG_CLOSE) { points.add(new BoardTactical.Point(origin.x() + xy[0], origin.y() + xy[1])); }
+            path.next();
+        }
+        if (!points.isEmpty()) { contours.add(new BoardTactical.Contour(points)); }
+        return new BoardTactical.Fill(contours, path.getWindingRule(), argb, playback, border, plane);
+    }
 
     /** Horizontal trapezoids preserve holes, dashed strokes, concave polygons and glyph counters. */
     static List<Triangle> flat(BoardTactical.Fill fill) {

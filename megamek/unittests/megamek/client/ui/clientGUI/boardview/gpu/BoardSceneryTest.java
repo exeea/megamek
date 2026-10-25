@@ -89,10 +89,10 @@ class BoardSceneryTest {
                 assertEquals(BoardScene.Pixels.capture(bare.tileset(), null), BoardScene.Pixels.capture(image.tileset(), null),
                       "The ground must not retain a duplicate of " + decoration);
                 var tile = tile(hex, image);
-                assertEquals(tile.tilesetDecals(), tile.withTactical(null).tilesetDecals(),
-                      "Tactical marker refreshes must retain painted artwork");
-                assertEquals(tile.tilesetScenery(), tile.withTactical(null).tilesetScenery(),
-                      "Tactical marker refreshes must retain object artwork");
+                assertEquals(tile.tilesetDecals(), tile.withText(List.of()).tilesetDecals(),
+                      "Label refreshes must retain painted artwork");
+                assertEquals(tile.tilesetScenery(), tile.withText(List.of()).tilesetScenery(),
+                      "Label refreshes must retain object artwork");
             }
             var skylight = drawn(support + ";fluff:6:0");
             assertTrue(skylight.hex().containsTerrain(Terrains.FLUFF), "The token stays for the 2D board");

@@ -183,6 +183,22 @@ public class WeaponHandler implements AttackHandler, Serializable {
               java.util.List.of(new megamek.common.ResolvedAttack.Mount(mount.entityId(), mount.equipmentIndex(), shot)));
     }
 
+    /**
+     * Shows a dropped bomb coming down at {@code landing} as an artillery round lands, sent from the bomb's own mount so
+     * the board knows its type; {@code shot} describes what it carries.
+     */
+    protected final void reportBombLanding(Mounted<?> bomb, megamek.common.ResolvedAttack.Shot shot, Coords landing,
+          int height) {
+        if (animationOrigin == null) { return; }
+        animationReported = true;
+        int index = attackingEntity.getEquipmentNum(bomb);
+        var placed = shot.withTrajectory(animationOrigin,
+              new megamek.common.units.UnitLocation(Entity.NONE, landing, 0, height, target.getBoardId()));
+        gameManager.sendAttackAnimation(attackingEntity, target, megamek.common.ResolvedAttack.Kind.SHOT, index,
+              bomb.getLocation(), !bMissed, placed,
+              java.util.List.of(new megamek.common.ResolvedAttack.Mount(attackingEntity.getId(), index, placed)));
+    }
+
     /** Called only where the existing rules actually expend a counterweapon's shot. */
     protected final void reportCounterAnimation(WeaponMounted counter) {
         if (animatedCounters == null) { animatedCounters = new java.util.HashSet<>(); }

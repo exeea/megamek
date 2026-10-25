@@ -714,7 +714,7 @@ public final class RailRoute {
     /** The midpoint of the border in {@code direction}, from the hex centre, in model px (+y north). */
     public static float[] border(int direction) {
         Coords origin = new Coords(0, 0), next = origin.translated(direction);
-        return new float[] { (HexTile.centerX(next, HexTile.WIDTH) - HexTile.centerX(origin, HexTile.WIDTH)) / 2,
+        return new float[] { (HexTile.centerX(next, HexTile.MODEL_WIDTH) - HexTile.centerX(origin, HexTile.MODEL_WIDTH)) / 2,
               (HexTile.centerY(next, HexTile.HEIGHT) - HexTile.centerY(origin, HexTile.HEIGHT)) / 2 };
     }
 
@@ -726,7 +726,7 @@ public final class RailRoute {
 
     /**
      * A lateral shift along the actual hex edge, {@code offset} model pixels right of the outward centre line.
-     * The 84x72 lattice is slightly non-regular: a plain perpendicular shift misses its diagonal borders, leaving
+     * The lattice is regular only to a 32nd: a plain perpendicular shift misses its diagonal borders by a hair, leaving
      * one rail endpoint outside its supporting ground and making its height sampler fall back to the plateau.
      */
     public static float[] borderOffset(int direction, float offset) {
@@ -735,7 +735,7 @@ public final class RailRoute {
         float x = at[1] / length * offset, y = -at[0] / length * offset;
         int edge = Math.floorMod(1 - direction, 6), next = (edge + 1) % 6;
         float nx = HexTile.cornerOffsetY(next, HexTile.HEIGHT) - HexTile.cornerOffsetY(edge, HexTile.HEIGHT);
-        float ny = HexTile.cornerOffsetX(edge, HexTile.WIDTH) - HexTile.cornerOffsetX(next, HexTile.WIDTH);
+        float ny = HexTile.cornerOffsetX(edge, HexTile.MODEL_WIDTH) - HexTile.cornerOffsetX(next, HexTile.MODEL_WIDTH);
         float along = (x * nx + y * ny) / (at[0] * nx + at[1] * ny);
         return new float[] { x - at[0] * along, y - at[1] * along };
     }

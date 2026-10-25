@@ -58,7 +58,8 @@ import megamek.common.units.Terrains;
  * the committed builders make them in the pending neighbourhood, joins included ({@link GpuTerrain#previewRoutes}),
  * in place of the installed ones; a tile left without pieces shows the ones that go. That comparison runs on a worker:
  * the frame never waits for it, and the pieces shown stay until it finishes. Ghosts are the movement destination's
- * blue, what goes red. Terrain cards' results show as tinted stand-ins. Hovering rebuilds no installed terrain.
+ * blue, what goes red. Terrain cards' results show as tinted stand-ins. Hovering rebuilds no installed terrain. In a
+ * game, the same ghosts show the work under way ({@link #work}).
  */
 final class GpuEditorPreview implements Disposable {
     /**
@@ -209,6 +210,25 @@ final class GpuEditorPreview implements Disposable {
         }
         return new Data(labelled == null ? preview.at() : labelled, erase, hexes, objects, List.copyOf(standIns), tint, label,
               List.copyOf(stubs), List.copyOf(decks), Map.copyOf(routes), routeBrush);
+    }
+
+    /**
+     * A game's work in progress as ghosts of what it builds (a bridge being built, a hex being fortified, rubble being
+     * cleared): {@code done} is each hex as it will be, whose tile's new features (sandbags, a cleared path) and route
+     * pieces (a bridge) the board's own builders make, as for Paint, without the editor's stand-ins, outlines and label.
+     * On the EDT.
+     */
+    static Data work(Map<Coords, Hex> before, Map<Coords, Hex> done, BiFunction<Coords, Hex, BoardScene.Tile> capture) {
+        if (done.isEmpty()) { return Data.NONE; }
+        Coords at = done.keySet().iterator().next();
+        var paint = data(new BoardEditorSession.Preview(at, before, done, List.of(), "", null, Map.of()), false, null, true,
+              capture);
+        Map<Coords, List<BoardScene.Feature>> objects = new LinkedHashMap<>();
+        done.forEach((coords, hex) -> {
+            var tile = capture.apply(coords, hex);
+            if (tile != null) { objects.put(coords, tile.features()); }
+        });
+        return new Data(at, false, List.of(), objects, List.of(), 0, "", List.of(), List.of(), paint.routes(), true);
     }
 
     /** Whether {@code hex} holds what the route builders draw: a road, a bridge, a wall or a route's object. */
@@ -381,7 +401,9 @@ final class GpuEditorPreview implements Disposable {
             for (var feature : entry.getValue()) {
                 if (!objectGhost(tile, feature, data.erase())) { continue; }
                 ModelInstance ghost;
-                if (feature.decoration().kind().equals("decal")) {
+                if (feature.decoration() == null) {
+                    ghost = terrain.sceneryGhost(at, feature);
+                } else if (feature.decoration().kind().equals("decal")) {
                     Model paint = terrain.decalGhost(at, feature, new Material("paint"));
                     if (paint != null) { owned.add(paint); }
                     ghost = paint == null ? null : new ModelInstance(paint);
@@ -445,9 +467,13 @@ final class GpuEditorPreview implements Disposable {
         if (routes != null) { routes.dispose(); routes = null; }
     }
 
-    /** Whether the event's object {@code feature} of {@code tile} shows as an object ghost: not a route piece, and new or going. */
+    /**
+     * Whether the event's object {@code feature} of {@code tile} shows as an object ghost: a placed object or authored
+     * scenery, not a route piece, and new or going.
+     */
     private static boolean objectGhost(BoardScene.Tile tile, BoardScene.Feature feature, boolean erase) {
-        return !GpuTerrain.routeFeature(tile, feature) && (erase || !tile.features().contains(feature));
+        return (feature.decoration() != null || feature.authoredPlacement()) && !GpuTerrain.routeFeature(tile, feature)
+              && (erase || !tile.features().contains(feature));
     }
 
     /** Paint's ghost is the movement destination's ({@link GpuBoardOverlay#ghostly}); what goes is the same in red. */

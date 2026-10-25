@@ -129,7 +129,7 @@ class GpuTerrainLoadBenchmarkTest {
                 for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
                     if (hex.containsTerrain(terrain)) { models.put(terrain, "buildings/saxarba/bsealed_hard/bsealed_hard_00"); }
                 }
-                var artwork = new BoardArtwork.HexImage(coords, null, null, null, null, null, List.of(), models, null);
+                var artwork = new BoardArtwork.HexImage(coords, null, null, null, null, List.of(), models, null);
                 tiles.add(BoardScene.captureTile(hex, artwork, null, pool, board::getHex));
             }
         }

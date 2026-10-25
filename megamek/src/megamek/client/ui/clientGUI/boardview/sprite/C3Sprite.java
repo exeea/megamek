@@ -34,13 +34,13 @@ package megamek.client.ui.clientGUI.boardview.sprite;
 
 import java.awt.Color;
 import java.awt.Graphics;
-import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.common.units.Entity;
 
@@ -48,7 +48,7 @@ import megamek.common.units.Entity;
  * Sprite and info for a C3 network. Does not actually use the image buffer as this can be horribly inefficient for long
  * diagonal lines.
  */
-public class C3Sprite extends Sprite implements TacticalSprite {
+public class C3Sprite extends Sprite {
 
     private Polygon c3Poly;
 
@@ -117,7 +117,7 @@ public class C3Sprite extends Sprite implements TacticalSprite {
 
         final double angle = (entityE.getPosition().radian(entityM.getPosition()) + (Math.PI * 1.5)) % (Math.PI
               * 2); // angle
-        final double lineWidth = this.bv.getScale() * BoardGlyphContext.C3_LINE_WIDTH; // line width
+        final double lineWidth = this.bv.getScale() * TacticalStyle.C3_LINE_WIDTH; // line width
 
         c3Poly = new Polygon();
         int roundedWidth = (int) Math.round(Math.sin(angle) * lineWidth);
@@ -176,12 +176,6 @@ public class C3Sprite extends Sprite implements TacticalSprite {
     @Override
     public boolean isInside(Point point) {
         return c3Poly.contains(point.x - bounds.x, point.y - bounds.y);
-    }
-
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Rectangle location = getBounds();
-        drawOnto(graphics, location.x, location.y, null);
     }
 
 }

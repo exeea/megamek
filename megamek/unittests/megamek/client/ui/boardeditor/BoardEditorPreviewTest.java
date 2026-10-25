@@ -138,7 +138,7 @@ class BoardEditorPreviewTest {
             assertEquals(turn, drawn.at(), "Near the centre the pointer heads nowhere");
             assertEquals(java.util.Set.of(start, turn), drawn.after().keySet(), "No step ahead");
             float[] border = RailRoute.border(side);
-            double x = border[0] / megamek.common.board.HexTile.WIDTH * .6, y = border[1] / megamek.common.board.HexTile.HEIGHT * .6;
+            double x = border[0] / megamek.common.board.HexTile.MODEL_WIDTH * .6, y = border[1] / megamek.common.board.HexTile.HEIGHT * .6;
             assertEquals(side, BoardEditorSession.heading(x, y));
             Map<Coords, JsonNode> document = document(session);
             Preview next = session.preview(turn, x, y, "ground");

@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,8 +47,7 @@ class BoardUltraSublevelTest {
                 assertFalse(BoardScatter.allowed(tile));
                 assertFalse(BoardSurfaceBlend.natural(tile));
                 assertTrue(tile.lunar(true).ultraSublevel() && tile.lunar(false).ultraSublevel());
-                var marking = new BoardScene.Pixels(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB));
-                assertTrue(tile.withTactical(marking).ultraSublevel());
+                assertTrue(tile.withText(List.of()).ultraSublevel());
                 for (TerrainLod lod : TerrainLod.values()) {
                     var surface = new BoardSurface(scene, tile, lod);
                     assertEquals(6, surface.faces.size(), "A complete hex seals the pit at every detail level");
@@ -274,7 +272,7 @@ class BoardUltraSublevelTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 Coords at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(source.apply(at), artwork, null, pool,
                       c -> c.getX() < 0 || c.getY() < 0 || c.getX() >= width || c.getY() >= height ? null : source.apply(c)));
             }

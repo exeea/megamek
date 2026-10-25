@@ -117,12 +117,16 @@ final class BoardRoadCut {
         }
     }
 
-    /** A segment split where it crosses the world's grid (BoardRoadBank#GRID), into {@code into}. */
+    /**
+     * A segment split where it crosses the world's grid (BoardRoadBank#GRID), into {@code into}: on the grid plane
+     * exactly, where the bank puts its own vertex.
+     */
     private void stations(Segment s, List<Segment> into) {
-        List<Float> cuts = crossings(s.ax(), s.ay(), s.bx(), s.by());
         float px = s.ax(), py = s.ay();
-        for (float t : cuts) {
-            float qx = s.ax() + (s.bx() - s.ax()) * t, qy = s.ay() + (s.by() - s.ay()) * t;
+        for (float[] cut : crossings(s.ax(), s.ay(), s.bx(), s.by())) {
+            float t = cut[0];
+            float qx = cut[1] == 0 ? cut[2] : s.ax() + (s.bx() - s.ax()) * t;
+            float qy = cut[1] == 1 ? cut[2] : s.ay() + (s.by() - s.ay()) * t;
             if (Math.hypot(qx - px, qy - py) > epsilon && Math.hypot(s.bx() - qx, s.by() - qy) > epsilon) {
                 into.add(new Segment(px, py, qx, qy));
                 px = qx;
@@ -166,19 +170,22 @@ final class BoardRoadCut {
         return false;
     }
 
-    /** Where a straight run from a to b crosses the world's grid planes, as sorted parameters inside it. */
-    private static List<Float> crossings(float ax, float ay, float bx, float by) {
+    /**
+     * Where a straight run from a to b crosses the world's grid planes, sorted along it: each its parameter inside the
+     * run, the plane's axis (0 for x) and the plane's coordinate.
+     */
+    private static List<float[]> crossings(float ax, float ay, float bx, float by) {
         float grid = BoardRoadBank.GRID * BoardGeometry.hexScale();
-        List<Float> cuts = new ArrayList<>();
+        List<float[]> cuts = new ArrayList<>();
         for (int axis = 0; axis < 2; axis++) {
             float a = axis == 0 ? ax : ay, b = axis == 0 ? bx : by;
             if (a == b) { continue; }
             for (long k = (long) Math.ceil(Math.min(a, b) / grid); k * grid <= Math.max(a, b); k++) {
                 float t = (k * grid - a) / (b - a);
-                if (t > 0 && t < 1) { cuts.add(t); }
+                if (t > 0 && t < 1) { cuts.add(new float[] { t, axis, k * grid }); }
             }
         }
-        cuts.sort(null);
+        cuts.sort((p, q) -> Float.compare(p[0], q[0]));
         return cuts;
     }
 
@@ -222,33 +229,46 @@ final class BoardRoadCut {
         }
     }
 
+    /** How near an outline's vertex, in tile pixels, a crease crossing the outline takes that vertex instead. */
+    private static final float CREASE_SNAP = .05f;
+
     /** The parts of a crease line that lie inside its own piece. */
     private void crease(Area area, float[] line) {
         float ax = line[0], ay = line[1], bx = line[2], by = line[3];
         List<Segment> boundary = new ArrayList<>();
         outline(area, boundary, epsilon);
-        List<Float> cuts = new ArrayList<>(List.of(0f, 1f));
+        // Each cut: its share of the crease, and its point taken on the boundary it crosses, which keeps it on that
+        // boundary exactly (a long crease's own share puts it a little off an edge, and the sweep rows it from there).
+        // A crossing a hair from the boundary's vertex is that vertex: beside it, it would add a row of slivers.
+        List<float[]> cuts = new ArrayList<>(List.of(new float[] { 0, ax, ay }, new float[] { 1, bx, by }));
+        float near = CREASE_SNAP * BoardGeometry.hexScale();
         for (Segment s : boundary) {
             float[] hit = intersection(ax, ay, bx, by, s.ax(), s.ay(), s.bx(), s.by());
-            if (hit != null) { cuts.add(hit[0]); }
+            if (hit != null) {
+                float length = (float) Math.hypot(s.bx() - s.ax(), s.by() - s.ay()), u = hit[1];
+                cuts.add(u * length < near ? new float[] { hit[0], s.ax(), s.ay() }
+                      : (1 - u) * length < near ? new float[] { hit[0], s.bx(), s.by() }
+                      : new float[] { hit[0], s.ax() + (s.bx() - s.ax()) * u, s.ay() + (s.by() - s.ay()) * u });
+            }
         }
-        cuts.sort(null);
+        cuts.sort((p, q) -> Float.compare(p[0], q[0]));
         for (int i = 1; i < cuts.size(); i++) {
-            float from = cuts.get(i - 1), to = cuts.get(i), middle = (from + to) / 2;
-            if ((to - from) * (float) Math.hypot(bx - ax, by - ay) < epsilon
+            float[] from = cuts.get(i - 1), to = cuts.get(i);
+            float middle = (from[0] + to[0]) / 2;
+            if (Math.hypot(to[1] - from[1], to[2] - from[2]) < epsilon
                   || !area.contains(ax + (bx - ax) * middle, ay + (by - ay) * middle)) { continue; }
-            segments.add(new Segment(ax + (bx - ax) * from, ay + (by - ay) * from, ax + (bx - ax) * to, ay + (by - ay) * to));
+            segments.add(new Segment(from[1], from[2], to[1], to[2]));
         }
     }
 
-    /** Parameters along both segments where they cross, or null. */
+    /** Parameters along both segments where they cross, or null. Solved in double: board coordinates are large. */
     private static float[] intersection(float ax, float ay, float bx, float by, float cx, float cy, float dx, float dy) {
-        float ex = bx - ax, ey = by - ay, fx = dx - cx, fy = dy - cy;
-        float denominator = ex * fy - ey * fx;
-        if (Math.abs(denominator) < 1e-12f) { return null; }
-        float t = ((cx - ax) * fy - (cy - ay) * fx) / denominator;
-        float u = ((cx - ax) * ey - (cy - ay) * ex) / denominator;
-        return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? new float[] { t, u } : null;
+        double ex = (double) bx - ax, ey = (double) by - ay, fx = (double) dx - cx, fy = (double) dy - cy;
+        double denominator = ex * fy - ey * fx;
+        if (Math.abs(denominator) < 1e-12) { return null; }
+        double t = (((double) cx - ax) * fy - ((double) cy - ay) * fx) / denominator;
+        double u = (((double) cx - ax) * ey - ((double) cy - ay) * ex) / denominator;
+        return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? new float[] { (float) t, (float) u } : null;
     }
 
     /**
@@ -636,7 +656,12 @@ final class BoardRoadCut {
         segments.add(new Segment(0, 0, 1, 0));
         segments.add(new Segment(1, 0, 0, 1));
         segments.add(new Segment(0, 1, 0, 0));
-        float e = 1e-6f;
+        // Two rounding steps of the face's coordinates, as a share of it: a chord that far off the face's edge is
+        // that edge.
+        float magnitude = Math.max(Math.max(Math.abs(a.x), Math.abs(a.y)),
+              Math.max(Math.max(Math.abs(b.x), Math.abs(b.y)), Math.max(Math.abs(c.x), Math.abs(c.y))));
+        float e = Math.max(1e-6f, 2 * Math.ulp(magnitude)
+              / (float) Math.sqrt(Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)))));
         Classifier classifier = (s, t) -> s < -e || t < -e || s + t > 1 + e ? OUTSIDE : reserved.at(s, t) ? RESERVED : KEPT;
         Map<Point, Vector3> vertices = new HashMap<>();
         java.util.function.Function<Point, Vector3> vertex = p -> vertices.computeIfAbsent(p, key -> {
@@ -646,6 +671,10 @@ final class BoardRoadCut {
             if (s == 0 && t == 1) { return c; }
             Vector3 v = new Vector3(a).mulAdd(new Vector3(b).sub(a), s).mulAdd(new Vector3(c).sub(a), t);
             float grid = 4 * epsilon;
+            // A cut a hair from the face's corner is that corner: beside it, it would leave a needle face.
+            for (Vector3 corner : new Vector3[] { a, b, c }) {
+                if (corner.dst2(v) <= grid * grid) { return corner; }
+            }
             var weld = List.of((long) Math.round(v.x / grid), (long) Math.round(v.y / grid), (long) Math.round(v.z / grid));
             Vector3 same = welded.get(weld);
             if (same != null) { return same; }
@@ -750,7 +779,7 @@ final class BoardRoadCut {
         boolean shallow = fill || natural && !cast;
         // The road's edge bends only at its stations and the emitted road's own vertices: the face meets it at each.
         List<Float> stations = new ArrayList<>(List.of(0f, 1f));
-        stations.addAll(crossings(p.x, p.y, q.x, q.y));
+        for (float[] cut : crossings(p.x, p.y, q.x, q.y)) { stations.add(cut[0]); }
         List<Vector3> corners = new ArrayList<>();
         for (Segment s : edge) {
             corners.add(new Vector3(s.ax(), s.ay(), 0));

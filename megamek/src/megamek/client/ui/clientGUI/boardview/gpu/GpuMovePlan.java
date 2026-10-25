@@ -40,6 +40,7 @@ import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.Infantry;
 import megamek.common.units.Terrains;
 
 /**
@@ -82,20 +83,21 @@ final class GpuMovePlan implements AutoCloseable {
      * then the display's last one, and none during a hex pick. {@code mounts} are the units a click boards: in the
      * planner's walk gear, the transports on its board the unit could mount ({@code Compute.canMount}) and may not
      * stand with, beside which MegaMek's click stops the path for its Mount command
-     * ({@code MountPathHelper.trimToMountableTransport}).
+     * ({@code MountPathHelper.trimToMountableTransport}). {@code facingMatters} is false for a unit that takes no turn
+     * commands ({@link #facingMatters}).
      */
     record Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
           String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
           int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
-          boolean legal, List<String> warnings, boolean canUndo, boolean canPin, Map<Coords, Band> envelope,
-          Set<Integer> mounts, int holdingRemaining) {
+          boolean legal, List<String> warnings, boolean canUndo, boolean canPin, boolean facingMatters,
+          Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining) {
         static final Snapshot EMPTY = idle(0);
 
         /** No plan (not the local movement turn, or no unit selected), with the hold's count. */
         static Snapshot idle(int holdingRemaining) {
             return new Snapshot(false, false, false, Entity.NONE, Mode.AUTO, false, "", List.of(), List.of(),
                   List.of(), null, -1, 0, 0, EntityMovementType.MOVE_NONE, "", false, 0, 0, false, List.of(), false,
-                  false, Map.of(), Set.of(), holdingRemaining);
+                  false, false, Map.of(), Set.of(), holdingRemaining);
         }
 
         Snapshot {
@@ -203,7 +205,8 @@ final class GpuMovePlan implements AutoCloseable {
               shown.route(), hovered, planner ? pinned(path) : List.of(), shown.destination(), shown.facing(),
               shown.cost(), shown.budget(), shown.type(), typeLabel(shown.type(), mode), planner && (mode == Mode.AUTO),
               shown.heat(), shown.tmm(), shown.legal(), shown.warnings(), planner && canUndo(path),
-              planner && pinnable(md, path), reach, planner ? mounts(md, entity) : Set.of(), held);
+              planner && pinnable(md, path), facingMatters(entity), reach, planner ? mounts(md, entity) : Set.of(),
+              held);
         if (!next.equals(published)) {
             published = next;
         }
@@ -416,7 +419,8 @@ final class GpuMovePlan implements AutoCloseable {
      */
     private void face(MovementDisplay md, int wanted) {
         MovePath path = md.getPlannedMovement();
-        if (wanted == path.getFinalFacing() || !available(md, MoveCommand.MOVE_TURN)) { return; }
+        if (wanted == path.getFinalFacing() || !facingMatters(path.getEntity())
+              || !available(md, MoveCommand.MOVE_TURN)) { return; }
         boolean route = path.length() > base(path);
         Entry before = entry(md);
         Mode mode = mode(md);
@@ -735,6 +739,15 @@ final class GpuMovePlan implements AutoCloseable {
     private static @Nullable MegaMekButton button(MovementDisplay md, MoveCommand command) {
         return md.getActionButtons().stream().filter(button -> command.getCmd().equals(button.getActionCommand()))
               .findFirst().orElse(null);
+    }
+
+    /**
+     * Whether turning the unit means anything: not for infantry whose weapons all fire all around (a conventional
+     * platoon's field guns, and one hitting the deck with them, fire forward), which no attack hits by side either.
+     */
+    static boolean facingMatters(Entity entity) {
+        return !(entity instanceof Infantry) || entity.getWeaponList().stream()
+              .anyMatch(weapon -> entity.getWeaponArc(entity.getEquipmentNum(weapon)) != Compute.ARC_360);
     }
 
     private static boolean available(MovementDisplay md, MoveCommand command) {

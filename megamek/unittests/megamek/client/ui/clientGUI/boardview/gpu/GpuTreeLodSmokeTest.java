@@ -124,7 +124,7 @@ class GpuTreeLodSmokeTest {
                             terrain.refreshShadows();
                             int shadowCount = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
                             if (level == 0 && nearCount == 0) {
-                                int submitted = count(profiler, () -> terrain.render(camera.camera, false));
+                                int submitted = count(profiler, () -> terrain.render(camera.camera));
                                 int draws = profiler.getDrawCalls();
                                 int alone = colour(profiler, terrain, camera);
                                 System.out.printf(Locale.ROOT, "%s near level: the depth pre-pass adds %d vertices and"
@@ -519,7 +519,7 @@ class GpuTreeLodSmokeTest {
     private static int colour(GLProfiler profiler, GpuTerrain terrain, BoardCamera camera) {
         Set<GpuTerrain.Prepass> prepass = GpuTerrain.depthPrepass;
         GpuTerrain.depthPrepass = EnumSet.noneOf(GpuTerrain.Prepass.class);
-        try { return count(profiler, () -> terrain.render(camera.camera, false)); }
+        try { return count(profiler, () -> terrain.render(camera.camera)); }
         finally { GpuTerrain.depthPrepass = prepass; }
     }
 
@@ -538,7 +538,7 @@ class GpuTreeLodSmokeTest {
             }
         }
         BoardScene.Tile tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
-              new BoardScene.Pixels(ground), null, null,
+              new BoardScene.Pixels(ground), null,
               List.of(new BoardScene.Feature(name, 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE)),
               List.of());
         return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
@@ -710,7 +710,7 @@ class GpuTreeLodSmokeTest {
         try (var timings = new GpuStageTimings()) {
             for (int frame = 0; frame < 80; frame++) {
                 output.scene().begin();
-                preview.render(camera.camera, true);
+                newShadingPass(preview);
                 Gdx.gl.glDepthMask(true);
                 ScreenUtils.clear(0, 0, 0, 1, true);
                 timings.beginFrame(frame >= 20);
@@ -734,7 +734,7 @@ class GpuTreeLodSmokeTest {
           GpuTreeInstances.Stand stand, int level, ModelBatch batch, Environment environment, BoardCamera camera) {
         output.scene().begin();
         // Start a real frame: shader globals are cached within one terrain pass, including the normal-map toggle.
-        preview.render(camera.camera, true);
+        newShadingPass(preview);
         Gdx.gl.glDepthMask(true);
         float adaptation = Boolean.getBoolean("megamek.gpu.reviewImpostorMaterials") ? preview.lightAdaptation() : 1;
         ScreenUtils.clear(GpuColor.linear(.035f) * GpuSceneRadiance.SCALE / adaptation,
@@ -752,6 +752,15 @@ class GpuTreeLodSmokeTest {
         batch.begin(camera.camera);
         batch.render(instances, environment);
         batch.end();
+    }
+
+    /** A new terrain shading pass, as each frame starts one: the provider's shaders refresh their cached globals. */
+    static void newShadingPass(GpuTerrain terrain) {
+        try {
+            var pass = GpuTerrain.class.getDeclaredField("shadingPass");
+            pass.setAccessible(true);
+            pass.setLong(terrain, pass.getLong(terrain) + 1);
+        } catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
     }
 
     static BufferedImage render(ModelBatch batch, Environment environment, Model model, BoardCamera camera) {

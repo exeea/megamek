@@ -269,7 +269,7 @@ class BoardSceneryLayoutsTest {
         for (int i = 0; i < moved.size(); i++) {
             var object = moved.get(i);
             assertFalse(fit.reaches(BoardModelBounds.footprint(tables, object), tables), object.id() + " stands clear of the bank");
-            double dx = (object.x() - placed.get(i).x()) * HexTile.WIDTH, dy = (object.y() - placed.get(i).y()) * HexTile.HEIGHT;
+            double dx = (object.x() - placed.get(i).x()) * HexTile.MODEL_WIDTH, dy = (object.y() - placed.get(i).y()) * HexTile.HEIGHT;
             farthest = Math.max(farthest, Math.hypot(dx, dy));
             if (object.group() == null) { continue; }
             double[] offset = offsets.computeIfAbsent(object.group(), group -> new double[] { dx, dy });

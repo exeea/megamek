@@ -2,8 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,7 +13,6 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
-import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -59,35 +56,11 @@ class GpuLargeMapTest {
             });
             BoardScene overview = fixture.source.takeFrame().scene();
             assertTrue(GpuHexOverlayTest.covers(overview.tactical(), preferences.getMapsheetColor(),
-                  new Coords(192, 190), 10.5, 18), "Far sheet borders must survive full-board capture as native geometry");
-            assertNull(overview.tile(new Coords(192, 190)).tactical(), "Native sheet borders need no per-hex raster");
-            Set<BoardScene.Pixels> markings = new HashSet<>();
-            overview.tiles().forEach(tile -> {
-                if (tile.tactical() != null) {
-                    markings.add(tile.tactical());
-                    assertEquals(252, tile.tactical().width());
-                    assertEquals(216, tile.tactical().height());
-                }
-            });
-            assertTrue(markings.size() < 1_000, "Sheet borders must share atlas artwork even in full overview");
+                  new Coords(192, 190), GpuHexOverlayTest.NORTH_WEST_X, GpuHexOverlayTest.NORTH_WEST_Y),
+                  "Far sheet borders must survive full-board capture as native geometry");
             long captured = System.nanoTime();
             Coords far = new Coords(190, 190);
-            // Auto-hit is now a native icon; a hit still exercises compatibility-raster capture and eviction.
-            SpecialHexDisplay marker = new SpecialHexDisplay(SpecialHexDisplay.Type.ARTILLERY_HIT,
-                  SpecialHexDisplay.NO_ROUND, fixture.player, "Large-board capture");
             SwingUtilities.invokeAndWait(() -> {
-                fixture.source.setVisibleArea(new Rectangle(185, 185, 15, 15));
-                fixture.game.getBoard().addSpecialHexDisplay(far, marker, true);
-                fixture.source.refresh();
-            });
-            assertNotNull(fixture.source.takeFrame().scene().tile(far).tactical());
-            SwingUtilities.invokeAndWait(() -> {
-                fixture.source.setVisibleArea(new Rectangle(0, 0, 16, 16));
-                fixture.source.refresh();
-            });
-            assertNull(fixture.source.takeFrame().scene().tile(far).tactical(), "Panning must release offscreen markings");
-            SwingUtilities.invokeAndWait(() -> {
-                fixture.game.getBoard().removeSpecialHexDisplay(far, marker, true);
                 fixture.game.getBoard().setHex(far, new Hex(4));
                 fixture.source.setVisibleArea(new Rectangle(185, 185, 15, 15));
                 fixture.source.refresh();
@@ -96,8 +69,8 @@ class GpuLargeMapTest {
             BoardScene last = fixture.source.takeFrame().scene();
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             assertSame(last.tiles(), fixture.source.takeFrame().scene().tiles());
-            System.out.printf("200x200: open %.2fs, overview %.2fs, unique ground %d, markings %d, max heap %d MiB%n",
-                  (opened - start) / 1e9, (captured - opened) / 1e9, ground.size(), markings.size(),
+            System.out.printf("200x200: open %.2fs, overview %.2fs, unique ground %d, max heap %d MiB%n",
+                  (opened - start) / 1e9, (captured - opened) / 1e9, ground.size(),
                   Runtime.getRuntime().maxMemory() / (1024 * 1024));
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setShowMapSheets(mapSheets));

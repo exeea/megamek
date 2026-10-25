@@ -34,10 +34,15 @@ package megamek.common.weapons.handlers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import java.util.HashMap;
 import java.util.Vector;
@@ -46,6 +51,8 @@ import megamek.common.GameBoardTestCase;
 import megamek.common.HexTarget;
 import megamek.common.Player;
 import megamek.common.Report;
+import megamek.common.ResolvedAttack;
+import megamek.common.SpecialHexDisplay;
 import megamek.common.ToHitData;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Coords;
@@ -53,6 +60,7 @@ import megamek.common.enums.GamePhase;
 import megamek.common.equipment.BombLoadout;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponMounted;
+import megamek.common.equipment.enums.BombType;
 import megamek.common.equipment.enums.BombType.BombTypeEnum;
 import megamek.common.game.Game;
 import megamek.common.net.packets.Packet;
@@ -66,10 +74,12 @@ import megamek.server.totalWarfare.TWGameManager;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 /**
- * Every bomb in a run rolls its own to-hit, including the bomb after one that scatters off the board (issue #9314).
+ * Every bomb in a run rolls its own to-hit, including the bomb after one that scatters off the board (issue #9314), and
+ * the board is shown where each one came down.
  */
 class BombAttackHandlerRollTest extends GameBoardTestCase {
 
@@ -109,6 +119,8 @@ class BombAttackHandlerRollTest extends GameBoardTestCase {
     void beforeEach() {
         gameManager = Mockito.spy(new TWGameManager());
         Mockito.doNothing().when(gameManager).send(any(Packet.class));
+        // Each bomb's landing goes to every player's client.
+        Mockito.doNothing().when(gameManager).send(anyInt(), any(Packet.class));
         Mockito.doNothing().when(gameManager).entityUpdate(anyInt());
         game = gameManager.getGame();
         game.setBoard(getBoard("BOMB_ROLL_BOARD"));
@@ -194,5 +206,31 @@ class BombAttackHandlerRollTest extends GameBoardTestCase {
         assertEquals(1, count(reports, REPORT_BOMB_OFF_BOARD), "only the first bomb leaves the board");
         assertEquals(1, count(reports, REPORT_BOMB_MISSED), "only the first bomb misses");
         assertEquals(2, count(reports, REPORT_BOMB_HIT), "the second and third bombs roll 12 and hit");
+    }
+
+    /**
+     * Each bomb that comes down is shown landing there from its own mount, which names its type; one that scatters off
+     * the board lands nowhere, and its miss points a drift line at the board edge it crossed.
+     */
+    @Test
+    void bombsShowWhereTheyCameDown() throws Exception {
+        doReturn(rollOf(2), rollOf(12), rollOf(12)).when(crew).rollGunnerySkill(any(), any());
+
+        diveBombThreeHE();
+
+        ArgumentCaptor<Integer> mounts = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<ResolvedAttack.Shot> shots = ArgumentCaptor.forClass(ResolvedAttack.Shot.class);
+        verify(gameManager, times(2)).sendAttackAnimation(eq(bomber), any(), eq(ResolvedAttack.Kind.SHOT),
+              mounts.capture(), anyInt(), anyBoolean(), shots.capture(), any());
+        for (int index : mounts.getAllValues()) {
+            assertEquals(BombTypeEnum.HE, ((BombType) bomber.getEquipment(index).getType()).getBombType());
+        }
+        for (ResolvedAttack.Shot shot : shots.getAllValues()) {
+            assertTrue(shot.artillery(), "a bomb lands as an artillery round does");
+            assertEquals(new Coords(1, 1), shot.impact().coords());
+        }
+        SpecialHexDisplay miss = game.getBoard().getSpecialHexDisplay(new Coords(1, 1)).stream()
+              .filter(display -> display.getType() == SpecialHexDisplay.Type.BOMB_MISS).findFirst().orElseThrow();
+        assertNotNull(miss.getDriftHex(), "the miss points toward the edge it left by");
     }
 }

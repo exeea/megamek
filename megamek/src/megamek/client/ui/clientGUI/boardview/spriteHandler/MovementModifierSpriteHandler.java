@@ -32,11 +32,14 @@
  */
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
+import java.awt.Color;
 import java.util.Collection;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementModifierEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
+import megamek.common.Facing;
+import megamek.common.compute.DefensiveMovementModifier;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.game.Game;
 import megamek.common.moves.MovePath;
@@ -67,14 +70,19 @@ public class MovementModifierSpriteHandler extends BoardViewSpriteHandler {
             return;
         }
         BoardClientState boardView = clientGUI.boardStates().getFirst();
-        movePaths.stream()
-              .map(path -> new MovementModifierEnvelopeSprite(boardView, path))
-              .forEach(currentSprites::add);
-        movePaths.stream()
-              .filter(MovePath::isMoveLegal)
-              .map(path -> new MovementModifierEnvelopeSprite(boardView, path))
-              .forEach(currentSprites::add);
-        boardView.addSprites(currentSprites);
+        addMarks(boardView, movePaths.stream().map(this::modifier).toList());
+        addMarks(boardView, movePaths.stream().filter(MovePath::isMoveLegal).map(this::modifier).toList());
+    }
+
+    /**
+     * The defensive modifier at the end of {@code movePath}, from one shared computation with the bot's position
+     * evaluation, so the overlay and the bot can never value destinations differently.
+     */
+    private TacticalMark.FacingModifier modifier(MovePath movePath) {
+        int movementModifier = DefensiveMovementModifier.forPath(movePath, game);
+        float hue = 0.7f - 0.15f * movementModifier;
+        return new TacticalMark.FacingModifier(movePath.getFinalCoords(), Facing.valueOfInt(movePath.getFinalFacing()),
+              String.format("%+d", movementModifier), new Color(Color.HSBtoRGB(hue, 1, 1)));
     }
 
     @Override

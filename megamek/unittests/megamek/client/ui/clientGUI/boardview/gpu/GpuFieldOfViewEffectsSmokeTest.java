@@ -58,7 +58,7 @@ class GpuFieldOfViewEffectsSmokeTest {
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 7; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, pixels, null, List.of(), List.of()));
                 var visibility = x < 3 ? BoardFieldOfView.Visibility.VISIBLE
                       : x < 6 ? BoardFieldOfView.Visibility.SENSOR : BoardFieldOfView.Visibility.BLOCKED;
                 hexes.add(new BoardFieldOfView.Hex(visibility, 0, x >= 6));
@@ -141,7 +141,7 @@ class GpuFieldOfViewEffectsSmokeTest {
         field.update(mask);
         ScreenUtils.clear(0, 0, 0, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         atmosphere.end(camera.camera, terrain, scene, 0, field);
         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {

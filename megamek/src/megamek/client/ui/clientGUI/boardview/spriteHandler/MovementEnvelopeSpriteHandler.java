@@ -33,12 +33,14 @@
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import java.awt.Color;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.common.board.Coords;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -89,6 +91,7 @@ public class MovementEnvelopeSpriteHandler extends BoardViewSpriteHandler {
         // outlined on all sides (as it always was)
         Map<Coords, Band> adjacentBands = (gear == MovementDisplay.GEAR_DFA)
               ? bands(mvEnvData, walk, run, jump, MovementDisplay.GEAR_LAND) : bands;
+        List<TacticalMark> marks = new ArrayList<>();
         for (Coords loc : mvEnvData.keySet()) {
             Band band = bands.get(loc);
             if (band == null) {
@@ -104,10 +107,9 @@ public class MovementEnvelopeSpriteHandler extends BoardViewSpriteHandler {
                     edgesToPaint += (1 << dir);
                 }
             }
-            currentSprites.add(new MovementEnvelopeSprite(boardView, color(band), loc, edgesToPaint));
+            marks.add(new TacticalMark.Envelope(loc, edgesToPaint, color(band)));
         }
-
-        boardView.addSprites(currentSprites);
+        addMarks(boardView, marks);
     }
 
     /**

@@ -50,8 +50,8 @@ class GpuTundraSmokeTest {
 
     private static void checkVariants(GpuShaderManager manager, File output) throws Exception {
         String source = GpuShaderSource.readDisk("terrain-tundra.glsl");
-        String boundary = "float tundraVariant(vec2 world) {";
-        assertTrue(source.contains(boundary), "The diagnostic must change only the variant selection");
+        String boundary = "float tundraWetness(vec3 world, vec3 face) {";
+        assertTrue(source.contains(boundary), "The diagnostic must change only the dry/wet carpet selection");
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
@@ -82,7 +82,7 @@ class GpuTundraSmokeTest {
                         difference += Math.abs((endpoints[0][i] & 255) - (endpoints[1][i] & 255));
                     }
                     assertTrue(difference > endpoints[0].length,
-                          "The actual earth material variants must visibly differ");
+                          "The dry heath and wet sedge carpets must visibly differ");
                 } else {
                     assertArrayEquals(baseline, endpoints[0], theme + " must ignore the terrestrial mask");
                     assertArrayEquals(baseline, endpoints[1], theme + " must ignore the terrestrial mask");
@@ -91,7 +91,7 @@ class GpuTundraSmokeTest {
                 assertTrue(restored.success(), restored.message());
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
-                assertArrayEquals(baseline, pixels(camera), theme + " must restore the world-space variation");
+                assertArrayEquals(baseline, pixels(camera), theme + " must restore the landform wetness");
             }
         } finally {
             try { frame.dispose(); terrain.dispose(); }

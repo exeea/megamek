@@ -66,7 +66,7 @@ class GpuOrchardSmokeTest {
                             // Keep terrain/scatter detail fixed while measuring the submitted tree geometry.
                             var ground = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, 0).ground();
                             var tile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
-                                  ground, null, null, List.of(tree), List.of());
+                                  ground, null, List.of(tree), List.of());
                             BoardScene scene = scene(List.of(tile), 1, 1);
                             terrain.update(scene);
                             int[] triangles = new int[TreeLod.LEVELS];
@@ -156,7 +156,7 @@ class GpuOrchardSmokeTest {
     private static int colour(GLProfiler profiler, GpuTerrain terrain, BoardCamera camera) {
         Set<GpuTerrain.Prepass> prepass = GpuTerrain.depthPrepass;
         GpuTerrain.depthPrepass = EnumSet.noneOf(GpuTerrain.Prepass.class);
-        try { return count(profiler, () -> terrain.render(camera.camera, false)); }
+        try { return count(profiler, () -> terrain.render(camera.camera)); }
         finally { GpuTerrain.depthPrepass = prepass; }
     }
 
@@ -170,7 +170,7 @@ class GpuOrchardSmokeTest {
         var base = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, hex.getLevel());
         int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0;
         return new BoardScene.Tile(coords, hex.getLevel(), -1, false, exits, BoardFeatures.surface(hex),
-              base.ground(), null, null, null, null, features, List.of(), BoardLiquid.NONE, null,
+              base.ground(), null, null, null, features, List.of(), BoardLiquid.NONE, null,
               BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex));
     }
 

@@ -38,7 +38,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.sprite.CollapseWarningSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
@@ -480,7 +480,7 @@ final class GpuMarkers implements Disposable {
 
     private static void symbol(Graphics2D g, BoardMarker.Kind kind) {
         switch (kind) {
-            case COLLAPSE_WARNING -> glyph(g, CollapseWarningSprite.WARNING_SIGN, FontHandler.symbolFont(), ART_SIZE * 0.67f);
+            case COLLAPSE_WARNING -> glyph(g, TacticalStyle.WARNING_SIGN, FontHandler.symbolFont(), ART_SIZE * 0.67f);
             case MINEFIELD, SAW_CLEARING -> {
                 int teeth = kind == BoardMarker.Kind.MINEFIELD ? 8 : 12;
                 for (int index = 0; index < teeth; index++) {
