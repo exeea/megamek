@@ -84,6 +84,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     private static final float TIP_WIDTH = 360;
     private static final float NOTES_WIDTH = 320;
     private static final float PORT_WIDTH = 110;
+    private static boolean probed;
 
     private record Hex(double x, double y, double at) { }
 
@@ -115,6 +116,9 @@ final class GpuStartScreen extends ApplicationAdapter {
     private final List<Actor> focusable = new ArrayList<>();
     private final List<String> tips;
     private final boolean motion;
+    /** The developer switch's page and shot, or null; only the first start window of a run reads it. */
+    private final StartScreenProbe probe;
+    private boolean shotSaved;
 
     private BufferedImage art;
     private GpuBoardSkin boardSkin;
@@ -154,6 +158,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     private UiButton onlineToggle;
     private boolean onlineOpen;
     private UiTextField passwordInput;
+    private UiKit.TokenPassword passwordBox;
     private UiTextField portInput;
     private UiFormField portField;
     private Table passwordRow;
@@ -171,6 +176,18 @@ final class GpuStartScreen extends ApplicationAdapter {
         motion = !preferences.getReduceMotion();
         skipped = !greet || !motion;
         tips = TipOfTheDay.plainTips(TIPS);
+        probe = takeProbe();
+        if (probe != null && probe.page() != null) {
+            skipped = true;
+        }
+    }
+
+    private static synchronized StartScreenProbe takeProbe() {
+        if (probed) {
+            return null;
+        }
+        probed = true;
+        return StartScreenProbe.fromEnvironment();
     }
 
     private java.awt.Color awtColor(String name) {
@@ -221,6 +238,66 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (skipped && motion) {
             // Reopened after a game: no greeting, but the menu still slides in
             pageShownAt = 0;
+        }
+        applyProbe();
+    }
+
+    /** Opens the page the developer switch asks for, in the state its options ask for. */
+    private void applyProbe() {
+        if (probe == null || probe.page() == null) {
+            return;
+        }
+        Page asked;
+        try {
+            asked = Page.valueOf(probe.page());
+        } catch (IllegalArgumentException unknown) {
+            LOGGER.warn("MM_START_PAGE names no start page: {}", probe.page());
+            return;
+        }
+        if (asked != Page.MAIN) {
+            showPage(asked);
+            pageShownAt = 0;
+        }
+        if (asked == Page.HOST) {
+            if (probe.has("online") && !onlineOpen) {
+                onlineOpen = true;
+                chevron(onlineToggle, true);
+                fillHostColumn();
+            }
+            if (probe.has("reveal")) {
+                passwordBox.shown(true);
+            }
+        }
+    }
+
+    /** Saves the frame just drawn as the developer switch's PNG, then quits when it asks to. */
+    private void saveShot() {
+        shotSaved = true;
+        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, bw, bh);
+        try {
+            BufferedImage image = new BufferedImage(bw, bh, BufferedImage.TYPE_INT_RGB);
+            ByteBuffer rgba = pixels.getPixels();
+            for (int y = 0; y < bh; y++) {
+                // The frame buffer's rows run upward
+                int from = (bh - y - 1) * bw * 4;
+                for (int x = 0; x < bw; x++, from += 4) {
+                    image.setRGB(x, y, (rgba.get(from) & 0xFF) << 16 | (rgba.get(from + 1) & 0xFF) << 8
+                          | rgba.get(from + 2) & 0xFF);
+                }
+            }
+            File file = probe.shot().getAbsoluteFile();
+            if (file.getParentFile() != null) {
+                file.getParentFile().mkdirs();
+            }
+            ImageIO.write(image, "png", file);
+            LOGGER.info("Start screen shot saved to {}", file);
+        } catch (IOException failure) {
+            LOGGER.error(failure, "The start screen could not save its shot to {}", probe.shot());
+        } finally {
+            pixels.dispose();
+        }
+        if (probe.quit()) {
+            window.dispatch(Action.QUIT);
         }
     }
 
@@ -365,11 +442,13 @@ final class GpuStartScreen extends ApplicationAdapter {
             fillHostColumn();
         });
 
-        passwordInput = kit.password(false);
+        UiKit.TokenPassword password = kit.tokenPassword(false);
+        passwordBox = password;
+        passwordInput = password.field;
         passwordInput.setText(lastPassword == null ? "" : lastPassword);
         passwordInput.setFocusTraversal(false);
         UiFormField passwordField = kit.formField(Messages.getString("MegaMek.GameConnection.password"),
-              passwordInput).helper(Messages.getString("MegaMek.GameConnection.passwordHelper"));
+              password).helper(Messages.getString("MegaMek.GameConnection.passwordHelper"));
         portInput = field(String.valueOf(client.getLastServerPort()));
         portField = kit.formField(Messages.getString("MegaMek.GameConnection.port"), portInput);
         passwordRow = new Table();
@@ -888,6 +967,9 @@ final class GpuStartScreen extends ApplicationAdapter {
         hud.update(Set.of());
         stage.draw();
         window.frame();
+        if (probe != null && probe.shot() != null && !shotSaved && clock() >= probe.shotAt()) {
+            saveShot();
+        }
         if (!settledRate && t >= StartTimeline.INTRO_END) {
             // The settled screen has only slow embers: 30 frames a second is plenty
             settledRate = true;

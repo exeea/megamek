@@ -70,6 +70,10 @@ public class UiFormField extends Table {
     private void refresh() {
         if (input instanceof UiTextField field) {
             field.status(status);
+        } else if (input instanceof UiKit.TokenPassword password) {
+            password.field.status(status);
+        } else if (input instanceof UiKit.TokenSearch search) {
+            search.field.status(status);
         }
         message.clearChildren();
         message.left();

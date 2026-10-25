@@ -381,11 +381,16 @@ work for Swing, and item 11 is under investigation.
      page~~ are done. **New game** opens the Host page: the player name, then a closed **Online options** section
      (password, port, the server browser and the local and public addresses), **Host game** and Back. The section
      opens by itself when the password or port was changed before or the port is wrong; errors show under the
-     inputs, and Enter in a field hosts. The local address shows at once; the public one is only asked of
+     inputs, and Enter in a field hosts while Tab moves to the next control. The password has an eye button that shows
+     it as typed, in both presentations, because a game password is a word shared with friends and there is no
+     confirm field to catch a typo. The local address shows at once; the public one is only asked of
      checkip.amazonaws.com when the player clicks **Show**, so it stays off streams and screenshots and MegaMek makes no
      outside request unasked. Next come Connect (G3, with a Player/Bot switch and SBF connect), Load game (G4), the
      scenario browser (G5) and the briefing (G6). Until then, the Swing dialogs open over the start window, Ctrl+click
-     reaches connect-as-bot, quick load and the last scenario, and SBF connect is off the menu.
+     reaches connect-as-bot, quick load and the last scenario, and SBF connect is off the menu. To review a page
+     without clicking through it, set `MM_START_PAGE` (such as `host+online+reveal`) before `gradlew :megamek:run`;
+     `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
+     `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`).
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
      main action named for what it does (**Host game**, **Connect**) and errors under the inputs instead of popups.
      Host keeps the password, port and server browser in a closed **Online options** section, which opens when the

@@ -476,12 +476,16 @@ because FlatLaf has no hover edge or minimum height for inputs. A read-only spin
 still step.
 
 **libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `TokenFieldStyle`s
-`input<variant>` and `input<variant>-compact` (`UiTheme.INPUT_VARIANTS`: plain or search, each with error, warning or
-read-only). [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java) adds the hover scene2d lacks,
+`input<variant>` and `input<variant>-compact` (`UiTheme.INPUT_VARIANTS`: plain, search or reveal, each with error,
+warning or read-only). [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java) adds the hover scene2d lacks,
 the status icon, `status(Status)` and `readOnly(true)`; `UiTextField.Area` is the text area. `UiKit` builds them:
-`input(text, compact)`, `password(compact)`, `tokenSearch(placeholder, compact)`, `area(text, rows)` and
-`formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)), whose input
-fills the width the form gives it, down to none, instead of `TextField`'s fixed 150 minimum. It is the
+`input(text, compact)`, `password(compact)`, `tokenPassword(compact)`, `tokenSearch(placeholder, compact)`,
+`area(text, rows)` and `formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)), whose input
+fills the width the form gives it, down to none, instead of `TextField`'s fixed 150 minimum, and whose status reaches
+the field inside a search or password input. `tokenPassword` is Swing's password field with FlatLaf's reveal
+button: a compact icon button at the trailing edge, the `show` eye while the text is bullets and the crossed-out `hide`
+eye while it shows as typed, in both presentations; it is a keyboard stop after the field and is hidden when the field
+is read-only. It is the
 in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD's number control), and read-only text
 can not be selected, because scene2d has no read-only field. hud-v3's own fields take the look without new controls:
 `UiKit.search(placeholder, true)` builds the search field on `input-search` with a leading glyph and a compact icon

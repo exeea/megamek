@@ -164,6 +164,8 @@ public final class UiTheme implements Disposable {
           Map.entry("orders", 0xE241), Map.entry("info", 0xE88E), Map.entry("unit", 0xE9E0),
           Map.entry("hex", 0xEB39), Map.entry("close", 0xE5CD), Map.entry("search", 0xE8B6),
           Map.entry("arrow", 0xE5CC), Map.entry("lock", 0xE897), Map.entry("unlock", 0xE898), Map.entry("checkbox-off", 0xE835),
+          // A password's reveal button: visibility while hidden, visibility_off while shown
+          Map.entry("show", 0xE8F4), Map.entry("hide", 0xE8F5),
           Map.entry("checkbox-on", 0xE834),
           Map.entry("tactical", 0xE3B4), Map.entry("map", 0xE55B), Map.entry("report", 0xE873),
           Map.entry("help", 0xF1C0), Map.entry("settings", 0xE8B8), Map.entry("menu", 0xE5D2),
@@ -767,12 +769,13 @@ public final class UiTheme implements Disposable {
     }
 
     /**
-     * The text input variants (docs/design-system/tokens.md, Inputs): plain or search, each with a status or read-only.
-     * Each is a {@link TokenFieldStyle} named {@code input<variant>}, and {@code input<variant>-compact} at the compact
-     * size.
+     * The text input variants (docs/design-system/tokens.md, Inputs): plain, search or reveal (a password with its
+     * reveal button), each with a status or read-only. Each is a {@link TokenFieldStyle} named {@code input<variant>},
+     * and {@code input<variant>-compact} at the compact size.
      */
     public static final List<String> INPUT_VARIANTS = List.of("", "-error", "-warning", "-readonly", "-search",
-          "-search-error", "-search-warning", "-search-readonly");
+          "-search-error", "-search-warning", "-search-readonly", "-reveal", "-reveal-error", "-reveal-warning",
+          "-reveal-readonly");
     /** The size of an input's status and search glyphs (icon.sm). */
     public static final float FIELD_ICON = DesignTokens.shipped().size().get("icon.sm");
     /** The gap between an input's text and its trailing status icon (space.xs). */
@@ -820,11 +823,12 @@ public final class UiTheme implements Disposable {
             float height = tokens.size().get(compact ? "control.sm" : "control.md");
             for (String variant : INPUT_VARIANTS) {
                 boolean search = variant.startsWith("-search");
-                String state = search ? variant.substring("-search".length()) : variant;
+                boolean reveal = variant.startsWith("-reveal");
+                String state = search || reveal ? variant.substring("-search".length()) : variant;
                 boolean status = state.equals("-error") || state.equals("-warning");
                 float left = search ? side + iconSpace : side;
-                // The search field's clear button and a status icon sit at the trailing edge, the icon innermost
-                float right = (search ? side + height - 2 * vertical : side) + (status ? iconSpace : 0);
+                // The clear or reveal button and a status icon sit at the trailing edge, the icon innermost
+                float right = (search || reveal ? side + height - 2 * vertical : side) + (status ? iconSpace : 0);
                 String rest = status ? "in" + state : "in";
                 TokenFieldStyle style = new TokenFieldStyle();
                 style.font = skin.getFont("hud-body");

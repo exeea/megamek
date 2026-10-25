@@ -869,6 +869,11 @@ public final class UiKit {
         return field;
     }
 
+    /** A token password input with a trailing reveal button that shows the text while it is on. */
+    public TokenPassword tokenPassword(boolean compact) {
+        return new TokenPassword(compact);
+    }
+
     /** A token search input: a leading search glyph, the placeholder, and a clear button while it holds text. */
     public TokenSearch tokenSearch(String placeholder, boolean compact) {
         return new TokenSearch(placeholder, compact);
@@ -1209,6 +1214,53 @@ public final class UiKit {
         @Override
         public void act(float delta) {
             clear.setVisible(!field.getText().isEmpty() && !field.isDisabled());
+            super.act(delta);
+        }
+    }
+
+    /**
+     * The token password input and its reveal button, which shows the text as typed while it is on, its eye crossed
+     * out, and as bullets again when pressed once more.
+     */
+    public final class TokenPassword extends Stack {
+        /** The text field, in password mode while the text is hidden. */
+        public final UiTextField field;
+        /** The reveal button; hidden while the field is disabled or read-only. */
+        public final UiButton reveal;
+
+        private TokenPassword(boolean compact) {
+            field = new UiTextField("", skin, "-reveal", compact);
+            field.setPasswordMode(true);
+            field.hoverRoot(this);
+            reveal = button("button-icon-compact", "show", null, null);
+            onChange(reveal, () -> shown(!shown()));
+            DesignTokens tokens = DesignTokens.shipped();
+            float inset = tokens.size().get("border") + tokens.space().get("xs");
+            float height = tokens.size().get(compact ? "control.sm" : "control.md");
+            Table overlay = new Table();
+            overlay.add().expandX();
+            overlay.add(reveal).size(height - 2 * inset).padRight(inset);
+            add(field);
+            add(overlay);
+        }
+
+        /** Whether the text shows as typed. */
+        public boolean shown() {
+            return !field.isPasswordMode();
+        }
+
+        /** Shows the text as typed, or as bullets; the button's eye shows what pressing it does next. */
+        public TokenPassword shown(boolean value) {
+            field.setPasswordMode(!value);
+            if (!reveal.icons.isEmpty() && reveal.icons.get(0) instanceof Image icon) {
+                icon.setDrawable(skin.getDrawable("icon-" + (value ? "hide" : "show")));
+            }
+            return this;
+        }
+
+        @Override
+        public void act(float delta) {
+            reveal.setVisible(!field.isDisabled());
             super.act(delta);
         }
     }
