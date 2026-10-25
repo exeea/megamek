@@ -11,6 +11,7 @@ import java.awt.geom.Point2D;
 import java.awt.geom.RoundRectangle2D;
 import javax.swing.AbstractButton;
 import javax.swing.JComponent;
+import javax.swing.UIManager;
 
 import com.formdev.flatlaf.icons.FlatCheckBoxIcon;
 import com.formdev.flatlaf.ui.FlatUIUtils;
@@ -20,7 +21,9 @@ import megamek.client.ui.design.DesignTokens;
  * The check box at the design-system size ({@code icon.sm}), with the design-system focus ring: a {@code focus.width}
  * ring a {@code focus.gap} away from the box, so the box keeps its checked or clear look while focused. FlatLaf's own
  * ring touches the box and merges with a checked box of the same color. {@code CheckBox.icon.focusWidth} must be the
- * ring plus the gap. The box eases between states and the mark draws itself in ({@link TokenMotion}).
+ * ring plus the gap. The box eases between states and the mark draws itself in ({@link TokenMotion}). A disabled box
+ * that is checked keeps its mark in {@link #DISABLED_SELECTED_CHECKMARK_COLOR} on the faint inverse fill, so it still
+ * reads as on; FlatLaf has one disabled mark color for both.
  */
 public class TokenCheckBoxIcon extends FlatCheckBoxIcon {
     /** FlatCheckBoxIcon's box edge, in its own units. */
@@ -28,6 +31,8 @@ public class TokenCheckBoxIcon extends FlatCheckBoxIcon {
     static final String EDGE = "check.edge";
     static final String FILL = "check.fill";
     static final String MARK = "check.mark";
+    /** The mark of a disabled check box, radio button or switch that is on. */
+    static final String DISABLED_SELECTED_CHECKMARK_COLOR = "CheckBox.icon.disabledSelectedCheckmarkColor";
     // FlatCheckBoxIcon.paintCheckmark's path
     private static final float[] MARK_X = { 4.5f, 6.6f, 11.25f };
     private static final float[] MARK_Y = { 7.5f, 10f, 3.5f };
@@ -47,6 +52,17 @@ public class TokenCheckBoxIcon extends FlatCheckBoxIcon {
         Color base = selected ? selectedBackground : background;
         Color target = super.getBackground(c, selected, indeterminate);
         return ease(c, FILL, target == null || base == null ? target : FlatUIUtils.deriveColor(target, base));
+    }
+
+    @Override
+    protected Color getCheckmarkColor(Component c, boolean indeterminate) {
+        return disabledSelected(c, indeterminate || isSelected(c), super.getCheckmarkColor(c, indeterminate));
+    }
+
+    /** The mark of a disabled indicator that is on, or {@code color}. */
+    static Color disabledSelected(Component c, boolean on, Color color) {
+        Color mark = on && !c.isEnabled() ? UIManager.getColor(DISABLED_SELECTED_CHECKMARK_COLOR) : null;
+        return mark == null ? color : mark;
     }
 
     @Override

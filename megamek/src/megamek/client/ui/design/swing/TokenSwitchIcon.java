@@ -17,7 +17,8 @@ import com.formdev.flatlaf.util.UIScale;
 /**
  * The switch's track and thumb. It shares the check box's colors: the track is a check box's box stretched into a pill,
  * and the thumb, on the right while on, is drawn in the check mark color. Off, the thumb takes
- * {@code CheckBox.icon.switchThumbColor}, so the side it sits on and its color both show the state.
+ * {@code CheckBox.icon.switchThumbColor}, so the side it sits on and its color both show the state. Disabled and on, the
+ * track keeps a faint inverse fill and the thumb its on color.
  */
 public class TokenSwitchIcon extends TokenCheckBoxIcon {
     /** The track's length, as a multiple of its height. */
@@ -61,7 +62,7 @@ public class TokenSwitchIcon extends TokenCheckBoxIcon {
         float thumb = h - INSET * 2;
         float travel = c instanceof JComponent component
               ? TokenMotion.value(component, MARK, on, TokenMotion.fast()) : on ? 1 : 0;
-        Color color = !c.isEnabled() ? disabledCheckmarkColor
+        Color color = !c.isEnabled() ? getCheckmarkColor(c, false)
               : TokenMotion.mix(thumbColor, getCheckmarkColor(c, false), travel);
         g.setColor(color);
         float left = INSET;

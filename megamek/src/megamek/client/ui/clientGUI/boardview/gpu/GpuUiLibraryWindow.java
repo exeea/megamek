@@ -49,6 +49,7 @@ import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiAngleDial;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiCardGrid;
+import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiChoiceGrid;
 import megamek.client.ui.gdx.UiConfirmation;
 import megamek.client.ui.gdx.UiFlow;
@@ -539,6 +540,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
               new Container<>(kit.select(value, false, true)).width(220));
         compare(page, "hud-select-inline", kit.select(value, true), kit.select(value, true, true));
         compare(page, "UiKit.checkbox", checkboxes(false), checkboxes(true));
+        compare(page, "UiChoice", null, choices());
+        compare(page, text("UiLibrary.gdx.onDisabled"), null, disabledOn(all, mine, critical));
         heading(page, "UiLibrary.gdx.menus");
         compare(page, "hud-menu-row", menuRows("hud-menu-row"), menuRows(UiTheme.TOKEN_MENU_ROW));
         compare(page, "UiMenuList", new Container<>(menuPanel()).width(280),
@@ -551,6 +554,46 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         checks.add(kit.checkbox(text("UiLibrary.gdx.ticked"), true, token));
         checks.add(kit.checkbox(text("UiLibrary.gdx.clear"), false, token));
         return checks;
+    }
+
+    /** The token check box, radio button and switch, on: enabled above, disabled below. */
+    private Table choices() {
+        Table choices = new Table();
+        choices.defaults().left().padRight(20).padBottom(8);
+        for (boolean disabled : new boolean[] { false, true }) {
+            UiChoice[] row = { kit.check(text("UiLibrary.gdx.ticked"), true),
+                  kit.radio(text("UiLibrary.gdx.radioOn"), true),
+                  kit.toggleSwitch(text("UiLibrary.gdx.switchOn"), true) };
+            for (UiChoice choice : row) {
+                choice.setDisabled(disabled);
+                choices.add(choice);
+            }
+            choices.row();
+        }
+        return choices;
+    }
+
+    /** A checked toggle, a checked icon toggle and the segmented controls, each disabled while on. */
+    private Table disabledOn(String... labels) {
+        Table samples = new Table();
+        samples.defaults().left().padBottom(8);
+        Table buttons = new Table();
+        buttons.defaults().padRight(12);
+        UiButton toggle = kit.button("button-toggle", null, text("UiLibrary.gdx.sampleAction"), null).pressed(true);
+        toggle.setDisabled(true);
+        UiButton icon = kit.button("button-icon", "search", null, null).pressed(true);
+        icon.setDisabled(true);
+        buttons.add(toggle);
+        buttons.add(icon);
+        samples.add(buttons).row();
+        UiKit.Segmented segments = kit.segmented(UiTheme.TOKEN_SEGMENT + UiTheme.COMPACT, false, labels).select(1);
+        segments.buttons.forEach(button -> button.setDisabled(true));
+        samples.add(segments).row();
+        var segmented = kit.tokenSegmented(true, labels);
+        segmented.select(1);
+        segmented.setDisabled(true);
+        samples.add(segmented);
+        return samples;
     }
 
     private Table menuRows(String style) {
@@ -1134,11 +1177,11 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         pill.setBackground(kit.skin.getDrawable(GpuBoardSkin.TOKEN_PILL + state));
         if (on) {
             pill.add(kit.icon("check", DesignTokens.shipped().size().get("icon.sm"), UiTheme.tokenColor(
-                  "text.primary"))).padRight(DesignTokens.shipped().space().get("xs"));
+                  "text.onInverse"))).padRight(DesignTokens.shipped().space().get("xs"));
         }
         pill.add(hud.letter(letter, false, true)).padRight(DesignTokens.shipped().space().get("sm"));
         pill.add(kit.typeLabel(text("UiLibrary.gdx.foeName"), "label", state.isEmpty() ? "text.secondary"
-              : "text.primary"));
+              : on ? "text.onInverse" : "text.primary"));
         return pill;
     }
 

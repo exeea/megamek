@@ -43,8 +43,9 @@ import megamek.client.ui.util.UIUtil;
 /**
  * The segmented control (docs/design-system/tokens.md, Segmented control): a few mutually exclusive options as separate
  * raised segments, xs apart and each with its own edge, for switching a view or a mode in place. The selected segment
- * has a mint wash and edge, like a
- * selected toggle; the sections share the width equally. Tab reaches only the selected section; Left and Right move
+ * is on, like a selected toggle: the inverse face and edge with its label in {@code text.onInverse}, hover and press
+ * leaning toward the label color; disabled, a faint inverse face. Keyboard focus rings the selected segment from
+ * outside ({@link FocusHalo}), or with two lines inside where that has no room. The sections share the width equally. Tab reaches only the selected section; Left and Right move
  * the selection, and Space and Enter select the focused section. It paints itself from the tokens of the current mode,
  * easing between states ({@link TokenMotion}).
  * <p>
@@ -176,10 +177,8 @@ public class TokenSegmented extends JPanel {
         boolean enabled = isEnabled();
         int raised = tokens.color("surface.raised", mode);
         int hover = tokens.color("surface.hover", mode);
-        int selected = tokens.color("selected.background", mode);
-        if (!enabled) {
-            selected = ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2);
-        }
+        int inverse = tokens.color("surface.inverse", mode);
+        int onInverse = tokens.color("text.onInverse", mode);
         Graphics2D g = (Graphics2D) graphics.create();
         try {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -190,8 +189,15 @@ public class TokenSegmented extends JPanel {
                 RoundRectangle2D box = round(outer(segment), arc);
                 g.setColor(new Color(raised, true));
                 g.fill(box);
-                Color fill = TokenMotion.color(this, FILL + i, model.isSelected() ? new Color(selected, true) : null,
-                      TokenMotion.fast());
+                Integer on = null;
+                if (model.isSelected() && !enabled) {
+                    on = tokens.color("surface.inverseDisabled", mode);
+                } else if (model.isSelected()) {
+                    on = !hovered(segment) ? inverse : ColorMath.over(ColorMath.withAlpha(onInverse,
+                          tokens.alpha(pressed(segment) ? "tint.pressed" : "tint.hover")), inverse);
+                }
+                Color fill = TokenMotion.color(this, FILL + i, on == null ? null : new Color(on, true),
+                      model.isSelected() ? TokenMotion.buttonState(segment) : TokenMotion.fast());
                 if (fill != null) {
                     g.setColor(fill);
                     g.fill(box);
@@ -210,7 +216,10 @@ public class TokenSegmented extends JPanel {
         }
     }
 
-    /** The edges go over the sections: each segment's own edge, mint when selected, and the focus ring. */
+    /**
+     * The edges go over the sections: each segment's own edge, the face color when selected, and the focus ring. The
+     * selected segment's ring goes outside it through {@link FocusHalo} when it fits.
+     */
     @Override
     protected void paintChildren(Graphics graphics) {
         super.paintChildren(graphics);
@@ -226,23 +235,48 @@ public class TokenSegmented extends JPanel {
             for (int i = 0; i < segments.size(); i++) {
                 Segment segment = segments.get(i);
                 String role;
-                if (!enabled) {
+                if (i == selected && !enabled) {
+                    // No visible edge: the faint face already shows the selection
+                    role = null;
+                } else if (!enabled) {
                     role = "border.subtle";
-                } else if (i == selected) {
-                    role = "selected.primary";
+                } else if (hovered(segment)) {
+                    role = "border.strong";
                 } else {
-                    role = hovered(segment) ? "border.strong" : "border.control";
+                    role = i == selected ? "surface.inverse" : "border.control";
                 }
-                Color edge = TokenMotion.color(this, EDGE + i, color(tokens, role, mode),
-                      i == selected ? TokenMotion.fast() : TokenMotion.buttonState(segment));
-                g.setColor(edge);
-                g.fill(ring(outer(segment), line, arc));
+                Color edge = TokenMotion.color(this, EDGE + i, role == null ? null : color(tokens, role, mode),
+                      TokenMotion.buttonState(segment));
+                if (edge != null) {
+                    g.setColor(edge);
+                    g.fill(ring(outer(segment), line, arc));
+                }
             }
-            for (Segment segment : segments) {
-                if (enabled && FlatUIUtils.isPermanentFocusOwner(segment)) {
+            for (int i = 0; i < segments.size(); i++) {
+                Segment segment = segments.get(i);
+                boolean focused = enabled && FlatUIUtils.isPermanentFocusOwner(segment);
+                if (!focused || i != selected) {
+                    FocusHalo.clear(segment);
+                }
+                if (!focused) {
+                    continue;
+                }
+                Rectangle box = outer(segment);
+                if (i == selected) {
+                    RoundRectangle2D face = new RoundRectangle2D.Float(box.x - segment.getX(),
+                          box.y - segment.getY(), box.width, box.height, arc, arc);
+                    if (!FocusHalo.around(segment, face)) {
+                        // No room outside: the label color inside a primary-text edge, as on the primary button
+                        g.setColor(color(tokens, "text.primary", mode));
+                        g.fill(ring(box, line, arc));
+                        box.grow(-line, -line);
+                        g.setColor(color(tokens, "text.onInverse", mode));
+                        g.fill(ring(box, line, Math.max(0, arc - 2 * line)));
+                    }
+                } else {
                     int ring = Math.max(1, UIUtil.scaleForGUI(Math.round(tokens.size().get("focus.width"))));
                     g.setColor(color(tokens, "focus.ring", mode));
-                    g.fill(ring(outer(segment), ring, arc));
+                    g.fill(ring(box, ring, arc));
                 }
             }
         } finally {
@@ -396,8 +430,9 @@ public class TokenSegmented extends JPanel {
         protected void paintComponent(Graphics graphics) {
             DesignTokens tokens = DesignTokens.shipped();
             ButtonModel model = getModel();
-            boolean active = model.isSelected() || model.isRollover() || model.isPressed();
-            String role = !isEnabled() ? "text.disabled" : active ? "text.primary" : "text.secondary";
+            boolean active = model.isRollover() || model.isPressed();
+            String role = model.isSelected() ? "text.onInverse"
+                  : !isEnabled() ? "text.disabled" : active ? "text.primary" : "text.secondary";
             Graphics2D g = (Graphics2D) graphics.create();
             try {
                 g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);

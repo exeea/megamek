@@ -123,6 +123,11 @@ public abstract class UiOptionBar extends Table {
         return !disabled && (options.get(index).focused || (index == selected && hasKeyboardFocus()));
     }
 
+    /** The selected option's label color, disabled or not; null: the active or disabled one, as the others. */
+    Color selectedText() {
+        return null;
+    }
+
     /** Draws {@code line} tinted {@code color}, the bar's alpha applied, and restores the batch color. */
     void line(Batch batch, Color color, float parentAlpha, float x, float y, float width, float height) {
         Color tint = getColor();
@@ -194,7 +199,9 @@ public abstract class UiOptionBar extends Table {
         @Override
         public void draw(Batch batch, float parentAlpha) {
             boolean active = isSelected() || isOver() || isPressed();
-            label.setColor(isDisabled() ? colors.disabledText : active ? colors.activeText : colors.text);
+            Color on = isSelected() ? selectedText() : null;
+            label.setColor(on != null ? on : isDisabled() ? colors.disabledText : active ? colors.activeText
+                  : colors.text);
             super.draw(batch, parentAlpha);
         }
     }

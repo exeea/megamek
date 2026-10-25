@@ -2457,7 +2457,7 @@ public final class SwingUiLibrary extends JFrame {
 
     /** Every button kind at {@code size} in every state, the transient states frozen through the button model. */
     private JComponent buttonMatrix(TokenButtons.Size size) {
-        List<String> states = List.of("rest", "hover", "pressed", "focus", "selected", "disabled");
+        List<String> states = List.of("rest", "hover", "pressed", "focus", "selected", "disabled", "disabledSelected");
         JPanel matrix = new JPanel(new GridBagLayout());
         matrix.setBackground(color("surface.base"));
         matrix.setAlignmentX(LEFT_ALIGNMENT);
@@ -2476,7 +2476,7 @@ public final class SwingUiLibrary extends JFrame {
             boolean selectable = kind == TokenButtons.Kind.TOGGLE || kind == TokenButtons.Kind.ICON
                   || kind == TokenButtons.Kind.SPECIAL;
             for (String state : states) {
-                if (state.equals("selected") && !selectable) {
+                if (state.endsWith("elected") && !selectable) {
                     matrix.add(Box.createHorizontalStrut(0), cell);
                     continue;
                 }
@@ -2491,8 +2491,8 @@ public final class SwingUiLibrary extends JFrame {
                               (Predicate<JComponent>) component -> true);
                     }
                     case "selected" -> button.setModel(new FrozenModel(false, false, true));
-                    case "disabled" -> {
-                        button.setModel(new FrozenModel(false, false, false));
+                    case "disabled", "disabledSelected" -> {
+                        button.setModel(new FrozenModel(false, false, state.equals("disabledSelected")));
                         button.setEnabled(false);
                     }
                     default -> { }

@@ -121,7 +121,9 @@ final class GpuBoardSkin implements Disposable {
         theme.box(TOKEN_PILL, Color.CLEAR, control, border, radius, null, 0, 0, chip).setLeftWidth(xs);
         theme.box(TOKEN_PILL + "-over", UiTheme.tokenColor("surface.hover"), UiTheme.tokenColor("border.strong"),
               border, radius, null, 0, 0, chip).setLeftWidth(xs);
-        theme.box(TOKEN_PILL + "-on", selected, selection, border, radius, null, 0, 0, chip).setLeftWidth(xs);
+        // On, the pill is cream like every control that is on; its check and name take text.onInverse
+        Color inverse = UiTheme.tokenColor("surface.inverse");
+        theme.box(TOKEN_PILL + "-on", inverse, inverse, border, radius, null, 0, 0, chip).setLeftWidth(xs);
         for (String state : new String[] {"", "-over", "-on"}) {
             skin.getDrawable(TOKEN_PILL + state).setRightWidth(lg);
         }

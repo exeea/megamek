@@ -7,6 +7,7 @@ import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
 import javax.swing.ButtonModel;
 import javax.swing.JButton;
 
@@ -20,8 +21,10 @@ import megamek.client.ui.util.UIUtil;
 /**
  * The special button (docs/design-system/tokens.md, Buttons): a raised face with corner ticks at rest that grow along
  * the edges into a full frame under the pointer, the HUD utility look. The ticks close slowly ({@code slow}) and open
- * again a little faster. A selected one, set with {@link #setSelected}, has a mint wash and frame; a click never
- * selects it. It paints itself from the tokens of the current mode.
+ * again a little faster. A selected one, set with {@link #setSelected}, is on: the inverse face and frame, the label
+ * in {@code text.onInverse}, hover and press leaning toward it like the primary button; disabled, a faint inverse face.
+ * A click never selects it. Keyboard focus rings a selected one from outside ({@link FocusHalo}), or with two lines
+ * inside where that has no room. It paints itself from the tokens of the current mode.
  */
 public class SpecialButton extends JButton {
     private static final String FACE = "special.face";
@@ -55,8 +58,14 @@ public class SpecialButton extends JButton {
         boolean hovered = enabled && model.isRollover();
         boolean selected = model.isSelected();
         int raised = tokens.color("surface.raised", mode);
-        int face = selected ? ColorMath.over(tokens.color("selected.background", mode), raised) : raised;
-        if (pressed || hovered) {
+        int inverse = tokens.color("surface.inverse", mode);
+        int onInverse = tokens.color("text.onInverse", mode);
+        int face = !selected ? raised
+              : enabled ? inverse : ColorMath.over(tokens.color("surface.inverseDisabled", mode), raised);
+        if (selected && (pressed || hovered)) {
+            int tint = tokens.alpha(pressed ? "tint.pressed" : "tint.hover");
+            face = ColorMath.over(ColorMath.withAlpha(onInverse, tint), inverse);
+        } else if (pressed || hovered) {
             int wash = tokens.color("surface.hover", mode);
             if (pressed) {
                 wash = ColorMath.withAlpha(wash, Math.min(255, ColorMath.alpha(wash) * 2));
@@ -78,9 +87,8 @@ public class SpecialButton extends JButton {
             float reveal = TokenMotion.value(this, REVEAL, active,
                   pressed ? 0 : active ? TokenMotion.slow() : TokenMotion.medium());
             Color rest = new Color(tokens.color(enabled ? "border.control" : "border.subtle", mode), true);
-            Color full = TokenMotion.color(this, EDGE,
-                  new Color(tokens.color(selected ? "selected.primary" : "border.strong", mode), true),
-                  TokenMotion.fast());
+            int edge = selected && !hovered && !pressed ? face : tokens.color("border.strong", mode);
+            Color full = TokenMotion.color(this, EDGE, new Color(edge, true), TokenMotion.fast());
             g.setColor(TokenMotion.mix(rest, full, reveal));
             if (reveal >= 1) {
                 frame(g, 0, 0, width, height, line);
@@ -90,23 +98,35 @@ public class SpecialButton extends JButton {
                 ticks(g, width, height, line, Math.round(tick + (width / 2f - tick) * reveal),
                       Math.round(tick + (height / 2f - tick) * reveal));
             }
-            if (enabled && FlatUIUtils.isPermanentFocusOwner(this)) {
-                g.setColor(new Color(tokens.color("focus.ring", mode), true));
-                int ring = Math.max(1, UIUtil.scaleForGUI(Math.round(tokens.size().get("focus.width"))));
-                for (int inset = 0; inset < ring; inset++) {
-                    frame(g, inset, inset, width - 2 * inset, height - 2 * inset, 1);
+            boolean focused = enabled && FlatUIUtils.isPermanentFocusOwner(this);
+            if (focused && selected) {
+                if (!FocusHalo.around(this, new RoundRectangle2D.Float(0, 0, width, height, 0, 0))) {
+                    // No room outside: the label color inside the strong edge, as on the primary button
+                    g.setColor(new Color(tokens.color("text.primary", mode), true));
+                    frame(g, 0, 0, width, height, 1);
+                    g.setColor(new Color(onInverse, true));
+                    frame(g, 1, 1, width - 2, height - 2, 1);
+                }
+            } else {
+                FocusHalo.clear(this);
+                if (focused) {
+                    g.setColor(new Color(tokens.color("focus.ring", mode), true));
+                    int ring = Math.max(1, UIUtil.scaleForGUI(Math.round(tokens.size().get("focus.width"))));
+                    for (int inset = 0; inset < ring; inset++) {
+                        frame(g, inset, inset, width - 2 * inset, height - 2 * inset, 1);
+                    }
                 }
             }
 
-            String role = !enabled ? "text.disabled" : selected || hovered || pressed ? "text.primary" : "text.secondary";
-            g.setColor(TokenMotion.color(this, TEXT, new Color(tokens.color(role, mode), true),
-                  TokenMotion.buttonState(this)));
+            int text = selected ? onInverse : tokens.color(!enabled ? "text.disabled"
+                  : hovered || pressed ? "text.primary" : "text.secondary", mode);
+            g.setColor(TokenMotion.color(this, TEXT, new Color(text, true), TokenMotion.buttonState(this)));
             g.setFont(getFont());
             FontMetrics metrics = g.getFontMetrics();
-            String text = getText();
-            int x = (width - metrics.stringWidth(text)) / 2;
+            String label = getText();
+            int x = (width - metrics.stringWidth(label)) / 2;
             int y = (height - metrics.getHeight()) / 2 + metrics.getAscent();
-            g.drawString(text, x, y);
+            g.drawString(label, x, y);
         } finally {
             g.dispose();
         }

@@ -13,7 +13,7 @@ import com.formdev.flatlaf.util.UIScale;
 /**
  * The design system's tables for Swing (docs/design-system/tokens.md, Tables). The MegaMek look and feels draw every
  * {@link JTable} with the list's rows stretched across its columns: zebra stripes, a surface wash under the pointer
- * and, for the selection, the mint wash plus a mint marker at the row's leading edge. Headers are upper-case
+ * and, for the selection, the selection wash plus a selection marker at the row's leading edge. Headers are upper-case
  * {@code overline} labels on the table's own surface, aligned like their column. This adds an empty-state text.
  */
 public final class TokenTables {

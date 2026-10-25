@@ -132,8 +132,10 @@ class DesignTokensTest {
                   || standard.colorToken(name).light() != safe.colorToken(name).light();
             assertEquals(List.of("status.danger", "status.warning", "status.success").contains(name), differs, name);
         }
-        assertEquals(standard.color("accent.primary", Mode.DARK), safe.color("selected.primary", Mode.DARK),
-              "Selection shares the accent in both palettes");
+        for (Mode mode : Mode.values()) {
+            assertEquals(standard.color("surface.inverse", mode), safe.color("selected.primary", mode),
+                  "Selection is the inverse color in both palettes");
+        }
     }
 
     @Test

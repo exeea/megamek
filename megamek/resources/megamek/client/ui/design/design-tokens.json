@@ -8,7 +8,8 @@
     "surface.popover": { "dark": "#172022", "light": "#FFFFFF", "use": "Menus, popovers, tooltips." },
     "surface.input": { "dark": "#1D2426", "light": "#FFFFFF", "use": "Text fields, selects, spinners." },
     "surface.hover": { "dark": "#FFFFFF0F", "light": "#16201E0D", "use": "Hover wash laid over any surface." },
-    "surface.inverse": { "dark": "#F0F2EE", "light": "#1C2426", "use": "Inverted faces: primary button, checked toggle." },
+    "surface.inverse": { "dark": "#F0F2EE", "light": "#1C2426", "use": "Inverted (cream) faces: the primary button and every control that is on: a checked toggle or icon toggle, the selected segment, an on chip, a checked box, radio or switch." },
+    "surface.inverseDisabled": { "dark": "#F0F2EE4D", "light": "#1C242673", "use": "A disabled control that is on: surface.inverse faint over the control's surface, with text.onInverse and no edge. Its label is as faint as other disabled text, on purpose." },
     "surface.scrim": { "dark": "#0D1112A3", "light": "#16201E66", "use": "Dims the window behind a modal card." },
 
     "text.primary": { "dark": "#F1F4F0", "light": "#16201E", "use": "Body text, values, titles." },
@@ -22,11 +23,11 @@
     "border.subtle": { "dark": "#2A3133", "light": "#D5DBD9", "use": "Decorative dividers and panel rails; never the only cue." },
     "border.strong": { "dark": "#E8F1EB", "light": "#2A3533", "use": "Hovered control edge, corner ticks at full frame." },
 
-    "accent.primary": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Brand accent: active state, links, progress, info." },
-    "focus.ring": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Keyboard focus ring: 2 wide inside the edge, or around a small indicator with a 1 gap." },
+    "accent.primary": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Brand accent: focus, progress, slider fill, links, info, badges." },
+    "focus.ring": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Keyboard focus ring: 2 wide inside the edge, or a 1 gap outside a small indicator or a cream (surface.inverse) face." },
 
-    "selected.primary": { "dark": "#82E2CE", "light": "#0A5C4C", "use": "Selected/current item: marker, edge, map selection. Shares the accent; the marker shape, not the color, tells it apart." },
-    "selected.background": { "dark": "#82E2CE29", "light": "#0A5C4C1F", "use": "Selected row or cell wash, laid over its surface." },
+    "selected.primary": { "dark": "#F0F2EE", "light": "#1C2426", "use": "Selected/current item in a collection: row marker, tab underline, edge of a selected panel, menu check, map selection. The inverse color, so mint stays for focus, progress and links." },
+    "selected.background": { "dark": "#F0F2EE1F", "light": "#1C24261A", "use": "Selected row, cell or panel wash, laid over its surface: a neutral wash, twice the hover one, so selection stays apart from hover." },
 
     "status.danger": { "dark": "#F2777A", "light": "#B42318", "colorblind": { "dark": "#FA878C", "light": "#8C1C12" }, "use": "Errors, destruction, enemy, critical." },
     "status.warning": { "dark": "#F2C14E", "light": "#8F5300", "colorblind": { "dark": "#F2D42D", "light": "#A24F00" }, "use": "Caution, heat, at-risk." },
@@ -82,7 +83,7 @@
     "visionRule": "The standard palette is measured for normal vision; the colorblind palette for every simulated vision type.",
     "distinct": [
       { "colors": ["status.danger", "status.warning", "status.success", "status.gamemaster"], "minDeltaE": 10, "why": "Statuses stay apart" },
-      { "colors": ["accent.primary", "status.danger", "status.warning", "status.success", "status.gamemaster"], "minDeltaE": 8, "why": "The accent (and so the selection and info) is not mistaken for a status" }
+      { "colors": ["accent.primary", "status.danger", "status.warning", "status.success", "status.gamemaster"], "minDeltaE": 8, "why": "The accent (and so focus and info) is not mistaken for a status" }
     ]
   }
 }

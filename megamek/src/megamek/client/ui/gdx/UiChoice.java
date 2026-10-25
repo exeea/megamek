@@ -16,8 +16,9 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 /**
  * A design-system choice (docs/design-system/tokens.md, Choices): a check box, radio button or switch with its label
  * on the right. A click on either, or Space or Enter while it has the keyboard focus, flips it and fires a ChangeEvent;
- * a view's own change ({@link #setChecked}) fires none. Checked is an accent fill with a mark in the on-accent color,
- * and an on switch has its thumb on the right, so the state never rests on color alone. Radio buttons are exclusive in
+ * a view's own change ({@link #setChecked}) fires none. Checked is the primary button's cream fill with a mark in the
+ * on-inverse color, faint but still cream while disabled, and an on switch has its thumb on the right, so the state
+ * never rests on color alone. Radio buttons are exclusive in
  * a {@link com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup} ({@link UiKit#radioGroup}).
  */
 public class UiChoice extends Button {
@@ -189,7 +190,7 @@ public class UiChoice extends Button {
                 batch.setColor(Color.WHITE);
                 return;
             }
-            Color color = isDisabled() ? colors.disabledMark : on ? colors.mark : colors.thumb;
+            Color color = on ? colors.mark : isDisabled() ? colors.disabledMark : colors.thumb;
             batch.setColor(color.r, color.g, color.b, color.a * alpha);
             switch (kind) {
                 case CHECK -> {

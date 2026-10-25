@@ -8,10 +8,15 @@ import java.util.Map;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.design.DesignTokens;
@@ -24,6 +29,9 @@ import megamek.client.ui.design.DesignTokens;
 public class UiButton extends TextButton {
     /** A sub-label on a disabled button (.b:disabled small). */
     private static final Color DISABLED_DETAIL = Color.valueOf("4A5452");
+    /** Scratch corners for {@link #ringFits}, which runs on the render thread only. */
+    private static final Vector2 LOW = new Vector2();
+    private static final Vector2 HIGH = new Vector2();
     /** The icons, drawn in the text color of the button's state. */
     public final List<Actor> icons = new ArrayList<>();
     /** The sub-labels and details, muted, darker on a filled face. */
@@ -169,6 +177,43 @@ public class UiButton extends TextButton {
         }
     }
 
+    /** A token style's checked face while disabled; Scene2D's disabled face would hide that the button is on. */
+    @Override
+    protected Drawable getBackgroundDrawable() {
+        if (isDisabled() && isChecked() && getStyle() instanceof UiTheme.TokenButtonStyle style
+              && style.checkedDisabled != null) {
+            return style.checkedDisabled;
+        }
+        return super.getBackgroundDrawable();
+    }
+
+    @Override
+    protected Color getFontColor() {
+        if (isDisabled() && isChecked() && getStyle() instanceof UiTheme.TokenButtonStyle style
+              && style.checkedDisabledFontColor != null) {
+            return style.checkedDisabledFontColor;
+        }
+        return super.getFontColor();
+    }
+
+    /**
+     * Whether a ring {@code room} outside {@code actor}'s bounds shows whole: no clipping ancestor (a scroll pane or a
+     * clipping table) cuts it off.
+     */
+    public static boolean ringFits(Actor actor, float room) {
+        for (Group parent = actor.getParent(); parent != null; parent = parent.getParent()) {
+            if (!(parent instanceof ScrollPane) && !(parent instanceof Table table && table.getClip())) {
+                continue;
+            }
+            actor.localToAscendantCoordinates(parent, LOW.set(-room, -room));
+            actor.localToAscendantCoordinates(parent, HIGH.set(actor.getWidth() + room, actor.getHeight() + room));
+            if (LOW.x < 0 || LOW.y < 0 || HIGH.x > parent.getWidth() || HIGH.y > parent.getHeight()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     @Override
     public void draw(Batch batch, float parentAlpha) {
         Color text = getFontColor();
@@ -191,9 +236,20 @@ public class UiButton extends TextButton {
         if (!isDisabled() && (focused || hasKeyboardFocus()) && token != null && token.focusOuter != null) {
             Color color = getColor();
             batch.setColor(color.r, color.g, color.b, color.a * parentAlpha);
-            token.focusOuter.draw(batch, getX(), getY(), getWidth(), getHeight());
-            if (token.focusInner != null) {
-                token.focusInner.draw(batch, getX() + 1, getY() + 1, getWidth() - 2, getHeight() - 2);
+            // A cream face takes the ring a gap outside it; where that would be clipped, two lines inside
+            boolean cream = token.creamUp || (token.creamChecked && isChecked());
+            float room = UiTheme.CHOICE_RING;
+            if (cream && token.focusRing != null && ringFits(this, room)) {
+                token.focusRing.draw(batch, getX() - room, getY() - room, getWidth() + 2 * room,
+                      getHeight() + 2 * room);
+            } else {
+                boolean inverse = cream && token.creamFocusOuter != null;
+                Drawable outer = inverse ? token.creamFocusOuter : token.focusOuter;
+                Drawable inner = inverse ? token.creamFocusInner : token.focusInner;
+                outer.draw(batch, getX(), getY(), getWidth(), getHeight());
+                if (inner != null) {
+                    inner.draw(batch, getX() + 1, getY() + 1, getWidth() - 2, getHeight() - 2);
+                }
             }
         }
     }

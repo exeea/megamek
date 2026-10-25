@@ -27,7 +27,7 @@ Agreed so far:
 | Swing themes | The four stock FlatLaf themes are replaced by MegaMek Dark and MegaMek Light. |
 | Button family | Collapse the 19 hud-v3 styles into a small variant × size set. |
 | Focus | Designed for Swing first, then ported to libGDX. |
-| Selected color | **Final.** Mint everywhere, sharing the accent: a selection always adds a shape (marker, edge, check, underline), so it needs no hue of its own. Violet stays only for the Game Master (`status.gamemaster`). See [tokens.md](tokens.md#color-roles). |
+| On, selected and focus | **Final.** Three looks. **On** (checked toggle, selected segment, on chip, check box, radio, switch) is the solid cream `surface.inverse` face with `text.onInverse` marks, as hud-v3's `button-checked`; a checked toggle looks like the primary button, as in hud-v3. **Selected** (list, table and tree rows, tabs, selectable panels, unit rows, menu and select checks) is a neutral wash plus a `selected.primary` (inverse color) marker, underline, edge or check. **Mint** is only focus, progress, slider fill, links, info and badges. Focus on a cream face is the mint ring `focus.gap` outside it, falling back to two inside lines where it would be clipped. On while disabled is the faint `surface.inverseDisabled` face with a `text.onInverse` label. This replaces the earlier "mint selection everywhere". Violet stays only for the Game Master (`status.gamemaster`). See [tokens.md](tokens.md#color-roles). |
 | Palettes | **Final.** Four themes: dark and light, each in a standard and a color-blind safe palette, picked by a user setting ("Color-blind safe colors"). Standard statuses use the expected red, amber and green and are checked for typical vision; the color-blind palette changes only the statuses and is checked for all simulated vision types. Contrast is checked in all four. Player and team colors are out of scope; whether MekHQ and MegaMekLab share the setting is decided when they adopt the tokens. Both galleries have a switch. See [tokens.md](tokens.md#palettes). |
 | Frames | Corner ticks for regular frames; Immersive dialogs may keep their own style. |
 | Startup screens | `MegaMekButton` bitmap skins will probably be replaced by the shared button (not final). |
@@ -37,7 +37,7 @@ Agreed so far:
 | Presentation mode | **Final.** Two modes, chosen per screen: **game** and **app**. The mode sets the text case and the slider thumb (game: hud-v3's thin bar; app: a disc), and later differences join it as whole-screen choices. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token (values signed off: display .04, headline .05, title .06, label .08, overline .1 em). Both galleries have a switch between the modes. See [tokens.md](tokens.md#presentation-mode). |
 | Panels and rails | **Final.** Ticked frames (panels, dialog cards, status cards) draw their edge only at the top and bottom, a paper roll, since the ticks close the sides. hud-v3's `panel-rails` (the Tactical View chip) keeps its rails as `token-rails`; `token-frame` is the plain frame. See [tokens.md](tokens.md#panels). |
 | Segmented control | **Final.** Separate segments, `xs` apart, each with its own edge, instead of a joined frame with hairlines, in both sizes: hud-v3's joined `hud-pill` becomes the compact size, not a second look. See [tokens.md](tokens.md#segmented-control). |
-| Primary button | **Final.** The `surface.inverse` face, hud-v3's cream `hud-main` (dark in light mode), not mint, so mint stays for state and selection. See [tokens.md](tokens.md#buttons). |
+| Primary button | **Final.** The `surface.inverse` face, hud-v3's cream `hud-main` (dark in light mode), not mint, so mint stays for focus; checked toggles share its look. See [tokens.md](tokens.md#buttons). |
 | Menus and popups | **Final.** A plain popup frame without corner ticks in both modes; ticks frame lasting containers (panels, dialogs, status cards), and submenus would stack them. See [tokens.md](tokens.md#menus). |
 | Dial | **Final.** The angle dial keeps hud-v3's mint hub ring, and the needle stops at it. See [tokens.md](tokens.md#inputs). |
 | Framed button | Corner ticks that become a full frame on hover (hud-v3 bracket, Immersive `FramedCommandButton`) are one shared special-purpose variant. |
@@ -305,14 +305,14 @@ work for Swing, and item 11 is under investigation.
   subset (no number spinner yet); see [tokens.md](tokens.md#inputs).
 - ~~Choices~~: check box (with a mixed state), radio button and switch, with hover, focus and disabled looks, in
   Swing and libGDX; see [tokens.md](tokens.md#choices).
-- ~~Tabs and segmented control~~: mint-underlined tabs and a segmented control of separate segments with a mint
+- ~~Tabs and segmented control~~: underlined tabs and a segmented control of separate segments with a cream
   selected one, in two sizes, in Swing and libGDX; see [tokens.md](tokens.md#tabs).
 - ~~Select~~: an input-faced select in two sizes and an inline one with a dotted underline, sharing one popup list
-  (neutral wash, mint check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
-- ~~Lists and trees~~: inset rounded rows at least 28 high, a neutral hover wash, and a mint wash plus a leading
-  marker for the selection, with two-line rows and an empty state, in Swing; libGDX keeps hud-v3's `UiList` and
+  (neutral wash, a check on the current value), in Swing and libGDX; see [tokens.md](tokens.md#select).
+- ~~Lists and trees~~: inset rounded rows at least 28 high, a neutral hover wash, and a stronger neutral wash plus a
+  leading marker for the selection, with two-line rows and an empty state, in Swing; libGDX keeps hud-v3's `UiList` and
   `UiTree` until the developers accept the system; see [tokens.md](tokens.md#lists-and-trees).
-- ~~Menus~~: menu bars, menus and context menus on the select's popup, with neutral hover rows, mint checks and
+- ~~Menus~~: menu bars, menus and context menus on the select's popup, with neutral hover rows, checks and
   radios, and muted shortcuts, in Swing; see [tokens.md](tokens.md#menus).
 - ~~Tooltips~~: small cards on the popup surface that wrap at 280, with a key chip for shortcuts and a title over
   secondary detail for info cards, in Swing; see [tokens.md](tokens.md#tooltips).
@@ -320,8 +320,8 @@ work for Swing, and item 11 is under investigation.
   rail and a brighter thumb under the pointer, in Swing; see [tokens.md](tokens.md#scrollbars).
 - ~~Sliders~~: an accent fill up to a round thumb (a thin bar in game mode) on a pill track, the same with ticks and labels, with an optional
   value readout, in Swing; see [tokens.md](tokens.md#sliders).
-- ~~Tables~~: the list's rows across every column with faint zebra stripes, a hover wash over the cells, the mint
-  selection and marker, and upper-case overline headers aligned like their column, in Swing; see
+- ~~Tables~~: the list's rows across every column with faint zebra stripes, a hover wash over the cells, the
+  selection wash and marker, and upper-case overline headers aligned like their column, in Swing; see
   [tokens.md](tokens.md#tables).
 - ~~The rest of the gallery~~: progress bars (a thin accent pill with its text above it), section headers (titled
   panels, collapsible sections and separators share one upper-case header with a line) and split panes (a subtle line
@@ -337,7 +337,7 @@ work for Swing, and item 11 is under investigation.
   the header, a percentage on the bar and a failed state with Close and Retry, in Swing; see
   [tokens.md](tokens.md#status-cards).
 - ~~Panels and frames~~: the dialog card's corner-ticked frame for anything that isn't a dialog, with an optional
-  header, status ticks with their icon, selectable unit cards (hover, mint selection, focus ring, one at a time),
+  header, status ticks with their icon, selectable unit cards (hover, selection, focus ring, one at a time),
   plain frames for groups inside a panel and a border for existing panels, with paper-roll edges, in Swing; see
   [tokens.md](tokens.md#panels).
 - ~~Chips and badges~~: status chips with their icon and an edge in the status color, filter chips (a check when on,
@@ -348,9 +348,11 @@ work for Swing, and item 11 is under investigation.
   passing through, in Swing; see [tokens.md](tokens.md#toasts).
 - ~~All-caps~~: a game and an app text case mode, chosen per screen, with signed-off caps tracking for upper-case
   text, in Swing and libGDX; see [tokens.md](tokens.md#presentation-mode).
-- ~~Drake's feedback~~: presentation mode (text case plus the slider thumb), mint selection everywhere with violet
-  kept for the Game Master, standard and color-blind safe palettes as a user setting, paper-roll panel edges, rails
+- ~~Drake's feedback~~: presentation mode (text case plus the slider thumb), violet kept only for the Game Master, standard and color-blind safe palettes as a user setting, paper-roll panel edges, rails
   kept for `panel-rails`, separate segments and the dial's mint hub, in Swing and libGDX.
+- ~~On state~~: cream for every "on" control (toggles, segments, chips, check boxes, radios, switches), neutral
+  selection for items in collections, mint only for focus and accents, an outside focus ring on cream faces and a
+  faint cream disabled-on look, in Swing and libGDX; see [tokens.md](tokens.md#color-roles).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
   controls, so the developers can judge the system in real use.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`

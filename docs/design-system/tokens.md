@@ -63,7 +63,8 @@ Names describe a role, not a hue, so each name has one meaning in both modes. Su
 | `surface.popover` | `#172022` | `#FFFFFF` | Menus, tooltips |
 | `surface.input` | `#1D2426` | `#FFFFFF` | Fields, selects |
 | `surface.hover` | `#FFFFFF0F` | `#16201E0D` | Hover wash |
-| `surface.inverse` | `#F0F2EE` | `#1C2426` | Primary button face |
+| `surface.inverse` | `#F0F2EE` | `#1C2426` | Primary button face and every "on" control |
+| `surface.inverseDisabled` | `#F0F2EE4D` | `#1C242673` | An "on" control while disabled, laid over its surface |
 | `surface.scrim` | `#0D1112A3` | `#16201E66` | Dims the window behind a modal card |
 | `text.primary` | `#F1F4F0` | `#16201E` | Body text |
 | `text.secondary` | `#CBD3D0` | `#3A4542` | Button labels, secondary values |
@@ -74,10 +75,10 @@ Names describe a role, not a hue, so each name has one meaning in both modes. Su
 | `border.control` | `#6B7774` | `#7A8683` | Edges that identify a control |
 | `border.subtle` | `#2A3133` | `#D5DBD9` | Decorative dividers only |
 | `border.strong` | `#E8F1EB` | `#2A3533` | Hovered edge, full frame |
-| `accent.primary` | `#82E2CE` | `#0A5C4C` | Active state, links, progress |
+| `accent.primary` | `#82E2CE` | `#0A5C4C` | Focus, progress, slider fill, links, info, badges |
 | `focus.ring` | `#82E2CE` | `#0A5C4C` | Keyboard focus |
-| `selected.primary` | `#82E2CE` | `#0A5C4C` | Selected item marker and edge |
-| `selected.background` | `#82E2CE29` | `#0A5C4C1F` | Selected row wash |
+| `selected.primary` | `#F0F2EE` | `#1C2426` | Selected item marker, underline and edge (the inverse color) |
+| `selected.background` | `#F0F2EE1F` | `#1C24261A` | Selected row wash (neutral) |
 | `status.danger` | `#F2777A` | `#B42318` | Errors, destruction, enemy |
 | `status.warning` | `#F2C14E` | `#8F5300` | Caution, heat |
 | `status.success` | `#8BD56B` | `#1E7B34` | Done, healthy |
@@ -88,9 +89,21 @@ Why these values:
 
 - **Accent is mint, and only the accent.** hud-v3 used mint for both "active" and "success". Success is now a
   distinct olive green, and info deliberately shares the accent so there is one fewer hue to tell apart.
-- **Selected is mint, like the accent.** A selection always adds a shape (a marker, an edge, a check or an
-  underline), so the shape, not a second hue, tells it apart from an active control. Violet read as foreign next to
-  the mint HUD; it stays only for the Game Master (`status.gamemaster`), whose notices need a hue of their own.
+- **"On" is cream, selected is neutral, mint is focus.** Three ideas, three looks:
+  - **On** (a control's state: checked toggle, selected segment, on chip, check box, radio, switch) is the solid
+    `surface.inverse` face with `text.onInverse` marks, hud-v3's `button-checked` and `pill-section-on`. A checked
+    toggle looks like the primary button, as in hud-v3; the two rarely meet, since one sits in toolbars and the other
+    in dialog footers.
+  - **Selected** (an item in a collection: list, table and tree rows, tabs, selectable panels, unit rows, menu and
+    select checks) is the neutral `selected.background` wash plus a `selected.primary` marker, underline, edge or check.
+    Hover stays a fainter wash with no marker, so the shape tells them apart.
+  - **Mint** (`accent.primary`, `focus.ring`) is left for focus, progress, slider fill, links, info and badges, so the
+    focus ring is never confused with a state.
+- **Why not mint for selection.** Mint selection beside cream "on" controls gave a screen two "chosen" colors. One hue
+  family for everything chosen reads calmer, and keeps mint meaningful. Violet stays only for the Game Master
+  (`status.gamemaster`), whose notices need a hue of their own.
+- **On while disabled** is the faint `surface.inverseDisabled` face with the `text.onInverse` label (about 2.7:1, like
+  other disabled text), so a disabled control still shows which option is on.
 - **Statuses use the hues players expect.** Red, amber and green in the standard palette; the color-blind safe
   palette (see [Palettes](#palettes)) moves them apart in lightness as well as hue.
 - **Borders that identify a control reach 3:1** (WCAG 1.4.11). hud-v3 field and chip borders measured 1.8 and 2.4.
@@ -136,7 +149,7 @@ light or dark theme.
 | `CORNER`, `HOVER` | `border.strong` |
 | `MINT` | `accent.primary`; its success uses move to `status.success` |
 | `CORAL`, `AMBER` | `status.danger`, `status.warning` |
-| `VIOLET` | `selected.primary` (now mint) for selection; `status.gamemaster` for the Game Master |
+| `VIOLET` | `selected.primary` (now the inverse color) for selection; `status.gamemaster` for the Game Master |
 | `BLIP` | No token: it stays a HUD game color, like unit and team colors |
 
 No hud-v3 color becomes `surface.base`, `surface.input`, `surface.hover`, `surface.scrim`, `text.onAccent`,
@@ -245,7 +258,7 @@ The libGDX gallery's Colors and type tab shows each hud-v3 color and font beside
 | Dialog width | sm 420, md 620, lg 800 |
 | Border | 1 |
 | Selection | 2 (the selected tab's underline) |
-| Focus ring | 2 wide inside the edge; 1 gap around small indicators; `focus.ring` |
+| Focus ring | 2 wide inside the edge; 1 gap outside small indicators and cream faces; `focus.ring` |
 | Corner ticks | 8 on controls, 13 on panels; 2 wide |
 | Opacity | tint.hover 0.16, tint.pressed 0.28 (a status color washed over a face) |
 | Motion | fast 120 ms, medium 200 ms, slow 320 ms; easing cubic-bezier(0.2, 0, 0, 1) |
@@ -296,8 +309,10 @@ One focus look for every control, so keyboard users always find the same thing.
   control's size or moves a layout.
 - **Focus wins.** The ring replaces the edge, whatever the control's state. Meaning stays in the text, fill and icons:
   a checked box stays checked, and error and warning fields carry a status icon as well as their colored edge.
-- **Primary buttons** use a `text.primary` outer line and a `text.onInverse` inner line, so the ring shows on the
-  inverse face.
+- **Cream faces** (the primary button and every "on" control: checked toggle, selected segment, on chip) get the
+  mint ring outside the edge, `focus.gap` (1) away, since mint barely shows on cream. Where the ring would be clipped
+  (inside a scroll pane's view or a popup) they fall back to a `text.primary` outer line and a `text.onInverse` inner
+  line inside the edge.
 - **Small indicators** (check box, radio, slider thumb) get the ring around them, `focus.gap` (1) away, so the
   indicator keeps its look. Their label sits far enough away for the ring.
 - **Tabs** get the ring inside the selected tab. **Lists and tables** show it on their scroll pane edge.
@@ -324,22 +339,23 @@ every state.
 | Secondary | Every other action (the default) | `surface.raised` face, `border.control` edge, `text.secondary` label | `surface.hover` wash (twice for pressed), `border.strong` edge, `text.primary` label | — |
 | Quiet | Low-emphasis actions in toolbars and rows | No face, no edge | As secondary, without the edge | — |
 | Danger | Destructive actions | As secondary, `status.danger` label and edge | Danger wash at `tint.hover` / `tint.pressed` | — |
-| Toggle | An on/off choice | As secondary | As secondary | `selected.background` wash, `selected.primary` edge |
-| Icon | A Material Symbols glyph, square; needs a tooltip | As quiet | As quiet | Selected wash and glyph |
-| Special | Emphasis moments (the HUD utility look) | Raised face, `border.control` corner ticks | Full `border.strong` frame | Selected wash and frame |
+| Toggle | An on/off choice | As secondary | As secondary | On: as primary, the `surface.inverse` face and `text.onInverse` label |
+| Icon | A Material Symbols glyph, square; needs a tooltip | As quiet | As quiet | On: the inverse face, `text.onInverse` glyph |
+| Special | Emphasis moments (the HUD utility look) | Raised face, `border.control` corner ticks | Full `border.strong` frame | On: the inverse face and frame |
 
 - **Sizes.** Regular is `control.md` (36) high with `lg` side padding, for dialogs and forms; compact is `control.sm`
   (28) with `md` padding, for dense tables and toolbars. Icon glyphs are `icon.md` / `icon.sm`.
 - **Labels** are Roboto Medium, sentence case in app mode and upper case in game mode (see [Presentation mode](#presentation-mode)).
   Rest text is `text.secondary` and brightens to `text.primary` under
   the pointer, so the hover reads on every kind.
-- **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label.
-- **Focus** follows [Focus](#focus): a 1-wide `focus.ring` border plus a 1-wide inner line, inside the edge. On
-  primary the border is `text.primary` and the inner line `text.onInverse`, so it shows on the inverse face.
-- **Primary is not mint.** Mint means active, focused, informational and selected; a mint main action would compete
-  with the selection on the same screen. The inverse face is neutral, has the highest contrast, and is hud-v3's `hud-main`.
-- **Selection** is always the mint selected color with an edge or glyph change, never a lighter face alone, so it
-  does not depend on telling two greys apart.
+- **Disabled** is the same for every kind: raised face, `border.subtle` edge, `text.disabled` label. A disabled toggle
+  that is on keeps the faint `surface.inverseDisabled` face with a `text.onInverse` label.
+- **Focus** follows [Focus](#focus): a 1-wide `focus.ring` border plus a 1-wide inner line, inside the edge. Cream
+  faces (primary and on) get the mint ring outside the edge instead, or the two inside lines where it would be clipped.
+- **Primary is not mint.** Mint means focus, progress and information; a mint main action would compete with the
+  focus ring. The inverse face is neutral, has the highest contrast, and is hud-v3's `hud-main`.
+- **On** is the solid inverse face, the strongest change a button can make, so it does not depend on telling two
+  greys apart. A checked toggle looks like the primary button, as in hud-v3.
 - The primary label keeps at least 4.5:1 against its hover and pressed faces in both modes (tested).
 
 ### Using them
@@ -441,11 +457,11 @@ galleries show every kind in every state, and a live row to click.
 | State | Look |
 | --- | --- |
 | Off | `surface.input` fill, `border.control` edge |
-| On | `accent.primary` fill and edge with a `text.onAccent` mark: a check, a dot, or the switch's thumb on the right |
+| On | `surface.inverse` fill and edge with a `text.onInverse` mark: a check, a dot, or the switch's thumb on the right |
 | Mixed (check box) | As on, with a dash in place of the check |
-| Hover / pressed | `border.strong` edge; off adds the `surface.hover` wash, on leans the accent toward the mark color (hover) or `text.primary` (pressed) |
+| Hover / pressed | `border.strong` edge; off adds the `surface.hover` wash, on leans the fill toward the mark color, further when pressed, like the primary button |
 | Focus | The ring around the indicator, `focus.gap` (1) away (see [Focus](#focus)) |
-| Disabled | `surface.base` fill, `border.subtle` edge, `text.disabled` mark and label |
+| Disabled | `surface.base` fill, `border.subtle` edge, `text.disabled` mark and label; on keeps the faint `surface.inverseDisabled` fill with a `text.onInverse` mark |
 
 - **Size.** The box and circle are `icon.sm` (16) in every row density; the switch's track is 16 high and 28 long,
   with a 12 thumb. The label sits `xs` (4) beyond the ring's room.
@@ -470,7 +486,7 @@ the `UiTheme.CHOICE_STATES`), its mark and the focus ring. `UiKit` builds them: 
 `radio(text, checked)`, `toggleSwitch(text, on)` and `radioGroup(radios...)`. A click, or Space or Enter while it has
 keyboard focus, fires a `ChangeEvent`; `setChecked` and `mixed(true)` from code fire none. `hovered`, `held` and
 `focused` freeze those states for the gallery. hud-v3's `UiKit.checkbox` takes the Token v0 look with
-`checkbox(text, ticked, true)`: the `choice-box` faces and a `text.onAccent` check over the accent fill when ticked.
+`checkbox(text, ticked, true)`: the `choice-box` faces and a `text.onInverse` check over the inverse fill when ticked.
 
 ## Tabs
 
@@ -498,9 +514,9 @@ place (map, list or cards). Use tabs to switch between pages, and radio buttons 
 | --- | --- |
 | Rest | Each segment a `surface.raised` box with its own `border.control` edge and `radius.md`; `text.secondary` labels |
 | Hover / pressed | A `border.strong` edge and the `surface.hover` wash (twice for pressed) on the segment, `text.primary` label |
-| Selected | `selected.background` wash and `selected.primary` edge on the segment, as a selected toggle |
-| Focus | The ring on the selected segment, over its edge |
-| Disabled | `border.subtle` edges, `text.disabled` labels, the selected wash at half strength |
+| Selected | The `surface.inverse` face and `text.onInverse` label, as a checked toggle; hover and press lean it toward the label |
+| Focus | The mint ring around the selected segment, `focus.gap` (1) outside it |
+| Disabled | `border.subtle` edges, `text.disabled` labels; the selected segment keeps the faint `surface.inverseDisabled` face and a `text.onInverse` label |
 
 - **Sizes** match buttons: regular `control.md` (36) with `lg` padding, compact `control.sm` (28) with `md`.
 - **Width.** The segments share the width equally, the widest label setting it.
@@ -529,7 +545,7 @@ traversal yet.
 hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
 `-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and
 `hud-tab-caps` compact tabs in sentence case. Segments share one width, `xs` apart, each drawn from the `seg-item`,
-`seg-over`, `seg-down` and `seg-on` faces; tabs sit on a `border.subtle` hairline with a mint underline under the
+`seg-over`, `seg-down` and `seg-on` faces; tabs sit on a `border.subtle` hairline with a `selected.primary` underline under the
 selected one.
 
 ## Select
@@ -550,7 +566,7 @@ options should stay visible.
 - **Sizes** match inputs: regular `control.md` (36), compact `control.sm` (28). The face is as wide as its widest item
   or placeholder, so it does not jump when the value changes. The inline face is `control.sm` high.
 - **Inline** is for a value inside a header or running text, where a box would be too heavy.
-- **Mint means selected.** The check, not the wash, marks the current value, so the wash stays neutral.
+- **The check marks the current value**, in `selected.primary`; the wash only follows the pointer.
 - **Keys.** Enter, Space or Down opens the list on the current value; Up and Down move, Home and End jump, Enter
   chooses and Escape closes without a choice. The focus comes back to the face.
 
@@ -587,8 +603,8 @@ when items have several comparable columns.
 | Empty | A `text.muted` message centered in the first row's place |
 | Tree | The list's rows with `text.secondary` chevrons and no connecting lines; each level indents 16, and the leading edge leaves room for the marker |
 
-- **Mint means selected**, and the marker keeps a selection visible without relying on its color, in multiple
-  selections too. Hover stays neutral.
+- **The marker means selected**, and keeps a selection visible without relying on the wash, in multiple selections
+  too. Hover is a fainter wash with no marker.
 - **Keys** are Swing's: Up and Down move, Home and End jump, Shift and Ctrl extend a multiple selection; Left and Right
   collapse and expand tree nodes.
 
@@ -602,7 +618,7 @@ content and get the hover and the marker, but only the stock renderer gets the r
 
 **libGDX.** hud-v3's own lists take the look without new controls.
 [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token-row` button style (no box, a
-hover wash, the selected wash and mint marker) and the `token-list` scroll pane style (the input frame, padded `xs`
+hover wash, the selected wash and marker) and the `token-list` scroll pane style (the input frame, padded `xs`
 to inset the rows). `UiKit.scrollList(list, true)` frames a list in it;
 `new UiList(kit, UiTheme.TOKEN)` gives a reorderable list's flying row and slot token colors for `token-row` rows;
 `new UiTree(kit, UiTheme.TOKEN)` draws `token-row` rows 28 high (46 with a second line in `text.secondary`) with
@@ -634,7 +650,7 @@ Menu bars, their menus and context menus. They share the select's popup, so ever
 
 **libGDX.** hud-v3's menu rows take the Token v0 look from the `token-menu-row` style: `UiKit.menuRow(style, ...)`
 and `new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW)`. Rows are `control.sm` high with the `sel-row-over` wash for the
-pointer and the keyboard highlight, a mint check, a `text.muted` shortcut and a `text.secondary` chevron. The list
+pointer and the keyboard highlight, a `selected.primary` check, a `text.muted` shortcut and a `text.secondary` chevron. The list
 sits in the `token-popup` frame (the select's popup with `xs` padding, which insets the wash) and its separators are
 `border.subtle` hairlines. `UiButton.iconColors` keeps an icon in its own color rather than the text's, and
 `TokenButtonStyle.detailFontColor` sets the details' color.
@@ -743,7 +759,7 @@ each item is one line of text.
 | Empty | A `text.muted` message centered in the first row's place |
 | Disabled | `text.disabled` text and headers, with no hover or marker |
 
-- **Mint means selected**, as in lists. A selected cell has no rectangle of its own: the row is the cursor.
+- **The marker means selected**, as in lists. A selected cell has no rectangle of its own: the row is the cursor.
 - **Sorting.** Click a header to sort by it and again to reverse; the chevron shows the direction.
 - **Keys** are Swing's: Up and Down move, Page Up and Page Down scroll, Shift and Ctrl extend a multiple selection.
 
@@ -997,9 +1013,9 @@ their text in `small` (11.5), sentence case.
 | Status chip, neutral | No icon, the edge in `border.control` and the text in `text.secondary`, `md` padding both sides |
 | Filter chip | `control.sm` (28) high, `lg` (12) padding; a `border.control` edge and the text in `text.secondary` |
 | Filter chip, hover | A `surface.hover` fill, the edge in `border.strong`, the text in `text.primary` |
-| Filter chip, on | A `selected.background` fill, the edge in `selected.primary`, a check at `icon.sm` before the text in `text.primary`; the chip grows by the check |
+| Filter chip, on | The `surface.inverse` fill and edge, a check at `icon.sm` before the text, both in `text.onInverse`; the chip grows by the check. Disabled, the faint `surface.inverseDisabled` fill |
 | Tag chip | `control.sm` high, the text in `text.primary` inside a `border.control` edge, then an ✕ in `text.muted`; hovering the ✕ shows a `surface.hover` square with a `radius.sm` corner and the ✕ turns `text.primary` |
-| Focus (filter, tag) | The `focus.ring` 2px ring in place of the edge |
+| Focus (filter, tag) | The `focus.ring` 2px ring in place of the edge; on an on filter chip, around it `focus.gap` (1) away |
 | Disabled (filter, tag) | The edge in `border.subtle`, the text in `text.disabled` |
 | Count badge | `icon.sm` high and at least as wide, `xs` padding; the count in the label's medium face at `caption`, `text.onAccent` on `accent.primary`; 99 and up shows 99+ |
 | Dot badge | `md` (8) across, in `accent.primary` |
@@ -1008,7 +1024,7 @@ their text in `small` (11.5), sentence case.
 | Motion | Filter chips ease their fill and edge with the [control timings](#motion); reduce motion makes them instant |
 
 - **Color is never the only cue.** A status chip always has its icon (info, check, warning, error), and screen
-  readers hear the status as the chip's description. A filter chip shows a check when on, not only the mint.
+  readers hear the status as the chip's description. A filter chip shows a check when on, not only the fill.
 - **Status chips are smaller because they aren't controls.** They sit in rows and cards beside text; the interactive
   chips take the compact control height so they keep a comfortable target.
 - **Filters.** A filter chip is a toggle; in a group where one filter applies at a time it behaves like a radio button

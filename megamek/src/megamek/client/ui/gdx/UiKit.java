@@ -719,7 +719,7 @@ public final class UiKit {
 
     /**
      * A menu item as {@link #menuRow(String, String, Boolean, boolean)} in {@code style}: hud-menu-row, or
-     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a mint check and a text.secondary chevron.
+     * {@link UiTheme#TOKEN_MENU_ROW} for the Token v0 look with a selection-color check and a text.secondary chevron.
      */
     public UiButton menuRow(String style, String text, String detail, Boolean checked, boolean group) {
         UiButton row = new UiButton(this, style);

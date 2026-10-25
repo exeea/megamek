@@ -10,7 +10,7 @@ import megamek.client.ui.design.swing.TokenButtons.Size;
 
 /**
  * The design system's tabs for Swing (docs/design-system/tokens.md, Tabs): secondary labels on the window surface, a
- * mint underline under the selected tab and a hairline under the strip. The MegaMek look and feels draw every tab
+ * selection-color underline under the selected tab and a hairline under the strip. The MegaMek look and feels draw every tab
  * pane this way at the compact size; this gives a tab pane the regular size, for top-level page switching.
  */
 public final class TokenTabs {

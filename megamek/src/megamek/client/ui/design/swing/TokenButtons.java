@@ -28,7 +28,7 @@ public final class TokenButtons {
         QUIET("quiet"),
         /** Destructive actions: danger text and edge. */
         DANGER("danger"),
-        /** An on/off choice: a secondary button that shows selection with a mint wash and edge. */
+        /** An on/off choice: a secondary button that shows selection with the inverse face and edge. */
         TOGGLE(null),
         /** A square, quiet button with a Material Symbols glyph; it needs a tooltip. */
         ICON("icon"),
@@ -101,7 +101,7 @@ public final class TokenButtons {
 
     /**
      * A square icon button showing the Material Symbols glyph {@code codePoint}; {@code tooltip} names the action,
-     * since the glyph alone does not. A toggle shows selection with a mint wash and glyph.
+     * since the glyph alone does not. A selected toggle is on: the inverse face, the glyph in {@code text.onInverse}.
      */
     public static AbstractButton icon(int codePoint, String tooltip, boolean toggle, Size size) {
         String glyph = new String(Character.toChars(codePoint));

@@ -510,6 +510,20 @@ public final class UiTheme implements Disposable {
         public Drawable focusInner;
         /** The details' color (null: hud-v3's muted one); disabled details take the disabled font color. */
         public Color detailFontColor;
+        /** The face and label of a checked button while disabled (null: the disabled ones, as in Scene2D). */
+        public Drawable checkedDisabled;
+        public Color checkedDisabledFontColor;
+        /** Whether the face is cream (surface.inverse) at rest, as the primary's is, or only while checked. */
+        public boolean creamUp;
+        public boolean creamChecked;
+        /**
+         * The focus ring of a cream face: a gap outside it, drawn over the button's bounds grown by
+         * {@link #CHOICE_RING}. Where an ancestor would clip it the button draws {@link #creamFocusOuter} and
+         * {@link #creamFocusInner} inside instead.
+         */
+        public Drawable focusRing;
+        public Drawable creamFocusOuter;
+        public Drawable creamFocusInner;
 
         public TokenButtonStyle() {
         }
@@ -520,6 +534,13 @@ public final class UiTheme implements Disposable {
             focusOuter = style.focusOuter;
             focusInner = style.focusInner;
             detailFontColor = style.detailFontColor;
+            checkedDisabled = style.checkedDisabled;
+            checkedDisabledFontColor = style.checkedDisabledFontColor;
+            creamUp = style.creamUp;
+            creamChecked = style.creamChecked;
+            focusRing = style.focusRing;
+            creamFocusOuter = style.creamFocusOuter;
+            creamFocusInner = style.creamFocusInner;
         }
     }
 
@@ -530,13 +551,10 @@ public final class UiTheme implements Disposable {
         int raised = tokens.color("surface.raised", mode);
         int hover = tokens.color("surface.hover", mode);
         int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
-        int selected = tokens.color("selected.background", mode);
         int danger = tokens.color("status.danger", mode);
-        int selectedFace = ColorMath.over(selected, raised);
         Color control = token(tokens.color("border.control", mode));
         Color subtle = token(tokens.color("border.subtle", mode));
         Color strong = token(tokens.color("border.strong", mode));
-        Color selectedEdge = token(tokens.color("selected.primary", mode));
         Color ring = token(tokens.color("focus.ring", mode));
         float radius = tokens.radius().get("md");
         float border = tokens.size().get("border");
@@ -545,8 +563,8 @@ public final class UiTheme implements Disposable {
         box("tb-secondary-over", token(ColorMath.over(hover, raised)), strong, border, radius, null, 0, 0, 0);
         box("tb-secondary-down", token(ColorMath.over(pressed, raised)), strong, border, radius, null, 0, 0, 0);
         box("tb-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
-        // The primary face is the inverse surface, hud-v3's cream, so mint stays for state. A surface wash barely
-        // shows on it: hover and press lean it toward the label color, press further.
+        // The primary face is the inverse surface, hud-v3's cream, as is every control that is on, so mint stays for
+        // focus. A surface wash barely shows on it: hover and press lean it toward the label color, press further.
         int inverse = tokens.color("surface.inverse", mode);
         int onInverse = tokens.color("text.onInverse", mode);
         int inverseHover = ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.hover")), inverse);
@@ -560,17 +578,23 @@ public final class UiTheme implements Disposable {
         box("tb-danger-down",
               token(ColorMath.over(ColorMath.withAlpha(danger, tokens.alpha("tint.pressed")), raised)),
               token(danger), border, radius, null, 0, 0, 0);
-        box("tb-toggle-checked", token(selectedFace), selectedEdge, border, radius, null, 0, 0, 0);
-        box("tb-toggle-checked-over", token(ColorMath.over(hover, selectedFace)), selectedEdge, border, radius, null, 0, 0,
-              0);
+        // A checked toggle looks like the primary button; disabled, it stays a faint cream with no edge
+        int inverseDisabled = tokens.color("surface.inverseDisabled", mode);
+        box("tb-on-disabled", token(ColorMath.over(inverseDisabled, raised)), null, 0, radius, null, 0, 0, 0);
         box("tb-quiet-over", token(hover), null, 0, radius, null, 0, 0, 0);
         box("tb-quiet-down", token(pressed), null, 0, radius, null, 0, 0, 0);
-        box("tb-quiet-checked", token(selected), null, 0, radius, null, 0, 0, 0);
+        // A checked icon toggle is a cream square without an edge, as its quiet faces have none
+        box("tb-quiet-on", token(inverse), null, 0, radius, null, 0, 0, 0);
+        box("tb-quiet-on-over", token(inverseHover), null, 0, radius, null, 0, 0, 0);
+        box("tb-quiet-on-down", token(inversePressed), null, 0, radius, null, 0, 0, 0);
+        box("tb-quiet-on-disabled", token(inverseDisabled), null, 0, radius, null, 0, 0, 0);
         box("tb-focus", Color.CLEAR, ring, border, radius, null, 0, 0, 0);
         box("tb-focus-inner", Color.CLEAR, ring, border, Math.max(radius - border, 0), null, 0, 0, 0);
         box("tb-focus-inverse", Color.CLEAR, token(tokens.color("text.primary", mode)), border, radius, null, 0, 0, 0);
         box("tb-focus-inverse-inner", Color.CLEAR, token(onInverse), border, Math.max(radius - border, 0), null, 0, 0,
               0);
+        float focusWidth = tokens.size().get("focus.width");
+        box("tb-focus-ring", Color.CLEAR, ring, focusWidth, radius + CHOICE_RING, null, 0, 0, 0);
 
         Color text = token(tokens.color("text.primary", mode));
         Color secondaryText = token(tokens.color("text.secondary", mode));
@@ -594,6 +618,10 @@ public final class UiTheme implements Disposable {
                 style.disabledFontColor = disabledText;
                 style.focusOuter = skin.getDrawable("tb-focus");
                 style.focusInner = skin.getDrawable("tb-focus-inner");
+                style.focusRing = skin.getDrawable("tb-focus-ring");
+                style.creamFocusOuter = skin.getDrawable("tb-focus-inverse");
+                style.creamFocusInner = skin.getDrawable("tb-focus-inverse-inner");
+                Color label = token(onInverse);
                 String face = switch (kind) {
                     case "primary", "danger", "quiet" -> kind;
                     default -> "secondary";
@@ -613,12 +641,15 @@ public final class UiTheme implements Disposable {
                 }
                 switch (kind) {
                     case "primary" -> {
-                        Color label = token(onInverse);
                         style.fontColor = label;
                         style.overFontColor = label;
                         style.downFontColor = label;
-                        style.focusOuter = skin.getDrawable("tb-focus-inverse");
-                        style.focusInner = skin.getDrawable("tb-focus-inverse-inner");
+                        style.checkedFontColor = label;
+                        style.checkedOverFontColor = label;
+                        style.checkedDownFontColor = label;
+                        style.focusOuter = style.creamFocusOuter;
+                        style.focusInner = style.creamFocusInner;
+                        style.creamUp = true;
                     }
                     case "danger" -> {
                         style.fontColor = token(danger);
@@ -626,19 +657,22 @@ public final class UiTheme implements Disposable {
                         style.downFontColor = token(danger);
                     }
                     case "toggle" -> {
-                        style.checked = sized(resized("tb-toggle-checked", 0, 0, 0), vertical, side, height, false);
-                        style.checkedOver = sized(resized("tb-toggle-checked-over", 0, 0, 0), vertical, side, height,
+                        style.checked = sized(resized("tb-primary", 0, 0, 0), vertical, side, height, false);
+                        style.checkedOver = sized(resized("tb-primary-over", 0, 0, 0), vertical, side, height, false);
+                        style.checkedDown = sized(resized("tb-primary-down", 0, 0, 0), vertical, side, height, false);
+                        style.checkedDisabled = sized(resized("tb-on-disabled", 0, 0, 0), vertical, side, height,
                               false);
-                        style.checkedDown = style.checkedOver;
+                        onInverseWhenChecked(style, label);
                     }
                     case "icon" -> {
-                        style.checked = sized(resized("tb-quiet-checked", 0, 0, 0), vertical, 0, height, true);
-                        style.checkedOver = style.checked;
-                        style.checkedDown = style.checked;
-                        style.checkedFontColor = selectedEdge;
-                        style.checkedOverFontColor = selectedEdge;
-                        style.checkedDownFontColor = selectedEdge;
+                        style.checked = sized(resized("tb-quiet-on", 0, 0, 0), vertical, 0, height, true);
+                        style.checkedOver = sized(resized("tb-quiet-on-over", 0, 0, 0), vertical, 0, height, true);
+                        style.checkedDown = sized(resized("tb-quiet-on-down", 0, 0, 0), vertical, 0, height, true);
+                        style.checkedDisabled = sized(resized("tb-quiet-on-disabled", 0, 0, 0), vertical, 0, height,
+                              true);
+                        onInverseWhenChecked(style, label);
                     }
+                    case "special" -> onInverseWhenChecked(style, label);
                     default -> { }
                 }
                 skin.add("button-" + kind + suffix, style, TextButton.TextButtonStyle.class);
@@ -651,33 +685,54 @@ public final class UiTheme implements Disposable {
         }
     }
 
-    /** The special button's faces: corner ticks at rest, a full frame under the pointer, in the selection color when selected. */
+    /** Gives a checked {@code style} the cream face's {@code label} color, disabled too, and its outside focus ring. */
+    private static void onInverseWhenChecked(TokenButtonStyle style, Color label) {
+        style.checkedFontColor = label;
+        style.checkedOverFontColor = label;
+        style.checkedDownFontColor = label;
+        style.checkedDisabledFontColor = label;
+        style.creamChecked = true;
+    }
+
+    /**
+     * The special button's faces: corner ticks at rest, a full frame under the pointer; selected, the cream face of
+     * every control that is on.
+     */
     private void special(TokenButtonStyle style, DesignTokens tokens, Mode mode, float vertical, float side,
           float height) {
         Texture white = skin.get("white", Texture.class);
         int raised = tokens.color("surface.raised", mode);
         int hover = tokens.color("surface.hover", mode);
         int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
-        int selectedFace = ColorMath.over(tokens.color("selected.background", mode), raised);
+        int inverse = tokens.color("surface.inverse", mode);
+        int onInverse = tokens.color("text.onInverse", mode);
         float tick = tokens.size().get("tick.control");
         Color strong = token(tokens.color("border.strong", mode));
-        Color selectedEdge = token(tokens.color("selected.primary", mode));
         style.up = sized(new HudFrame(white, token(raised), null, token(tokens.color("border.control", mode)), tick,
               null), vertical, side, height, false);
         style.over = sized(new HudFrame(white, token(ColorMath.over(hover, raised)), null, null, 0, strong), vertical,
               side, height, false);
         style.down = sized(new HudFrame(white, token(ColorMath.over(pressed, raised)), null, null, 0, strong),
               vertical, side, height, false);
-        style.checked = sized(new HudFrame(white, token(selectedFace), null, null, 0, selectedEdge), vertical, side, height,
+        style.checked = sized(new HudFrame(white, token(inverse), null, null, 0, token(inverse)), vertical, side,
+              height, false);
+        style.checkedOver = sized(new HudFrame(white, token(ColorMath.over(ColorMath.withAlpha(onInverse,
+              tokens.alpha("tint.hover")), inverse)), null, null, 0, strong), vertical, side, height, false);
+        style.checkedDown = sized(new HudFrame(white, token(ColorMath.over(ColorMath.withAlpha(onInverse,
+              tokens.alpha("tint.pressed")), inverse)), null, null, 0, strong), vertical, side, height, false);
+        style.checkedDisabled = sized(new HudFrame(white, token(ColorMath.over(
+              tokens.color("surface.inverseDisabled", mode), raised)), null, null, 0, null), vertical, side, height,
               false);
-        style.checkedOver = sized(new HudFrame(white, token(ColorMath.over(hover, selectedFace)), null, null, 0,
-              selectedEdge), vertical, side, height, false);
-        style.checkedDown = style.checkedOver;
         style.disabled = sized(new HudFrame(white, token(raised), null, token(tokens.color("border.subtle", mode)),
               tick, null), vertical, side, height, false);
         Color ring = token(tokens.color("focus.ring", mode));
         style.focusOuter = new HudFrame(white, Color.CLEAR, null, null, 0, ring);
         style.focusInner = null;
+        style.focusRing = new HudFrame(white, Color.CLEAR, null, null, 0, ring, tokens.size().get("focus.width"));
+        style.creamFocusOuter = new HudFrame(white, Color.CLEAR, null, null, 0, token(tokens.color("text.primary",
+              mode)), tokens.size().get("border"));
+        style.creamFocusInner = new HudFrame(white, Color.CLEAR, null, null, 0, token(onInverse),
+              tokens.size().get("border"));
     }
 
     /** Pads {@code drawable} and gives it the control height; a square one is as wide as it is high. */
@@ -797,18 +852,19 @@ public final class UiTheme implements Disposable {
     public static final class ChoiceStyle {
         public Color text;
         public Color disabledText;
-        /** The check, dash, dot or on-thumb on the accent fill. */
+        /** The check, dash, dot or on-thumb on the cream fill, disabled too. */
         public Color mark;
         /** An off switch's thumb. */
         public Color thumb;
-        /** Every mark while disabled. */
+        /** An off switch's thumb while disabled. */
         public Color disabledMark;
     }
 
     /**
      * The token choices in dark mode: a box, circle or pill in the input fill and control edge, strong under the
-     * pointer; on, an accent fill that leans toward its mark on hover and away from it when pressed; disabled, no fill and a subtle edge.
-     * The focus ring sits a gap away, so it never hides the state.
+     * pointer; on, the cream fill of the primary button, leaning toward its mark on hover and further when pressed;
+     * disabled, no fill and a subtle edge, or a faint cream fill when on. The focus ring sits a gap away, so it never
+     * hides the state.
      */
     private void tokenChoices() {
         DesignTokens tokens = DesignTokens.shipped();
@@ -816,11 +872,12 @@ public final class UiTheme implements Disposable {
         int input = tokens.color("surface.input", mode);
         int hover = tokens.color("surface.hover", mode);
         int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
-        int accent = tokens.color("accent.primary", mode);
-        int accentHover = ColorMath.over(ColorMath.withAlpha(tokens.color("text.onAccent", mode),
-              tokens.alpha("tint.hover")), accent);
-        int accentPressed = ColorMath.over(ColorMath.withAlpha(tokens.color("text.primary", mode),
-              tokens.alpha("tint.pressed")), accent);
+        int inverse = tokens.color("surface.inverse", mode);
+        int onInverse = tokens.color("text.onInverse", mode);
+        int inverseHover = ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.hover")), inverse);
+        int inversePressed = ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.pressed")), inverse);
+        int inverseDisabled = ColorMath.over(tokens.color("surface.inverseDisabled", mode),
+              tokens.color("surface.base", mode));
         Color base = token(tokens.color("surface.base", mode));
         Color control = token(tokens.color("border.control", mode));
         Color strong = token(tokens.color("border.strong", mode));
@@ -839,10 +896,10 @@ public final class UiTheme implements Disposable {
             box(name + "-over", token(ColorMath.over(hover, input)), strong, border, radius, null, 0, 0, height);
             box(name + "-down", token(ColorMath.over(pressed, input)), strong, border, radius, null, 0, 0, height);
             box(name + "-disabled", base, subtle, border, radius, null, 0, 0, height);
-            box(name + "-on", token(accent), token(accent), border, radius, null, 0, 0, height);
-            box(name + "-on-over", token(accentHover), strong, border, radius, null, 0, 0, height);
-            box(name + "-on-down", token(accentPressed), strong, border, radius, null, 0, 0, height);
-            skin.add(name + "-on-disabled", skin.getDrawable(name + "-disabled"), Drawable.class);
+            box(name + "-on", token(inverse), token(inverse), border, radius, null, 0, 0, height);
+            box(name + "-on-over", token(inverseHover), strong, border, radius, null, 0, 0, height);
+            box(name + "-on-down", token(inversePressed), strong, border, radius, null, 0, 0, height);
+            box(name + "-on-disabled", token(inverseDisabled), null, 0, radius, null, 0, 0, height);
             box(name + "-focus", Color.CLEAR, ring, width, radius + gap + width, null, 0, 0,
                   height == 0 ? 0 : height + 2 * (gap + width));
         });
@@ -852,7 +909,7 @@ public final class UiTheme implements Disposable {
         ChoiceStyle style = new ChoiceStyle();
         style.text = token(tokens.color("text.primary", mode));
         style.disabledText = token(tokens.color("text.disabled", mode));
-        style.mark = token(tokens.color("text.onAccent", mode));
+        style.mark = token(onInverse);
         style.thumb = token(tokens.color("text.secondary", mode));
         style.disabledMark = style.disabledText;
         skin.add("default", style);
@@ -864,6 +921,8 @@ public final class UiTheme implements Disposable {
         public Color text;
         /** An option under the pointer, pressed or selected. */
         public Color activeText;
+        /** A selected segment's label on its cream face, disabled too. */
+        public Color onText;
         public Color disabledText;
         /** The selected tab's underline. */
         public Color underline;
@@ -878,9 +937,9 @@ public final class UiTheme implements Disposable {
 
     /**
      * Tabs and segmented controls in dark mode (docs/design-system/tokens.md, Tabs and Segmented control). A tab is a
-     * label on the window surface with a wash under the pointer and a mint underline when selected. A segmented
-     * control is a row of separate raised segments, each with its own edge; the selected one has a mint wash and
-     * edge, like a selected toggle.
+     * label on the window surface with a wash under the pointer and an underline in the selection color when selected.
+     * A segmented control is a row of separate raised segments, each with its own edge; the selected one has the cream
+     * face of a checked toggle, faint while disabled, and its focus ring sits a gap outside it.
      */
     private void tokenOptions() {
         DesignTokens tokens = DesignTokens.shipped();
@@ -888,8 +947,8 @@ public final class UiTheme implements Disposable {
         int raised = tokens.color("surface.raised", mode);
         int hover = tokens.color("surface.hover", mode);
         int pressed = ColorMath.withAlpha(hover, Math.min(255, ColorMath.alpha(hover) * 2));
-        int selected = tokens.color("selected.background", mode);
-        int selectedDisabled = ColorMath.withAlpha(selected, ColorMath.alpha(selected) / 2);
+        int inverse = tokens.color("surface.inverse", mode);
+        int onInverse = tokens.color("text.onInverse", mode);
         Color control = token(tokens.color("border.control", mode));
         Color subtle = token(tokens.color("border.subtle", mode));
         Color selectedEdge = token(tokens.color("selected.primary", mode));
@@ -908,14 +967,24 @@ public final class UiTheme implements Disposable {
         box("seg-item-disabled", token(raised), subtle, border, radius, null, 0, 0, 0);
         box("seg-over", token(raisedHover), strong, border, radius, null, 0, 0, 0);
         box("seg-down", token(ColorMath.over(pressed, raised)), strong, border, radius, null, 0, 0, 0);
-        box("seg-on", token(ColorMath.over(selected, raised)), selectedEdge, border, radius, null, 0, 0, 0);
-        box("seg-on-disabled", token(ColorMath.over(selectedDisabled, raised)), subtle, border, radius, null, 0, 0,
-              0);
+        box("seg-on", token(inverse), token(inverse), border, radius, null, 0, 0, 0);
+        box("seg-on-over", token(ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.hover")), inverse)),
+              strong, border, radius, null, 0, 0, 0);
+        box("seg-on-down", token(ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.pressed")),
+              inverse)), strong, border, radius, null, 0, 0, 0);
+        box("seg-on-disabled", token(ColorMath.over(tokens.color("surface.inverseDisabled", mode), raised)), null, 0,
+              radius, null, 0, 0, 0);
         box("seg-focus", Color.CLEAR, ring, focus, radius, null, 0, 0, 0);
+        // The selected segment's ring sits a gap outside its cream face, or, where clipped, two lines inside it
+        box("seg-on-focus", Color.CLEAR, ring, focus, radius + CHOICE_RING, null, 0, 0, 0);
+        box("seg-on-focus-outer", Color.CLEAR, token(tokens.color("text.primary", mode)), border, radius, null, 0, 0,
+              0);
+        box("seg-on-focus-inner", Color.CLEAR, token(onInverse), border, Math.max(radius - border, 0), null, 0, 0, 0);
 
         OptionStyle style = new OptionStyle();
         style.text = token(tokens.color("text.secondary", mode));
         style.activeText = token(tokens.color("text.primary", mode));
+        style.onText = token(onInverse);
         style.disabledText = token(tokens.color("text.disabled", mode));
         style.underline = selectedEdge;
         style.disabledUnderline = subtle;
@@ -956,7 +1025,7 @@ public final class UiTheme implements Disposable {
     /**
      * Selects and their popup list in dark mode (docs/design-system/tokens.md, Select). The face is the input box; the
      * inline variant has a dotted underline instead. The popup list is a popover frame with a control edge: the row
-     * at the pointer or the keyboard gets the hover wash, and the current value a mint check, so the selection color keeps
+     * at the pointer or the keyboard gets the hover wash, and the current value a check in the selection color, which keeps
      * meaning selected.
      */
     private void tokenSelects() {
@@ -1040,8 +1109,10 @@ public final class UiTheme implements Disposable {
             segment.over = sized(resized("seg-over", 0, 0, 0), 0, side, height, false);
             segment.down = sized(resized("seg-down", 0, 0, 0), 0, side, height, false);
             segment.checked = sized(resized("seg-on", 0, 0, 0), 0, side, height, false);
-            segment.checkedOver = segment.checked;
-            segment.checkedDown = segment.checked;
+            segment.checkedOver = sized(resized("seg-on-over", 0, 0, 0), 0, side, height, false);
+            segment.checkedDown = sized(resized("seg-on-down", 0, 0, 0), 0, side, height, false);
+            segment.checkedDisabled = sized(resized("seg-on-disabled", 0, 0, 0), 0, side, height, false);
+            onInverseWhenChecked(segment, token(DesignTokens.shipped().color("text.onInverse", Mode.DARK)));
             segment.disabled = sized(resized("seg-item-disabled", 0, 0, 0), 0, side, height, false);
             skin.add(TOKEN_SEGMENT + suffix, segment, TextButton.TextButtonStyle.class);
 
@@ -1386,7 +1457,7 @@ public final class UiTheme implements Disposable {
 
     /**
      * Token v0 styles for hud-v3's own lists, trees, grids and splits (docs/design-system/tokens.md, Lists and trees,
-     * Scrollbars and Split panes). Rows have no box: a hover wash, and a selected wash with a mint marker at the
+     * Scrollbars and Split panes). Rows have no box: a hover wash, and a selected wash with a marker in the selection color at the
      * leading edge. The scroll bar's hover and drag looks are the {@code scroll-rail}, {@code scroll-thumb-over} and
      * {@code scroll-thumb-down} drawables, and the divider's is {@code token-split-active}; {@code UiKit} swaps them in.
      */

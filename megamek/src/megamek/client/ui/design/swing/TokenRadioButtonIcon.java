@@ -37,6 +37,11 @@ public class TokenRadioButtonIcon extends FlatRadioButtonIcon {
     }
 
     @Override
+    protected Color getCheckmarkColor(Component c, boolean indeterminate) {
+        return TokenCheckBoxIcon.disabledSelected(c, isSelected(c), super.getCheckmarkColor(c, indeterminate));
+    }
+
+    @Override
     protected void paintIcon(Component c, Graphics2D g) {
         super.paintIcon(c, g);
         // A cleared radio button shrinks its dot away; a selected one grows it in paintCheckmark

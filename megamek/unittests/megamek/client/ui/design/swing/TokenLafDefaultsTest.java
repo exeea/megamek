@@ -764,7 +764,20 @@ class TokenLafDefaultsTest {
         assertColor(defaults, "Component.error.focusedBorderColor", "focus.ring", mode);
         assertColor(defaults, "Component.warning.focusedBorderColor", "focus.ring", mode);
         assertColor(defaults, "CheckBox.icon.focusColor", "focus.ring", mode);
-        assertColor(defaults, "CheckBox.icon.focusedSelectedBackground", "accent.primary", mode);
+        assertColor(defaults, "CheckBox.icon.focusedSelectedBackground", "surface.inverse", mode);
+        // On is cream: a checked box and a selected toggle take the inverse face with the inverse label
+        assertColor(defaults, "CheckBox.icon.selectedBackground", "surface.inverse", mode);
+        assertColor(defaults, "CheckBox.icon.checkmarkColor", "text.onInverse", mode);
+        assertColor(defaults, TokenCheckBoxIcon.DISABLED_SELECTED_CHECKMARK_COLOR, "text.onInverse", mode);
+        assertColor(defaults, "ToggleButton.selectedBackground", "surface.inverse", mode);
+        assertColor(defaults, "ToggleButton.selectedForeground", "text.onInverse", mode);
+        assertColor(defaults, "ToggleButton.disabledSelectedForeground", "text.onInverse", mode);
+        assertColor(defaults, "ToggleButton.toolbar.selectedBackground", "surface.inverse", mode);
+        assertColor(defaults, TokenButtonUI.INVERSE_FOCUS_COLOR, "text.onInverse", mode);
+        int faint = ColorMath.over(tokens.color("surface.inverseDisabled", mode), tokens.color("surface.raised", mode));
+        assertEquals(new Color(faint), new Color(defaults.getColor("ToggleButton.disabledSelectedBackground").getRGB()));
+        assertEquals(255, defaults.getColor("CheckBox.icon.disabledSelectedBackground").getAlpha(),
+              "FlatLaf fills a translucent disabled fill over the full selected fill");
         assertColor(defaults, "CheckBox.icon.focusedBackground", "surface.input", mode);
         assertColor(defaults, "Slider.focusedColor", "focus.ring", mode);
         assertTrue(defaults.getIcon("CheckBox.icon") instanceof TokenCheckBoxIcon, "CheckBox.icon");
@@ -789,7 +802,7 @@ class TokenLafDefaultsTest {
         int selection = ColorMath.over(tokens.color("selected.background", mode), tokens.color("surface.input", mode));
         assertEquals(new Color(selection), new Color(defaults.getColor("Table.selectionBackground").getRGB()));
         assertNotNull(defaults.get("[style]Button.primary"), "primary button style class");
-        assertColor(defaults, "Button.selectedBorderColor", "selected.primary", mode);
+        assertColor(defaults, "Button.selectedBorderColor", "surface.inverse", mode);
         assertColor(defaults, "Button.foreground", "text.secondary", mode);
         assertColor(defaults, "Button.hoverForeground", "text.primary", mode);
         assertColor(defaults, "Button.default.focusedBackground", "surface.inverse", mode);
