@@ -348,8 +348,11 @@ work for Swing, and item 11 is under investigation.
 - ~~Toasts~~: short notices at the top centre of a view, a bar and an icon in the level's color (the Game Master in
   violet with a shield), the newest on top and at most five, paused by the pointer, closed by their ✕, with clicks
   passing through, in Swing; see [tokens.md](tokens.md#toasts).
-- ~~All-caps~~: a game and an app text case mode, chosen per screen, with signed-off caps tracking for upper-case
-  text, in Swing and libGDX; see [tokens.md](tokens.md#presentation-mode).
+- ~~All-caps~~ (discussion closed): a game and an app presentation mode, chosen per screen. Game mode upper-cases only
+  the short framing labels, with signed-off caps tracking, and sets them and unit names in condensed type (see Type
+  width); content stays sentence case in both modes. Both galleries switch between the modes and compare each hud-v3
+  font with its token type as a game screen draws them, on a realistic sample for that kind of text. In Swing and
+  libGDX; see [tokens.md](tokens.md#presentation-mode).
 - ~~Drake's feedback~~: presentation mode (text case plus the slider thumb), violet kept only for the Game Master, standard and color-blind safe palettes as a user setting, paper-roll panel edges, rails
   kept for `panel-rails`, separate segments and the dial's mint hub, in Swing and libGDX.
 - ~~Type width~~: game mode sets the framing labels and unit names in Roboto Condensed Medium (a second static face for
