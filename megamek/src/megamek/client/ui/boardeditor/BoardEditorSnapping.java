@@ -4,11 +4,11 @@ package megamek.client.ui.boardeditor;
 import java.util.List;
 import java.util.Set;
 
-import megamek.client.ui.tileset.HexTileset;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 
 /** Translation-only joins between explicitly authored, compatible connector ends. No model loading or ID guessing. */
 public final class BoardEditorSnapping {
@@ -27,12 +27,12 @@ public final class BoardEditorSnapping {
         // Equal-size targets (scale and stretch) cannot have a connector outside this catalog-derived neighbourhood.
         double reach = blueprint.assets().stream().filter(a -> a.snap() != null && a.snap().set().equals(definition.set()))
               .flatMap(a -> a.snap().connectors().stream()).mapToDouble(end -> Math.hypot(end.x(), end.y())).max().orElse(0)
-              * moving.scale() * Math.max(moving.stretch().x(), moving.stretch().y()) * 2 * HexTileset.HEX_W / HexTileset.HEX_H
-              + definition.radius();
-        int left = Math.max(0, (int) Math.floor((centreX - reach) / .75));
-        int right = Math.min(board.getWidth() - 1, (int) Math.ceil((centreX + reach) / .75));
-        int top = Math.max(0, (int) Math.floor(-centreY - reach - .5));
-        int bottom = Math.min(board.getHeight() - 1, (int) Math.ceil(-centreY + reach + .5));
+              * moving.scale() * Math.max(moving.stretch().x(), moving.stretch().y()) * 2 + definition.radius();
+        double across = reach / HexTile.MODEL_WIDTH, along = reach / HexTile.HEIGHT;
+        int left = Math.max(0, (int) Math.floor((centreX - across) / .75));
+        int right = Math.min(board.getWidth() - 1, (int) Math.ceil((centreX + across) / .75));
+        int top = Math.max(0, (int) Math.floor(-centreY - along - .5));
+        int bottom = Math.min(board.getHeight() - 1, (int) Math.ceil(-centreY + along + .5));
         double best = definition.radius() * definition.radius(), dx = 0, dy = 0;
         for (int col = left; col <= right; col++) {
             for (int row = top; row <= bottom; row++) {
@@ -52,7 +52,7 @@ public final class BoardEditorSnapping {
                             if (angle > Math.min(definition.angleTolerance(), targetDefinition.angleTolerance())
                                   || !Double.isFinite(from.z()) || !Double.isFinite(to.z()) || Math.abs(from.z() - to.z()) > .02) { continue; }
                             double x = to.x() - from.x(), y = to.y() - from.y();
-                            double distance = x * x + Math.pow(y * HexTileset.HEX_H / HexTileset.HEX_W, 2);
+                            double distance = Math.pow(x * HexTile.MODEL_WIDTH, 2) + Math.pow(y * HexTile.HEIGHT, 2);
                             if (distance < best && distance <= targetDefinition.radius() * targetDefinition.radius()) {
                                 double q = owner.toCube().q() + (moving.x() + x) / .75;
                                 double r = owner.toCube().r() - moving.y() - y - (moving.x() + x) / 1.5;
@@ -67,10 +67,10 @@ public final class BoardEditorSnapping {
         return moving.transform(moving.x() + dx, moving.y() + dy, moving.rotation(), moving.mirror(), moving.scale(), moving.placement());
     }
 
-    /** Board-global east of an owner-relative offset, in hex widths; metric space scales it by {@code HEX_W}. */
+    /** Board-global east of an owner-relative offset, in hex widths; metric space scales it by the board's hex width. */
     static double globalX(Coords owner, double x) { return owner.getX() * .75 + x; }
 
-    /** Board-global north of an owner-relative offset, in hex heights; metric space scales it by {@code HEX_H}. */
+    /** Board-global north of an owner-relative offset, in hex heights; metric space scales it by the hex height. */
     static double globalY(Coords owner, double y) { return -owner.getY() - (owner.getX() & 1) * .5 + y; }
 
     private static boolean tilted(BoardDecoration object) {
@@ -82,10 +82,10 @@ public final class BoardEditorSnapping {
         double radians = Math.toRadians(object.rotation()), cos = Math.cos(radians), sin = Math.sin(radians);
         double base = height(board, owner, object);
         return definition.connectors().stream().map(end -> {
-            double x = end.x() * HexTileset.HEX_W * object.scale() * object.stretch().x() * (object.mirror() ? -1 : 1);
-            double y = end.y() * HexTileset.HEX_H * object.scale() * object.stretch().y();
-            return new End(globalX(owner, object.x()) + (x * cos - y * sin) / HexTileset.HEX_W,
-                  globalY(owner, object.y()) + (x * sin + y * cos) / HexTileset.HEX_H,
+            double x = end.x() * object.scale() * object.stretch().x() * (object.mirror() ? -1 : 1);
+            double y = end.y() * object.scale() * object.stretch().y();
+            return new End(globalX(owner, object.x()) + (x * cos - y * sin) / HexTile.MODEL_WIDTH,
+                  globalY(owner, object.y()) + (x * sin + y * cos) / HexTile.HEIGHT,
                   base + end.z() * object.scale() * object.stretch().z(), object.rotation() + (object.mirror() ? 180 - end.heading() : end.heading()));
         }).toList();
     }

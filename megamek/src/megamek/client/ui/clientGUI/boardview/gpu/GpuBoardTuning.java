@@ -123,6 +123,7 @@ final class GpuBoardTuning {
     private final SelectBox<String> antiAliasing;
     private final CheckBox specularAntialiasing;
     private final CheckBox ambientOcclusion;
+    private final CheckBox depthCues;
     /** The graphics card rows; null on computers without two cards to choose from. */
     private SelectBox<GpuGraphicsCard> graphicsCard;
     private Label cardInUse;
@@ -318,6 +319,19 @@ final class GpuBoardTuning {
             public void changed(ChangeEvent event, Actor actor) {
                 boolean enabled = ambientOcclusion.isChecked();
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAmbientOcclusion(enabled));
+            }
+        });
+        depthCues = checkbox(skin, "Depth cues", "tuning-depth-cues");
+        // The saved choice (off until one is saved); like anti-aliasing, Defaults leaves it alone.
+        depthCues.setChecked(GUIPreferences.getInstance().getBoardDepthCues());
+        depthCues.addListener(new TextTooltip("Separates nearer terrain from farther terrain without fog: a light"
+              + " haze over what lies behind the middle of the view, following the camera. The Tactical View keeps"
+              + " clear air. The choice is saved for the next session.", skin, "menu"));
+        depthCues.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = depthCues.isChecked();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardDepthCues(enabled));
             }
         });
         Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
@@ -1061,6 +1075,11 @@ final class GpuBoardTuning {
     /** Screen-space ambient occlusion on the opaque scene (GpuAmbientOcclusion). */
     boolean ambientOcclusion() {
         return ambientOcclusion.isChecked();
+    }
+
+    /** The haze that separates nearer surfaces from farther ones (GpuDepthCues). */
+    boolean depthCues() {
+        return depthCues.isChecked();
     }
 
     /** The window's physical size, after a resize: the render resolution shows the scene size it gives. */

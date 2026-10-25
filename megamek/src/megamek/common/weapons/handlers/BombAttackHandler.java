@@ -37,12 +37,15 @@ package megamek.common.weapons.handlers;
 import java.io.Serial;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Vector;
 
+import megamek.common.Hex;
 import megamek.common.HexTarget;
 import megamek.common.Messages;
 import megamek.common.Player;
 import megamek.common.Report;
+import megamek.common.ResolvedAttack;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.SpecialHexDisplay.Type;
 import megamek.common.TagInfo;
@@ -54,6 +57,7 @@ import megamek.common.compute.scatter.Scatter;
 import megamek.common.compute.scatter.ScatterMethod;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.HitDamageType;
+import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.BombLoadout;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponType;
@@ -67,6 +71,7 @@ import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.IBomber;
 import megamek.common.units.Targetable;
+import megamek.common.weapons.ArtilleryHandlerHelper;
 import megamek.server.totalWarfare.TWGameManager;
 
 /**
@@ -76,6 +81,8 @@ import megamek.server.totalWarfare.TWGameManager;
 public class BombAttackHandler extends WeaponHandler {
     @Serial
     private static final long serialVersionUID = -2997052348538688888L;
+    /** The density of the minefield a Thunder bomb lays in the hex it lands in and each hex around it. */
+    private static final int THUNDER_DENSITY = 20;
 
     /**
      *
@@ -305,9 +312,10 @@ public class BombAttackHandler extends WeaponHandler {
                         bombMsg = "Bomb missed!  Round " + game.getRoundCount()
                               + ", by " + ((player != null) ? player.getName() : "somebody") + ", drifted to "
                               + drop.getBoardNum();
-                        game.getBoard(target).addSpecialHexDisplay(coords,
-                              new SpecialHexDisplay(Type.BOMB_MISS, game.getRoundCount(),
-                                    player, bombMsg));
+                        SpecialHexDisplay missMarker = new SpecialHexDisplay(Type.BOMB_MISS, game.getRoundCount(),
+                              player, bombMsg);
+                        missMarker.setDriftHex(drop);
+                        game.getBoard(target).addSpecialHexDisplay(coords, missMarker);
                     } else {
                         // misses and scatters off-board
                         report = new Report(6699);
@@ -319,12 +327,16 @@ public class BombAttackHandler extends WeaponHandler {
                         bombMsg = "Bomb missed!  Round " + game.getRoundCount()
                               + ", by " + ((player != null) ? player.getName() : "somebody")
                               + ", drifted off the board";
-                        game.getBoard(target).addSpecialHexDisplay(coords,
-                              new SpecialHexDisplay(Type.BOMB_MISS, game.getRoundCount(),
-                                    player, bombMsg));
+                        SpecialHexDisplay missMarker = new SpecialHexDisplay(Type.BOMB_MISS, game.getRoundCount(),
+                              player, bombMsg);
+                        // The drift line points to the board edge the bomb crossed.
+                        missMarker.setDriftHex(ArtilleryHandlerHelper.nearestOnBoardHexTowardOffBoard(
+                              game.getBoard(target), coords, drop));
+                        game.getBoard(target).addSpecialHexDisplay(coords, missMarker);
                         continue;
                     }
                 }
+                reportBombLanding(type, drop);
                 // Capture drop hex info
                 HexTarget dropHex = new HexTarget(drop, target.getBoardId(), target.getTargetType());
                 dropHex.setTargetLevel(((HexTarget) target).getTargetLevel());
@@ -335,13 +347,13 @@ public class BombAttackHandler extends WeaponHandler {
                 } else if (type == BombTypeEnum.THUNDER) {
                     gameManager.deliverThunderMinefield(drop,
                           attackingEntity.getOwner().getId(),
-                          20,
+                          THUNDER_DENSITY,
                           attackingEntity.getId());
                     List<Coords> hexes = drop.allAdjacent();
                     for (Coords c : hexes) {
                         gameManager.deliverThunderMinefield(c,
                               attackingEntity.getOwner().getId(),
-                              20,
+                              THUNDER_DENSITY,
                               attackingEntity.getId());
                     }
                 } else {
@@ -368,6 +380,31 @@ public class BombAttackHandler extends WeaponHandler {
         }
 
         return false;
+    }
+
+    /**
+     * Shows a bomb of {@code type} coming down at {@code landing}: its blast, bomblets, mines or fire there, from the
+     * dropped bomb's mount. The shot names what the bomb carries; a Thunder bomb's rack size is the density of its
+     * minefield, as a FASCAM round's is.
+     */
+    private void reportBombLanding(BombTypeEnum type, Coords landing) {
+        Mounted<?> bomb = attackingEntity.getBombs().stream()
+              .filter(mounted -> ((BombType) mounted.getType()).getBombType() == type).findFirst().orElse(null);
+        if (bomb == null) {
+            return;
+        }
+        Set<String> munitions = switch (type) {
+            case CLUSTER -> Set.of(AmmoType.Munitions.M_CLUSTER.name());
+            case FAE_SMALL, FAE_LARGE -> Set.of(AmmoType.Munitions.M_FAE.name());
+            case THUNDER -> Set.of(AmmoType.Munitions.M_FASCAM.name());
+            case INFERNO -> Set.of(AmmoType.Munitions.M_INFERNO.name());
+            default -> Set.of();
+        };
+        var shot = new ResolvedAttack.Shot("", munitions, true, false, 1, 0, true, null, null, null, false,
+              (type == BombTypeEnum.THUNDER) ? THUNDER_DENSITY : 0, false, false, false, null,
+              ((BombType) bomb.getType()).getDamagePerShot());
+        Hex hex = game.getBoard(target).getHex(landing);
+        reportBombLanding(bomb, shot, landing, (hex == null) ? 0 : hex.getLevel());
     }
 
     /**

@@ -41,7 +41,6 @@ import java.awt.RenderingHints;
 import java.awt.Stroke;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
@@ -78,11 +77,6 @@ public class SawClearingSprite extends HexSprite {
     public SawClearingSprite(BoardGlyphContext boardView, Coords loc, int turnsRemaining) {
         super(boardView, loc);
         this.turnsRemaining = turnsRemaining;
-    }
-
-    @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.SAW_CLEARING, loc, Integer.toString(turnsRemaining));
     }
 
     @Override

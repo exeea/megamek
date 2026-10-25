@@ -12,9 +12,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.SensorRangeSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.common.Hex;
 import megamek.common.HexTarget;
 import megamek.common.RangeType;
@@ -99,9 +98,6 @@ class GpuFiringCaptureTest {
                 fixture.source.refresh();
                 BoardScene cleared = fixture.source.takeFrame().scene();
                 assertTrue(cleared.firingLines().isEmpty());
-                assertEquals(scene.tiles().stream().map(BoardScene.Tile::tactical).toList(),
-                      cleared.tiles().stream().map(BoardScene.Tile::tactical).toList(),
-                      "Attack arrows must never be baked into per-hex ground markings");
                 // An already published scene remains immutable when orders are cleared on Swing.
                 assertEquals(2, scene.firingLines().size());
             });
@@ -109,7 +105,7 @@ class GpuFiringCaptureTest {
     }
 
     @Test
-    void splitFireKeepsTargetIdentityWhenUnitsShareAHexAndHiddenAttacksAreRemoved() throws Exception {
+    void splitFireKeepsTargetIdentityWhenUnitsShareAHexAndRemovedAttacksGo() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board())) {
             SwingUtilities.invokeAndWait(() -> {
                 attacks(fixture);
@@ -134,11 +130,12 @@ class GpuFiringCaptureTest {
                       .map(BoardScene.FiringLine::targetKey).toList());
                 assertEquals(3, lines.stream().filter(line -> line.attackerId() == fixture.entity.getId()).count(),
                       "Repeated weapons from the same attacker still share a trace");
-                fixture.view.getAttackSprites().stream().filter(sprite -> sprite.getTargetedEntity().getId() == 42)
-                      .forEach(sprite -> sprite.setHidden(true));
+                fixture.view.removeAttacksFor(fixture.game.getEntity(45));
                 fixture.source.refresh();
-                assertEquals(List.of(TargetKey.unit(43)), fixture.source.takeFrame().scene().firingLines().stream()
-                      .map(BoardScene.FiringLine::targetKey).toList());
+                var remaining = fixture.source.takeFrame().scene().firingLines();
+                assertEquals(3, remaining.size());
+                assertTrue(remaining.stream().allMatch(line -> line.attackerId() == fixture.entity.getId()),
+                      "A removed attacker's lines go with it");
             });
         }
     }
@@ -178,49 +175,40 @@ class GpuFiringCaptureTest {
             SwingUtilities.invokeAndWait(() -> {
                 BoardScene before = fixture.source.takeFrame().scene();
                 Coords weaponHex = new Coords(2, 2), sensorHex = new Coords(6, 2), objectiveHex = new Coords(6, 6);
-                FieldOfFireSprite weapon = new FieldOfFireSprite(fixture.view, RangeType.RANGE_SHORT, weaponHex, 63);
-                var label = new TextMarkerSprite(fixture.view, weaponHex, RangeType.RANGE_SHORT);
-                var sensor = new SensorRangeSprite(fixture.view, SensorRangeSprite.SENSORS, sensorHex, 63);
-                var objective = new FieldOfFireSprite(fixture.view, Color.CYAN, objectiveHex, 63);
-                fixture.view.addSprites(List.of(weapon, sensor, objective));
+                var weapon = new TacticalMark.WeaponRange(weaponHex, 63, RangeType.RANGE_SHORT);
+                var label = new TacticalMark.RangeLabel(weaponHex, RangeType.RANGE_SHORT);
+                var sensor = new TacticalMark.SensorRange(sensorHex, 63, TacticalStyle.SENSORS);
+                var objective = new TacticalMark.ControlZone(objectiveHex, 63, Color.CYAN);
+                fixture.view.addMarks(List.of(weapon, sensor, objective));
                 fixture.source.refresh();
                 BoardScene scene = fixture.source.takeFrame().scene();
                 assertEquals(1, scene.rangeBorders().size());
                 assertEquals(63, scene.rangeBorders().getFirst().edges());
                 assertEquals(weaponHex, scene.rangeBorders().getFirst().coords());
                 assertEquals("S", scene.rangeBorders().getFirst().label());
-                assertEquals(before.tile(weaponHex).tactical(), scene.tile(weaponHex).tactical());
-                assertEquals(before.tile(sensorHex).tactical(), scene.tile(sensorHex).tactical());
-                assertEquals(before.tile(objectiveHex).tactical(), scene.tile(objectiveHex).tactical());
                 assertFalse(scene.tactical().fills().isEmpty(), "Sensor and objective borders must survive as native geometry");
-                fixture.view.addSprites(List.of(label));
+                fixture.view.addMarks(List.of(label));
                 fixture.source.refresh();
                 BoardScene withLabel = fixture.source.takeFrame().scene();
-                assertEquals(before.tile(weaponHex).tactical(), withLabel.tile(weaponHex).tactical(),
-                      "Camera-facing lettering must not also be baked into the terrain");
                 assertEquals(scene.tactical(), withLabel.tactical());
                 assertEquals(megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS ? List.of() : List.of(
                       new BoardScene.RangeLabel(weaponHex,
-                            FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_SHORT).getRGB(), "S")),
+                            TacticalStyle.rangeColor(RangeType.RANGE_SHORT).getRGB(), "S")),
                       withLabel.rangeLabels());
                 assertEquals(withLabel.rangeLabels(), withLabel.withUnits(List.of()).rangeLabels(),
                       "Playback must retain the range lettering");
                 assertEquals(withLabel.tactical(), withLabel.withUnits(List.of()).tactical());
                 Coords neighbor = weaponHex.translated(0);
-                assertEquals(scene.tile(neighbor).tactical(), withLabel.tile(neighbor).tactical(),
-                      "The flat marker must stay in the handler's original hex");
-                weapon.setHidden(true);
-                label.setHidden(true);
+                fixture.view.removeMarks(List.of(weapon, label));
                 fixture.source.refresh();
                 assertTrue(fixture.source.takeFrame().scene().rangeBorders().isEmpty());
                 assertTrue(fixture.source.takeFrame().scene().rangeLabels().isEmpty());
                 assertEquals(megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS ? 0 : 1, withLabel.rangeLabels().size(),
-                      "Hiding the Swing sprite must not mutate an already published snapshot");
-                fixture.view.removeSprites(List.of(weapon, label, sensor, objective));
+                      "Removing a mark must not mutate an already published snapshot");
+                fixture.view.removeMarks(List.of(sensor, objective));
                 fixture.source.refresh();
                 assertTrue(fixture.source.takeFrame().scene().rangeBorders().isEmpty());
                 assertTrue(fixture.source.takeFrame().scene().rangeLabels().isEmpty());
-                assertEquals(before.tile(weaponHex).tactical(), fixture.source.takeFrame().scene().tile(weaponHex).tactical());
             });
         }
     }
@@ -232,14 +220,14 @@ class GpuFiringCaptureTest {
                 List<String> labels = List.of("min", "S", "M", "L", "E");
                 for (int bracket = RangeType.RANGE_MINIMUM; bracket <= RangeType.RANGE_EXTREME; bracket++) {
                     Coords coords = new Coords(bracket + 1, 2);
-                    var border = new FieldOfFireSprite(fixture.view, bracket, coords, 63);
-                    var marker = new TextMarkerSprite(fixture.view, coords, bracket);
-                    fixture.view.addSprites(List.of(border, marker));
+                    var border = new TacticalMark.WeaponRange(coords, 63, bracket);
+                    var marker = new TacticalMark.RangeLabel(coords, bracket);
+                    fixture.view.addMarks(List.of(border, marker));
                     fixture.source.refresh();
                     var captured = fixture.source.takeFrame().scene().rangeBorders().stream()
                           .filter(range -> range.coords().equals(coords)).findFirst().orElseThrow();
                     assertEquals(labels.get(bracket), captured.label());
-                    int rgb = FieldOfFireSprite.getFieldOfFireColor(bracket).getRGB();
+                    int rgb = TacticalStyle.rangeColor(bracket).getRGB();
                     assertEquals(rgb, captured.rgb(), "Native contours must use the shared range color");
                     if (!megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS) {
                         var label = fixture.source.takeFrame().scene().rangeLabels().stream()
@@ -247,17 +235,17 @@ class GpuFiringCaptureTest {
                         assertEquals(captured.label(), label.label());
                         assertEquals(rgb, label.rgb(), "Flat letters and contours must use the same color");
                     }
-                    border.setHidden(true);
+                    fixture.view.removeMarks(List.of(border));
                     fixture.source.refresh();
                     assertTrue(fixture.source.takeFrame().scene().rangeBorders().isEmpty());
-                    fixture.view.removeSprites(List.of(border, marker));
+                    fixture.view.removeMarks(List.of(marker));
                 }
                 Coords coords = new Coords(2, 2);
                 BoardScene before = fixture.source.takeFrame().scene();
-                fixture.view.addSprites(List.of(new TextMarkerSprite(fixture.view, coords, "X", Color.CYAN)));
+                fixture.view.addMarks(List.of(new TacticalMark.HexText(coords, "X", Color.CYAN)));
                 fixture.source.refresh();
-                assertFalse(java.util.Objects.equals(before.tile(coords).tactical(),
-                      fixture.source.takeFrame().scene().tile(coords).tactical()));
+                BoardScene after = fixture.source.takeFrame().scene();
+                assertTrue(after.tactical().fills().size() > before.tactical().fills().size());
             });
         }
     }

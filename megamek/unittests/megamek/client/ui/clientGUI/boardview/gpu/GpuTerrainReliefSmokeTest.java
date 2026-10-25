@@ -136,7 +136,7 @@ class GpuTerrainReliefSmokeTest {
 
     private static void frame(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
         outputFrame.begin(.2f, .26f, .31f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         outputFrame.display();
     }
@@ -261,7 +261,7 @@ class GpuTerrainReliefSmokeTest {
 
     private static BoardScene coverScene(BoardScene.Pixels pixels, BoardScene.Pixels tactical, int elevation) {
         var tile = new BoardScene.Tile(new Coords(0, 0), elevation, -1, false, 0, BoardScene.Surface.GRASS, pixels,
-              null, null, null, tactical, List.of(), List.of(), BoardLiquid.NONE, null, true);
+              null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true);
         return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
     }
 
@@ -279,7 +279,7 @@ class GpuTerrainReliefSmokeTest {
                 if (water) { level = 0; }
                 int depth = water ? x >= 7 ? 2 : 1 : -1;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, pixels,
-                      null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                      null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

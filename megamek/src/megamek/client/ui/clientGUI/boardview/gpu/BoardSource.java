@@ -213,6 +213,8 @@ interface BoardSource extends AutoCloseable {
     default void editorHover(Coords coords, double x, double y, String receiver) { }
     /** The editor's preview of that event (GpuEditorPreview), published with the frame; none outside the editor. */
     default GpuEditorPreview.Data editorPreview() { return GpuEditorPreview.Data.NONE; }
+    /** A game's work in progress as ghosts of what it builds (GpuEditorPreview#work), published with the frame. */
+    default GpuEditorPreview.Data workGhosts() { return GpuEditorPreview.Data.NONE; }
 
     default void editPlanetaryConditions(Consumer<BoardAtmosphere.Settings> completed) { atmosphere().edit(completed); }
     default BoardAtmosphere.Settings atmosphereFor(PlanetaryConditions conditions, boolean inSpace) {

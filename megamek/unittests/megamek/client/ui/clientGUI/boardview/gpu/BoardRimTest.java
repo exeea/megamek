@@ -241,7 +241,7 @@ class BoardRimTest {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(low) ? neighborElevation : 2, -1, false,
                       road && coords.equals(CENTER) ? 1 << direction : 0, BoardScene.Surface.GRASS,
-                      color, normal, null, null, List.of(), List.of()));
+                      color, normal, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -253,7 +253,7 @@ class BoardRimTest {
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
         tiles.set(CENTER.getX() * scene.height() + CENTER.getY(), new BoardScene.Tile(t.coords(), t.elevation(),
               t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(), t.normals(), t.decals(),
-              t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
+              t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
               t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), 1 << direction));
         return scene.withTiles(tiles);
     }

@@ -34,6 +34,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.FortifyBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -76,11 +77,9 @@ public class FortifyBuildSpriteHandler extends BoardViewSpriteHandler {
             BoardLocation location = BoardLocation.of(entity.getPosition(), entity.getBoardId());
             BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView != null) {
-                currentSprites.add(new FortifyBuildSprite(boardView, entity.getPosition(),
-                      stage, fortifyTotalStagesOf(entity)));
+                addMark(boardView, new TacticalMark.Fortify(entity.getPosition(), stage, fortifyTotalStagesOf(entity)));
             }
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     /**

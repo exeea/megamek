@@ -18,6 +18,9 @@ uniform vec3 u_finishGlow[FINISH_COUNT];     // emission without a map
 // Each sculpted surface's heightmap parallax (terrain-materials.glsl, relievedProjection): its depth along U and V in
 // repeats (Godot's heightmap_scale / 100, negative where it flips the tangent or binormal), 0 without a heightmap.
 uniform vec2 u_finishRelief[ROAD_FINISH];
+// Each sculpted surface where distance flattens its maps (terrain-materials.glsl, distantLayer): its normal/AO layer's
+// mean occlusion and the length of its mean tangent normal, read once from the layer's smallest mip at load.
+uniform vec2 u_finishDistant[ROAD_FINISH];
 
 // A material's finish without its maps: the uniform values (or the map's means) and the constant glow.
 Finish meanFinish(int material) { return finishOf(u_finishSurface[material].rgb, u_finishGlow[material]); }

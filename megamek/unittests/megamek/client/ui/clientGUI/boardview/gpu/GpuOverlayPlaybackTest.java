@@ -8,14 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
-import java.awt.Point;
 import java.util.List;
 import java.util.function.Consumer;
 
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
@@ -142,7 +140,7 @@ class GpuOverlayPlaybackTest {
             for (var timing : List.of(BoardTactical.Playback.HIDE_DURING_MOVEMENT,
                   BoardTactical.Playback.HOLD_DURING_PLAYBACK, BoardTactical.Playback.LIVE)) {
                 BoardTacticalGraphics.draw(graphics, timing, layer -> {
-                    Graphics2D local = BoardTacticalGraphics.at(layer, new Point(0, 0));
+                    Graphics2D local = BoardTacticalGraphics.at(layer, coords);
                     try {
                         local.setColor(new Color(version.hashCode() & 0xFFFFFF));
                         local.fillRect(0, 0, 20, 20);

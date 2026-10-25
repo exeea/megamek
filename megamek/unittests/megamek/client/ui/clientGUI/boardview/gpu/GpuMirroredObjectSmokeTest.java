@@ -107,7 +107,7 @@ class GpuMirroredObjectSmokeTest {
                             profiler.enable();
                             profiler.reset();
                             ScreenUtils.clear(0, 0, 0, 1, true);
-                            terrain.render(camera.camera, false);
+                            terrain.render(camera.camera);
                             draws.put(entry.getKey(), profiler.getDrawCalls());
                             profiler.disable();
                             for (var at : List.of(BARRIER, CAR, CORAL)) {

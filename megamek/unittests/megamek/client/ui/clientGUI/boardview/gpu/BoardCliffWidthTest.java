@@ -53,7 +53,7 @@ class BoardCliffWidthTest {
                         for (int y = 0; y < 7; y++) {
                             Coords at = new Coords(x, y);
                             tiles.add(new BoardScene.Tile(at, at.equals(start) || at.equals(end) ? 8 : 0, -1,
-                                  false, 0, family, null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                                  false, 0, family, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
                         }
                     }
                     var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

@@ -170,7 +170,7 @@ class GpuModularBuildingSmokeTest {
             if (type != Terrains.INDUSTRIAL) {
                 hex.addTerrain(new Terrain(type == Terrains.BUILDING ? Terrains.BLDG_ELEV : Terrains.FUEL_TANK_ELEV, levels));
             }
-            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(), null, null, null, null,
+            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(), null, null, null,
                   levels == 0 ? List.of() : BoardFeatures.capture(hex, coords, Map.of(type, asset)),
                   List.of(), BoardLiquid.NONE, null, true);
         });

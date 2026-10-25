@@ -68,9 +68,9 @@ class GpuMagmaSmokeTest {
             Path textures = root.resolve("models/board/textures");
             // The final repeat changes coverage to zero while retaining exactly the same emitted light.
             int alpha = index == 3 ? 0 : 255;
-            BoardMaterialFiles.relief(textures, "terrain/lava/lava", filled(0xff000000), filled(0xff8080ff),
+            BoardMaterialFiles.relief(textures, "terrain/lava/lava-flow", filled(0xff000000), filled(0xff8080ff),
                   filled(0x0080ccff));
-            BoardMaterialFiles.heat(textures, "terrain/lava/lava", filled((alpha << 24) | 0x004080c0),
+            BoardMaterialFiles.heat(textures, "terrain/lava/lava-flow", filled((alpha << 24) | 0x004080c0),
                   index == 3 ? 2 : index * 2);
             roots.add(root);
         }
@@ -260,7 +260,7 @@ class GpuMagmaSmokeTest {
                       pixelMetres = max(length(dFdx(world)), length(dFdy(world)));
                       farDetail = 0.0;
                       vec3 color = vec3(.2), normal = face, bounce = vec3(0.0);
-                      float cavity = 1.0, height = .5, grass = 0.0, sand = 0.0;
+                      float cavity = 1.0, relief = 1.0, height = .5, grass = 0.0, sand = 0.0;
                       float response = 0.0, rainCover = 0.0, volcanic;
                       Finish finish = Finish(.9, 0.0, 0.0, vec3(0.0));
                       vec4 weights;
@@ -268,7 +268,7 @@ class GpuMagmaSmokeTest {
                       float sediment = any(lessThan(abs(u_coverFamilies - 2.0), vec4(.5)))
                             && u_sculptFamily != 2.0 && world.x < 0.0 ? 1.0 : 0.0;
                       blendCovers(world, face, v_diffuseUV.x, v_diffuseUV.y, .6, .5, sediment, .4, .6, .5,
-                            color, normal, cavity, height, grass, sand, bounce, response, rainCover,
+                            color, normal, cavity, relief, height, grass, sand, bounce, response, rainCover,
                             finish, volcanic, weights);
                       int channel = int(gl_FragCoord.y) % 5;
                       if (channel == 0) fragColor = vec4(color, height);
@@ -1377,7 +1377,7 @@ class GpuMagmaSmokeTest {
             BoardLiquid liquid = x >= 5 && x <= 7 && y >= 1 && y <= 4
                   ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
             tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.ROCK,
-                  pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                  pixels, null, null, null, List.of(), List.of(), liquid, null, true));
         }
         var scene = new BoardScene(0, 9, 6, tiles, List.of(), List.of(), -1, "", List.of());
         assertTrue(BoardFlow.calculate(scene).isEmpty(), "An enclosed equal-level pool has no directed reach");
@@ -1533,7 +1533,7 @@ class GpuMagmaSmokeTest {
         BoardScene river = GpuRiverTerrainSmokeTest.scene(BoardScene.Surface.VOLCANO);
         return river.withTiles(river.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
-              tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
+              tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(),
               tile.liquid().present() ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : tile.liquid(),
               tile.tileset(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(), tile.impassable(),
               tile.blackIce(), tile.cliffTopExits(), tile.bare(), tile.groundCover(), tile.bridge(),
@@ -2077,7 +2077,7 @@ class GpuMagmaSmokeTest {
                       : BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
                 // A gentle grade at the back and a three-level spill in front exercise both forms of flow.
                 tiles.add(new BoardScene.Tile(new Coords(x, y), y < 2 ? 3 : y < 4 ? 2 : -1, -1, false, 0, BoardScene.Surface.ROCK,
-                      pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                      pixels, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }
         return new BoardScene(0, 9, 6, tiles, List.of(), List.of(), -1, "", List.of());

@@ -132,7 +132,7 @@ class GpuGrassFogSmokeTest {
                     atmosphere.prepareClouds(terrain, scene, 1f / 60);
                     timings.stage(names[mode] + ": scene");
                     atmosphere.begin(WIDTH, HEIGHT, 1f / 60);
-                    terrain.render(camera.camera, false);
+                    terrain.render(camera.camera);
                     terrain.renderTransparent(camera.camera);
                     timings.stage(names[mode] + ": fog and composite");
                     atmosphere.end(camera.camera, terrain, scene, 0);
@@ -154,7 +154,7 @@ class GpuGrassFogSmokeTest {
         terrain.renderShadows(camera.camera, List.of());
         atmosphere.prepareClouds(terrain, scene, 0);
         atmosphere.begin(WIDTH, HEIGHT, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         atmosphere.end(camera.camera, terrain, scene, 0);
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());

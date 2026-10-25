@@ -10,7 +10,7 @@ void main() {
     // Whole-section tints cover the owning hex's terrain, including cliffs that extend outside its footprint.
     // Leave a margin: perspective interpolation can round a constant width slightly below its stored value.
     if (v_border.y > u_board.z * 0.5) { fragColor = v_color; return; }
-    // HexDrawUtilities builds a regular hex, then scales Y to the board's 84 x 72 pixel lattice.
+    // A regular hex as wide as the board's tile, its Y scaled to the tile's height (1 on the regular board hex).
     float apothem = u_board.z * 0.4330127018922193;
     vec2 p = abs(vec2(v_local.x, v_local.y * apothem / (u_board.w * 0.5)));
     float inset = apothem - max(p.y, p.x * 0.8660254037844386 + p.y * 0.5);

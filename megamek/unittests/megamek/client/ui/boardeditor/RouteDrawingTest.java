@@ -146,7 +146,7 @@ class RouteDrawingTest {
                 session.pointer(start, 0, 0, false);
                 // Just inside the crossed hex's border towards the start.
                 float[] border = RailRoute.border((direction + 3) % 6);
-                double x = border[0] / HexTile.WIDTH * .7, y = border[1] / HexTile.HEIGHT * .7;
+                double x = border[0] / HexTile.MODEL_WIDTH * .7, y = border[1] / HexTile.HEIGHT * .7;
                 assertFalse(BoardEditorSession.core(x, y));
                 session.pointer(crossed, x, y, true);
                 session.pointer(end, 0, 0, true);
@@ -220,7 +220,7 @@ class RouteDrawingTest {
         Coords end = cells.getLast(), aside = end.translated(1);
         drag(session, cells);
         float[] border = RailRoute.border(1);
-        double x = border[0] / HexTile.WIDTH * .5, y = border[1] / HexTile.HEIGHT * .5;
+        double x = border[0] / HexTile.MODEL_WIDTH * .5, y = border[1] / HexTile.HEIGHT * .5;
         assertTrue(BoardEditorSession.core(x, y), "Still in the core of " + end);
         session.pointer(end, x, y, true);
         var preview = session.preview(end, x, y, "ground");

@@ -38,7 +38,6 @@ import java.awt.Image;
 import java.awt.Rectangle;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
@@ -72,11 +71,6 @@ public class GroundObjectSprite extends HexSprite {
         bounds = new Rectangle(dim);
         bounds.setLocation(bv.getHexLocation(loc));
         return bounds;
-    }
-
-    @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.CARGO, loc, "");
     }
 
     @Override

@@ -11,20 +11,22 @@ import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
- * A missed artillery round on the 3D board: the hex it was aimed at carries a drift line to where it came down, which
- * the board overlay draws, and no standing symbol.
+ * A missed artillery round or bomb on the 3D board: the hex it was aimed at carries a drift line to where it came down,
+ * which the board overlay draws, and no standing symbol.
  */
 class GpuArtilleryDriftTest {
-    @Test
-    void aMissThatDriftedBecomesADriftLineFromItsAimedHex() throws Exception {
+    @ParameterizedTest
+    @EnumSource(value = SpecialHexDisplay.Type.class, names = { "ARTILLERY_MISS", "BOMB_MISS" })
+    void aMissThatDriftedBecomesADriftLineFromItsAimedHex(SpecialHexDisplay.Type type) throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords aimed = new Coords(8, 8);
             Coords landing = new Coords(8, 11);
             SwingUtilities.invokeAndWait(() -> {
-                var miss = new SpecialHexDisplay(SpecialHexDisplay.Type.ARTILLERY_MISS, fixture.game.getRoundCount(),
-                      fixture.player, "Artillery missed here");
+                var miss = new SpecialHexDisplay(type, fixture.game.getRoundCount(), fixture.player, "Missed here");
                 miss.setDriftHex(landing);
                 fixture.game.getBoard().addSpecialHexDisplay(aimed, miss);
                 fixture.source.refresh();

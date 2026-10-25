@@ -35,9 +35,21 @@ Sections: [1 Architecture](#1-architecture) · [2 Input](#2-input-routing) · [3
 
 ### 1.2 Board state: `BoardClientState`
 
-- Each board has one `BoardClientState` (`megamek.client.ui.clientGUI.boardview`). It holds the sprites, overlays,
-  selection, LOS and ruler, field of view, ECM, chat box, tooltips and every GPU capture (`capturePlanarTactical`,
-  `captureTacticalGeometry`, `captureFieldOfView`, `getBoardMarkers`).
+- Each board has one `BoardClientState` (`megamek.client.ui.clientGUI.boardview`). It holds the tactical marks,
+  overlays, selection, LOS and ruler, field of view, ECM, chat box, tooltips and every GPU capture
+  (`captureFieldOfView`, `getBoardMarkers`).
+- The marks are plain records (`TacticalMark`): envelopes, ranges, zones, route dots, steps, links, markers and the
+  like. Sprite handlers, dialogs and the movement display publish them (`addMarks`/`removeMarks`); the state makes the
+  path, C3, fly-over, vector and LOS marks itself. `BoardTacticalMarks` draws them on the 3D board's hexes, the state
+  makes the Legacy 2D sprites from them, and both boards share their look (`TacticalStyle`) and glyphs
+  (`TacticalGlyphs`).
+- In 3D, work under way shows as the board editor's blue ghosts of what it builds (`GpuEditorPreview.work`): a bridge
+  being built, a fortified hex's sandbags, a cleared rubble path, a trench being dug. A dug-in platoon's trench
+  (`scenery/military/trench`) is scenery of its hex in the scene (`BoardFeatures.withTrench`); no hex stores it.
+- Special hexes draw no pictures in 3D: markers are native icons, and artillery and bomb landings show as their blasts,
+  craters and drift lines. The server reports each dropped bomb's landing from the bomb's own mount, so the blast takes
+  its type's area and style (`GpuArtilleryBlast`). `HexDrawPlugin`s paint only the Legacy 2D board and the saved
+  board image.
 - `BoardView` is only the Legacy 2D renderer. `ClientGUI` builds it only while the Legacy 2D view is enabled; in GPU
   mode no `BoardView` exists.
 - `GpuBoardSource.currentView()` is the shown board's state. Every service reads it per call, so a board switch needs
@@ -489,7 +501,7 @@ Two board-space components are world meshes that `GpuBattleView` draws:
 
 **Region markings** The displayed weapon's range brackets are `GpuFireControl`'s continuous walls along the brackets'
 contours (`BoardFiringGeometry`) with the camera-facing S/M/L letters. 
-The visual range (`SensorRangeSprite`) and the deployment zones (`BoardDeploymentGeometry`) stand
+The visual range (`TacticalMark.SensorRange`) and the deployment zones (`BoardDeploymentGeometry`) stand
 upright through `BoardRangeBorder` in the tactical capture, which `GpuTactical` lays flat in the Tactical View.
 MegaMek's movement envelope, the sensor ranges and the zones lie flat on their hex's plane; `GpuTactical` depth-tests
 those markings two levels nearer (`PLANE_SEE_THROUGH_LEVELS`), so that the slopes and rocks inside their hex never

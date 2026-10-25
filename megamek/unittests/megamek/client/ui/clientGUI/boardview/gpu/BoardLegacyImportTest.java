@@ -146,7 +146,7 @@ class BoardLegacyImportTest {
         BoardDecoration bevel = roof.getDecorations().getFirst();
         assertEquals(1, roof.getDecorations().size());
         assertEquals("scenery/roofs/bevel", bevel.asset());
-        assertEquals(-19.486 / 84, bevel.x(), 1e-5);
+        assertEquals(-19.486 / BoardGeometry.TILE_WIDTH, bevel.x(), 1e-5);
         assertEquals(11.25 / 72, bevel.y(), 1e-5);
         assertEquals(-120, bevel.rotation(), 1e-4);
         assertNull(bevel.group(), "One object forms no group");
@@ -403,7 +403,7 @@ class BoardLegacyImportTest {
         var text = new ByteArrayOutputStream();
         BoardFile.write(board, text);
         Board reread = BoardFile.readNative(text.toString(StandardCharsets.UTF_8));
-        // The board's 84 x 72 hex puts the diagonal borders 0.26 degrees off the decals' 60-degree turns.
+        // The board's hex is regular to a 32nd: its diagonal borders lie a hair off the decals' 60-degree turns.
         double square = Math.sin(Math.toRadians(.5));
         for (int i = 0; i < terrain.length; i++) {
             Coords at = new Coords(1 + 2 * i, 1);

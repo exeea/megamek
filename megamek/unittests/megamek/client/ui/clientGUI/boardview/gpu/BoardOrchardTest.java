@@ -53,7 +53,8 @@ class BoardOrchardTest {
                 for (var tree : BoardTreeDistributionTest.capture(hex, coords, natural)) {
                     float x = BoardGeometry.centerX(coords) / BoardGeometry.hexScale() + tree.x();
                     float y = BoardGeometry.centerY(coords) / BoardGeometry.hexScale() + tree.y();
-                    assertEquals(0, Math.floorMod(Math.round(x), 21), "Columns share one planting grid");
+                    float column = x / (BoardGeometry.TILE_WIDTH / 4);
+                    assertEquals(Math.round(column), column, .01f, "Columns share one planting grid");
                     assertEquals(18, Math.floorMod(Math.round(y), 36), "Rows share one planting grid");
                 }
             }

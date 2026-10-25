@@ -29,7 +29,7 @@ class BoardRoadSpillTest {
             boolean wet = c.equals(AT.translated(2));
             int level = c.equals(AT.translated(1)) ? 1 : 0;
             return new BoardScene.Tile(c, level, wet ? 1 : -1, false, 9, BoardScene.Surface.GRASS,
-                  null, null, null, null, null, List.of(), List.of(), wet ? BoardLiquid.WATER : BoardLiquid.NONE,
+                  null, null, null, null, List.of(), List.of(), wet ? BoardLiquid.WATER : BoardLiquid.NONE,
                   null, !c.equals(AT.translated(3)), BoardRoad.Kind.PAVED);
         });
         var roads = BoardRoad.nearby(scene, scene.tile(AT));

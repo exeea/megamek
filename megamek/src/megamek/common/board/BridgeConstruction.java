@@ -233,18 +233,48 @@ public final class BridgeConstruction {
      */
     public static IBuilding placeBridge(Board board, Coords target, int exits, int bridgeType, int cf) {
         Hex targetHex = board.getHex(target);
-        int[] exitDirections = exitDirections(exits);
-        Hex firstBank = board.getHex(target.translated(exitDirections[0]));
-        Hex secondBank = board.getHex(target.translated(exitDirections[1]));
-
-        // The deck sits at the lowest anchoring bank (land, rim, or previous span) so units cross at grade and a
-        // chain of spans steps down the lower rim, spanning the water or canyon below. See bridgeDeckLevel().
-        int surfaceLevel = bridgeDeckLevel(firstBank, secondBank, targetHex);
+        int surfaceLevel = deckLevel(board, target, exits);
         IBuilding bridge = addBridgeStructure(board, target, targetHex, exits, bridgeType, cf, surfaceLevel);
         LOGGER.info("[BuildBridge] placed a type-{} bridge at {}: CF {}, elevation {}, exits bitmask {}, "
                     + "registered as structure", bridgeType, target, cf, Math.max(0, surfaceLevel - targetHex.getLevel()),
               exits & 63);
         return bridge;
+    }
+
+    /**
+     * The target hex as {@link #placeBridge} would leave it, without changing the board: a bridge not yet standing, as
+     * the 3D board shows it while it is built. Null unless {@code exits} names two hex sides with both banks on the
+     * board.
+     *
+     * @param board      the board the bridge is built on
+     * @param target     the hex the bridge is placed in
+     * @param exits      exits bitmask of the two hexsides the bridge connects
+     * @param bridgeType the bridge type as a {@link megamek.common.enums.BuildingType} value
+     *
+     * @return a copy of the target hex with the bridge, or null
+     */
+    public static @Nullable Hex bridgedHex(Board board, Coords target, int exits, int bridgeType) {
+        if (Integer.bitCount(exits & 63) != 2) {
+            return null;
+        }
+        int[] exitDirections = exitDirections(exits);
+        if (!board.contains(target) || !board.contains(target.translated(exitDirections[0]))
+              || !board.contains(target.translated(exitDirections[1]))) {
+            return null;
+        }
+        Hex result = board.getHex(target).duplicate();
+        addBridgeTerrain(result, exits, bridgeType, 0, deckLevel(board, target, exits));
+        return result;
+    }
+
+    /**
+     * The deck sits at the lowest anchoring bank (land, rim, or previous span) so units cross at grade and a chain of
+     * spans steps down the lower rim, spanning the water or canyon below. See bridgeDeckLevel().
+     */
+    private static int deckLevel(Board board, Coords target, int exits) {
+        int[] exitDirections = exitDirections(exits);
+        return bridgeDeckLevel(board.getHex(target.translated(exitDirections[0])),
+              board.getHex(target.translated(exitDirections[1])), board.getHex(target));
     }
 
     /**
@@ -399,6 +429,15 @@ public final class BridgeConstruction {
      */
     private static IBuilding addBridgeStructure(Board board, Coords target, Hex targetHex, int exits, int bridgeType,
           int cf, int surfaceLevel) {
+        addBridgeTerrain(targetHex, exits, bridgeType, cf, surfaceLevel);
+        board.initializeAround(target.getX(), target.getY());
+
+        IBuilding bridge = new BuildingTerrain(target, board, Terrains.BRIDGE, BasementType.NONE);
+        board.addBuildingToBoard(bridge);
+        return bridge;
+    }
+
+    private static void addBridgeTerrain(Hex targetHex, int exits, int bridgeType, int cf, int surfaceLevel) {
         int bridgeElevation = Math.max(0, surfaceLevel - targetHex.getLevel());
         targetHex.addTerrain(new Terrain(Terrains.BRIDGE, bridgeType, true, exits & 63));
         targetHex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, bridgeElevation));
@@ -410,11 +449,6 @@ public final class BridgeConstruction {
             appearance.put("bridge", HexAppearance.BUILT_BRIDGE);
             targetHex.setAppearance(appearance);
         }
-        board.initializeAround(target.getX(), target.getY());
-
-        IBuilding bridge = new BuildingTerrain(target, board, Terrains.BRIDGE, BasementType.NONE);
-        board.addBuildingToBoard(bridge);
-        return bridge;
     }
 
     /**

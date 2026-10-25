@@ -37,7 +37,7 @@ class BoardRocksTest {
         for (int x = 0; x < LAYOUT[0].length(); x++) {
             for (int y = 0; y < LAYOUT.length; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), LAYOUT[y].charAt(x) - '0', -1, false, 0, family, null,
-                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, LAYOUT[0].length(), LAYOUT.length, tiles, List.of(), List.of(), -1, "", List.of());
@@ -80,7 +80,7 @@ class BoardRocksTest {
             for (int y = 0; y < 3; y++) {
                 boolean centre = x == 1 && y == 1;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), centre ? height : 0, wet ? 1 : -1, false, 0,
-                      family, null, null, null, null, null, centre ? List.of(rough) : List.of(), List.of(),
+                      family, null, null, null, null, centre ? List.of(rough) : List.of(), List.of(),
                       wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

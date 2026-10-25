@@ -232,7 +232,7 @@ class BoardFlowTest {
                 Coords coords = new Coords(x, y);
                 boolean wet = water.containsKey(coords);
                 tiles.add(new BoardScene.Tile(coords, water.getOrDefault(coords, 0), wet ? 1 : -1, frozen.contains(coords),
-                      0, BoardScene.Surface.ROCK, pixels, null, null, null, null, List.of(), List.of(),
+                      0, BoardScene.Surface.ROCK, pixels, null, null, null, List.of(), List.of(),
                       wet ? types.getOrDefault(coords, BoardLiquid.WATER) : BoardLiquid.NONE));
             }
         }

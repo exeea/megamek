@@ -77,7 +77,7 @@ class GpuFieldOfViewSurfaceSmokeTest {
                     update(scene, terrain, field, camera, preferences, generation, chunks);
                     ScreenUtils.clear(0, 0, 0, 1, true);
                     atmosphere.begin(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), 0);
-                    terrain.render(camera.camera, false);
+                    terrain.render(camera.camera);
                     atmosphere.end(camera.camera, terrain, scene, 0, field);
                     if (angle % 3 == 0) {
                         GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),

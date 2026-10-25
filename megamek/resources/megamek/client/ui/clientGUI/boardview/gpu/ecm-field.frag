@@ -122,7 +122,7 @@ void main() {
     vec4 colour = vec4(0.0);
 
     if (u_pulseTime >= 0.0 && self.open && self.count == 1) {
-        // Continuous cube distance on the 84 x 72 lattice: the front keeps the field's hexagon.
+        // Continuous cube distance on the board's hex lattice: the front keeps the field's hexagon.
         vec2 offset = world - u_pulseCentre;
         float q = offset.x / (0.75 * u_board.z);
         float r = -offset.y / u_board.w - q * 0.5;

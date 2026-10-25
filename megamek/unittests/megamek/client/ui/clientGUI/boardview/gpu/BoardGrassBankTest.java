@@ -177,7 +177,7 @@ class BoardGrassBankTest {
             var water = at.translated(0);
             var scene = BoardSurfaceBlendTest.scene(c -> c.equals(water)
                   ? new BoardScene.Tile(c, level, 1, level == 0, 0, BoardScene.Surface.GRASS, null, null,
-                        null, null, null, List.of(), List.of(), BoardLiquid.WATER, null, true)
+                        null, null, List.of(), List.of(), BoardLiquid.WATER, null, true)
                   : dry.tile(c));
             assertEquals(meadow, GpuGroundCover.plant(scene, scene.tile(at), support, null),
                   "A frozen shore or water at another elevation does not thin this meadow: " + level);
@@ -231,20 +231,25 @@ class BoardGrassBankTest {
         for (var family : new BoardScene.Surface[] { BoardScene.Surface.GRASS, BoardScene.Surface.DIRT, BoardScene.Surface.SAND }) {
             for (int levels : new int[] { 1, 2, 4 }) {
                 var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family, c.getX() < 4 ? levels : 0, -1, 0));
-                var tile = scene.tile(new Coords(3, 4));
-                var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-                var turf = GpuBankTurf.plant(scene, tile, surface, null);
-                if (family != BoardScene.Surface.GRASS || levels != 2) { assertNull(turf); continue; }
-                assertNotNull(turf);
+                // A hex's clumps draw their silhouettes at random: along the bank, over three hexes, all six take part.
                 var variants = new HashSet<Integer>();
-                for (int clump = 0; clump < turf.size; clump += 48 * GpuBankTurf.STRIDE) {
-                    float u = 1, v = 1;
-                    for (int at = clump; at < clump + 48 * GpuBankTurf.STRIDE; at += GpuBankTurf.STRIDE) {
-                        u = Math.min(u, turf.get(at + 7)); v = Math.min(v, turf.get(at + 8));
+                for (int row = 3; row <= 5; row++) {
+                    var tile = scene.tile(new Coords(3, row));
+                    var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
+                    var turf = GpuBankTurf.plant(scene, tile, surface, null);
+                    if (family != BoardScene.Surface.GRASS || levels != 2) { assertNull(turf); continue; }
+                    assertNotNull(turf);
+                    for (int clump = 0; clump < turf.size; clump += 48 * GpuBankTurf.STRIDE) {
+                        float u = 1, v = 1;
+                        for (int at = clump; at < clump + 48 * GpuBankTurf.STRIDE; at += GpuBankTurf.STRIDE) {
+                            u = Math.min(u, turf.get(at + 7)); v = Math.min(v, turf.get(at + 8));
+                        }
+                        variants.add(Math.round(u * 3) + 3 * Math.round(v * 2));
                     }
-                    variants.add(Math.round(u * 3) + 3 * Math.round(v * 2));
                 }
-                assertEquals(6, variants.size(), "All six atlas silhouettes participate");
+                if (family == BoardScene.Surface.GRASS && levels == 2) {
+                    assertEquals(6, variants.size(), "All six atlas silhouettes participate");
+                }
             }
         }
         var wet = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
@@ -261,7 +266,7 @@ class BoardGrassBankTest {
             var scene = BoardSurfaceBlendTest.scene(c -> {
                 var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 4 ? 2 : 0, -1, 0);
                 return new BoardScene.Tile(c, tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
+                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
                       tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(),
                       tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare(), cover);
             });

@@ -39,8 +39,8 @@ import megamek.common.board.Coords;
 import megamek.common.game.Game;
 
 /**
- * Per-hex tactical painters belong to shared board presentation. Legacy 2D drawing, native raster capture and printable
- * export invoke the same painters; they do not require a Legacy 2D viewport.
+ * Per-hex tactical painters belong to shared board presentation. Legacy 2D drawing and printable export invoke the same
+ * painters; they do not require a Legacy 2D viewport.
  * <p>
  * Note that at the moment, these plugins will always draw last, i.e. above everything else that gets drawn to the image
  * cache. As sprites get drawn separately, they will draw above plugins.

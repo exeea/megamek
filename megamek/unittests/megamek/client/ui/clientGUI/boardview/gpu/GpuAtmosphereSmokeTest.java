@@ -131,7 +131,7 @@ class GpuAtmosphereSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      x == 1 && y == 2 ? darkPixels : pixels, x % 2 == 0 ? normals : null, null, null,
+                      x == 1 && y == 2 ? darkPixels : pixels, x % 2 == 0 ? normals : null, null,
                       List.of(), List.of()));
             }
         }
@@ -342,7 +342,7 @@ class GpuAtmosphereSmokeTest {
         if (cloudOverride != null) { terrain.environment().set(cloudOverride); }
         ScreenUtils.clear(0, 0, 0, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, delta);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         batch.begin(camera.camera);
         batch.render(units, terrain.environment());
         batch.end();
@@ -1130,7 +1130,7 @@ class GpuAtmosphereSmokeTest {
         draw(atmosphere, terrain, batch, tower, camera, scene, lunar);
         assertEquals(dryLunarGround, sample(camera, plain), "Airless conditions suppress rain and wet ground together");
         var snowTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0, -1, false, 0,
-              BoardScene.Surface.SNOW, tile.ground(), tile.normals(), null, null, List.of(), List.of())).toList();
+              BoardScene.Surface.SNOW, tile.ground(), tile.normals(), null, List.of(), List.of())).toList();
         var snow = new BoardScene(0, 7, 7, snowTiles, List.of(), List.of(), -1, "", List.of());
         terrain.update(snow);
         draw(atmosphere, terrain, batch, tower, camera, snow, BoardAtmosphere.DEFAULTS);
@@ -1138,7 +1138,7 @@ class GpuAtmosphereSmokeTest {
         drawScene(atmosphere, terrain, batch, List.of(tower), camera, snow, rain, null, 0);
         assertEquals(frozenGround, sample(camera, plain), "Snow artwork must not acquire a liquid-water sheen");
         var pavementTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0, -1, false, 0,
-              BoardScene.Surface.CONCRETE, tile.ground(), tile.normals(), null, null, List.of(), List.of())).toList();
+              BoardScene.Surface.CONCRETE, tile.ground(), tile.normals(), null, List.of(), List.of())).toList();
         var pavement = new BoardScene(0, 7, 7, pavementTiles, List.of(), List.of(), -1, "", List.of());
         terrain.update(pavement);
         Vector3 sun = atmosphere.lighting().direction().cpy().scl(-1);
@@ -1167,7 +1167,7 @@ class GpuAtmosphereSmokeTest {
         for (int x = 0; x < 64; x++) {
             for (int y = 0; y < 64; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      pixels, x % 2 == 0 ? normals : null, null, null, List.of(), List.of()));
+                      pixels, x % 2 == 0 ? normals : null, null, List.of(), List.of()));
                 if (x % 8 == 4 && y % 8 == 4) {
                     ModelInstance unit = new ModelInstance(tower.model);
                     unit.transform.setToTranslation(BoardGeometry.center(new Coords(x, y), 0).add(0, 0, 54));

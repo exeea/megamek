@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
-import java.awt.Point;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,7 +27,6 @@ import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -70,8 +68,10 @@ class GpuHexMasksSmokeTest {
             var graphics = new BoardTacticalGraphics();
             BoardTactical opaque;
             try {
-                graphics.setColor(new Color(73, 151, 227));
-                graphics.fillHexBorder(new Point(), 1, 1.5, 2.5, false);
+                var hex = BoardTacticalGraphics.at(graphics, new Coords(0, 0));
+                hex.setColor(new Color(73, 151, 227));
+                hex.fillHexBorder(1.5, 2.5);
+                hex.dispose();
                 opaque = graphics.snapshot();
             } finally { graphics.dispose(); }
             BoardScene single = scene(1, 1, opaque);
@@ -293,10 +293,11 @@ class GpuHexMasksSmokeTest {
             for (int layer = 0; layer < repetitions; layer++) {
                 for (int x = 0; x < width; x++) {
                     for (int y = 0; y < height; y++) {
-                        graphics.setColor(new Color(40 + (x * 23 + layer * 67) % 200,
+                        var hex = BoardTacticalGraphics.at(graphics, new Coords(x, y));
+                        hex.setColor(new Color(40 + (x * 23 + layer * 67) % 200,
                               35 + (y * 41 + layer * 53) % 210, 220 - layer * 35, layer == 0 && x % 3 == 0 ? 255 : 109));
-                        graphics.fillHexBorder(new Point(x * 63, y * 72 + (x & 1) * 36), 1,
-                              (x + y) % 3 + layer * .5, 1.5 + (x % 3), false);
+                        hex.fillHexBorder((x + y) % 3 + layer * .5, 1.5 + (x % 3));
+                        hex.dispose();
                     }
                 }
             }
@@ -319,7 +320,7 @@ class GpuHexMasksSmokeTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 7 && y == 1 ? raised : x == 2 ? 2 : 0, x == 4 ? 3 : -1,
-                      x == 4 && y == 1, 0, BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      x == 4 && y == 1, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of(), null,

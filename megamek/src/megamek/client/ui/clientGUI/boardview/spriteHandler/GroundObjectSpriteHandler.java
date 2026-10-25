@@ -43,10 +43,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.GroundObjectSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.HexFlagSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.Player;
 import megamek.common.actions.ScanAction;
 import megamek.common.board.Board;
@@ -104,17 +101,14 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
                 for (ICarryable groundObject : currentGroundObjectList.get(coords)) {
                     if ((groundObject instanceof ObjectiveMarker marker) && showOverlays) {
                         flagCount++;
-                        currentSprites.addAll(zoneOutlineSprites(boardView, game.getBoard(), coords,
-                              marker.getControlRadius(), marker));
+                        addMarks(boardView, zoneOutline(game.getBoard(), coords, marker.getControlRadius(), marker));
                     }
-                    currentSprites.add(spriteFor(groundObject, coords, boardView));
+                    addMark(boardView, markFor(groundObject, coords, boardView));
                 }
             }
         }
-
-        clientGUI.boardStates().getFirst().addSprites(currentSprites);
-        VICTORY_HEX_LOGGER.debug("[VictoryHex] Board shows {} ground object sprite(s), {} of them objective flag(s)",
-              currentSprites.size(), flagCount);
+        VICTORY_HEX_LOGGER.debug("[VictoryHex] Board shows {} ground object mark(s), {} of them objective flag(s)",
+              currentMarks.size(), flagCount);
     }
 
     /**
@@ -122,19 +116,18 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
      * edges facing hexes outside the zone are highlighted, so the zone's perimeter is drawn on the board without
      * filling it. A radius of 0 draws nothing - the flag itself already marks the single hex.
      *
-     * @param boardView the board view the sprites are displayed on
      * @param board     the game board, for the zone's edge at the board border; may be {@code null} pre-board
      * @param center    the objective's hex
      * @param radius    the control radius in hexes
      *
-     * @return the perimeter sprites of the zone, empty for radius 0
+     * @return the perimeter hexes of the zone, empty for radius 0
      */
-    private List<FieldOfFireSprite> zoneOutlineSprites(BoardClientState boardView, @Nullable Board board,
-          Coords center, int radius, ObjectiveMarker marker) {
+    private List<TacticalMark.ControlZone> zoneOutline(@Nullable Board board, Coords center, int radius,
+          ObjectiveMarker marker) {
         Color zoneColor = tracedControllerColor(marker);
-        List<FieldOfFireSprite> outlineSprites = new ArrayList<>();
+        List<TacticalMark.ControlZone> outline = new ArrayList<>();
         if ((radius <= 0) || (board == null) || (board.getWidth() == 0)) {
-            return outlineSprites;
+            return outline;
         }
         for (Coords zoneHex : center.allAtDistanceOrLess(radius)) {
             if (!board.contains(zoneHex)) {
@@ -149,20 +142,20 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
                 }
             }
             if (outsideEdges != 0) {
-                outlineSprites.add(new FieldOfFireSprite(boardView, zoneColor, zoneHex, outsideEdges));
+                outline.add(new TacticalMark.ControlZone(zoneHex, outsideEdges, zoneColor));
             }
         }
-        return outlineSprites;
+        return outline;
     }
 
     /**
-     * @param groundObject the ground object to create a sprite for
+     * @param groundObject the ground object to mark
      * @param coords       the hex the ground object is in
-     * @param boardView    the board view the sprite is displayed on
+     * @param boardView    the board state the mark is shown on
      *
-     * @return a flag in the owning player's color for an objective marker, otherwise the generic cargo sprite
+     * @return a flag in the owning player's color for an objective marker, otherwise the generic cargo mark
      */
-    private Sprite spriteFor(ICarryable groundObject, Coords coords, BoardClientState boardView) {
+    private TacticalMark markFor(ICarryable groundObject, Coords coords, BoardClientState boardView) {
         if (groundObject instanceof ObjectiveMarker marker) {
             boolean showOverlays = GUIP.getShowObjectiveOverlays();
             String schemeWord = showOverlays
@@ -177,9 +170,10 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
                 progress = Messages.getString("BoardView1.SCANNED");
             }
             // the banner shows the same colour as the zone: a point reads as one thing
-            return new HexFlagSprite(boardView, coords, tracedControllerColor(marker), schemeWord, progress);
+            return new TacticalMark.Flag(coords, tracedControllerColor(marker), schemeWord, progress,
+                  TacticalMark.Flag.NO_FACING);
         }
-        return new GroundObjectSprite(boardView, coords);
+        return new TacticalMark.Cargo(coords);
     }
 
     /**

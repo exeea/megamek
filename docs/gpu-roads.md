@@ -151,6 +151,27 @@ using their existing rail courses and the chosen trees' model footprints.
 Markings follow the main paved route through unmarked branches. Wheel wear follows
 the lane centres through bends, endings and material changes.
 
+### Paved wear
+
+A paved carriageway's core coat carries its traffic: its mask holds the wheel direction and where across its lane a point
+lies (`BoardRoad.wearLane`), and `terrain-road.frag#asphaltWear` shades the asphalt under the paint from them and from
+world-anchored fields:
+- Age: binder pales from black to grey over broad stretches.
+- Traffic: polished, darker wheel paths and ruts; an oil-drip line down each lane; grit along the kerbs and the middle.
+- Ravelling: loose aggregate between the wheel paths.
+- Cracks: an intermittent joint crack between the lanes, transverse thermal cracks, block cracking on old stretches
+  (sealed into black bands where the road is maintained), and fatigue cells in decayed wheel paths.
+- Bleeding: black binder in hot wheel paths.
+- Repairs: sealed cracks, rectangular patches and trenches with sealed saw cuts.
+- Damage: potholes down to the aggregate, skid marks and oil stains.
+
+Ruts, cracks and potholes fill first in rain. Markings flake and dull on weathered stretches. Across a junction's hub
+(`BoardRoad.wearHub`, carried in the length of the mask's heading) turning traffic wears the surface evenly, and
+the lane-bound and oriented marks (oil drip, kerb grit, joint and transverse cracks, skids) give way. Wear never
+lowers the roughness, so worn asphalt does not glint in the sun. The Weathering setting scales all of it; at zero, roads stay new. Features are
+placed per 8 m world cell and use the heading only symmetrically, so neighbouring hexes agree whichever way their paths
+run.
+
 ## Road and rail corridors
 
 A corridor exists only on reciprocal road/rail sides that share the same reachable

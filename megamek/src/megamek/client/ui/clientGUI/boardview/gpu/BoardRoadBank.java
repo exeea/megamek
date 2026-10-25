@@ -138,8 +138,10 @@ final class BoardRoadBank {
             float dx = (BoardGeometry.centerX(next.coords()) - BoardGeometry.centerX(poured.coords())) / scale;
             float dy = (BoardGeometry.centerY(next.coords()) - BoardGeometry.centerY(poured.coords())) / scale;
             for (int k = 0; k < 6; k++) {
-                float ex = HexTile.cornerOffsetX(k, HexTile.WIDTH) + HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH);
-                float ey = HexTile.cornerOffsetY(k, HexTile.HEIGHT) + HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT);
+                float ex = HexTile.cornerOffsetX(k, BoardGeometry.TILE_WIDTH)
+                      + HexTile.cornerOffsetX((k + 1) % 6, BoardGeometry.TILE_WIDTH);
+                float ey = HexTile.cornerOffsetY(k, BoardGeometry.TILE_HEIGHT)
+                      + HexTile.cornerOffsetY((k + 1) % 6, BoardGeometry.TILE_HEIGHT);
                 if (Math.abs(ex - dx) + Math.abs(ey - dy) < .5f) { result |= 1 << k; }
             }
         }
@@ -250,10 +252,10 @@ final class BoardRoadBank {
                   || cut && hex.apron() <= bed) { continue; }
             boolean inside = true;
             for (int k = 0; k < 6; k++) {
-                float ax = hex.x() + HexTile.cornerOffsetX(k, HexTile.WIDTH) * scale;
-                float ay = hex.y() + HexTile.cornerOffsetY(k, HexTile.HEIGHT) * scale;
-                float bx = hex.x() + HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH) * scale;
-                float by = hex.y() + HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT) * scale;
+                float ax = hex.x() + HexTile.cornerOffsetX(k, BoardGeometry.TILE_WIDTH) * scale;
+                float ay = hex.y() + HexTile.cornerOffsetY(k, BoardGeometry.TILE_HEIGHT) * scale;
+                float bx = hex.x() + HexTile.cornerOffsetX((k + 1) % 6, BoardGeometry.TILE_WIDTH) * scale;
+                float by = hex.y() + HexTile.cornerOffsetY((k + 1) % 6, BoardGeometry.TILE_HEIGHT) * scale;
                 float length = (float) Math.hypot(bx - ax, by - ay);
                 float along = ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / length;
                 float out = -((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / length;

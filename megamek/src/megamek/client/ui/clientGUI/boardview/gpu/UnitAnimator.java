@@ -38,6 +38,9 @@ final class UnitAnimator {
     private final InfantryMotion formation = new InfantryMotion();
     private final Vector3 recoilDirection = new Vector3();
     private final Map<String, Float> mountRecoil = new HashMap<>();
+    private final Map<String, Quaternion> retainedTurretYaw = new HashMap<>();
+    private record TurretTurn(Object group, Quaternion start) { }
+    private final Map<String, TurretTurn> turretTurns = new HashMap<>();
     private ModelInstance instance;
     private UnitLandingSupports landingSupports;
     private UnitGroundContact groundContact;
@@ -218,6 +221,11 @@ final class UnitAnimator {
                 if (node != null && rest != null) {
                     mounts.add(new Joint(node, rest));
                 }
+                for (String joint : new String[] { binding.aimNode(), binding.recoilNode() }) {
+                    if (joint != null && placed.getNode(joint) != null && model.instance.getNode(joint) != null) {
+                        mounts.add(new Joint(placed.getNode(joint), model.instance.getNode(joint)));
+                    }
+                }
             }
             for (Body body : bodies) {
                 previous.stream().filter(old -> old.rig.equals(body.rig)).findFirst().ifPresent(old -> {
@@ -373,7 +381,13 @@ final class UnitAnimator {
             }
             if (!mek) {
                 var pose = unit.model().state().pose();
-                body.rotate("turret", Vector3.Z, -(pose.secondaryFacing() - pose.facing()) * 60);
+                var turret = body.joints.get("turret");
+                var retained = turret == null ? null : retainedTurretYaw.get(turret.node().id);
+                if ("building-turret-v1".equals(body.rig.type()) && retained != null) {
+                    turret.node().rotation.set(retained);
+                } else {
+                    body.rotate("turret", Vector3.Z, -(pose.secondaryFacing() - pose.facing()) * 60);
+                }
             }
             if ("naval-v1".equals(body.rig.type())) {
                 body.rotate("hull", Vector3.Y, MathUtils.sin(clock * .8f + seed) * .8f);
@@ -789,6 +803,28 @@ final class UnitAnimator {
                 if (request.clock() >= request.start() && (current == null || request.start() > current.start())) { current = request; }
             }
             if (current == null) { continue; }
+            if (buildingTurret(entry.getKey())) {
+                Node joint = entry.getKey();
+                TurretTurn turn = turretTurns.get(joint.id);
+                if (turn == null || turn.group() != current.group()) {
+                    turn = new TurretTurn(current.group(), new Quaternion(joint.rotation));
+                    turretTurns.put(joint.id, turn);
+                }
+                joint.rotation.set(turn.start());
+                instance.calculateTransforms();
+                joint.rotation.mulLeft(new Quaternion().slerp(aimRotation(current, joint, 180), current.turn()));
+                if (current.turn() >= .999f) { retainedTurretYaw.put(joint.id, new Quaternion(joint.rotation)); }
+                instance.calculateTransforms();
+                for (var request : entry.getValue()) {
+                    var binding = request.binding();
+                    Node aim = instance.getNode(binding.aimNode() == null ? binding.node() : binding.aimNode());
+                    if (request.group() == current.group() && aim != joint) {
+                        aim.rotation.mulLeft(new Quaternion().slerp(aimRotation(request, aim, 25), current.turn()));
+                        instance.calculateTransforms();
+                    }
+                }
+                continue;
+            }
             for (var request : entry.getValue()) {
                 if (request.start() < current.start() && (previous == null || request.start() > previous.start())) { previous = request; }
             }
@@ -799,7 +835,8 @@ final class UnitAnimator {
             entry.getKey().rotation.mulLeft(new Quaternion().slerp(rotation, weight));
             instance.calculateTransforms();
             for (var request : entry.getValue()) {
-                var attachment = instance.getNode(request.binding().node());
+                var attachment = instance.getNode(request.binding().aimNode() == null
+                      ? request.binding().node() : request.binding().aimNode());
                 if (request.group() == current.group() && attachment != request.joint()) {
                     attachment.rotation.mulLeft(new Quaternion().slerp(aimRotation(request, attachment, 25), current.turn() * weight));
                     instance.calculateTransforms();
@@ -813,6 +850,11 @@ final class UnitAnimator {
     private void applyRecoil(GpuUnitModel model) {
         for (var binding : model.equipment()) {
             Float recoil = mountRecoil.get(binding.node());
+            if (binding.aimNode() != null) {
+                // New modules opt in to a mechanical recoil joint. A laser/launcher with only aim stays fixed.
+                if (binding.recoilNode() != null) { applyWeaponRecoil(instance, model.instance, binding, recoil == null ? 0 : recoil); }
+                continue;
+            }
             Node node = instance.getNode(binding.node()), rest = model.instance.getNode(binding.node());
             if (recoil == null || node == null || rest == null) { continue; }
             var emitter = binding.emitters().isEmpty() ? null : binding.emitters().getFirst();
@@ -820,6 +862,15 @@ final class UnitAnimator {
             node.translation.set(rest.translation).mulAdd(recoilDirection, -UnitAttack.RECOIL_DISTANCE * recoil);
         }
         instance.calculateTransforms();
+    }
+
+    /** Local -Y travel of the barrel/breech; the fixed collar and attachment datum do not move. */
+    static void applyWeaponRecoil(ModelInstance posed, ModelInstance rest, UnitEquipmentAssembly.Binding binding, float strength) {
+        if (binding.recoilNode() == null) { return; }
+        Node node = posed.getNode(binding.recoilNode()), original = rest.getNode(binding.recoilNode());
+        if (node == null || original == null) { return; }
+        node.translation.set(original.translation).mulAdd(Vector3.Y, -UnitAttack.RECOIL_DISTANCE * strength);
+        posed.calculateTransforms();
     }
 
     private Quaternion aimRotation(Aim request, Node joint, float limit) {
@@ -837,7 +888,8 @@ final class UnitAnimator {
             } else if (!attack.arcing(request.binding())) { attack.endpoint(request.victim(), origin, true, ordinal, aim); }
         }
         float loft = attack.arcing(request.binding()) ? MathUtils.PI * UnitAttack.arcHeight(origin, aim) : 0;
-        return trackingRotation(joint, forward, aim.sub(origin).add(0, 0, loft).nor(), limit);
+        return trackingRotation(joint, forward, aim.sub(origin).add(0, 0, loft).nor(), limit,
+              request.binding().pitchOnly() && joint.id.equals(request.binding().aimNode()), request.binding().depression());
     }
 
     /** Deterministic rigid collapse; restored wrecks use the terminal pose without replaying an event. */
@@ -1039,6 +1091,11 @@ final class UnitAnimator {
         return "";
     }
 
+    private boolean buildingTurret(Node node) {
+        return bodies.stream().anyMatch(body -> "building-turret-v1".equals(body.rig.type())
+              && body.joints.get("turret") != null && body.joints.get("turret").node() == node);
+    }
+
     private Matrix4 parentWorld(Node node) {
         var parent = new Matrix4(instance.transform);
         return node.getParent() == null ? parent : parent.mul(node.getParent().globalTransform);
@@ -1050,10 +1107,30 @@ final class UnitAnimator {
     }
 
     private Quaternion trackingRotation(Node joint, Vector3 forward, Vector3 target, float limit) {
+        return trackingRotation(joint, forward, target, limit, false, 0);
+    }
+
+    /** @param depression a pitch-only mount's visual depression stop in degrees */
+    private Quaternion trackingRotation(Node joint, Vector3 forward, Vector3 target, float limit, boolean pitchOnly,
+          float depression) {
         var inverse = parentWorld(joint).inv();
         forward.rot(inverse).nor();
         target.rot(inverse).nor();
         if (forward.isZero() || target.isZero()) { return new Quaternion(); }
+        if (pitchOnly) {
+            // A cradle's transverse trunnion is a hinge, not a ball joint.
+            float angle = MathUtils.atan2(forward.y * target.z - forward.z * target.y,
+                  forward.y * target.y + forward.z * target.z) * MathUtils.radiansToDegrees;
+            // The external cradle kit clears the hull down to its binding's stop (-20 degrees unless front bays
+            // sit below the barrel). This is a visual mechanical stop; it does not alter legal firing arcs.
+            return new Quaternion(Vector3.X, MathUtils.clamp(angle, Math.max(-limit, -depression), limit));
+        }
+        if (buildingTurret(joint)) {
+            // The bearing can yaw; barrel elevation belongs to the weapon's aim joint.
+            float angle = MathUtils.atan2(forward.x * target.y - forward.y * target.x,
+                  forward.x * target.x + forward.y * target.y) * MathUtils.radiansToDegrees;
+            return new Quaternion(Vector3.Z, angle);
+        }
         var rotation = new Quaternion().setFromCross(forward, target);
         float angle = rotation.getAngle();
         return new Quaternion().slerp(rotation, Math.min(1, limit / Math.max(.001f, angle)));

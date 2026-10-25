@@ -46,7 +46,6 @@ class GpuAuthoredSculptSmokeTest {
     private static final float HALF_STEP_BELOW_ONE = 1 / 2048f;
     private static final Coords CENTER = new Coords(2, 2);
     private static final String CONTROL = "u_authoredSculptReview";
-    private static final String MARKER = "// authored-sculpt-material-probe";
 
     @Test
     void snowRocksAndPlantingPitsRetainAuthoredMaterialChannels() {
@@ -104,7 +103,8 @@ class GpuAuthoredSculptSmokeTest {
                 var reference = before.get(index);
                 var shader = specimen.batch().getShaderProvider().getShader(specimen.part());
                 var program = ((BaseShader) GpuShaderProvider.unwrap(shader)).program;
-                assertTrue(program.getFragmentShaderSource().contains(MARKER) && program.hasUniform(CONTROL),
+                // Programs compile without comments; the probe's uniform proves the linked program contains it.
+                assertTrue(program.hasUniform(CONTROL),
                       "The linked actual provider must contain the material probe, never fallback shading");
                 assertArrayEquals(reference.rgba(), draw(output, specimen, 0).rgba(),
                       "An inactive probe preserves the complete shaded image");
@@ -158,7 +158,6 @@ class GpuAuthoredSculptSmokeTest {
               """, "actual snow mixture");
         String boundary = "// Rain darkens exposed ground and rock, and gathers in puddles on level ground.";
         return GpuShaderSource.replaceOnce(source, boundary, """
-              // authored-sculpt-material-probe
               if (u_authoredSculptReview > 0) {
                   // Uniform diagnostic branch: evaluate both aligned authored maps before per-role output selection.
                   vec4 bark = planar(u_treePitMaterial.x, p, u_treePitMaterial.y, fine);
@@ -300,7 +299,7 @@ class GpuAuthoredSculptSmokeTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
             var coords = new Coords(x, y);
-            tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null, null, null, null,
+            tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null, null, null,
                   coords.equals(CENTER) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null, true));
         }
         var scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

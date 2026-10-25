@@ -21,6 +21,12 @@ final class BoardBridgeSlope {
      */
     static float ease(float u) { return u * u * (3 - u) / 2; }
 
+    /**
+     * How far, in tile pixels, a vertical face is clipped behind its facing (see {@link #build}): a few times the grade
+     * patches' own containment tolerance, so the face lies clearly inside one of them.
+     */
+    private static final float NUDGE = .004f;
+
     /** The rise the {@code eased} exits' solid ramps drop by to their edges, the same for all of them; 0 for none. */
     static float easedRise(BoardBridge.Deck deck, int eased) {
         return eased == 0 ? 0 : deck.rises().get(Integer.numberOfTrailingZeros(eased)) * BoardGeometry.level();
@@ -52,7 +58,12 @@ final class BoardBridgeSlope {
             }
             boolean slab = Math.max(face.a().z, Math.max(face.b().z, face.c().z)) <= .001f;
             boolean vertical = Math.abs(face.normal().z) < .0001f;
-            var polygon = List.of(a, b, c);
+            // A vertical face along a grade patch's edge lies in neither patch by plan, and clipped in place both cut it
+            // to slivers. It is clipped a hair behind its facing, inside one patch, and set back; both give one height.
+            float nudge = vertical ? NUDGE * scale / (float) Math.hypot(face.normal().x, face.normal().y) : 0;
+            float backX = face.normal().x * nudge, backY = face.normal().y * nudge;
+            var polygon = List.of(new Vector3(a).sub(backX, backY, 0), new Vector3(b).sub(backX, backY, 0),
+                  new Vector3(c).sub(backX, backY, 0));
             for (var patch : profile) {
                 int direction = patch.landEdge() < 0 ? -1 : BoardGeometry.edgeDirection(patch.landEdge());
                 boolean solid = direction >= 0 && (footing.solidExits() & (1 << direction)) != 0;
@@ -72,8 +83,9 @@ final class BoardBridgeSlope {
                         // The solid support owns that boundary; its neighbour must not restore buried fascia.
                         if (vertical && !ownsBoundary(profile, patch, footing.solidExits(),
                               triangle)) { return; }
-                        ease(triangle, patch, rise, eased -> BoardBridge.triangle(faces, eased.a(), eased.b(),
-                              eased.c(), face.part(), face.colour()));
+                        ease(triangle, patch, rise, eased -> BoardBridge.triangle(faces,
+                              new Vector3(eased.a()).add(backX, backY, 0), new Vector3(eased.b()).add(backX, backY, 0),
+                              new Vector3(eased.c()).add(backX, backY, 0), face.part(), face.colour()));
                     });
                 }
             }

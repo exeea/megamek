@@ -22,7 +22,7 @@ import megamek.common.board.Coords;
 public record BoardRangeBorder(float height, int argb, BoardTactical.Outline outline) {
     private record Joint(int x, int y, BoardRangeBorder border, BoardTactical.Playback playback) {
         Joint(BoardTactical.Wall wall, BoardTactical.Point point) {
-            // Path rotations can leave tiny rounding differences at the same unscaled board-pixel endpoint.
+            // Path rotations can leave tiny rounding differences at the same endpoint in tactical units.
             this(Math.round(point.x() * 100), Math.round(point.y() * 100), wall.border(), wall.playback());
         }
     }

@@ -147,7 +147,7 @@ class GpuTerrainMaterialsSmokeTest {
         for (int x = 0; x < 6; x++) {
             for (int y = 0; y < 6; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), y < 3 ? levels : 0, -1, false, 0, family, pixels,
-                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, detailed));
+                      null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, detailed));
             }
         }
         return new BoardScene(0, 6, 6, tiles, List.of(), List.of(), -1, "", List.of());
@@ -181,7 +181,7 @@ class GpuTerrainMaterialsSmokeTest {
         camera.center(point);
         terrain.renderShadows(camera.camera, List.of());
         outputFrame.begin(.4f, .5f, .6f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         outputFrame.display();
         if (name != null) { GpuBoardTestUi.capture(new File(output, "terrain-materials-" + name + ".png")); }

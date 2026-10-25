@@ -17,7 +17,10 @@ import megamek.common.units.Terrains;
 /** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
 public final class BoardSurfaceBlend {
     static final float WIDTH_METRES = 7f;
-    static final float FOOT_METRES = .9f;
+    /** The farthest the receiving ground reaches up a column above its foot; its tongues reach a fifth of it to all. */
+    static final float FOOT_METRES = 2.7f;
+    /** How far lava, molten or crusted, melts snow and burns turf beside it. */
+    static final float HEAT_METRES = 5f;
     // Render-only covers derived from BoardLiquid; the board's terrain families and rules remain unchanged.
     static final int CRUST = BoardScene.Surface.values().length, BANK = CRUST + 1, FAMILIES = BANK + 1;
 
@@ -159,6 +162,15 @@ public final class BoardSurfaceBlend {
         return cover(weights, 1, top.interpolation());
     }
 
+    /** What lava's heat leaves of a family: snow melts off its rock, turf burns to its soil; the rest stays. */
+    static int melted(int family) {
+        if (family == BoardScene.Surface.SNOW.ordinal()) { return BoardScene.Surface.ROCK.ordinal(); }
+        if (family == BoardScene.Surface.GRASS.ordinal() || family == BoardScene.Surface.TROPICAL.ordinal()) {
+            return BoardScene.Surface.DIRT.ordinal();
+        }
+        return family;
+    }
+
     static int family(BoardScene.Tile tile) {
         return tile.liquid().volcanic() ? tile.liquid().molten() ? BANK : CRUST : tile.surface().ordinal();
     }
@@ -249,7 +261,7 @@ public final class BoardSurfaceBlend {
 
         /** Point-independent facts about one tile; the arrays keep the query order: itself, then directions 0-5. */
         private record Contacts(boolean blendable, boolean water, boolean ownerContact, BoardScene.Tile[] touching,
-              int bedFamily, BoardScene.Tile[] pools) { }
+              int bedFamily, BoardScene.Tile[] pools, BoardScene.Tile[] lava) { }
 
         private final BoardScene scene;
         private final BoardScene.Tile owner;
@@ -272,7 +284,7 @@ public final class BoardSurfaceBlend {
             Position key = new Position(x, y, z);
             Cover cover = ground.get(key);
             if (cover == null) {
-                cover = onto(sampleGround(x, y, z), x, y, z);
+                cover = scorched(onto(sampleGround(x, y, z), x, y, z), x, y, z);
                 ground.put(key, cover);
             }
             return cover;
@@ -282,6 +294,7 @@ public final class BoardSurfaceBlend {
             Position key = new Position(x, y, z);
             Cover cover = cliffs.get(key);
             if (cover == null) {
+                // A dry column takes the ground's query (#sample), which lava's heat has already reached.
                 cover = sampleColumn(x, y, z);
                 cliffs.put(key, cover);
             }
@@ -327,7 +340,7 @@ public final class BoardSurfaceBlend {
         }
 
         private Cover sampleColumn(float x, float y, float z) {
-            if (!blendableOwner) { return cover(owner, z); }
+            if (!blendableOwner) { return scorched(cover(owner, z), x, y, z); }
             var at = BoardGeometry.tile(scene, x, y);
             if (at == null) { return cover(owner, z); }
             if (!at.liquid().present() || at.liquid().volcanic()) { return sample(x, y, z); }
@@ -339,7 +352,38 @@ public final class BoardSurfaceBlend {
                 float distance = distance(candidate.coords(), x, y);
                 if (distance < nearest) { column = candidate; nearest = distance; }
             }
-            return column == null ? cover(owner, z) : sampleAt(column, contacts(column), cover(column, z), x, y, z, true);
+            return scorched(column == null ? cover(owner, z)
+                  : sampleAt(column, contacts(column), cover(column, z), x, y, z, true), x, y, z);
+        }
+
+        /**
+         * Lava melts the snow beside it off its rock and burns turf to its soil (#melted): fully at the lava's edge, in
+         * broken tongues to HEAT_METRES out, and less far up a column, which the heat reaches across less of.
+         */
+        private Cover scorched(Cover cover, float x, float y, float z) {
+            float snow = cover.snow(), turf = cover.grass() + cover.tropical();
+            if (snow + turf <= 0) { return cover; }
+            var at = BoardGeometry.tile(scene, x, y);
+            if (at == null) { return cover; }
+            float metre = BoardRelief.metres(1), heat = 0;
+            for (BoardScene.Tile lava : contacts(at).lava()) {
+                float reach = metre * HEAT_METRES;
+                float rise = Math.max(0, z - BoardGeometry.groundZ(lava));
+                float distance = Math.max(0, distance(lava.coords(), x, y)) + rise * .5f;
+                // The tongues fray the heat's reach, never its edge: nothing survives against the lava.
+                float warp = (BoardRelief.noise(x / (metre * 2.3f) + 41, y / (metre * 2.3f) - 17) - .5f) * reach * .7f;
+                distance += warp * BoardRelief.smooth(distance / reach);
+                heat = Math.max(heat, 1 - BoardRelief.smooth(distance / reach));
+            }
+            if (heat <= 0) { return cover; }
+            float[] weights = new float[FAMILIES];
+            for (int family = 0; family < FAMILIES; family++) {
+                float weight = cover.weight(family);
+                int remains = melted(family);
+                weights[family] += remains == family ? weight : weight * (1 - heat);
+                if (remains != family) { weights[remains] += weight * heat; }
+            }
+            return cover(weights, 1, cover.interpolation());
         }
 
         private Contacts contacts(BoardScene.Tile at) {
@@ -353,7 +397,7 @@ public final class BoardSurfaceBlend {
 
         private Contacts derive(BoardScene.Tile at) {
             boolean water = water(at);
-            List<BoardScene.Tile> touching = new ArrayList<>(7), pools = new ArrayList<>(7);
+            List<BoardScene.Tile> touching = new ArrayList<>(7), pools = new ArrayList<>(7), lava = new ArrayList<>(0);
             float[] banks = new float[FAMILIES];
             for (int direction = -1; direction < 6; direction++) {
                 BoardScene.Tile tile = direction < 0 ? at : scene.neighbor(at, direction);
@@ -365,13 +409,14 @@ public final class BoardSurfaceBlend {
                     }
                 }
                 if (water && water(tile) && tile.elevation() == at.elevation()) { pools.add(tile); }
+                if (tile != null && tile.liquid().volcanic()) { lava.add(tile); }
             }
             int bedFamily = 0;
             for (int family = 1; family < FAMILIES; family++) {
                 if (banks[family] > banks[bedFamily]) { bedFamily = family; }
             }
             return new Contacts(blendable(at), water, contact(owner, at), touching.toArray(BoardScene.Tile[]::new),
-                  bedFamily, pools.toArray(BoardScene.Tile[]::new));
+                  bedFamily, pools.toArray(BoardScene.Tile[]::new), lava.toArray(BoardScene.Tile[]::new));
         }
 
         /** Water hexes share their bank/bed fields across their boundaries, independently of triangle ownership. */
@@ -443,7 +488,8 @@ public final class BoardSurfaceBlend {
                 float warp = (patch - .5f) * contactWidth * strength;
                 float weight = 1 - BoardRelief.smooth((distance + contactWidth - warp) / (2 * contactWidth));
                 // A column's material reaches the foot and nearby talus. The receiving ground creeps a bounded
-                // distance up that column, then disappears; it cannot paint the whole cliff or the upper plateau.
+                // distance up that column in tongues (the same patches), then disappears; it cannot paint the whole
+                // cliff or the upper plateau.
                 if (water) {
                     // Land continues down into the basin; only cover from below this height is attenuated.
                     // The water surface is the reference, not its recessed bed or an absolute height difference.
@@ -452,7 +498,7 @@ public final class BoardSurfaceBlend {
                     weight *= 1 - BoardRelief.smooth((dz - .35f) / .65f);
                 } else {
                     float above = Math.max(0, (z - BoardGeometry.groundZ(tile)) / metre);
-                    weight *= 1 - BoardRelief.smooth(above / FOOT_METRES);
+                    weight *= 1 - BoardRelief.smooth(above / (FOOT_METRES * (.2f + .8f * patch)));
                 }
                 if (weight < .0001f) { continue; }
                 Cover cover = water ? cover(tile) : cover(tile, z);

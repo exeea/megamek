@@ -30,9 +30,10 @@ import com.badlogic.gdx.utils.IntArray;
 import megamek.common.board.Coords;
 
 /**
- * Grass blades over finished terrain. Terrain workers plant each full-detail hex's roots with its chunk
- * ({@link #plant}); here every chunk keeps one persistent instance buffer of those roots and draws the prefix by
- * rank that each hex's projected size needs, so zooming and panning upload nothing. GL ownership stays here.
+ * Grass blades, and tundra's dwarf shrubs, over finished terrain. Terrain workers plant each full-detail hex's roots
+ * with its chunk ({@link #plant}); here every chunk keeps one persistent instance buffer of those roots per template
+ * and draws the prefix by rank that each hex's projected size needs, so zooming and panning upload nothing. GL
+ * ownership stays here.
  */
 final class GpuGroundCover implements Disposable {
     static final class Wind extends FloatAttribute {
@@ -45,6 +46,8 @@ final class GpuGroundCover implements Disposable {
     private static final int ROOTS_PER_HEX = 4096;
     private static final int STRIDE = 4;
     private static final float START_PIXELS = 120, FULL_PIXELS = 500;
+    /** Projected hex pixels at which every dwarf shrub stands: they are few and broad, and show at play distance. */
+    private static final float SHRUB_FULL_PIXELS = 250;
     /** The tallest standing blade, as a fraction of the hex width; shared with cosmetic shrub sizing. */
     static final float MAX_HEIGHT_FRACTION = .07f;
     /** Metres frozen land's jagged border reaches past its hex edge at most: the shard offset, lean and splinters. */
@@ -53,12 +56,24 @@ final class GpuGroundCover implements Disposable {
     private static final float SHORE_FADE_METRES = 3;
     /** Metres beyond a bridge landing's solid asphalt over which standing grass thickens to the full meadow. */
     private static final float LANDING_FADE_METRES = 5;
+    /** Metres across the clumps tundra's dwarf shrubs grow in, with its carpet showing between them. */
+    private static final float SHRUB_CLUMP_METRES = 1.6f;
+    /** The share of the roots in a clump that grow a shrub: each shrub spreads far wider than a blade. */
+    private static final float SHRUB_SHARE = .07f;
+    /** Leaves in the dwarf-shrub template (terrain-grass.glsl). */
+    static final int SHRUB_LEAVES = 16;
 
-    /** Whether a hex grows grass: natural grass ground, or its neighbour within a level of a grass hex. */
+    /**
+     * Whether a hex grows cover: natural grass ground or tundra with air, or the neighbour within a level of a grass
+     * hex.
+     */
     static boolean grows(BoardScene scene, BoardScene.Tile tile) {
         boolean shallow = shallowShore(tile);
-        if ((!BoardSurfaceBlend.natural(tile) && !shallow) || BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return false; }
+        var biome = BoardBiome.kind(tile);
+        boolean tundra = biome == BoardScene.Biome.TUNDRA;
+        if ((!BoardSurfaceBlend.natural(tile) && !shallow) || biome != BoardScene.Biome.NONE && !tundra) { return false; }
         if (shallow && BoardBiome.plantKind(scene, tile) != BoardScene.Biome.NONE) { return false; }
+        if (tundra) { return !tile.barren(); }
         if (!shallow && tile.surface() == BoardScene.Surface.GRASS) { return true; }
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = scene.tile(tile.coords().translated(direction));
@@ -104,7 +119,9 @@ final class GpuGroundCover implements Disposable {
      * and rank at every terrain detail level and only its height follows the installed ground: a medium-detail
      * chunk's grass carries over to its full-detail replacement without a blade moving. Density selects a prefix by
      * rank, so zooming never moves an existing blade either. No blade grows through {@code paint} (null when nothing
-     * paints the hex): adding or removing a decal keeps every other root's place and rank.
+     * paints the hex): adding or removing a decal keeps every other root's place and rank. Where tundra's clumped dwarf
+     * shrubs outgrow the grass, a sparser share of the roots grows a shrub instead and carries rank + .5: the shrub
+     * template draws those, the blades the others, and the prefix by whole rank is unchanged.
      */
     static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
           BoardDecals.Opacity paint) {
@@ -160,6 +177,7 @@ final class GpuGroundCover implements Disposable {
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
         float shoreReach = BoardRelief.metres(SHORE_FADE_METRES);
+        float clump = BoardRelief.metres(SHRUB_CLUMP_METRES);
         var obstacles = new BoardObstacles(scene, tile);
         List<BoardScene.Feature> minerals = vegetation == null ? List.of() : vegetation.minerals();
         var cover = new BoardSurfaceBlend.Sampler(scene, tile);
@@ -194,7 +212,15 @@ final class GpuGroundCover implements Disposable {
             if (iced) { continue; }
             float grass = boundary ? BoardSurfaceBlend.grass(tile, cover.sample(x, y, z), x, y)
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
-            if (tundraEdge) { grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z); }
+            boolean shrub = false;
+            if (tundraEdge) {
+                float tundra = BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z);
+                float shrubs = tile.barren() ? 0
+                      : tundra * BoardRelief.smooth((BoardRelief.noise(x / clump, y / clump) - .3f) / .35f);
+                grass *= 1 - tundra;
+                shrub = shrubs > grass;
+                grass = Math.max(grass, shrubs);
+            }
             if (marshEdge && waterHeights.containsKey(face.a())) {
                 grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.MARSH, x, y, z);
             }
@@ -203,7 +229,7 @@ final class GpuGroundCover implements Disposable {
                 grass *= 1 - GpuMineralGround.coverage(minerals, (x - centerX) / BoardGeometry.hexScale(),
                       (y - centerY) / BoardGeometry.hexScale());
             }
-            float growth = grass * BoardRelief.smooth((grass - .55f) / .35f);
+            float growth = grass * BoardRelief.smooth((grass - .55f) / .35f) * (shrub ? SHRUB_SHARE : 1);
             // Follow the same smoothly varying normals as the turf material, including the next hex's slope toe.
             // A whole-triangle cutoff removes green ground and leaves straight, full-density blade edges.
             growth *= groundGrowth(face, normals, waterHeights, x, y, z, normal);
@@ -221,7 +247,7 @@ final class GpuGroundCover implements Disposable {
                 growth *= BoardRelief.smooth((BoardRoad.distance(landings, x, y) - BoardRoad.SHOULDER - 1) / landingFade);
             }
             if (chance <= growth) {
-                roots.addAll(x, y, z - sink, rank);
+                roots.addAll(x, y, z - sink, shrub ? rank + .5f : rank);
             }
         }
         roots.shrink();
@@ -247,9 +273,13 @@ final class GpuGroundCover implements Disposable {
         return growth;
     }
 
-    /** One blade template's instanced draw for a chunk. Its buffer persists while the chunk's roots are unchanged. */
+    /**
+     * One template's instanced draw for a chunk, a blade of {@code segments} or the dwarf shrub ({@code segments} 0),
+     * over the roots of its kind. Its buffer persists while the chunk's roots are unchanged.
+     */
     private static final class Batch implements Disposable {
         final int segments;
+        final boolean shrubs;
         // Roots are replaced, never edited in place: identity, then contents, identify unchanged hexes.
         final List<FloatArray> current = new ArrayList<>(), previous = new ArrayList<>();
         final FloatArray data = new FloatArray();
@@ -260,7 +290,7 @@ final class GpuGroundCover implements Disposable {
         int capacity;
         long uploads;
 
-        Batch(int segments) { this.segments = segments; }
+        Batch(int segments) { this.segments = segments; shrubs = segments == 0; }
 
         void begin() { current.clear(); }
 
@@ -311,34 +341,58 @@ final class GpuGroundCover implements Disposable {
             return low - from / STRIDE;
         }
 
-        /** Hex after hex, each in rank order: every hex's prefix is one contiguous range. */
+        /** Hex after hex, each its roots of this batch's kind in rank order: every hex's prefix is one contiguous range. */
         private void concatenate() {
             data.clear();
             starts.clear();
             for (FloatArray roots : current) {
                 starts.add(data.size);
-                data.addAll(roots);
+                for (int i = 0; i < roots.size; i += STRIDE) {
+                    if ((roots.items[i + 3] % 1 != 0) == shrubs) { data.addAll(roots.items, i, STRIDE); }
+                }
             }
             starts.add(data.size);
         }
 
         private void build() {
-            int vertices = segments * 2 + 1;
-            mesh = new GpuInstancedMesh(vertices, (segments * 2 - 1) * 3,
+            float[] points;
+            short[] indices;
+            if (shrubs) {
+                // Each leaf a diamond of four corners, (across, along) in x and y, its leaf number + 1 in z; the
+                // shader arranges the leaves into a low mound.
+                points = new float[SHRUB_LEAVES * 4 * 7];
+                indices = new short[SHRUB_LEAVES * 6];
+                float[] corners = { 0, 0, -1, .45f, 1, .45f, 0, 1 };
+                short[] leafIndices = { 0, 1, 2, 1, 3, 2 };
+                for (int leaf = 0; leaf < SHRUB_LEAVES; leaf++) {
+                    for (int corner = 0; corner < 4; corner++) {
+                        int at = (leaf * 4 + corner) * 7;
+                        points[at] = corners[corner * 2];
+                        points[at + 1] = corners[corner * 2 + 1];
+                        points[at + 2] = leaf + 1;
+                        points[at + 5] = 1;
+                        points[at + 6] = Color.WHITE.toFloatBits();
+                    }
+                    for (int i = 0; i < 6; i++) { indices[leaf * 6 + i] = (short) (leaf * 4 + leafIndices[i]); }
+                }
+            } else {
+                int vertices = segments * 2 + 1;
+                points = new float[vertices * 7];
+                for (int i = 0; i < vertices; i++) {
+                    points[i * 7] = i == vertices - 1 ? 0 : i % 2 == 0 ? -1 : 1;
+                    points[i * 7 + 1] = (i / 2) / (float) segments;
+                    points[i * 7 + 5] = 1;
+                    points[i * 7 + 6] = Color.WHITE.toFloatBits();
+                }
+                indices = new short[(vertices - 2) * 3];
+                for (int i = 0; i < vertices - 2; i++) {
+                    indices[i * 3] = (short) (i % 2 == 0 ? i : i + 1);
+                    indices[i * 3 + 1] = (short) (i % 2 == 0 ? i + 1 : i);
+                    indices[i * 3 + 2] = (short) (i + 2);
+                }
+            }
+            mesh = new GpuInstancedMesh(points.length / 7, indices.length,
                   new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(), VertexAttribute.ColorPacked()));
-            float[] points = new float[vertices * 7];
-            for (int i = 0; i < vertices; i++) {
-                points[i * 7] = i == vertices - 1 ? 0 : i % 2 == 0 ? -1 : 1;
-                points[i * 7 + 1] = (i / 2) / (float) segments;
-                points[i * 7 + 5] = 1;
-                points[i * 7 + 6] = Color.WHITE.toFloatBits();
-            }
-            short[] indices = new short[(vertices - 2) * 3];
-            for (int i = 0; i < vertices - 2; i++) {
-                indices[i * 3] = (short) (i % 2 == 0 ? i : i + 1);
-                indices[i * 3 + 1] = (short) (i % 2 == 0 ? i + 1 : i);
-                indices[i * 3 + 2] = (short) (i + 2);
-            }
             mesh.setVertices(points); mesh.setIndices(indices);
             ModelBuilder builder = new ModelBuilder();
             builder.begin();
@@ -356,13 +410,16 @@ final class GpuGroundCover implements Disposable {
         }
     }
 
-    /** One terrain chunk's grass: the three- and seven-triangle blade templates, one in use at a time. */
+    /**
+     * One terrain chunk's cover: the three- and seven-triangle blade templates, one in use at a time, and the dwarf
+     * shrub's.
+     */
     private static final class Chunk implements Disposable {
-        final Batch[] batches = { new Batch(2), new Batch(4) };
+        final Batch[] batches = { new Batch(2), new Batch(4), new Batch(0) };
         final GpuBankTurf turf = new GpuBankTurf();
         // The chunk's planted hexes and, for each, the roots its projected size needs this frame (none out of view).
         final List<FloatArray> roots = new ArrayList<>();
-        final IntArray targets = new IntArray();
+        final IntArray targets = new IntArray(), shrubTargets = new IntArray();
         float nearPixels;
         long frame;
         // Blades place themselves from their roots; the transform only orders chunks nearest first for early depth.
@@ -373,7 +430,9 @@ final class GpuGroundCover implements Disposable {
                   chunk.getY() * TerrainLod.CHUNK_SIZE + TerrainLod.CHUNK_SIZE / 2), 0);
         }
 
-        void begin(long next) { frame = next; roots.clear(); targets.clear(); turf.begin(); nearPixels = 0; }
+        void begin(long next) {
+            frame = next; roots.clear(); targets.clear(); shrubTargets.clear(); turf.begin(); nearPixels = 0;
+        }
 
         @Override
         public void dispose() { for (Batch batch : batches) { batch.dispose(); } turf.dispose(); }
@@ -398,8 +457,8 @@ final class GpuGroundCover implements Disposable {
               + GpuShaderSource.read("terrain-meadow.glsl");
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
-              + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX
-              + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n"
+              + "\n#define SHRUB_FULL_PIXELS " + SHRUB_FULL_PIXELS + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX
+              + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n#define SHRUB_LEAVES " + SHRUB_LEAVES + ".0\n"
               + GpuGroundDamage.shaderSource() + GpuShaderSource.read("terrain-grass.glsl");
         // A root beyond its density leaves every vertex of its blade outside the clip volume.
         return GpuShaderSource.coverVertex(source.replace("void main() {",
@@ -408,8 +467,10 @@ final class GpuGroundCover implements Disposable {
                     + "gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }\n"));
     }
 
-    private static float density(float pixels) {
-        float t = Math.clamp((pixels - START_PIXELS) / (FULL_PIXELS - START_PIXELS), 0, 1);
+    private static float density(float pixels) { return density(pixels, FULL_PIXELS); }
+
+    private static float density(float pixels, float full) {
+        float t = Math.clamp((pixels - START_PIXELS) / (full - START_PIXELS), 0, 1);
         return t * t * (3 - 2 * t);
     }
 
@@ -470,6 +531,7 @@ final class GpuGroundCover implements Disposable {
             float growth = arrived == null ? 1 : BoardRelief.smooth((now - arrived) / (float) GROWTH_NANOS);
             chunk.roots.add(roots);
             chunk.targets.add((int) Math.ceil(ROOTS_PER_HEX * density(pixels) * growth));
+            chunk.shrubTargets.add((int) Math.ceil(ROOTS_PER_HEX * density(pixels, SHRUB_FULL_PIXELS) * growth));
             chunk.nearPixels = Math.max(chunk.nearPixels, pixels);
         }
         List<ModelInstance> result = new ArrayList<>();
@@ -492,12 +554,12 @@ final class GpuGroundCover implements Disposable {
             }
             for (int i = 0; i < chunk.batches.length; i++) {
                 Batch batch = chunk.batches[i];
-                // The idle template keeps its buffer for a return to its scale.
+                // The idle blade template keeps its buffer for a return to its scale.
                 batch.begin();
-                if (i != detail || chunk.nearPixels <= START_PIXELS) { continue; }
+                if (!batch.shrubs && i != detail || chunk.nearPixels <= START_PIXELS) { continue; }
                 for (FloatArray roots : chunk.roots) { batch.add(roots); }
                 long before = batch.uploads;
-                ModelInstance instance = batch.upload(chunk.targets);
+                ModelInstance instance = batch.upload(batch.shrubs ? chunk.shrubTargets : chunk.targets);
                 uploads += batch.uploads - before;
                 if (instance != null) {
                     instance.transform.setToTranslation(chunk.centre);

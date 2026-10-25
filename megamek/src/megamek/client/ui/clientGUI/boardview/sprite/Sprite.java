@@ -41,9 +41,7 @@ import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
 import jakarta.annotation.Nonnull;
-import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 
 /**
  * Everything in the main map view is either the board or it's a sprite displayed on top of the board. Most sprites
@@ -55,8 +53,6 @@ abstract public class Sprite implements ImageObserver, Comparable<Sprite> {
     public final BoardGlyphContext bv;
     protected Rectangle bounds;
     protected Image image;
-    // Set this to true if you don't want the sprite to be drawn.
-    protected boolean hidden = false;
 
     protected Sprite(BoardGlyphContext boardView1) {
         bv = boardView1.glyphContext();
@@ -137,17 +133,9 @@ abstract public class Sprite implements ImageObserver, Comparable<Sprite> {
         return null;
     }
 
-    /** Optional point symbol for the 3D view, using the same handler-owned visibility and presentation state. */
-    public @Nullable BoardMarker boardMarker() {
-        return null;
-    }
-
+    /** Whether the sprite is left undrawn. */
     public boolean isHidden() {
-        return hidden;
-    }
-
-    public void setHidden(boolean h) {
-        hidden = h;
+        return false;
     }
 
     /**

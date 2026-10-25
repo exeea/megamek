@@ -6,9 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.Shape;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +20,8 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.sprite.SensorRangeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -32,7 +30,7 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Compare the original painter and GPU range walls with and without map-edge outlines in both cameras. */
+/** Every range mode's GPU walls in both cameras; the map edge is no range boundary. */
 @Tag("on-demand")
 class GpuRangeWallSmokeTest {
     private static final String[] MODES = { "sensor", "air-sensor", "visual", "dark-visual" };
@@ -55,43 +53,24 @@ class GpuRangeWallSmokeTest {
         return new Board(9, 9, hexes);
     }
 
-    private static List<SensorRangeSprite> markers(GpuBoardFixture fixture, int mode, boolean before, boolean includeMapBorder) {
-        List<SensorRangeSprite> sprites = new ArrayList<>();
+    /** A column of ranges along the map edge, whose outside sides face off the map, and one inside it. */
+    private static List<TacticalMark> markers(GpuBoardFixture fixture, int mode) {
+        List<TacticalMark> marks = new ArrayList<>();
         for (int x : new int[] { 0, 4 }) {
             for (int y = 0; y < 9; y++) {
-                Coords coords = new Coords(x, y);
-                sprites.add(new SensorRangeSprite(fixture.view, mode, coords, x == 0 ? 48 : 6) {
-                    @Override
-                    protected void paintTactical(Graphics2D graph) {
-                        paintRange(graph, includeMapBorder);
-                    }
-
-                    @Override
-                    protected void drawBorderXC(Graphics2D graphics, Shape fillShape, Shape lineShape) {
-                        if (before) {
-                            // The original painter: retain its palette, band opacity and inherited dashed stroke.
-                            Color color = getColor(getRangeBracket());
-                            graphics.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), getBorderOpacity()));
-                            graphics.fill(fillShape);
-                            graphics.setColor(lineColor);
-                            graphics.draw(lineShape);
-                        } else {
-                            super.drawBorderXC(graphics, fillShape, lineShape);
-                        }
-                    }
-                });
+                marks.add(new TacticalMark.SensorRange(new Coords(x, y), x == 0 ? 48 : 6, mode));
             }
         }
-        fixture.view.addSprites(sprites);
+        fixture.view.addMarks(marks);
         fixture.source.refresh();
-        return sprites;
+        return marks;
     }
 
     @Test
     void dashesScrollInBothPresentationsAndZeroSpeedRemainsStatic() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board())) {
-            SwingUtilities.invokeAndWait(() -> markers(fixture, SensorRangeSprite.VISUAL, false, false));
+            SwingUtilities.invokeAndWait(() -> markers(fixture, TacticalStyle.VISUAL));
             BoardScene scene = fixture.source.takeFrame().scene();
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override
@@ -175,23 +154,20 @@ class GpuRangeWallSmokeTest {
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 private int tick;
                 private int comparison;
-                private List<SensorRangeSprite> sprites = List.of();
+                private List<TacticalMark> marks = List.of();
                 private GpuTactical probe;
                 private long builds;
 
                 private void selectComparison() throws Exception {
-                    int mode = comparison / 6;
-                    boolean before = comparison % 3 == 0;
-                    boolean includeMapBorder = comparison % 3 != 2;
+                    int mode = comparison / 2;
                     SwingUtilities.invokeAndWait(() -> {
-                        fixture.view.removeSprites(sprites);
-                        sprites = markers(fixture, mode, before, includeMapBorder);
+                        fixture.view.removeMarks(marks);
+                        marks = markers(fixture, mode);
                     });
                     // The isometric 3D view, or the Tactical View with its flat walls ("-top").
-                    setTacticalView(comparison % 6 >= 3);
+                    setTacticalView(comparison % 2 == 1);
                     var scene = fixture.source.takeFrame().scene();
-                    assertEquals(before || mode < SensorRangeSprite.VISUAL ? 0 : includeMapBorder ? 18 : 9,
-                          scene.tactical().walls().size());
+                    assertEquals(mode < TacticalStyle.VISUAL ? 0 : 9, scene.tactical().walls().size());
                     probe.update(scene);
                     builds = probe.builds();
                 }
@@ -211,14 +187,9 @@ class GpuRangeWallSmokeTest {
                             probe.update(fixture.source.takeFrame().scene());
                             assertEquals(builds, probe.builds(), "Camera changes must reuse the range meshes");
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                            String name = MODES[comparison / 6] + (comparison % 6 < 3 ? "-isometric" : "-top")
-                                  + switch (comparison % 3) {
-                                      case 0 -> "-before.png";
-                                      case 1 -> "-border-enabled.png";
-                                      default -> "-border-disabled.png";
-                                  };
+                            String name = MODES[comparison / 2] + (comparison % 2 == 0 ? "-isometric.png" : "-top.png");
                             GpuBoardTestUi.capture(new File(output, name));
-                            if (++comparison == MODES.length * 6) {
+                            if (++comparison == MODES.length * 2) {
                                 Gdx.app.exit();
                             } else {
                                 selectComparison();

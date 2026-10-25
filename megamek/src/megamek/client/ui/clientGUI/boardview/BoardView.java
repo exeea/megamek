@@ -167,11 +167,6 @@ public final class BoardView extends AbstractBoardView
     // Set Zoom Out Overview Toggle inactive.
     public boolean zoomOverview = false;
 
-    // line width of the c3 network lines
-    public static final int C3_LINE_WIDTH = BoardGlyphContext.C3_LINE_WIDTH;
-
-    // line width of the fly over lines
-    public static final int FLY_OVER_LINE_WIDTH = BoardGlyphContext.FLY_OVER_LINE_WIDTH;
     private static final Font FONT_7 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 7);
     private static final Font FONT_9 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 9);
     private static final Font FONT_10 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
@@ -1242,20 +1237,11 @@ public final class BoardView extends AbstractBoardView
         clientState.drawHexBorder(graphics2D, point, col, pad, lineWidth);
     }
 
-    private void drawHexBorder(Graphics2D graphics2D, Point point, Color col, double pad, double lineWidth,
-          boolean floating) {
-        clientState.drawHexBorder(graphics2D, point, col, pad, lineWidth, floating);
-    }
-
     /**
      * Draw an outline around the hex at {@link Point} no padding and a width of 1
      */
     private void drawHexBorder(Graphics2D graphics2D, Point point, Color color) {
         clientState.drawHexBorder(graphics2D, point, color);
-    }
-
-    private void drawHexBorder(Graphics2D graphics2D, Point point, Color color, boolean floating) {
-        clientState.drawHexBorder(graphics2D, point, color, floating);
     }
 
     /**
@@ -3079,19 +3065,6 @@ public final class BoardView extends AbstractBoardView
         return radarBlipImage;
     }
 
-    void invalidatePlanarCapture() {
-        clientState.invalidatePlanarCapture();
-    }
-
-
-    /** Releases capture-only working memory when the native view closes or switches boards. */
-    public void releasePlanarCapture() {
-        clientState.releasePlanarCapture();
-
-        clientState.clearArtwork();
-    }
-
-
     public BoardClientState getClientState() { return clientState; }
     @Override public BoardGlyphContext glyphContext() { return clientState; }
 
@@ -3860,7 +3833,7 @@ public final class BoardView extends AbstractBoardView
         if (fovHighlightingAndDarkening != null) {
             fovHighlightingAndDarkening.invalidate();
         }
-        invalidatePlanarCapture();
+        clientState.repaint();
         hexImageCache.clear();
 
         clientState.clearArtwork();
@@ -3875,7 +3848,7 @@ public final class BoardView extends AbstractBoardView
         if (fovHighlightingAndDarkening != null) {
             fovHighlightingAndDarkening.invalidate();
         }
-        invalidatePlanarCapture();
+        clientState.repaint();
         for (Coords coords : setCoords) {
             hexImageCache.remove(coords);
 
@@ -3895,7 +3868,7 @@ public final class BoardView extends AbstractBoardView
             }
             // GPU raster tiles no longer contain FoV. Only Legacy 2D pixels and the presentation snapshot change.
             hexImageCache.clear();
-            invalidatePlanarCapture();
+            clientState.repaint();
         }
     }
 
@@ -4000,36 +3973,6 @@ public final class BoardView extends AbstractBoardView
 
     public ArrayList<AttackSprite> getAttackSprites() {
         return clientState.getAttackSprites();
-    }
-
-
-    /** Used by mixed terrain/status sprites to leave only their terrain artwork in the planar capture. */
-    public boolean isGpuCapture() {
-        return false;
-    }
-
-    public BoardMarker boardMarker(BoardMarker.Kind kind, Coords coords, String label) {
-        return clientState.boardMarker(kind, coords, label);
-    }
-
-    public BoardMarker boardMarker(BoardMarker.Kind kind, Coords coords, int rgb, String label) {
-        return clientState.boardMarker(kind, coords, rgb, label);
-    }
-
-    /** Swing-only snapshot of the existing visible handlers, local attacks, and special-hex display rules. */
-    public List<BoardMarker> getBoardMarkers() {
-        return clientState.getBoardMarkers();
-    }
-
-
-    /** Existing handler output, including its arc, range and preference filtering. Swing thread only. */
-    public List<FieldOfFireSprite> getWeaponRangeSprites() {
-        return clientState.getWeaponRangeSprites();
-    }
-
-    /** Preserve the handler's visible label positions; the GPU only changes their orientation. */
-    public List<TextMarkerSprite> getWeaponRangeTextSprites() {
-        return clientState.getWeaponRangeTextSprites();
     }
 
     @Override

@@ -43,6 +43,7 @@ import java.awt.Stroke;
 import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 
@@ -50,7 +51,7 @@ import megamek.common.units.Entity;
  * Sprite and info for an aero flyover route. Does not actually use the image buffer as this can be horribly inefficient
  * for long diagonal lines.
  */
-public class FlyOverSprite extends Sprite implements TacticalSprite {
+public class FlyOverSprite extends Sprite {
 
     private Polygon flyOverPoly = null;
 
@@ -80,7 +81,7 @@ public class FlyOverSprite extends Sprite implements TacticalSprite {
         double prevAngle = prev.radian(curr);
 
         Point currPoint = bv.getCentreHexLocation(curr, true);
-        final double lw = bv.getScale() * BoardGlyphContext.FLY_OVER_LINE_WIDTH;
+        final double lw = bv.getScale() * TacticalStyle.FLY_OVER_LINE_WIDTH;
 
         // This is a bend
         double diff;
@@ -143,7 +144,7 @@ public class FlyOverSprite extends Sprite implements TacticalSprite {
         }
 
         // line width
-        final double lw = bv.getScale() * BoardGlyphContext.FLY_OVER_LINE_WIDTH;
+        final double lw = bv.getScale() * TacticalStyle.FLY_OVER_LINE_WIDTH;
         int numPassedThrough = en.getPassedThrough().size();
         double angle;
         double xDiff, yDiff;
@@ -270,12 +271,6 @@ public class FlyOverSprite extends Sprite implements TacticalSprite {
     @Override
     public boolean isInside(Point point) {
         return flyOverPoly.contains(point.x - bounds.x, point.y - bounds.y);
-    }
-
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Rectangle location = getBounds();
-        drawOnto(graphics, location.x, location.y, null);
     }
 
 }

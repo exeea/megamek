@@ -21,7 +21,7 @@ class BoardFiringGeometryTest {
                 List<BoardScene.Feature> features = x == 4 && y == 4
                       ? List.of(new BoardScene.Feature("tower", 0, 0, 0, 1, 5, 0)) : List.of();
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 4 || x == 6 ? 4 : 0,
-                      -1, false, 0, BoardScene.Surface.GRASS, null, null, null, features, List.of()));
+                      -1, false, 0, BoardScene.Surface.GRASS, null, null, features, List.of()));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "Firing", List.of());
@@ -96,7 +96,7 @@ class BoardFiringGeometryTest {
                     List<BoardScene.Tile> tiles = new ArrayList<>();
                     for (int x = 0; x < 3; x++) {
                         tiles.add(new BoardScene.Tile(new Coords(x, 0), level, x == 1 ? depth : -1,
-                              x == 1 && frozen, 0, BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                              x == 1 && frozen, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
                     }
                     BoardScene scene = new BoardScene(0, 3, 1, tiles, List.of(), List.of(), -1, "Firing", List.of());
                     float bottom = level * BoardGeometry.LEVEL

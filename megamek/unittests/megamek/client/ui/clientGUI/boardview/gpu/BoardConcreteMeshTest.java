@@ -117,8 +117,9 @@ class BoardConcreteMeshTest {
         float rimDistance = Float.NaN;
         for (Coords at : List.of(new Coords(0, 14), first, last)) {
             BoardSurface surface = new BoardSurface(scene, scene.tile(at));
-            // At 0115 edge 3 is the board cut; the fitted slope begins at corner 4.
-            int start = at.getX() == 0 ? 4 : 3;
+            // At 0115 edge 3 is the board cut and corner 4 keeps its place on the board's edge; the fitted slope begins
+            // at corner 5.
+            int start = at.getX() == 0 ? 5 : 3;
             for (int k = start; k <= 5; k++) {
                 Vector3 rim = surface.relief.seam(k, k, 0).sub(a);
                 float distance = direction.x * rim.y - direction.y * rim.x;
@@ -348,7 +349,7 @@ class BoardConcreteMeshTest {
                 Hex hex = new Hex(elevation.applyAsInt(at));
                 if (!natural || x < 8) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
                 hex.addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, cliffs));
-                var art = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                var art = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(hex, art, null, new BoardScene.PixelPool(), neighbour -> null));
             }
         }

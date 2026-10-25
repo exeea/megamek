@@ -250,7 +250,7 @@ class BoardRoughTest {
                 Coords coords = new Coords(x, y);
                 Hex hex = x == 2 && y == 2 ? centre : new Hex(0);
                 tiles.add(new BoardScene.Tile(coords, x > 2 ? step : 0, water ? 1 : -1, false, 0,
-                      family, null, null, null, null, null,
+                      family, null, null, null, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

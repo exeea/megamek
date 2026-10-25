@@ -55,6 +55,9 @@ vec3 groundNormal(vec2 uv, float strength);
 #ifdef roadCoatFlag
 vec3 mappedNormal(vec4 texel, float strength);
 #endif
+vec3 toLinear(vec3 c);
+// Paved wear's noise reads the shared rain noise, which those functions declare: it follows main.
+vec4 wearNoise(vec2 m, float size, float offset, float pixel);
 
 // A surface's maps and settings: from its material, or for a merged coat from its vertices.
 struct RoadMaps {
@@ -172,6 +175,202 @@ vec4 roadProfile() {
 #endif
 }
 
+// ---- Paved wear -----------------------------------------------------------------------------------------------------
+// A paved carriageway ages, carries traffic and breaks down; its core coat shows it, under the paint (GpuRoads#patches).
+// That coat's mask carries the traffic's heading (RG; its length falls to a half across a junction's hub,
+// BoardRoad#wearHub) and where across its lane a point lies (B, BoardRoad#wearLane: 0 the lane's centre, 1 its edge, the
+// wheel paths at WHEEL_PATH). World-anchored fields place every feature and the heading only orients them,
+// symmetrically, so neighbouring hexes agree whichever way their paths run. Sizes are metres.
+uniform float u_metre;       // world units per metre
+uniform float u_terrainWear; // the Weathering setting: 0 keeps every road new
+
+const float WHEEL_PATH = .4;  // BoardRoad.WHEEL_OFFSET over half of Kind.PAVED.halfWidth
+const float LANE_METRES = 2.7; // half of Kind.PAVED.halfWidth, in metres: B's full range
+const float HUB_WHEEL = .6;    // turning traffic crosses a junction's hub everywhere: it wears evenly
+
+bool pavedWear(RoadMaps m) {
+#if (defined(roadMapsFlag) || defined(roadCoatFlag)) && defined(roadMaskFlag)
+    return m.mapped && abs(m.transition + 2.0) < .5 && roadFinish(m) == ROAD_FINISH;
+#else
+    return false;
+#endif
+}
+
+vec4 wearHash(vec2 cell) {
+    vec4 p = fract(cell.xyxy * vec4(.1031, .1030, .0973, .1099));
+    p += dot(p, p.wzxy + 33.33);
+    return fract((p.xxyz + p.yzzw) * p.zywx);
+}
+
+// A line of half width w at distance d, averaged over a pixel: a line thinner than the pixel fades rather than aliases.
+float wearLine(float d, float w, float pixel) {
+    float drawn = max(w, pixel * .5);
+    return clamp((drawn - abs(d)) / pixel + .5, 0.0, 1.0) * (w / drawn);
+}
+
+// The distance to the nearest border of a grid of jittered cells: half the gap between the two nearest points.
+float crackBorder(vec2 p) {
+    vec2 g = floor(p), f = p - g;
+    float d1 = 8.0, d2 = 8.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 r = vec2(x, y) + .15 + .7 * wearHash(g + vec2(x, y)).xy - f;
+            float d = dot(r, r);
+            if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+        }
+    }
+    return (sqrt(d2) - sqrt(d1)) * .5;
+}
+
+// What a pit exposes: the gravel road's aggregate where the merged coats carry its maps, else darkened asphalt.
+vec3 pitAggregate(vec2 uv, vec3 asphalt) {
+#ifdef roadCoatFlag
+    return texture(u_roadColors, vec3(uv * 1.7, 2.0)).rgb * .62;
+#else
+    return asphalt * vec3(1.5, 1.35, 1.15);
+#endif
+}
+
+// The asphalt's wear at m (metres, Y flipped as the road UVs) over a pixel of `pixel` metres: its albedo and surface
+// (R height, G roughness, B cavity), and the slope its damage gives the normal (in m's frame). Lane-bound and oriented
+// marks give way to even wear across a junction's hub. Wear never makes the surface glossier: it would glint in the sun.
+// Returns how much water it holds: ruts, cracks and potholes fill first.
+float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2 uv, inout vec3 albedo,
+      inout vec4 surface, out vec2 slope) {
+    slope = vec2(0.0);
+    float wear = u_terrainWear;
+    if (wear <= 0.0) return 0.0;
+    vec2 across = vec2(-heading.y, heading.x);
+    float along = dot(m, heading);
+    float grain = surface.r;
+    // Broad state: how old a stretch is (its binder oxidises from black to grey) and how far it has broken down.
+    float age = wearNoise(m, 173.0, .61, pixel).g;
+    float decay = smoothstep(.36, .76, wearNoise(m, 61.0, .29, pixel).r * .6 + age * .4) * wear;
+    float oxidised = smoothstep(.2, .8, age) * wear;
+    float fine = wearNoise(m, 2.3, .43, pixel).b;
+    float luma = dot(albedo, vec3(.2126, .7152, .0722));
+    albedo = mix(albedo, vec3(luma), .55 * oxidised) * mix(mix(1.0, .8, wear), 1.3, oxidised);
+    float wheel = mix(1.0 - smoothstep(.07, .2, abs(lane - WHEEL_PATH)), HUB_WHEEL, hub);
+    float marks = 1.0 - hub;
+    // Old binder loosens its aggregate between the wheel paths: open texture.
+    float ravel = smoothstep(.55, .85, age * .6 + fine * .4) * wear * (1.0 - wheel);
+    albedo *= 1.0 + ravel * (grain - .5) * .6;
+    surface.g = min(.98, surface.g + .08 * ravel);
+    // Traffic polishes the wheel paths dark and smooth, streaked along with rubber; the paths sink into ruts.
+    vec2 streak = vec2(along / 7.0, dot(m, across) * 1.3);
+    float rubbed = .5 * (wearNoise(streak, 1.0, 0.0, pixel * 1.3).r + wearNoise(-streak, 1.0, 0.0, pixel * 1.3).r);
+    rubbed = mix(rubbed, wearNoise(m, 1.3, .21, pixel).r, hub);
+    float polish = wheel * wear * mix(.45, 1.0, rubbed);
+    albedo *= mix(1.0, .62, polish * mix(.55, 1.0, oxidised));
+    float hollow = wheel * decay * .6;
+    // Binder squeezed up in hot wheel paths: black.
+    float bleed = wheel * smoothstep(.74, .9, wearNoise(m, 9.0, .17, pixel).g) * wear;
+    albedo = mix(albedo, albedo * .42, bleed);
+    // Engines drip down the middle of each lane.
+    vec2 dripUV = vec2(along / 2.2, dot(m, across) * 3.0);
+    float drops = .5 * (wearNoise(dripUV + .3, 1.0, 0.0, pixel * 3.0).g + wearNoise(.3 - dripUV, 1.0, 0.0, pixel * 3.0).g);
+    float drip = (1.0 - smoothstep(.06, .17, lane)) * smoothstep(.45, .78, drops) * wear * marks;
+    albedo *= mix(1.0, .55, drip);
+    // Grit and dust gather where no wheel sweeps: along the kerbs and the middle.
+    float grit = smoothstep(.82, .99, lane) * smoothstep(.3, .7, fine) * wear * .55 * marks;
+    albedo = mix(albedo, toLinear(vec3(.44, .41, .36)) * (.8 + .4 * grain), grit);
+    surface.g = mix(surface.g, .95, grit);
+    float crack = 0.0, sealant = 0.0, fresh = 0.0, seam = 0.0, cut = 0.0, pit = 0.0, skid = 0.0, stain = 0.0;
+    if (pixel < .35) {
+        // The longitudinal joint between the lanes opens in stretches (the lane edge also runs along the kerb).
+        float joint = wearLine((1.0 - lane) * LANE_METRES, .008 + .01 * decay, pixel);
+        crack = max(crack, joint * smoothstep(.45, .7, wearNoise(m, 5.0, .53, pixel).b)
+              * smoothstep(.15, .5, decay + oxidised * .3) * marks);
+    }
+    // Features of 8 m cells, each in its own frame along the traffic: thermal cracks across the road, sealed or open;
+    // repairs, utility trenches, potholes, skid marks and oil stains.
+    vec2 g = floor(m / 8.0);
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 cell = g + vec2(x, y);
+            vec4 h = wearHash(cell), k = wearHash(cell + 71.3);
+            vec2 r = m - (cell + .2 + .6 * h.xy) * 8.0;
+            float u = dot(r, heading), v = dot(r, across);
+            float kind = h.z;
+            if (kind < .35 + .3 * oxidised) {
+                if (abs(v) > 7.0 || pixel > .35) continue;
+                float d = u + (wearNoise(m, 1.9, h.w, pixel).r - .5) * .4;
+                float line = wearLine(d, k.x < .45 ? .045 : .008 + .012 * decay, pixel)
+                      * smoothstep(7.0, 5.5, abs(v) + k.y * 3.0) * marks;
+                if (k.x < .45) sealant = max(sealant, line); else crack = max(crack, line);
+            } else if (kind < .7) {
+                continue;
+            } else if (kind < .78) {
+                // A repair (a rectangle of newer asphalt) or a trench across the road, refilled with asphalt or
+                // concrete; their saw cuts are sealed.
+                vec2 extent = kind < .75 ? vec2(.7 + 2.2 * k.y, .6 + 1.6 * k.z) : vec2(.3 + .25 * k.y, 7.0);
+                float inside = min(extent.x - abs(u), extent.y - abs(v));
+                if (inside < -.05) continue;
+                float area = clamp(inside / pixel + .5, 0.0, 1.0) * wear;
+                if (kind > .75 && k.w < .5) cut = max(cut, area); else fresh = max(fresh, area);
+                seam = max(seam, wearLine(inside, .025, pixel) * wear);
+            } else if (kind < .78 + .1 * decay) {
+                float radius = .25 + .55 * k.y;
+                float d = length(r) + (wearNoise(m, .6, h.w, pixel).r - .5) * .3 * radius;
+                float inside = smoothstep(radius, radius - .06, d);
+                pit = max(pit, inside);
+                // The pit's wall faces inwards.
+                slope -= r / max(length(r), 1e-4) * (inside - smoothstep(radius - .06, radius - .2, d)) * .9;
+            } else if (kind < .92 && kind > .87) {
+                // One vehicle's braking: its two tyres' streaks, broken and fading at both ends.
+                float reach = 2.0 + 4.0 * k.y;
+                float streak = (1.0 - smoothstep(.07, .13, abs(abs(v) - .9))) * (1.0 - smoothstep(reach * .5, reach, abs(u)));
+                skid = max(skid, streak * mix(.4, 1.0, wearNoise(m, .7, h.w, pixel).r) * .8 * wear * marks);
+            } else if (kind > .95) {
+                float radius = .5 + 1.1 * k.y;
+                float d = length(r) + (wearNoise(m, .9, h.w, pixel).g - .5) * .5 * radius;
+                stain = max(stain, smoothstep(radius, radius * .6, d) * mix(.5, 1.0, k.z) * wear);
+            }
+        }
+    }
+    // Weathered stretches crack into blocks of a few metres, sealed into black bands where the road is maintained; the
+    // decayed wheel paths into small fatigue cells.
+    float blocks = smoothstep(.5, .8, age * .5 + decay * .5) * wear;
+    if (blocks > 0.0 && pixel < .3) {
+        vec2 q = m / 2.6 + (vec2(wearNoise(m, 3.1, .11, pixel).r, wearNoise(m, 3.1, .63, pixel).g) - .5) * .45;
+        float border = crackBorder(q) * 2.6, present = blocks * smoothstep(.35, .6, wearNoise(m, 7.0, .71, pixel).b);
+        float sealed = smoothstep(.45, .6, wearNoise(m, 40.0, .37, pixel).g);
+        crack = max(crack, wearLine(border, .007 + .008 * decay, pixel) * present * (1.0 - sealed));
+        sealant = max(sealant, wearLine(border, .03, pixel) * present * sealed);
+    }
+    float fatigue = wheel * smoothstep(.5, .85, decay + (fine - .5) * .4);
+    if (fatigue > 0.0 && pixel < .06) {
+        vec2 q = m / .32 + (vec2(wearNoise(m, .5, .37, pixel).r, wearNoise(m, .5, .81, pixel).g) - .5) * .5;
+        crack = max(crack, wearLine(crackBorder(q) * .32, .004, pixel) * fatigue);
+    }
+    albedo *= mix(1.0, .9, fatigue);
+    // Repairs and trenches: newer binder, smoother and darker; some trenches are filled with concrete.
+    vec3 newer = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .3) * .6;
+    albedo = mix(albedo, newer, fresh);
+    albedo = mix(albedo, toLinear(vec3(.47, .46, .43)) * (.8 + .4 * grain), cut * .8);
+    // Open cracks are dark slits; sealed ones, and the saw cuts round repairs, black bands.
+    sealant = max(sealant, seam);
+    albedo = mix(albedo, albedo * .15, crack);
+    albedo = mix(albedo, toLinear(vec3(.055)), sealant);
+    albedo = mix(albedo, albedo * .35, skid);
+    albedo = mix(albedo, albedo * .5, stain);
+    // A pothole: broken through to the base course, its aggregate shadowed deeper in.
+    albedo = mix(albedo, pitAggregate(uv, albedo) * mix(.55, 1.0, grain), pit);
+    surface.g = mix(surface.g, .92, pit);
+    surface.b = mix(surface.b, surface.b * .55, pit);
+    hollow = max(hollow, max(pit, crack * .8));
+    surface.r = mix(surface.r, 0.0, hollow);
+    return hollow;
+}
+
+// Road paint wears with its road, most on weathered stretches (asphaltWear's age): how much has flaked off (x), and
+// how dull and grimy the rest is (y).
+vec2 paintWear(vec2 m, float pixel) {
+    float worn = smoothstep(.15, .85, wearNoise(m, 173.0, .61, pixel).g) * u_terrainWear;
+    float flakes = wearNoise(m, .9, .13, pixel).r * .6 + wearNoise(m, .23, .57, pixel).g * .4;
+    return vec2(worn * smoothstep(.78 - .32 * worn, .92 - .3 * worn, flakes), worn);
+}
+
 void main() {
     vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
     // Before the mask's discard, like the face above.
@@ -187,6 +386,10 @@ void main() {
     // texture covers. The material's own maps, magnified or not, take uv, so its grain keeps its size too.
     vec2 groundUV = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
     RoadMaps m = roadMaps();
+    // Paved wear's ground in metres and the pixel it covers, taken before the varying branches.
+    vec2 wearMetres = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_metre;
+    float wearPixel = max(length(dFdx(wearMetres)), length(dFdy(wearMetres)));
+    bool paved = pavedWear(m);
     // The material's own reads take its parallax; world-anchored patterns and its other grain scales do not.
     vec2 materialUV = uv;
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
@@ -210,10 +413,17 @@ void main() {
     vec3 albedo = roadAlbedo(m, materialUV).rgb * tint;
     vec4 properties = m.mapped ? roadSurface(m, materialUV) : vec4(.5);
     float roadCoverage = 1.0;
-    bool wheelWear = m.mapped && m.transition < -1.5 && m.transition > -2.5;
+    bool wheelWear = m.mapped && m.transition < -1.5 && m.transition > -2.5 && !paved;
     // Reuse the shared, stable noise field. These masks describe use and loose material, not road width.
     float wearPatches = 0.0, loosePatches = 0.0, compaction = 0.0;
-    if (m.mapped && abs(m.transition) > .5) {
+    vec2 wearSlope = vec2(0.0);
+    float wearWater = 0.0;
+    if (paved) {
+        vec2 heading = (roadColor.rg * 255.0 - 128.0) / 127.0;
+        float hub = smoothstep(.04, .46, 1.0 - length(heading));
+        wearWater = asphaltWear(wearMetres, wearPixel, normalize(heading), roadColor.b, hub, materialUV, albedo,
+              properties, wearSlope);
+    } else if (m.mapped && abs(m.transition) > .5) {
         wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
         loosePatches = texture(u_rainNoise, groundUV / 5.0 + .37).b;
         albedo *= mix(.95, 1.05, wearPatches);
@@ -261,6 +471,8 @@ void main() {
     float normalStrength = 1.0;
     if (wheelWear) { normalStrength = mix(1.2, .35, compaction); }
     vec3 normal = roadNormal(m, materialUV, normalStrength);
+    // Potholes' walls (asphaltWear's slope, in the road UVs' frame).
+    if (paved) normal = normalize(normal + vec3(wearSlope.x, -wearSlope.y, 0.0));
     // Only exposed, upward-facing ground receives liquid water. No accumulation or terrain-rule changes.
     float wet = u_wetness * step(0.0, m.response) * smoothstep(0.2, 0.8, v_normal.z);
     float response = max(0.0, m.response);
@@ -283,6 +495,8 @@ void main() {
             float basinWater = smoothstep(mix(.86, .51, wet), mix(.92, .59, wet), soilBasins);
             puddle = max(puddle, basinWater * wet * smoothstep(.98, .999, v_normal.z) * u_rainDetail);
         }
+        // Ruts, cracks and potholes hold water first.
+        if (paved) puddle = max(puddle, smoothstep(.3, .9, wearWater) * wet * u_rainDetail);
     }
     albedo = wetAlbedo(albedo, absorption);
     groundFilm(normal, puddle);
@@ -315,7 +529,11 @@ void main() {
         alpha = mix(broken, roadColor.a, dust);
     } else if (wheelWear) {
         alpha *= smoothstep(.16, .62, wearPatches) * mix(.35, 1.0, loosePatches);
-    } else if (m.mapped && abs(m.transition) > .5) {
+    } else if (m.transition > 2.5) {
+        vec2 paint = paintWear(wearMetres, wearPixel);
+        alpha *= 1.0 - paint.x;
+        albedo *= 1.0 - .22 * paint.y;
+    } else if (m.mapped && abs(m.transition) > .5 && !paved) {
         // The wide loose margin has no opaque shoulder underneath it. Clumps give way to isolated grains
         // and exposed ground; the compacted core remains continuous and at the authored road width.
         float clumps = texture(u_rainNoise, groundUV / 32.0 + .19).r;
@@ -331,4 +549,9 @@ void main() {
 #ifdef roadMaskFlag
     if (roadHidden) discard;
 #endif
+}
+
+// The shared noise over cells of `size` metres, filtered for the pixel: explicitly, as its reads sit in varying branches.
+vec4 wearNoise(vec2 m, float size, float offset, float pixel) {
+    return textureLod(u_rainNoise, m / size + offset, log2(max(pixel * 64.0 / size, 1.0)));
 }

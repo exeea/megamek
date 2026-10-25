@@ -182,7 +182,7 @@ class GpuShadingNormalSmokeTest {
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 terrain.animate(0, java.util.List.of());
                 terrain.renderShadows(camera.camera, java.util.List.of());
-                Runnable draw = () -> terrain.render(camera.camera, false);
+                Runnable draw = () -> terrain.render(camera.camera);
                 setProxyMode(batch, 0);
                 specimenFrame(output, terrain, camera.camera, draw); // Install lazy production programs before uniforms.
                 ProxyFrame full = specimenFrame(output, terrain, camera.camera, draw);
@@ -466,7 +466,7 @@ class GpuShadingNormalSmokeTest {
         camera.near = 1; camera.far = 500; camera.update();
         output.begin(0, 0, 0, 0);
         // Match existing TreeLod provider fixtures: a new terrain pass invalidates cached camera/light globals.
-        if (preview != null) { preview.render(camera, true); output.begin(0, 0, 0, 0); }
+        if (preview != null) { GpuTreeLodSmokeTest.newShadingPass(preview); }
         batch.begin(camera); batch.render(instance, environment); batch.end();
         float[] pixels = output.linearPixels();
         finite(pixels);
@@ -1072,7 +1072,7 @@ class GpuShadingNormalSmokeTest {
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 terrain.animate(0, java.util.List.of());
                 terrain.renderShadows(camera.camera, java.util.List.of());
-                Runnable draw = () -> terrain.render(camera.camera, false);
+                Runnable draw = () -> terrain.render(camera.camera);
                 setProxyMode(batch, 0);
                 specimenFrame(output, terrain, camera.camera, draw); // Resolve actual lazy resources/programs first.
                 if (bank) {
@@ -1333,7 +1333,7 @@ class GpuShadingNormalSmokeTest {
 
     private static ProxyFrame specimenFrame(GpuSceneTestOutput output, GpuTerrain preview,
           com.badlogic.gdx.graphics.Camera camera, Runnable draw) {
-        preview.render(camera, true); // Invalidate the actual provider's per-frame camera/light cache.
+        GpuTreeLodSmokeTest.newShadingPass(preview); // Invalidate the actual provider's per-frame camera/light cache.
         output.begin(0, 0, 0, 0); draw.run();
         float[] rgba = output.linearPixels(); finite(rgba);
         float[] depth = new float[128 * 128];

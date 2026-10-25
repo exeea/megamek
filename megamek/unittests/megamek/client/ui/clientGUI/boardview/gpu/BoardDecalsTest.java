@@ -154,7 +154,7 @@ class BoardDecalsTest {
 
     /** A grass hex at {@link #COORDS}, with a legacy paint overlay or none. */
     private static BoardScene.Tile grass(BoardScene.Pixels overlay) {
-        return new BoardScene.Tile(COORDS, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, overlay, null, null,
+        return new BoardScene.Tile(COORDS, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, overlay, null,
               List.of(), List.of(), BoardLiquid.NONE, null, true);
     }
 

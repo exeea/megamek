@@ -127,7 +127,7 @@ class GpuForestBenchmarkSmokeTest {
           GpuStageTimings timings) {
         if (timings != null) { timings.stage("opaque"); }
         output.begin(.42f, .56f, .69f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         if (timings != null) { timings.stage("transparent"); }
         terrain.renderTransparent(camera.camera);
         if (timings != null) { timings.stage("display"); }
@@ -165,7 +165,7 @@ class GpuForestBenchmarkSmokeTest {
                     }
                     features = BoardFeatures.capture(hex, coords, Map.of());
                 }
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, ground, null, null, null, null, features,
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, ground, null, null, null, features,
                       List.of(), BoardLiquid.NONE, null, true));
             }
         }

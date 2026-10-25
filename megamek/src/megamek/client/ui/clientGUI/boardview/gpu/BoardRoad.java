@@ -594,7 +594,10 @@ final class BoardRoad {
      */
     static IntFunction<Vector2> bends(Coords coords, Function<Coords, Node> nodes) {
         return direction -> {
-            if (!bent(coords, direction, nodes)) { return null; }
+            // A straight road through a bridge's hex crosses as a plain straight road does: square to its border.
+            if (!bent(coords, direction, nodes)) {
+                return straightThrough(coords, direction, nodes) ? border(direction).nor() : null;
+            }
             Coords after = coords.translated(direction);
             int mine = other(nodes.apply(coords), direction), theirs = other(nodes.apply(after), (direction + 3) % 6);
             Vector2 normal = border(direction);
@@ -627,6 +630,14 @@ final class BoardRoad {
         Node self = nodes.apply(coords), next = nodes.apply(coords.translated(direction));
         return self != null && next != null && self.simple() && next.simple() && self.elevation() == next.elevation()
               && (self.exits() & 1 << direction) != 0 && (next.exits() & 1 << (direction + 3) % 6) != 0;
+    }
+
+    /** Whether a straight road crosses this border at one level into a straight road, plain or not. */
+    private static boolean straightThrough(Coords coords, int direction, Function<Coords, Node> nodes) {
+        Node self = nodes.apply(coords), next = nodes.apply(coords.translated(direction));
+        int opposite = (direction + 3) % 6, through = 1 << direction | 1 << opposite;
+        return self != null && next != null && self.elevation() == next.elevation() && self.exits() == through
+              && next.exits() == through;
     }
 
     /** A two-way road's exit other than the given one. */
@@ -1003,8 +1014,8 @@ final class BoardRoad {
 
     /** Bend a point past the bank's shared border, retaining its offset across the incoming carriageway. */
     Vector2 bendFrom(Coords origin, int direction, float x, float y) {
-        float dx = HexTile.centerX(origin, HexTile.WIDTH) - HexTile.centerX(coords, HexTile.WIDTH);
-        float dy = HexTile.centerY(origin, HexTile.HEIGHT) - HexTile.centerY(coords, HexTile.HEIGHT);
+        float dx = HexTile.centerX(origin, BoardGeometry.TILE_WIDTH) - HexTile.centerX(coords, BoardGeometry.TILE_WIDTH);
+        float dy = HexTile.centerY(origin, BoardGeometry.TILE_HEIGHT) - HexTile.centerY(coords, BoardGeometry.TILE_HEIGHT);
         var gate = border(direction);
         var axis = new Vector2(gate).nor();
         float along = (x + dx) * axis.x + (y + dy) * axis.y;
@@ -1173,10 +1184,30 @@ final class BoardRoad {
 
     /** Symmetric feathering changes tyre wear intensity, never the axle spacing or tyre width. */
     float wheelCoverage(float x, float y) {
-        PathSample nearest = pathSample(x, y, paintPaths());
-        float axle = Math.abs(nearest.distance() - laneCenter(nearest.width()));
-        float t = Math.clamp((TRACK_HALF_WIDTH - Math.abs(axle - WHEEL_OFFSET)) / TRACK_HALF_WIDTH, 0, 1);
+        float t = Math.clamp((TRACK_HALF_WIDTH - Math.abs(laneOffset(x, y) - WHEEL_OFFSET)) / TRACK_HALF_WIDTH, 0, 1);
         return t * t * (3 - 2 * t);
+    }
+
+    /** How far a point lies from the centre line of its lane, whichever side. */
+    private float laneOffset(float x, float y) {
+        PathSample nearest = pathSample(x, y, paintPaths(), true);
+        return Math.abs(nearest.distance() - laneCenter(nearest.width()));
+    }
+
+    /**
+     * Where a point lies across its lane for paved wear (terrain-road.frag): 0 on the lane's centre line, 1 at its edge,
+     * a two-way road's middle or kerb, so its wheel paths lie at WHEEL_OFFSET of that.
+     */
+    float wearLane(float x, float y) { return Math.min(1, laneOffset(x, y) / (Kind.PAVED.halfWidth / 2)); }
+
+    /**
+     * How far into a junction's hub a point lies for paved wear: 1 where the approaches' lanes cross and turning
+     * traffic wears the whole surface, fading to 0 on the arms, whose lanes carry their own wear.
+     */
+    float wearHub(float x, float y) {
+        if (borders.size() < 3 || circle != null) { return 0; }
+        float t = Math.clamp(((float) Math.hypot(x, y) - 14) / 10, 0, 1);
+        return 1 - t * t * (3 - 2 * t);
     }
 
     /** Disturbed soil/fines thin out in patches; their final extent still stays inside the terminal plane. */
@@ -1214,13 +1245,26 @@ final class BoardRoad {
     }
 
     private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths) {
+        return pathSample(x, y, sampledPaths, false);
+    }
+
+    /**
+     * With {@code open}, a path's open ends run straight on, so a point past one (an oblique border crossing leaves a
+     * wedge of carriageway beyond it) still measures across the lane rather than round the end.
+     */
+    private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths, boolean open) {
         float distance = Float.POSITIVE_INFINITY, edge = Float.POSITIVE_INFINITY, alongX = 0, alongY = 1, width = 0;
         for (var path : sampledPaths) {
+            // A ring closes on itself (to rounding): it has no ends.
+            boolean ends = open && Math.hypot(path.getFirst().x - path.getLast().x, path.getFirst().y - path.getLast().y) > .01;
             for (int i = 1; i < path.size(); i++) {
                 Point a = path.get(i - 1), b = path.get(i);
                 float dx = b.x - a.x, dy = b.y - a.y;
-                float t = Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy), 0, 1);
+                float along = ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy);
+                float t = Math.clamp(along, ends && i == 1 ? Float.NEGATIVE_INFINITY : 0,
+                      ends && i == path.size() - 1 ? Float.POSITIVE_INFINITY : 1);
                 float near = (float) Math.hypot(x - a.x - t * dx, y - a.y - t * dy);
+                t = Math.clamp(t, 0, 1);
                 edge = Math.min(edge, near - a.width - t * (b.width - a.width));
                 if (near < distance) { distance = near; alongX = dx; alongY = dy; width = a.width + t * (b.width - a.width); }
             }
@@ -1259,8 +1303,8 @@ final class BoardRoad {
     /**
      * The unit normal {x, y} of {@link #throughStation}'s section at each vertex of the course: square to the bisector of
      * the segments meeting there. Where the course crosses a border, the section is the border itself, so both hexes
-     * measure one station all along their shared edge: the 84x72 lattice is not regular, and a square crossing is not
-     * quite square to it.
+     * measure one station all along their shared edge: the lattice is regular only to a 32nd, and a square crossing is
+     * not exactly square to it.
      */
     private float[] sections() {
         float[] result = sections;
@@ -1292,9 +1336,10 @@ final class BoardRoad {
     /** The normal of the hex edge a course point lies on, turned along (dx, dy); null off the hex outline. */
     private static float[] borderNormal(Point p, float dx, float dy) {
         for (int k = 0; k < 6; k++) {
-            float ax = HexTile.cornerOffsetX(k, HexTile.WIDTH), ay = HexTile.cornerOffsetY(k, HexTile.HEIGHT);
-            float ex = HexTile.cornerOffsetX((k + 1) % 6, HexTile.WIDTH) - ax;
-            float ey = HexTile.cornerOffsetY((k + 1) % 6, HexTile.HEIGHT) - ay;
+            float ax = HexTile.cornerOffsetX(k, BoardGeometry.TILE_WIDTH);
+            float ay = HexTile.cornerOffsetY(k, BoardGeometry.TILE_HEIGHT);
+            float ex = HexTile.cornerOffsetX((k + 1) % 6, BoardGeometry.TILE_WIDTH) - ax;
+            float ey = HexTile.cornerOffsetY((k + 1) % 6, BoardGeometry.TILE_HEIGHT) - ay;
             float length = (float) Math.hypot(ex, ey), along = ((p.x - ax) * ex + (p.y - ay) * ey) / (length * length);
             if (along < 0 || along > 1 || Math.abs((p.x - ax) * ey - (p.y - ay) * ex) > .01f * length) { continue; }
             float nx = ey / length, ny = -ex / length, sign = nx * dx + ny * dy < 0 ? -1 : 1;

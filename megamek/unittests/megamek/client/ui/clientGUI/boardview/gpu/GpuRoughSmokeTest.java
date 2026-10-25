@@ -176,7 +176,7 @@ class GpuRoughSmokeTest {
                 if (y == 2) { hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, 18)); }
                 var base = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, hex.getLevel());
                 tiles.add(new BoardScene.Tile(coords, hex.getLevel(), -1, false, y == 2 ? 18 : 0,
-                      BoardFeatures.surface(hex), base.ground(), null, null, null, null,
+                      BoardFeatures.surface(hex), base.ground(), null, null, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.NONE, null,
                       BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex)));
             }

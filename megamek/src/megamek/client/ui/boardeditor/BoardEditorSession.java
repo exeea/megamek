@@ -1881,7 +1881,7 @@ public final class BoardEditorSession {
      * takes a hex there ({@link #draw}).
      */
     static boolean core(double x, double y) {
-        double px = x * HexTile.WIDTH, py = y * HexTile.HEIGHT;
+        double px = x * HexTile.MODEL_WIDTH, py = y * HexTile.HEIGHT;
         for (int direction = 0; direction < 6; direction++) {
             float[] border = RailRoute.border(direction);
             if ((px * border[0] + py * border[1]) / (border[0] * border[0] + border[1] * border[1]) > CORE) { return false; }
@@ -1896,8 +1896,8 @@ public final class BoardEditorSession {
      * just inside the hex it still lies in the half it came in by.
      */
     static int heading(double x, double y) {
-        double px = x * HexTile.WIDTH, py = y * HexTile.HEIGHT;
-        if (Math.hypot(px, py) < HEADING * HexTile.WIDTH) { return -1; }
+        double px = x * HexTile.MODEL_WIDTH, py = y * HexTile.HEIGHT;
+        if (Math.hypot(px, py) < HEADING * HexTile.MODEL_WIDTH) { return -1; }
         int side = -1;
         double most = 0;
         for (int direction = 0; direction < 6; direction++) {
@@ -1946,7 +1946,7 @@ public final class BoardEditorSession {
         var track = track(at, object);
         if (track == null) { return object; }
         var spot = track.getValue();
-        return object.transform(spot.x() / HexTile.WIDTH, spot.y() / HexTile.HEIGHT, spot.rotation(), object.mirror(),
+        return object.transform(spot.x() / HexTile.MODEL_WIDTH, spot.y() / HexTile.HEIGHT, spot.rotation(), object.mirror(),
               object.scale(), RailRoute.ride(track.getKey()));
     }
 
@@ -1959,7 +1959,7 @@ public final class BoardEditorSession {
      */
     private Map.Entry<BoardDecoration, RailRoute.Spot> track(Coords at, BoardDecoration vehicle) {
         Hex hex = board().getHex(at);
-        float x = (float) vehicle.x() * HexTile.WIDTH, y = (float) vehicle.y() * HexTile.HEIGHT;
+        float x = (float) vehicle.x() * HexTile.MODEL_WIDTH, y = (float) vehicle.y() * HexTile.HEIGHT;
         double level = vehicle.placement().level(hex), gap = Double.POSITIVE_INFINITY, rise = Double.POSITIVE_INFINITY;
         Map.Entry<BoardDecoration, RailRoute.Spot> result = null;
         for (var marker : RailRoute.markers(hex, RailRoute.rides(vehicle.asset()))) {
@@ -2003,7 +2003,7 @@ public final class BoardEditorSession {
                   || RailRoute.follow(board()::getHex, at, route, start, offset + half).beyond() > FITS) { continue; }
             var onTrack = RailRoute.follow(board()::getHex, at, route, start, offset);
             var spot = onTrack.spot();
-            result.add(Map.entry(onTrack.at(), member.transform(spot.x() / HexTile.WIDTH, spot.y() / HexTile.HEIGHT,
+            result.add(Map.entry(onTrack.at(), member.transform(spot.x() / HexTile.MODEL_WIDTH, spot.y() / HexTile.HEIGHT,
                   spot.rotation() + member.rotation(), member.mirror(), member.scale(), RailRoute.ride(onTrack.marker()))));
         }
         return result;
@@ -2563,7 +2563,7 @@ public final class BoardEditorSession {
         double factor = property.equals("scale") ? number : 1;
         require(factor > 0 && Double.isFinite(factor), Messages.getString("BoardEditor.scalePositive"));
         double cos = Math.cos(Math.toRadians(turn)), sin = Math.sin(Math.toRadians(turn));
-        double width = megamek.client.ui.tileset.HexTileset.HEX_W, height = megamek.client.ui.tileset.HexTileset.HEX_H;
+        double width = HexTile.MODEL_WIDTH, height = HexTile.HEIGHT;
         Map<Selection, BoardDecoration> moved = new LinkedHashMap<>();
         for (var entry : members.entrySet()) {
             Coords owner = entry.getKey().coords();

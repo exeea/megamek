@@ -83,7 +83,6 @@ public final class UnitAnnotations {
     private Image image;
 
     public Image image() { return image; }
-    public static final int ANNOTATION_RESOLUTION = 4;
 
     // Statics
     private static final int SMALL = 0;
@@ -485,24 +484,6 @@ public final class UnitAnnotations {
 
     private record Bar(int length, Color color) { }
     private record Tmm(int mode, int value, Color color) { }
-    private record AnnotationState(boolean visible, String name, Font font, Positioning labelPosition,
-          Color background, Color border, Color text, List<Status> statuses, Bar armor, Bar internal, Tmm tmm) { }
-
-    /** Cached presentation owned by the Swing snapshot caller. Its image must not be modified after capture. */
-    public static final class Annotations {
-        private final AnnotationState state;
-        private final BufferedImage image;
-
-        private Annotations(AnnotationState state, BufferedImage image) {
-            this.state = state;
-            this.image = image;
-        }
-
-        public BufferedImage image() {
-            return image;
-        }
-    }
-
     private void drawStatusStrings(Graphics2D graphics2D, List<Status> statusStrings) {
         if (statusStrings.isEmpty()) {
             return;
@@ -582,60 +563,7 @@ public final class UnitAnnotations {
      * AWT.
      */
     public void prepare() {
-        prepare(false, statusStrings());
-    }
-
-    public BufferedImage captureAnnotations() {
-        return captureAnnotations(null, isSelected, isAffectedByECM).image();
-    }
-
-    /** Reuses artwork when the visible presentation is unchanged, regardless of board position or camera zoom. */
-    public Annotations captureAnnotations(Annotations previous, boolean selected, boolean affectedByECM) {
-        isSelected = selected;
-        isAffectedByECM = affectedByECM;
-        getBounds();
-        boolean sensor = onlyDetectedBySensors();
-        List<Status> statuses = sensor ? List.of() : statusStrings();
-        if (sensor) {
-            criticalStatus = false;
-        }
-        AnnotationState state = new AnnotationState(hasAnnotations(), getAdjShortName(), labelFont, labelPos,
-              labelBackground(true), labelBorder(), labelTextColor(), statuses,
-              sensor ? null : armorBar(), sensor ? null : internalBar(), sensor ? null : tmm());
-        if (previous != null && previous.state.equals(state)) {
-            return previous;
-        }
-        prepare(true, statuses);
-        BufferedImage result = new BufferedImage(image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = result.createGraphics();
-        graphics.drawImage(image, 0, 0, null);
-        graphics.dispose();
-        int left = result.getWidth();
-        int top = result.getHeight();
-        int right = 0;
-        int bottom = 0;
-        for (int row = 0; row < result.getHeight(); row++) {
-            for (int column = 0; column < result.getWidth(); column++) {
-                if ((result.getRGB(column, row) >>> 24) != 0) {
-                    left = Math.min(left, column);
-                    top = Math.min(top, row);
-                    right = Math.max(right, column + 1);
-                    bottom = Math.max(bottom, row + 1);
-                }
-            }
-        }
-        // A subimage would retain the entire transparent backing buffer for the lifetime of the cache.
-        BufferedImage cropped = new BufferedImage(Math.max(1, right - left), Math.max(1, bottom - top),
-              BufferedImage.TYPE_INT_ARGB);
-        if (right > left) {
-            Graphics2D crop = cropped.createGraphics();
-            try {
-                crop.drawImage(result, -left, -top, null);
-            } finally {
-                crop.dispose();
-            }
-        }
-        return new Annotations(state, cropped);
+        prepare(statusStrings());
     }
 
     private List<Status> statusStrings() {
@@ -681,27 +609,18 @@ public final class UnitAnnotations {
         };
     }
 
-    private void prepare(boolean floating, List<Status> stStr) {
+    private void prepare(List<Status> stStr) {
         final Board board = bv.getBoard();
         // recalculate bounds & label
         getBounds();
-        if (floating) {
-            int margin = 4 * (labelRect.height + 2) + 4;
-            bounds = new Rectangle(Math.max(bv.getHexSize().width, labelRect.width + 2 * margin),
-                  bv.getHexSize().height + labelRect.height + 8);
-            hexOrigin = new Point((bv.getHexSize().width - bounds.width) / 2, 0);
-            labelRect.setLocation((bv.getHexSize().width - labelRect.width) / 2, 2);
-        }
 
         // create image for buffer
         GraphicsConfiguration config = GraphicsEnvironment.getLocalGraphicsEnvironment()
               .getDefaultScreenDevice()
               .getDefaultConfiguration();
-        int resolution = floating ? ANNOTATION_RESOLUTION : 1;
-        image = config.createCompatibleImage(bounds.width * resolution, bounds.height * resolution, Transparency.TRANSLUCENT);
+        image = config.createCompatibleImage(bounds.width, bounds.height, Transparency.TRANSLUCENT);
         Graphics2D graph = (Graphics2D) image.getGraphics();
         UIUtil.setHighQualityRendering(graph);
-        graph.scale(resolution, resolution);
 
         // translate everything (=correction for label placement)
         graph.translate(-hexOrigin.x, -hexOrigin.y);
@@ -711,7 +630,7 @@ public final class UnitAnnotations {
 
         boolean isAero = entity.isAero();
 
-        if (!floating && (isAero && ((IAero) entity).isSpheroid() && !board.isSpace()) && (secondaryPos == 1)) {
+        if ((isAero && ((IAero) entity).isSpheroid() && !board.isSpace()) && (secondaryPos == 1)) {
             graph.setColor(Color.WHITE);
             graph.draw(bv.getFacingPolys()[entity.getFacing()]);
         }
@@ -723,7 +642,7 @@ public final class UnitAnnotations {
 
             // Label background
             if (!getAdjShortName().isBlank()) {
-                graph.setColor(labelBackground(floating));
+                graph.setColor(labelBackground());
                 graph.fillRoundRect(labelRect.x, labelRect.y, labelRect.width, labelRect.height, 5, 10);
 
                 // Draw a label border with player colors or team coloring
@@ -764,7 +683,7 @@ public final class UnitAnnotations {
 
             // draw facing
             graph.setColor(Color.white);
-            if (!floating && (entity.getFacing() != -1)
+            if ((entity.getFacing() != -1)
                   && !((entity instanceof ConvInfantry infantry)
                   && !infantry.hasFieldWeapon()
                   && !infantry.isTakingCover())
@@ -797,20 +716,18 @@ public final class UnitAnnotations {
             }
 
             // highlight the active front arc for infantry that has hit the deck with a field weapon
-            if (!floating) {
-                drawOnDeckFrontArc(graph);
-            }
+            drawOnDeckFrontArc(graph);
 
             // determine secondary facing for non-meks & flipped arms; the label shows no Mek torso twist
             boolean mekTorso = ((entity instanceof Mek) || (entity instanceof ProtoMek)) && !(entity instanceof QuadVee)
                   && !entity.getArmsFlipped();
             int secFacing = mekTorso ? entity.getFacing() : twistFacing(entity);
             // draw secondary facing arrow if necessary
-            if (!floating && (secFacing != -1) && (secFacing != entity.getFacing())) {
+            if ((secFacing != -1) && (secFacing != entity.getFacing())) {
                 graph.setColor(Color.GREEN);
                 graph.draw(bv.getFacingPolys()[secFacing]);
             }
-            if (!floating && entity.isAero() && this.bv.getGame().useVectorMove()) {
+            if (entity.isAero() && this.bv.getGame().useVectorMove()) {
                 for (int head : entity.getHeading()) {
                     graph.setColor(Color.GREEN);
                     graph.draw(bv.getFacingPolys()[head]);
@@ -818,10 +735,6 @@ public final class UnitAnnotations {
             }
 
             // armor, internal and TMM status bars
-            if (floating) {
-                graph.translate((bv.getHexSize().width / bv.getScale() - STATUS_BAR_LENGTH) / 2.0 - STATUS_BAR_X,
-                      (labelRect.height + 6) / bv.getScale() - 6);
-            }
             Bar armor = armorBar();
             graph.setColor(Color.darkGray);
             graph.fillRect(STATUS_BAR_X + 1, 7, STATUS_BAR_LENGTH, 3);
@@ -889,8 +802,8 @@ public final class UnitAnnotations {
         return secondaryPos == -1 || secondaryPos == 6 || entity instanceof AbstractBuildingEntity && secondaryPos == 0;
     }
 
-    private Color labelBackground(boolean floating) {
-        return criticalStatus && (!floating || !onlyDetectedBySensors()) ? LABEL_CRITICAL_BACK : labelBack;
+    private Color labelBackground() {
+        return criticalStatus ? LABEL_CRITICAL_BACK : labelBack;
     }
 
     private Color labelBorder() {

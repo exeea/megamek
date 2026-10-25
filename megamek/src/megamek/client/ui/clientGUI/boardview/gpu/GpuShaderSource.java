@@ -20,12 +20,17 @@ import java.util.regex.Pattern;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import megamek.common.Configuration;
+import megamek.common.board.HexTile;
 
 /** Uncached shader reads: installation overrides, checkout resources, then the bundled defaults. */
 final class GpuShaderSource {
     private static final String RESOURCES = "megamek/client/ui/clientGUI/boardview/gpu/";
 
     private GpuShaderSource() { }
+
+    /** The board hex in model units ({@link HexTile}): every shader's hex lattice derives from this one size. */
+    private static final String BOARD_HEX = "#ifndef BOARD_HEX_DEFINED\n#define BOARD_HEX_DEFINED\nconst vec2 BOARD_HEX = vec2("
+          + HexTile.MODEL_WIDTH + ", " + HexTile.HEIGHT + ".0);\n#endif";
 
     private static final Pattern INCLUDE = Pattern.compile("(?m)^([ \\t]*)// ([A-Za-z][A-Za-z0-9_-]*)(?=[ \\t]*\\r?$)");
 
@@ -112,6 +117,7 @@ final class GpuShaderSource {
                   + read("particles-fire.glsl", choices, path) + "\n" + read("particles-jet.glsl", choices, path);
             case "terrain-projection-functions" -> read("terrain-detail.glsl", choices, path)
                   + read("terrain-projection.glsl", choices, path);
+            case "BOARD_HEX" -> BOARD_HEX;
             // Selection comments and structural insertion points are not file includes.
             default -> null;
         };

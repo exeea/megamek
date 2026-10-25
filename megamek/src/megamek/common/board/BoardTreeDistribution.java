@@ -23,7 +23,7 @@ public final class BoardTreeDistribution {
     public static final List<Integer> TREE_TERRAINS = List.of(Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV);
     /** About three hexes across, in authored tile pixels, independent of render scale or camera. */
     private static final float STAND_SIZE = 210;
-    private static final float TILE_WIDTH = HexTile.WIDTH;
+    private static final float TILE_WIDTH = HexTile.MODEL_WIDTH;
     private static final float TILE_HEIGHT = HexTile.HEIGHT;
 
     private BoardTreeDistribution() { }

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -21,7 +22,6 @@ import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import javax.swing.JComponent;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
@@ -33,15 +33,13 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
-import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
-import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.clientGUI.tooltip.HexTooltip;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
@@ -50,9 +48,10 @@ import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.TagInfo;
 import megamek.common.actions.ArtilleryAttackAction;
-import megamek.common.actions.EntityAction;
+import megamek.common.actions.AttackAction;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Board;
+import megamek.common.board.BridgeConstruction;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.Flare;
@@ -67,11 +66,14 @@ import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Aero;
+import megamek.common.units.BulldozerRules;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import megamek.common.units.UnitLocation;
 import megamek.logging.MMLogger;
 
@@ -89,6 +91,19 @@ final class GpuBoardSource implements BoardSource {
     private GpuBoardActions actions;
     volatile UiPreferences uiPreferences;
     private final Map<Image, BoardScene.Pixels> unitImages = new IdentityHashMap<>();
+    /**
+     * EDT: the board's tactical markings, without what the HUD draws itself (G4): the firing solutions are the board
+     * labels' to-hit badges, and the path's step arrows and costs are left out while the plan draws the route.
+     * MegaMek's movement envelope stays.
+     */
+    private final BoardTacticalMarks tacticalMarks = new BoardTacticalMarks();
+    /** The work under way as ghosts, and the marks and tiles they were built from (EDT); see {@link #workGhosts}. */
+    private volatile GpuEditorPreview.Data workGhosts = GpuEditorPreview.Data.NONE;
+    private List<TacticalMark> workMarks = List.of();
+    private List<BoardScene.Tile> workTiles = List.of();
+    /** The scene's tiles, {@link #tiles} with dug-in platoons' trenches, and what they were made from (EDT). */
+    private List<BoardScene.Tile> trenchedTiles = List.of(), trenchedFrom = List.of();
+    private Set<Coords> trenched = Set.of();
     private final UnitCamouflage camouflage = new UnitCamouflage();
     private final GpuReportLog reports = new GpuReportLog();
     private final GpuBattleStatus battleStatus = new GpuBattleStatus();
@@ -766,7 +781,6 @@ final class GpuBoardSource implements BoardSource {
                 changedState = true;
                 view.setMovingUnits(false);
                 view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
-                view.releasePlanarCapture();
                 view = selectedView;
                 unitImages.clear();
                 terrain.changed(null);
@@ -838,20 +852,13 @@ final class GpuBoardSource implements BoardSource {
         }
         Rectangle area = visibleArea;
         long revision = view.getPlanarRevision();
-        boolean allMarkings = revision != capturedRevision || view.game.getPhase() != capturedPhase;
-        boolean changedMarkings = changedTerrain || allMarkings;
-        if (changedMarkings || !area.equals(capturedArea)) {
-            List<BoardScene.Tile> painted = new ArrayList<>(tiles);
-            for (int index = 0; index < tiles.size(); index++) {
-                BoardScene.Tile old = tiles.get(index);
-                if (old.tactical() != null && !area.contains(old.coords().getX(), old.coords().getY())) {
-                    painted.set(index, old.withTactical(null));
-                }
-            }
-            // A terrain edit repaints its changed hexes and newly exposed view only. Explicit painter/overlay
-            // invalidation remains global, including FoV changes caused by an edited blocker.
+        boolean allLabels = revision != capturedRevision || view.game.getPhase() != capturedPhase;
+        if (changedTerrain || allLabels || !area.equals(capturedArea)) {
+            List<BoardScene.Tile> labelled = new ArrayList<>(tiles);
+            // A terrain edit relabels its changed hexes and newly exposed view only. A repaint of the client state
+            // relabels the whole view, including FoV changes caused by an edited blocker.
             List<Rectangle> exposed = new ArrayList<>();
-            if (allMarkings || capturedArea == null || !area.intersects(capturedArea)) {
+            if (allLabels || capturedArea == null || !area.intersects(capturedArea)) {
                 exposed.add(area);
             } else {
                 exposed.addAll(List.of(SwingUtilities.computeDifference(area, capturedArea)));
@@ -860,16 +867,17 @@ final class GpuBoardSource implements BoardSource {
                     if (!local.isEmpty()) { exposed.add(local); }
                 }
             }
-            for (Rectangle region : exposed) { view.capturePlanarTactical(region, hex -> {
-                int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
-                BoardScene.Tile old = tiles.get(index);
-                BoardScene.Tile next = old.withMarkings(terrainImages.capture(hex.tactical(), old.tactical()), hex.text());
-                if (!next.equals(old)) {
-                    painted.set(index, next);
+            for (Rectangle region : exposed) {
+                Rectangle hexes = region.intersection(new Rectangle(0, 0, board.getWidth(), board.getHeight()));
+                for (int x = hexes.x; x < hexes.x + hexes.width; x++) {
+                    for (int y = hexes.y; y < hexes.y + hexes.height; y++) {
+                        int index = x * board.getHeight() + y;
+                        labelled.set(index, tiles.get(index).withText(BoardArtwork.labels(board, new Coords(x, y))));
+                    }
                 }
-            }); }
-            if (!painted.equals(tiles)) {
-                tiles = List.copyOf(painted);
+            }
+            if (!labelled.equals(tiles)) {
+                tiles = List.copyOf(labelled);
             }
             terrainImages.retain(tiles);
             fieldOfView = view.captureFieldOfView(area);
@@ -965,18 +973,18 @@ final class GpuBoardSource implements BoardSource {
         GpuMovePlan.Snapshot move = moves.capture(panel, hover, pointer.pointedZ());
         Point light = view.getTerrainLightDirection();
         var rulerSnapshot = los.capture();
-        BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), tiles, units,
+        BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), trenchedTiles(board), units,
               List.of(), actorId, view.game.getPhase().localizedName(), commands,
               light == null || light.x == 0 && light.y == 0 ? null : new BoardScene.Light(light.x, -light.y),
-              firingLines(), view.getWeaponRangeSprites().stream().map(sprite -> new BoardScene.RangeBorder(
-                    sprite.getPosition(), sprite.getBorders(),
-                    FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
-                    FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(),
-              view.getBoardMarkers(), tacticalGeometry(move.planner()).withRuler(rulerSnapshot.ruler()),
-              view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
-                    FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
-                    FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView,
+              firingLines(), view.getWeaponRanges().stream().map(range -> new BoardScene.RangeBorder(
+                    range.coords(), range.borders(), TacticalStyle.rangeColor(range.bracket()).getRGB(),
+                    TacticalStyle.rangeText(range.bracket()))).toList(),
+              view.getBoardMarkers(), tacticalMarks.capture(view, move.planner()).withRuler(rulerSnapshot.ruler()),
+              view.getRangeLabels().stream().map(label -> new BoardScene.RangeLabel(label.coords(),
+                    TacticalStyle.rangeColor(label.bracket()).getRGB(),
+                    TacticalStyle.rangeText(label.bracket()))).toList(), fieldOfView,
               view.electronicWarfare(), designations(), starShells());
+        captureWorkGhosts(board);
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);
@@ -1013,23 +1021,88 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * EDT: the board state's tactical capture without MegaMek's sprites the HUD draws itself (G4, a consumer filter):
-     * the firing solutions always (the board labels' to-hit badges), and the path's step arrows and costs while the
-     * plan draws the route. MegaMek's movement envelope stays.
-     * The sprites are hidden only for this capture, on the thread that paints the Legacy 2D board.
+     * EDT: the scene's tiles: {@link #tiles} with a trench on every hex a platoon is dug in, the same tiles while
+     * neither changes.
      */
-    private BoardTactical tacticalGeometry(boolean planner) {
-        List<Sprite> skipped = Stream.concat(view.getAllSprites().stream(), view.getPathSprites().stream())
-              .filter(sprite -> !sprite.isHidden() && (sprite instanceof FiringSolutionSprite
-                    || planner && sprite instanceof StepSprite))
-              .toList();
-        skipped.forEach(sprite -> sprite.setHidden(true));
-        try {
-            return view.captureTacticalGeometry();
-        } finally {
-            skipped.forEach(sprite -> sprite.setHidden(false));
+    private List<BoardScene.Tile> trenchedTiles(Board board) {
+        Set<Coords> dug = trenches(board, true);
+        if (tiles != trenchedFrom || !dug.equals(trenched)) {
+            List<BoardScene.Tile> next = new ArrayList<>(tiles);
+            for (Coords coords : dug) {
+                int index = coords.getX() * board.getHeight() + coords.getY();
+                next.set(index, BoardFeatures.withTrench(tiles.get(index)));
+            }
+            trenchedTiles = dug.isEmpty() ? tiles : List.copyOf(next);
+            trenchedFrom = tiles;
+            trenched = dug;
         }
+        return trenchedTiles;
     }
+
+    /** The hexes of the board where a platoon is dug in ({@code complete}), or digging in. */
+    private Set<Coords> trenches(Board board, boolean complete) {
+        return view.getMarks().stream().<Coords>mapMulti((mark, result) -> {
+            if (mark instanceof TacticalMark.DugIn dugIn && dugIn.complete() == complete && board.contains(dugIn.coords())) {
+                result.accept(dugIn.coords());
+            }
+        }).collect(Collectors.toSet());
+    }
+
+    /**
+     * EDT: bridges being built, hexes being fortified, rubble being cleared and trenches being dug, as the hexes will be
+     * when the work is done; rebuilt when that work or the board's tiles change.
+     */
+    private void captureWorkGhosts(Board board) {
+        List<TacticalMark> work = view.getMarks().stream().filter(mark -> mark instanceof TacticalMark.BridgeBuild
+              || mark instanceof TacticalMark.Fortify || mark instanceof TacticalMark.RubbleClear
+              || mark instanceof TacticalMark.DugIn dugIn && !dugIn.complete()).toList();
+        if (work.equals(workMarks) && tiles == workTiles) { return; }
+        workMarks = work;
+        workTiles = tiles;
+        Map<Coords, Hex> before = new LinkedHashMap<>(), done = new LinkedHashMap<>();
+        for (TacticalMark mark : work) {
+            var finished = finished(board, mark);
+            if (finished != null) {
+                before.put(finished.getKey(), board.getHex(finished.getKey()));
+                done.put(finished.getKey(), finished.getValue());
+            }
+        }
+        // A trench is no terrain: a hex being dug stays as it is, unless other work there changes it.
+        Set<Coords> digging = trenches(board, false);
+        for (Coords coords : digging) {
+            before.putIfAbsent(coords, board.getHex(coords));
+            done.putIfAbsent(coords, board.getHex(coords));
+        }
+        workGhosts = GpuEditorPreview.work(before, done, (coords, hex) -> {
+            BoardScene.Tile tile = terrain.preview(board, coords, hex, at -> done.getOrDefault(at, board.getHex(at)));
+            return tile != null && digging.contains(coords) ? BoardFeatures.withTrench(tile) : tile;
+        });
+    }
+
+    /** The hex {@code work} leaves when it is done, by its coords; null where it would build nothing. */
+    private static Map.Entry<Coords, Hex> finished(Board board, TacticalMark work) {
+        return switch (work) {
+            case TacticalMark.BridgeBuild bridge -> {
+                Hex hex = BridgeConstruction.bridgedHex(board, bridge.coords(), bridge.exits(), bridge.bridgeType());
+                yield hex == null ? null : Map.entry(bridge.coords(), hex);
+            }
+            case TacticalMark.Fortify fortify when board.contains(fortify.coords()) -> {
+                Hex hex = board.getHex(fortify.coords()).duplicate();
+                hex.addTerrain(new Terrain(Terrains.FORTIFIED, 1));
+                yield Map.entry(fortify.coords(), hex);
+            }
+            case TacticalMark.RubbleClear rubble when board.contains(rubble.coords()) -> {
+                Hex hex = board.getHex(rubble.coords()).duplicate();
+                if (!BulldozerRules.hasClearableRubble(hex)) { yield null; }
+                BulldozerRules.clearRubble(hex);
+                yield Map.entry(rubble.coords(), hex);
+            }
+            default -> null;
+        };
+    }
+
+    @Override
+    public GpuEditorPreview.Data workGhosts() { return workGhosts; }
 
     /**
      * EDT: the enemy whose arcs the Tactical View shades: the listed, identified enemy under the
@@ -1156,28 +1229,26 @@ final class GpuBoardSource implements BoardSource {
 
     private List<BoardScene.FiringLine> firingLines() {
         List<BoardScene.FiringLine> result = new ArrayList<>();
-        for (var sprite : view.getAttackSprites()) {
-            Entity attacker = sprite.getAttackingEntity();
-            Targetable target = sprite.getTargetedEntity();
-            if (sprite.isHidden() || attacker.getPosition() == null || target.getPosition() == null
+        for (AttackAction action : view.getAttacks()) {
+            Entity weaponEntity = view.game.getEntity(action.getEntityId());
+            Entity attacker = weaponEntity == null ? null : weaponEntity.getAttackingEntity();
+            Targetable target = view.game.getTarget(action.getTargetType(), action.getTargetId());
+            if (attacker == null || target == null || attacker.getPosition() == null || target.getPosition() == null
                   || !board.contains(attacker.getPosition()) || !board.contains(target.getPosition())) {
                 continue;
             }
-            for (EntityAction action : sprite.getActions()) {
-                // ArtilleryAttackAction also represents direct artillery declared in the firing phase.
-                boolean indirect = action instanceof ArtilleryAttackAction && switch (view.game.getPhase()) {
-                    case TARGETING, TARGETING_REPORT, OFFBOARD, OFFBOARD_REPORT -> true;
-                    default -> false;
-                };
-                if (action instanceof WeaponAttackAction weaponAttack) {
-                    Entity weaponEntity = view.game.getEntity(action.getEntityId());
-                    var weapon = weaponEntity == null ? null : weaponEntity.getEquipment(weaponAttack.getWeaponId());
-                    indirect |= weapon != null && weapon.curMode().isIndirect();
-                }
-                result.add(new BoardScene.FiringLine(firingEndpoint(attacker), firingEndpoint(target),
-                      attacker.getOwner().getColour().getColour().getRGB(), indirect, attacker.getId(),
-                      TargetKey.of(target)));
+            // ArtilleryAttackAction also represents direct artillery declared in the firing phase.
+            boolean indirect = action instanceof ArtilleryAttackAction && switch (view.game.getPhase()) {
+                case TARGETING, TARGETING_REPORT, OFFBOARD, OFFBOARD_REPORT -> true;
+                default -> false;
+            };
+            if (action instanceof WeaponAttackAction weaponAttack) {
+                var weapon = weaponEntity.getEquipment(weaponAttack.getWeaponId());
+                indirect |= weapon != null && weapon.curMode().isIndirect();
             }
+            result.add(new BoardScene.FiringLine(firingEndpoint(attacker), firingEndpoint(target),
+                  attacker.getOwner().getColour().getColour().getRGB(), indirect, attacker.getId(),
+                  TargetKey.of(target)));
         }
         // Multiple weapons on one target share a trace, but direct and indirect fire remain distinct.
         return result.stream().distinct().toList();
@@ -1644,7 +1715,6 @@ final class GpuBoardSource implements BoardSource {
         camouflage.clear();
         tiles = List.of();
         terrain.close();
-        view.releasePlanarCapture();
         synchronized (this) {
             pendingEvents.clear();
             nuclearCapture = null;

@@ -275,7 +275,7 @@ final class GpuFamilyAssemblyReview {
                     assertTrue(terrainHit == null || unitHit < terrainHit.distance(), "Hull is in front of the board");
                     terrain.renderShadows(camera.camera, List.of(model.instance));
                     output.begin(.12f, .16f, .2f, 1);
-                    terrain.render(camera.camera, false);
+                    terrain.render(camera.camera);
                     batch.begin(camera.camera);
                     batch.render(model.instance, terrain.environment());
                     batch.end();

@@ -12,7 +12,6 @@ import java.awt.Color;
 import java.awt.Point;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
-import java.awt.geom.Path2D;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,8 +20,6 @@ import java.util.Map;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
@@ -136,7 +133,7 @@ class BoardDeploymentGeometryTest {
                 // A zone crosses several elevation changes and borders a much taller exterior ridge.
                 int level = x >= 3 ? 12 : (y % 3) * 2 - 2;
                 tiles.add(new BoardScene.Tile(coords, level, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
                 if (x < 3) { fills.add(fill(coords, Color.YELLOW.getRGB())); }
                 float crown = level * BoardGeometry.LEVEL + 4 * BoardGeometry.HEX_SCALE;
                 var center = BoardGeometry.center(coords, 0);
@@ -176,7 +173,7 @@ class BoardDeploymentGeometryTest {
             assertEquals(a.bottom().z, b.bottom().z, .001f, "Panel bottoms must share their joint");
             assertEquals(a.top().z, b.top().z, .001f, "The moving white outline must have no elevation gaps");
             if (scene.tile(a.owner()).elevation() != scene.tile(b.owner()).elevation()) { levelChanges++; }
-            if (a.top().x >= 210 * BoardGeometry.HEX_SCALE) {
+            if (a.top().x >= 2.5f * BoardGeometry.TILE_WIDTH * BoardGeometry.HEX_SCALE) {
                 assertTrue(a.top().z < 3 * BoardGeometry.LEVEL,
                       "The twelve-level exterior plateau must not raise the low deployment border");
                 exteriorRidge++;
@@ -221,18 +218,12 @@ class BoardDeploymentGeometryTest {
         Area union = new Area();
         for (var entry : zones.entrySet()) {
             if (entry.getValue().argb() != argb) { continue; }
-            Coords coords = entry.getKey();
-            int x = coords.getX() * 63, y = coords.getY() * 72 + (coords.getX() & 1) * 36;
-            Path2D hex = new Path2D.Double();
-            hex.moveTo(x + 21, y); hex.lineTo(x + 63, y); hex.lineTo(x + 84, y + 36);
-            hex.lineTo(x + 63, y + 72); hex.lineTo(x + 21, y + 72); hex.lineTo(x, y + 36);
-            hex.closePath();
-            union.add(new Area(hex));
+            var centre = BoardTacticalGeometry.centre(entry.getKey());
+            union.add(new Area(AffineTransform.getTranslateInstance(centre.x(), centre.y())
+                  .createTransformedShape(BoardTacticalGeometry.insetHexagon(0))));
         }
-        union.transform(AffineTransform.getScaleInstance(1, HexDrawUtilities.HEX_HGT / 72));
         Area outline = new Area(new BasicStroke(20, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER).createStrokedShape(union));
         outline.intersect(union);
-        outline.transform(AffineTransform.getScaleInstance(1, 72 / HexDrawUtilities.HEX_HGT));
         return outline;
     }
 
@@ -242,25 +233,22 @@ class BoardDeploymentGeometryTest {
         return result;
     }
 
+    /** A deployment hex's ring, as the deployment painter's capture reaches the 3D board. */
     private static BoardTactical.Fill fill(Coords coords, int argb) {
-        var graphics = new BoardTacticalGraphics();
-        try {
-            graphics.setColor(new Color(argb, true));
-            BoardTacticalGraphics.drawDeployment(graphics, local -> ((BoardTacticalGraphics) local).fillHexBorder(
-                  new Point(coords.getX() * 63, coords.getY() * 72 + (coords.getX() & 1) * 36), 1, 0, 2, true));
-            return graphics.snapshot().fills().getFirst();
-        } finally { graphics.dispose(); }
+        var centre = BoardTacticalGeometry.centre(coords);
+        return BoardTacticalGeometry.fill(BoardTacticalGeometry.ring(0, 2), centre, argb,
+              BoardTactical.Playback.HIDE_DURING_MOVEMENT, new BoardTactical.HexBorder(centre, 0, 2, 1, true), centre);
     }
 
-    private static float centerX(Coords coords) { return coords.getX() * 63 + 42; }
-    private static float centerY(Coords coords) { return coords.getY() * 72 + (coords.getX() & 1) * 36 + 36; }
+    private static float centerX(Coords coords) { return BoardTacticalGeometry.centre(coords).x(); }
+    private static float centerY(Coords coords) { return BoardTacticalGeometry.centre(coords).y(); }
 
     private static BoardScene scene(int width, int height, List<BoardTactical.Fill> fills) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of(), null,

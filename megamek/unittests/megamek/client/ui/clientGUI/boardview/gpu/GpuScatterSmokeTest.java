@@ -55,13 +55,13 @@ class GpuScatterSmokeTest {
             // Isolate the baked scatter layer from the separate living grass and sculpted-ground systems.
             var tiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
                   tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
-                  tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(), tile.liquid(),
+                  tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(), tile.liquid(),
                   tile.tileset(), false)).toList();
             BoardScene scene = new BoardScene(0, 16, 16, tiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(-24, -30));
             BoardScene bare = new BoardScene(0, 16, 16, scene.tiles().stream().map(tile -> new BoardScene.Tile(
                   tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
-                  tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), List.of(),
+                  tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), List.of(),
                   tile.text())).toList(), List.of(), List.of(), -1, "", List.of(), scene.light());
             var configuration = GpuBoardWindow.configuration(false);
             configuration.setWindowedMode(1440, 1000);
@@ -119,8 +119,8 @@ class GpuScatterSmokeTest {
                             plain.setAtmosphere(lighting);
                             boolean visible = step < 2 || step == 4;
                             int vertices = visible ? triangles * 3 : 0;
-                            int[] background = count(profiler, () -> plain.render(camera.camera, false));
-                            int[] decorated = count(profiler, () -> terrain.render(camera.camera, false));
+                            int[] background = count(profiler, () -> plain.render(camera.camera));
+                            int[] decorated = count(profiler, () -> terrain.render(camera.camera));
                             assertEquals(vertices, decorated[0] - background[0], "Color pass at LoD step " + step);
                             if (step == 0) {
                                 scatterDraws = decorated[1] - background[1];
@@ -159,8 +159,8 @@ class GpuScatterSmokeTest {
                         plain.update(approach(scene.tiles().getFirst().ground(), List.of()));
                         camera.camera.zoom = .25f;
                         camera.center(BoardGeometry.center(new Coords(0, 0), 0));
-                        assertEquals(count(profiler, () -> plain.render(camera.camera, false))[0],
-                              count(profiler, () -> terrain.render(camera.camera, false))[0],
+                        assertEquals(count(profiler, () -> plain.render(camera.camera))[0],
+                              count(profiler, () -> terrain.render(camera.camera))[0],
                               "A sloped road approach into an unpaved hex must also suppress scatter");
                         terrain.update(scene);
                         GpuStageTimings.stopCounting(profiler, rawGl20);
@@ -287,7 +287,7 @@ class GpuScatterSmokeTest {
                         ScreenUtils.clear(.035f, .055f, .075f, 1, true);
                         timings.beginFrame(i >= 90);
                         timings.stage("opaque");
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         timings.stage(null);
                         Gdx.gl.glFinish();
                     }
@@ -304,9 +304,9 @@ class GpuScatterSmokeTest {
 
     private static BoardScene approach(BoardScene.Pixels ground, List<BoardScene.Feature> details) {
         var empty = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
-              ground, null, null, details, List.of());
+              ground, null, details, List.of());
         var road = new BoardScene.Tile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS,
-              ground, null, null, List.of(), List.of());
+              ground, null, List.of(), List.of());
         return new BoardScene(0, 1, 2, List.of(empty, road), List.of(), List.of(), -1, "", List.of());
     }
 
@@ -327,7 +327,7 @@ class GpuScatterSmokeTest {
     private static void preview(GpuTerrain terrain, BoardCamera camera, String name) {
         ScreenUtils.clear(.035f, .055f, .075f, 1, true);
         terrain.renderShadows(camera.camera, List.of());
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         String directory = System.getProperty("megamek.gpu.screenshots");
         if (directory != null) {
             GpuBoardTestUi.capture(new File(directory, name + ".png"));

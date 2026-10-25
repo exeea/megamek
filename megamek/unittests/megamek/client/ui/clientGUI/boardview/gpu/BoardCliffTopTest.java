@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,8 +70,7 @@ class BoardCliffTopTest {
         hex.addTerrain(new Terrain("cliff_top:1:56"));
         var tile = capture(hex, CENTER);
         assertEquals(56, tile.cliffTopExits());
-        var marking = new BoardScene.Pixels(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB));
-        assertEquals(56, tile.withTactical(marking).cliffTopExits());
+        assertEquals(56, tile.withText(List.of()).cliffTopExits());
         BoardSculptTest.withTransitions(true, () -> {
             BoardScene scene = island(CENTER, -1, 63);
             var surface = new BoardSurface(scene, scene.tile(CENTER));
@@ -186,7 +184,7 @@ class BoardCliffTopTest {
     }
 
     private static BoardScene.Tile capture(Hex hex, Coords at) {
-        var artwork = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+        var artwork = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
         return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 }

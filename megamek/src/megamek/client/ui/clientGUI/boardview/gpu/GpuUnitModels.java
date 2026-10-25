@@ -260,6 +260,9 @@ final class GpuUnitModels implements Disposable {
             if ("mek".equals(value.getString("kind"))) {
                 return MekVisual.assemble(this, value, selection.state().structure());
             }
+            if ("building-turret".equals(value.getString("kind"))) {
+                return BuildingTurretVisual.assemble(this, value, selection.state().structure());
+            }
             if ("family".equals(value.getString("kind"))) {
                 return FamilyVisual.assemble(this, value, selection.state().structure());
             }

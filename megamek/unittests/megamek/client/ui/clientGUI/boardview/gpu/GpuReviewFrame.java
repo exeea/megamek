@@ -26,6 +26,8 @@ final class GpuReviewFrame implements Disposable {
     /** Off unless a review turns it on (setAmbientOcclusion), as on the board's Display page. */
     private final GpuAmbientOcclusion ambientOcclusion = new GpuAmbientOcclusion();
     private boolean occlusion;
+    /** Each frame's elapsed seconds; 0, a still capture, unless a review plays frames in time (setFrameSeconds). */
+    private float frameSeconds;
 
     GpuReviewFrame(BoardAtmosphere.Settings settings) {
         atmosphere.setOptions(OPTIONS);
@@ -53,6 +55,8 @@ final class GpuReviewFrame implements Disposable {
     void setAmbientOcclusion(boolean enabled) {
         occlusion = enabled;
     }
+
+    void setFrameSeconds(float seconds) { frameSeconds = seconds; }
 
     /** Borrowed: the occlusion this frame draws with. */
     GpuAmbientOcclusion ambientOcclusion() { return ambientOcclusion; }
@@ -90,7 +94,7 @@ final class GpuReviewFrame implements Disposable {
         prepare(terrain, camera, scene);
         terrain.renderShadows(camera.camera, objects);
         atmosphere.prepareClouds(terrain, scene, 0);
-        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, scale, 0);
+        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, scale, frameSeconds);
         terrain.render(camera.camera, null,
               () -> ambientOcclusion.render(camera.camera, terrain, atmosphere.depthTexture()));
         if (!objects.isEmpty()) {
@@ -106,7 +110,7 @@ final class GpuReviewFrame implements Disposable {
 
     /** The same frame with its stages marked on a native benchmark's timings. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, GpuStageTimings timings) {
-        render(terrain, camera, scene, timings, 1, () -> terrain.render(camera.camera, false));
+        render(terrain, camera, scene, timings, 1, () -> terrain.render(camera.camera));
     }
 
     /**

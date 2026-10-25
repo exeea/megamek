@@ -161,8 +161,8 @@ final class BoardScatter {
             var feature = new BoardScene.Feature(asset, (float) Math.cos(angle) * radius,
                   (float) Math.sin(angle) * radius, random.nextFloat() * 360, .7f + random.nextFloat() * .5f,
                   .10f + random.nextFloat() * .13f, 0, BoardScene.FeatureKind.SCATTER);
-            // Replace only tundra's plants with support-rooted dwarf shrubs. Consume the same random values so
-            // its loose rocks and slabs retain their original positions, sizes and rotations.
+            // Tundra's plants are its dwarf shrubs, grown with the grass (GpuGroundCover). Consume the same random
+            // values so its loose rocks and slabs retain their original positions, sizes and rotations.
             if (!tundra || stone(asset)) { result.add(feature); }
         }
     }

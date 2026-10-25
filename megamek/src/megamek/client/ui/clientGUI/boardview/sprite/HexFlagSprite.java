@@ -39,7 +39,6 @@ import java.awt.geom.Path2D;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
@@ -134,12 +133,6 @@ public class HexFlagSprite extends HexSprite {
         this.label = label;
         this.progress = progress;
         this.facing = facing;
-    }
-
-    @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.OBJECTIVE, loc, flagColor.getRGB(),
-              (label == null ? "" : label) + (progress == null ? "" : " " + progress));
     }
 
     @Override

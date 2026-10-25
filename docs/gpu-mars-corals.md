@@ -33,7 +33,7 @@ The sibling `mm-data` repository contains:
 | File | Purpose |
 | --- | --- |
 | `data/models/board/mars/*.glb` | Six runtime models. |
-| `data/models/board/textures/vegetation/mars/coral-mineral-atlas_albedo.png` | Shared opaque Imagegen atlas: porous ivory, veined mauve, weathered tubes and dusty basal crust. |
+| `data/models/board/textures/vegetation/mars/mars-coral-atlas_albedo.png` | Shared opaque Imagegen atlas: porous ivory, veined mauve, weathered tubes and dusty basal crust. |
 
 The normal Gradle `stageData` task copies the GLBs and texture into the game's data
 directory.

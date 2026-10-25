@@ -59,9 +59,24 @@ final class UnitEquipmentAssembly {
         }
     }
 
-    /** One real mounted item, even for split criticals or a multi-barrel launcher. Emitter nodes are assembly-local. */
+    /**
+     * One real mounted item, even for split criticals or a multi-barrel launcher. Emitter nodes are assembly-local.
+     *
+     * @param depression visual depression stop in degrees for a pitch-only mount (its cradle clears the hull there)
+     */
     record Binding(int index, String location, String node, String asset, boolean embedded,
-          List<UnitModelDescriptor.Emitter> emitters, int memberId) {
+          List<UnitModelDescriptor.Emitter> emitters, int memberId, String aimNode, String recoilNode, boolean pitchOnly,
+          float depression) {
+        static final float DEPRESSION = 20;
+
+        Binding(int index, String location, String node, String asset, boolean embedded,
+              List<UnitModelDescriptor.Emitter> emitters, int memberId, String aimNode, String recoilNode) {
+            this(index, location, node, asset, embedded, emitters, memberId, aimNode, recoilNode, false, DEPRESSION);
+        }
+        Binding(int index, String location, String node, String asset, boolean embedded,
+              List<UnitModelDescriptor.Emitter> emitters, int memberId) {
+            this(index, location, node, asset, embedded, emitters, memberId, null, null);
+        }
         Binding(int index, String location, String node, String asset, boolean embedded,
               List<UnitModelDescriptor.Emitter> emitters) {
             this(index, location, node, asset, embedded, emitters, -1);
@@ -405,6 +420,9 @@ final class UnitEquipmentAssembly {
             List<JsonValue> candidates = new ArrayList<>();
             int best = Integer.MIN_VALUE;
             for (JsonValue settings : descriptor.get("mounts")) {
+                if (settings.has("equipmentIndex") && settings.getInt("equipmentIndex") != mount.index()) {
+                    continue;
+                }
                 var point = points.get(settings.getString("hardpoint"));
                 if (point == null) {
                     throw new IllegalArgumentException("Mount preference references a missing hardpoint");
@@ -612,6 +630,11 @@ final class UnitEquipmentAssembly {
             // Scale about the socket, then move the projected footprint to the free position.
             Vector3 origin = socket.getTranslation(new Vector3()).mul(area.inverse());
             transform.scale(fit.scale(), fit.scale(), fit.scale());
+            // Recess depth is part of the installation, so it scales around the socket
+            // together with the weapon when the area fitter selects a smaller size.
+            Vector3 socketPosition = socket.getTranslation(new Vector3());
+            transform.setTranslation(transform.getTranslation(new Vector3()).sub(socketPosition)
+                  .scl(fit.scale()).add(socketPosition));
             Vector3 shiftedCenter = new Vector3(center).sub(origin).scl(fit.scale()).add(origin);
             transform.trn(new Vector3(fit.x() - shiftedCenter.x, 0, fit.z() - shiftedCenter.z).rot(area.rotation()));
         }
@@ -637,8 +660,14 @@ final class UnitEquipmentAssembly {
                       emitter.position(), emitter.direction(), emitter.role(), emitter.effect()));
             }
         }
+        boolean articulated = !embedded && "equipment-v1".equals(module.descriptor().rig());
+        var joints = module.descriptor().joints();
         bindings.add(new Binding(item.mount().index(), item.mount().location(), placement.id, moduleAsset,
-              embedded, emitters));
+              embedded, emitters, -1,
+              articulated && joints.containsKey("aim") ? prefix + "-" + joints.get("aim") : null,
+              articulated && joints.containsKey("recoil") ? prefix + "-" + joints.get("recoil") : null,
+              articulated && joints.containsKey("elevation"),
+              item.placement().getFloat("depression", Binding.DEPRESSION)));
     }
 
     /** A bay's launchers are sized together, so its first large launcher cannot consume every remaining slot. */
@@ -887,7 +916,35 @@ final class UnitEquipmentAssembly {
         // A held gun is authored at its finished size; a barrel-length override would crush it front to back.
         float length = item.visual().held() ? 0 : item.placement().getFloat("length", 0);
         float depthScale = length > 0 ? length / module.descriptor().bounds().max().get(1) : scale;
-        return new Matrix4(socket).scale(scale, depthScale, scale);
+        float insertion = insertion(item.placement(), module.descriptor());
+        return new Matrix4(socket).scale(scale, depthScale, scale).translate(0, -insertion, 0);
+    }
+
+    /** Authored launchers have two installations; other weapons retain adjustable insertion. */
+    private static float insertion(JsonValue placement, UnitModelDescriptor module) {
+        boolean launcher = "equipment-v1".equals(module.rig()) && "missile".equals(module.family());
+        if (launcher && placement.has("insertion")) {
+            throw new IllegalArgumentException("Authored launchers use encased true/false, not numeric insertion");
+        }
+        if (module.joints().containsKey("elevation")) {
+            if (placement.getBoolean("encased", false) || placement.has("insertion")) {
+                throw new IllegalArgumentException("An external weapon cradle cannot be inserted into a front bay");
+            }
+            return 0;
+        }
+        if (launcher) {
+            return placement.getBoolean("encased", false)
+                  ? .75f * (module.bounds().max().get(1) - module.bounds().min().get(1)) : 0;
+        }
+        if (placement.has("encased") && (!"equipment-v1".equals(module.rig()) || !placement.getBoolean("encased"))) {
+            throw new IllegalArgumentException("An exposed weapon requires its complete external body and cradle profile");
+        }
+        float insertion = placement.getFloat("insertion", 0);
+        if (!Float.isFinite(insertion) || insertion < 0
+              || (insertion > 0 && insertion >= module.bounds().max().get(1))) {
+            throw new IllegalArgumentException("Invalid weapon insertion depth: " + insertion);
+        }
+        return insertion;
     }
 
     private static double area(UnitModelDescriptor.Bounds bounds) {

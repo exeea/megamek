@@ -34,6 +34,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.sprite.RubbleClearSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -79,15 +80,10 @@ public class RubbleClearSpriteHandler extends BoardViewSpriteHandler {
             BoardLocation location = BoardLocation.of(target, entity.getBoardId());
             BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView != null) {
-                int turnsCompleted = clearer.getRubbleClearTurnsCompleted();
-                int turnsRequired = clearer.getRubbleClearTurnsRequired();
-                // Two layers: the cleared-path fade behind the unit, and the progress counter over it so it reads
-                // clearly without the fade dimming the vehicle (QA feedback).
-                currentSprites.add(new RubbleClearSprite(boardView, target, turnsCompleted, turnsRequired, false));
-                currentSprites.add(new RubbleClearSprite(boardView, target, turnsCompleted, turnsRequired, true));
+                addMark(boardView, new TacticalMark.RubbleClear(target, clearer.getRubbleClearTurnsCompleted(),
+                      clearer.getRubbleClearTurnsRequired()));
             }
         }
-        currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));
     }
 
     @Override

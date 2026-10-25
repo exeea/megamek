@@ -161,6 +161,11 @@ final class GpuAtmosphere implements Disposable {
     private FrameBuffer weatherLayer;
     private boolean weatherDrawn;
     private GpuHeatGlow heatGlow;
+    /** Made at the first frame with depth cues; strength 0 skips its pass. */
+    private GpuDepthCues depthCues;
+    private float depthCueStrength;
+    /** This frame's seconds, as begin() received them. */
+    private float frameDelta;
     private List<BoardScene.Tile> heatTiles;
     private boolean molten;
     private GpuWeatherParticles particles;
@@ -521,6 +526,7 @@ final class GpuAtmosphere implements Disposable {
             fog = GpuHeatGlow.buffer(Math.max(1, pixelsWide / 4), Math.max(1, pixelsHigh / 4));
             fog.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         }
+        frameDelta = delta;
         clock = (clock + Math.min(delta, 0.1f)) % 3600;
         spaceTime += Math.min(delta, .1f);
         stormClock = settings.effects().lightning() > 0 ? (stormClock + Math.min(delta, 0.1f)) % 7 : 0;
@@ -576,6 +582,9 @@ final class GpuAtmosphere implements Disposable {
     /** A nuclear flash over the next composited view: a whiteout that glares most around its fireball. */
     void setFlash(GpuArtilleryBlast.Flash next) { flash = next; }
 
+    /** The depth cues' haze strength for the next board views ({@link GpuDepthCues}), 0 to 1; 0 is off. */
+    void setDepthCues(float strength) { depthCueStrength = MathUtils.clamp(strength, 0, 1); }
+
     void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom) {
         end(camera, terrain, board, bottom, null);
     }
@@ -608,6 +617,15 @@ final class GpuAtmosphere implements Disposable {
             heatGlow.render(sceneColor.getColorBufferTexture(), sceneDepth,
                   hasScattering() ? fog.getColorBufferTexture() : null, camera, fieldOfView);
         }
+        BoardProjectionCamera cued = depthCueStrength > 0 && terrain != null
+              && camera instanceof BoardProjectionCamera view ? view : null;
+        Texture water = hasScattering() || settings.effects().sand() > 0 || cued != null ? terrain.waterDepth() : null;
+        if (cued != null) {
+            if (depthCues == null) { depthCues = new GpuDepthCues(quad); }
+            depthCues.render(sceneDepth, water, cued, frameDelta);
+        } else if (depthCues != null) {
+            depthCues.forget();
+        }
         if (target != null) { target.begin(); }
         else if (antiAliased) { smaa.begin(displayWidth, displayHeight); }
         else { HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight); }
@@ -637,9 +655,10 @@ final class GpuAtmosphere implements Disposable {
               ahead ? flashScreen.y / camera.viewportHeight : -10, camera.viewportWidth / camera.viewportHeight);
         compositeShader.setUniformi("u_depth", 1);
         compositeShader.setUniformf("u_sceneScaled", resampled ? 1 : 0);
-        Texture water = hasScattering() || settings.effects().sand() > 0 ? terrain.waterDepth() : null;
         if (water != null) { water.bind(6); }
         compositeShader.setUniformi("u_waterDepth", water == null ? 1 : 6);
+        if (cued != null) { depthCues.bind(compositeShader, depthCueStrength, lighting.fog(), 9); }
+        else { GpuDepthCues.unbind(compositeShader, 0); }
         compositeShader.setUniformi("u_fog", hasScattering() ? 2 : 0);
         if (glowActive) { heatGlow.texture().bind(5); }
         compositeShader.setUniformi("u_heatGlow", glowActive ? 5 : 0);
@@ -1054,10 +1073,14 @@ final class GpuAtmosphere implements Disposable {
         if (heatGlow != null) { heatGlow.disposeBuffers(); }
     }
 
-    /** Links the weather and heat programs now (GpuBattleView's warm-up), not at the first rain or lava shown. */
+    /**
+     * Links the weather and heat programs now (GpuBattleView's warm-up), not at the first rain or lava shown, and the
+     * depth cues' program while they are on; switched on later, it links at their first frame.
+     */
     void prepare() {
         if (particles == null) { particles = new GpuWeatherParticles(); }
         if (heatGlow == null) { heatGlow = new GpuHeatGlow(quad); }
+        if (depthCueStrength > 0 && depthCues == null) { depthCues = new GpuDepthCues(quad); }
     }
 
     @Override
@@ -1071,6 +1094,7 @@ final class GpuAtmosphere implements Disposable {
         }
         if (clouds != null) { clouds.dispose(); }
         if (heatGlow != null) { heatGlow.dispose(); }
+        if (depthCues != null) { depthCues.dispose(); }
         if (groundNoise != null) { groundNoise.dispose(); }
         quad.dispose();
         GpuShaderManager.dispose(fogShader);

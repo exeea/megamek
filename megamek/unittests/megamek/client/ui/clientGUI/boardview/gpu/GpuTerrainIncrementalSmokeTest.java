@@ -55,7 +55,7 @@ class GpuTerrainIncrementalSmokeTest {
                         var tiles = new ArrayList<>(scene.tiles());
                         tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, tile.elevation(),
                               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
-                              tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
+                              tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(),
                               tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(),
                               tile.impassable(), tile.blackIce(), exits));
                         scene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
@@ -168,7 +168,7 @@ class GpuTerrainIncrementalSmokeTest {
         var tiles = new ArrayList<>(scene.tiles());
         var before = scene.tile(at);
         tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, level, depth, false, 0, family,
-              before.ground(), null, null, null, null, List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
+              before.ground(), null, null, null, List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 
@@ -178,7 +178,7 @@ class GpuTerrainIncrementalSmokeTest {
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 16; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      pixels, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      pixels, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 17, 16, tiles, List.of(), List.of(), -1, "", List.of());

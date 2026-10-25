@@ -71,10 +71,10 @@ class GpuSourceParityTest {
         assertEquals(gameTiles.size(), previewTiles.size());
         assertEquals(gameTiles.size(), editorTiles.size());
         for (int i = 0; i < gameTiles.size(); i++) {
-            var expected = gameTiles.get(i).withMarkings(null, List.of());
+            var expected = gameTiles.get(i).withText(List.of());
             String hex = "Hex " + expected.coords().getBoardNum();
-            assertEquals(expected, previewTiles.get(i).withMarkings(null, List.of()), hex + ": preview");
-            assertEquals(expected, editorTiles.get(i).withMarkings(null, List.of()), hex + ": editor");
+            assertEquals(expected, previewTiles.get(i).withText(List.of()), hex + ": preview");
+            assertEquals(expected, editorTiles.get(i).withText(List.of()), hex + ": editor");
         }
 
         Set<String> rows = TERRAIN_OWNED.stream().flatMap(key -> BoardSceneryLayouts.layout("scenery/saxarba/" + key)

@@ -20,7 +20,7 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, float fineMix, ou
       out float tundra) {
     cover = vec4(0.0); fringe = vec4(0.0); liquids = vec4(0.0); tundra = 0.0;
     if (u_biomeBoard.x < 1.0) return;
-    const float width = 30.0, height = 30.0 * 72.0 / 84.0;
+    const float width = 30.0, height = 30.0 * BOARD_HEX.y / BOARD_HEX.x;
     int column = int(floor(world.x / (width * .75)));
     // Only the quarters of this cell (halves of the column and of the row) that a biome hex, or liquids of two
     // palettes, can reach receive coverage, and R bits 4..7 of the own hex's texel say which (GpuBiomeSurface): every

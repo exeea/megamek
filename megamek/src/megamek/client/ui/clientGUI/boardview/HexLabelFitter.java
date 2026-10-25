@@ -30,7 +30,7 @@
  * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
  * affiliated with Microsoft.
  */
-package megamek.client.ui.clientGUI.boardview.sprite;
+package megamek.client.ui.clientGUI.boardview;
 
 import java.awt.Font;
 import java.awt.Graphics;

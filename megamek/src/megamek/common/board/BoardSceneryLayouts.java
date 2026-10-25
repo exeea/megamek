@@ -40,7 +40,7 @@ public final class BoardSceneryLayouts {
     /** The pillar mesh of the legacy pillar art (pillars1-6); on a bridge hex that art is the bridge's Pillars toggle. */
     public static final String PILLAR = "scenery/parks/pillar";
     /** A hex in the rows' model px. */
-    private static final float TILE_WIDTH = HexTile.WIDTH, TILE_HEIGHT = HexTile.HEIGHT;
+    private static final float TILE_WIDTH = HexTile.MODEL_WIDTH, TILE_HEIGHT = HexTile.HEIGHT;
     private static final String ROAD_TREES = "scenery/saxarba/roads/road_trees";
     private static final Map<String, Layout> LAYOUTS = read();
 

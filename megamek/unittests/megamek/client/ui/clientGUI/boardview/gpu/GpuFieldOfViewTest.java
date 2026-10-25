@@ -83,8 +83,6 @@ class GpuFieldOfViewTest {
                 assertFalse(at(mask, behindRidge).outsideSensorRange(),
                       "A ridge blocking a hex-only LOS preview must not select the sensor effect");
                 assertEquals(fixture.view.getFieldOfView().evaluate(behindRidge), at(mask, behindRidge));
-                assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
-                      measured.tiles().stream().map(BoardScene.Tile::tactical).toList());
                 assertSame(mask, measured.withUnits(measured.units()).fieldOfView(),
                       "Animation snapshots must retain the authoritative visibility result");
                 Coords unitHex = fixture.entity.getPosition();

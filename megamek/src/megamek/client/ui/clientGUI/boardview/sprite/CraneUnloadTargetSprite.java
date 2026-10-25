@@ -38,6 +38,7 @@ import java.awt.Graphics2D;
 import java.awt.Stroke;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 
@@ -48,15 +49,6 @@ import megamek.common.board.Coords;
  * the outer edge of that band and looks like two rings.
  */
 public class CraneUnloadTargetSprite extends HexSprite {
-
-    /** Opacity (0-255) of the tint filling the hex. */
-    private static final int FILL_OPACITY = 90;
-
-    /** Opacity (0-255) of the line around the hex. */
-    private static final int OUTLINE_OPACITY = 230;
-
-    /** Width, in unscaled hex pixels, of the line around the hex. */
-    private static final float OUTLINE_WIDTH = 2.5f;
 
     private final Color highlightColor;
 
@@ -80,12 +72,12 @@ public class CraneUnloadTargetSprite extends HexSprite {
         UIUtil.setHighQualityRendering(graph);
         graph.scale(bv.getScale(), bv.getScale());
 
-        graph.setColor(withOpacity(FILL_OPACITY));
+        graph.setColor(withOpacity(TacticalStyle.CRANE_TARGET_FILL_OPACITY));
         graph.fill(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
 
         Stroke oldStroke = graph.getStroke();
-        graph.setStroke(new BasicStroke(OUTLINE_WIDTH));
-        graph.setColor(withOpacity(OUTLINE_OPACITY));
+        graph.setStroke(new BasicStroke(TacticalStyle.CRANE_TARGET_OUTLINE_WIDTH));
+        graph.setColor(withOpacity(TacticalStyle.CRANE_TARGET_OUTLINE_OPACITY));
         graph.draw(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
         graph.setStroke(oldStroke);
         graph.dispose();

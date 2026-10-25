@@ -35,18 +35,15 @@ package megamek.client.ui.clientGUI.boardview.sprite;
 import static megamek.client.ui.clientGUI.boardview.HexDrawUtilities.*;
 
 import java.awt.AlphaComposite;
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.Shape;
-import java.awt.Stroke;
 import java.awt.image.ImageObserver;
 
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardTactical;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
@@ -61,51 +58,6 @@ import megamek.common.board.Coords;
  * @author Simon
  */
 public class FieldOfFireSprite extends MovementEnvelopeSprite {
-    // ### Control values
-
-    // thick border
-    /** Band width of a weapon range bracket. */
-    private static final int RANGE_BAND_WIDTH = 10;
-
-    /**
-     * Band width of an objective control zone: half a range band. A range band is a broad wash the eye
-     * reads past; a control zone is a boundary, and at full width it swallowed the hex edge it marks.
-     */
-    private static final int CONTROL_ZONE_BAND_WIDTH = RANGE_BAND_WIDTH / 2;
-    private static final int borderOpacity = 120;
-
-    /**
-     * Objective control zones are drawn solid, where a weapon range band is translucent. A range bracket
-     * is background information you read past; a control zone is telling you who currently holds a point
-     * you are fighting over. The default player palette is pale - Player Blue is 134,134,191 - and blended
-     * over terrain at any transparency it reads as grey, so the holder could not be told from nobody. The
-     * band is only the hex edge, so painting it solid hides almost no terrain.
-     */
-    private static final int CONTROL_ZONE_OPACITY = 255;
-
-
-    private static final GUIPreferences GUIP = GUIPreferences.getInstance();
-
-    // thin line
-    private static final float lineThickness = 1.4f;
-    protected static final Color lineColor = Color.WHITE;
-    private static final Stroke lineStroke = new BasicStroke(lineThickness, BasicStroke.CAP_BUTT,
-          BasicStroke.JOIN_MITER, 10f, new float[] { 2f, 2f }, 0f);
-    // ### -------------
-
-    // the fields control when and how borders are drawn
-    // across a hex instead of along its borders
-    private static final int[] bDir = {
-          0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 2, 1, 0, 0, 0, 0, 0,
-          0, 0, 1, 0, 3, 3, 3, 0, 2, 2, 1, 0, 2, 5, 4, 5, 6, 5, 1, 5,
-          0, 5, 2, 5, 2, 2, 1, 5, 4, 4, 4, 4, 4, 4, 1, 4, 3, 3, 3, 3, 2, 2, 1, 0
-    };
-    private static final int[] bTypes = {
-          0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 6, 1, 7, 2, 3, 0, 0, 0, 7,
-          0, 1, 6, 5, 1, 6, 7, 4, 2, 5, 3, 8, 0, 1, 4, 2, 6, 6, 7, 3,
-          0, 7, 2, 5, 6, 4, 5, 8, 1, 2, 6, 3, 7, 5, 4, 8, 2, 3, 5, 8, 3, 8, 8, 0
-    };
-
     private static final int COLORS_MAX = 5;
 
     // in this sprite type, the images are very repetitive
@@ -136,10 +88,9 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
           int borders) {
         // the color of the super doesn't matter
         super(boardView1, Color.BLACK, l, borders);
-        Color c = getFieldOfFireColor(rangeBracket);
-        fillColor = new Color(c.getRed(), c.getGreen(), c.getBlue(), borderOpacity);
+        fillColor = TacticalStyle.withAlpha(TacticalStyle.rangeColor(rangeBracket), TacticalStyle.RANGE_BAND_OPACITY);
         this.rangeBracket = rangeBracket;
-        this.borderWidth = RANGE_BAND_WIDTH;
+        this.borderWidth = TacticalStyle.RANGE_BAND_WIDTH;
     }
 
     /**
@@ -154,42 +105,13 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
     public FieldOfFireSprite(BoardGlyphContext boardView1, Color zoneColor, Coords l, int borders) {
         super(boardView1, Color.BLACK, l, borders);
         this.usesOwnColor = true;
-        fillColor = new Color(zoneColor.getRed(), zoneColor.getGreen(), zoneColor.getBlue(),
-              CONTROL_ZONE_OPACITY);
+        fillColor = TacticalStyle.withAlpha(zoneColor, TacticalStyle.CONTROL_ZONE_OPACITY);
         this.rangeBracket = RangeType.RANGE_MEDIUM;
-        this.borderWidth = CONTROL_ZONE_BAND_WIDTH;
-    }
-
-    public static Color getFieldOfFireColor(int rangeBracket) {
-        // colors for Min,S,M,L,E ranges
-        return switch (rangeBracket) {
-            case RangeType.RANGE_MINIMUM -> GUIP.getFieldOfFireMinColor();
-            case RangeType.RANGE_SHORT -> GUIP.getFieldOfFireShortColor();
-            case RangeType.RANGE_MEDIUM -> GUIP.getFieldOfFireMediumColor();
-            case RangeType.RANGE_LONG -> GUIP.getFieldOfFireLongColor();
-            case RangeType.RANGE_EXTREME -> GUIP.getFieldOfFireExtremeColor();
-            default -> new Color(0, 0, 0);
-        };
-    }
-
-    /** Shared labels for the Legacy 2D markers and the native range contours. */
-    public static String getRangeText(int rangeBracket) {
-        return switch (rangeBracket) {
-            case RangeType.RANGE_MINIMUM -> "min";
-            case RangeType.RANGE_SHORT -> "S";
-            case RangeType.RANGE_MEDIUM -> "M";
-            case RangeType.RANGE_LONG -> "L";
-            case RangeType.RANGE_EXTREME -> "E";
-            default -> "";
-        };
+        this.borderWidth = TacticalStyle.CONTROL_ZONE_BAND_WIDTH;
     }
 
     protected void setFillColor(Color c) {
         fillColor = c;
-    }
-
-    protected int getBorderOpacity() {
-        return borderOpacity;
     }
 
     protected float getOldZoom() {
@@ -207,32 +129,6 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
     /** Sensor ranges and objective zones keep their own planar presentation. */
     public boolean isWeaponRange() {
         return getClass() == FieldOfFireSprite.class && !usesOwnColor;
-    }
-
-    @Override
-    public BoardTactical.Playback playback() {
-        return usesOwnColor ? BoardTactical.Playback.HOLD_DURING_PLAYBACK
-              : BoardTactical.Playback.HIDE_DURING_MOVEMENT;
-    }
-
-    public int getBorders() {
-        return borders;
-    }
-
-    protected Stroke getLineStroke() {
-        return lineStroke;
-    }
-
-    protected int[] getBTypes() {
-        return bTypes;
-    }
-
-    protected int[] getBDir() {
-        return bDir;
-    }
-
-    protected int getBorderW() {
-        return borderWidth;
     }
 
     @Override
@@ -273,56 +169,52 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
 
     @Override
     protected void paintTactical(Graphics2D graph) {
-        paintTactical(graph, borders);
-    }
-
-    /** Choose the shared border layout after a specialized painter filters its edge mask. */
-    protected void paintTactical(Graphics2D graph, int borderMask) {
-        graph.setStroke(lineStroke);
+        graph.setStroke(TacticalStyle.ZONE_LINE_STROKE);
 
         // this will take the right way to paint the borders
         // from the static arrays; depends on the exact
         // borders that are present
-        switch (bTypes[borderMask]) {
+        int turn = TacticalStyle.borderLayoutDirection(borders);
+        switch (TacticalStyle.borderLayout(borders)) {
             case 1: // 2 adjacent borders
-                drawBorderXC(graph, getHexCrossArea01(bDir[borderMask], borderWidth),
-                      getHexCrossLine01(bDir[borderMask], borderWidth));
+                drawBorderXC(graph, getHexCrossArea01(turn, borderWidth),
+                      getHexCrossLine01(turn, borderWidth));
                 break;
             case 2: // 3 adjacent borders
-                drawBorderXC(graph, getHexCrossArea012(bDir[borderMask], borderWidth),
-                      getHexCrossLine012(bDir[borderMask], borderWidth));
+                drawBorderXC(graph, getHexCrossArea012(turn, borderWidth),
+                      getHexCrossLine012(turn, borderWidth));
                 break;
             case 3: // 4 adjacent borders
-                drawBorderXC(graph, getHexCrossArea0123(bDir[borderMask], borderWidth),
-                      getHexCrossLine0123(bDir[borderMask], borderWidth));
+                drawBorderXC(graph, getHexCrossArea0123(turn, borderWidth),
+                      getHexCrossLine0123(turn, borderWidth));
                 break;
             case 4: // twice two adjacent borders
-                drawBorderXC(graph, getHexCrossArea01(bDir[borderMask], borderWidth),
-                      getHexCrossLine01(bDir[borderMask], borderWidth));
-                drawBorderXC(graph, getHexCrossArea01(bDir[borderMask] + 3, borderWidth),
-                      getHexCrossLine01(bDir[borderMask] + 3, borderWidth));
+                drawBorderXC(graph, getHexCrossArea01(turn, borderWidth),
+                      getHexCrossLine01(turn, borderWidth));
+                drawBorderXC(graph, getHexCrossArea01(turn + 3, borderWidth),
+                      getHexCrossLine01(turn + 3, borderWidth));
                 break;
             case 5: // three adjacent borders and one lone
-                drawBorderXC(graph, getHexCrossArea012(bDir[borderMask], borderWidth),
-                      getHexCrossLine012(bDir[borderMask], borderWidth));
-                drawLoneBorder(graph, bDir[borderMask] + 4);
+                drawBorderXC(graph, getHexCrossArea012(turn, borderWidth),
+                      getHexCrossLine012(turn, borderWidth));
+                drawLoneBorder(graph, turn + 4);
                 break;
             case 6: // two adjacent borders and one lone
-                drawBorderXC(graph, getHexCrossArea01(bDir[borderMask], borderWidth),
-                      getHexCrossLine01(bDir[borderMask], borderWidth));
-                drawLoneBorder(graph, bDir[borderMask] + 3);
+                drawBorderXC(graph, getHexCrossArea01(turn, borderWidth),
+                      getHexCrossLine01(turn, borderWidth));
+                drawLoneBorder(graph, turn + 3);
                 break;
             case 7: // two adjacent borders and one lone (other hex face)
-                drawBorderXC(graph, getHexCrossArea01(bDir[borderMask], borderWidth),
-                      getHexCrossLine01(bDir[borderMask], borderWidth));
-                drawLoneBorder(graph, bDir[borderMask] + 4);
+                drawBorderXC(graph, getHexCrossArea01(turn, borderWidth),
+                      getHexCrossLine01(turn, borderWidth));
+                drawLoneBorder(graph, turn + 4);
                 break;
             case 8:
-                drawBorderXC(graph, getHexCrossArea01234(bDir[borderMask], borderWidth),
-                      getHexCrossLine01234(bDir[borderMask], borderWidth));
+                drawBorderXC(graph, getHexCrossArea01234(turn, borderWidth),
+                      getHexCrossLine01234(turn, borderWidth));
                 break;
             default:
-                drawNormalBorders(graph, borderMask);
+                drawNormalBorders(graph, borders);
         }
 
     }
@@ -333,7 +225,7 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
         graph.fill(fillShape);
 
         // 2) thin dashed line border
-        graph.setColor(lineColor);
+        graph.setColor(TacticalStyle.ZONE_LINE_COLOR);
         graph.draw(lineShape);
     }
 
@@ -350,7 +242,7 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
                 cut |= ((borderMask & (1 << ((i + 5) % 6))) == 0) ? CUT_LEFT_BORDER : CUT_LEFT_INSIDE;
 
                 drawBorderXC(graph, getHexBorderArea(i, cut, borderWidth),
-                      getHexBorderLine(i, cut, lineThickness / 2));
+                      getHexBorderLine(i, cut, TacticalStyle.ZONE_LINE_THICKNESS / 2));
             }
         }
     }

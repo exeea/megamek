@@ -129,7 +129,6 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.capture(pixels.normals(), previous == null ? null : previous.normals()),
               terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
-              terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery()),
               pixels.text(), BoardLiquid.capture(hex),
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
@@ -316,7 +315,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      */
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-          Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+          List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
           boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
           boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
@@ -325,210 +324,189 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop) {
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
               boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
               java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren,
               BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
               RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, BoardBackdrop.NONE);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
               boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
               java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren,
               BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, barren, deckRoad, deckRoadExits, deckMud, railBed, RailRoute.Corridor.NONE, RailRoute.Corridor.NONE);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
               boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
               java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, barren, BoardRoad.Kind.NONE, 0, false, 0);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
               boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
               java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, false);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
               boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
               java.util.Map<String, megamek.common.board.HexAppearance> appearance) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   Cover.NONE);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-          Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+          List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
           boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
           boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, java.util.Map.of());
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, java.util.Map.of());
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
               boolean ultraSublevel) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, bridge, ultraSublevel, null, null);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, bridge, false);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, groundCover, null);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits, boolean bare) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, bare, BoardSurfaceBlend.solid(surface == null ? Surface.GRASS : surface));
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce, int cliffTopExits) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
                   cliffTopExits, false);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
               boolean blackIce) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce, 0);
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce, 0);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, false);
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, false);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, false);
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, false);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, Biome.NONE);
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, fireSmoke, Biome.NONE);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround, BoardRoad.Kind road) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, road, BoardFireSmoke.NONE);
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, road, BoardFireSmoke.NONE);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
               boolean detailedGround) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, detailedGround, BoardRoad.Kind.NONE);
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, detailedGround, BoardRoad.Kind.NONE);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, tileset, false);
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, tileset, false);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, liquid, null);
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, liquid, null);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardHexText> text) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
-                  tactical, features, text, waterDepth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE);
+              List<Feature> features, List<BoardHexText> text) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, features, text, waterDepth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
-              Pixels normals, Pixels decals, Pixels tactical, List<Feature> features, List<BoardHexText> text) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, null, tactical, features, text);
+              Pixels normals, Pixels decals, List<Feature> features, List<BoardHexText> text) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, null, features, text);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
-              Pixels decals, Pixels tactical, List<Feature> features, List<BoardHexText> text) {
-            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, null, decals, tactical, features, text);
+              Pixels decals, List<Feature> features, List<BoardHexText> text) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, null, decals, features, text);
         }
 
-        Tile withTactical(Pixels marking) { return withMarkings(marking, text); }
-
-        /** This tile with its tactical image and labels replaced; every captured terrain field is kept. */
-        Tile withMarkings(Pixels marking, List<BoardHexText> labels) {
-            if (marking == tactical && Objects.equals(labels, text)) { return this; }
+        /** This tile with its labels replaced; every captured terrain field is kept. */
+        Tile withText(List<BoardHexText> labels) {
+            if (Objects.equals(labels, text)) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
-                  decalsWithoutLimbs, marking, features, labels, liquid, tileset, detailedGround, road, fireSmoke, biome,
+                  decalsWithoutLimbs, features, labels, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
         }
@@ -536,7 +514,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         /** This tile with other features: the editor preview's tile of a route stroke's next step. */
         Tile withFeatures(List<Feature> shown) {
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
-                  decalsWithoutLimbs, tactical, List.copyOf(shown), text, liquid, tileset, detailedGround, road, fireSmoke, biome,
+                  decalsWithoutLimbs, List.copyOf(shown), text, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
         }
@@ -546,7 +524,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             List<Feature> kept = features.stream().filter(feature -> !GpuScatter.vegetation(feature)).toList();
             if (barren && kept.size() == features.size()) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
-                  decalsWithoutLimbs, tactical, kept, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
+                  decalsWithoutLimbs, kept, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, true, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
         }
@@ -632,7 +610,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             boolean iced = !weightless && (frozen || liquid.present() && !liquid.molten());
             Surface airlessSurface = surface == Surface.CONCRETE ? Surface.CONCRETE : Surface.LUNAR;
             return new Tile(coords, level, weightless ? -1 : waterDepth, iced, roadExits, airlessSurface, ground, null,
-                  null, null, tactical, kept, BoardHexText.settled(labels, text),
+                  null, null, kept, BoardHexText.settled(labels, text),
                   weightless ? BoardLiquid.NONE : liquid, null, true, road, fireSmoke, Biome.NONE, impassable, false,
                   cliffTopExits, weightless, BoardSurfaceBlend.solid(airlessSurface), bridge(), ultraSublevel, null, null,
                   appearance, cover, true, deckRoad, deckRoadExits, false, railBed, corridor, deckCorridor, backdrop);
@@ -1222,7 +1200,6 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 used.add(tile.normals());
                 used.add(tile.decals());
                 used.add(tile.decalsWithoutLimbs());
-                used.add(tile.tactical());
                 used.add(tile.tileset());
                 used.add(tile.bridge());
                 used.add(tile.tilesetDecals());

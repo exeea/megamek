@@ -34,7 +34,7 @@ class BoardRoadTest {
 
     static BoardScene.Tile tile(Coords coords, BoardRoad.Kind road, int exits, int level, BoardScene.Surface family) {
         var base = BoardSurfaceBlendTest.tile(coords, family, level, -1, exits);
-        return new BoardScene.Tile(coords, level, -1, false, exits, family, base.ground(), null, null, null, null,
+        return new BoardScene.Tile(coords, level, -1, false, exits, family, base.ground(), null, null, null,
               List.of(), List.of(), BoardLiquid.NONE, null, true, road);
     }
 
@@ -403,7 +403,7 @@ class BoardRoadTest {
         var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
         var road = BoardRoad.of(scene, scene.tile(CENTER));
         var patch = GpuRoads.patches(scene.tile(CENTER), road).stream()
-              .filter(p -> p.texture().equals("roads/asphalt") && p.fade() == null).findFirst().orElseThrow();
+              .filter(p -> p.texture().equals("roads/asphalt") && p.lift() == GpuRoads.SURFACE_LIFT).findFirst().orElseThrow();
         var data = GpuRoads.mask(road, patch);
         var masks = new GpuRoads.Masks();
         assertSame(data, masks.share(data));

@@ -190,7 +190,7 @@ class GpuRailBridgeRampSmokeTest {
                   0, 0, 0, false, 1, placement, 0).withConnections(9)));
         }
         var tile = new BoardScene.Tile(at, 0, ground.waterDepth(), false, 0, ground.surface(), ground.ground(),
-              null, null, null, null, BoardFeatures.capture(hex, at, Map.of()), List.of(), ground.liquid(), null,
+              null, null, null, BoardFeatures.capture(hex, at, Map.of()), List.of(), ground.liquid(), null,
               true, BoardRoad.Kind.NONE);
         return bridge ? BoardBridgeTypeTest.appearance(tile, Map.of("bridge", HexAppearance.TRUSS_PILLARS)) : tile;
     }

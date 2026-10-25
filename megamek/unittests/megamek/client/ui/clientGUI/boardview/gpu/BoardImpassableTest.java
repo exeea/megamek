@@ -19,7 +19,6 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
@@ -135,9 +134,9 @@ class BoardImpassableTest {
         var fills = BoardImpassable.fills(scene, null, false);
         Area legalArea = new Area();
         for (Coords coords : marked) {
-            double x = coords.getX() * 63, y = coords.getY() * 72 + (coords.getX() & 1) * 36;
-            legalArea.add(new Area(AffineTransform.getTranslateInstance(x, y)
-                  .createTransformedShape(HexDrawUtilities.getHexFullBorderLine(0))));
+            var centre = BoardTacticalGeometry.centre(coords);
+            legalArea.add(new Area(AffineTransform.getTranslateInstance(centre.x(), centre.y())
+                  .createTransformedShape(BoardTacticalGeometry.insetHexagon(0))));
         }
         for (var fill : fills) {
             Area spill = new Area(fill.shape());
@@ -146,7 +145,7 @@ class BoardImpassableTest {
                   Math.abs((triangle.b().x - triangle.a().x) * (triangle.c().y - triangle.a().y)
                         - (triangle.c().x - triangle.a().x) * (triangle.b().y - triangle.a().y)) / 2).sum();
             assertTrue(spillArea < .01, "Only float-rounding slivers may leave the region; pixel area: " + spillArea);
-            assertFalse(fill.shape().contains(3 * 63 + 42, 3 * 72 + 72));
+            assertFalse(fill.shape().contains(3 * .75 * BoardGeometry.TILE_WIDTH + BoardGeometry.TILE_WIDTH / 2, 3 * 72 + 72));
         }
         assertTrue(BoardImpassable.fills(scene(Set.of()), null, false).isEmpty());
     }
@@ -192,7 +191,7 @@ class BoardImpassableTest {
     }
 
     private static BoardScene.Tile capture(Hex hex, Coords coords) {
-        var artwork = new BoardArtwork.HexImage(coords, null, null, null, null, null, List.of(), Map.of(), null);
+        var artwork = new BoardArtwork.HexImage(coords, null, null, null, null, List.of(), Map.of(), null);
         return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 }

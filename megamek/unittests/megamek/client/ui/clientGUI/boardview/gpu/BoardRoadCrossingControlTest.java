@@ -69,7 +69,7 @@ class BoardRoadCrossingControlTest {
         Hex hex = new Hex(0, "road:1:9;rail:1:18", "");
         var signal = controls(hex).getFirst();
         hex.setDecorations(List.of(new BoardDecoration("saved-crossing", "prop", signal.asset(), null,
-              signal.x() / HexTile.WIDTH, signal.y() / HexTile.HEIGHT, signal.rotation(), false, 1,
+              signal.x() / HexTile.MODEL_WIDTH, signal.y() / HexTile.HEIGHT, signal.rotation(), false, 1,
               BoardDecoration.Placement.ground(), 0, false)));
         assertEquals(1, controls(hex).size());
     }

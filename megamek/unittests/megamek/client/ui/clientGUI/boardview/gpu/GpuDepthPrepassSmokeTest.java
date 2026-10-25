@@ -342,7 +342,7 @@ class GpuDepthPrepassSmokeTest {
         List<List<Integer>> state = new ArrayList<>();
         timings.beginFrame(false);
         frame.render(terrain, camera, scene, timings, view.scale(), () -> {
-            terrain.render(camera.camera, false);
+            terrain.render(camera.camera);
             state.add(exitState());
             // The scene target is still bound, at its own size.
             IntBuffer viewport = BufferUtils.newIntBuffer(16);
@@ -477,7 +477,7 @@ class GpuDepthPrepassSmokeTest {
         try {
             GpuTerrain.depthPrepass = categories;
             timings.beginFrame(false);
-            frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera, false));
+            frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera));
         } finally { sorterField.set(batch, original); }
         return draws;
     }

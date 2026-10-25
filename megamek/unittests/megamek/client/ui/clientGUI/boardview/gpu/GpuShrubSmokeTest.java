@@ -122,7 +122,7 @@ class GpuShrubSmokeTest {
                         camera.setPerspective(view == 2);
                         terrain.renderShadows(camera.camera, List.of());
                         outputFrame.begin(.035f, .055f, .075f, 1);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         outputFrame.display();
                         GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                               "shrubs-" + view + ".png"));
@@ -146,7 +146,7 @@ class GpuShrubSmokeTest {
     private static int colour(GLProfiler profiler, GpuTerrain terrain, BoardCamera camera) {
         Set<GpuTerrain.Prepass> prepass = GpuTerrain.depthPrepass;
         GpuTerrain.depthPrepass = EnumSet.noneOf(GpuTerrain.Prepass.class);
-        try { return count(profiler, () -> terrain.render(camera.camera, false)); }
+        try { return count(profiler, () -> terrain.render(camera.camera)); }
         finally { GpuTerrain.depthPrepass = prepass; }
     }
 
@@ -195,7 +195,7 @@ class GpuShrubSmokeTest {
     }
 
     private static BoardScene.Tile tile(String family, Coords coords, BoardScene.Pixels ground) {
-        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, ground, null, null,
+        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, ground, null,
               List.of(new BoardScene.Feature("foliage-" + family, 0, 0, 20, 1.7f, 1.1f, 0,
                     BoardScene.FeatureKind.TREE)), List.of());
     }

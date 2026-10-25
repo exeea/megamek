@@ -75,8 +75,6 @@ class GpuMeasurementTest {
                 assertEquals(end, measured.tactical().ruler().end());
                 assertEquals(before.tactical().fills(), measured.tactical().fills(),
                       "The native ruler is a ray, never a draped fill");
-                assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
-                      measured.tiles().stream().map(BoardScene.Tile::tactical).toList());
             });
             BoardScene measured = fixture.source.takeFrame().scene();
             fixture.source.changeRuler(fixture.source.takeFrame().boardGeneration(), RulerModel::clear);

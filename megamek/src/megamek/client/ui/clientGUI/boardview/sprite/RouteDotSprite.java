@@ -32,14 +32,12 @@
  */
 package megamek.client.ui.clientGUI.boardview.sprite;
 
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Ellipse2D;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
@@ -49,16 +47,7 @@ import megamek.common.board.Coords;
  * reads as a line, and a larger one for a turning point the bot planned (HammerGS, 2026-10-03). The 3D board draws the
  * same dot on the hex.
  */
-public class RouteDotSprite extends HexSprite implements TacticalSprite {
-
-    /** The dot size of a hex on the way between waypoints, in unscaled hex pixels. */
-    public static final double TRAIL_DIAMETER = 7;
-
-    /** The dot size of a turning point the bot planned. */
-    public static final double TURN_DIAMETER = 15;
-
-    private static final Color OUTLINE_COLOR = new Color(40, 40, 40, 220);
-    private static final BasicStroke OUTLINE_STROKE = new BasicStroke(1.5f);
+public class RouteDotSprite extends HexSprite {
 
     private final Color dotColor;
     private final double diameter;
@@ -86,29 +75,13 @@ public class RouteDotSprite extends HexSprite implements TacticalSprite {
         graph.dispose();
     }
 
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
-        try {
-            paintDot(local);
-        } finally {
-            local.dispose();
-        }
-    }
-
-    /** The route stays on the board while units move, as its flags do. */
-    @Override
-    public BoardTactical.Playback playback() {
-        return BoardTactical.Playback.LIVE;
-    }
-
     private void paintDot(Graphics2D graph) {
         Ellipse2D.Double dot = new Ellipse2D.Double((HexTileset.HEX_W - diameter) / 2.0,
               (HexTileset.HEX_H - diameter) / 2.0, diameter, diameter);
         graph.setColor(dotColor);
         graph.fill(dot);
-        graph.setColor(OUTLINE_COLOR);
-        graph.setStroke(OUTLINE_STROKE);
+        graph.setColor(TacticalStyle.ROUTE_OUTLINE_COLOR);
+        graph.setStroke(TacticalStyle.ROUTE_OUTLINE_STROKE);
         graph.draw(dot);
     }
 

@@ -20,6 +20,7 @@ import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.board.HexAppearance;
 import megamek.common.loaders.MapSettings;
 import megamek.common.units.Terrain;
@@ -572,7 +573,7 @@ class BoardEditorSessionTest {
               0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
         board.getHex(target).setDecorations(java.util.List.of(fixed));
         // A barrier's ends lie half its length north and south of its anchor: the next barrier joins one length north.
-        double join = 2 * blueprint.asset(barrier).snap().connectors().getFirst().y();
+        double join = 2 * blueprint.asset(barrier).snap().connectors().getFirst().y() / HexTile.HEIGHT;
         var moving = new megamek.common.board.BoardDecoration("moving", "prop", barrier, null,
               .02, join + .03, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
         var snapped = BoardEditorSnapping.snap(board, blueprint, target, moving, java.util.Set.of());
@@ -636,7 +637,8 @@ class BoardEditorSessionTest {
     private double[] metric(BoardEditorSession session, String id) {
         var entry = placedObjects(session).entrySet().stream().filter(e -> e.getKey().object().equals(id)).findFirst().orElseThrow();
         Coords owner = entry.getKey().coords();
-        return new double[] { (owner.getX() * .75 + entry.getValue().x()) * 84, (-owner.getY() - (owner.getX() & 1) * .5 + entry.getValue().y()) * 72 };
+        return new double[] { (owner.getX() * .75 + entry.getValue().x()) * HexTile.MODEL_WIDTH,
+              (-owner.getY() - (owner.getX() & 1) * .5 + entry.getValue().y()) * HexTile.HEIGHT };
     }
     private String group(BoardEditorSession session, String id) {
         return placedObjects(session).entrySet().stream().filter(e -> e.getKey().object().equals(id)).findFirst().orElseThrow().getValue().group();
@@ -688,7 +690,7 @@ class BoardEditorSessionTest {
         session.finishStroke(); session.release();
         assertEquals(java.util.Set.of("a", "c"), ids(session), "A press that drags moves the group instead of drilling down");
         double[] movedA = metric(session, "a"), movedC = metric(session, "c");
-        assertEquals(84, movedA[0] - a[0], 1e-6); assertEquals(84, movedC[0] - c[0], 1e-6);
+        assertEquals(HexTile.MODEL_WIDTH, movedA[0] - a[0], 1e-6); assertEquals(HexTile.MODEL_WIDTH, movedC[0] - c[0], 1e-6);
         assertEquals(a[1], movedA[1], 1e-6); assertEquals(c[1], movedC[1], 1e-6);
         assertEquals(group, group(session, "a"), "A move keeps membership across owner hexes");
 
@@ -744,7 +746,8 @@ class BoardEditorSessionTest {
         send(session, Action.SELECT_OBJECT, "g", "");
         assertEquals("a", session.snapshot().object());
         send(session, Action.GROUP_VALUE, "x", "0.3");
-        assertEquals(a[0] + .3 * 84, metric(session, "a")[0], 1e-6); assertEquals(b[0] + .3 * 84, metric(session, "b")[0], 1e-6);
+        assertEquals(a[0] + .3 * HexTile.MODEL_WIDTH, metric(session, "a")[0], 1e-6);
+        assertEquals(b[0] + .3 * HexTile.MODEL_WIDTH, metric(session, "b")[0], 1e-6);
         send(session, Action.UNDO, "", "");
 
         // Values are relative to the group as it is (yaw 0, scale 1): a live drag's values are its total change, and

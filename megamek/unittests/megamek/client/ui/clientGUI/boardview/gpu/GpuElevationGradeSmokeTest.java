@@ -59,7 +59,7 @@ class GpuElevationGradeSmokeTest {
                         camera.center(BoardGeometry.center(CENTER, level));
                         Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
                         ScreenUtils.clear(0, 0, 0, 1, true);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         GpuReviewFrame.save(new File(output, "level-" + level + ".png"));
                         double[] samples = samples(scene, camera);
                         assertTrue(samples[0] <= previousGround + 1, "Lower ground must not get lighter");
@@ -136,7 +136,7 @@ class GpuElevationGradeSmokeTest {
                 var hex = new Hex(level);
                 if (coords.equals(CENTER)) { hex.addTerrain(new Terrain(Terrains.ROUGH, 1)); }
                 var base = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS, level, -1, 0);
-                tiles.add(new BoardScene.Tile(coords, level, -1, false, 0, base.surface(), base.ground(), null, null, null, null,
+                tiles.add(new BoardScene.Tile(coords, level, -1, false, 0, base.surface(), base.ground(), null, null, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.NONE, null, true));
             }
         }

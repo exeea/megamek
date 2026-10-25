@@ -346,7 +346,7 @@ class GpuBuildingHoverSmokeTest {
         BoardScene scene = BoardSurfaceBlendTest.scene(coords -> {
             var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
             var hex = new Hex(0, "building:2;bldg_elev:5;bldg_cf:40", "");
-            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(), null, null, null, null,
+            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(), null, null, null,
                   coords.equals(BUILDING) ? BoardFeatures.capture(hex, coords,
                         Map.of(Terrains.BUILDING, GpuBuildingTest.ASSET)) : List.of(),
                   List.of(), BoardLiquid.NONE, null, true);
@@ -371,7 +371,7 @@ class GpuBuildingHoverSmokeTest {
         var camera = view.boardCamera.camera;
         output.begin(0, 0, 0, 1);
         HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
-        terrain.render(camera, false);
+        terrain.render(camera);
         output.display();
         var pages = (GpuPropBatch) field(terrain, "propBatch");
         long pageBuilds = pages.rebuilds();
@@ -385,7 +385,7 @@ class GpuBuildingHoverSmokeTest {
                 terrain.animate(0, List.of(), level == 1 ? 1 : .5f, BUILDING, level * BoardGeometry.level());
                 output.begin(0, 0, 0, 1);
                 HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
-                terrain.render(camera, false);
+                terrain.render(camera);
                 output.display();
                 assertEquals(pageBuilds, pages.rebuilds(),
                       "Opening/closing a building storey must not rebuild static prop pages");

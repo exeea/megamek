@@ -8,8 +8,8 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
 import java.awt.RenderingHints;
+import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.concurrent.FutureTask;
@@ -30,15 +30,15 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The editor's trace overlay over 48x48 (decision P of b9-decisions.md): a reference image drawn for the 2D board at
- * 100 % zoom (hex outlines, a river and one hex filled magenta) lies on the hexes in the top view and is gone once the
+ * The editor's trace overlay over 48x48 (decision P of b9-decisions.md): a reference image drawn at one pixel per board
+ * unit (hex outlines, a river and one hex filled magenta) lies on the hexes in the top view and is gone once the
  * camera tilts, and comes back with the top view. Captures {@code b9-trace-overlay-top.png} and
  * {@code b9-trace-overlay-tilted.png}.
  */
 @Tag("on-demand")
 class GpuEditorTraceOverlaySmokeTest {
-    /** The 2D board's size of 48x48 at 100 % zoom: the reference image covers exactly the board. */
-    private static final int WIDTH = 48 * 63 + 21, HEIGHT = 48 * 72 + 36;
+    /** 48x48 at one pixel per board unit, with a one-hex margin on each side. */
+    private static final int WIDTH = Math.round((2 + 48 * .75f + .25f) * BoardGeometry.TILE_WIDTH), HEIGHT = 50 * 72 + 36;
     /** The hex the reference image fills magenta, near the board's middle. */
     private static final Coords MARKED = new Coords(24, 24);
 
@@ -53,12 +53,12 @@ class GpuEditorTraceOverlaySmokeTest {
         int opacity = gui.getTraceOverlayTransparency(), scale = gui.getTraceOverlayScale();
         int x = gui.getTraceOverlayOriginX(), y = gui.getTraceOverlayOriginY();
         var setup = new FutureTask<GpuMapSource>(() -> {
-            // The image covers the board, so it starts at the 2D board's first hex: one hex in from the panel's corner.
+            // The offsets count from one hex left of and above the first hex, where the image's margin begins.
             gui.setTraceOverlayImageFile(reference.getAbsolutePath());
             gui.setTraceOverlayTransparency(200);
             gui.setTraceOverlayScale(100);
-            gui.setTraceOverlayOriginX(84);
-            gui.setTraceOverlayOriginY(72);
+            gui.setTraceOverlayOriginX(0);
+            gui.setTraceOverlayOriginY(0);
             gui.setValue(GUIPreferences.SHOW_TRACE_OVERLAY, true);
             var editor = new BoardEditorSession();
             editor.open(new File(Configuration.boardsDir(), "unofficial/VictorMorson/48x48.board").toPath());
@@ -176,11 +176,19 @@ class GpuEditorTraceOverlaySmokeTest {
         return image;
     }
 
-    /** A hex's outline in the 2D board image: columns 63 pixels apart, an odd column half a hex lower. */
-    private static Polygon hex(Coords hex) {
-        int left = hex.getX() * 63, top = hex.getY() * 72 + (hex.getX() & 1) * 36;
-        return new Polygon(new int[] { left + 21, left + 63, left + 84, left + 63, left + 21, left },
-              new int[] { top, top, top + 36, top + 72, top + 72, top + 36 }, 6);
+    /** A hex's outline in the image: past the margin, columns three quarters of a hex apart, odd ones half a hex lower. */
+    private static Path2D hex(Coords hex) {
+        float tile = BoardGeometry.TILE_WIDTH;
+        float left = tile + hex.getX() * .75f * tile, top = 72 + hex.getY() * 72 + (hex.getX() & 1) * 36;
+        var outline = new Path2D.Float();
+        outline.moveTo(left + tile / 4, top);
+        outline.lineTo(left + tile * .75f, top);
+        outline.lineTo(left + tile, top + 36);
+        outline.lineTo(left + tile * .75f, top + 72);
+        outline.lineTo(left + tile / 4, top + 72);
+        outline.lineTo(left, top + 36);
+        outline.closePath();
+        return outline;
     }
 
     private static com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration configuration() {

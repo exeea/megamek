@@ -487,7 +487,7 @@ class GpuUtilityMinimapSmokeTest {
     private static BoardScene withLiquid(BoardScene scene, Coords coords, BoardLiquid liquid) {
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> !tile.coords().equals(coords) ? tile
               : new BoardScene.Tile(tile.coords(), tile.elevation(), 1, false, tile.roadExits(), tile.surface(),
-                    tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
+                    tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
                     tile.features(), tile.text(), liquid, tile.tileset())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),
@@ -685,7 +685,7 @@ class GpuUtilityMinimapSmokeTest {
         GpuMovePlan.Snapshot empty = GpuMovePlan.Snapshot.EMPTY;
         return new GpuMovePlan.Snapshot(true, true, false, GpuHudFixtures.ATLAS, GpuMovePlan.Mode.AUTO, false, "",
               ROUTE, List.of(), List.of(), ROUTE.getLast().coords(), 0, 3, 3, EntityMovementType.MOVE_WALK, "",
-              true, 1, 1, true, List.of(), true, true, empty.envelope(), Set.of(), 0);
+              true, 1, 1, true, List.of(), true, true, true, empty.envelope(), Set.of(), 0);
     }
 
     /** A volley of {@code count} weapon attacks of this round, as the report log keeps them for review. */

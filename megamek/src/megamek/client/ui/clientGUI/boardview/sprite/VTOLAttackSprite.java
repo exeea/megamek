@@ -38,45 +38,37 @@ import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.Shape;
 import java.awt.image.ImageObserver;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
-import megamek.common.units.IBomber;
-import megamek.common.units.VTOL;
 
 /**
  * @author Neoancient
  */
-public class VTOLAttackSprite extends Sprite implements TacticalSprite {
+public class VTOLAttackSprite extends Sprite {
     private final BoardGlyphContext boardView;
+    private final TacticalMark.VtolAttack attack;
     private final Entity entity;
     private List<Coords> targets;
     private final Color spriteColor;
 
-    public VTOLAttackSprite(BoardGlyphContext boardView, Entity entity) {
+    public VTOLAttackSprite(BoardGlyphContext boardView, TacticalMark.VtolAttack attack) {
         super(boardView);
         this.boardView = bv;
-        this.entity = entity;
-        spriteColor = entity.getOwner().getColour().getColour();
+        this.attack = attack;
+        entity = attack.entity();
+        spriteColor = attack.color();
         image = null;
         prepare();
     }
 
     @Override
     public void prepare() {
-        if ((entity instanceof IBomber) && ((IBomber) entity).isVTOLBombing()) {
-            targets = Collections.singletonList(((IBomber) entity).getVTOLBombTarget().getPosition());
-        } else if (entity instanceof VTOL) {
-            targets = new ArrayList<>(((VTOL) entity).getStrafingCoords());
-        } else {
-            targets = Collections.emptyList();
-        }
+        targets = attack.targets();
         int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
         if (!targets.isEmpty()) {
             x1 = x2 = (int) boardView.getHexLocation(targets.getFirst()).getX();
@@ -107,7 +99,8 @@ public class VTOLAttackSprite extends Sprite implements TacticalSprite {
     public void drawOnto(Graphics graphics, int x, int y, ImageObserver observer) {
         if (graphics instanceof Graphics2D graphics2D) {
             for (Coords c : targets) {
-                Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics2D, boardView.getHexLocation(c));
+                Graphics2D local = (Graphics2D) graphics2D.create();
+                local.translate(boardView.getHexLocation(c).x, boardView.getHexLocation(c).y);
                 try {
                     boardView.drawHexBorder(local, spriteColor, 0, 3);
                 } finally {
@@ -119,12 +112,6 @@ public class VTOLAttackSprite extends Sprite implements TacticalSprite {
 
     public Entity getEntity() {
         return entity;
-    }
-    @Override
-    public void drawTactical(Graphics2D graphics) {
-        prepare();
-        Rectangle location = getBounds();
-        drawOnto(graphics, location.x, location.y, null);
     }
 
 }

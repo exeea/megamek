@@ -171,9 +171,9 @@ class GpuAssetReloadSmokeTest {
                             Path grass = surfaces.resolve("grassland-ground.tres");
                             Files.writeString(grass, Files.readString(grass).replace("roughness = 1.0", "roughness = 0.5"));
                             Path lava = textures.resolve("terrain/lava");
-                            GpuAssetReloadTest.png(lava.resolve("lava_emission.png"), 0xff204080);
-                            GpuAssetReloadTest.png(lava.resolve("lava_coverage.png"), 0xff404040);
-                            Path molten = lava.resolve("lava.tres");
+                            GpuAssetReloadTest.png(lava.resolve("lava-flow_emission.png"), 0xff204080);
+                            GpuAssetReloadTest.png(lava.resolve("lava-flow_coverage.png"), 0xff404040);
+                            Path molten = lava.resolve("lava-flow.tres");
                             Files.writeString(molten, Files.readString(molten).replace("emission_energy = 5.0", "emission_energy = 4.0"));
                             // The catalogue is data too: grass takes twice the metres per repeat (half its density),
                             // and asphalt is catalogued at half its width, so the same texture covers twice the road.
@@ -472,7 +472,7 @@ class GpuAssetReloadSmokeTest {
         }
         // The earlier edit uses energy 4 and small heat maps. The official batch must restore the current
         // authored pair together and refresh the same emission owner used by spill lights.
-        var molten = GodotMaterial.read(textures.resolve("terrain/lava/lava.tres").toFile(), textures.toFile());
+        var molten = GodotMaterial.read(textures.resolve("terrain/lava/lava-flow.tres").toFile(), textures.toFile());
         var heat = GpuMaterialMaps.pack(molten, GpuMaterialMaps.Layout.MOLTEN_HEAT);
         var emission = assets.lavaEmission();
         try {

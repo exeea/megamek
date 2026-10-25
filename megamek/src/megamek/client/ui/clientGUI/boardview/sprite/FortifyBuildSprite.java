@@ -45,7 +45,6 @@ import javax.swing.ImageIcon;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -95,17 +94,10 @@ public class FortifyBuildSprite extends HexSprite {
     }
 
     @Override
-    public BoardMarker boardMarker() {
-        return bv.boardMarker(BoardMarker.Kind.FORTIFY_BUILD, loc, stage + "/" + totalStages);
-    }
-
-    @Override
     public void prepare() {
         Graphics2D graph = spriteSetup();
         drawGhostFortification(graph);
-        if (!bv.isGpuCapture()) {
-            drawProgressIndicator(graph);
-        }
+        drawProgressIndicator(graph);
         graph.dispose();
     }
 

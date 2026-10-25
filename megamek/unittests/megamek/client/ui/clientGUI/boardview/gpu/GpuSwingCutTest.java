@@ -36,13 +36,11 @@ import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
-import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.common.Configuration;
@@ -79,8 +77,8 @@ class GpuSwingCutTest {
     }
 
     /**
-     * G4: MegaMek's firing solution draws into the board state's tactical capture, but the native frame leaves it out
-     * (the board labels' to-hit badges stand for it), and the sprite stays shown for the Legacy 2D board.
+     * G4: the native frame leaves MegaMek's firing solution out (the board labels' to-hit badges stand for it), and the
+     * sprite stays shown for the Legacy 2D board.
      */
     @Test
     void theNativeFrameLeavesOutMegaMeksFiringSolutions() throws Exception {
@@ -94,16 +92,14 @@ class GpuSwingCutTest {
                 return sprite;
             });
             List<BoardTactical> captures = onSwing(() -> {
-                BoardTactical all = fixture.view.captureTacticalGeometry();
                 fixture.view.removeSprites(List.of(solution));
-                BoardTactical without = fixture.view.captureTacticalGeometry();
+                BoardTactical without = new BoardTacticalMarks().capture(fixture.view, false);
                 fixture.view.addSprites(List.of(solution));
                 fixture.source.refresh();
-                return List.of(all, without, fixture.source.takeFrame().scene().tactical());
+                return List.of(without, fixture.source.takeFrame().scene().tactical());
             });
-            assertNotEquals(captures.get(1), captures.get(0), "MegaMek's own capture draws the solution");
-            assertEquals(captures.get(1), captures.get(2), "The native frame draws everything else, and no solution");
-            assertFalse(onSwing(solution::isHidden), "The capture leaves the sprite shown for the Legacy 2D board");
+            assertEquals(captures.get(0), captures.get(1), "The native frame draws everything else, and no solution");
+            assertFalse(onSwing(solution::isHidden), "The sprite stays shown for the Legacy 2D board");
         }
     }
 
@@ -120,9 +116,9 @@ class GpuSwingCutTest {
                   "MegaMek's board state shows the selected unit's envelope");
             moving.board.panel = moving.display;
             onSwing(() -> {
-                moving.board.view.addSprites(List.of(
-                      new FieldOfFireSprite(moving.board.view, RangeType.RANGE_SHORT, new Coords(4, 4), 63),
-                      new FieldOfFireSprite(moving.board.view, new Color(0x12, 0x34, 0x56), new Coords(6, 4), 63)));
+                moving.board.view.addMarks(List.of(
+                      new TacticalMark.WeaponRange(new Coords(4, 4), 63, RangeType.RANGE_SHORT),
+                      new TacticalMark.ControlZone(new Coords(6, 4), 63, new Color(0x12, 0x34, 0x56))));
                 return null;
             });
             Planned planning = planned(moving);
@@ -139,31 +135,28 @@ class GpuSwingCutTest {
 
     /**
      * G4: while the plan draws a unit's route, the native frame leaves out MegaMek's step arrows and costs too, which
-     * the board state captures over the route (the user's report of 2026-10-03: the old route marks mixed with the
-     * new); without a plan it shows them, and the capture leaves them shown for the Legacy 2D board.
+     * would lie over the route (the user's report of 2026-10-03: the old route marks mixed with the new); without a
+     * plan it shows them, and the sprites stay shown for the Legacy 2D board.
      */
     @Test
     void theNativeFrameLeavesOutMegaMeksStepArrowsWhileThePlanDrawsTheRoute() throws Exception {
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {
             moving.board.panel = moving.display;
-            List<StepSprite> steps = onSwing(() -> {
+            List<TacticalMark.Step> steps = onSwing(() -> {
                 moving.display.plotTo(new Coords(11, 9), 0);
-                return List.copyOf(moving.board.view.getPathSprites());
+                return moving.board.view.getPathSteps();
             });
             assertFalse(steps.isEmpty(), "MegaMek's board state draws the plotted path's steps");
             List<BoardTactical> captures = onSwing(() -> {
                 moving.board.source.refresh();
                 BoardTactical frame = moving.board.source.takeFrame().scene().tactical();
-                BoardTactical withSteps = moving.board.view.captureTacticalGeometry();
-                steps.forEach(step -> step.setHidden(true));
-                BoardTactical withoutSteps = moving.board.view.captureTacticalGeometry();
-                steps.forEach(step -> step.setHidden(false));
+                BoardTactical withSteps = new BoardTacticalMarks().capture(moving.board.view, false);
+                BoardTactical withoutSteps = new BoardTacticalMarks().capture(moving.board.view, true);
                 return List.of(frame, withSteps, withoutSteps);
             });
-            assertNotEquals(captures.get(2), captures.get(1), "MegaMek's own capture draws the steps");
+            assertNotEquals(captures.get(2), captures.get(1), "Without a plan the markings draw the steps");
             assertEquals(captures.get(2), captures.get(0), "The native frame draws everything else, and no step");
-            assertTrue(onSwing(() -> steps.stream().noneMatch(Sprite::isHidden)),
-                  "The capture leaves the steps shown for the Legacy 2D board");
+            assertEquals(steps, onSwing(moving.board.view::getPathSteps), "The board state keeps the plotted steps");
 
             moving.board.panel = new JPanel();
             Planned unplanned = planned(moving);
@@ -172,16 +165,16 @@ class GpuSwingCutTest {
         }
     }
 
-    /** A capture: the plan's planner flag, the frame's tactical geometry and the board state's own. */
+    /** A capture: the plan's planner flag, the frame's tactical geometry and all of the board's markings. */
     private record Planned(boolean planner, BoardTactical frame, BoardTactical state) { }
 
-    /** EDT, in one event: captures the frame, then the board state's own tactical capture of the same sprites. */
+    /** EDT, in one event: captures the frame, then the markings of the same sprites, the path's steps included. */
     private static Planned planned(GpuMovementFixture moving) throws Exception {
         return onSwing(() -> {
             moving.board.source.refresh();
             GpuBoardSource.Frame frame = moving.board.source.takeFrame();
             return new Planned(frame.panels().move().planner(), frame.scene().tactical(),
-                  moving.board.view.captureTacticalGeometry());
+                  new BoardTacticalMarks().capture(moving.board.view, false));
         });
     }
 

@@ -665,8 +665,8 @@ class GpuBridgeSmokeTest {
             try (var source = new GpuMapSource(editor.game(), null, editor)) { return source.takeFrame().scene(); }
         });
         javax.swing.SwingUtilities.invokeAndWait(opened);
-        assertEquals(scene.tiles().stream().map(t -> t.withMarkings(null, List.of())).toList(),
-              opened.get().tiles().stream().map(t -> t.withMarkings(null, List.of())).toList(), "One tile build");
+        assertEquals(scene.tiles().stream().map(t -> t.withText(List.of())).toList(),
+              opened.get().tiles().stream().map(t -> t.withText(List.of())).toList(), "One tile build");
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 900);
@@ -982,7 +982,7 @@ class GpuBridgeSmokeTest {
             if (coords.equals(CENTER)) {
                 var art = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS, -2, 1, 0).ground();
                 return new BoardScene.Tile(coords, -2, 1, false, 0, BoardScene.Surface.GRASS,
-                      art, null, null, null, null, BoardFeatures.capture(bridge, coords, Map.of()), List.of(),
+                      art, null, null, null, BoardFeatures.capture(bridge, coords, Map.of()), List.of(),
                       BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE);
             }
             int road = 0;

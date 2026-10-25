@@ -57,16 +57,16 @@ class GpuConcreteEdgesSmokeTest {
                       || !board.getHex(at.translated(HexTile.edgeDirection(k))).containsTerrain(megamek.common.units.Terrains.WATER)) {
                     continue;
                 }
-                float ax = HexTile.cornerX(at, k, HexTile.WIDTH), ay = HexTile.cornerY(at, k, HexTile.HEIGHT);
-                float bx = HexTile.cornerX(at, (k + 1) % 6, HexTile.WIDTH), by = HexTile.cornerY(at, (k + 1) % 6, HexTile.HEIGHT);
+                float ax = HexTile.cornerX(at, k, HexTile.MODEL_WIDTH), ay = HexTile.cornerY(at, k, HexTile.HEIGHT);
+                float bx = HexTile.cornerX(at, (k + 1) % 6, HexTile.MODEL_WIDTH), by = HexTile.cornerY(at, (k + 1) % 6, HexTile.HEIGHT);
                 var a = fit.corner(at, k);
                 var b = fit.corner(at, (k + 1) % 6);
                 float first = (bx - ax) * (a.y() - ay) - (by - ay) * (a.x() - ax);
                 float second = (bx - ax) * (b.y() - ay) - (by - ay) * (b.x() - ax);
                 if (first > 1 && second > 1) {
-                    double mx = ((ax + bx) / 2 + (a.x() + b.x()) / 2) / 2 - HexTile.centerX(at, HexTile.WIDTH);
+                    double mx = ((ax + bx) / 2 + (a.x() + b.x()) / 2) / 2 - HexTile.centerX(at, HexTile.MODEL_WIDTH);
                     double my = ((ay + by) / 2 + (a.y() + b.y()) / 2) / 2 - HexTile.centerY(at, HexTile.HEIGHT);
-                    return new Spot(at, mx / HexTile.WIDTH, my / HexTile.HEIGHT);
+                    return new Spot(at, mx / HexTile.MODEL_WIDTH, my / HexTile.HEIGHT);
                 }
             }
         }

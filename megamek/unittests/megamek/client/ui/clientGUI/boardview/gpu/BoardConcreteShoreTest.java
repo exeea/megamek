@@ -335,7 +335,7 @@ class BoardConcreteShoreTest {
                 boolean land = Math.abs(relative.dot(axis)) <= 280 * BoardGeometry.HEX_SCALE
                       && Math.abs(relative.x * -axis.y + relative.y * axis.x) <= 85 * BoardGeometry.HEX_SCALE;
                 var surface = land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS;
-                tiles.add(new BoardScene.Tile(at, land ? level : 0, -1, false, 0, surface, null, null, null, null, null,
+                tiles.add(new BoardScene.Tile(at, land ? level : 0, -1, false, 0, surface, null, null, null, null,
                       at.equals(objectAt) ? features : List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
                       BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false, BoardSurfaceBlend.solid(surface), null,
                       false, null, null, at.equals(objectAt) ? appearance : Map.of(), null));
@@ -355,7 +355,7 @@ class BoardConcreteShoreTest {
                 Vector3 p = BoardGeometry.corner(at, 0, k);
                 var shift = coast.corners(at).get(k);
                 p.add(shift.x(), shift.y(), 0);
-                assertEquals(21 * BoardGeometry.HEX_SCALE, Math.abs(p.x - BoardGeometry.centerX(tip)), .002f,
+                assertEquals(BoardGeometry.TILE_WIDTH / 4 * BoardGeometry.HEX_SCALE, Math.abs(p.x - BoardGeometry.centerX(tip)), .002f,
                       "Every pier vertex remains on its parallel sides, including the landing end");
             }
         }
@@ -383,7 +383,7 @@ class BoardConcreteShoreTest {
                     if (Math.hypot(shift[0], shift[1]) > 10 * BoardGeometry.HEX_SCALE) { clipped++; }
                     corner.add(shift[0], shift[1], 0);
                     float across = (corner.x - a.x) * -axis.y + (corner.y - a.y) * axis.x;
-                    assertTrue(Math.abs(across) <= 21.01f * BoardGeometry.HEX_SCALE,
+                    assertTrue(Math.abs(across) <= (BoardGeometry.TILE_WIDTH / 4 + .01f) * BoardGeometry.HEX_SCALE,
                           "A dock follows its whole chain, direction=" + direction);
                 }
                 Vector3 center = BoardGeometry.center(coords, 0);
@@ -466,7 +466,7 @@ class BoardConcreteShoreTest {
                     boolean concrete = at.equals(CENTER);
                     tiles.add(new BoardScene.Tile(at, concrete ? 0 : elevation, -1, false, 0,
                           concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
-                          null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                          null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
                 }
             }
             BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -621,7 +621,8 @@ class BoardConcreteShoreTest {
                         Vector3 axis = BoardGeometry.center(CENTER.translated(direction), 0).sub(center).nor();
                         float ca = (a.x - center.x) * -axis.y + (a.y - center.y) * axis.x;
                         float cb = (b.x - center.x) * -axis.y + (b.y - center.y) * axis.x;
-                        parallel |= Math.abs(ca - cb) < .002f && Math.abs(Math.abs(ca) / BoardGeometry.HEX_SCALE - 21) < .2f;
+                        parallel |= Math.abs(ca - cb) < .002f
+                              && Math.abs(Math.abs(ca) / BoardGeometry.HEX_SCALE - BoardGeometry.TILE_WIDTH / 4) < .2f;
                     }
                     assertTrue(parallel, "Each angled bank follows a rectangular arm: " + first + ", " + second + ", edge " + e);
                 }
@@ -758,7 +759,7 @@ class BoardConcreteShoreTest {
                     boolean water = at.equals(CENTER) || at.equals(upstream);
                     tiles.add(new BoardScene.Tile(at, at.equals(upstream) ? 1 : 0, water ? 2 : -1, false, 0,
                           water ? BoardScene.Surface.GRASS : BoardScene.Surface.CONCRETE,
-                          null, null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
+                          null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
                           null, true));
                 }
             }
@@ -785,22 +786,31 @@ class BoardConcreteShoreTest {
               "The connector meets the continued runway edge");
         assertEquals(0, distance(a, b, shape.corner(join, 2)), .003f,
               "The runway reaches the trunk without a triangular notch");
-        assertEquals(shape.corner(new Coords(5, 1), 0).x, shape.corner(join, 2).x, .003f,
-              "The continued runway meets the trunk's vertical side");
+        // Where the continued runway edge reaches the trunk's vertical side, a fitted corner joins the two.
+        float x = shape.corner(new Coords(5, 1), 0).x, y = a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x);
+        boolean meets = false;
+        for (Coords at : join.allAtDistanceOrLess(1)) {
+            for (int k = 0; k < 6; k++) { meets |= Math.hypot(shape.corner(at, k).x - x, shape.corner(at, k).y - y) < .003f; }
+        }
+        assertTrue(meets, "The continued runway meets the trunk's vertical side");
     }
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 2 })
-    void aeroBaseTaxiwayKeepsItsDiagonalSidePastTheJunctionAndToTheMapEdge(int elevation) {
+    void aeroBaseTaxiwayKeepsItsDiagonalSidePastTheJunctionUpToTheMapEdge(int elevation) {
         BoardScene scene = aeroBaseAtElevation(elevation);
         BoardConcrete shape = BoardConcrete.of(scene);
         Coords arm = new Coords(12, 3);
         Vector3 a = shape.corner(arm, 3), b = shape.corner(arm, 4);
-        for (int[] vertex : new int[][] { { 13, 4, 0 }, { 14, 4, 4 }, { 14, 4, 5 }, { 15, 4, 4 }, { 15, 4, 5 } }) {
+        for (int[] vertex : new int[][] { { 13, 4, 0 }, { 14, 4, 4 }, { 14, 4, 5 }, { 15, 4, 4 } }) {
             Vector3 p = shape.corner(new Coords(vertex[0], vertex[1]), vertex[2]);
             assertEquals(0, distance(a, b, p), .003f,
                   "No extra concrete apron below the diagonal taxiway: " + p);
         }
+        // Its corner on the map's edge keeps its place, so the board keeps its hex outline.
+        Coords edge = new Coords(15, 4);
+        assertEquals(0, shape.corner(edge, 5).dst(BoardGeometry.corner(edge, 0, 5)), .003f,
+              "The taxiway turns back to the board's corner");
         assertEquals(shape.corner(new Coords(13, 5), 0).x, shape.corner(new Coords(13, 4), 0).x, .003f,
               "The two taxiway sides meet at one corner");
     }
@@ -810,7 +820,7 @@ class BoardConcreteShoreTest {
         if (elevation == 0) { return scene; }
         return scene.withTiles(scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
               tile.surface() == BoardScene.Surface.CONCRETE ? elevation : tile.elevation(), -1, false, 0,
-              tile.surface(), tile.ground(), null, null, null, null, tile.features(), List.of(), BoardLiquid.NONE, null,
+              tile.surface(), tile.ground(), null, null, null, tile.features(), List.of(), BoardLiquid.NONE, null,
               tile.detailedGround())).toList());
     }
 
@@ -906,7 +916,7 @@ class BoardConcreteShoreTest {
                 List<BoardScene.Feature> features = dry && buildings
                       ? List.of(new BoardScene.Feature("building", 0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of();
                 tiles.add(new BoardScene.Tile(coords, 0, dry ? -1 : 2, false, 0,
-                      dry ? family : BoardScene.Surface.GRASS, null, null, null, null, null, features, List.of(),
+                      dry ? family : BoardScene.Surface.GRASS, null, null, null, null, features, List.of(),
                       dry ? BoardLiquid.NONE : BoardLiquid.WATER, null,
                       features.isEmpty() || family == BoardScene.Surface.CONCRETE));
             }

@@ -185,7 +185,11 @@ final class BoardBridge {
 
     static void triangle(List<Facet> faces, Vector3 a, Vector3 b, Vector3 c, Part part, Color colour) {
         var normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a));
-        if (normal.len2() > 1e-8f) { faces.add(new Facet(a, b, c, normal.nor(), part, colour)); }
+        // A needle a rounding step wide has no stable plane: its height and picking would be noise.
+        float longest = Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)));
+        if (normal.len2() > Math.max(1e-8f, 1e-8f * longest * longest)) {
+            faces.add(new Facet(a, b, c, normal.nor(), part, colour));
+        }
     }
 
     static BoardScene.Feature feature(BoardScene.Tile tile) {

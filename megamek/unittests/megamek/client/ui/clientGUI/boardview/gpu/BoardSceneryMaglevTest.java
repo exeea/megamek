@@ -27,6 +27,7 @@ import megamek.common.board.BoardModelBounds;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -71,7 +72,7 @@ class BoardSceneryMaglevTest {
             double spacing = stamp.equals("stamp/maglev-train") ? 1 : 1.3;
             for (int i = 0; i < rows.size(); i++) {
                 var row = rows.get(i); var object = objects.get(i);
-                assertEquals(row.x() * spacing, object.x() * 84, .0001, stamp);
+                assertEquals(row.x() * spacing, object.x() * HexTile.MODEL_WIDTH, .0001, stamp);
                 assertEquals(row.y() * spacing, object.y() * 72, .0001, stamp);
                 assertEquals(row.scale(), object.scale(), .0001, stamp);
             }
