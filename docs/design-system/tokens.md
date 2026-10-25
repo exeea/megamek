@@ -715,10 +715,10 @@ A number picked from a range by dragging the thumb, clicking the track (the thum
 | Part / state | Look |
 | --- | --- |
 | Track | An `xs` (4) high pill: `accent.primary` up to the thumb, `border.control` past it |
-| Thumb | App mode: an `icon.sm` (16) `accent.primary` disc. Game mode: hud-v3's thin bar, `xs` (4) wide and `icon.sm` (16) tall with `radius.sm`, in `text.secondary` so it stands out from the accent fill. With or without ticks and labels |
+| Thumb | `surface.inverse`, the cream of every handle and "on" face, so the mint focus ring stands out around it. App mode: an `icon.sm` (16) disc. Game mode: hud-v3's flat thin bar, `xs` (4) wide and `icon.sm` (16) tall with square corners. With or without ticks and labels |
 | Ticks | `tick.width` (2) pills under the track in `border.control`: major ones `sm` (6) long, minor ones half that |
 | Labels | `small` type in `text.muted` under the ticks |
-| Hover / dragging | The disc gains a `border.strong` edge and leans its face as on a checked box: toward the on-accent color on hover, toward the text color while dragging. The bar turns `text.primary` |
+| Hover / dragging | The thumb leans toward `text.onInverse` like the primary button, further while dragging; the disc also gains a `border.strong` edge |
 | Focus | The ring around the thumb, `focus.gap` (1) away (see [Focus](#focus)) |
 | Disabled | A `border.subtle` track and ticks with no fill, and a `text.disabled` thumb |
 
@@ -727,6 +727,8 @@ A number picked from a range by dragging the thumb, clicking the track (the thum
 - **Readout.** When the exact value matters (opacity, scale, a count), show it beside the track in `body` type. It
   keeps the width of the longest value so the track doesn't shift as it changes.
 - **Not by color alone.** The thumb's position carries the value; the fill only repeats it.
+- **Mint fill, cream thumb.** The fill is an amount, like a progress bar, so it keeps the accent; the thumb is a handle,
+  so it is cream like the other control faces. The angle dial's hub ring stays mint.
 
 **Swing.** The MegaMek themes draw every `JSlider` this way through
 [`TokenSliderUI`](../../megamek/src/megamek/client/ui/design/swing/TokenSliderUI.java), so existing views get it
@@ -736,7 +738,7 @@ the readout and lines it up with the track on the slider's baseline. On a game-m
 (`TokenPresentation.setMode`) the thumb is the bar (`Slider.barThumb*` defaults).
 
 **libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `token` `SliderStyle`:
-a 4-high pill track, an accent fill and a 16 accent disc thumb that gains a border.strong edge on hover or press, and
+a 4-high pill track, an accent fill and a 16 inverse disc thumb that gains a border.strong edge on hover or press, and
 the `token-slider-bar` style with the game-mode bar thumb. `UiKit.tokenSliderStyle()` returns a copy of the one for
 the kit's presentation mode (the bar by default, since libGDX is game mode); the tuning panel's `UiKit.sliderStyle()` stays as hud-v3
 draws it.

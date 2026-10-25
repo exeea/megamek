@@ -204,8 +204,8 @@ public class TokenSliderUI extends FlatSliderUI {
     }
 
     /**
-     * The game presentation's thumb: a thin bar across the track, xs wide and icon.sm long, in the light text color so
-     * it stands out from the accent fill; under the pointer or dragged it brightens and widens a pixel each side. The
+     * The game presentation's thumb: hud-v3's flat bar across the track, xs wide and icon.sm long, in the inverse
+     * color; under the pointer or dragged it leans toward the inverse ink and widens a pixel each side. The
      * whole thumb rectangle stays its hit area, and focus rings the bar a gap away.
      */
     private void paintBar(Graphics g, boolean enabled, boolean pressed, boolean hover, int duration,

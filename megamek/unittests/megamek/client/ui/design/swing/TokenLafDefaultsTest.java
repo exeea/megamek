@@ -542,7 +542,8 @@ class TokenLafDefaultsTest {
                 UIDefaults defaults = lookAndFeel.getDefaults();
                 assertColor(defaults, "Slider.trackColor", "border.control", mode);
                 assertColor(defaults, "Slider.trackValueColor", "accent.primary", mode);
-                assertColor(defaults, "Slider.thumbColor", "accent.primary", mode);
+                assertColor(defaults, "Slider.thumbColor", "surface.inverse", mode);
+                assertColor(defaults, "Slider.barThumbColor", "surface.inverse", mode);
                 assertColor(defaults, "Slider.hoverThumbBorderColor", "border.strong", mode);
                 assertColor(defaults, "Slider.tickColor", "border.control", mode);
                 assertColor(defaults, "Slider.disabledTickColor", "border.subtle", mode);

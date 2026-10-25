@@ -198,11 +198,7 @@ public final class TokenLafDefaults {
         put("Button.disabledSelectedBorderColor", over(inverseDisabled, raised));
         put(TokenButtonUI.INVERSE_FOCUS_COLOR, onInverse);
 
-        // Slider thumbs keep the accent; a surface wash is invisible on it, so hover leans toward the on-accent color
-        // and press away from it
         int accent = color("accent.primary");
-        int accentHover = over(ColorMath.withAlpha(color("text.onAccent"), tokens.alpha("tint.hover")), accent);
-        int accentPressed = over(ColorMath.withAlpha(color("text.primary"), tokens.alpha("tint.pressed")), accent);
         // Primary (default) button: the inverse face, focused like a selected toggle
         put("Button.default.background", inverse);
         put("Button.default.foreground", onInverse);
@@ -492,8 +488,8 @@ public final class TokenLafDefaults {
         put(TokenProgressBarUI.VALUE_FOREGROUND, color("text.primary"));
         put(TokenProgressBarUI.DISABLED_TRACK, color("border.subtle"));
         values.put(TokenProgressBarUI.TEXT_GAP, number(tokens.space().get("xs")));
-        // Sliders (TokenSliderUI): an accent fill up to a round icon.sm thumb on an xs pill track, the same with ticks
-        // and labels. Hover and drag lean the thumb as on a checked box and give it a strong edge; focus rings it a gap
+        // Sliders (TokenSliderUI): an accent fill up to a round inverse icon.sm thumb on an xs pill track, the same with
+        // ticks and labels. Hover and drag lean the thumb as on the primary button and give it a strong edge; focus rings it a gap
         // away. Ticks are tick.width pills under the track, labels small and muted.
         values.put("SliderUI", TokenSliderUI.class.getName());
         values.put("Slider.trackWidth", number(tokens.space().get("xs")));
@@ -504,18 +500,18 @@ public final class TokenLafDefaults {
         values.put("Slider.thumbBorderWidth", number(tokens.size().get("border")));
         values.put("Slider.tickLength", number(tokens.space().get("sm")));
         values.put("Slider.tickWidth", number(tokens.size().get("tick.width")));
-        // The game presentation's thumb (TokenSliderUI): a light xs bar, icon.sm long, that stands out of the fill
+        // The game presentation's thumb (TokenSliderUI): a flat inverse xs bar, icon.sm long, as in hud-v3
         values.put("Slider.barThumbSize", number(tokens.space().get("xs")) + "," + thumb);
-        values.put("Slider.barThumbArc", number(tokens.radius().get("sm")));
+        values.put("Slider.barThumbArc", "0");
         values.put("Slider.barThumbFocusGap", number(tokens.size().get("focus.gap")));
-        put("Slider.barThumbColor", color("text.secondary"));
-        put("Slider.barThumbActiveColor", color("text.primary"));
+        put("Slider.barThumbColor", inverse);
+        put("Slider.barThumbActiveColor", inverseHover);
         put("Slider.trackColor", color("border.control"));
         put("Slider.trackValueColor", accent);
-        put("Slider.thumbColor", accent);
-        put("Slider.thumbBorderColor", accent);
-        put("Slider.hoverThumbColor", accentHover);
-        put("Slider.pressedThumbColor", accentPressed);
+        put("Slider.thumbColor", inverse);
+        put("Slider.thumbBorderColor", inverse);
+        put("Slider.hoverThumbColor", inverseHover);
+        put("Slider.pressedThumbColor", inversePressed);
         put("Slider.hoverThumbBorderColor", color("border.strong"));
         put("Slider.focusedColor", color("focus.ring"));
         put("Slider.tickColor", color("border.control"));

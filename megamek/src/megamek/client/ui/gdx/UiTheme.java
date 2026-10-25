@@ -1375,7 +1375,7 @@ public final class UiTheme implements Disposable {
 
     /**
      * Token v0 styles for hud-v3's own inputs (docs/design-system/tokens.md, Inputs and Sliders): the slider's pill
-     * track and accent disc, and the pickers' discs and colors. The text fields use the {@code input} styles.
+     * track, accent fill and inverse disc, and the pickers' discs and colors. The text fields use the {@code input} styles.
      */
     private void tokenInputs() {
         DesignTokens tokens = DesignTokens.shipped();
@@ -1387,21 +1387,22 @@ public final class UiTheme implements Disposable {
         float border = tokens.size().get("border");
         float track = tokens.space().get("xs");
         float thumb = tokens.size().get("icon.sm");
-        int accentHover = ColorMath.over(ColorMath.withAlpha(tokens.color("text.onAccent", mode),
-              tokens.alpha("tint.hover")), accent);
-        int accentPressed = ColorMath.over(ColorMath.withAlpha(tokens.color("text.primary", mode),
-              tokens.alpha("tint.pressed")), accent);
+        // The thumb is a handle, so it takes the inverse face and leans toward its ink like the primary button
+        int inverse = tokens.color("surface.inverse", mode);
+        int onInverse = tokens.color("text.onInverse", mode);
+        int inverseHover = ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.hover")), inverse);
+        int inversePressed = ColorMath.over(ColorMath.withAlpha(onInverse, tokens.alpha("tint.pressed")), inverse);
 
         Slider.SliderStyle slider = new Slider.SliderStyle();
         slider.background = box("slider-track", control, null, 0, track / 2, null, 0, 0, track);
         slider.background.setMinWidth(0);
         slider.knobBefore = box("slider-fill", token(accent), null, 0, track / 2, null, 0, 0, track);
         slider.knobBefore.setMinWidth(0);
-        slider.knob = box("slider-thumb", token(accent), token(accent), border, thumb / 2, null, 0, 0, thumb);
+        slider.knob = box("slider-thumb", token(inverse), token(inverse), border, thumb / 2, null, 0, 0, thumb);
         slider.knob.setMinWidth(thumb);
-        slider.knobOver = box("slider-thumb-over", token(accentHover), strong, border, thumb / 2, null, 0, 0, thumb);
+        slider.knobOver = box("slider-thumb-over", token(inverseHover), strong, border, thumb / 2, null, 0, 0, thumb);
         slider.knobOver.setMinWidth(thumb);
-        slider.knobDown = box("slider-thumb-down", token(accentPressed), strong, border, thumb / 2, null, 0, 0,
+        slider.knobDown = box("slider-thumb-down", token(inversePressed), strong, border, thumb / 2, null, 0, 0,
               thumb);
         slider.knobDown.setMinWidth(thumb);
         slider.disabledBackground = box("slider-track-disabled", subtle, null, 0, track / 2, null, 0, 0, track);
@@ -1411,14 +1412,14 @@ public final class UiTheme implements Disposable {
         slider.disabledKnob.setMinWidth(thumb);
         skin.add(TOKEN, slider);
 
-        // The game presentation's thumb: a light xs bar, icon.sm long, that stands out of the accent fill
+        // The game presentation's thumb: hud-v3's flat bar, xs wide and icon.sm long, in the inverse color
         Slider.SliderStyle bar = new Slider.SliderStyle(slider);
         float barWidth = tokens.space().get("xs");
-        float barRadius = tokens.radius().get("sm");
-        bar.knob = box("slider-bar", token(tokens.color("text.secondary", mode)), null, 0, barRadius, null, 0, 0,
+        float barRadius = 0;
+        bar.knob = box("slider-bar", token(inverse), null, 0, barRadius, null, 0, 0,
               thumb);
         bar.knob.setMinWidth(barWidth);
-        bar.knobOver = box("slider-bar-over", token(tokens.color("text.primary", mode)), null, 0, barRadius, null, 0,
+        bar.knobOver = box("slider-bar-over", token(inverseHover), null, 0, barRadius, null, 0,
               0, thumb);
         bar.knobOver.setMinWidth(barWidth);
         bar.knobDown = bar.knobOver;
