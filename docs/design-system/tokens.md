@@ -581,8 +581,8 @@ faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
 [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers. `UiKit` builds them:
 `tokenTabs(compact, labels...)` and `tokenSegmented(compact, labels...)`. A click, or Left and Right while the bar has
 keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
-`focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no Tab
-traversal yet.
+`focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no general Tab
+traversal yet; the start screen's menu (`GpuStartScreen`) handles Up, Down, Tab and Enter itself.
 
 hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
 `-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and

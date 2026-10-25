@@ -170,6 +170,16 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
         frame.dispose();
     }
 
+    private static volatile boolean openMaximized;
+
+    /**
+     * Asks the next client window to open maximized, so the lobby keeps the start screen's maximized state. The caller
+     * clears it once the window is initialized.
+     */
+    public static void setOpenMaximized(boolean maximized) {
+        openMaximized = maximized;
+    }
+
     protected void initializeFrame() {
         if (GUIP.getWindowSizeHeight() != 0) {
             frame.setLocation(GUIP.getWindowPosX(), GUIP.getWindowPosY());
@@ -179,6 +189,9 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
         }
         frame.setMinimumSize(new Dimension(640, 480));
         UIUtil.updateWindowBounds(frame);
+        if (openMaximized) {
+            frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+        }
 
         List<Image> iconList = new ArrayList<>();
         iconList.add(frame.getToolkit()

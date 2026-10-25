@@ -705,6 +705,10 @@ public final class GpuBoardWindow {
         if (GpuUiLibraryWindow.closeThen(() -> start(window))) {
             return;
         }
+        // So does the start screen; it reopens when an editor it opened closes
+        if (GpuStartWindow.closeThen(() -> start(window))) {
+            return;
+        }
         try {
             active = window;
             ClientGUI gui = window.gui;
@@ -1327,6 +1331,10 @@ public final class GpuBoardWindow {
     }
 
     private static void showLegacy2D(ClientGUI gui, Window window) {
+        // An editor opened from the start screen returns to it rather than to its hidden owner frame
+        if (gui == null && GpuStartWindow.reopenFor(window)) {
+            return;
+        }
         if (gui != null) {
             gui.setLegacy2DViewEnabled(!gui.getClient().getGame().getPhase().isLounge());
         }

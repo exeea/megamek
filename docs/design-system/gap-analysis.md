@@ -368,10 +368,19 @@ work for Swing, and item 11 is under investigation.
   2. ~~Shared dialog footers~~: `AbstractButtonDialog`, `AbstractValidationButtonDialog` and the Host/Connect
      dialogs put their buttons in `TokenDialogs.footer`, Ok as the primary button first. Dialogs with their own
      footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
-  3. Main menu: a full-window game screen over the battle art, opened by a skippable "Welcome back" greeting and reveal
-     on app launch (an instant cut with reduce motion), the menu bar hidden and Settings, Help and Tools on screen.
-     The reveal is waiting on a developer vote. Host, Connect, Load game and the scenario choice open as pages in the
-     menu's own column, with Back (Esc) to return, so the art stays in view.
+  3. Main menu, in libGDX (a Swing version dropped frames on ordinary machines, and the 2D board that kept the
+     startup path in Swing is going away): a full-window game screen over the battle art
+     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back" greeting and reveal on app launch (an
+     instant cut with reduce motion), with Settings, Help and Tools on screen and Up, Down, Tab and Enter moving
+     through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
+     sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
+     left. The window opens maximized the first time and remembers its bounds;
+     the lobby opens at the same bounds. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
+     notice waits for the reveal to end. The old splash medal is dropped. ~~G1, the window and menu~~ is done; next
+     come its pages, which show Host (G2, with the network information), Connect (G3, with a Player/Bot switch and SBF connect), Load
+     game (G4), the scenario browser (G5) and the briefing (G6) in the menu's own column, with Back (Esc) to return,
+     so the art stays in view. Until then, the Swing dialogs open over the start window, Ctrl+click reaches
+     connect-as-bot, quick load and the last scenario, and SBF connect and network information are off the menu.
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
      main action named for what it does (**Host game**, **Connect**) and errors under the inputs instead of popups.
      Host keeps the password, port and server browser in a closed **Online options** section, which opens when the
