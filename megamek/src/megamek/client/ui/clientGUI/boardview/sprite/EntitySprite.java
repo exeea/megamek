@@ -35,7 +35,6 @@ package megamek.client.ui.clientGUI.boardview.sprite;
 import java.awt.Image;
 import java.awt.Point;
 import java.awt.Rectangle;
-import java.awt.image.BufferedImage;
 
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
