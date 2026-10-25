@@ -92,7 +92,7 @@ class BoardLiquidTest {
         for (BoardLiquid.Kind kind : List.of(BoardLiquid.Kind.WATER, BoardLiquid.Kind.HAZARDOUS, BoardLiquid.Kind.MAGMA)) {
             BoardScene scene = BoardSurfaceBlendTest.scene(c -> c.equals(pool)
                   ? new BoardScene.Tile(pool, 0, -1, false, 0, BoardScene.Surface.ROCK,
-                        pixels, null, null, null, null, List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true)
+                        pixels, null, null, null, List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true)
                   : BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 1, -1, 0));
             assertVisiblePool(scene, pool);
         }
@@ -243,7 +243,7 @@ class BoardLiquidTest {
                 Coords coords = new Coords(x, y);
                 BoardLiquid liquid = coords.equals(high) || coords.equals(low) ? new BoardLiquid(kind, "", 0) : BoardLiquid.NONE;
                 tiles.add(new BoardScene.Tile(coords, coords.equals(high) ? drop : 0, -1, false, 0, BoardScene.Surface.ROCK,
-                      pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                      pixels, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -253,9 +253,9 @@ class BoardLiquidTest {
         BoardScene.Pixels pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         return new BoardScene(0, 1, 2, List.of(
               new BoardScene.Tile(new Coords(0, 0), 2, depth, false, 0, BoardScene.Surface.ROCK,
-                    pixels, null, null, null, null, List.of(), List.of(), high),
+                    pixels, null, null, null, List.of(), List.of(), high),
               new BoardScene.Tile(new Coords(0, 1), 0, depth, false, 0, BoardScene.Surface.ROCK,
-                    pixels, null, null, null, null, List.of(), List.of(), low)),
+                    pixels, null, null, null, List.of(), List.of(), low)),
               List.of(), List.of(), -1, "", List.of());
     }
 }

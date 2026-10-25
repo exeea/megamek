@@ -98,9 +98,6 @@ class GpuFiringCaptureTest {
                 fixture.source.refresh();
                 BoardScene cleared = fixture.source.takeFrame().scene();
                 assertTrue(cleared.firingLines().isEmpty());
-                assertEquals(scene.tiles().stream().map(BoardScene.Tile::tactical).toList(),
-                      cleared.tiles().stream().map(BoardScene.Tile::tactical).toList(),
-                      "Attack arrows must never be baked into per-hex ground markings");
                 // An already published scene remains immutable when orders are cleared on Swing.
                 assertEquals(2, scene.firingLines().size());
             });
@@ -189,15 +186,10 @@ class GpuFiringCaptureTest {
                 assertEquals(63, scene.rangeBorders().getFirst().edges());
                 assertEquals(weaponHex, scene.rangeBorders().getFirst().coords());
                 assertEquals("S", scene.rangeBorders().getFirst().label());
-                assertEquals(before.tile(weaponHex).tactical(), scene.tile(weaponHex).tactical());
-                assertEquals(before.tile(sensorHex).tactical(), scene.tile(sensorHex).tactical());
-                assertEquals(before.tile(objectiveHex).tactical(), scene.tile(objectiveHex).tactical());
                 assertFalse(scene.tactical().fills().isEmpty(), "Sensor and objective borders must survive as native geometry");
                 fixture.view.addMarks(List.of(label));
                 fixture.source.refresh();
                 BoardScene withLabel = fixture.source.takeFrame().scene();
-                assertEquals(before.tile(weaponHex).tactical(), withLabel.tile(weaponHex).tactical(),
-                      "Camera-facing lettering must not also be baked into the terrain");
                 assertEquals(scene.tactical(), withLabel.tactical());
                 assertEquals(megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS ? List.of() : List.of(
                       new BoardScene.RangeLabel(weaponHex,
@@ -207,8 +199,6 @@ class GpuFiringCaptureTest {
                       "Playback must retain the range lettering");
                 assertEquals(withLabel.tactical(), withLabel.withUnits(List.of()).tactical());
                 Coords neighbor = weaponHex.translated(0);
-                assertEquals(scene.tile(neighbor).tactical(), withLabel.tile(neighbor).tactical(),
-                      "The flat marker must stay in the handler's original hex");
                 fixture.view.removeMarks(List.of(weapon, label));
                 fixture.source.refresh();
                 assertTrue(fixture.source.takeFrame().scene().rangeBorders().isEmpty());
@@ -219,7 +209,6 @@ class GpuFiringCaptureTest {
                 fixture.source.refresh();
                 assertTrue(fixture.source.takeFrame().scene().rangeBorders().isEmpty());
                 assertTrue(fixture.source.takeFrame().scene().rangeLabels().isEmpty());
-                assertEquals(before.tile(weaponHex).tactical(), fixture.source.takeFrame().scene().tile(weaponHex).tactical());
             });
         }
     }
@@ -256,7 +245,6 @@ class GpuFiringCaptureTest {
                 fixture.view.addMarks(List.of(new TacticalMark.HexText(coords, "X", Color.CYAN)));
                 fixture.source.refresh();
                 BoardScene after = fixture.source.takeFrame().scene();
-                assertEquals(before.tile(coords).tactical(), after.tile(coords).tactical(), "Free text is native");
                 assertTrue(after.tactical().fills().size() > before.tactical().fills().size());
             });
         }

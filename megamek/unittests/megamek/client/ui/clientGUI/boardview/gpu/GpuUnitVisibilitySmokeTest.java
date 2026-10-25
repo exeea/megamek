@@ -203,7 +203,7 @@ class GpuUnitVisibilitySmokeTest {
             }
             Coords wooded = new Coords(3, 2);
             List<BoardScene.Tile> groveTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
-                  0, -1, false, 0, tile.surface(), tile.ground(), null, null,
+                  0, -1, false, 0, tile.surface(), tile.ground(), null,
                   tile.coords().equals(wooded) ? List.of(new BoardScene.Feature("tree-broad", 0, 0, 0, 1.5f, 4, 0,
                         BoardScene.FeatureKind.TREE)) : List.of(), List.of())).toList();
             BoardScene grove = new BoardScene(0, scene.width(), scene.height(), groveTiles,
@@ -224,7 +224,7 @@ class GpuUnitVisibilitySmokeTest {
             Coords indoors = new Coords(3, 2);
             var building = new Hex(0, "building:2;bldg_elev:5;bldg_cf:40", "");
             List<BoardScene.Tile> buildingTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
-                  0, -1, false, 0, tile.surface(), tile.ground(), null, null,
+                  0, -1, false, 0, tile.surface(), tile.ground(), null,
                   tile.coords().equals(indoors) ? BoardFeatures.capture(building, indoors,
                         Map.of(Terrains.BUILDING, GpuBuildingTest.ASSET)) : List.of(), List.of())).toList();
             BoardScene city = new BoardScene(0, scene.width(), scene.height(), buildingTiles,
@@ -262,7 +262,7 @@ class GpuUnitVisibilitySmokeTest {
             // into the relief, so without that exemption the ground itself would outline them.
             Coords meadowHex = new Coords(3, 2);
             List<BoardScene.Tile> meadowTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0,
-                  -1, false, 0, BoardScene.Surface.GRASS, tile.ground(), null, null, null, null, List.of(), List.of(),
+                  -1, false, 0, BoardScene.Surface.GRASS, tile.ground(), null, null, null, List.of(), List.of(),
                   BoardLiquid.NONE, null, true)).toList();
             BoardScene meadow = new BoardScene(0, scene.width(), scene.height(), meadowTiles,
                   List.of(), List.of(), -1, "", List.of());
@@ -314,7 +314,7 @@ class GpuUnitVisibilitySmokeTest {
         terrain.renderShadows(camera.camera, units);
         ScreenUtils.clear(0.02f, 0.03f, 0.04f, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         batch.begin(camera.camera);
         units.forEach(unit -> batch.render(unit, terrain.environment()));
         batch.end();
@@ -364,7 +364,7 @@ class GpuUnitVisibilitySmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 6; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), y >= 3 ? 4 : 1, -1, false, 0,
-                      BoardScene.Surface.GRASS, art, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, art, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 7, 6, tiles, List.of(), List.of(), -1, "", List.of());

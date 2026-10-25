@@ -226,8 +226,6 @@ class GpuMarkersTest {
             assertTrue(scene.markers().contains(new BoardMarker(BoardMarker.Kind.COLLAPSE_WARNING, building, 6)));
             assertTrue(scene.markers().contains(new BoardMarker(BoardMarker.Kind.COLLAPSE_WARNING, bridge, 2)));
             assertEquals(scene.markers(), scene.withUnits(List.of()).markers(), "Playback must retain location warnings");
-            assertEquals(before.tile(building).tactical(), scene.tile(building).tactical());
-            assertEquals(before.tile(bridge).tactical(), scene.tile(bridge).tactical());
             SwingUtilities.invokeAndWait(() -> {
                 fixture.view.removeMarks(List.of(warnings.getFirst()));
                 fixture.source.refresh();
@@ -238,7 +236,6 @@ class GpuMarkersTest {
                 fixture.source.refresh();
             });
             assertTrue(fixture.source.takeFrame().scene().markers().isEmpty());
-            assertEquals(before.tile(building).tactical(), fixture.source.takeFrame().scene().tile(building).tactical());
         }
     }
 }

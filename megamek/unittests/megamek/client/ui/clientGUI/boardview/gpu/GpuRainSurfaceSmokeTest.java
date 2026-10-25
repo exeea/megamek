@@ -233,7 +233,7 @@ class GpuRainSurfaceSmokeTest {
         for (int x = 0; x < 12; x++) {
             for (int y = 0; y < 8; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.CONCRETE, pixels, null, null, List.of(), List.of()));
+                      BoardScene.Surface.CONCRETE, pixels, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 12, 8, tiles, List.of(), List.of(), -1, "", List.of());
@@ -329,7 +329,7 @@ class GpuRainSurfaceSmokeTest {
                     var tile = BoardBiomeTest.tile(coords, coords.getX() < 5 ? biome : BoardScene.Biome.NONE, 0);
                     if (!sand) { return tile; }
                     return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.SAND, tile.ground(),
-                          null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
+                          null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
                           BoardRoad.Kind.NONE, BoardFireSmoke.NONE, tile.biome());
                 });
                 var terrain = new GpuTerrain();
@@ -415,7 +415,7 @@ class GpuRainSurfaceSmokeTest {
     private static void draw(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, float wetness) {
         terrain.setWetness(wetness);
         outputFrame.begin(0.08f, 0.10f, 0.12f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         outputFrame.display();
     }

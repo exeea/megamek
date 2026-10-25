@@ -241,7 +241,7 @@ class GpuShadowSmokeTest {
             for (int y = 0; y < 9; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
-                      BoardScene.Surface.CONCRETE, pixels, null, null, List.of(), List.of()));
+                      BoardScene.Surface.CONCRETE, pixels, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
@@ -451,7 +451,7 @@ class GpuShadowSmokeTest {
 
     private static Pixmap draw(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
         outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         outputFrame.display();
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }

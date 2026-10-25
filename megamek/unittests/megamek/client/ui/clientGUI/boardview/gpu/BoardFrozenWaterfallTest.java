@@ -495,7 +495,7 @@ class BoardFrozenWaterfallTest {
 
     private static BoardScene.Tile tile(Coords coords, int elevation, boolean water, boolean frozen) {
         return new BoardScene.Tile(coords, elevation, water ? 2 : -1, frozen, 0, BoardScene.Surface.SAND,
-              null, null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
+              null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
     }
 
     private static float iceHeight(List<BoardSurface.Face> faces, Vector3 point) {

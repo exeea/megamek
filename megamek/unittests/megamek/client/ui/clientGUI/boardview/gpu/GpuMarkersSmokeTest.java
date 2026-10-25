@@ -375,7 +375,7 @@ class GpuMarkersSmokeTest {
         terrain.renderShadows(camera.camera, units);
         ScreenUtils.clear(0.03f, 0.05f, 0.07f, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         batch.begin(camera.camera);
         objects.forEach(batch::render);
         batch.end();
@@ -394,7 +394,7 @@ class GpuMarkersSmokeTest {
         for (int x = 0; x < 15; x++) {
             for (int y = 0; y < 12; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, ground, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, ground, null, List.of(), List.of()));
             }
         }
         String[] labels = { "Sensor", "Collapse", "Minefield", "Charges", "Incoming", "Target", "Adjusted", "Auto hit",
@@ -451,7 +451,7 @@ class GpuMarkersSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 6; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), y >= 3 ? 5 : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, pixels, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 7, 6, tiles, List.of(), List.of(), -1, "", List.of(), null, List.of(), List.of(),

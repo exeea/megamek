@@ -5,7 +5,10 @@
 #define GRASS_MAX_HEIGHT .07
 #endif
 #ifndef SHRUB_LEAVES
-#define SHRUB_LEAVES 12.0
+#define SHRUB_LEAVES 16.0
+#endif
+#ifndef SHRUB_FULL_PIXELS
+#define SHRUB_FULL_PIXELS 250.0
 #endif
 layout(location = 14) in vec4 a_coverRoot;
 uniform float u_coverPixels;
@@ -39,9 +42,9 @@ void dwarfShrub(vec3 samplePoint, vec3 root, uint seed, float scar, float growth
     int kind = int(grassRandom(seed + 13u) * 3.999);
     vec4 form = SHRUB_FORM[kind];
     vec2 spread = SHRUB_SPREAD[kind];
-    // Mostly small shrubs, a few broad ones.
+    // Mostly small shrubs, a few broad ones, oversized 2.5 times for the diorama, as the meadow's blades are too.
     float size = grassRandom(seed + 7u);
-    float radius = u_coverHexWidth * mix(.006, .022, size * size) * mix(.75, 1.0, meadowCover(metres))
+    float radius = u_coverHexWidth * mix(.015, .055, size * size) * mix(.75, 1.0, meadowCover(metres))
           * (1.0 - scar * .5) * growth;
     float height = radius * form.x * mix(.75, 1.2, grassRandom(seed + 11u));
     float angle = grassRandom(seed) * 6.2831853 + leaf * 2.3999632;
@@ -51,7 +54,7 @@ void dwarfShrub(vec3 samplePoint, vec3 root, uint seed, float scar, float growth
     vec3 along = normalize(vec3(outward, mix(form.w, spread.x, ring)));
     along = normalize(along + vec3(u_wind.xy, 0.0) * u_wind.z * (.25 + .35 * vegetationGust(root.xy)) * samplePoint.y);
     vec3 side = vec3(-outward.y, outward.x, 0.0);
-    float leafLength = radius * form.y * mix(.8, 1.2, grassRandom(leafSeed + 3u));
+    float leafLength = radius * form.y * mix(.65, .95, grassRandom(leafSeed + 3u));
     position = base + along * samplePoint.y * leafLength + side * samplePoint.x * leafLength * form.z;
     normal = normalize(cross(side, along));
     // Colonies metres across, each of crowberry, bearberry, dwarf birch or willow.
@@ -69,12 +72,13 @@ void dwarfShrub(vec3 samplePoint, vec3 root, uint seed, float scar, float growth
 
 // False when this root is beyond the density its projected size allows: the caller skips the rest of the program.
 // A chunk's buffer is drawn as a prefix by rank for its nearest hex; farther hexes need fewer of those roots. A
-// shrub's root carries its rank + .5 (GpuGroundCover.plant).
+// shrub's root carries its rank + .5 (GpuGroundCover.plant); the few, broad shrubs all stand from SHRUB_FULL_PIXELS.
 bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 color) {
     vec3 root = a_coverRoot.xyz;
     float rank = floor(a_coverRoot.w);
     float pixels = u_coverPixels / max(.001, abs((u_projViewTrans * vec4(root, 1.0)).w));
-    float density = smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels) * GRASS_ROOTS_PER_HEX;
+    float full = samplePoint.z > .5 ? SHRUB_FULL_PIXELS : GRASS_FULL_PIXELS;
+    float density = smoothstep(GRASS_START_PIXELS, full, pixels) * GRASS_ROOTS_PER_HEX;
     if (density <= rank) { return false; }
     uint seed = floatBitsToUint(root.x) ^ (floatBitsToUint(root.y) * 1664525u) ^ uint(rank);
     // Reject the whole rooted blade, not fragments of a swaying tip. Buffers remain unchanged after an impact.

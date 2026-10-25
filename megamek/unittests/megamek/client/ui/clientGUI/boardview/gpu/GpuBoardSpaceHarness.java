@@ -168,7 +168,7 @@ final class GpuBoardSpaceHarness implements Disposable {
         terrain.renderShadows(camera.camera, shown);
         ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
         atmosphere.begin(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         if (based) { bases.renderBases(camera.camera); }
         unitBatch.begin(camera.camera);
         for (BoardScene.Unit unit : anchors.keySet()) {
@@ -182,7 +182,6 @@ final class GpuBoardSpaceHarness implements Disposable {
         terrain.renderTransparent(camera.camera);
         if (based) { bases.renderBadges(camera.camera); }
         atmosphere.end(camera.camera, terrain, scene, 0);
-        terrain.render(camera.camera, true);
         component.accept(camera.camera);
     }
 

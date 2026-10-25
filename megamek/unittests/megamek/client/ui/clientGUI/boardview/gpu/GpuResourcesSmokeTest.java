@@ -96,7 +96,7 @@ class GpuResourcesSmokeTest {
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 17; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 8 ? 3 : 0, x == 7 && y == 8 ? 1 : -1, false, 0,
-                      BoardScene.Surface.GRASS, art, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, art, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 17, 17, tiles, List.of(), List.of(), -1, "", List.of());
@@ -144,7 +144,7 @@ class GpuResourcesSmokeTest {
             }
             List<BoardScene.Tile> elevated = new ArrayList<>(tiles);
             elevated.set(tiles.indexOf(scene.tile(moved)), new BoardScene.Tile(moved, 6, -1, false, 0,
-                  BoardScene.Surface.GRASS, art, null, null, List.of(), List.of()));
+                  BoardScene.Surface.GRASS, art, null, List.of(), List.of()));
             BoardScene elevatedScene = new BoardScene(0, 17, 17, elevated, List.of(), List.of(), -1, "", List.of());
             Ray ray = new Ray(BoardGeometry.center(moved, 6).add(0, 0, 1000), new Vector3(0, 0, -1));
             BoardGeometry.Hit expected = BoardGeometry.hit(elevatedScene, ray);
@@ -167,7 +167,7 @@ class GpuResourcesSmokeTest {
             BoardScene.Tile previous = scene.tile(edited);
             List<BoardScene.Tile> changed = new ArrayList<>(tiles);
             changed.set(tiles.indexOf(previous), new BoardScene.Tile(edited, previous.elevation(), -1, false, 0,
-                  BoardScene.Surface.GRASS, hexPixels(java.awt.Color.YELLOW), null, null, List.of(), List.of()));
+                  BoardScene.Surface.GRASS, hexPixels(java.awt.Color.YELLOW), null, List.of(), List.of()));
             terrain.update(new BoardScene(0, 17, 17, changed, List.of(), List.of(), -1, "", List.of()));
             assertSame(untouched, terrain.tacticalSurface(distant), "An artwork edit must leave distant chunks intact");
             assertNotSame(beforeEdit, terrain.tacticalSurface(edited));
@@ -232,7 +232,7 @@ class GpuResourcesSmokeTest {
                     for (int y = 0; y < 5; y++) {
                         Coords coords = new Coords(x, y);
                         tiles.add(new BoardScene.Tile(coords, x == 4 ? 2 : 0,
-                              coords.equals(target) ? depth : -1, false, 0, BoardScene.Surface.GRASS, art, null, null,
+                              coords.equals(target) ? depth : -1, false, 0, BoardScene.Surface.GRASS, art, null,
                               coords.equals(target) && depth < 0
                                     ? List.of(new BoardScene.Feature("buildings/saxarba/building_hard/building_hard_00",
                                           0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of(),
@@ -375,7 +375,7 @@ class GpuResourcesSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
         BoardScene.Tile tile = scene.tile(target);
         tiles.set(target.getX() * scene.height() + target.getY(), new BoardScene.Tile(target, 0, -1, false, 0,
-              tile.surface(), tile.ground(), null, null,
+              tile.surface(), tile.ground(), null,
               List.of(new BoardScene.Feature("tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE)), List.of()));
         BoardScene trees = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
         GpuTerrain terrain = new GpuTerrain();
@@ -543,7 +543,7 @@ class GpuResourcesSmokeTest {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? elevation : 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      pixels, null, null, List.of(), List.of()));
+                      pixels, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), light);
@@ -552,7 +552,7 @@ class GpuResourcesSmokeTest {
     private void drawModel(GpuSceneTestOutput frame, GpuTerrain terrain, BoardCamera camera, ModelBatch batch,
           ModelInstance unit, boolean transparent) {
         frame.begin(.035f, .055f, .075f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         batch.begin(camera.camera);
         batch.render(unit, terrain.environment());
         batch.end();

@@ -487,7 +487,7 @@ class GpuUtilityMinimapSmokeTest {
     private static BoardScene withLiquid(BoardScene scene, Coords coords, BoardLiquid liquid) {
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> !tile.coords().equals(coords) ? tile
               : new BoardScene.Tile(tile.coords(), tile.elevation(), 1, false, tile.roadExits(), tile.surface(),
-                    tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
+                    tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
                     tile.features(), tile.text(), liquid, tile.tileset())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),

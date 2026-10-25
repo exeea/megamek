@@ -128,7 +128,7 @@ class GpuMineralGroundTest {
             for (int y = 0; y < 5; y++) {
                 Coords at = new Coords(x, y);
                 Hex hex = new Hex(at.equals(CENTER) ? 1 : 0, at.equals(CENTER) ? terrain : "", "");
-                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
                 var tile = BoardScene.captureTile(hex, artwork, null, pool, unused -> null);
                 tiles.add(tile.withFeatures(at.equals(CENTER) ? features : List.of()));
             }

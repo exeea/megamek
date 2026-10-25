@@ -148,7 +148,7 @@ class BoardWetCliffTest {
             var shallower = LAND.translated(1);
             var tiles = new ArrayList<>(shallowScene.tiles());
             tiles.set(deeper.getX() * 7 + deeper.getY(), new BoardScene.Tile(deeper, 0, 2, false, 0, BoardScene.Surface.SAND, null,
-                  null, null, null, null, List.of(), List.of(), BoardLiquid.WATER, null, true));
+                  null, null, null, List.of(), List.of(), BoardLiquid.WATER, null, true));
             var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
             var a = new BoardSurface(scene, scene.tile(deeper));
             var b = new BoardSurface(scene, scene.tile(shallower));
@@ -183,7 +183,7 @@ class BoardWetCliffTest {
                 int depth = !water ? -1 : new int[] { 1, 2, 1, 5, 2, 1, 2 }[x - 1];
                 int level = water ? -2 : y < 3 ? x == 4 ? 9 : x == 5 ? -2 : x < 5 ? 1 : 3 : -2;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, BoardScene.Surface.GRASS,
-                      pixels, null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
+                      pixels, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
                       null, true));
             }
         }
@@ -207,7 +207,7 @@ class BoardWetCliffTest {
                 var coords = new Coords(x, y);
                 boolean land = coords.equals(LAND);
                 tiles.add(new BoardScene.Tile(coords, land ? level : 0, land ? -1 : depth, false, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
                       land ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
             }
         }

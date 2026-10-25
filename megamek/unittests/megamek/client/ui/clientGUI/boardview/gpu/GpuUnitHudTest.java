@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,7 +12,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Point;
 import java.io.File;
@@ -27,8 +25,6 @@ import javax.swing.SwingUtilities;
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
-import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.common.Player;
 import megamek.common.board.Coords;
@@ -36,7 +32,6 @@ import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.Entity;
-import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -190,61 +185,6 @@ class GpuUnitHudTest {
                 }
             });
         }
-    }
-
-    @Test
-    void labelsReuseArtworkButRefreshVisibleStatusPreferencesAndSelection() throws Exception {
-        GUIPreferences prefs = GUIPreferences.getInstance();
-        Color validColor = prefs.getUnitValidColor();
-        LabelDisplayStyle style = prefs.getUnitLabelStyle();
-        int pipMode = prefs.getTMMPipMode();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            SwingUtilities.invokeAndWait(() -> {
-                try {
-                    prefs.setTMMPipMode(1);
-                    prefs.setUnitLabelStyle(LabelDisplayStyle.ABBREV);
-                    UnitAnnotations.Annotations first = fixture.view.captureUnitAnnotations(fixture.entity, -1, null);
-                    fixture.entity.setPosition(new Coords(7, 7));
-                    fixture.entity.setFacing(3);
-                    fixture.entity.setSecondaryFacing(3);
-                    var same = fixture.view.captureUnitAnnotations(fixture.entity, -1, first);
-                    assertSame(first, same, "Position and facing cannot force a fresh label raster");
-                    assertSame(first.image(), same.image());
-
-                    fixture.entity.setProne(true);
-                    var prone = fixture.view.captureUnitAnnotations(fixture.entity, -1, same);
-                    assertChanged(same, prone);
-                    fixture.entity.setArmor(0, Mek.LOC_CENTER_TORSO);
-                    var damaged = fixture.view.captureUnitAnnotations(fixture.entity, -1, prone);
-                    assertChanged(prone, damaged);
-                    prefs.setUnitValidColor(Color.MAGENTA);
-                    var recolored = fixture.view.captureUnitAnnotations(fixture.entity, -1, damaged);
-                    assertChanged(damaged, recolored);
-                    fixture.view.redrawAllEntities();
-                    fixture.view.highlightSelectedEntity(fixture.entity);
-                    var selected = fixture.view.captureUnitAnnotations(fixture.entity, -1, recolored);
-                    assertChanged(recolored, selected);
-                    prefs.setUnitLabelStyle(LabelDisplayStyle.FULL);
-                    var renamed = fixture.view.captureUnitAnnotations(fixture.entity, -1, selected);
-                    assertChanged(selected, renamed);
-                    fixture.game.setPhase(GamePhase.FIRING);
-                    fixture.entity.delta_distance = 5;
-                    fixture.entity.moved = EntityMovementType.MOVE_WALK;
-                    var pips = fixture.view.captureUnitAnnotations(fixture.entity, -1, renamed);
-                    assertChanged(renamed, pips);
-                    assertSame(pips, fixture.view.captureUnitAnnotations(fixture.entity, -1, pips));
-                } finally {
-                    prefs.setUnitValidColor(validColor);
-                    prefs.setUnitLabelStyle(style);
-                    prefs.setTMMPipMode(pipMode);
-                }
-            });
-        }
-    }
-
-    private static void assertChanged(UnitAnnotations.Annotations before, UnitAnnotations.Annotations after) {
-        assertNotSame(before.image(), after.image());
-        assertNotEquals(new BoardScene.Pixels(before.image()), new BoardScene.Pixels(after.image()));
     }
 
     static ClientGUI gui(GpuBoardFixture fixture) {

@@ -133,7 +133,7 @@ class BoardDeploymentGeometryTest {
                 // A zone crosses several elevation changes and borders a much taller exterior ridge.
                 int level = x >= 3 ? 12 : (y % 3) * 2 - 2;
                 tiles.add(new BoardScene.Tile(coords, level, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
                 if (x < 3) { fills.add(fill(coords, Color.YELLOW.getRGB())); }
                 float crown = level * BoardGeometry.LEVEL + 4 * BoardGeometry.HEX_SCALE;
                 var center = BoardGeometry.center(coords, 0);
@@ -248,7 +248,7 @@ class BoardDeploymentGeometryTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of(), null,

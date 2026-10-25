@@ -12,6 +12,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
@@ -366,7 +367,7 @@ class BoardGroundCaptureTest {
             assertEquals(mixed, BoardSurfaceBlend.sample(after, after.tile(next), p.x, p.y, p.z));
             assertTrue(mixed.desert() > 0 && mixed.desert() < .5f);
             assertEquals(1, mixed.grass() + mixed.desert(), .00001f);
-            assertEquals(after.tile(center).groundCover(), after.tile(center).withTactical(before.tile(center).ground()).groundCover());
+            assertEquals(after.tile(center).groundCover(), after.tile(center).withText(List.of()).groundCover());
             return null;
         });
     }

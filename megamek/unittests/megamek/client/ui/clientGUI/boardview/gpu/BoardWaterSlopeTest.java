@@ -372,7 +372,7 @@ class BoardWaterSlopeTest {
                 Coords coords = new Coords(x, y);
                 int depth = depths.getOrDefault(coords, -1);
                 tiles.add(new BoardScene.Tile(coords, levels.getOrDefault(coords, 2), depth, false, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
                       depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

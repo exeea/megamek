@@ -724,7 +724,8 @@ their required source images remain the authoring source of truth.
 
 Tundra's dwarf shrubs grow with the grass blades ([grass](gpu-grass-rendering.md)): crowberry, bearberry, dwarf
 birch and willow in their autumn colours, in clumps about 1.6 m across with the carpet open between them. Shapes and
-sizes mix shrub by shrub (needle mats, prostrate spreads, upright bushes); colours change by colonies metres across. No meadow blade grows over the carpet, and the
+sizes mix shrub by shrub (needle mats, prostrate spreads, upright bushes, 2.5 times life size like the oversized
+blades, so they read at play distance); colours change by colonies metres across. No meadow blade grows over the carpet, and the
 relief's field dressing adds no second shrub kit there.
 
 `BoardTundraTest` checks native capture, theme preservation, precedence, cliff

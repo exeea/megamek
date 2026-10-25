@@ -73,7 +73,7 @@ class BoardBiomeTest {
     static BoardScene.Tile tile(Coords coords, BoardScene.Biome kind, int elevation) {
         var base = BoardSurfaceBlendTest.tile(coords, kind == BoardScene.Biome.MUD || kind == BoardScene.Biome.QUICKSAND
               ? BoardScene.Surface.DIRT : BoardScene.Surface.GRASS, elevation, -1, 0);
-        return new BoardScene.Tile(coords, elevation, -1, false, 0, base.surface(), base.ground(), null, null, null, null,
+        return new BoardScene.Tile(coords, elevation, -1, false, 0, base.surface(), base.ground(), null, null, null,
               List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, kind);
     }
 
@@ -187,7 +187,7 @@ class BoardBiomeTest {
             var scene = BoardSurfaceBlendTest.scene(c -> {
                 var base = tile(c, c.getX() <= 4 ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE, c.getY() < 4 ? 1 : 0);
                 return new BoardScene.Tile(c, base.elevation(), -1, false, road ? 9 : 0, base.surface(), base.ground(),
-                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
+                      null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
                       road ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, BoardFireSmoke.NONE, base.biome());
             });
             var tile = scene.tile(center);

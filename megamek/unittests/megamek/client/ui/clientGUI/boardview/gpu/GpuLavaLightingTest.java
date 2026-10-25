@@ -27,7 +27,7 @@ class GpuLavaLightingTest {
         var lights = new GpuLavaLighting(null);
         lights.setEffects(List.of(beam, point));
         var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.ROCK, null, null, null,
-              null, null, List.of(), List.of(), BoardLiquid.NONE);
+              null, List.of(), List.of(), BoardLiquid.NONE);
         lights.update(new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of()));
 
         float[] list = (float[]) GpuMixedUnitBenchmarkSmokeTest.field(lights, "list");

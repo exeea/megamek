@@ -110,7 +110,7 @@ class BoardEditorTransformsTest {
             var marks = BoardEditorTerrain.capture(new Hex(x * 3, "deployment_zone:1:1", ""), at);
             fills.addAll(marks.fills()); labels.addAll(marks.labels());
             tiles.add(new BoardScene.Tile(at, x * 3, -1, false, 0, BoardScene.Surface.GRASS,
-                  null, null, null, null, null, List.of(), List.of()));
+                  null, null, null, null, List.of(), List.of()));
         }
         var scene = new BoardScene(0, 2, 1, tiles, List.of(), List.of(), -1, "", List.of(), null,
               List.of(), List.of(), List.of(), new BoardTactical(fills, labels));

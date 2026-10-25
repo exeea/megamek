@@ -396,6 +396,6 @@ class GpuTerrainScalingSmokeTest {
         Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(GpuColor.linear(.2f) * GpuSceneRadiance.SCALE,
               GpuColor.linear(.26f) * GpuSceneRadiance.SCALE, GpuColor.linear(.31f) * GpuSceneRadiance.SCALE, 1, true);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
     }
 }

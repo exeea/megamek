@@ -294,7 +294,7 @@ class GpuTerrainSubmissionSmokeTest {
                         : List.of();
             tiles.add(new BoardScene.Tile(coords, tile.elevation(), tile.waterDepth(), false, 0,
                   BoardScene.Surface.values()[coords.getX() % BoardScene.Surface.values().length], tile.ground(),
-                  null, tile.water() ? null : marking, null, null, features, List.of(), tile.liquid(), null, true));
+                  null, tile.water() ? null : marking, null, features, List.of(), tile.liquid(), null, true));
         }
         return new BoardScene(0, relief.width(), relief.height(), tiles, List.of(), List.of(), -1, "", List.of(),
               new BoardScene.Light(-24, -30));
@@ -304,13 +304,12 @@ class GpuTerrainSubmissionSmokeTest {
           GpuSceneTestOutput target) {
         terrain.renderShadows(camera.camera, occupants);
         target.begin(.2f, .26f, .31f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         units.begin(camera.camera);
         units.render(occupants, terrain.environment());
         units.end();
         terrain.renderTransparent(camera.camera);
         target.display();
-        terrain.render(camera.camera, true);
     }
 
     private static byte[] pixels(GpuTerrain terrain, BoardCamera camera, ModelBatch units, List<ModelInstance> occupants,

@@ -204,7 +204,7 @@ class GpuLiquidSmokeTest {
 
     private static void draw(GpuSceneTestOutput surface, GpuTerrain terrain, BoardCamera camera, boolean transparent) {
         surface.begin(.03f, .045f, .06f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         if (transparent) { terrain.renderTransparent(camera.camera); }
     }
 
@@ -297,6 +297,6 @@ class GpuLiquidSmokeTest {
 
     private static BoardScene.Tile tile(Coords coords, int elevation, BoardLiquid liquid, BoardScene.Pixels ground, boolean frozen) {
         return new BoardScene.Tile(coords, elevation, liquid.present() && !liquid.molten() ? 2 : -1, frozen, 0,
-              BoardScene.Surface.ROCK, ground, null, null, null, null, List.of(), List.of(), liquid);
+              BoardScene.Surface.ROCK, ground, null, null, null, List.of(), List.of(), liquid);
     }
 }

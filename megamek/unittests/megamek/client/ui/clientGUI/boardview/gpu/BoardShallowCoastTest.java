@@ -162,7 +162,7 @@ class BoardShallowCoastTest {
     void shallowWetlandBanksRemainOwnedByReeds() {
         var scene = BoardSurfaceBlendTest.scene(c -> c.equals(BoardSurfaceBlendTest.CENTER)
               ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, 0, 0)
-              : new BoardScene.Tile(c, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, null, null, null,
+              : new BoardScene.Tile(c, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, null, null,
                     List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE,
                     BoardScene.Biome.MARSH, false));
         var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
@@ -188,7 +188,7 @@ class BoardShallowCoastTest {
 
     private static BoardScene coast(BoardScene.Surface land, int depth, boolean frozen, BoardLiquid liquid) {
         return BoardSurfaceBlendTest.scene(c -> c.equals(BoardSurfaceBlendTest.CENTER)
-              ? new BoardScene.Tile(c, 0, depth, frozen, 0, BoardScene.Surface.GRASS, null, null, null, null, null,
+              ? new BoardScene.Tile(c, 0, depth, frozen, 0, BoardScene.Surface.GRASS, null, null, null, null,
                     List.of(), List.of(), liquid, null, true)
               : BoardSurfaceBlendTest.tile(c, land, 0, -1, 0));
     }

@@ -196,7 +196,7 @@ class GpuCliffMaterialsSmokeTest {
         for (boolean relief : new boolean[] { false, true }) {
             terrain.setNormalMaps(relief);
             surface.begin(.16f, .20f, .24f, 1);
-            terrain.render(camera.camera, false);
+            terrain.render(camera.camera);
             terrain.renderTransparent(camera.camera);
             surface.display();
             GpuBoardTestUi.capture(new File(output, "cliff-board-" + (relief ? "relief" : "flat") + ".png"));
@@ -206,7 +206,7 @@ class GpuCliffMaterialsSmokeTest {
     private static int[] samples(GpuSceneTestOutput surface, GpuTerrain terrain, OrthographicCamera camera, Vector3 a,
           Vector3 b) {
         surface.begin(.06f, .07f, .09f, 1);
-        terrain.render(camera, false);
+        terrain.render(camera);
         terrain.renderTransparent(camera);
         surface.display();
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
@@ -269,7 +269,7 @@ class GpuCliffMaterialsSmokeTest {
                 // End the artwork road on the plateau so a connected ramp cannot cover the wall being sampled.
                 tiles.add(new BoardScene.Tile(coords, coords.equals(RAISED) ? 6 : 0, -1, false,
                       road && coords.equals(RAISED) ? 18 : 0,
-                      family, pixels, null, null, List.of(), List.of()));
+                      family, pixels, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

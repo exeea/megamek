@@ -57,7 +57,7 @@ final class GpuSceneTestOutput implements AutoCloseable {
         // setAtmosphere installs a shadow map; populate it before any lit material samples its visibility.
         terrain.renderShadows(camera, List.of());
         begin(.02f, .025f, .035f, 1);
-        terrain.render(camera, false);
+        terrain.render(camera);
         if (transparent) { terrain.renderTransparent(camera); }
         display();
     }

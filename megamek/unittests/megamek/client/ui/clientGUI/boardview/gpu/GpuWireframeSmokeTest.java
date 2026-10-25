@@ -263,7 +263,7 @@ class GpuWireframeSmokeTest {
                       ? List.of(new BoardScene.Feature(BoardFungus.SCATTER.get((x + y) % BoardFungus.SCATTER.size()),
                             20, 8, 0, 1, .2f, 0, BoardScene.FeatureKind.SCATTER)) : List.<BoardScene.Feature>of();
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, family, ground, null,
-                      null, null, null, features, List.of(), BoardLiquid.NONE, null, true));
+                      null, null, features, List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of());
@@ -275,7 +275,7 @@ class GpuWireframeSmokeTest {
             output.scene().begin();
             Gdx.gl.glDepthMask(true);
             ScreenUtils.clear(0, 0, 0, 1, true);
-            if (wireframe == null) { terrain.render(camera.camera, false); }
+            if (wireframe == null) { terrain.render(camera.camera); }
             else { wireframe.fill(camera.camera, terrain); }
             output.display();
             if (wireframe != null) { wireframe.lines(camera.camera, terrain); }

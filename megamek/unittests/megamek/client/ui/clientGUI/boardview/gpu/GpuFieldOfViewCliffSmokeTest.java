@@ -67,7 +67,7 @@ class GpuFieldOfViewCliffSmokeTest {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
-                      BoardScene.Surface.CONCRETE, pixels, null, null, List.of(), List.of()));
+                      BoardScene.Surface.CONCRETE, pixels, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -159,7 +159,7 @@ class GpuFieldOfViewCliffSmokeTest {
         field.update(mask);
         ScreenUtils.clear(0, 0, 0, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         atmosphere.end(camera.camera, terrain, scene, 0, field);
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }

@@ -865,7 +865,7 @@ class GpuBoardPerformanceSmokeTest {
         terrain.animate(1 / 60f, List.of());
         terrain.renderShadows(camera.camera, List.of());
         output.begin(.08f, .08f, .08f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         output.display();
     }

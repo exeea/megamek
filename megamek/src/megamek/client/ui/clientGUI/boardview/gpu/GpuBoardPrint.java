@@ -229,7 +229,7 @@ final class GpuBoardPrint implements Disposable {
         terrain.renderShadows(List.of());
         atmosphere.setPrintTile(x, y, width, height, printWidth, printHeight);
         atmosphere.beginPixels(width, height, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         atmosphere.end(camera.camera, terrain, scene, 0, null, false, target);
         if (GpuShaderProvider.unlinkedDraws() != skipped) { return; }

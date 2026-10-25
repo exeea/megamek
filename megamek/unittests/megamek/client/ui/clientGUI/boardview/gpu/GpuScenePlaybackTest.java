@@ -169,7 +169,7 @@ class GpuScenePlaybackTest {
         image.setRGB(0, 0, 0xFF000000 | version);
         var pixels = new BoardScene.Pixels(image);
         var feature = new BoardScene.Feature("building-" + version, 0, 0, 0, 1, version, 0, BoardScene.FeatureKind.BUILDING);
-        var tile = new BoardScene.Tile(coords, version, -1, false, 0, BoardScene.Surface.GRASS, pixels, pixels, pixels,
+        var tile = new BoardScene.Tile(coords, version, -1, false, 0, BoardScene.Surface.GRASS, pixels, pixels,
               List.of(feature), List.of());
         var marker = new BoardMarker(BoardMarker.Kind.CARGO, coords, 0, 0xFFFF00, "Cargo " + version);
         var text = new BoardTactical.Text("Objective " + version, new Font(Font.SANS_SERIF, Font.PLAIN, 12), 0, 0, 0xFFFF0000);

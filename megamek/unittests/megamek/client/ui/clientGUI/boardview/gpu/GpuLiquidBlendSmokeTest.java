@@ -152,7 +152,7 @@ class GpuLiquidBlendSmokeTest {
             hex.setTheme(LIQUIDS[palette].theme());
         }
         if (frozen) { hex.addTerrain(new Terrain(Terrains.ICE, 1)); }
-        return new BoardScene.Tile(coords, elevation, 1, frozen, 0, base.surface(), base.ground(), null, null, null, null,
+        return new BoardScene.Tile(coords, elevation, 1, frozen, 0, base.surface(), base.ground(), null, null, null,
               List.of(), List.of(), BoardLiquid.capture(hex), null, BoardFeatures.detailedGround(hex, Map.of()));
     }
 

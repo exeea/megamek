@@ -192,7 +192,7 @@ class BoardTacticalGeometryTest {
             for (int y = 0; y < 2; y++) {
                 boolean owner = x == 1 && y == 1;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), owner ? level : level + 7, owner ? depth : -1,
-                      owner && frozen, 0, BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      owner && frozen, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 2, 2, tiles, List.of(), List.of(), -1, "", List.of(), null,
@@ -210,7 +210,7 @@ class BoardTacticalGeometryTest {
             wall(graphics, HexDrawUtilities.getHexCrossLine01(4, 10), HexDrawUtilities.getHexCrossArea01(4, 10),
                   coords, 0.5f, Color.WHITE);
             var tile = new BoardScene.Tile(coords, 2, 4, false, 0,
-                  BoardScene.Surface.GRASS, null, null, null, List.of(), List.of());
+                  BoardScene.Surface.GRASS, null, null, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), null,
                   List.of(), List.of(), List.of(), graphics.snapshot());
             List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
@@ -243,7 +243,7 @@ class BoardTacticalGeometryTest {
             for (int y = 0; y < levels.length; y++) {
                 Coords coords = new Coords(0, y);
                 tiles.add(new BoardScene.Tile(coords, levels[y], y == 3 ? 5 : -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
                 var local = (BoardTacticalGraphics) graphics.create();
                 try {
                     local.translate(0, y * BoardGeometry.TILE_HEIGHT);
@@ -288,7 +288,7 @@ class BoardTacticalGeometryTest {
             for (int level : new int[] { -2, 0, 3 }) {
                 for (boolean frozen : new boolean[] { false, true }) {
                     var tile = new BoardScene.Tile(coords, level, 5, frozen, 0,
-                          BoardScene.Surface.GRASS, null, null, null, List.of(), List.of());
+                          BoardScene.Surface.GRASS, null, null, List.of(), List.of());
                     var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), null,
                           List.of(), List.of(), List.of(), graphics.snapshot());
                     List<BoardTacticalGeometry.Triangle> faces = new ArrayList<>(), outlines = new ArrayList<>();
@@ -324,7 +324,7 @@ class BoardTacticalGeometryTest {
                 for (int depth : new int[] { -1, 0, 5 }) {
                     for (boolean frozen : new boolean[] { false, true }) {
                         var tile = new BoardScene.Tile(coords, level, depth, frozen, 0,
-                              BoardScene.Surface.GRASS, null, null, null, List.of(), List.of());
+                              BoardScene.Surface.GRASS, null, null, List.of(), List.of());
                         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), null,
                               List.of(), List.of(), List.of(), graphics.snapshot());
                         List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
@@ -391,7 +391,7 @@ class BoardTacticalGeometryTest {
             List<BoardScene.Tile> tiles = new ArrayList<>();
             for (int x = 0; x < 3; x++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, 0), x - 1, x == 0 ? 1 : -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
             }
             var scene = new BoardScene(0, 3, 1, tiles, List.of(), List.of(), -1, "", List.of(), null,
                   List.of(), List.of(), List.of(), graphics.snapshot());

@@ -25,7 +25,7 @@ class TerrainLodTest {
             for (int y = 0; y < 7; y++) {
                 var family = x % 2 == 0 ? BoardScene.Surface.SAND : BoardScene.Surface.ROCK;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), (3 * x + 2 * y) % 8, -1, false, 0, family,
-                      null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         var scene = new BoardScene(0, 11, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -48,7 +48,7 @@ class TerrainLodTest {
         for (int x = 0; x < 10; x++) {
             for (int y = 0; y < 7; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 1, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         var scene = new BoardScene(0, 10, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -160,7 +160,7 @@ class TerrainLodTest {
                 var features = !dry && rough ? List.of(new BoardScene.Feature("rough-boulder", 8, 5, 17, 1.8f, .7f, 0,
                       BoardScene.FeatureKind.BOULDER)) : List.<BoardScene.Feature>of();
                 tiles.add(new BoardScene.Tile(at, dry ? 5 : 0, dry ? -1 : 1, false, 0, BoardScene.Surface.SAND,
-                      null, null, null, null, null, features, List.of(), dry ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
+                      null, null, null, null, features, List.of(), dry ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
             }
         }
         return new BoardScene(0, 10, 7, tiles, List.of(), List.of(), -1, "", List.of());

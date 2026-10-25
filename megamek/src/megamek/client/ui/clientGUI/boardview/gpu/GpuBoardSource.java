@@ -33,6 +33,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
@@ -780,7 +781,6 @@ final class GpuBoardSource implements BoardSource {
                 changedState = true;
                 view.setMovingUnits(false);
                 view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
-                view.releasePlanarCapture();
                 view = selectedView;
                 unitImages.clear();
                 terrain.changed(null);
@@ -852,20 +852,13 @@ final class GpuBoardSource implements BoardSource {
         }
         Rectangle area = visibleArea;
         long revision = view.getPlanarRevision();
-        boolean allMarkings = revision != capturedRevision || view.game.getPhase() != capturedPhase;
-        boolean changedMarkings = changedTerrain || allMarkings;
-        if (changedMarkings || !area.equals(capturedArea)) {
-            List<BoardScene.Tile> painted = new ArrayList<>(tiles);
-            for (int index = 0; index < tiles.size(); index++) {
-                BoardScene.Tile old = tiles.get(index);
-                if (old.tactical() != null && !area.contains(old.coords().getX(), old.coords().getY())) {
-                    painted.set(index, old.withTactical(null));
-                }
-            }
-            // A terrain edit repaints its changed hexes and newly exposed view only. Explicit painter/overlay
-            // invalidation remains global, including FoV changes caused by an edited blocker.
+        boolean allLabels = revision != capturedRevision || view.game.getPhase() != capturedPhase;
+        if (changedTerrain || allLabels || !area.equals(capturedArea)) {
+            List<BoardScene.Tile> labelled = new ArrayList<>(tiles);
+            // A terrain edit relabels its changed hexes and newly exposed view only. A repaint of the client state
+            // relabels the whole view, including FoV changes caused by an edited blocker.
             List<Rectangle> exposed = new ArrayList<>();
-            if (allMarkings || capturedArea == null || !area.intersects(capturedArea)) {
+            if (allLabels || capturedArea == null || !area.intersects(capturedArea)) {
                 exposed.add(area);
             } else {
                 exposed.addAll(List.of(SwingUtilities.computeDifference(area, capturedArea)));
@@ -874,16 +867,17 @@ final class GpuBoardSource implements BoardSource {
                     if (!local.isEmpty()) { exposed.add(local); }
                 }
             }
-            for (Rectangle region : exposed) { view.capturePlanarTactical(region, hex -> {
-                int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
-                BoardScene.Tile old = tiles.get(index);
-                BoardScene.Tile next = old.withMarkings(terrainImages.capture(hex.tactical(), old.tactical()), hex.text());
-                if (!next.equals(old)) {
-                    painted.set(index, next);
+            for (Rectangle region : exposed) {
+                Rectangle hexes = region.intersection(new Rectangle(0, 0, board.getWidth(), board.getHeight()));
+                for (int x = hexes.x; x < hexes.x + hexes.width; x++) {
+                    for (int y = hexes.y; y < hexes.y + hexes.height; y++) {
+                        int index = x * board.getHeight() + y;
+                        labelled.set(index, tiles.get(index).withText(BoardArtwork.labels(board, new Coords(x, y))));
+                    }
                 }
-            }); }
-            if (!painted.equals(tiles)) {
-                tiles = List.copyOf(painted);
+            }
+            if (!labelled.equals(tiles)) {
+                tiles = List.copyOf(labelled);
             }
             terrainImages.retain(tiles);
             fieldOfView = view.captureFieldOfView(area);
@@ -1721,7 +1715,6 @@ final class GpuBoardSource implements BoardSource {
         camouflage.clear();
         tiles = List.of();
         terrain.close();
-        view.releasePlanarCapture();
         synchronized (this) {
             pendingEvents.clear();
             nuclearCapture = null;

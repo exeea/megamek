@@ -104,7 +104,7 @@ class GpuTerrainAsyncSmokeTest {
                                 frame.shadowsMs = (System.nanoTime() - stage) / 1e6;
                                 outputFrame.begin(.2f, .26f, .31f, 1);
                                 stage = System.nanoTime();
-                                terrain.render(camera.camera, false);
+                                terrain.render(camera.camera);
                                 frame.opaqueMs = (System.nanoTime() - stage) / 1e6;
                                 stage = System.nanoTime();
                                 terrain.renderTransparent(camera.camera);
@@ -126,7 +126,7 @@ class GpuTerrainAsyncSmokeTest {
                                 var tiles = new ArrayList<>(scene.tiles());
                                 tiles.set(tiles.indexOf(tile), new BoardScene.Tile(at, tile.elevation() + 1,
                                       tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(),
-                                      tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
+                                      tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
                                       tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road()));
                                 scene = new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles,
                                       scene.units(), scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(),
@@ -163,7 +163,7 @@ class GpuTerrainAsyncSmokeTest {
                             for (int i = 0; i < 20; i++) {
                                 terrain.renderShadows(camera.camera, List.of());
                                 outputFrame.begin(.2f, .26f, .31f, 1);
-                                terrain.render(camera.camera, false);
+                                terrain.render(camera.camera);
                                 terrain.renderTransparent(camera.camera);
                             }
                             outputFrame.display();

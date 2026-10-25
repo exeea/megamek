@@ -60,7 +60,7 @@ class GpuRimMaterialSmokeTest {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? drop : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, normals, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, pixels, normals, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -126,7 +126,7 @@ class GpuRimMaterialSmokeTest {
 
     private static int[] samples(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, List<Vector3> probes) {
         outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         outputFrame.display();
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {

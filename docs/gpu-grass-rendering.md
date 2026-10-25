@@ -126,16 +126,19 @@ fragment shader adds lighting and wetness.
 
 Tundra grows dwarf shrubs on the same roots instead of blades. Where its
 coverage (`BoardBiome`) times a clump field about 1.6 m across outgrows the
-grass, a root becomes a shrub, at 40 % of a blade's chance since a shrub spreads
+grass, a root becomes a shrub, at 7 % of a blade's chance since a shrub spreads
 far wider; the root carries rank + .5, so the prefix by whole rank still draws
 both kinds. Each chunk keeps a third buffer of these roots for the shrub
 template: twelve diamond leaves, which the vertex shader arranges into a
 mound, steeper on its crown than at its rim. Each shrub draws one of four forms
 (a low mat of needles, a prostrate spread of round leaves, upright bushes of round
-or narrow leaves) and its size, mostly small with a few broad ones, and takes one
-colour from colonies metres across of crowberry, bearberry, dwarf birch and willow. Shrubs
-share the blades' density, wind (less sway), scars, lighting and Grass blades
-control, and are drawn at every grass scale. No blade grows on full tundra, so the
+or narrow leaves) and its size, mostly small with a few broad ones, 0.45 to 1.65 m
+in radius: 2.5 times a real dwarf shrub, as the blades are oversized too. Each takes
+one colour from colonies metres across of crowberry, bearberry, dwarf birch and
+willow. Being few and broad, every shrub stands from 250 projected pixels per hex
+(the blades from 500), so they show at play distance. Shrubs
+share the blades' wind (less sway), scars, lighting and Grass blades control, and
+are drawn at every grass scale. No blade grows on full tundra, so the
 carpet's own detail stays visible between the clumps. The grass color pass has no draws
 below its visible scale, one at a uniform orthographic scale, and at most two in
 perspective. Grass receives shadows but does not cast a separate shadow per blade.

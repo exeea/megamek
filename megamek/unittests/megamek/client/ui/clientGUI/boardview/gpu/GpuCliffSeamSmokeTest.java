@@ -50,7 +50,7 @@ class GpuCliffSeamSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(10, 10), 1));
                         terrain.renderShadows(camera.camera, List.of());
                         frame.begin(.3f, .55f, .8f, 1);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         terrain.renderTransparent(camera.camera);
                         frame.display();
                         GpuBoardTestUi.capture(new File(output, "commcenter-cliffs-" + tilt + ".png"));

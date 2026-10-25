@@ -210,7 +210,7 @@ class GpuTerrainGradeSmokeTest {
                 var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS,
                       coords.getX() < 4 ? upper : upper - 2, -1, 0);
                 return new BoardScene.Tile(coords, tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
+                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
                       tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(),
                       tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare(), cover);
             });

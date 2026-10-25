@@ -284,7 +284,7 @@ class GpuWeatherBaselineSmokeTest {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, BoardScene.Surface.GRASS,
-                      null, null, null, List.of(), List.of()));
+                      null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

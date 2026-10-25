@@ -121,7 +121,7 @@ class GpuBuildingMaterialsSmokeTest {
                         terrain.animate(0, List.of());
                         terrain.renderShadows(List.of());
                         outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-                        terrain.render(camera.camera, false);
+                        terrain.render(camera.camera);
                         outputFrame.display();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         if (++frames == 4) {

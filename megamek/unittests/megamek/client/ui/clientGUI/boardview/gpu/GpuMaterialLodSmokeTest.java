@@ -230,7 +230,7 @@ class GpuMaterialLodSmokeTest {
             for (int y = 0; y < 7; y++) {
                 var family = x < 3 ? BoardScene.Surface.GRASS : BoardScene.Surface.ROCK;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x < 3 ? 3 : 0, -1, false, 0,
-                      family, pixels, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
+                      family, pixels, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
                       BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false,
                       x == 2 || x == 3 ? mixed : BoardSurfaceBlend.solid(family)));
             }
@@ -505,7 +505,7 @@ class GpuMaterialLodSmokeTest {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), elevation, -1, false, 0,
                       liquid.kind() == BoardLiquid.Kind.NONE ? BoardScene.Surface.valueOf(material.toUpperCase(Locale.ROOT))
                             : BoardScene.Surface.SAND,
-                      pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                      pixels, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

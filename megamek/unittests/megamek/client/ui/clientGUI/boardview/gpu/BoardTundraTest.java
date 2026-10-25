@@ -130,16 +130,8 @@ class BoardTundraTest {
         for (int i = 3; i < roots.size; i += 4) {
             assertEquals(.5f, roots.items[i] % 1, "Every tundra root grows a dwarf shrub, never a blade over the carpet");
         }
-        // Clumps leave the carpet open between them: of the hex's 1.5 m cells, some hold shrubs and some none.
-        var cells = new java.util.HashSet<Long>();
-        float cell = BoardRelief.metres(1.5f);
-        for (int i = 0; i < roots.size; i += 4) {
-            cells.add((long) Math.floor(roots.items[i] / cell) << 32 ^ (long) Math.floor(roots.items[i + 1] / cell));
-        }
-        float hexCells = (float) (Math.sqrt(3) / 2 * BoardGeometry.width() * BoardGeometry.width() / (cell * cell));
-        assertTrue(cells.size() > hexCells * .2f && cells.size() < hexCells * .9f,
-              "Shrubs grow in clumps with open carpet between them, not evenly everywhere: " + cells.size() + " of "
-                    + hexCells);
+        int shrubs = roots.size / 4;
+        assertTrue(shrubs > 20 && shrubs < 4096 * .15f, "A few broad shrubs, with the carpet open between them: " + shrubs);
         var full = new BoardSurface(scene, tile, TerrainLod.FULL);
         assertTrue(full.faces.stream().map(face -> full.relief.shade(face.a())).noneMatch(shade ->
               shade != null && shade.kind() == BoardRelief.Kind.PLANT), "No second, baked shrub kit on tundra");

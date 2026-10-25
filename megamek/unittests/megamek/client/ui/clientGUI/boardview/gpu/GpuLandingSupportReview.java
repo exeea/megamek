@@ -351,7 +351,7 @@ final class GpuLandingSupportReview {
           ModelInstance placed) {
         terrain.renderShadows(camera.camera, List.of(placed));
         output.begin(.12f, .16f, .2f, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         batch.begin(camera.camera);
         batch.render(placed, terrain.environment());
         batch.end();

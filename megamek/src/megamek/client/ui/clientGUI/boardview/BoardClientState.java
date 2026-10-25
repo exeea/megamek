@@ -23,7 +23,6 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
-import java.awt.image.DataBufferInt;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -162,13 +161,10 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private final ClientGUI clientgui;
     private Player localPlayer;
     private final TilesetManager tileManager;
-    private BufferedImage tacticalChunk;
     private final Map<Font, FontMetrics> fontMetrics = new HashMap<>();
     private BoardGlyphContext projection;
     private Consumer<Graphics2D> drawMovingUnits;
     void setMovingUnitPainter(Consumer<Graphics2D> painter) { drawMovingUnits = painter; }
-    private boolean gpuCapture;
-    private float captureScale = 1;
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
     private static final int HEX_WC = HEX_W - HEX_W / 4;
     private static final int[] allDirections = { 0, 1, 2, 3, 4, 5 };
@@ -389,7 +385,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         hexDrawPlugins.clear();
         if (hexPick != null) { hexPick.cancel(); }
         listeners.clear();
-        releasePlanarCapture();
         if (ownsTileset) { tileManager.close(); }
     }
 
@@ -401,24 +396,24 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void setLocalPlayer(int id) { setLocalPlayer(game.getPlayer(id)); }
     public Entity getSelectedEntity() { return getDisplayedEntity(); }
     public TilesetManager getTilesetManager() { return tileManager; }
-    public float getScale() { return gpuCapture || projection == null ? captureScale : projection.getScale(); }
+    public float getScale() { return projection == null ? 1 : projection.getScale(); }
     public Dimension getHexSize() { return new Dimension((int) (HEX_W * getScale()), (int) (HEX_H * getScale())); }
-    public int getVerticalOffset() { return gpuCapture || projection == null ? 0 : projection.getVerticalOffset(); }
+    public int getVerticalOffset() { return projection == null ? 0 : projection.getVerticalOffset(); }
     public Point getHexLocation(Coords coords) {
         if (coords == null) { return null; }
-        if (!gpuCapture && projection != null) { return projection.getHexLocation(coords); }
+        if (projection != null) { return projection.getHexLocation(coords); }
         return new Point((int) (coords.getX() * HEX_WC * getScale()),
               (int) ((coords.getY() * HEX_H + (coords.isXOdd() ? HEX_H / 2 : 0)) * getScale()));
     }
     public Point getCentreHexLocation(Coords coords) { return getCentreHexLocation(coords, false); }
     public Point getCentreHexLocation(Coords coords, boolean ignoreElevation) {
-        if (!gpuCapture && projection != null) { return projection.getCentreHexLocation(coords, ignoreElevation); }
+        if (projection != null) { return projection.getCentreHexLocation(coords, ignoreElevation); }
         Point point = getHexLocation(coords);
         point.translate(getHexSize().width / 2, getHexSize().height / 2);
         return point;
     }
     public Image getScaledImage(Image image, boolean cache) {
-        if (projection != null && !gpuCapture) { return projection.getScaledImage(image, cache); }
+        if (projection != null) { return projection.getScaledImage(image, cache); }
         return getScale() == 1 ? image : ImageUtil.getScaledImage(image,
               Math.max(1, (int) (image.getWidth(null) * getScale())), Math.max(1, (int) (image.getHeight(null) * getScale())));
     }
@@ -439,7 +434,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private Font getMinefieldFont() { return new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, Math.max(1, (int) (12 * getScale()))); }
     public void refreshDisplayables() { changed.run(); }
     public void repaint() { revision++; changed.run(); }
-    public void invalidatePlanarCapture() { if (!gpuCapture) { repaint(); } }
     public long getPlanarRevision() { return revision; }
     public BoardFocus getCenterRequest() { return focus; }
     public void setUseLosTool(boolean use) { useLOSTool = use; }
@@ -2331,13 +2325,10 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     /**
-     * The Legacy 2D look of E(C)CM: player-colour washes, static noise and source rings. The 3D board's captures skip it
-     * and draw {@link #electronicWarfare()} instead.
+     * The Legacy 2D look of E(C)CM: player-colour washes, static noise and source rings. The 3D board draws
+     * {@link #electronicWarfare()} instead.
      */
     public void drawElectronicWarfare(Graphics2D graphics, Coords coords) {
-        if (gpuCapture) {
-            return;
-        }
         Graphics2D local = (Graphics2D) graphics.create();
         try {
             Color ecm = colorAt(ecmHexes, coords);
@@ -2703,10 +2694,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         if (legacyChanged || warfareChanged) {
             visibilityChanged();
         }
-        if (legacyChanged) {
-            invalidatePlanarCapture();
-        }
-
         repaint();
     }
 
@@ -2809,7 +2796,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             graphics2D.draw(scaleTransform.createTransformedShape(HexDrawUtilities.getHexCrossLine01(4, 2)));
         }
 
-        if (!gpuCapture && getBoard().embeddedBoardCoords().contains(coords)) {
+        if (getBoard().embeddedBoardCoords().contains(coords)) {
             drawEmbeddedBoard(graphics2D);
         }
         drawElectronicWarfare(graphics2D, coords);
@@ -2873,18 +2860,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
     public boolean isEntitySelected(Entity entity) { return selectedEntities.contains(entity.getId()); }
     public void selectEntity(Entity entity) { visibilityChanged(); updateEcmList(); highlightSelectedEntity(entity); }
-    public UnitAnnotations.Annotations captureUnitAnnotations(Entity entity, int part, UnitAnnotations.Annotations previous) {
-        boolean originalCapture = gpuCapture;
-        float originalScale = captureScale;
-        try {
-            gpuCapture = true; captureScale = 1;
-            return new UnitAnnotations(this, entity, part).captureAnnotations(previous,
-                  isEntitySelected(entity), isAffectedByECM(entity));
-        } finally { gpuCapture = originalCapture; captureScale = originalScale; }
-    }
-    public void releasePlanarCapture() {
-        tacticalChunk = null;
-    }
     public void clearArtwork() {
         fieldOfView.invalidate();
         repaint();
@@ -2892,76 +2867,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void invalidateArtwork(Coords coords) {
         // A terrain blocker changes LOS beyond the artwork's local neighborhood, with or without a renderer.
         fieldOfView.invalidate();
-    }
-    /**
-     * The game's raster hex pass: each hex's plugins ({@link HexDrawPlugin}), painted in 16-hex chunks. The terrain is
-     * captured by the 3D board's one capture ({@code BoardTiles}); the tactical marks and special hexes are native.
-     */
-    public void capturePlanarTactical(Rectangle requested, Consumer<BoardArtwork.HexImage> consumer) {
-        if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Capture must run on the client thread"); }
-        Rectangle area = requested.intersection(new Rectangle(0, 0, getBoard().getWidth(), getBoard().getHeight()));
-        // Without a plugin nothing is painted: the hexes pass on their labels alone.
-        boolean painted = !hexDrawPlugins.isEmpty();
-        boolean originalCapture = gpuCapture;
-        float originalScale = captureScale;
-        try {
-            gpuCapture = true; captureScale = 3;
-            for (int column = area.x; column < area.x + area.width; column += 16) {
-                for (int row = area.y; row < area.y + area.height; row += 16) {
-                    Rectangle chunk = new Rectangle(column, row, Math.min(16, area.x + area.width - column),
-                          Math.min(16, area.y + area.height - row));
-                    Rectangle pixels = new Rectangle(chunk.x * HEX_WC * 3, chunk.y * HEX_H * 3,
-                          ((chunk.width - 1) * HEX_WC + HEX_W) * 3, (chunk.height * HEX_H + HEX_H / 2) * 3);
-                    if (painted) { paintTacticalChunk(chunk, pixels); }
-                    for (int x = chunk.x; x < chunk.x + chunk.width; x++) {
-                        for (int y = chunk.y; y < chunk.y + chunk.height; y++) {
-                            Coords coords = new Coords(x, y);
-                            BoardArtwork.HexImage art = BoardArtwork.labels(getBoard(), coords);
-                            Point point = getHexLocation(coords);
-                            BufferedImage marking = painted
-                                  ? markingImage(tacticalChunk, point.x - pixels.x, point.y - pixels.y) : null;
-                            // The game's 3D view gets the shared terrain capture (BoardTiles) plus this marking.
-                            consumer.accept(art.withTactical(marking));
-                        }
-                    }
-                }
-            }
-        } finally {
-            gpuCapture = originalCapture; captureScale = originalScale;
-        }
-    }
-    private void paintTacticalChunk(Rectangle area, Rectangle pixels) {
-        if (tacticalChunk == null || tacticalChunk.getWidth() < pixels.width || tacticalChunk.getHeight() < pixels.height) {
-            tacticalChunk = new BufferedImage(pixels.width, pixels.height, BufferedImage.TYPE_INT_ARGB);
-        }
-        Graphics2D graphics = tacticalChunk.createGraphics();
-        try {
-            graphics.setComposite(AlphaComposite.Clear); graphics.fillRect(0, 0, tacticalChunk.getWidth(), tacticalChunk.getHeight());
-            graphics.setComposite(AlphaComposite.SrcOver); graphics.translate(-pixels.x, -pixels.y); graphics.setClip(pixels);
-            UIUtil.setHighQualityRendering(graphics);
-            for (int x = area.x; x < area.x + area.width; x++) {
-                for (int y = area.y; y < area.y + area.height; y++) {
-                    Coords coords = new Coords(x, y); Point point = getHexLocation(coords);
-                    Graphics2D local = (Graphics2D) graphics.create(point.x, point.y, HEX_W * 3, HEX_H * 3);
-                    try {
-                        drawHexPlugins(local, coords);
-                    } finally { local.dispose(); }
-                }
-            }
-        } finally { graphics.dispose(); }
-    }
-    private static BufferedImage markingImage(BufferedImage layer, int x, int y) {
-        int width = HEX_W * 3, height = HEX_H * 3;
-        int[] pixels = ((DataBufferInt) layer.getRaster().getDataBuffer()).getData();
-        for (int row = y; row < y + height; row++) {
-            int start = row * layer.getWidth() + x;
-            for (int index = start; index < start + width; index++) {
-                if ((pixels[index] >>> 24) != 0) {
-                    return layer.getSubimage(x, y, width, height);
-                }
-            }
-        }
-        return null;
     }
     private Image radarBlip;
     private Supplier<double[]> visibleArea = () -> new double[] { 0, 0, 1, 1 };
@@ -3283,11 +3188,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     /** Explicit printable export; uses the same labels and tactical painters without constructing a viewport. */
     public BufferedImage getEntireBoardImage(boolean ignoreUnits) {
         BoardGlyphContext previousProjection = projection;
-        boolean previousCapture = gpuCapture;
-        float previousScale = captureScale;
         projection = null;
-        gpuCapture = false;
-        captureScale = 1;
         List<Sprite> glyphs = allSprites.stream()
               .filter(sprite -> !sprite.isUnitVisual()).toList();
         try {
@@ -3328,8 +3229,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             return result;
         } finally {
             projection = previousProjection;
-            gpuCapture = previousCapture;
-            captureScale = previousScale;
             if (projection != null && getScale() != 1) { glyphs.forEach(Sprite::prepare); }
         }
     }

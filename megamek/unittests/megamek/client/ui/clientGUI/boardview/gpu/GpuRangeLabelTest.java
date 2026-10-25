@@ -78,6 +78,6 @@ class GpuRangeLabelTest {
 
     private static BoardScene.Tile tile(int elevation, int depth) {
         return new BoardScene.Tile(new Coords(2, 3), elevation, depth, false, 0, BoardScene.Surface.GRASS,
-              null, null, null, List.of(), List.of());
+              null, null, List.of(), List.of());
     }
 }

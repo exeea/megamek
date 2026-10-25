@@ -52,7 +52,6 @@ class GpuMarkerCaptureTest {
             });
             BoardScene scene = fixture.source.takeFrame().scene();
             assertEquals(5, scene.markers().size());
-            assertEquals(before.tile(ROOF).tactical(), scene.tile(ROOF).tactical());
             assertTrue(scene.markers().stream().allMatch(marker -> marker.elevation() == 4));
             BoardMarker objective = scene.markers().stream().filter(marker -> marker.kind() == BoardMarker.Kind.OBJECTIVE)
                   .findFirst().orElseThrow();
@@ -142,8 +141,7 @@ class GpuMarkerCaptureTest {
             assertEquals(7, markers.size());
             assertTrue(markers.stream().allMatch(marker -> marker.coords().equals(ROOF)));
             assertFalse(markers.stream().anyMatch(marker -> marker.coords().equals(privateNote)));
-            assertTrue(fixture.source.takeFrame().scene().tile(heatMap).tactical() != null
-                        || !fixture.source.takeFrame().scene().tactical().fills().isEmpty(),
+            assertFalse(fixture.source.takeFrame().scene().tactical().fills().isEmpty(),
                   "Heat-map fills must remain terrain overlays");
             SwingUtilities.invokeAndWait(() -> {
                 fixture.game.getBoard().getSpecialHexDisplay(ROOF).clear();
@@ -174,8 +172,7 @@ class GpuMarkerCaptureTest {
                   .map(fill -> BoardTacticalGeometry.anchorCoords(after, fill.planeAnchor())).collect(Collectors.toSet()),
                   "Every affected hex uses its own annotation plane");
             Coords neighbor = new Coords(3, 2);
-            assertTrue(!java.util.Objects.equals(before.tile(neighbor).tactical(), after.tile(neighbor).tactical())
-                        || !before.tactical().fills().equals(after.tactical().fills()),
+            assertFalse(before.tactical().fills().equals(after.tactical().fills()),
                   "The raised centre must retain the blast footprint on the board");
         }
     }

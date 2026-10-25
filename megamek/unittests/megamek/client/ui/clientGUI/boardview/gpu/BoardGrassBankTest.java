@@ -177,7 +177,7 @@ class BoardGrassBankTest {
             var water = at.translated(0);
             var scene = BoardSurfaceBlendTest.scene(c -> c.equals(water)
                   ? new BoardScene.Tile(c, level, 1, level == 0, 0, BoardScene.Surface.GRASS, null, null,
-                        null, null, null, List.of(), List.of(), BoardLiquid.WATER, null, true)
+                        null, null, List.of(), List.of(), BoardLiquid.WATER, null, true)
                   : dry.tile(c));
             assertEquals(meadow, GpuGroundCover.plant(scene, scene.tile(at), support, null),
                   "A frozen shore or water at another elevation does not thin this meadow: " + level);
@@ -266,7 +266,7 @@ class BoardGrassBankTest {
             var scene = BoardSurfaceBlendTest.scene(c -> {
                 var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 4 ? 2 : 0, -1, 0);
                 return new BoardScene.Tile(c, tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
+                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
                       tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(),
                       tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare(), cover);
             });

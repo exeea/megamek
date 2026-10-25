@@ -1377,7 +1377,7 @@ class GpuMagmaSmokeTest {
             BoardLiquid liquid = x >= 5 && x <= 7 && y >= 1 && y <= 4
                   ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
             tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.ROCK,
-                  pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                  pixels, null, null, null, List.of(), List.of(), liquid, null, true));
         }
         var scene = new BoardScene(0, 9, 6, tiles, List.of(), List.of(), -1, "", List.of());
         assertTrue(BoardFlow.calculate(scene).isEmpty(), "An enclosed equal-level pool has no directed reach");
@@ -1533,7 +1533,7 @@ class GpuMagmaSmokeTest {
         BoardScene river = GpuRiverTerrainSmokeTest.scene(BoardScene.Surface.VOLCANO);
         return river.withTiles(river.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
-              tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
+              tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(),
               tile.liquid().present() ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : tile.liquid(),
               tile.tileset(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(), tile.impassable(),
               tile.blackIce(), tile.cliffTopExits(), tile.bare(), tile.groundCover(), tile.bridge(),
@@ -2077,7 +2077,7 @@ class GpuMagmaSmokeTest {
                       : BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
                 // A gentle grade at the back and a three-level spill in front exercise both forms of flow.
                 tiles.add(new BoardScene.Tile(new Coords(x, y), y < 2 ? 3 : y < 4 ? 2 : -1, -1, false, 0, BoardScene.Surface.ROCK,
-                      pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                      pixels, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }
         return new BoardScene(0, 9, 6, tiles, List.of(), List.of(), -1, "", List.of());

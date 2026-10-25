@@ -45,7 +45,7 @@ class BoardSculptTest {
                 char cell = layout[y].charAt(x);
                 int level = cell == 'a' ? -1 : cell == 'b' ? -2 : cell - '0';
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, -1, false, 0,
-                      (x + y) % 4 == 0 ? BoardScene.Surface.GRASS : family, null, null, null, null, null,
+                      (x + y) % 4 == 0 ? BoardScene.Surface.GRASS : family, null, null, null, null,
                       List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
@@ -160,7 +160,7 @@ class BoardSculptTest {
                 char cell = x < DRY[0].length() && y < DRY.length ? DRY[y].charAt(x) : '0';
                 int level = cell == 'a' ? -1 : cell == 'b' ? -2 : cell - '0';
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, -1, false, 0, BoardScene.Surface.SAND, null,
-                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         BoardScene scene = new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());

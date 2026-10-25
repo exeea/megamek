@@ -79,7 +79,7 @@ class GpuWaterFlowTest {
                       : wall && barrier.equals("lava") ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.WATER;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), wall && barrier.equals("height") ? 1 : 0,
                       liquid.present() ? 1 : -1, wall && barrier.equals("ice"), 0, BoardScene.Surface.SAND,
-                      null, null, null, null, null, List.of(), List.of(), liquid, null, true));
+                      null, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }
         return new BoardScene(0, 13, 13, tiles, List.of(), List.of(), -1, "", List.of());
@@ -182,7 +182,7 @@ class GpuWaterFlowTest {
                 // Give the lower reach a different bed depth even when the surface is entirely level.
                 int bed = wet ? depth + (water.get(coords) == 0 && !coords.equals(HIGH) ? 1 : 0) : -1;
                 tiles.add(new BoardScene.Tile(coords, water.getOrDefault(coords, drop + 1), bed, false, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
                       wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

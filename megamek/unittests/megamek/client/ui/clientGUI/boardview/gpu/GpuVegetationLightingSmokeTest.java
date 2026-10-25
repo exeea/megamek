@@ -82,7 +82,7 @@ class GpuVegetationLightingSmokeTest {
                             var result = manager.apply(variant == 0 ? Map.of() : Map.of("surface-shading.glsl", disabled));
                             assertTrue(result.success(), result.message());
                             if (species.equals("grass")) {
-                                fixture.terrain.render(camera.camera, true);
+                                GpuTreeLodSmokeTest.newShadingPass(fixture.terrain);
                                 var blades = cover.visible(grass, camera.camera, grass.tiles(), fixture.terrain::planted);
                                 assertTrue(!blades.isEmpty(), "Exercise real planted grass");
                                 ScreenUtils.clear(0, 0, 0, 0, true);
@@ -269,7 +269,7 @@ class GpuVegetationLightingSmokeTest {
         }
 
         private void draw(BoardCamera camera, GpuTreeInstances.Stand stand, int level, Runnable clearTarget) {
-            terrain.render(camera.camera, true); // Advance the production shader's per-pass global cache.
+            GpuTreeLodSmokeTest.newShadingPass(terrain); // Advance the production shader's per-pass global cache.
             clearTarget.run();
             instances.begin(GpuTreeInstances.Pass.COLOUR);
             instances.add(stand, level, true);
@@ -326,7 +326,7 @@ class GpuVegetationLightingSmokeTest {
     private static BoardScene scene(BoardScene.Surface surface, BoardLiquid.Kind kind, boolean hidden) {
         var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, surface,
-              pixels, null, null, null, null, List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true);
+              pixels, null, null, null, List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true);
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
         return new BoardScene(scene.boardId(), 1, 1, scene.tiles(), scene.units(), scene.plannedPath(), scene.selectedId(),
               scene.phase(), scene.commands(), scene.light(), scene.firingLines(), scene.rangeBorders(), scene.markers(),

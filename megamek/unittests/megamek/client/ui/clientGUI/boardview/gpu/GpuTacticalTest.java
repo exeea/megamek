@@ -265,8 +265,6 @@ class GpuTacticalTest {
                 BoardScene captured = fixture.source.takeFrame().scene();
                 assertFalse(captured.tactical().fills().isEmpty());
                 assertFalse(captured.tactical().labels().isEmpty(), "Movement costs must remain readable labels");
-                assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
-                      captured.tiles().stream().map(BoardScene.Tile::tactical).toList());
                 BoardView legacy2D = fixture.legacy2DView();
                 try {
                     legacy2D.getComponent();

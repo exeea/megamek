@@ -110,7 +110,7 @@ final class GpuReviewFrame implements Disposable {
 
     /** The same frame with its stages marked on a native benchmark's timings. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, GpuStageTimings timings) {
-        render(terrain, camera, scene, timings, 1, () -> terrain.render(camera.camera, false));
+        render(terrain, camera, scene, timings, 1, () -> terrain.render(camera.camera));
     }
 
     /**

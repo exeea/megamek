@@ -34,7 +34,7 @@ class BoardRoadTest {
 
     static BoardScene.Tile tile(Coords coords, BoardRoad.Kind road, int exits, int level, BoardScene.Surface family) {
         var base = BoardSurfaceBlendTest.tile(coords, family, level, -1, exits);
-        return new BoardScene.Tile(coords, level, -1, false, exits, family, base.ground(), null, null, null, null,
+        return new BoardScene.Tile(coords, level, -1, false, exits, family, base.ground(), null, null, null,
               List.of(), List.of(), BoardLiquid.NONE, null, true, road);
     }
 

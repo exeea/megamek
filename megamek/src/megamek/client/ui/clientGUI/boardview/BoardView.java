@@ -3065,19 +3065,6 @@ public final class BoardView extends AbstractBoardView
         return radarBlipImage;
     }
 
-    void invalidatePlanarCapture() {
-        clientState.invalidatePlanarCapture();
-    }
-
-
-    /** Releases capture-only working memory when the native view closes or switches boards. */
-    public void releasePlanarCapture() {
-        clientState.releasePlanarCapture();
-
-        clientState.clearArtwork();
-    }
-
-
     public BoardClientState getClientState() { return clientState; }
     @Override public BoardGlyphContext glyphContext() { return clientState; }
 
@@ -3846,7 +3833,7 @@ public final class BoardView extends AbstractBoardView
         if (fovHighlightingAndDarkening != null) {
             fovHighlightingAndDarkening.invalidate();
         }
-        invalidatePlanarCapture();
+        clientState.repaint();
         hexImageCache.clear();
 
         clientState.clearArtwork();
@@ -3861,7 +3848,7 @@ public final class BoardView extends AbstractBoardView
         if (fovHighlightingAndDarkening != null) {
             fovHighlightingAndDarkening.invalidate();
         }
-        invalidatePlanarCapture();
+        clientState.repaint();
         for (Coords coords : setCoords) {
             hexImageCache.remove(coords);
 
@@ -3881,7 +3868,7 @@ public final class BoardView extends AbstractBoardView
             }
             // GPU raster tiles no longer contain FoV. Only Legacy 2D pixels and the presentation snapshot change.
             hexImageCache.clear();
-            invalidatePlanarCapture();
+            clientState.repaint();
         }
     }
 

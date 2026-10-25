@@ -153,7 +153,7 @@ class GpuDomeVentSeamsSmokeTest {
     private static void render(GpuSceneTestOutput frame, GpuTerrain terrain, BoardCamera camera) {
         terrain.renderShadows(camera.camera, List.of());
         frame.begin(1, 0, 1, 1);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         frame.display();
     }

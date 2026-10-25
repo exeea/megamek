@@ -191,7 +191,7 @@ class GpuColorGradingSmokeTest {
         final GpuAtmosphere atmosphere = new GpuAtmosphere();
         final GpuTerrain terrain = new GpuTerrain();
         final BoardScene scene = new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(new Coords(0, 0), 0, -1,
-              false, 0, BoardScene.Surface.GRASS, null, null, null, null, List.of(), List.of())),
+              false, 0, BoardScene.Surface.GRASS, null, null, null, List.of(), List.of())),
               List.of(), List.of(), -1, "", List.of());
         final OrthographicCamera camera = new OrthographicCamera(2, 2);
         final FrameBuffer target = GpuAtmosphere.buffer(3, 3, true);

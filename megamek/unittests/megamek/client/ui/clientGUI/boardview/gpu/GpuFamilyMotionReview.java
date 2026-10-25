@@ -166,7 +166,7 @@ final class GpuFamilyMotionReview {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 6; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), y <= 2 ? 1 : 0, -1, false, 9,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 6, tiles, List.of(), List.of(), -1, "", List.of());

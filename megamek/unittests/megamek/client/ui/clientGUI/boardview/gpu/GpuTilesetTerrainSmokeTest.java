@@ -84,11 +84,6 @@ class GpuTilesetTerrainSmokeTest {
         // New tileset art at the same height leaves the neighbours' walls and rims as they were.
         scene = scene(Map.of(inside, 2, edge, 1), Map.of(edge, pixels(0xff806040)), art);
         assertEquals(Set.of(0), rebuilt(terrain, chunks, scene));
-        // New markings change no column.
-        List<BoardScene.Tile> marked = new ArrayList<>(scene.tiles());
-        marked.replaceAll(tile -> tile.withTactical(pixels(0x80ff0000)));
-        scene = scene.withTiles(marked);
-        assertEquals(Set.of(), rebuilt(terrain, chunks, scene));
 
         // A shallower pool on the chunk's edge keeps its water level and the board's floor, but changes the walls
         // under the water of its neighbours across that edge.
@@ -120,7 +115,7 @@ class GpuTilesetTerrainSmokeTest {
             for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
                 Coords at = new Coords(x, y);
                 shore.add(at.equals(center) ? pool(at, 2, art)
-                      : new BoardScene.Tile(at, 1, -1, false, 0, bank, art, null, null, null, null,
+                      : new BoardScene.Tile(at, 1, -1, false, 0, bank, art, null, null, null,
                             List.of(), List.of(), BoardLiquid.NONE, art));
             }
             scene = new BoardScene(0, 3, 3, shore, List.of(), List.of(), -1, "", List.of());
@@ -215,12 +210,12 @@ class GpuTilesetTerrainSmokeTest {
     }
 
     private static BoardScene.Tile pool(Coords coords, int depth, BoardScene.Pixels art) {
-        return new BoardScene.Tile(coords, 0, depth, false, 0, BoardScene.Surface.GRASS, art, null, null, null, null,
+        return new BoardScene.Tile(coords, 0, depth, false, 0, BoardScene.Surface.GRASS, art, null, null, null,
               List.of(), List.of(), BoardLiquid.WATER, art);
     }
 
     private static BoardScene.Tile land(Coords coords, BoardScene.Pixels art) {
-        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, art, null, null, null, null,
+        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, art, null, null, null,
               List.of(), List.of(), BoardLiquid.NONE, art);
     }
 
@@ -243,7 +238,7 @@ class GpuTilesetTerrainSmokeTest {
             for (int y = 0; y < HEIGHT; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, raised.getOrDefault(coords, 0), -1, false, 0,
-                      BoardScene.Surface.GRASS, art, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE,
+                      BoardScene.Surface.GRASS, art, null, null, null, List.of(), List.of(), BoardLiquid.NONE,
                       painted.getOrDefault(coords, art)));
             }
         }

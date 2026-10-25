@@ -665,7 +665,7 @@ class GpuHexTextSmokeTest {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, null, List.of(), (neighbours
+                      null, null, List.of(), (neighbours
                             ? y == LABELED.getY() && Math.abs(x - LABELED.getX()) == 1
                             : coords.equals(LABELED)) ? text : List.of()));
             }
@@ -793,12 +793,6 @@ class GpuHexTextSmokeTest {
             assertVertices(labels, legacy(large, font, true), font);
             labels.update(large, font, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
             assertSame(pages.getFirst(), pages(labels).getFirst());
-            // A path preview repaints the markings of the hexes: new tiles with the same labels keep the meshes too.
-            var marking = new BoardScene.Pixels(new java.awt.image.BufferedImage(2, 2,
-                  java.awt.image.BufferedImage.TYPE_INT_ARGB));
-            labels.update(new BoardScene(0, 48, 48, large.tiles().stream().map(tile -> tile.withTactical(marking))
-                  .toList(), List.of(), List.of(), -1, "", List.of()), font, font, coords -> null);
-            assertSame(pages.getFirst(), pages(labels).getFirst(), "New markings alone must not relabel the board");
             camera.fit(large);
             profiler.enable();
             try {
@@ -951,7 +945,7 @@ class GpuHexTextSmokeTest {
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, null, List.of(), x < size / 2 ? firstPage : labels));
+                      null, null, List.of(), x < size / 2 ? firstPage : labels));
             }
         }
         return new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());
@@ -1019,7 +1013,7 @@ class GpuHexTextSmokeTest {
             unit.transform.setToTranslation(BoardGeometry.centerX(LABELED), BoardGeometry.centerY(LABELED),
                   2 * BoardGeometry.LEVEL + BoardRelief.headroom(scene.tile(LABELED)) + 2 * BoardGeometry.HEX_SCALE);
             atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-            terrain.render(camera.camera, false);
+            terrain.render(camera.camera);
             units.begin(camera.camera);
             units.render(unit);
             units.end();
@@ -1045,7 +1039,7 @@ class GpuHexTextSmokeTest {
           ShapeRenderer object) {
         ScreenUtils.clear(0, 0, 0, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         if (object != null) {
             Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDepthMask(true);
@@ -1089,7 +1083,7 @@ class GpuHexTextSmokeTest {
                             object.transform.setToTranslation(BoardGeometry.center(coords, 4));
                             ScreenUtils.clear(0, 0, 0, 1, true);
                             atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-                            terrain.render(camera.camera, false);
+                            terrain.render(camera.camera);
                             objects.begin(camera.camera);
                             objects.render(object);
                             objects.end();
@@ -1231,7 +1225,7 @@ class GpuHexTextSmokeTest {
                 Coords coords = new Coords(x, y);
                 boolean labeled = coords.equals(LABELED);
                 tiles.add(new BoardScene.Tile(coords, cliff && y >= 4 ? 8 : 2, -1, false, 0,
-                      BoardScene.Surface.GRASS, ground, null, null, null, null,
+                      BoardScene.Surface.GRASS, ground, null, null, null,
                       labeled && detailedLabels ? rocks : List.of(), labeled ? text : List.of(),
                       BoardLiquid.NONE, null, detailedLabels));
             }

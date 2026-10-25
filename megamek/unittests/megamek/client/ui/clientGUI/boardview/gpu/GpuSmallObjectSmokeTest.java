@@ -171,12 +171,12 @@ class GpuSmallObjectSmokeTest {
     /** A crossing alone keeps the shadow map; the next redraw applies the rule. */
     private static void checkShadowRedraws(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler, int cars) {
         zoom(camera, 16);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.refreshShadows();
         int all = count(profiler, () -> terrain.renderShadows(null, List.of()));
         assertTrue(all > 0);
         zoom(camera, 9);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         assertEquals(0, count(profiler, () -> terrain.renderShadows(null, List.of())), "A crossing does not redraw the shadows");
         terrain.refreshShadows();
         assertEquals(all - cars, count(profiler, () -> terrain.renderShadows(null, List.of())));
@@ -289,10 +289,10 @@ class GpuSmallObjectSmokeTest {
 
     private static int hiddenShadows(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler) {
         terrain.setSmallObjects(false);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         int all = count(profiler, () -> terrain.renderShadows(null, List.of()));
         terrain.setSmallObjects(true);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         return all - count(profiler, () -> terrain.renderShadows(null, List.of()));
     }
 
@@ -305,13 +305,13 @@ class GpuSmallObjectSmokeTest {
 
     private static void capture(GpuTerrain terrain, BoardCamera camera, String name) {
         ScreenUtils.clear(.2f, .2f, .2f, 1, true);
-        terrain.render(camera.camera, false);
+        terrain.render(camera.camera);
         terrain.renderTransparent(camera.camera);
         GpuReviewFrame.save(new File(OUTPUT, name));
     }
 
     private static int opaque(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler) {
-        return count(profiler, () -> terrain.render(camera.camera, false));
+        return count(profiler, () -> terrain.render(camera.camera));
     }
 
     private static int count(GLProfiler profiler, Runnable draw) {

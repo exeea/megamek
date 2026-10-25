@@ -115,7 +115,7 @@ class BoardTerrainMeshTest {
             for (int y = 0; y < 7; y++) {
                 Coords at = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(at, at.equals(AT) ? level : 0, -1, false, 0, family,
-                      null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

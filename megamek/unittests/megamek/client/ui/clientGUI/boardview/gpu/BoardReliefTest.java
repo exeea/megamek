@@ -28,7 +28,7 @@ class BoardReliefTest {
             for (int y = 0; y < 5; y++) {
                 boolean center = x == CENTER.getX() && y == CENTER.getY();
                 tiles.add(new BoardScene.Tile(new Coords(x, y), center ? centerLevel : 0, -1, false, 0, family, null,
-                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, center ? detailed : true));
+                      null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, center ? detailed : true));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
@@ -84,7 +84,7 @@ class BoardReliefTest {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 1, -1, false, 0,
-                      x < 2 ? BoardScene.Surface.GRASS : BoardScene.Surface.SAND, null, null, null, null, null,
+                      x < 2 ? BoardScene.Surface.GRASS : BoardScene.Surface.SAND, null, null, null, null,
                       List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
@@ -166,7 +166,7 @@ class BoardReliefTest {
                 for (int x = 0; x < 5; x++) {
                     for (int y = 0; y < 5; y++) {
                         Coords coords = new Coords(x, y);
-                        tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null, null, null, null,
+                        tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null, null, null,
                               coords.equals(CENTER) ? trees : List.of(), List.of(), BoardLiquid.NONE, null, true));
                     }
                 }
@@ -219,8 +219,7 @@ class BoardReliefTest {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, level.applyAsInt(coords), -1, false, 0,
-                      paved.test(coords) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, null, null,
-                      null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      paved.test(coords) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 5, 3, tiles, List.of(), List.of(), -1, "", List.of());

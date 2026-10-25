@@ -60,7 +60,7 @@ class BoardBackdropBoundaryTest {
                 var at = new Coords(x, y);
                 boolean solid = at.equals(CENTER) || solidNorth && at.equals(CENTER.translated(0));
                 var hex = new Hex(solid ? 1 : emptyElevation, solid ? "pavement:1" : backdrop, "lunar");
-                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(hex, artwork, null, pool, ignored -> null));
             }
         }
