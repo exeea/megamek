@@ -1020,6 +1020,8 @@ frame.
 | Motion | Edge, ticks and wash ease with the [control timings](#motion); reduce motion makes them instant |
 
 - **Only the outermost frame has ticks.** Panels inside a panel, such as the cards in a sidebar, use the plain frame.
+  A card inside a screen that has its own corners, such as the start screen's tip card, keeps the panel's fill and
+  padding with a 1px `border.subtle` edge all round and no ticks (`token-panel-plain`).
 - **Paper roll.** Every ticked frame (panels, dialog cards, status cards) has edges only at the top and bottom. The
   focus ring still goes all round.
 - **Selectable panels are controls.** A click, or Space or Enter with the focus on it, selects the panel; in a group

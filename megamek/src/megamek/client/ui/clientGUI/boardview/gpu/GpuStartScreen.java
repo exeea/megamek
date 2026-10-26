@@ -82,6 +82,7 @@ import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTextField;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.game.IGame;
@@ -1317,7 +1318,9 @@ final class GpuStartScreen extends ApplicationAdapter {
     }
 
     private Table tipCard() {
+        // The screen's corners frame it already, and only the outermost frame has ticks
         Table card = kit.panel(true);
+        card.setBackground(boardSkin.skin.getDrawable(UiTheme.TOKEN_PANEL_PLAIN));
         card.defaults().left();
         card.add(kit.roleTypeLabel("overline", Messages.getString("StartScreen.tip"), "text.muted"))
               .growX().row();
@@ -1508,7 +1511,8 @@ final class GpuStartScreen extends ApplicationAdapter {
             y += itemHeight + gapBelow(item, i);
             item.setVisible(p > 0);
         }
-        double rowIn = slide(column.size());
+        // Like the logo, the bottom row only slides in with the greeting and stays put between pages
+        double rowIn = pageShownAt < 0 ? slide(column.size()) : 1;
         bottomRow.setPosition(w - margin - bottomRow.getWidth() + (float) ((1 - rowIn) * offscreen), 32);
         bottomRow.setVisible(rowIn > 0);
         boolean settled = t >= StartTimeline.MENU_START;

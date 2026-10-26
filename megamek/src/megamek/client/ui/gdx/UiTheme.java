@@ -1564,6 +1564,11 @@ public final class UiTheme implements Disposable {
     public static final String TOKEN_PANEL_DANGER = "token-panel-danger";
     /** The plain frame, the edge only, which frames panels inside panels. */
     public static final String TOKEN_FRAME = "token-frame";
+    /**
+     * The panel's fill and padding inside the plain frame's edge, with no ticks: a card that sits within an outer frame
+     * that has them, such as the start screen's corners.
+     */
+    public static final String TOKEN_PANEL_PLAIN = "token-panel-plain";
     /** The rails frame, which replaces {@code panel-rails}: the overlay panel with border.control rails, no corners. */
     public static final String TOKEN_RAILS = "token-rails";
 
@@ -1595,6 +1600,8 @@ public final class UiTheme implements Disposable {
         skin.add(TOKEN_PANEL + "-overlay", pad(new HudFrame(white, overlayPanel, null, strong, tick, subtle, border)
               .paperRoll(), lg, lg), Drawable.class);
         skin.add(TOKEN_FRAME, pad(new HudFrame(white, Color.CLEAR, null, null, 0, subtle, border), sm, md),
+              Drawable.class);
+        skin.add(TOKEN_PANEL_PLAIN, pad(new HudFrame(white, panel, null, null, 0, subtle, border), lg, lg),
               Drawable.class);
         // HudFrame's rails are tick.width (2) high
         skin.add(TOKEN_RAILS, pad(new HudFrame(white, overlayPanel, token(tokens.color("border.control", mode)), null,
