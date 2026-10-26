@@ -17,8 +17,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -226,8 +226,10 @@ public final class GpuBoardWindow {
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
     /** Natively owned raised dialogs (Windows, macOS, Linux on X11) instead of floating them on top. Else {@code null}. */
     private volatile GpuNativeDialogOwner nativeOwner;
-    /** EDT: natively owned modal dialogs; while any is open the board window is disabled, as a blocked frame is. */
-    private final Set<Dialog> modalDialogs = Collections.newSetFromMap(new IdentityHashMap<>());
+    /** EDT: natively owned modal dialogs, oldest first; while any is open the board window ignores its input. */
+    private final Set<Dialog> modalDialogs = new LinkedHashSet<>();
+    /** Whether a modal dialog is open; the GPU thread reads it to send clicks on the window to that dialog. */
+    private volatile boolean modalOpen;
     /**
      * The Swing window hides while the GPU view runs, so a Swing dialog owned by it would open behind the native
      * window. A client dialog that opens while the GPU window cannot ask the client's prompts itself (it starts or
@@ -762,8 +764,19 @@ public final class GpuBoardWindow {
                 }
 
                 @Override
+                public void focusGained() {
+                    if (modalOpen) {
+                        SwingUtilities.invokeLater(GpuBoardWindow.this::frontModal);
+                    }
+                }
+
+                @Override
                 public boolean closeRequested() {
-                    requestExit();
+                    if (modalOpen) {
+                        SwingUtilities.invokeLater(GpuBoardWindow.this::frontModal);
+                    } else {
+                        requestExit();
+                    }
                     return false;
                 }
             });
@@ -775,6 +788,7 @@ public final class GpuBoardWindow {
                 public void create() {
                     application = (Lwjgl3Application) Gdx.app;
                     super.create();
+                    setInputBlocked(modalOpen);
                     // Another preview may have been selected before the native context finished opening.
                     if (preview) { ((Lwjgl3Graphics) Gdx.graphics).getWindow().setTitle(previewTitle); }
                     prepareEntrance();
@@ -1082,17 +1096,33 @@ public final class GpuBoardWindow {
         }
     }
 
-    /** Disables or re-enables the board window on its own thread; re-enabled, it takes the focus back. */
+    /** EDT: brings the newest open modal dialog to the front when the board window is clicked or asked to close. */
+    private void frontModal() {
+        Dialog newest = null;
+        for (Dialog dialog : modalDialogs) {
+            if (dialog.isShowing()) {
+                newest = dialog;
+            }
+        }
+        if (newest != null) {
+            newest.toFront();
+        }
+    }
+
+    /**
+     * Blocks or restores the board window's input on its own thread. The native window itself stays enabled: Windows
+     * picks the window to activate as a modal dialog hides, before Swing reports it, and a still disabled owner would
+     * hand the activation to another application, flashing the board away until it took the focus back.
+     */
     private void setBoardEnabled(boolean enabled) {
-        GpuNativeDialogOwner owner = nativeOwner;
+        modalOpen = !enabled;
         Lwjgl3Application app = application;
-        if (owner == null || app == null) {
+        if (app == null) {
             return;
         }
         app.postRunnable(() -> {
-            owner.setOwnerEnabled(enabled);
-            if (enabled && !closing) {
-                ((Lwjgl3Graphics) app.getGraphics()).getWindow().focusWindow();
+            if (app.getApplicationListener() instanceof GpuBattleView battle) {
+                battle.setInputBlocked(!enabled);
             }
         });
     }
@@ -1200,6 +1230,7 @@ public final class GpuBoardWindow {
     private void restoreDialogPresentation() {
         Toolkit.getDefaultToolkit().removeAWTEventListener(dialogListener);
         modalDialogs.clear();
+        modalOpen = false;
         dialogOnTop.forEach(Dialog::setAlwaysOnTop);
         dialogOnTop.clear();
     }

@@ -41,9 +41,9 @@ import org.lwjgl.system.windows.User32;
  * above the board without being topmost over other applications, follows it when it is minimized and has no taskbar
  * button of its own. Each platform has its own relationship:
  * <ul>
- *     <li>Windows: the board window becomes the dialog's owner window. While a modal Swing dialog is open the board
- *     window is also disabled, so clicking it flashes the dialog as clicking a Swing frame behind its modal dialog
- *     does.</li>
+ *     <li>Windows: the board window becomes the dialog's owner window. The board window stays enabled while a modal
+ *     Swing dialog is open, so Windows activates it again as the dialog hides; the board ignores its own input
+ *     meanwhile and clicking it brings the dialog back to the front.</li>
  *     <li>macOS: the dialog becomes a child window of the board window, so AppKit orders and moves it with the
  *     board.</li>
  *     <li>Linux on X11 (including XWayland): the dialog is marked transient for the board window, which window
@@ -51,8 +51,8 @@ import org.lwjgl.system.windows.User32;
  *     so dialogs float on top instead.</li>
  * </ul>
  *
- * <p>{@link #adopt}, {@link #hidden} and {@link #forget} run on the Swing thread, {@link #setOwnerEnabled} on the
- * GPU thread that owns the board window, and {@link #releaseAll} on the GPU thread before the board window is
+ * <p>{@link #adopt}, {@link #hidden} and {@link #forget} run on the Swing thread, and {@link #releaseAll} on the GPU
+ * thread before the board window is
  * destroyed: a dialog must not go down with its owner. On macOS and Linux the dialogs' native windows come from
  * JAWT, Java's supported native window interface, so no JVM flag opens AWT's internals.</p>
  */
@@ -193,25 +193,15 @@ abstract class GpuNativeDialogOwner {
         return false;
     }
 
-    /** GPU thread: disables the board window while a modal dialog is open, where the platform supports it. */
-    void setOwnerEnabled(boolean enabled) {
-    }
-
-    boolean ownerEnabled() {
-        return true;
-    }
-
     /** Windows: the board window is the native owner window ({@code GWLP_HWNDPARENT}) of each dialog. */
     static final class Win32 extends GpuNativeDialogOwner {
         /** The owner of a top-level window; despite the name it is not the parent. */
         static final int GWLP_HWNDPARENT = -8;
         static final int GWL_STYLE = -16;
-        static final long WS_DISABLED = 0x08000000L;
         static final int GCLP_HICON = -14;
         static final int GCLP_HICONSM = -34;
         private static final long ICON_SMALL = 0;
         private static final long ICON_BIG = 1;
-        private static volatile long enableWindow;
         private static long classBigIcon;
         private static long classSmallIcon;
 
@@ -257,24 +247,6 @@ abstract class GpuNativeDialogOwner {
             if (User32.GetWindowLongPtr(adoption.handle(), GWLP_HWNDPARENT) == ownerHandle()) {
                 User32.SetWindowLongPtr(adoption.handle(), GWLP_HWNDPARENT, adoption.previousOwner());
             }
-        }
-
-        /** GPU thread (the board window's own thread, so Windows sends it no message across threads). */
-        @Override
-        void setOwnerEnabled(boolean enabled) {
-            long function = enableWindow;
-            if (function == 0) {
-                function = User32.getLibrary().getFunctionAddress("EnableWindow");
-                enableWindow = function;
-            }
-            if (function != 0) {
-                JNI.callPI(ownerHandle(), enabled ? 1 : 0, function);
-            }
-        }
-
-        @Override
-        boolean ownerEnabled() {
-            return (User32.GetWindowLongPtr(ownerHandle(), GWL_STYLE) & WS_DISABLED) == 0;
         }
 
         /**

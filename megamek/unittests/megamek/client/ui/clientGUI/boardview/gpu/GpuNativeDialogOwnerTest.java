@@ -111,23 +111,6 @@ class GpuNativeDialogOwnerTest {
     }
 
     @Test
-    void disablingTheBoardBlocksItAsAModalDialogBlocksItsFrame() throws Exception {
-        assertTrue(owner.ownerEnabled());
-
-        onSwing(() -> {
-            owner.setOwnerEnabled(false);
-            return null;
-        });
-        assertFalse(owner.ownerEnabled());
-
-        onSwing(() -> {
-            owner.setOwnerEnabled(true);
-            return null;
-        });
-        assertTrue(owner.ownerEnabled());
-    }
-
-    @Test
     void forgottenDialogIsNotRestored() throws Exception {
         long dialogHandle = onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
         assertTrue(onSwing(() -> owner.adopt(dialog)));

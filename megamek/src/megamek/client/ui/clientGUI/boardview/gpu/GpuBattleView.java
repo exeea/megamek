@@ -22,6 +22,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.graphics.Color;
@@ -162,6 +163,9 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
+    /** The loading stage's or the HUD's input, which a modal Swing dialog holds back (setInputBlocked). */
+    private InputProcessor installedInput;
+    private boolean inputBlocked;
     final FullscreenKey fullscreenKey = new FullscreenKey();
     /** The window's bounds before the fullscreen key made it fullscreen; the key's next press restores them. */
     private GpuWindowBounds windowed;
@@ -292,10 +296,30 @@ class GpuBattleView extends ApplicationAdapter {
         shaderEdits.run(this::createView);
     }
 
+    private void installInput(InputProcessor input) {
+        installedInput = input;
+        Gdx.input.setInputProcessor(inputBlocked ? null : input);
+    }
+
+    /**
+     * GPU thread: ignores the mouse and keyboard while a modal Swing dialog is open, as a disabled window would; the
+     * window itself stays enabled so it takes the activation back when the dialog closes.
+     */
+    void setInputBlocked(boolean blocked) {
+        if (blocked == inputBlocked) {
+            return;
+        }
+        inputBlocked = blocked;
+        if (blocked) {
+            pause();
+        }
+        Gdx.input.setInputProcessor(blocked ? null : installedInput);
+    }
+
     private void createView() {
         if (source == null) {
             createLoadingStage();
-            Gdx.input.setInputProcessor(new InputMultiplexer(fullscreenKey, loadingStage));
+            installInput(new InputMultiplexer(fullscreenKey, loadingStage));
             return;
         }
         createBoard();
@@ -394,7 +418,7 @@ class GpuBattleView extends ApplicationAdapter {
         ui = source instanceof GpuBoardSource game
               ? new GpuHud(game, theme.skin, annotationBatch, boardCamera, tuning, history)
               : new GpuMapHud(source, theme.skin, annotationBatch, boardCamera, tuning, history, () -> terrain);
-        Gdx.input.setInputProcessor(new InputMultiplexer(ui.stage(), boardInput) {
+        installInput(new InputMultiplexer(ui.stage(), boardInput) {
             // The HUD's Stage takes the presses on its widgets; every key goes through BoardInput, which asks the
             // HUD first (C.4), so no key reaches the Stage twice.
             @Override
