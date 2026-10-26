@@ -415,9 +415,8 @@ work for Swing, and item 11 is under investigation.
      when the server already took it. The load and scenario pages are wider than the menu, so long names fit, and
      their list fills the room left in the column. Ctrl+click on Load game and Scenario still reaches quick load
      and the last scenario. Follow-ups: a **Load anyway** for saves from another version (to propose to the MegaMek
-     team), a map thumbnail in the briefing (ideally drawn by the 3D board), the native dialog on macOS and Linux
-     (LWJGL's NFD 3.3.3 has no owner window or title, and needs the main thread on macOS), and libGDX camo,
-     options and conditions pickers with the lobby's dialogs (step 8). To review a page without clicking through it, set
+     team), the map thumbnail and the native dialog on macOS and Linux (step 5.5), and libGDX camo, options and
+     conditions pickers with the lobby's dialogs (step 8). To review a page without clicking through it, set
      `MM_START_PAGE` (such as `host+online+reveal`, `connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with
      `MM_START_SCENARIO` naming the scenario file) before `gradlew :megamek:run`;
      `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
@@ -427,7 +426,14 @@ work for Swing, and item 11 is under investigation.
      Host keeps the password, port and server browser in a closed **Online options** section, which opens when the
      password or port was changed before or one of them is wrong. Bot setup moves with the lobby's dialogs (step 8). The new main menu shows these forms as
      its own pages; the card stays for MekHQ.
-  5. The scenario flow.
+  5. ~~The scenario flow~~: the scenario browser and the briefing in the start screen's column (G5 and G6 in step 3).
+  5.5. Start screen follow-ups, before the lobby:
+     - A map thumbnail on the briefing, ideally drawn by the 3D board, so a scenario shows its battlefield before it
+       starts.
+     - The system's file dialog on macOS and Linux. LWJGL's Native File Dialog supports both, but it is only enabled
+       on Windows so far: on macOS it must run on the main thread, which the start window's loop holds (so it would
+       open from that loop and pause drawing while it is open), and on Linux it uses GTK, which needs checking
+       beside AWT. Both need testing on real machines; Swing's chooser stays the fallback.
   6. The lobby as a briefing room in game mode: a top bar with Ready and summary chips, players on the left, forces in
      the centre, the battlefield (map, conditions, victory) on the right and a chat dock.
   7. The unit selector. 8. The lobby's dialogs. 9. A settings check.
