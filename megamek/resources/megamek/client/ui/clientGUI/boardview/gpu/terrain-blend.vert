@@ -3,13 +3,16 @@
 #ifdef terrainBlendFlag
 in vec4 a_coverWeights;
 in float a_coverInterpolation;
+in vec4 a_coverFoot;
 out vec4 v_coverWeights;
 out float v_coverInterpolation;
+out vec4 v_coverFoot;
 #endif
 
 void terrainBlendWeights() {
     #ifdef terrainBlendFlag
     v_coverWeights = a_coverWeights;
     v_coverInterpolation = a_coverInterpolation;
+    v_coverFoot = a_coverFoot;
     #endif
 }

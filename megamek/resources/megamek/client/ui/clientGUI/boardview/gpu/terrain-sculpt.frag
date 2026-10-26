@@ -52,6 +52,7 @@ uniform float u_gravity;    // scenario acceleration; without it there is no wat
 #ifdef terrainBlendFlag
 in vec4 v_coverWeights;
 in float v_coverInterpolation;
+in vec4 v_coverFoot; // a bank's share of its cover from the ground below, before footCover cuts it by height
 uniform vec4 u_coverFamilies;
 #ifdef COVER_FAMILIES
 const vec4 coverFamilyConstants = COVER_FAMILIES;

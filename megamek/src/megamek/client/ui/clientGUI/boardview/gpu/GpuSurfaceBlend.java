@@ -22,7 +22,8 @@ final class GpuSurfaceBlend extends Attribute {
     static final VertexAttributes VERTICES = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(),
           VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
           new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverWeights"),
-          new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_coverInterpolation", 1));
+          new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_coverInterpolation", 1),
+          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverFoot", 2));
     final GpuAssets.MaterialArrays texture;
     final float[] families, responses;
     final float[][] tiles, layers;
@@ -120,7 +121,10 @@ final class GpuSurfaceBlend extends Attribute {
         }
     }
 
-    record Point(MeshPartBuilder.VertexInfo vertex, BoardSurfaceBlend.Cover cover) { }
+    /** A vertex and its cover; a bank's vertex also carries the ground below's uncut share of it (BoardSurfaceBlend.Footing). */
+    record Point(MeshPartBuilder.VertexInfo vertex, BoardSurfaceBlend.Cover cover, BoardSurfaceBlend.Cover foot) {
+        Point(MeshPartBuilder.VertexInfo vertex, BoardSurfaceBlend.Footing footing) { this(vertex, footing.cover(), footing.foot()); }
+    }
 
     record Triangle(Point a, Point b, Point c) {
         void write(MeshPartBuilder mesh, Palette palette) {
@@ -129,11 +133,18 @@ final class GpuSurfaceBlend extends Attribute {
 
         private static short write(MeshPartBuilder mesh, Point point, Palette palette) {
             var v = point.vertex();
+            var cover = point.cover();
+            var foot = point.foot();
             return mesh.vertex(v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z,
-                  v.color.toFloatBits(), v.uv.x, v.uv.y, point.cover().weight(palette.base()),
-                  palette.first() == palette.base() ? 0 : point.cover().weight(palette.first()),
-                  palette.second() == palette.base() ? 0 : point.cover().weight(palette.second()),
-                  palette.third() == palette.base() ? 0 : point.cover().weight(palette.third()), point.cover().interpolation());
+                  v.color.toFloatBits(), v.uv.x, v.uv.y, cover.weight(palette.base()), slot(cover, palette.first(), palette),
+                  slot(cover, palette.second(), palette), slot(cover, palette.third(), palette), cover.interpolation(),
+                  foot.weight(palette.base()), slot(foot, palette.first(), palette), slot(foot, palette.second(), palette),
+                  slot(foot, palette.third(), palette));
+        }
+
+        /** Unused slots repeat the base family and carry nothing. */
+        private static float slot(BoardSurfaceBlend.Cover cover, int family, Palette palette) {
+            return family == palette.base() ? 0 : cover.weight(family);
         }
     }
 
@@ -153,13 +164,14 @@ final class GpuSurfaceBlend extends Attribute {
         var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
         return prepare(BoardSurfaceBlend.family(tile), faces, vertices,
               v -> v.color.b > .375f && v.color.b < .625f
-                    ? sampler.sampleCliff(v.position.x, v.position.y, v.position.z)
-                    : sampler.sample(v.position.x, v.position.y, v.position.z), spacing);
+                    ? sampler.sampleFoot(v.position.x, v.position.y, v.position.z)
+                    : new BoardSurfaceBlend.Footing(sampler.sample(v.position.x, v.position.y, v.position.z),
+                          BoardSurfaceBlend.NO_FOOT), spacing);
     }
 
     private static Map<Palette, List<Triangle>> prepare(int family, List<BoardSurface.Face> faces,
-          Function<Vector3, MeshPartBuilder.VertexInfo> vertices, Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
-          float spacing) {
+          Function<Vector3, MeshPartBuilder.VertexInfo> vertices,
+          Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Footing> cover, float spacing) {
         Map<Palette, List<Triangle>> groups = new LinkedHashMap<>();
         // Coincident cliff/top vertices deliberately carry different packed roles and UV meanings.
         Map<Vector3, Point> points = new IdentityHashMap<>();
@@ -182,8 +194,9 @@ final class GpuSurfaceBlend extends Attribute {
     static void appendPolygon(Map<Palette, List<Triangle>> groups, int family,
           List<MeshPartBuilder.VertexInfo> polygon, Function<Vector3, BoardSurfaceBlend.Cover> cover, float spacing) {
         List<Point> points = new ArrayList<>(polygon.size());
-        for (var vertex : polygon) { points.add(new Point(vertex, cover.apply(vertex.position))); }
-        Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> vertexCover = v -> cover.apply(v.position);
+        Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Footing> vertexCover
+              = v -> new BoardSurfaceBlend.Footing(cover.apply(v.position), BoardSurfaceBlend.NO_FOOT);
+        for (var vertex : polygon) { points.add(new Point(vertex, vertexCover.apply(vertex))); }
         for (int i = 1; i + 1 < points.size(); i++) {
             Point a = points.getFirst(), b = points.get(i), c = points.get(i + 1);
             if (degenerate(a.vertex().position, b.vertex().position, c.vertex().position)) { continue; }
@@ -200,7 +213,7 @@ final class GpuSurfaceBlend extends Attribute {
     }
 
     private static void append(Map<Palette, List<Triangle>> groups, int family,
-          Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
+          Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Footing> cover,
           Point a, Point b, Point c, float spacing, int depth) {
         int mask = a.cover().mask() | b.cover().mask() | c.cover().mask();
         float ab = a.vertex().position.dst2(b.vertex().position), bc = b.vertex().position.dst2(c.vertex().position);
@@ -247,7 +260,7 @@ final class GpuSurfaceBlend extends Attribute {
     }
 
     private static boolean appendSplit(Map<Palette, List<Triangle>> groups, int family,
-          Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
+          Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Footing> cover,
           Point a, Point b, Point c, float spacing, int depth, int mask) {
         var mid = between(cover, a, b, .5f);
         if (Integer.bitCount(mask) <= 4 && accurate(mid, a, b, c, .5f, .5f, 0)
@@ -261,7 +274,7 @@ final class GpuSurfaceBlend extends Attribute {
         return true;
     }
 
-    private static Point between(Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
+    private static Point between(Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Footing> cover,
           Point a, Point b, float amount) {
         var v = new MeshPartBuilder.VertexInfo().set(a.vertex()).lerp(b.vertex(), amount);
         v.normal.nor();
@@ -274,6 +287,8 @@ final class GpuSurfaceBlend extends Attribute {
         for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
             float expected = a.cover().weight(family) * wa + b.cover().weight(family) * wb + c.cover().weight(family) * wc;
             if (Math.abs(sample.cover().weight(family) - expected) > .04f) { return false; }
+            float foot = a.foot().weight(family) * wa + b.foot().weight(family) * wb + c.foot().weight(family) * wc;
+            if (Math.abs(sample.foot().weight(family) - foot) > .04f) { return false; }
         }
         return true;
     }
