@@ -20,13 +20,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.filechooser.FileFilter;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
@@ -55,6 +58,8 @@ public final class GpuStartWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuStartWindow.class);
     /** Frames between reads of the window's bounds; a few times a second is plenty to follow a move or resize. */
     private static final int BOUNDS_POLL_FRAMES = 15;
+    private static final int OWN_DIALOG_POLL_MS = 50;
+    private static final int OWN_DIALOG_TRIES = 100;
 
     /** What the start screen asks MegaMek to do; each runs on the Swing thread. */
     public enum Action {
@@ -460,23 +465,66 @@ public final class GpuStartWindow {
     }
 
     /**
-     * Any thread: shows a file chooser, a form of the hidden frame and so above this window, at {@code directory}, and
-     * hands the file the player opens to {@code chosen} on the GPU thread; nothing when they cancel.
+     * Any thread: shows the system's file dialog, or a file chooser that is a form of the hidden frame and so above
+     * this window where it can't, at {@code directory}, and hands the file the player opens to {@code chosen} on the
+     * GPU thread; nothing when they cancel. The start window takes no input while either is open.
      */
-    void chooseFile(File directory, String title, FileFilter filter, Consumer<File> chosen) {
+    void chooseFile(File directory, String title, FileNameExtensionFilter filter, Consumer<File> chosen) {
+        if (!NativeFileChooser.usable()) {
+            SwingUtilities.invokeLater(() -> swingChooser(directory, title, filter, chosen));
+            return;
+        }
+        AtomicBoolean showing = new AtomicBoolean(true);
         SwingUtilities.invokeLater(() -> {
-            JFileChooser chooser = new JFileChooser(directory);
-            chooser.setDialogTitle(title);
-            chooser.setFileFilter(filter);
-            if (chooser.showOpenDialog(anchor) != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
-                return;
-            }
-            File file = chooser.getSelectedFile();
+            setStartEnabled(false);
+            ownSystemDialog(showing);
+        });
+        NativeFileChooser.open(directory, filter, file -> SwingUtilities.invokeLater(() -> {
+            showing.set(false);
+            setStartEnabled(true);
             Lwjgl3Application app = application;
-            if (app != null) {
+            if (file != null && app != null) {
                 app.postRunnable(() -> chosen.accept(file));
             }
+        }), () -> SwingUtilities.invokeLater(() -> {
+            showing.set(false);
+            setStartEnabled(true);
+            swingChooser(directory, title, filter, chosen);
+        }));
+    }
+
+    /**
+     * Swing thread: the system's file dialog opens without an owner, so clicking this window could bury it; once it
+     * shows, this window becomes its owner, which keeps it in front the way a Swing form is. Gives up after a few
+     * seconds, leaving it ownerless.
+     */
+    private void ownSystemDialog(AtomicBoolean showing) {
+        if (!(nativeOwner instanceof GpuNativeDialogOwner.Win32 owner)) {
+            return;
+        }
+        int[] tries = { 0 };
+        Timer poll = new Timer(OWN_DIALOG_POLL_MS, null);
+        poll.addActionListener(event -> {
+            long dialog = showing.get() ? GpuNativeDialogOwner.Win32.ownerlessSystemDialog() : 0;
+            if (!showing.get() || ++tries[0] > OWN_DIALOG_TRIES || (dialog != 0 && owner.own(dialog))) {
+                poll.stop();
+            }
         });
+        poll.start();
+    }
+
+    private void swingChooser(File directory, String title, FileFilter filter, Consumer<File> chosen) {
+        JFileChooser chooser = new JFileChooser(directory);
+        chooser.setDialogTitle(title);
+        chooser.setFileFilter(filter);
+        if (chooser.showOpenDialog(anchor) != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
+            return;
+        }
+        File file = chooser.getSelectedFile();
+        Lwjgl3Application app = application;
+        if (app != null) {
+            app.postRunnable(() -> chosen.accept(file));
+        }
     }
 
     /**

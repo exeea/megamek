@@ -225,6 +225,40 @@ abstract class GpuNativeDialogOwner {
             return dialog.isDisplayable() ? FlatNativeWindowsLibrary.getHWND(dialog) : 0;
         }
 
+        /**
+         * A shown standard dialog of this process that isn't owned by any window, such as the system's file dialog
+         * opened without an owner, or 0; Swing's own windows have classes of their own.
+         */
+        static long ownerlessSystemDialog() {
+            var library = User32.getLibrary();
+            long findWindow = library.getFunctionAddress("FindWindowExW");
+            long windowProcess = library.getFunctionAddress("GetWindowThreadProcessId");
+            if (findWindow == 0 || windowProcess == 0) {
+                return 0;
+            }
+            long process = ProcessHandle.current().pid();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                long dialogClass = MemoryUtil.memAddress(stack.UTF16("#32770"));
+                IntBuffer processOf = stack.mallocInt(1);
+                long window = 0;
+                while ((window = JNI.callPPPPP(0L, window, dialogClass, 0L, findWindow)) != 0) {
+                    JNI.callPPI(window, MemoryUtil.memAddress(processOf), windowProcess);
+                    if (Integer.toUnsignedLong(processOf.get(0)) == process && User32.IsWindowVisible(window)
+                          && User32.GetWindowLongPtr(window, GWLP_HWNDPARENT) == 0) {
+                        return window;
+                    }
+                }
+            }
+            return 0;
+        }
+
+        /** Makes this window the native owner of {@code window}, so it stays above it; whether that took. */
+        boolean own(long window) {
+            User32.SetWindowLongPtr(window, GWLP_HWNDPARENT, ownerHandle());
+            User32.BringWindowToTop(window);
+            return User32.GetWindowLongPtr(window, GWLP_HWNDPARENT) == ownerHandle();
+        }
+
         @Override
         Adoption attach(Dialog dialog, Adoption previous) {
             long handle = handle(dialog);
