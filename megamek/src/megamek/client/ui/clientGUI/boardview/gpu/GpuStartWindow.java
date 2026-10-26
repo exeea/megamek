@@ -228,13 +228,18 @@ public final class GpuStartWindow {
 
     /**
      * EDT: closes the start window and runs {@code then} on the EDT once its native window is gone, so another native
-     * window can take GLFW. Returns false, and runs nothing, when it is not open.
+     * window can take GLFW. Returns false, and runs nothing, when it is not open. Runs every {@code then} asked for
+     * while it closes, in order: a game's board window waits on it as the game's launch closes it too.
      */
     public static boolean closeThen(Runnable then) {
         if (open == null) {
             return false;
         }
-        open.afterClose = then;
+        Runnable earlier = open.afterClose;
+        open.afterClose = earlier == null ? then : () -> {
+            earlier.run();
+            then.run();
+        };
         open.requestClose();
         return true;
     }
