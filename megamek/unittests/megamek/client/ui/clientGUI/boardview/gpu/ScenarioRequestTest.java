@@ -48,8 +48,18 @@ class ScenarioRequestTest {
     @Test
     void aLoadNeedsTheSaveAndTheServerSettings() {
         HostRequest host = new HostRequest("Natasha", "", MMConstants.DEFAULT_PORT, false, "");
-        assertThrows(NullPointerException.class, () -> new LoadRequest(null, host));
-        assertThrows(NullPointerException.class, () -> new LoadRequest(new File("autosave.sav.gz"), null));
+        assertThrows(NullPointerException.class, () -> new LoadRequest(null, host, false, List.of()));
+        assertThrows(NullPointerException.class,
+              () -> new LoadRequest(new File("autosave.sav.gz"), null, false, List.of()));
+    }
+
+    @Test
+    void theHostsOwnPlayerGetsNoBotUnlessTheyWatch() {
+        File save = new File("autosave.sav.gz");
+        HostRequest host = new HostRequest("Natasha", "", MMConstants.DEFAULT_PORT, false, "");
+        assertThrows(IllegalArgumentException.class, () -> new LoadRequest(save, host, false, List.of("Natasha")));
+        assertTrue(new LoadRequest(save, host, false, List.of("Princess")).bots().contains("Princess"));
+        assertTrue(new LoadRequest(save, host, true, List.of("Natasha")).observe());
     }
 
     private ScenarioRequest request(List<Role> roles, String name) {

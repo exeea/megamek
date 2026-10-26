@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
@@ -87,12 +88,18 @@ public final class GpuStartWindow {
     /**
      * A saved game the Load game page asks MegaMek to host, its inputs already checked.
      *
-     * @param host the server's settings and the save's player the host takes
+     * @param host    the server's settings and the save's player the host takes, or the observer's name
+     * @param observe whether the host only watches, under a name none of the save's players has
+     * @param bots    the save's players a bot played, which a bot takes back; never the host's own player
      */
-    public record LoadRequest(File saveGame, HostRequest host) {
+    public record LoadRequest(File saveGame, HostRequest host, boolean observe, List<String> bots) {
         public LoadRequest {
             Objects.requireNonNull(saveGame);
             Objects.requireNonNull(host);
+            bots = List.copyOf(bots);
+            if (!observe && bots.contains(host.playerName())) {
+                throw new IllegalArgumentException("The host's own player can't get a bot");
+            }
         }
     }
 
@@ -470,6 +477,36 @@ public final class GpuStartWindow {
                 app.postRunnable(() -> chosen.accept(file));
             }
         });
+    }
+
+    /**
+     * Any thread: runs {@code work} on the Swing thread with the hidden frame that owns the screen's forms, so a form it
+     * opens shows above this window, then hands its result to {@code done} on the GPU thread.
+     */
+    <T> void onSwing(Function<JFrame, T> work, Consumer<T> done) {
+        SwingUtilities.invokeLater(() -> {
+            T result = work.apply(anchor);
+            Lwjgl3Application app = application;
+            if (app != null) {
+                app.postRunnable(() -> done.accept(result));
+            }
+        });
+    }
+
+    /**
+     * EDT: the scenario the briefing asked for didn't start; {@code gameUsed} when the server had taken its game by
+     * then, so the briefing has to make it again before it can start another.
+     */
+    public static void startFailed(boolean gameUsed) {
+        GpuStartWindow window = open;
+        Lwjgl3Application app = window == null ? null : window.application;
+        if (app != null) {
+            app.postRunnable(() -> {
+                if (window.screen != null) {
+                    window.screen.startFailed(gameUsed);
+                }
+            });
+        }
     }
 
     /**

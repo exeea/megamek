@@ -4,6 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -14,6 +18,7 @@ import java.util.zip.GZIPInputStream;
 import megamek.MMConstants;
 import megamek.SuiteConstants;
 import megamek.Version;
+import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.logging.MMLogger;
 import megamek.utilities.xml.MMXMLUtility;
@@ -32,20 +37,47 @@ final class StartSaves {
     /** Why a save can't be loaded. */
     enum Problem { UNREADABLE, NO_VERSION, WRONG_VERSION }
 
+    /** One of a save's players: its name, and whether a bot played it or it only watched. */
+    record Seat(String name, boolean bot, boolean observer) { }
+
     /**
      * What a save says about itself.
      *
-     * @param players the names of its players, in the save's order; the player takes one of them
+     * @param seats   its players, in the save's order; the player takes one of them
      * @param problem why it can't be loaded, or null when it can
      * @param version the version that wrote it, or null when it has none or can't be read
      */
-    record Summary(File file, List<String> players, Problem problem, Version version) {
+    record Summary(File file, List<Seat> seats, Problem problem, Version version) {
         Summary {
-            players = List.copyOf(players);
+            seats = List.copyOf(seats);
         }
 
         boolean loadable() {
             return problem == null;
+        }
+
+        /** Its players' names, in the save's order. */
+        List<String> players() {
+            return seats.stream().map(Seat::name).toList();
+        }
+
+        /** The players a bot played, which a bot takes back when it loads. */
+        List<String> bots() {
+            return seats.stream().filter(Seat::bot).map(Seat::name).toList();
+        }
+
+        /** The players people played, not bots and not observers. */
+        List<String> humans() {
+            return seats.stream().filter(seat -> !seat.bot() && !seat.observer()).map(Seat::name).toList();
+        }
+
+        /**
+         * The player who loads this save at once, without its options: {@code lastName}, when that is the save's only
+         * person and so nobody else need be asked about; null when someone has to choose.
+         */
+        String quickPlayer(String lastName) {
+            List<String> humans = humans();
+            return loadable() && humans.size() == 1 && humans.get(0).equals(lastName) ? lastName : null;
         }
     }
 
@@ -80,9 +112,34 @@ final class StartSaves {
         return name;
     }
 
+    /**
+     * How long ago {@code then} was, from {@code now}, both in epoch milliseconds: "just now", minutes, hours, yesterday
+     * and days, and the date beyond a week.
+     */
+    static String ago(long then, long now) {
+        long minutes = Math.max(0, now - then) / 60_000;
+        if (minutes < 1) {
+            return Messages.getString("StartScreen.agoNow");
+        } else if (minutes < 60) {
+            return Messages.getString(minutes == 1 ? "StartScreen.agoMinute" : "StartScreen.agoMinutes", minutes);
+        }
+        long hours = minutes / 60;
+        if (hours < 24) {
+            return Messages.getString(hours == 1 ? "StartScreen.agoHour" : "StartScreen.agoHours", hours);
+        }
+        long days = hours / 24;
+        if (days == 1) {
+            return Messages.getString("StartScreen.agoYesterday");
+        } else if (days < 7) {
+            return Messages.getString("StartScreen.agoDays", days);
+        }
+        return DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+              .format(Instant.ofEpochMilli(then).atZone(ZoneId.systemDefault()));
+    }
+
     /** Blocks: reads {@code file}'s version and players. */
     static Summary read(File file) {
-        List<String> players = new ArrayList<>();
+        List<Seat> players = new ArrayList<>();
         Version version = null;
         // As the old Load game dialog: a save without a version node loads; one with an empty node doesn't
         boolean versioned = true;
@@ -171,7 +228,7 @@ final class StartSaves {
         return new Version(major, minor, patch, revision, extra);
     }
 
-    private static void playerNames(Node playersNode, List<String> names) {
+    private static void playerNames(Node playersNode, List<Seat> seats) {
         NodeList entries = playersNode.getChildNodes();
         for (int i = 0; i < entries.getLength(); i++) {
             Node entry = entries.item(i);
@@ -184,12 +241,25 @@ final class StartSaves {
                 if (player.getNodeType() != Node.ELEMENT_NODE || !Player.class.getName().equals(player.getNodeName())) {
                     continue;
                 }
+                String name = null;
+                boolean bot = false;
+                boolean observer = false;
                 NodeList fields = player.getChildNodes();
                 for (int j = 0; j < fields.getLength(); j++) {
                     Node field = fields.item(j);
-                    if (field.getNodeType() == Node.ELEMENT_NODE && "name".equals(field.getNodeName())) {
-                        names.add(field.getTextContent());
+                    if (field.getNodeType() != Node.ELEMENT_NODE) {
+                        continue;
                     }
+                    switch (field.getNodeName()) {
+                        case "name" -> name = field.getTextContent();
+                        case "bot" -> bot = "true".equals(field.getTextContent().trim());
+                        case "observer" -> observer = "true".equals(field.getTextContent().trim());
+                        default -> {
+                        }
+                    }
+                }
+                if (name != null) {
+                    seats.add(new Seat(name, bot, observer));
                 }
             }
         }

@@ -2,6 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +45,18 @@ class StartScenariosTest {
         when(scenario.getName()).thenReturn(" ");
         when(scenario.getFileName()).thenReturn(new File(SCENARIOS, "nameless.mms").getPath());
         assertEquals("nameless.mms", new StartScenarios.Entry("", scenario).name());
+    }
+
+    @Test
+    void theSearchMatchesEveryWordAgainstNameGroupAndPlanet() {
+        StartScenarios.Entry entry = entry("tukkayid", "Second Encounter");
+        when(entry.scenario().getPlanet()).thenReturn("Luthien");
+        assertTrue(StartScenarios.matches(entry, ""));
+        assertTrue(StartScenarios.matches(entry, "  encounter  "));
+        assertTrue(StartScenarios.matches(entry, "TUKKAYID luth"));
+        assertTrue(StartScenarios.matches(entry, "second luthien"));
+        assertFalse(StartScenarios.matches(entry, "second tharkad"));
+        assertFalse(StartScenarios.matches(entry, "first"));
     }
 
     private static StartScenarios.Entry entry(String group, String name) {

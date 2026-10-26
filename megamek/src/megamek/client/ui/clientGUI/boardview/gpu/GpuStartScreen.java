@@ -10,6 +10,7 @@ import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -19,13 +20,17 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
+import javax.swing.ImageIcon;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -54,6 +59,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.MMConstants;
@@ -72,6 +78,9 @@ import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.design.swing.TokenFonts;
+import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
+import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
+import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
@@ -83,9 +92,16 @@ import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
 import megamek.common.Player;
+import megamek.common.game.Game;
 import megamek.common.game.IGame;
+import megamek.common.icons.Camouflage;
+import megamek.common.interfaces.PlanetaryConditionsUsing;
+import megamek.common.options.IBasicOption;
+import megamek.common.options.IOption;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.scenario.Scenario;
@@ -115,6 +131,9 @@ final class GpuStartScreen extends ApplicationAdapter {
     /** The least height a list or description keeps when the window is short. */
     private static final float MIN_FILLER = 96;
     private static final float ROLE_WIDTH = 130;
+    /** A camouflage swatch on the briefing, about a hex's proportions. */
+    private static final int SWATCH_WIDTH = 28;
+    private static final int SWATCH_HEIGHT = 24;
     private static final DateTimeFormatter SAVED_AT = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM,
           FormatStyle.SHORT);
     private static boolean probed;
@@ -134,8 +153,8 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     private enum Page { MAIN, HELP, HOST, CONNECT, LOAD, RESUME, SCENARIOS, BRIEFING }
 
-    /** A scenario read and its game made for the briefing, or why that failed. */
-    private record Briefing(Scenario scenario, IGame game, String error) { }
+    /** A scenario read and its game made for the briefing, with each player's camouflage swatch, or why that failed. */
+    private record Briefing(Scenario scenario, IGame game, List<BufferedImage> swatches, String error) { }
 
     private final GpuStartWindow window;
     private final GUIPreferences preferences;
@@ -230,6 +249,10 @@ final class GpuStartScreen extends ApplicationAdapter {
     private List<StartScenarios.Entry> catalog;
     private int groupIndex;
     private UiSelect groupSelect;
+    /** What the browser's search field holds; kept while the start screen is open, as the group is. */
+    private String scenarioQuery = "";
+    private UiTextField searchInput;
+    private Table scenarioFilters;
     private Table scenarioRows;
     private ScrollPane scenarioList;
     private UiButton openScenario;
@@ -241,6 +264,15 @@ final class GpuStartScreen extends ApplicationAdapter {
     private ScrollPane briefingText;
     private Table playerRows;
     private final List<UiSelect> roleSelects = new ArrayList<>();
+    /** Each player's camouflage swatch on the briefing, and the textures they show. */
+    private final List<Image> swatches = new ArrayList<>();
+    private final List<Texture> swatchTextures = new ArrayList<>();
+    /** The scenario's own value of each rule, so the briefing can count the ones the player changed. */
+    private final Map<String, Object> ruleBaseline = new HashMap<>();
+    private Table rulesLine;
+    private Label rulesValue;
+    private Table conditionsLine;
+    private Label conditionsValue;
     private UiButton startButton;
 
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
@@ -348,7 +380,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
             showPage(Page.LOAD);
             if (!saves.isEmpty()) {
-                readSave(saves.get(0));
+                readSave(saves.get(0), false);
             }
         } else if (asked != Page.MAIN) {
             showPage(asked);
@@ -444,7 +476,13 @@ final class GpuStartScreen extends ApplicationAdapter {
         } else {
             List<Actor> items = new ArrayList<>();
             if (shown == Page.MAIN) {
-                items.add(pageButton("button-primary", "StartScreen.newGame", Page.HOST));
+                // The latest save, when there is one, is the way back in and takes the accent from New game
+                List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
+                if (!saves.isEmpty()) {
+                    items.add(continueItem(saves.get(0)));
+                }
+                items.add(pageButton(saves.isEmpty() ? "button-primary" : "button-secondary", "StartScreen.newGame",
+                      Page.HOST));
                 items.add(pageItem("button-secondary", "StartScreen.loadGame", () -> showPage(Page.LOAD),
                       () -> window.dispatch(Action.QUICK_LOAD)));
                 // As a dev convenience, Ctrl opens the last scenario's briefing
@@ -532,6 +570,15 @@ final class GpuStartScreen extends ApplicationAdapter {
         UiButton button = kit.button(style, null, Messages.getString(key), null);
         leftAligned(button);
         UiKit.onChange(button, () -> (controlHeld() ? withControl : action).run());
+        return button;
+    }
+
+    /** Continue: the latest save, named with how long ago it was made, loaded as a click on it in the list loads it. */
+    private UiButton continueItem(File save) {
+        UiButton button = kit.button("button-primary", null, Messages.getString("StartScreen.continue"),
+              StartSaves.title(save) + "  \u00b7  " + StartSaves.ago(save.lastModified(), System.currentTimeMillis()));
+        leftAligned(button);
+        UiKit.onChange(button, () -> readSave(save, true));
         return button;
     }
 
@@ -692,6 +739,9 @@ final class GpuStartScreen extends ApplicationAdapter {
             items.add(resumeHeader);
         }
         items.add(resuming && playAsField != null ? playAsField : nameField);
+        if (resuming && watching()) {
+            items.add(nameField);
+        }
         items.add(onlineToggle);
         if (onlineOpen) {
             items.add(passwordRow);
@@ -872,7 +922,11 @@ final class GpuStartScreen extends ApplicationAdapter {
         leftAligned(browseSaves);
         UiKit.onChange(browseSaves, () -> window.chooseFile(new File(MMConstants.SAVEGAME_DIR),
               Messages.getString("MegaMek.SaveGameDialog.title"), new FileNameExtensionFilter(
-                    Messages.getString("StartScreen.saveFiles"), "sav", "gz"), this::readSave));
+                    Messages.getString("StartScreen.saveFiles"), "sav", "gz"), file -> {
+                  if (page == Page.LOAD) {
+                      readSave(file, false);
+                  }
+              }));
         List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
         if (saves.isEmpty()) {
             saveList = null;
@@ -885,8 +939,15 @@ final class GpuStartScreen extends ApplicationAdapter {
         for (File save : saves) {
             UiButton row = kit.button("button-quiet", null, StartSaves.title(save), savedAt(save));
             leftAligned(row);
-            UiKit.onChange(row, () -> readSave(save));
-            rows.add(row).row();
+            UiKit.onChange(row, () -> readSave(save, true));
+            // The way to the Resume page's choices for a save that would otherwise load at once
+            UiButton options = kit.button("button-quiet-compact", null,
+                  Messages.getString("StartScreen.saveOptions"), null);
+            UiKit.onChange(options, () -> readSave(save, false));
+            Table line = new Table();
+            line.add(row).growX().minWidth(0);
+            line.add(options).padLeft(4);
+            rows.add(line).row();
         }
         saveList = kit.scrollList(rows, true);
     }
@@ -913,18 +974,30 @@ final class GpuStartScreen extends ApplicationAdapter {
         return SAVED_AT.format(Instant.ofEpochMilli(file.lastModified()).atZone(ZoneId.systemDefault()));
     }
 
-    /** Reads {@code save} off the GPU thread, then opens it on the Resume page, or says why it can't be loaded. */
-    private void readSave(File save) {
-        if (page != Page.LOAD) {
-            return;
-        }
+    /**
+     * Reads {@code save} off the GPU thread, then, when {@code quick} and it is the last player's own game against
+     * bots, loads it at once; otherwise opens it on the Resume page, or says on the Load game page why it can't load.
+     */
+    private void readSave(File save, boolean quick) {
         generation++;
-        showLoadNote(Messages.getString("StartScreen.readingSave", StartSaves.title(save)), "text.muted");
+        if (page == Page.LOAD) {
+            showLoadNote(Messages.getString("StartScreen.readingSave", StartSaves.title(save)), "text.muted");
+        }
         background("save", () -> StartSaves.read(save), summary -> {
-            if (summary.loadable()) {
+            ClientPreferences client = PreferenceManager.getClientPreferences();
+            String player = quick ? summary.quickPlayer(client.getLastPlayerName()) : null;
+            if (player != null) {
+                String password = client.getLastServerPass();
+                window.load(new LoadRequest(summary.file(), new HostRequest(player,
+                      password == null ? "" : password, client.getLastServerPort(), false, ""), false,
+                      summary.bots()));
+            } else if (summary.loadable()) {
                 resume = summary;
                 showPage(Page.RESUME);
             } else {
+                if (page != Page.LOAD) {
+                    showPage(Page.LOAD);
+                }
                 showLoadNote(saveProblem(summary), "status.danger");
             }
         });
@@ -961,23 +1034,41 @@ final class GpuStartScreen extends ApplicationAdapter {
         playAsField = null;
         List<String> players = resume.players();
         if (!players.isEmpty()) {
-            playAs = kit.tokenSelect(false, players.toArray(String[]::new));
+            List<String> choices = new ArrayList<>(players);
+            choices.add(Messages.getString("StartScreen.watch"));
+            playAs = kit.tokenSelect(false, choices.toArray(String[]::new));
             int last = players.indexOf(PreferenceManager.getClientPreferences().getLastPlayerName());
             playAs.select(Math.max(last, 0));
+            UiKit.onChange(playAs, this::fillHostColumn);
             playAsField = kit.formField(Messages.getString("StartScreen.playAs"), playAs)
                   .helper(Messages.getString("StartScreen.playAsHelper"));
+            // Watching asks for a name, as the briefing does when the host takes no side
+            nameField = kit.formField(Messages.getString("StartScreen.observerName"), nameInput)
+                  .helper(Messages.getString("StartScreen.loadObserverHelper"));
         }
     }
 
-    /** Checks the Resume page as the Host page; asks MegaMek to host the save as the chosen player. */
+    /** Whether the Resume page's host watches the save rather than take one of its players. */
+    private boolean watching() {
+        return playAs != null && playAs.getSelectedIndex() == resume.players().size();
+    }
+
+    /** Checks the Resume page as the Host page; asks MegaMek to host the save as the chosen player, or to watch it. */
     private void submitResume() {
-        String name = playAs != null ? playAs.getSelected() : nameInput.getText().trim();
+        boolean watching = watching();
+        String name = playAs != null && !watching ? playAs.getSelected() : nameInput.getText().trim();
         int port = StartHostForm.port(portInput.getText());
-        if (playAs == null) {
-            nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
+        String nameError = null;
+        if (playAs == null || watching) {
+            if (name.isEmpty()) {
+                nameError = Messages.getString("MegaMek.GameConnection.nameError");
+            } else if (watching && resume.players().contains(name)) {
+                nameError = Messages.getString("StartScreen.observerNameTaken");
+            }
+            nameField.error(nameError);
         }
         portField.error(portError(port));
-        if (name == null || name.isEmpty()) {
+        if (nameError != null) {
             stage.setKeyboardFocus(nameInput);
             return;
         }
@@ -991,8 +1082,9 @@ final class GpuStartScreen extends ApplicationAdapter {
             return;
         }
         boolean register = registerBox.isChecked();
+        List<String> bots = resume.bots().stream().filter(bot -> watching || !bot.equals(name)).toList();
         window.load(new LoadRequest(resume.file(), new HostRequest(name, passwordInput.getText(), port, register,
-              register ? metaserverInput.getText().trim() : "")));
+              register ? metaserverInput.getText().trim() : ""), watching, bots));
     }
 
     // ---- The scenario browser ----
@@ -1042,6 +1134,22 @@ final class GpuStartScreen extends ApplicationAdapter {
         } else {
             groupIndex = 0;
         }
+        UiKit.TokenSearch search = kit.tokenSearch(Messages.getString("StartScreen.searchScenarios"), false);
+        searchInput = search.field;
+        searchInput.setFocusTraversal(false);
+        searchInput.setText(scenarioQuery);
+        // Only the rows change while typing, so the field keeps the keyboard
+        UiKit.onChange(searchInput, () -> {
+            scenarioQuery = searchInput.getText();
+            fillScenarioRows();
+            scenarioList.setScrollY(0);
+        });
+        scenarioFilters = new Table();
+        scenarioFilters.left().top();
+        scenarioFilters.add(search).growX().minWidth(0);
+        if (groupSelect != null) {
+            scenarioFilters.add(groupSelect).width(ROLE_WIDTH + 30).padLeft(8);
+        }
         scenarioRows = new Table();
         scenarioRows.top().left();
         scenarioRows.defaults().growX().left();
@@ -1049,13 +1157,13 @@ final class GpuStartScreen extends ApplicationAdapter {
         fillScenarioRows();
     }
 
-    /** The scenarios of the chosen group, or all of them. */
+    /** The scenarios of the chosen group, or all of them, that answer the search. */
     private void fillScenarioRows() {
         scenarioRows.clearChildren();
         List<String> groups = StartScenarios.groups(catalog);
         String group = groupIndex == 0 ? null : groups.get(groupIndex - 1);
         for (StartScenarios.Entry entry : catalog) {
-            if (group != null && !group.equals(entry.group())) {
+            if (group != null && !group.equals(entry.group()) || !StartScenarios.matches(entry, scenarioQuery)) {
                 continue;
             }
             List<String> about = new ArrayList<>();
@@ -1072,6 +1180,9 @@ final class GpuStartScreen extends ApplicationAdapter {
             UiKit.onChange(row, () -> openBriefing(new File(entry.scenario().getFileName()), Page.SCENARIOS));
             scenarioRows.add(row).row();
         }
+        if (!scenarioRows.hasChildren()) {
+            scenarioRows.add(note(Messages.getString("StartScreen.noMatches"), "text.muted")).pad(8);
+        }
     }
 
     private void fillScenarioColumn() {
@@ -1080,9 +1191,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (catalog.isEmpty()) {
             items.add(note(Messages.getString("StartScreen.noScenarios"), "text.muted"));
         } else {
-            if (groupSelect != null) {
-                items.add(groupSelect);
-            }
+            items.add(scenarioFilters);
             items.add(scenarioList);
         }
         items.add(openScenario);
@@ -1140,12 +1249,57 @@ final class GpuStartScreen extends ApplicationAdapter {
     private static Briefing prepare(File file) {
         try {
             Scenario scenario = new ScenarioLoader(file).load();
-            return new Briefing(scenario, scenario.createGame(), null);
+            IGame game = scenario.createGame();
+            List<Player> players = game.getPlayersList();
+            if (!scenario.isSinglePlayer()) {
+                // As the old players dialog did, a multiplayer scenario's sides take the colours in order; a side
+                // still in the default blue camouflage wears its colour, so the briefing's swatches tell them apart
+                PlayerColour[] colours = PlayerColour.values();
+                Camouflage untouched = Camouflage.of(PlayerColour.BLUE);
+                for (int i = 0; i < players.size(); i++) {
+                    Player player = players.get(i);
+                    PlayerColour colour = colours[i % colours.length];
+                    player.setColour(colour);
+                    if (untouched.equals(player.getCamouflage())) {
+                        player.setCamouflage(Camouflage.of(colour));
+                    }
+                }
+            }
+            return new Briefing(scenario, game, players.stream().map(GpuStartScreen::swatch).toList(), null);
         } catch (Exception ex) {
             LOGGER.error(ex, "The start screen could not prepare the scenario {}", file);
-            return new Briefing(null, null, Messages.getString("StartScreen.briefingFailed", file.getName(),
-                  ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
+            return new Briefing(null, null, List.of(), Messages.getString("StartScreen.briefingFailed",
+                  file.getName(), ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
         }
+    }
+
+    /** Blocks: a side's camouflage as the briefing shows it, a small rounded patch of it, or of its colour. */
+    private static BufferedImage swatch(Player player) {
+        java.awt.Image camo = null;
+        try {
+            camo = player.getCamouflage().getBaseImage();
+        } catch (RuntimeException ex) {
+            LOGGER.warn("No camouflage image for {}: {}", player.getName(), ex.getMessage());
+        }
+        if (camo != null) {
+            // Waits for an image the toolkit loads in the background
+            camo = new ImageIcon(camo).getImage();
+        }
+        int width = SWATCH_WIDTH * 2;
+        int height = SWATCH_HEIGHT * 2;
+        BufferedImage swatch = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = swatch.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.setClip(new RoundRectangle2D.Float(0, 0, width, height, 10, 10));
+        if (camo != null && camo.getWidth(null) > 0) {
+            g.drawImage(camo, 0, 0, width, height, null);
+        } else {
+            g.setColor(player.getDisplayColour().getColour());
+            g.fillRect(0, 0, width, height);
+        }
+        g.dispose();
+        return swatch;
     }
 
     /**
@@ -1181,6 +1335,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
 
         roleSelects.clear();
+        disposeSwatches();
         playerRows = new Table();
         playerRows.left().top();
         playerRows.defaults().left().padBottom(4);
@@ -1188,19 +1343,36 @@ final class GpuStartScreen extends ApplicationAdapter {
         String[] roles = { Messages.getString("StartScreen.you"), Messages.getString("StartScreen.human"),
                            Messages.getString("StartScreen.bot") };
         for (int i = 0; i < players.size(); i++) {
+            playerRows.add(swatchButton(i)).padRight(8);
             playerRows.add(line(players.get(i).getName(), "body", "text.primary")).growX().minWidth(0);
             if (scenario.isSinglePlayer()) {
                 playerRows.add(kit.typeLabel(roles[i == 0 ? 0 : 2], "body", "text.muted")).width(ROLE_WIDTH)
                       .padLeft(12);
             } else {
+                // Most multiplayer games are played against bots: the host takes the first side, bots the rest
                 UiSelect role = kit.tokenSelect(true, roles);
-                role.select(i == 0 ? Role.YOU.ordinal() : Role.HUMAN.ordinal());
+                role.select(i == 0 ? Role.YOU.ordinal() : Role.BOT.ordinal());
                 UiKit.onChange(role, () -> roleChosen(role));
                 roleSelects.add(role);
                 playerRows.add(role).width(ROLE_WIDTH).padLeft(12);
             }
             playerRows.row();
         }
+
+        ruleBaseline.clear();
+        if (briefing.game() instanceof Game twGame) {
+            twGame.getOptions().getOptionsList().forEach(option -> ruleBaseline.put(option.getName(),
+                  option.getValue()));
+        }
+        rulesValue = kit.typeLabel("", "body", "text.primary");
+        rulesLine = settingLine("StartScreen.rules", rulesValue,
+              scenario.hasFixedGameOptions() || !(briefing.game() instanceof Game) ? null : this::changeRules);
+        conditionsValue = kit.typeLabel("", "body", "text.primary");
+        conditionsLine = briefing.game() instanceof PlanetaryConditionsUsing
+              ? settingLine("StartScreen.conditions", conditionsValue,
+                    scenario.hasFixedPlanetaryConditions() ? null : this::changeConditions)
+              : null;
+        describeSettings();
 
         ClientPreferences client = PreferenceManager.getClientPreferences();
         nameInput = field(client.getLastPlayerName());
@@ -1210,6 +1382,161 @@ final class GpuStartScreen extends ApplicationAdapter {
         startButton = kit.button("button-primary", null, Messages.getString("StartScreen.startScenario"), null);
         leftAligned(startButton);
         UiKit.onChange(startButton, this::submitBriefing);
+    }
+
+    /** A side's camouflage swatch; a click chooses another camouflage for it. */
+    private UiButton swatchButton(int index) {
+        Texture texture = texture(briefing.swatches().get(index), false);
+        swatchTextures.add(texture);
+        Image image = new Image(texture);
+        swatches.add(image);
+        UiButton button = kit.button("button-quiet-compact", null, null, null);
+        button.add(image).size(SWATCH_WIDTH, SWATCH_HEIGHT);
+        UiKit.onChange(button, () -> chooseCamo(index));
+        return button;
+    }
+
+    /** Opens the camouflage chooser for side {@code index}, then shows what was chosen. */
+    private void chooseCamo(int index) {
+        Player player = briefing.game().getPlayersList().get(index);
+        Briefing asked = briefing;
+        window.onSwing(frame -> {
+            CamoChooserDialog dialog = new CamoChooserDialog(frame, player.getCamouflage());
+            try {
+                if (!dialog.showDialog().isConfirmed()) {
+                    return null;
+                }
+                player.setCamouflage(dialog.getSelectedItem());
+                return swatch(player);
+            } finally {
+                dialog.dispose();
+            }
+        }, chosen -> {
+            if (chosen == null || briefing != asked || page != Page.BRIEFING) {
+                return;
+            }
+            Texture texture = texture(chosen, false);
+            swatchTextures.set(index, texture).dispose();
+            swatches.get(index).setDrawable(new TextureRegionDrawable(texture));
+        });
+    }
+
+    private void disposeSwatches() {
+        swatchTextures.forEach(Texture::dispose);
+        swatchTextures.clear();
+        swatches.clear();
+    }
+
+    /**
+     * A line of the briefing's settings: its name, what it holds, and a Change button when the scenario leaves it to
+     * the player, or that the scenario sets it when it doesn't.
+     */
+    private Table settingLine(String key, Label value, Runnable change) {
+        Table line = new Table();
+        line.left();
+        line.add(kit.typeLabel(Messages.getString(key), "body", "text.muted")).width(ROLE_WIDTH - 30).left();
+        value.setEllipsis(true);
+        line.add(value).growX().minWidth(0).left();
+        if (change != null) {
+            UiButton button = kit.button("button-quiet-compact", null, Messages.getString("StartScreen.change"),
+                  null);
+            UiKit.onChange(button, change);
+            line.add(button).padLeft(8);
+        }
+        return line;
+    }
+
+    /** Fills the Rules and Conditions lines from the briefing's game. */
+    private void describeSettings() {
+        Scenario scenario = briefing.scenario();
+        if (scenario.hasFixedGameOptions() || !(briefing.game() instanceof Game twGame)) {
+            rulesValue.setText(Messages.getString("StartScreen.setByScenario"));
+        } else {
+            long changed = twGame.getOptions().getOptionsList().stream()
+                  .filter(option -> !Objects.equals(option.getValue(), ruleBaseline.get(option.getName())))
+                  .count();
+            rulesValue.setText(changed == 0 ? Messages.getString("StartScreen.rulesDefault")
+                  : changed == 1 ? Messages.getString("StartScreen.rulesChangedOne")
+                  : Messages.getString("StartScreen.rulesChanged", changed));
+        }
+        if (conditionsLine != null) {
+            conditionsValue.setText(scenario.hasFixedPlanetaryConditions()
+                  ? Messages.getString("StartScreen.setByScenario")
+                  : conditions(((PlanetaryConditionsUsing) briefing.game()).getPlanetaryConditions()));
+        }
+    }
+
+    /** The conditions in a few words: the light, and whatever else isn't the usual. */
+    static String conditions(PlanetaryConditions conditions) {
+        List<String> parts = new ArrayList<>();
+        parts.add(conditions.getLight().toString());
+        if (!conditions.getWeather().isClear()) {
+            parts.add(conditions.getWeather().toString());
+        }
+        if (!conditions.getWind().isCalm()) {
+            parts.add(conditions.getWind().toString());
+        }
+        if (!conditions.getFog().isFogNone()) {
+            parts.add(conditions.getFog().toString());
+        }
+        if (conditions.getTemperature() != 25) {
+            parts.add(Messages.getString("StartScreen.temperature", conditions.getTemperature()));
+        }
+        if (conditions.getGravity() != 1) {
+            parts.add(Messages.getString("StartScreen.gravity", conditions.getGravity()));
+        }
+        return String.join(", ", parts);
+    }
+
+    /** Opens the game options the scenario leaves open; confirming them sets them on the briefing's game. */
+    private void changeRules() {
+        Briefing asked = briefing;
+        Game game = (Game) briefing.game();
+        Set<String> locked = briefing.scenario().lockedGameOptions();
+        window.onSwing(frame -> {
+            GameOptionsDialog dialog = new GameOptionsDialog(frame, game.getOptions(), false);
+            try {
+                dialog.update(game.getOptions());
+                dialog.setEditable(true);
+                // The options the scenario calls its mission stay as written; the rest are the player's
+                dialog.lockOptions(locked);
+                return dialog.showDialog().isConfirmed() ? List.copyOf(dialog.getOptions()) : null;
+            } finally {
+                dialog.dispose();
+            }
+        }, chosen -> {
+            if (chosen == null || briefing != asked) {
+                return;
+            }
+            for (IBasicOption option : chosen) {
+                IOption rule = game.getOptions().getOption(option.getName());
+                if (rule != null) {
+                    rule.setValue(option.getValue());
+                }
+            }
+            describeSettings();
+        });
+    }
+
+    /** Opens the planetary conditions; confirming them sets them on the briefing's game. */
+    private void changeConditions() {
+        Briefing asked = briefing;
+        PlanetaryConditionsUsing game = (PlanetaryConditionsUsing) briefing.game();
+        PlanetaryConditions current = game.getPlanetaryConditions();
+        window.onSwing(frame -> {
+            PlanetaryConditionsDialog dialog = new PlanetaryConditionsDialog(frame, current);
+            try {
+                return dialog.showDialog() ? dialog.getConditions() : null;
+            } finally {
+                dialog.dispose();
+            }
+        }, chosen -> {
+            if (chosen == null || briefing != asked) {
+                return;
+            }
+            game.setPlanetaryConditions(chosen);
+            describeSettings();
+        });
     }
 
     /** A side became {@code chosen}'s choice; the host takes one side at most, so You moves rather than copies. */
@@ -1237,10 +1564,18 @@ final class GpuStartScreen extends ApplicationAdapter {
             items.add(overline("StartScreen.players"));
             items.add(playerRows);
             if (!briefing.scenario().isSinglePlayer()) {
-                if (!roles().contains(Role.YOU)) {
+                List<Role> roles = roles();
+                if (!roles.contains(Role.YOU)) {
                     items.add(nameField);
                 }
-                items.add(passwordRow);
+                // Only another person needs the password and port to join
+                if (roles.contains(Role.HUMAN)) {
+                    items.add(passwordRow);
+                }
+            }
+            items.add(rulesLine);
+            if (conditionsLine != null) {
+                items.add(conditionsLine);
             }
             items.add(startButton);
         }
@@ -1267,15 +1602,20 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     /** Checks the briefing; asks MegaMek to host the scenario with its sides as chosen. */
     private void submitBriefing() {
+        if (startButton.isDisabled()) {
+            return;
+        }
         List<Role> roles = roles();
         boolean single = briefing.scenario().isSinglePlayer();
+        // Without another person to join, the game takes the default port and no password, as single player does
+        boolean online = !single && roles.contains(Role.HUMAN);
         int you = roles.indexOf(Role.YOU);
         String name = you >= 0 ? briefing.game().getPlayersList().get(you).getName() : nameInput.getText().trim();
-        int port = single ? MMConstants.DEFAULT_PORT : StartHostForm.port(portInput.getText());
+        int port = online ? StartHostForm.port(portInput.getText()) : MMConstants.DEFAULT_PORT;
         if (you < 0) {
             nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
         }
-        if (!single) {
+        if (online) {
             portField.error(portError(port));
         }
         if (name.isEmpty()) {
@@ -1286,8 +1626,57 @@ final class GpuStartScreen extends ApplicationAdapter {
             stage.setKeyboardFocus(portInput);
             return;
         }
+        startButton.setDisabled(true);
+        startButton.setText(kit.cased("button", Messages.getString("StartScreen.starting")));
         window.scenario(new ScenarioRequest(briefing.scenario(), briefing.game(), roles, name,
-              single ? "" : passwordInput.getText(), port));
+              online ? passwordInput.getText() : "", port));
+    }
+
+    /**
+     * The scenario didn't start; MegaMek has said why. Start works again, once the briefing has made its game again when
+     * {@code gameUsed}, keeping the sides' camouflage, the rules and the conditions the player chose.
+     */
+    void startFailed(boolean gameUsed) {
+        if (page != Page.BRIEFING || briefing == null || briefing.error() != null) {
+            return;
+        }
+        if (!gameUsed) {
+            enableStart();
+            return;
+        }
+        Briefing used = briefing;
+        background("briefing", () -> prepare(briefingFile), made -> {
+            if (made.error() != null) {
+                briefing = made;
+                fillBriefingColumn();
+                return;
+            }
+            List<Player> before = used.game().getPlayersList();
+            List<Player> after = made.game().getPlayersList();
+            for (int i = 0; i < Math.min(before.size(), after.size()); i++) {
+                after.get(i).setCamouflage(before.get(i).getCamouflage());
+            }
+            if (used.game() instanceof Game oldGame && made.game() instanceof Game newGame) {
+                for (IOption option : oldGame.getOptions().getOptionsList()) {
+                    IOption rule = newGame.getOptions().getOption(option.getName());
+                    if (rule != null) {
+                        rule.setValue(option.getValue());
+                    }
+                }
+            }
+            if (used.game() instanceof PlanetaryConditionsUsing oldConditions
+                  && made.game() instanceof PlanetaryConditionsUsing newConditions) {
+                newConditions.setPlanetaryConditions(
+                      (PlanetaryConditions) oldConditions.getPlanetaryConditions().clone());
+            }
+            briefing = new Briefing(made.scenario(), made.game(), used.swatches(), null);
+            enableStart();
+        });
+    }
+
+    private void enableStart() {
+        startButton.setDisabled(false);
+        startButton.setText(kit.cased("button", Messages.getString("StartScreen.startScenario")));
     }
 
     private Table bottomRow() {
@@ -1955,5 +2344,6 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (boardSkin != null) {
             boardSkin.dispose();
         }
+        disposeSwatches();
     }
 }

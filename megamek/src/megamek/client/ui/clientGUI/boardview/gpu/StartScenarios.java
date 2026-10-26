@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 import megamek.SuiteConstants;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
@@ -60,6 +61,22 @@ final class StartScenarios {
                     .thenComparing(Entry::group, String.CASE_INSENSITIVE_ORDER)
                     .thenComparing(Entry::name, String.CASE_INSENSITIVE_ORDER))
               .toList();
+    }
+
+    /**
+     * Whether {@code entry} answers the browser's search: every word of {@code query} is somewhere in its name, group
+     * or planet, whatever the case; an empty query matches everything.
+     */
+    static boolean matches(Entry entry, String query) {
+        String planet = entry.scenario().getPlanet();
+        String text = (entry.name() + ' ' + entry.group() + ' ' + (planet == null ? "" : planet))
+              .toLowerCase(Locale.ROOT);
+        for (String word : query.toLowerCase(Locale.ROOT).trim().split("\\s+")) {
+            if (!word.isEmpty() && !text.contains(word)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** The groups of {@code entries}, in their order, without repeats. */

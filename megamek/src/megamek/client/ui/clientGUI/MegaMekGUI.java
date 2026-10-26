@@ -78,9 +78,7 @@ import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.UnitLoadingDialog;
 import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
-import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog;
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
 import megamek.client.ui.dialogs.randomArmy.AbstractRandomArmyDialog;
@@ -89,7 +87,6 @@ import megamek.client.ui.dialogs.unitSelectorDialogs.MainMenuUnitBrowserDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.panels.skinEditor.SkinEditorMainGUIPanel;
 import megamek.client.ui.util.MegaMekController;
-import megamek.client.ui.util.PlayerColour;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Configuration;
@@ -97,15 +94,11 @@ import megamek.common.KeyBindParser;
 import megamek.common.Player;
 import megamek.common.compute.Compute;
 import megamek.common.equipment.SensorChoiceHandler;
-import megamek.common.game.Game;
 import megamek.common.game.GameType;
 import megamek.common.game.IGame;
-import megamek.common.interfaces.PlanetaryConditionsUsing;
 import megamek.common.jacksonAdapters.BotParser;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.loaders.MekSummaryCache;
-import megamek.common.options.IBasicOption;
-import megamek.common.options.IOption;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceChangeEvent;
@@ -469,6 +462,36 @@ public class MegaMekGUI implements IPreferenceChangeListener {
               null,
               request.saveGame(),
               host.playerName());
+        if (server == null || client == null) {
+            return;
+        }
+        if (request.observe()) {
+            for (Player player : server.getGame().getPlayersList()) {
+                if (player.getName().equals(host.playerName())) {
+                    player.setObserver(true);
+                }
+            }
+        }
+        rejoinBots(request.bots(), server.getPort());
+    }
+
+    /**
+     * Has a Princess with her default behaviour take back each of a loaded save's {@code bots}: the server gives a
+     * player who connects under a disconnected player's name that player's place.
+     */
+    private void rejoinBots(List<String> bots, int port) {
+        for (String name : bots) {
+            LOGGER.info("Bringing back the bot {}", name);
+            BotClient botClient = BotFactory.createBot(AIType.PRINCESS, name, MMConstants.LOCALHOST, port);
+            botClient.getGame().addGameListener(new BotGUI(frame, botClient));
+            if (!botClient.connect()) {
+                LOGGER.error("Bot {} failed to connect; shutting it down", name);
+                botClient.die();
+            } else if (controller.clientGUI instanceof ClientGUI clientGUI) {
+                // As Edit Bots does: the host's client owns the bot, so it can be set up and readies with the host
+                clientGUI.getLocalBots().put(name, botClient);
+            }
+        }
     }
 
     /**
@@ -521,43 +544,24 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         IGame game = request.game();
         PreferenceManager.getClientPreferences().setLastScenario(scenario.getFileName());
 
-        if (!scenario.hasFixedGameOptions() && game instanceof Game twGame) {
-            GameOptionsDialog god = new GameOptionsDialog(frame, twGame.getOptions(), false);
-            god.update(twGame.getOptions());
-            god.setEditable(true);
-            // the options the scenario calls its mission stay as written; the rest are the player's
-            god.lockOptions(scenario.lockedGameOptions());
-            god.setVisible(true);
-            for (IBasicOption opt : god.getOptions()) {
-                IOption orig = game.getOptions().getOption(opt.getName());
-                orig.setValue(opt.getValue());
-            }
-        }
-
-        if ((game instanceof PlanetaryConditionsUsing plGame) && !scenario.hasFixedPlanetaryConditions()) {
-            PlanetaryConditionsDialog pcd = new PlanetaryConditionsDialog(frame, plGame.getPlanetaryConditions());
-            pcd.update(plGame.getPlanetaryConditions());
-            pcd.setVisible(true);
-            plGame.setPlanetaryConditions(pcd.getConditions());
-        }
-
         Player[] players = game.getPlayersList().toArray(new Player[0]);
-        if (!scenario.isSinglePlayer()) {
-            // As the old players dialog did, a multiplayer scenario's players take the colours in order
-            PlayerColour[] colours = PlayerColour.values();
-            for (int i = 0; i < players.length; i++) {
-                players[i].setColour(colours[i % colours.length]);
-            }
-        }
 
         Compute.d6();
         int port = request.port();
         if (!startServer(request.password(), port, false, null, null, null, scenario.getGameType())) {
+            GpuStartWindow.startFailed(false);
             return;
         }
         server.setGame(game);
         scenario.applyDamage(gameManager);
         startClient(request.playerName(), MMConstants.LOCALHOST, port, scenario.getGameType());
+        if (client == null) {
+            // The server has the briefing's game now; the briefing makes it again before it starts another
+            server.die();
+            server = null;
+            GpuStartWindow.startFailed(true);
+            return;
+        }
         gameManager.calculatePlayerInitialCounts();
 
         // Currently no bot supports anything other than TW
