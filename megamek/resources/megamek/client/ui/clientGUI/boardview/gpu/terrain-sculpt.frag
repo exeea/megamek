@@ -580,7 +580,10 @@ void main() {
     }
     // 1 above the water, 0 on a submerged bed: the water surface draws the grid and takes the rain for it.
     float exposed = watered ? 1.0 - smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) : 1.0;
-    if (ground && u_clay < .5 && volcanic < .01) {
+    // Weathering follows the ground onto the level toe and lip of its banks, fading as they steepen, so a bank meets
+    // its foot and rim in the same worn tone.
+    float weathered = ground ? 1.0 : cliff && natural && !panel ? smoothstep(.75, .97, face.z) : 0.0;
+    if (weathered > 0.0 && u_clay < .5 && volcanic < .01) {
         // Follow the final material weights, including sand windows and authored mixtures. Reuse the blended
         // relief once; no extra maps or stamped motifs. Wetland pools suppress dry surface abrasion.
         if (u_terrainWear > 0.0 && terrainNormalDetail > 0.0) {
@@ -602,12 +605,12 @@ void main() {
 #else
             if (family(5.0)) colorPigment = vec3(0.0);
 #endif
-            float wearStrength = u_terrainWear * exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65);
+            float wearStrength = u_terrainWear * exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65) * weathered;
             pigment *= wearStrength;
             albedo *= authoredPigmentGain(vec3(1.0) + colorPigment * wearStrength);
             finish.roughness = mix(finish.roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
         }
-        groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, finish);
+        if (ground) groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, finish);
     }
     if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, finish);
     // Scorch replaces material before rain, grid and elevation grade. Severity zero takes no material samples.

@@ -17,7 +17,10 @@ import megamek.common.units.Terrains;
 /** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
 public final class BoardSurfaceBlend {
     static final float WIDTH_METRES = 7f;
-    /** The farthest the receiving ground reaches up a column above its foot; its tongues reach a fifth of it to all. */
+    /**
+     * The farthest the receiving ground reaches up a column above its foot; its tongues reach a fifth of it to all, and a
+     * fifth as far under snow, which lies over its column down to the foot.
+     */
     static final float FOOT_METRES = 2.7f;
     /** How far lava, molten or crusted, melts snow and burns turf beside it. */
     static final float HEAT_METRES = 5f;
@@ -467,6 +470,13 @@ public final class BoardSurfaceBlend {
             }
             // A cliff's column reaches the point by height; ground contacts were settled with the tile.
             BoardScene.Tile[] tiles = cliff ? reaching(at, z) : around.touching();
+            // Snow lies over its column down to the foot: the ground below creeps up under it only a little way.
+            float drape = 0;
+            if (!water) {
+                for (BoardScene.Tile tile : tiles) {
+                    if (BoardGeometry.groundZ(tile) > z + metre * .05f) { drape = Math.max(drape, cover(tile).snow()); }
+                }
+            }
             for (BoardScene.Tile tile : tiles) {
                 // A contact spreads and meanders down the exposed column; it starts at the plateau's own cover.
                 // The bounded world-metre field is identical at every mesh LOD.
@@ -498,7 +508,9 @@ public final class BoardSurfaceBlend {
                     weight *= 1 - BoardRelief.smooth((dz - .35f) / .65f);
                 } else {
                     float above = Math.max(0, (z - BoardGeometry.groundZ(tile)) / metre);
-                    weight *= 1 - BoardRelief.smooth(above / (FOOT_METRES * (.2f + .8f * patch)));
+                    // Lava's banks keep their reach: its heat has melted the snow there (#scorched).
+                    float under = tile.liquid().volcanic() ? 0 : drape * (1 - cover(tile).snow());
+                    weight *= 1 - BoardRelief.smooth(above / (FOOT_METRES * (.2f + .8f * patch) * (1 - .8f * under)));
                 }
                 if (weight < .0001f) { continue; }
                 Cover cover = water ? cover(tile) : cover(tile, z);

@@ -629,14 +629,19 @@ float coverPatch(vec3 world, float familyId) {
     return .5 + (texture(u_rainNoise, contact / 21.0 + offset).r - .5) * .8;
 }
 
+// How strongly the cover patches decide a contact: more on a slope than on level ground. Banks and the ground at their
+// foot take the same value where their faces meet.
+float coverPatchStrength(vec3 face) { return mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, face.z)); }
+
 // How far the covers' plain proportions replace their height-blended patches: fully in an authored transition
 // (v_coverInterpolation), whose mixture is the hex's own look, except a tropical mixture's dark interior litter; about
-// half between neighbouring covers on level ground, softening them without losing their interlocking texture. Banks
-// take an authored transition's part (blendCliff), so a bank meets the ground at its foot in the same mixture.
-float coverGradient(vec4 proportions) {
+// half between neighbouring covers on level ground (soft 1), softening them without losing their interlocking texture.
+// A bank (blendCliff) softens as much at its toe and rim, where it meets that ground, and interlocks fully between
+// (soft 0).
+float coverGradient(vec4 proportions, float soft) {
     float authored = clamp(v_coverInterpolation, 0.0, 1.0);
     float tropical = dot(proportions, vec4(lessThan(abs(coverFamilies - TROPICAL_FAMILY), vec4(.5))));
-    return mix(.55, 1.0, authored) * (1.0 - authored * smoothstep(0.0, .15, tropical));
+    return mix(.55 * soft, 1.0, authored) * (1.0 - authored * smoothstep(0.0, .15, tropical));
 }
 
 // What a pixel's final cover weights make of its grass, sand, bounce light and rain response.
@@ -843,12 +848,12 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     if (coverFamilies.y != coverFamilies.x) patches.y = coverPatch(world, coverFamilies.y);
     if (coverFamilies.z != coverFamilies.x) patches.z = coverPatch(world, coverFamilies.z);
     if (coverFamilies.w != coverFamilies.x) patches.w = coverPatch(world, coverFamilies.w);
-    float patchStrength = mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, face.z));
-    weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45 + patches * patchStrength);
+    weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45
+          + patches * coverPatchStrength(face));
     // The tropical exception fades with its actual contribution, never the triangle's palette membership, so a
     // zero-weight tropical slot cannot introduce a material seam.
     vec4 proportions = raw / max(dot(raw, vec4(1.0)), .00001);
-    weights = mix(weights, proportions, coverGradient(proportions));
+    weights = mix(weights, proportions, coverGradient(proportions, 1.0));
     // Loose deposits leave a few windows onto this tile's actual substrate. Transfer coverage, not just colour,
     // so exposed turf/rock keeps its own normals, height, cavity and wet response. The CPU uses this same field
     // for grass roots; neither the board's SAND flag nor the terrain/support mesh changes.
@@ -1308,7 +1313,10 @@ vec4 coverLayersAt(int i) {
     return i == 0 ? u_coverLayers0 : i == 1 ? u_coverLayers1 : i == 2 ? u_coverLayers2 : u_coverLayers3;
 }
 
-// A blended cliff: its two strongest palette slots, each as one cliff material, meeting in broken patches.
+// A blended cliff: its two strongest palette slots, each as one cliff material, meeting as the covers of the ground at
+// its foot or rim do (blendCovers): the family whose patches and own relief stand higher shows, so snow and dust fill the
+// hollows of a bank's soil, and an authored mixture mixes in proportion. Within two metres of its toe and rim it softens
+// as that ground does, so the two meet in one pattern.
 TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,
       float hardness, float broad, float fine, float region, float sediment, out vec4 weights) {
     vec4 raw = max(v_coverWeights, vec4(0.0));
@@ -1325,11 +1333,11 @@ TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float ab
     if (share < .02) return a;
     TerrainMaterial b = cliffMaterial(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
           sediment, coverFamilies[second], coverTilesAt(second), coverLayersAt(second), true, false);
-    float patches = textureLod(u_rainNoise, (world.xy + world.z * vec2(.47, .29)) / 9.5, 0.0).b;
-    // Neighbouring families interlock, the one standing higher in its own relief showing: snow and dust fill the
-    // hollows of a bank's soil. An authored mixture mixes in proportion, as its level ground does.
-    float t = smoothstep(.4, .6, share + (b.height - a.height) * .45 + (patches - .5) * .3);
-    t = mix(t, share, coverGradient(raw / max(dot(raw, vec4(1.0)), .00001)) * clamp(v_coverInterpolation, 0.0, 1.0));
+    vec2 relief = vec2(a.height, b.height) * .45 + coverPatchStrength(face)
+          * vec2(coverPatch(world, coverFamilies[first]), coverPatch(world, coverFamilies[second]));
+    float t = materialWeights(vec4(1.0 - share, share, 0.0, 0.0), vec4(relief, 0.0, 0.0)).y;
+    t = mix(t, share, coverGradient(raw / max(dot(raw, vec4(1.0)), .00001),
+          1.0 - smoothstep(0.0, 2.0, min(aboveFoot, belowRim))));
     weights[first] = 1.0 - t;
     weights[second] += t;
     a.color = mix(a.color, b.color, t);
