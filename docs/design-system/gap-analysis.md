@@ -391,19 +391,33 @@ work for Swing, and item 11 is under investigation.
      the top, the name, the server address beside its port, a **Strategic BattleForce game** check box for the player
      only (there is no SBF bot), **Connect** (**Connect bot**, which opens the bot setup) and Back; errors show under
      the inputs as on Host. It has no password: joining a game never asks for one, since MegaMek's server password
-     only guards game options and server commands, which ask for it when they need it. **Load game** opens a list
-     of the saves in `savegames`, newest first, with when each was saved, and **Browse files…** for others; picking
-     one reads it in the background and opens the Host form titled Load game, with the save's name and date on top
-     and a **Play as** select of the saved players in place of the name field. A save that cannot be read, has no
-     version or comes from another version says so in the page instead of a popup. **Scenario** opens the scenario
-     browser: a group select (All scenarios or one folder) over a list of names, each with its group and planet,
-     and **Open a file…**. Picking one opens the **briefing**: the title, single player or multiplayer, the
-     description and the players. In single player you are the first player and the others are bots; in
-     multiplayer each player has a You | Human | Bot select, an observer name shows when nobody is You, and the
-     server password and port follow. **Start scenario** still opens the Swing game options and planetary
-     conditions, which move with the lobby's dialogs. The load and scenario pages are wider than the menu, so long
-     names fit, and their list fills the room left in the column. Ctrl+click on Load game and Scenario still
-     reaches quick load and the last scenario. To review a page without clicking through it, set
+     only guards game options and server commands, which ask for it when they need it. When `savegames` has a
+     save, a **Continue** item tops the menu with the newest save's name and how long ago it was saved, and takes
+     the accent from New game. **Load game** opens a list of the saves, newest first, with when each was saved, and
+     **Browse files…** for others. Clicking a save (or Continue) loads it at once when the player's last name is the
+     save's only human player; otherwise, and from each row's **Options…** and from Browse files, it opens the Host
+     form titled Load game, with the save's name and date on top and a **Play as** select of the saved players and
+     **Watch as observer**, which asks for an observer name. Sides the save marks as bots come back as default
+     Princess bots under their saved names. A save that cannot be read, has no version or comes from another
+     version says so in the page instead of a popup. **Scenario** opens the scenario browser: a search field (every
+     word must match the name, group or planet) beside a group select (All scenarios or one folder) over a list of
+     names, each with its group and planet, and **Open a file…**. On Windows, Browse files and Open a file use the
+     system's open-file dialog (LWJGL's Native File Dialog, on its own thread, natively owned by the start window
+     so it stays in front); elsewhere, or if it fails, Swing's chooser. Picking a scenario opens the **briefing**:
+     the title, single player or multiplayer, the description and the players, each with a camo swatch that opens
+     the camo chooser (scenarios skip the lobby, so this is the only place to change it; multiplayer sides start in
+     their own colour). In single player you are the first player and the others are bots; in multiplayer each
+     player has a You | Human | Bot select, the first is You and the rest Bot, an observer name shows when nobody is
+     You, and the server password and port show only while a side is Human. **Rules** and **Conditions** lines
+     summarise the game options and planetary conditions, with **Change…** opening their Swing dialogs (or "Set by
+     the scenario" when the scenario fixes them); Start no longer pops them up. **Start scenario** reads
+     "Starting…" while it works and comes back if the start fails, rebuilding the game with the player's choices
+     when the server already took it. The load and scenario pages are wider than the menu, so long names fit, and
+     their list fills the room left in the column. Ctrl+click on Load game and Scenario still reaches quick load
+     and the last scenario. Follow-ups: a **Load anyway** for saves from another version (to propose to the MegaMek
+     team), a map thumbnail in the briefing (ideally drawn by the 3D board), the native dialog on macOS and Linux
+     (LWJGL's NFD 3.3.3 has no owner window or title, and needs the main thread on macOS), and libGDX camo,
+     options and conditions pickers with the lobby's dialogs (step 8). To review a page without clicking through it, set
      `MM_START_PAGE` (such as `host+online+reveal`, `connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with
      `MM_START_SCENARIO` naming the scenario file) before `gradlew :megamek:run`;
      `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
