@@ -15,6 +15,7 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -145,9 +146,11 @@ public final class GpuStartWindow {
 
     private final boolean greet;
     private final GpuWindowBounds startBounds;
-    private final Set<Dialog> modalDialogs = new HashSet<>();
+    private final Set<Dialog> modalDialogs = new LinkedHashSet<>();
     private final Map<Dialog, Boolean> dialogOnTop = new HashMap<>();
     private final AWTEventListener dialogListener = this::dialogEvent;
+    /** Whether a modal form is open; the GPU thread reads it to send clicks on the window to that form. */
+    private volatile boolean modalOpen;
     private volatile Lwjgl3Application application;
     private volatile GpuNativeDialogOwner nativeOwner;
     private volatile boolean closeRequested;
@@ -319,8 +322,19 @@ public final class GpuStartWindow {
                 }
 
                 @Override
+                public void focusGained() {
+                    if (modalOpen) {
+                        SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
+                    }
+                }
+
+                @Override
                 public boolean closeRequested() {
-                    dispatch(Action.QUIT);
+                    if (modalOpen) {
+                        SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
+                    } else {
+                        dispatch(Action.QUIT);
+                    }
                     return false;
                 }
             });
@@ -346,6 +360,7 @@ public final class GpuStartWindow {
     private void finished(Throwable failure) {
         Toolkit.getDefaultToolkit().removeAWTEventListener(dialogListener);
         modalDialogs.clear();
+        modalOpen = false;
         dialogOnTop.forEach(Dialog::setAlwaysOnTop);
         dialogOnTop.clear();
         if (open == this) {
@@ -607,7 +622,7 @@ public final class GpuStartWindow {
 
     /**
      * Keeps a form above the start window until either closes: owned natively where the platform allows, otherwise
-     * floating on top. A modal form disables the start window as it would its Swing owner.
+     * floating on top. A modal form blocks the start window's input as it would its Swing owner's.
      */
     private void raise(Dialog dialog) {
         GpuNativeDialogOwner owner = nativeOwner;
@@ -647,17 +662,31 @@ public final class GpuStartWindow {
         }
     }
 
+    /** EDT: brings the newest open modal form to the front when the start window is clicked or asked to close. */
+    private void frontModal() {
+        Dialog newest = null;
+        for (Dialog dialog : modalDialogs) {
+            if (dialog.isShowing()) {
+                newest = dialog;
+            }
+        }
+        if (newest != null) {
+            newest.toFront();
+        }
+    }
+
+    /**
+     * Blocks or restores the start window's input. The native window itself stays enabled: Windows picks the window to
+     * activate as a modal form hides, before Swing reports it, and a still disabled owner would hand the activation to
+     * another application, flashing the start window away until it took the focus back.
+     */
     private void setStartEnabled(boolean enabled) {
-        GpuNativeDialogOwner owner = nativeOwner;
+        modalOpen = !enabled;
         Lwjgl3Application app = application;
-        if (owner == null || app == null) {
+        GpuStartScreen startScreen = screen;
+        if (app == null || startScreen == null) {
             return;
         }
-        app.postRunnable(() -> {
-            owner.setOwnerEnabled(enabled);
-            if (enabled && !closeRequested) {
-                ((Lwjgl3Graphics) app.getGraphics()).getWindow().focusWindow();
-            }
-        });
+        app.postRunnable(() -> startScreen.setInputBlocked(!enabled));
     }
 }

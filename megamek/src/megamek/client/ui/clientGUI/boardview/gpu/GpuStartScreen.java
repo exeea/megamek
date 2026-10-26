@@ -161,6 +161,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     private GpuHudKit hud;
     private UiKit kit;
     private Stage stage;
+    private boolean inputBlocked;
     private SpriteBatch batch;
     private ShapeRenderer shapes;
     private float scale = 1;
@@ -276,6 +277,18 @@ final class GpuStartScreen extends ApplicationAdapter {
         return skipped ? StartTimeline.INTRO_END + 1 : clock();
     }
 
+    /** GPU thread: ignores the mouse and keyboard while a modal Swing form is open, as a disabled window would. */
+    void setInputBlocked(boolean blocked) {
+        inputBlocked = blocked;
+        if (stage == null) {
+            return;
+        }
+        if (blocked) {
+            stage.cancelTouchFocus();
+        }
+        Gdx.input.setInputProcessor(blocked ? null : stage);
+    }
+
     @Override
     public void create() {
         window.started();
@@ -284,7 +297,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         kit = hud.ui;
         kit.presentation(Presentation.GAME);
         stage = new Stage(new ScreenViewport());
-        Gdx.input.setInputProcessor(stage);
+        Gdx.input.setInputProcessor(inputBlocked ? null : stage);
         batch = new SpriteBatch();
         shapes = new ShapeRenderer();
         art = readImage(new File(Configuration.miscImagesDir(), "mm-background.jpg"));
