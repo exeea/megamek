@@ -1343,13 +1343,10 @@ TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float ab
           sediment, coverFamilies[second], coverTilesAt(second), coverLayersAt(second), true, false);
     float patches = textureLod(u_rainNoise, (world.xy + world.z * vec2(.47, .29)) / 9.5, 0.0).b;
     // Neighbouring families interlock, the one standing higher in its own relief showing: snow and dust fill the
-    // hollows of a bank's soil. An authored mixture mixes in proportion, as its level ground does. Near its toe and
-    // crest the bank's majority takes the faint share of the other cover that the ground beside it shows, so no bare
-    // band opens between the bank's edge and that ground's fade; the interlocking patches stay crisp.
+    // hollows of a bank's soil. They soften as on level ground (coverGradient), so a bank and the ground at its foot
+    // and crest meet in the same faded contact; an authored mixture mixes in proportion.
     float t = smoothstep(.4, .6, share + (b.height - a.height) * .45 + (patches - .5) * .3);
-    float gradient = coverGradient(raw / max(dot(raw, vec4(1.0)), .00001));
-    t = mix(t, share, gradient * clamp(v_coverInterpolation, 0.0, 1.0));
-    t = max(t, share * gradient * (1.0 - smoothstep(0.0, 2.0, min(aboveFoot, belowRim))));
+    t = mix(t, share, coverGradient(raw / max(dot(raw, vec4(1.0)), .00001)));
     weights[first] = 1.0 - t;
     weights[second] += t;
     a.color = mix(a.color, b.color, t);
