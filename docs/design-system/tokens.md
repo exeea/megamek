@@ -614,7 +614,8 @@ options should stay visible.
 | Rows | `control.sm` (28) high; a `surface.hover` wash, inset `xs`, on the row under the pointer or the keyboard; a `selected.primary` check before the current value, in a leading `icon.sm` slot |
 
 - **Sizes** match inputs: regular `control.md` (36), compact `control.sm` (28). The face is as wide as its widest item
-  or placeholder, so it does not jump when the value changes. The inline face is `control.sm` high.
+  or placeholder, so it does not jump when the value changes. Held narrower by its layout, it keeps its padding and
+  chevron and ends the value with an ellipsis. The inline face is `control.sm` high.
 - **Inline** is for a value inside a header or running text, where a box would be too heavy.
 - **The check marks the current value**, in `selected.primary`; the wash only follows the pointer.
 - **Keys.** Enter, Space or Down opens the list on the current value; Up and Down move, Home and End jump, Enter

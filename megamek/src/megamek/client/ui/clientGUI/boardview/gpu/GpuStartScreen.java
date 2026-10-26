@@ -613,7 +613,7 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     /** Whether {@code shown} lists or describes something and so takes a wider column. */
     private static boolean wide(Page shown) {
-        return shown == Page.LOAD || shown == Page.SCENARIOS || shown == Page.BRIEFING;
+        return shown == Page.LOAD || shown == Page.RESUME || shown == Page.SCENARIOS || shown == Page.BRIEFING;
     }
 
     /** A line of wrapped text in the column, such as a page's status or an error. */
@@ -1909,7 +1909,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             double p = slide(i);
             float dx = (float) ((1 - p) * offscreen);
             y += gapAbove(item);
-            item.setBounds(left + dx + (item instanceof Label ? 4 : 0), h - y - itemHeight, columnWidth, itemHeight);
+            item.setBounds(left + dx, h - y - itemHeight, columnWidth, itemHeight);
             y += itemHeight + gapBelow(item, i);
             item.setVisible(p > 0);
         }
