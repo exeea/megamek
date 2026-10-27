@@ -229,7 +229,8 @@ class GpuDepthPrepassBaselineSmokeTest {
             frame.render(terrain, camera, scene);
             assertTrue(System.nanoTime() < deadline, "Family programs must finish");
         } while (terrain.familyPrograms().pending() > 0);
-        for (int quiet = 0; quiet < 2; ) {
+        // Deferred work waits for unchanged frames: stale mesh pages merge and refined chunks redraw the cached shadow.
+        for (int quiet = 0; quiet < GpuMeshPage.SETTLE_FRAMES + 2; ) {
             frame.render(terrain, camera, scene, BoardCamera.renderScale);
             quiet = terrain.refine(camera.camera) | terrain.busy() ? 0 : quiet + 1;
             assertTrue(System.nanoTime() < deadline, () -> "Terrain must settle: " + terrain.buildDetails());

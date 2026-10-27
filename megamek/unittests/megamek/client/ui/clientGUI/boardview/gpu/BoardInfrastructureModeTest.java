@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
@@ -120,7 +121,7 @@ class BoardInfrastructureModeTest {
     }
 
     @Test
-    void anUnconnectedRoadEndCannotGradeItsColumnOrTheAdjacentBank() {
+    void aRoadEndingAtDryGroundCarriesTheWholeRampAndTheBankKeepsItsShape() {
         for (int direction = 0; direction < 6; direction++) {
             for (int parity = 0; parity < 2; parity++) {
                 var at = new Coords(2 + parity, 2);
@@ -129,17 +130,19 @@ class BoardInfrastructureModeTest {
                 var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
                       c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                       c.equals(at) ? exits : 0, c.equals(next) ? 3 : 1, BoardScene.Surface.GRASS));
-                for (var cell : List.of(at, next)) {
-                    var tile = scene.tile(cell);
-                    var classic = GpuTilesetTerrain.column(scene, tile, BoardGeometry.floor(scene));
-                    for (var face : classic.top()) {
-                        for (var point : List.of(face.a(), face.b(), face.c())) {
-                            assertEquals(BoardGeometry.surfaceZ(tile), point.z, .001f,
-                                  "A nonreciprocal road exit is not an incline connection");
-                        }
+                float floor = BoardGeometry.floor(scene), bankTop = BoardGeometry.surfaceZ(scene.tile(next));
+                var bank = GpuTilesetTerrain.column(scene, scene.tile(next), floor);
+                for (var face : bank.top()) {
+                    for (var point : List.of(face.a(), face.b(), face.c())) {
+                        assertEquals(bankTop, point.z, .001f, "A road ending at it leaves the bank's own shape");
                     }
-                    assertVertical(classic.walls());
                 }
+                // BoardRoadGrade.edgeLevel: the road climbs to the bank's level within its own hex.
+                var road = GpuTilesetTerrain.column(scene, scene.tile(at), floor);
+                assertTrue(road.top().stream().flatMap(face -> Stream.of(face.a(), face.b(), face.c()))
+                      .anyMatch(point -> Math.abs(point.z - bankTop) < .001f), "The road end ramps up to the bank");
+                assertVertical(bank.walls());
+                assertVertical(road.walls());
             }
         }
     }

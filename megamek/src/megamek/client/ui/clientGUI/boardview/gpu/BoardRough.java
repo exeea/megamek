@@ -61,7 +61,9 @@ public final class BoardRough {
             // Retain the captured rows and route clearance. Omit a solid spanning a cliff or a receding edge;
             // elsewhere bury its base in the downhill ground so neither concrete nor timber floats.
             if (!Float.isFinite(low) || high - low > height * .8f) { continue; }
-            float base = low - .025f * BoardGeometry.level();
+            // A stacked log rests its elevation above that: levels at the model's own proportions, as its height 0 keeps.
+            float base = low - .025f * BoardGeometry.level()
+                  + feature.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale();
             transform.val[Matrix4.M23] = base;
             points.values().forEach(point -> point.z += base);
             for (BoardShape.Polygon polygon : shape.polygons()) {

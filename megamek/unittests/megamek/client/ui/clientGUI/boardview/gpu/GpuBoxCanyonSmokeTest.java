@@ -79,7 +79,7 @@ class GpuBoxCanyonSmokeTest {
                     camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     String name = "box-canyon-" + at.getBoardNum() + (iso ? "-iso-" : "-top-");
-                    for (String mode : List.of("material", "clay", "normal", "contact", "albedo")) {
+                    for (String mode : List.of("material", "clay", "normal", "contact")) {
                         // The uniform-controlled mix retains the full shader interface during diagnostic reloads.
                         String diagnostic = switch (mode) {
                             case "normal" -> source.replace("fragColor = vec4(result, 1.0);",
@@ -87,10 +87,6 @@ class GpuBoxCanyonSmokeTest {
                             case "contact" -> source.replace("fragColor = vec4(result, 1.0);",
                                   "fragColor = vec4(mix(result, vec3(clamp(v_diffuseUV.x / 4.0, 0.0, 1.0)),"
                                         + " step(-.5, u_clay)), 1.0);");
-                            case "albedo" -> source.replace("albedo = toLinear(albedo);",
-                                  "vec3 diagnosticAlbedo = albedo; albedo = toLinear(albedo);")
-                                  .replace("fragColor = vec4(result, 1.0);",
-                                        "fragColor = vec4(mix(result, diagnosticAlbedo, step(-.5, u_clay)), 1.0);");
                             default -> source;
                         };
                         var changed = shaders.apply(Map.of("terrain-sculpt.frag", diagnostic));

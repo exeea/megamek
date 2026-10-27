@@ -117,15 +117,17 @@ class BoardSurfaceCacheTest {
         BoardScene edited = replace(scene, shape(scene.tile(road), 1, 1 << 4, BoardScene.Surface.GRASS));
         assertSame(scene.tile(CENTER), edited.tile(CENTER));
         assertSame(scene.tile(neighbor), edited.tile(neighbor));
-        assertTrue(BoardSurface.ramps(edited, edited.tile(neighbor)) != 0);
+        // A road ending at bare ground carries its whole ramp; the neighbour keeps its shape (BoardRoadGrade.edgeLevel).
+        assertTrue(BoardSurface.ramps(edited, edited.tile(road)) != 0);
+        assertEquals(0, BoardSurface.ramps(edited, edited.tile(neighbor)));
         BoardSurface changed = cache.get(edited, edited.tile(CENTER));
-        assertNotSame(first, changed, "A road approaching the neighbor from the second ring grades the neighbor");
+        assertNotSame(first, changed, "A road changing in the second ring rebuilds the hex (BoardSurface.geometryKey)");
         // Ground a road only approaches keeps its natural rim, so the join with it keeps its height.
         assertEquals(first.height(edge.x, edge.y), changed.height(edge.x, edge.y), .003f);
     }
 
     @Test
-    void aSecondRingReciprocalExitChangesTheTerminalGradeEvenWhenTheRampMaskStaysTheSame() {
+    void aSecondRingExitChangeRebuildsTheTerminalEvenWhenTheRampMaskStaysTheSame() {
         BoardScene scene = scene(0, 7, 7, true);
         Coords neighbor = CENTER.translated(0), distant = neighbor.translated(0);
         scene = replace(scene, shape(scene.tile(CENTER), 3, 1, BoardScene.Surface.GRASS));
@@ -139,11 +141,9 @@ class BoardSurfaceCacheTest {
         assertSame(scene.tile(CENTER), edited.tile(CENTER));
         assertSame(scene.tile(neighbor), edited.tile(neighbor));
         assertEquals(BoardSurface.ramps(scene, scene.tile(neighbor)), BoardSurface.ramps(edited, edited.tile(neighbor)));
+        // The terminal's grade reads only its own edge (BoardRoadGrade.edgeLevel); the cache still rebuilds it.
         var changed = cache.get(edited, edited.tile(CENTER));
         assertNotSame(first, changed);
-        Vector3 point = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(neighbor, 0), 1f / 9);
-        assertTrue(Math.abs(first.height(point.x, point.y) - changed.height(point.x, point.y))
-              > .25f * BoardGeometry.hexScale(), "The new route must rebuild the terminal's vertical transition");
         assertSame(changed, cache.get(edited, edited.tile(CENTER)));
     }
 
@@ -193,10 +193,11 @@ class BoardSurfaceCacheTest {
         return BoardGeometry.corner(CENTER, 0, 0).lerp(BoardGeometry.corner(CENTER, 0, 1), .5f);
     }
 
+    /** Road exits make a road only with a kind of road (BoardRoad.rendered): a paved one. */
     private static BoardScene.Tile shape(BoardScene.Tile t, int elevation, int roadExits, BoardScene.Surface surface) {
         return new BoardScene.Tile(t.coords(), elevation, t.waterDepth(), t.frozen(), roadExits, surface, t.decals(),
               t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround());
+              t.detailedGround(), roadExits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED);
     }
 
     private static BoardScene replace(BoardScene scene, BoardScene.Tile tile) {

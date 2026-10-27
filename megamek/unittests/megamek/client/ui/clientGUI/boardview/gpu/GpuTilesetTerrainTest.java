@@ -156,8 +156,10 @@ class GpuTilesetTerrainTest {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
                 int road = coords.equals(CENTER) ? 1 : coords.equals(north) ? 1 << 3 : 0;
+                // Road exits make a road only with a kind of road (BoardRoad.rendered).
                 tiles.add(new BoardScene.Tile(coords, coords.equals(north) ? 0 : 1, -1, false, road,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of(), BoardLiquid.NONE, null, false,
+                      road == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             }
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -194,7 +196,7 @@ class GpuTilesetTerrainTest {
                   at.equals(lower) ? 1 : at.equals(upper) ? 8 : 0,
                   at.equals(lower) ? 0 : at.equals(upper) ? 3 : level, BoardScene.Surface.GRASS));
             var tile = scene.tile(bank);
-            assertTrue(BoardRoad.nearbyWays(scene, tile).isEmpty(), "Neither adjoining road has the bank's level");
+            assertTrue(BoardRoad.nearby(scene, tile).isEmpty(), "Neither adjoining road has the bank's level");
             var enhanced = new BoardSurface(scene, tile);
             assertTrue(enhanced.groundFaces().stream().flatMap(f -> Stream.of(f.a(), f.b(), f.c()))
                   .anyMatch(p -> Math.abs(p.z - level * BoardGeometry.level()) > .1f),

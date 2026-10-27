@@ -52,13 +52,14 @@ class GpuShaderEditorTest {
             var files = GpuShaderSource.files();
             assertTrue(files.containsAll(java.util.List.of("beams.frag", "effects.vert", "light-model.glsl")));
             assertTrue(files.size() >= 50);
-            String original = GpuShaderSource.read("beams.frag");
+            // read expands the file's includes; readDisk is the file as it stands.
+            String original = GpuShaderSource.read("beams.frag"), disk = GpuShaderSource.readDisk("beams.frag");
             manager.run(() -> {
                 var result = manager.apply(java.util.Map.of("beams.frag", "draft"));
                 assertTrue(result.success());
                 assertEquals(0, result.updated());
                 assertEquals("draft", GpuShaderSource.read("beams.frag"));
-                assertEquals(original, GpuShaderSource.readDisk("beams.frag"));
+                assertEquals(disk, GpuShaderSource.readDisk("beams.frag"));
             });
             assertEquals(original, GpuShaderSource.read("beams.frag"), "Other windows do not inherit this draft");
         } finally { manager.close(); Gdx.files = previous; }

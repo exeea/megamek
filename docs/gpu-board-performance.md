@@ -584,7 +584,13 @@ resources cannot outlive that chunk.
 terrain are unchanged. Moving units are drawn over the retained terrain shadow.
 Both color and depth attachments must be restored: retaining only color leaves
 incorrect depth for moving casters. Terrain changes, shader changes and unsuitable
-shadow-camera coverage invalidate the cache.
+shadow-camera coverage invalidate the cache. A camera refinement does not: the
+refined chunk casts the same terrain at finer detail, so the cached shadow serves
+until refinement has paused for `GpuMeshPage.SETTLE_FRAMES` (30) frames and is then
+drawn once. Dragging the 32x34 random board on an Iris Xe, full shadow passes fell
+from 60 to 20-22 per 600 frames (every refined chunk drew one before) and their GPU
+time from 116 to 72-78 ms; frame-time percentiles moved less than the run-to-run
+spread.
 
 `GpuAtmosphere` reuses the captured scene depth for fog, shafts and composition.
 `GpuEffectDepth` supplies depth to effects that need it. These are distinct from

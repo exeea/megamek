@@ -210,11 +210,13 @@ public class Terrains implements Serializable {
     public static final int BRIDGE_REPAIRED = 60;
 
     /**
-     * A rail on the hex's ground, beneath any bridge (TO:AR p.49). Level 1 rail, 0 destroyed; its exits are its sides and
-     * are always specified, so parallel rails in adjacent hexes never join.
+     * A rail on the hex's ground, beneath any bridge (TO:AR p.49). Level 1 rail, 2 maglev, 0 destroyed; its exits are
+     * its sides and are always specified, so parallel rails in adjacent hexes never join.
      */
     public static final int RAIL = 62;
-    /** A rail on the hex's bridge deck (level 1); its exits, always specified, lie within the bridge's exits. */
+    /**
+     * A rail on the hex's bridge deck (level 1, 2 maglev); its exits, always specified, lie within the bridge's exits.
+     */
     public static final int BRIDGE_RAIL = 63;
     /**
      * A road on the hex's bridge deck, {@link #ROAD}'s twin with its levels (1 paved, 2 alley, 3 dirt, 4 gravel); its

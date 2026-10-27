@@ -481,10 +481,13 @@ public final class BoardArtwork implements AutoCloseable {
           Terrains.METAL_CONTENT, Terrains.IMPASSABLE,
           Terrains.ULTRA_SUBLEVEL };
 
+    /** Closing again does nothing. */
     @Override
     public void close() {
+        if (gpuTileset == null) { return; }
         clear();
-        if (gpuTileset != null) { gpuTileset.close(); gpuTileset = null; }
+        gpuTileset.close();
+        gpuTileset = null;
         levels = null;
         hexMask = null;
     }

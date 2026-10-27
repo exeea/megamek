@@ -40,7 +40,6 @@ import java.util.Map;
 
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.HexAppearance;
-import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -102,26 +101,11 @@ class HexClearTest {
     }
 
     @Test
-    void aRailOnTheGroundCountsButARailOnADeckOrASuspendedMaglevDoesNot() {
-        Hex groundRail = hex("");
-        groundRail.setDecorations(List.of(marker(RailRoute.Kind.RAIL, BoardDecoration.Placement.ground(), 9)));
-        assertFalse(groundRail.isClear());
-        Hex stub = hex("");
-        stub.setDecorations(List.of(marker(RailRoute.Kind.RAIL, BoardDecoration.Placement.ground(), 0)));
-        assertFalse(stub.isClear(), "a marker without sides still lies on the ground");
-
-        BoardDecoration.Placement onDeck = new BoardDecoration.Placement("surface", null,
-              new BoardDecoration.Receiver("bridge", "deck"), 0.0);
-        Hex natural = hex("bridge:1:09;bridge_cf:40;bridge_elev:2");
-        natural.setAppearance(Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
-        natural.setDecorations(List.of(marker(RailRoute.Kind.RAIL, onDeck, 9)));
-        assertTrue(natural.isClear());
-        assertFalse(natural.isClearDeck(), "a rail on the deck touches the deck");
-
-        Hex maglev = hex("");
-        maglev.setDecorations(List.of(marker(RailRoute.Kind.MAGLEV, new BoardDecoration.Placement("absolute", 3.0,
-              null, null), 9)));
-        assertTrue(maglev.isClear());
+    void aMaglevAtTheHexsLevelCountsButASuspendedOneLeavesTheGroundClear() {
+        // A maglev is rail at level 2 (RailRoute): on the ground, or on the deck that suspends it.
+        assertFalse(hex("rail:2:09").isClear(), "a maglev at the hex's level lies on its ground");
+        assertTrue(hex("bridge:1:09;bridge_cf:40;bridge_elev:3;bridge_rail:2:09").isClear(),
+              "a suspended maglev rides its deck");
     }
 
     @Test
@@ -138,10 +122,5 @@ class HexClearTest {
         Hex implicit = hex("water:1;bridge:1:09;bridge_cf:40;bridge_elev:0;bridge_road:1:09");
         implicit.setAppearance(Map.of("bridge", HexAppearance.IMPLICIT_BRIDGE));
         assertFalse(implicit.isClearDeck(), "an implicit bridge is built");
-    }
-
-    private static BoardDecoration marker(RailRoute.Kind kind, BoardDecoration.Placement placement, int sides) {
-        return new BoardDecoration("route", "prop", kind.asset, null, 0, 0, 0, false, 1, placement, 0, false, 0, 0,
-              null, false, sides);
     }
 }

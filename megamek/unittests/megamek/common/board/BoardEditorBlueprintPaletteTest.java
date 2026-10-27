@@ -202,8 +202,11 @@ class BoardEditorBlueprintPaletteTest {
             files = walk.filter(path -> BoardFile.isNativeName(path.toString())).toList();
         }
         assertFalse(files.isEmpty());
-        // A bridge's Pillars toggle is stored as a design of its own, with no blueprint variant.
-        var pillars = Set.of(HexAppearance.PILLARS.variant(), HexAppearance.TRUSS_PILLARS.variant());
+        // A bridge's Pillars toggle is stored as a design of its own, with no blueprint variant; so are the implicit
+        // bridge a road or rail makes for itself (BridgeSpan.carry) and a rail junction's track layout.
+        var pillars = Set.of(HexAppearance.PILLARS.variant(), HexAppearance.TRUSS_PILLARS.variant(),
+              HexAppearance.IMPLICIT_BRIDGE.variant(), HexAppearance.IMPLICIT_PILLARS.variant(),
+              HexAppearance.tracks(1).variant());
         for (Path file : files) {
             Board board = BoardFile.read(file, true);
             for (int y = 0; y < board.getHeight(); y++) {

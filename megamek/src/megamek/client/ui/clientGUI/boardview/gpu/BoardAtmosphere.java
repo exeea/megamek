@@ -741,6 +741,17 @@ final class BoardAtmosphere {
         return 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
     }
 
+    /**
+     * The depth cues' haze ({@link GpuDepthCues}): the fog's light half-way to the visible horizon's hue, the cool grey
+     * distant air takes at that hour and under that taint (the full hue reads as a blue wash); without air, the fog's
+     * own neutral color. Writes and returns {@code out}.
+     */
+    static Color depthHaze(Lighting lighting, boolean vacuum, Color out) {
+        out.set(lighting.fog());
+        if (!vacuum && luminance(lighting.horizon()) > 0) { tintAtmosphere(out, lighting.horizon(), .5f); }
+        return out;
+    }
+
     /** Blend a palette into a color at that color's own luminance: tinting adds no emission or exposure. */
     private static void tintAtmosphere(Color color, Color palette, float strength) {
         // Above 1 the lerp overshoots the luminance-matched target and channel clamping would then break it.

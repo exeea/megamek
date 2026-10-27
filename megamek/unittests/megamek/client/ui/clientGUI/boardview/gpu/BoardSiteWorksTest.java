@@ -46,9 +46,12 @@ class BoardSiteWorksTest {
         assertEquals(trees - secondTurn,
               nearlyDone.features().stream().filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE).count(),
               "Each stump stands where a tree was felled");
-        for (var log : nearlyDone.features().stream().filter(f -> f.asset().equals(BoardFeatures.SAWN_LOG)).toList()) {
+        var logs = nearlyDone.features().stream().filter(f -> f.asset().equals(BoardFeatures.SAWN_LOG)).toList();
+        for (var log : logs) {
             assertTrue(Math.hypot(log.x(), log.y()) < BoardGeometry.TILE_HEIGHT / 2f, "The logs stay in their hex");
+            assertEquals(logs.getFirst().rotation(), log.rotation(), 6, "The logs lie side by side, none across another");
         }
+        assertTrue(logs.size() < 3 || logs.stream().anyMatch(log -> log.elevation() > 0), "The logs are stacked");
     }
 
     @Test

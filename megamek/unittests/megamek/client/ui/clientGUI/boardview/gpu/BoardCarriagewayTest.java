@@ -66,10 +66,12 @@ class BoardCarriagewayTest {
                 assertEquals(0, rail.roadExits(), "no road paint under a rail");
                 assertTrue(BoardRoad.carriageway(rail) && !BoardRoad.rendered(rail));
                 assertEquals(BoardSurface.ramps(roads, road), BoardSurface.ramps(rails, rail), "rise " + rise + " " + at);
-                assertEquals(faces(new BoardSurface(roads, road)), faces(new BoardSurface(rails, rail)), "rise " + rise + " " + at);
+                assertGround(new BoardSurface(roads, road), new BoardSurface(rails, rail), "rise " + rise + " " + at);
             }
         }
-        assertNotEquals(0, BoardSurface.ramps(line(false, 1), line(false, 1).tile(AT)), "a rail climbs to its neighbour on a ramp");
+        // A junction keeps its crossing level; the line beyond it carries the whole ramp (BoardRoadGrade.edgeLevel).
+        assertNotEquals(0, BoardSurface.ramps(line(false, 1), line(false, 1).tile(AT.translated(0))),
+              "a rail climbs to its neighbour on a ramp");
     }
 
     @Test
@@ -93,8 +95,9 @@ class BoardCarriagewayTest {
                     }
                 }
                 assertTrue(points >= 2);
-                if (rise > 0 && at.equals(AT)) {
-                    assertTrue(layout.paths().stream().flatMap(List::stream).anyMatch(p -> p.z > .5f), "the track climbs the ramp");
+                if (rise > 0 && !at.equals(AT)) {
+                    assertTrue(layout.paths().stream().flatMap(List::stream).anyMatch(p -> p.z < -.5f),
+                          "the track descends the ramp to the junction");
                 }
             }
         }
@@ -271,7 +274,27 @@ class BoardCarriagewayTest {
         }
     }
 
-    private static List<List<Vector3>> faces(BoardSurface surface) {
-        return surface.faces.stream().map(face -> List.of(face.a(), face.b(), face.c())).toList();
+    /**
+     * The same ground over the hex. Loose rocks are left out, and so is the ground they cover: they keep clear of a
+     * rail's wider course (BoardRoad.way) than of a road's; that course's outline also splits the flat ground into
+     * other triangles.
+     */
+    private static void assertGround(BoardSurface road, BoardSurface rail, String context) {
+        var center = BoardGeometry.center(road.tile.coords(), 0);
+        float step = BoardGeometry.width() / 20;
+        int compared = 0, samples = 0;
+        for (float dx = -.3f * BoardGeometry.width(); dx <= .3f * BoardGeometry.width(); dx += step) {
+            for (float dy = -.3f * BoardGeometry.height(); dy <= .3f * BoardGeometry.height(); dy += step) {
+                float x = center.x + dx, y = center.y + dy;
+                float roadHeight = BoardSurface.sampleHeight(road.foundation(), x, y, Float.NaN);
+                float railHeight = BoardSurface.sampleHeight(rail.foundation(), x, y, Float.NaN);
+                if (Float.isNaN(roadHeight) && Float.isNaN(railHeight)) { continue; }
+                samples++;
+                if (Float.isNaN(roadHeight) || Float.isNaN(railHeight)) { continue; }
+                assertEquals(roadHeight, railHeight, .001f * BoardGeometry.hexScale(), context + " at " + x + "," + y);
+                compared++;
+            }
+        }
+        assertTrue(compared > .9f * samples, context + ": compare the ground, not the rocks");
     }
 }

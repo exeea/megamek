@@ -62,8 +62,11 @@ class BoardLoadParityTest {
             for (int x = 0; x < game.getWidth(); x++) {
                 Coords at = new Coords(x, y);
                 Hex before = loaded.getHex(at), after = game.getHex(at);
+                // A rail or maglev sprite becomes rail terrain, which draws it in the 2D views as well, with no objects.
+                boolean railed = RailRoute.intact(after) || RailRoute.deckRail(after);
                 for (int type : new int[] { Terrains.FLUFF, Terrains.ROAD_FLUFF }) {
                     Terrain token = before.getTerrain(type);
+                    if (token != null && after.getTerrain(type) == null && railed) { continue; }
                     assertTrue(token == null || token.toString().equals(String.valueOf(after.getTerrain(type)))
                                 && token.toString().equals(String.valueOf(preview.getHex(at).getTerrain(type))),
                           at + " keeps its token " + token + " in the game and the preview, for their 2D views");
@@ -86,7 +89,8 @@ class BoardLoadParityTest {
                         assertTrue(!game.contains(centre) || game.getHex(centre).getDecorations().stream()
                               .anyMatch(object -> object.asset().equals(piece.decal())), at + " has its emblem on " + centre);
                     } else {
-                        assertTrue(!after.getDecorations().isEmpty() || HexAppearance.pillars(after.getAppearance()),
+                        assertTrue(!after.getDecorations().isEmpty() || HexAppearance.pillars(after.getAppearance())
+                                    || railed,
                               at + " has the objects of " + layer.key());
                     }
                 }

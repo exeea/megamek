@@ -632,6 +632,19 @@ final class GpuBoardTuning {
         terrainProgress = new Label("", skin, "small");
         terrainProgress.setName("terrain-build-progress");
         rows.add(terrainProgress).colspan(3).left().row();
+        TextButton palette = new TextButton("Material palette...", skin, "menu-control");
+        palette.setName("tuning-material-palette");
+        palette.setProgrammaticChangeEvents(false);
+        palette.addListener(new TextTooltip("Every board material side by side on a tile, a cube or a sphere, as the "
+              + "game draws it from the files on disk.", skin, "menu"));
+        palette.addListener(new ChangeListener() {
+            @Override public void changed(ChangeEvent event, Actor actor) {
+                palette.setChecked(false);
+                Runnable reload = source == null ? null : GpuBoardTuning.this::requestAssetReload;
+                javax.swing.SwingUtilities.invokeLater(() -> GpuMaterialPalette.show(reload));
+            }
+        });
+        rows.add(palette).colspan(3).left().row();
         section(skin, "Hex joins");
         transitions = checkbox(skin, "Hex transitions", "tuning-transitions");
         transitions.addListener(new TextTooltip("Steps between hexes take room on both sides of their edge: slopes up to "
@@ -688,9 +701,7 @@ final class GpuBoardTuning {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 reloadAssets.setChecked(false);
-                reloadAssets.setDisabled(true);
-                assetReloadStatus.setText("Reloading...");
-                assetReloadRequested = true;
+                requestAssetReload();
             }
         });
         reset = new TextButton("Defaults", skin, "menu-control");
@@ -731,6 +742,13 @@ final class GpuBoardTuning {
         uiScaleSaved = value(uiScale, 0) / 100;
         setValues(renderResolution, new float[] { preferences.getBoardRenderResolution() * 100 });
         applyRenderResolution();
+    }
+
+    /** Reload assets (its button, the material palette's): the board reloads them on its next frame. Render thread. */
+    private void requestAssetReload() {
+        reloadAssets.setDisabled(true);
+        assetReloadStatus.setText("Reloading...");
+        assetReloadRequested = true;
     }
 
     boolean takeAssetReloadRequest() {

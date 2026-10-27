@@ -48,8 +48,10 @@ vec3 environmentGround(vec3 groundAlbedo) {
 }
 
 vec3 skyLight(vec3 normal, vec3 groundAlbedo) {
-    // At roughness one the normalized GGX prefilter is the cosine convolution: irradiance divided by pi.
-    return environmentRadiance(normal, 1.0, environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)));
+    // At roughness one the normalized GGX prefilter is the cosine convolution: irradiance divided by pi. The board's
+    // relief hides part of the sky in canyons and at the feet of walls (sky-visibility.glsl).
+    return environmentRadiance(normal, 1.0, environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)))
+          * skyVisibility(v_cloudPosition, normal);
 }
 
 float surfaceVisibility() {

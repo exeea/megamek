@@ -271,14 +271,14 @@ these values safely).
 
 ### Constrained (96)
 
-- `scenery/`: `demolition-materials`, `geyser-travertine`, `pool-water`, `rubble-brick`, `rubble-debris-concrete`, `rubble-debris-masonry`, `rubble-debris-timber`, `rubble-fines`, `rubble-slab`, `rubble-steel`, `rubble-timber`, `timber-bark`, `timber-char`, `timber-endgrain`, `tunnel-concrete`
+- `scenery/`: `demolition-materials`, `geyser-travertine`, `pool-water`, `rubble-brick`, `rubble-debris-concrete`, `rubble-debris-masonry`, `rubble-debris-timber`, `rubble-fines`, `rubble-slab`, `rubble-steel`, `rubble-timber`, `timber-bark`, `timber-endgrain`, `tunnel-concrete`
 - `structures/common/`: `chrome`, `corrugated`, `diamond-plate`, `hazard-stripes`, `iron`, `safety-yellow`, `steel`
 - `structures/facades/`: `facade-fortress`, `facade-hangar`, `facade-hard`, `facade-heavy`, `facade-industrial`, `facade-light`, `facade-medium`, `facade-tank`
 - `structures/industrial/`: `fan`
 - `structures/turret/`: `turret-dark`, `turret-edge`, `turret-paint`
 - `terrain/classic/`: `concrete`, `dirt`, `fungus`, `high-incline-dark`, `incline-dark`, `lunar`, `mars`, `rock`, `sand`, `snow`, `volcano`, `water-bed`
 - `terrain/damage/`: `ballistic-blast`, `ballistic-gouge`, `explosive-blast`, `fire-burn`, `laser-blast`, `laser-gouge`, `plasma-splash`, `ppc-blast`, `ppc-gouge`
-- `vegetation/`: `bank-turf`, `bark`, `birch-bark`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `fern-cutout`, `marsh-sedge`, `palm-bark`, `palm-frond-cutout`, `palm-fronds`, `shrub-cutout`, `snow`, `tundra-tussock`, `tundra-tussock-dry`
+- `vegetation/`: `bank-turf`, `bark`, `birch-bark`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `fern-cutout`, `marsh-sedge`, `palm-bark`, `palm-frond-cutout`, `palm-fronds`, `shrub-cutout`, `snow`, `tundra-tussock`
 - `vegetation/fungus/`: `fungus-atlas`
 - `vegetation/mars/`: `mars-coral-atlas`
 - `vegetation/orchard/`: `orchard-leaning`, `orchard-round`, `orchard-spreading`, `orchard-upright`, `orchard-vase`, `orchard-young`

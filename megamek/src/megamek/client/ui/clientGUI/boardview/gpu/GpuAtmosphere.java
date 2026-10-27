@@ -164,6 +164,7 @@ final class GpuAtmosphere implements Disposable {
     /** Made at the first frame with depth cues; strength 0 skips its pass. */
     private GpuDepthCues depthCues;
     private float depthCueStrength;
+    private final Color depthHaze = new Color();
     /** This frame's seconds, as begin() received them. */
     private float frameDelta;
     private List<BoardScene.Tile> heatTiles;
@@ -657,7 +658,10 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_sceneScaled", resampled ? 1 : 0);
         if (water != null) { water.bind(6); }
         compositeShader.setUniformi("u_waterDepth", water == null ? 1 : 6);
-        if (cued != null) { depthCues.bind(compositeShader, depthCueStrength, lighting.fog(), 9); }
+        if (cued != null) {
+            depthCues.bind(compositeShader, depthCueStrength,
+                  BoardAtmosphere.depthHaze(lighting, settings.pressure().isVacuum(), depthHaze), 9);
+        }
         else { GpuDepthCues.unbind(compositeShader, 0); }
         compositeShader.setUniformi("u_fog", hasScattering() ? 2 : 0);
         if (glowActive) { heatGlow.texture().bind(5); }

@@ -329,7 +329,8 @@ class BoardGroundCaptureTest {
                 assertFalse(pixels.blankTerrains().contains(Terrains.GROUND_FLUFF));
                 assertFalse(BoardFeatures.detailedGround(gravel, pixels.structureModels(), pixels.blankTerrains()),
                       "Unmodeled gravel artwork must not be discarded by a blanket fluff allow-list");
-                Hex unsupported = new Hex(0, "ground_fluff:1:3;sky:1", "grass", coords);
+                // A terrain without native 3D ground (BoardFeatures.detailedGround): magma draws only levels 1 and 2.
+                Hex unsupported = new Hex(0, "ground_fluff:1:3;magma:3", "grass", coords);
                 board.setHex(coords, unsupported);
                 artwork.invalidate(coords);
                 var fallback = BoardScene.captureTile(unsupported, artwork.capture(board, coords, board.getHex(coords)), null,

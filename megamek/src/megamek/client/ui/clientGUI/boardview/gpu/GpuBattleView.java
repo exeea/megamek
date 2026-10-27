@@ -134,6 +134,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
     /** The opaque scene's ambient occlusion, between the depth pre-pass and the opaque colour (Display: Ambient occlusion). */
     private final GpuAmbientOcclusion ambientOcclusion = new GpuAmbientOcclusion();
+    private final GpuSkyVisibility skyVisibility = new GpuSkyVisibility();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
     private record UnitSprite(BoardScene.Pixels pixels, boolean meeple) { }
     private final Map<UnitSprite, GpuUnitModel> spriteModels = new HashMap<>();
@@ -489,6 +490,7 @@ class GpuBattleView extends ApplicationAdapter {
         waterImpacts.dispose();
         effectDepth.dispose();
         ambientOcclusion.dispose();
+        skyVisibility.dispose();
     }
 
     @Override
@@ -703,6 +705,8 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.configureClouds(terrain, scene);
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
         atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
+        // Lighting, not an option: the sky light the board's relief hides from canyons and the feet of its walls.
+        skyVisibility.update(terrain.environment(), scene, 1);
         terrain.setGravity(atmosphereSettings.gravity());
         terrain.setVacuum(atmosphereSettings.pressure().isVacuum());
         // The 3D Graphics choose what the terrain builds; the first frame already has the saved choice, and a switch

@@ -22,14 +22,21 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Depth cue review: Crystalline Canyon's pillars in front of its far walls without fog, each view without the cues and
- * with each haze strength of {@code megamek.gpu.depthCues} (comma separated; the Tuning panel's without the property).
- * Then the focus easing: a cut from one view to another played at 60 frames a second with the last strength.
+ * Depth cue review: Crystalline Canyon's pillars in front of its far walls without fog, each view bare, with the haze
+ * behind the focus, with the sky occlusion by the relief (GpuSkyVisibility, always on on the board) and with both, as
+ * the board draws them with the Display page's Depth cues. Then the focus easing: a cut from one view to another played
+ * at 60 frames a second.
  */
 @Tag("on-demand")
 class GpuDepthCuesSmokeTest {
     /** A tilt of 0 looks straight down. */
     private record View(String name, Coords at, float zoom, float azimuth, float tilt) { }
+
+    /** A capture's cues: the haze's strength and the sky occlusion's. */
+    private record Look(String name, float haze, float sky) { }
+
+    private static final List<Look> LOOKS = List.of(new Look("off", 0, 0), new Look("haze", GpuDepthCues.STRENGTH, 0),
+          new Look("sky", 0, 1), new Look("both", GpuDepthCues.STRENGTH, 1));
 
     private static final List<View> VIEWS = List.of(
           new View("wall", new Coords(10, 6), .16f, 230, 70),
@@ -51,7 +58,6 @@ class GpuDepthCuesSmokeTest {
                 scene.set(fixture.source.takeFrame().scene());
             });
         }
-        String[] strengths = System.getProperty("megamek.gpu.depthCues", String.valueOf(GpuDepthCues.STRENGTH)).split(",");
         File output = output();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
@@ -71,22 +77,19 @@ class GpuDepthCuesSmokeTest {
                     for (View view : VIEWS) {
                         place(camera, view, scene.get());
                         GpuTerrainLodSmokeTest.settle(terrain, null, scene.get(), camera);
-                        // Each strength starts from this view's own focus: a frame without cues forgets the last one.
-                        frame.atmosphere().setDepthCues(0);
-                        frame.render(terrain, camera, scene.get());
-                        GpuReviewFrame.save(new File(output, view.name() + "-off.png"));
-                        for (String strength : strengths) {
-                            frame.atmosphere().setDepthCues(Float.parseFloat(strength));
+                        // Each look starts from this view's own focus: the first, without cues, forgets the last one.
+                        for (Look look : LOOKS) {
+                            show(frame, look);
                             frame.render(terrain, camera, scene.get());
-                            GpuReviewFrame.save(new File(output, view.name() + "-haze-" + strength + ".png"));
+                            GpuReviewFrame.save(new File(output, view.name() + "-" + look.name() + ".png"));
                         }
                     }
                     View from = VIEWS.get(1), to = VIEWS.get(0);
                     place(camera, from, scene.get());
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene.get(), camera);
-                    frame.atmosphere().setDepthCues(0);
+                    show(frame, LOOKS.getFirst());
                     frame.render(terrain, camera, scene.get());
-                    frame.atmosphere().setDepthCues(Float.parseFloat(strengths[strengths.length - 1]));
+                    show(frame, LOOKS.getLast());
                     frame.render(terrain, camera, scene.get());
                     place(camera, to, scene.get());
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene.get(), camera);
@@ -111,8 +114,9 @@ class GpuDepthCuesSmokeTest {
     }
 
     /**
-     * The Display page's Depth cues in the battle view: saved on, its program links while the board loads and the view
-     * draws the Tuning panel's haze; switched off, the next frame draws without it. Captures of both.
+     * The Display page's Depth cues in the battle view: saved on, the haze's program links while the board loads and the
+     * view draws the haze; switched off, the next frame draws without it. The sky occlusion stays on either way.
+     * Captures of both.
      */
     @Test
     void displayOptionDrivesTheBattleView() throws Exception {
@@ -139,11 +143,15 @@ class GpuDepthCuesSmokeTest {
                                   "Saved on, the depth cues link while the board loads");
                             place(view.boardCamera, VIEWS.get(0), (BoardScene) GpuCamouflageReview.field(view, "scene"));
                             GpuBoardTestUi.present(view);
+                            var sky = (GpuSkyVisibility) GpuCamouflageReview.field(view, "skyVisibility");
                             assertEquals(GpuDepthCues.STRENGTH, GpuCamouflageReview.field(atmosphere, "depthCueStrength"));
+                            assertEquals(GpuSkyVisibility.ENABLED ? 1f : 0f, GpuCamouflageReview.field(sky, "strength"));
                             GpuBoardTestUi.capture(new File(output, "battle-view-on.png"));
                             GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-depth-cues"));
                             GpuBoardTestUi.present(view);
                             assertEquals(0f, GpuCamouflageReview.field(atmosphere, "depthCueStrength"));
+                            assertEquals(GpuSkyVisibility.ENABLED ? 1f : 0f, GpuCamouflageReview.field(sky, "strength"),
+                                  "Sky occlusion is lighting");
                             GpuBoardTestUi.capture(new File(output, "battle-view-off.png"));
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         } catch (Throwable error) {
@@ -159,6 +167,11 @@ class GpuDepthCuesSmokeTest {
             SwingUtilities.invokeAndWait(() -> preferences.setBoardDepthCues(original));
         }
         if (failure.get() != null) { throw new AssertionError("Depth cues from the Display page", failure.get()); }
+    }
+
+    private static void show(GpuReviewFrame frame, Look look) {
+        frame.atmosphere().setDepthCues(look.haze());
+        frame.setSkyVisibility(look.sky());
     }
 
     private static File output() throws Exception {

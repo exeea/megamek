@@ -101,7 +101,8 @@ class BoardRimTest {
             BoardScene.Pixels ramp = new BoardRim().column(road, road.tile(CENTER), ground, incline, high);
             assertEquals(ground.rgba(probe(edge, 0.5f, 3)), ramp.rgba(probe(edge, 0.5f, 3)),
                   "A road ramping through the edge keeps its mouth clear at edge " + edge);
-            assertNotEquals(ground.rgba(probe(edge, 0.12f, 3)), ramp.rgba(probe(edge, 0.12f, 3)),
+            // The mouth (BoardSurface.ROAD_MOUTH) leaves the rim only within a few pixels of each corner.
+            assertNotEquals(ground.rgba(probe(edge, 0.05f, 3)), ramp.rgba(probe(edge, 0.05f, 3)),
                   "Beside the mouth the drop keeps its rim at edge " + edge);
             BoardScene steep = scene(edge, false, -1);
             assertEquals(Math.round(0x50 * shade(0xc0, 1)),
@@ -171,9 +172,11 @@ class BoardRimTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
+                boolean paved = road && coords.equals(CENTER);
+                // Road exits make a road only with a kind of road (BoardRoad.rendered).
                 tiles.add(new BoardScene.Tile(coords, coords.equals(low) ? neighborElevation : 2, -1, false,
-                      road && coords.equals(CENTER) ? 1 << direction : 0, BoardScene.Surface.GRASS, null, List.of(),
-                      List.of()));
+                      paved ? 1 << direction : 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
+                      BoardLiquid.NONE, null, false, paved ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

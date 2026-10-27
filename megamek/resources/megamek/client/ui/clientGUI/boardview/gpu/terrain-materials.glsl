@@ -1287,6 +1287,20 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         float abrasion = (1.0 - smoothstep(.15, 2.2, belowRim)) * smoothstep(.45, .95, up);
         vec3 weathering = mix(vec3(.98, .91, .85), vec3(1.14, 1.15, 1.13), abrasion);
         result.color *= mix(vec3(1.0), authoredPigmentGain(mix(vec3(1.0), weathering, u_terrainWear)), roleShare.w);
+    } else if (sides && abs(familyId - LUNAR_FAMILY) > .5 && abs(familyId - FUNGUS_FAMILY) > .5
+          && abs(familyId - MARS_FAMILY) > .5) {
+        // A wall weathers by height, over its own height: sun and wind bleach its rim, water leaving the top streaks
+        // the face down from it, and grime and moisture darken its lower part towards the foot. Desert sandstone keeps
+        // its abraded rim above; airless and alien walls neither.
+        float faceHeight = max(aboveFoot + belowRim, 1.0);
+        float low = (1.0 - smoothstep(0.0, .45, max(aboveFoot, 0.0) / faceHeight)) * (.6 + .4 * variation);
+        float bleach = (1.0 - smoothstep(.3, 3.0 + 3.0 * broad, belowRim)) * (1.0 - .5 * up);
+        vec2 along = vec2(-face.y, face.x) / max(length(face.xy), .001);
+        float streak = textureLod(u_rainNoise, vec2(dot(world.xy, along) / 5.0, world.z / 200.0) + .41, 0.0).r;
+        float streaks = smoothstep(.5, .8, streak) * (1.0 - smoothstep(0.0, .6 * faceHeight + 4.0, max(belowRim, 0.0)));
+        vec3 weathering = mix(vec3(1.0), vec3(1.10, 1.10, 1.09), bleach) * mix(vec3(1.0), vec3(.84, .84, .86), streaks)
+              * mix(vec3(1.0), vec3(.84, .85, .88), low);
+        result.color *= mix(vec3(1.0), authoredPigmentGain(mix(vec3(1.0), weathering, u_terrainWear)), roleShare.w);
     }
     if (abs(familyId - 2.0) < .5) {
         float mineral = dot(result.color, vec3(.2126, .7152, .0722));

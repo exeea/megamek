@@ -21,7 +21,7 @@ class BoardRoadSpillTest {
     private static final Coords AT = new Coords(4, 4);
 
     @Test
-    void onlyDryGroundAtTheSameLevelSharesPaintAndRailClearance() {
+    void paintKeepsToDryGroundAtItsLevelWhileClearanceAlsoReachesRampsAndRails() {
         var scene = BoardSurfaceBlendTest.scene(c -> {
             if (c.equals(AT.translated(4))) {
                 return BoardBridgeFootingTest.routeTile(c, false, RailRoute.Kind.RAIL, 0, 9, false, 0);
@@ -36,8 +36,9 @@ class BoardRoadSpillTest {
         assertEquals(List.of(AT, AT.translated(0), AT.translated(3), AT.translated(5)),
               roads.stream().map(BoardRoad::coords).toList(), "A Classic-artwork neighbor still contributes its native road");
         var ways = BoardRoad.nearbyWays(scene, scene.tile(AT));
-        assertEquals(List.of(AT, AT.translated(0), AT.translated(3), AT.translated(4), AT.translated(5)),
-              ways.stream().map(BoardRoad::coords).toList(), "A rail-only neighbor clears plants without adding road paint");
+        // A graded road's ramp reaches a neighbour of another level (BoardRoad.nearby); a rail clears plants too.
+        assertEquals(List.of(AT, AT.translated(0), AT.translated(1), AT.translated(3), AT.translated(4), AT.translated(5)),
+              ways.stream().map(BoardRoad::coords).toList(), "Clearance reaches every dry neighbour's way");
         assertTrue(BoardRoad.nearby(scene, scene.tile(AT.translated(2))).isEmpty(), "Water cannot support spilled road paint");
     }
 

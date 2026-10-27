@@ -214,7 +214,7 @@ final class GpuShaderPreview implements Disposable {
                 weather.render(camera, sampleScene, effects, Color.WHITE, seconds);
             }
             display.render(sceneBuffer, buffer, exposure);
-            return new Frame(image(), title + " · drag to orbit · wheel to zoom", preset, seconds);
+            return new Frame(image(WIDTH, HEIGHT), title + " · drag to orbit · wheel to zoom", preset, seconds);
         } catch (RuntimeException error) {
             failure = error.toString();
             if (batch != null && batch.getCamera() != null) {
@@ -337,9 +337,10 @@ final class GpuShaderPreview implements Disposable {
         return new UnitAttack(new BoardScene.Combat(result, attacker, victim, target));
     }
 
-    private BufferedImage image() {
-        byte[] rgba = ScreenUtils.getFrameBufferPixels(0, 0, WIDTH, HEIGHT, true);
-        var image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
+    /** The bound framebuffer's displayed colour, upright, for Swing (also GpuMaterialSwatches). */
+    static BufferedImage image(int width, int height) {
+        byte[] rgba = ScreenUtils.getFrameBufferPixels(0, 0, width, height, true);
+        var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         int[] rgb = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
         for (int i = 0; i < rgb.length; i++) {
             int offset = i * 4;

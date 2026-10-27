@@ -47,9 +47,9 @@ floating. Both camera modes use the same meshes. Water geometry snapshots retain
 
 The assets live in `mm-data/data/models/board/rough`. The dragon tooth (28 triangles) uses the shared concrete
 texture. The timber (`felled-trunk`, `charred-stump`, `fallen-stump`, and the saw clearing's `sawn-stump` and
-`sawn-log`) are game meshes of at most 500 triangles with two coarser levels, each with its own albedo, normal and
-occlusion maps (`<name>_albedo/_normal/_occlusion.png`) baked from a dense sculpt in the timber photo materials
-(`textures/scenery/timber-bark`, `timber-char`, `timber-endgrain`). A ROUGH feature of height 0 keeps its model's own
+`sawn-log`) are game meshes of at most 500 triangles with two coarser levels, in the shared timber materials:
+`textures/scenery/timber-bark` wraps each trunk a whole number of times, `timber-endgrain` is centred on each cut face.
+Rough's timber is the same materials vertex-coloured charcoal; the sawn timber shows them as they are. A ROUGH feature of height 0 keeps its model's own
 proportions: the sawn timber is modelled at real size. The rough pieces' maximum
 footprint radii are three board units for standing stumps and six for the other pieces
 before placement scaling, matching capture's route clearance. No GL resources

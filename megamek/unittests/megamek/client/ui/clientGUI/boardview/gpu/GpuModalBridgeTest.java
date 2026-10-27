@@ -171,7 +171,10 @@ class GpuModalBridgeTest {
                 assertNull(onSwing(() -> GpuBoardWindow.ask(other, request)), "Another client's window");
                 assertNull(GpuBoardWindow.ask(gui, request), "Off the EDT");
                 assertNull(fixture.source.dialog());
-                assertFalse(onSwing(gui::shouldIgnoreHotKeys));
+                // Whether the client takes hotkeys also follows which Swing window is active (ClientGUI
+                // isGameWindowActive), which other tests may leave anywhere: the dialog's effect is measured
+                // against it.
+                boolean idle = onSwing(gui::shouldIgnoreHotKeys);
 
                 FutureTask<DialogAnswer> ask = askLater(() -> GpuBoardWindow.ask(gui, request));
                 DialogRequest shown = awaitDialog(fixture.source, "Continue?");
@@ -181,7 +184,8 @@ class GpuModalBridgeTest {
                 fixture.source.answer(shown.id(), answer(0));
                 assertEquals(answer(0), ask.get(WAIT_SECONDS, SECONDS));
                 assertFalse(GpuBoardWindow.dialogPendingFor(gui));
-                assertFalse(onSwing(gui::shouldIgnoreHotKeys));
+                assertEquals(idle, onSwing(gui::shouldIgnoreHotKeys),
+                      "The answered dialog no longer holds the hotkeys");
             } finally {
                 dismiss();
             }

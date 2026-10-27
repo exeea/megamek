@@ -169,7 +169,8 @@ class RailRouteEditorTest {
             assertTrue(onTrack(session, cells, curve, x, y, vehicle.rotation()) < .5, vehicle.asset() + " stands on the track");
             assertEquals(RailRoute.ride(route(session, RailRoute.Kind.RAIL, home)), vehicle.placement());
             if (previous != null) {
-                float spacing = rows.get(i - 1).y() - rows.get(i).y();
+                // A conventional train grows with its cars, which the 3D view draws larger (BoardSceneryLayouts).
+                float spacing = (rows.get(i - 1).y() - rows.get(i).y()) * RailRoute.CONVENTIONAL_SCALE;
                 assertEquals(spacing, Math.hypot(x - previous[0], y - previous[1]), 2.5, "The stamp's spacing, round the curve");
             }
             previous = new float[] { x, y };

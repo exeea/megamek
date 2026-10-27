@@ -129,12 +129,13 @@ final class GpuShaderSource {
     }
 
     /**
-     * The material finish, light model, rain field, local lights, ambient occlusion and geometry shadows of every lit
-     * surface.
+     * The material finish, light model, rain field, local lights, ambient occlusion, sky visibility and geometry shadows
+     * of every lit surface.
      */
     private static String sharedLighting() {
         return read("material-finish.glsl") + read("light-model.glsl") + read("environment-lighting.glsl") + read("rain-surface.glsl")
-              + read("lava-lighting.glsl") + read("ambient-occlusion.glsl") + read("surface-lighting.glsl");
+              + read("lava-lighting.glsl") + read("ambient-occlusion.glsl") + read("sky-visibility.glsl")
+              + read("surface-lighting.glsl");
     }
 
     /** Imported models (model.frag) share the terrain's lighting and its one entry, without its material libraries. */

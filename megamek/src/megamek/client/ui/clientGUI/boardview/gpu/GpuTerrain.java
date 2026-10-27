@@ -1150,6 +1150,8 @@ final class GpuTerrain implements Disposable {
     private final OrthographicCamera boardShadowFit = new OrthographicCamera();
     private boolean shadowBoardWide;
     private boolean shadowDirty;
+    // Frames since a camera refinement last replaced a chunk the cached shadow has not redrawn; -1 when none.
+    private int refinedShadowFrames = -1;
     private float clock;
     private long shadingPass;
     private float vegetationPhase;
@@ -3534,8 +3536,10 @@ final class GpuTerrain implements Disposable {
         terrainBatch.clear();
         pickingSurfaces.clear();
         detailPixelsPerUnit = Float.NaN;
-        shadowDirty = true;
-        updateLight(coverScene.light());
+        // A refined chunk casts its terrain at finer detail. The cached shadow serves until refinement settles
+        // (renderShadows): drawing every chunk and tree again for each one cost 3-6 ms a time on an Iris Xe.
+        refinedShadowFrames = 0;
+        fitShadowBounds();
     }
 
     /** Fallen limbs are the only terrain props whose geometry follows the unit scale setting. */
@@ -8086,9 +8090,13 @@ final class GpuTerrain implements Disposable {
     private void updateLight(BoardScene.Light next) {
         light = next;
         shadowDirty = true;
+        fitShadowBounds();
+        applyLight();
+    }
+
+    private void fitShadowBounds() {
         shadowBounds.inf();
         chunks.forEach(chunk -> shadowBounds.ext(chunk.bounds));
-        applyLight();
     }
 
     void setAtmosphere(BoardAtmosphere.Lighting next) {
@@ -8368,6 +8376,11 @@ final class GpuTerrain implements Disposable {
         if (view != null) { updateDetail(view); }
         if (shadow == null || environment.shadowMap == null) {
             return;
+        }
+        // Refinement has settled: the refined chunks cast their own shadow (replaceDetail).
+        if (refinedShadowFrames >= 0 && ++refinedShadowFrames > GpuMeshPage.SETTLE_FRAMES) {
+            refinedShadowFrames = -1;
+            shadowDirty = true;
         }
         if (lifts != null) {
             // Moving lifts cast like units, over the cached terrain's shadow, which leaves them out.

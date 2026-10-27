@@ -47,7 +47,8 @@ Sections: [1 Architecture](#1-architecture) · [2 Input](#2-input-routing) · [3
   being built, a fortified hex's sandbags, a cleared rubble path, a trench being dug. What marks set on the ground is
   scenery of its hex in the scene, which no hex stores (`GpuBoardSource.markedTiles`): a dug-in platoon's trench
   (`scenery/military/trench`, `BoardFeatures.withTrench`); woods being cleared by saws, whose trees fall from one side
-  a share for each turn of work, each leaving a sawn stump and its log (`BoardFeatures.withSawClearing`; the game
+  a share for each turn of work, each leaving a sawn stump, their logs in a low pile along that side
+  (`BoardFeatures.withSawClearing`; the game
   lowers the woods when the work is done); and cargo set down, a worn military container
   (`scenery/military/cargo-crate`, `BoardFeatures.withCargo`) that replaces the cargo marker and stays in the Tactical View.
   Its sides are stencilled with a two-digit number its hex picks (`BoardFeatures.label`, written by `RigidGlb.label`); its
@@ -919,7 +920,13 @@ A developer and tester tool, to be removed before release.
   Fit board accounts for the current panel clearances. The gameplay right column starts one gap below the utility
   row and fills the available height; the phase header moves below that row when both cannot fit across the window. Tuning opens
   at the same top, 360 wide and ending at least 70 above the bottom, with the pages Display, Board, Atmosphere, Terrain
-  and Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor).
+  and Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor). The
+  Terrain page opens the Material palette (`GpuMaterialPalette`): a Swing window with every board material on a flat
+  tile, a cube or a sphere, drawn by the model shader with its whole finish (`GpuMaterialSwatches`,
+  `GpuAssets.finish`) under the default daylight. It orders them by folder, similarity (a chain of nearest looks:
+  mean colour and contrast on a 4 x 4 grid of each swatch), brightness (the material's own pixels), map bytes on disk
+  or newest file; a tooltip gives the albedo size, map bytes and change time. Its Reload assets button requests the
+  board's asset reload, as the footer's does, and draws the palette again from disk.
 - **Model:** `GpuBoardTuning` keeps every value as a Scene2D control that is never drawn; `GpuBattleView` reads the
   values from it. `GpuTuningPanel` mirrors the model's rows in the hud-v3 look, and an edit goes to the model's own
   control. Its tooltips are the model's texts; the row texts are English literals.

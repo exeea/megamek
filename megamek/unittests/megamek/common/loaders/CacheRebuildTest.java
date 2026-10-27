@@ -54,6 +54,7 @@ import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.layout.PatternLayout;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -62,6 +63,13 @@ class CacheRebuildTest {
     @BeforeEach
     void setUp() throws Exception {
         Configuration.setDataDir(new File("testresources/data"));
+        resetCacheSingleton();
+    }
+
+    /** Later test classes in this JVM read the shipped data, and must not inherit a cache of the test units. */
+    @AfterEach
+    void tearDown() throws Exception {
+        Configuration.setDataDir(null);
         resetCacheSingleton();
     }
 

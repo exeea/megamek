@@ -81,8 +81,10 @@ class DeckWaysTest {
         assertTrue(errors("bridge:1;bridge_cf:40;bridge_elev:2;bridge_rail:1:13").isEmpty(),
               "automatic bridge exits follow the neighbours, so the hex alone cannot judge them");
         assertTrue(errors("rail:0:9").isEmpty() && errors("rail:1:9").isEmpty());
-        assertFalse(errors("rail:2:9").isEmpty(), "maglev is stage B");
-        assertFalse(errors(SPAN + ";bridge_rail:2:9").isEmpty());
+        assertTrue(errors("rail:2:9").isEmpty() && errors(SPAN + ";bridge_rail:2:9").isEmpty(),
+              "a maglev is rail at level 2, on the ground or on a deck");
+        assertFalse(errors("rail:3:9").isEmpty());
+        assertFalse(errors(SPAN + ";bridge_rail:3:9").isEmpty());
         assertFalse(errors(SPAN + ";bridge_road:5:9").isEmpty(), "a deck road has the road's four kinds");
         assertTrue(errors("water:1;rail:1:9").isEmpty(), "submerged track is legal (TO:AR p.32 fn 21)");
     }

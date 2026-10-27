@@ -30,7 +30,7 @@ class UnitDisplayModeTest {
         assertNull(selection.asset());
         assertNull(selection.fallback(), "Missing model entries must retain the existing flat fallback in 3D Models mode");
         assertTrue(UnitDisplayMode.ALL_MEEPLES.meeple(selection));
-        assertEquals(entity instanceof Mek, UnitDisplayMode.DEFAULT.meeple(selection));
+        assertEquals(entity instanceof Mek, UnitDisplayMode.MEK_MEEPLES.meeple(selection));
         assertFalse(UnitDisplayMode.MODELS.meeple(selection));
     }
 }

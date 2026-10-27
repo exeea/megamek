@@ -40,7 +40,7 @@ final class GpuCloudShadow extends Attribute {
               + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "")
               + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.Antialiasing.TYPE)
                     ? "#define specularAntialiasingFlag\n" : "")
-              + GpuAmbientOcclusion.prefix(renderable);
+              + GpuAmbientOcclusion.prefix(renderable) + GpuSkyVisibility.prefix(renderable);
     }
 
     static void register(DefaultShader shader) {

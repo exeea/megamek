@@ -683,13 +683,15 @@ final class BoardFeatures {
 
     /** The timber a saw clearing leaves ({@link #withSawClearing}), modelled at real size. */
     static final String SAWN_STUMP = "rough/sawn-stump", SAWN_LOG = "rough/sawn-log";
-    /** Half the sawn log's length (4.6 m), in tile px. */
-    private static final float SAWN_LOG_REACH = 6.4f;
+    /** Half the sawn log's length (4.6 m) and its diameter, in tile px. */
+    private static final float SAWN_LOG_REACH = 6.4f, SAWN_LOG_DIAMETER = 1.45f;
 
     /**
      * {@code tile} while saws clear its woods (TW p.112): of its trees, a share for each turn of work done, felled from
-     * one side of the hex across (its hex's choice), each leaving a sawn stump where it stood and its log in the ground
-     * already cleared behind it. The game lowers the woods when the work is done.
+     * one side of the hex across (its hex's choice), each leaving a sawn stump where it stood. Their logs, cut to one
+     * length, lie in a low pile along that side, as near it as the trees and stumps leave room: half of them side by
+     * side on the ground, the rest centred in the grooves between them (loose logs roll off anything higher). The game
+     * lowers the woods when the work is done.
      */
     static BoardScene.Tile withSawClearing(BoardScene.Tile tile, int turnsRemaining) {
         List<BoardScene.Feature> trees = tile.features().stream()
@@ -707,21 +709,41 @@ final class BoardFeatures {
         features.removeAll(cut);
         for (BoardScene.Feature tree : cut) {
             // The board's trees are drawn larger than life; their timber matches their trunks.
-            float size = 2 * tree.scale(), reach = (SAWN_LOG_REACH + 1.5f) * size;
-            features.add(new BoardScene.Feature(SAWN_STUMP, tree.x(), tree.y(), random.nextFloat() * 360, size, 0, 0,
-                  BoardScene.FeatureKind.ROUGH));
-            double fall = heading + Math.PI + (random.nextFloat() - .5f) * .7f;
-            float x = tree.x() + (float) Math.cos(fall) * reach, y = tree.y() + (float) Math.sin(fall) * reach;
-            if (Math.hypot(x, y) > BoardGeometry.TILE_HEIGHT / 2f - SAWN_LOG_REACH * size) {
-                // A log that would leave the hex lies toward its middle instead.
-                fall = Math.atan2(-tree.y(), -tree.x());
-                x = tree.x() + (float) Math.cos(fall) * reach;
-                y = tree.y() + (float) Math.sin(fall) * reach;
-            }
-            features.add(new BoardScene.Feature(SAWN_LOG, x, y, (float) Math.toDegrees(fall), size, 0, 0,
-                  BoardScene.FeatureKind.ROUGH));
+            features.add(new BoardScene.Feature(SAWN_STUMP, tree.x(), tree.y(), random.nextFloat() * 360,
+                  2 * tree.scale(), 0, 0, BoardScene.FeatureKind.ROUGH));
+        }
+        float size = (float) cut.stream().mapToDouble(tree -> 2 * tree.scale()).average().orElseThrow();
+        float diameter = SAWN_LOG_DIAMETER * size, reach = SAWN_LOG_REACH * size;
+        int bottom = (cut.size() + 2) / 2, upper = cut.size() - bottom;
+        float depth = bottom * diameter;
+        // The pile's far side: within its hex side and, at the logs' ends, the two sides beside it.
+        float edge = Math.min(BoardGeometry.TILE_HEIGHT / 2f - size, BoardGeometry.TILE_HEIGHT - 1.8f * reach);
+        float far = edge;
+        while (far > depth && blocked(trees, dx, dy, far - depth, far, reach, 2 * size)) { far--; }
+        if (far <= depth) { far = edge; }
+        for (int i = 0; i < cut.size(); i++) {
+            // From the pile's near side: the ground row's centres, then the grooves between them.
+            boolean top = i >= bottom;
+            float across = top ? (bottom - 1 - upper) / 2 + i - bottom + 1 : i + .5f;
+            float back = far - depth + across * diameter;
+            float side = (random.nextFloat() - .5f) * size;
+            features.add(new BoardScene.Feature(SAWN_LOG, -dx * back - dy * side, -dy * back + dx * side,
+                  (float) Math.toDegrees(heading) + 90 + (random.nextFloat() - .5f) * 2, size, 0,
+                  top ? diameter * .866f / BoardGeometry.MODEL_LEVEL_HEIGHT : 0, BoardScene.FeatureKind.ROUGH));
         }
         return tile.withFeatures(features);
+    }
+
+    /**
+     * True when a trunk, with its roots within {@code trunk}, stands between {@code near} and {@code far} behind the hex
+     * centre, across a log's reach.
+     */
+    private static boolean blocked(List<BoardScene.Feature> trees, float dx, float dy, float near, float far, float reach,
+          float trunk) {
+        return trees.stream().anyMatch(tree -> {
+            float back = -(tree.x() * dx + tree.y() * dy), side = tree.y() * dx - tree.x() * dy;
+            return back > near - trunk && back < far + trunk && Math.abs(side) < reach + trunk;
+        });
     }
 
     /** A crate of cargo set down on the ground ({@link #withCargo}). */
@@ -917,34 +939,64 @@ final class BoardFeatures {
         int exits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
         BoardRoad bridge = hex.containsTerrain(Terrains.BRIDGE) ? BoardRoad.clearance(coords, exits) : null;
         Predicate<BoardScene.Feature> clear = feature -> {
-            float x = feature.x(), y = feature.y();
-            float clearance = BoardRoad.SHOULDER + feature.scale() * switch (feature.asset()) {
-                case "rough/charred-stump" -> 3;
-                case "rough/dragon-tooth" -> DRAGON_TOOTH_RADIUS;
-                // Unit rock meshes fit a square, so a rotated corner reaches beyond half the width.
-                case "rough-boulder", BoardRocks.OUTCROP -> ROUGH_BOULDER_WIDTH * .65f;
-                default -> ROUGH_BOULDER_WIDTH / 2;
-            };
-            // Bridge decks follow the complete road footprint, including dead ends and solid roundabout islands.
+            float x = feature.x(), y = feature.y(), radius = roughRadius(feature);
+            // Bridge decks follow the complete road footprint, including dead ends and solid roundabout islands, and
+            // reach their own shoulder beyond it.
             return BoardRoad.distance(roads, BoardGeometry.centerX(coords) + x * BoardGeometry.hexScale(),
-                  BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale()) >= clearance && (bridge == null
-                  || bridge.distance(x, y) >= clearance
+                  BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale()) >= BoardRoad.SHOULDER + radius
+                  && (bridge == null || bridge.distance(x, y) >= BoardBridge.SHOULDER + radius
                         && !(BoardRoad.roundabout(exits) && Math.hypot(x, y) < BoardRoad.ROUNDABOUT_RADIUS));
         };
-        // A route removes the cover on its line. Keep the authoritative count beside it, as woods do: teeth close
-        // their spacing, and other cover offers up to three times as many placement candidates.
+        // A route clears the cover off its line and keeps the count beside it: teeth close their spacing.
         if (teeth) {
             // Standard teeth spread across the hex; ultra rough fills it at the closest spacing.
             result.addAll(dragonTeeth(count, ultra ? CLOSE_TEETH_SPACING : 20, clear));
             return;
         }
-        List<BoardScene.Feature> placed = List.of();
-        for (int spread = count; placed.size() < count && spread <= 3 * count; spread++) {
-            var candidates = felled ? roughSpiral(coords, true, ultra, spread) : roughRocks(coords, spread);
-            List<BoardScene.Feature> pieces = candidates.stream().filter(clear).limit(count).toList();
-            if (pieces.size() > placed.size()) { placed = pieces; }
+        // Other pieces stay where they lie, and those on the route are pushed off it onto its verge.
+        var pieces = felled ? roughSpiral(coords, true, ultra, count) : roughRocks(coords, count);
+        List<BoardScene.Feature> placed = new ArrayList<>(pieces.stream().filter(clear).toList());
+        for (var piece : pieces) {
+            if (clear.test(piece)) { continue; }
+            var pushed = pushedAside(piece, clear, placed);
+            if (pushed != null) { placed.add(pushed); }
         }
         result.addAll(placed);
+    }
+
+    /** The footprint radius of a rough piece, in tile pixels: rock meshes fit a square, so a corner reaches further. */
+    private static float roughRadius(BoardScene.Feature feature) {
+        return feature.scale() * switch (feature.asset()) {
+            case "rough/charred-stump" -> 3.1f;
+            case "rough/dragon-tooth" -> DRAGON_TOOTH_RADIUS;
+            case "rough-boulder", BoardRocks.OUTCROP -> ROUGH_BOULDER_WIDTH * .65f;
+            default -> ROUGH_BOULDER_WIDTH / 2;
+        };
+    }
+
+    /**
+     * {@code piece} moved the shortest way onto clear ground wholly inside its hex, as if shoved off a road: pieces
+     * pushed together may overlap a little, never sit inside each other. Where the verge is crowded (a road ending in
+     * the hex), a smaller piece still fits, as if broken up on the way. Null without such ground.
+     */
+    private static BoardScene.Feature pushedAside(BoardScene.Feature piece, Predicate<BoardScene.Feature> clear,
+          List<BoardScene.Feature> placed) {
+        for (float size : new float[] { 1, .8f, .65f, .5f, .35f }) {
+            float radius = roughRadius(piece) * size;
+            for (int distance = 1; distance <= BoardGeometry.TILE_WIDTH; distance++) {
+                for (int step = 0; step < 24; step++) {
+                    double angle = step * Math.PI / 12;
+                    float x = piece.x() + distance * (float) Math.cos(angle);
+                    float y = piece.y() + distance * (float) Math.sin(angle);
+                    if (hexMargin(x, y) < radius) { continue; }
+                    var moved = new BoardScene.Feature(piece.asset(), x, y, piece.rotation(), piece.scale() * size,
+                          piece.height() * size, piece.elevation(), piece.kind());
+                    if (clear.test(moved) && placed.stream().allMatch(other -> Math.hypot(x - other.x(), y - other.y())
+                          >= .6f * (radius + roughRadius(other)))) { return moved; }
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -987,7 +1039,7 @@ final class BoardFeatures {
         // Board-space noise gives nearby hexes a common fracture direction, independent of camera, scale and LOD.
         float strike = 360 * BoardRelief.noise(coords.getX() * .15f,
               -(coords.getY() + (coords.getX() & 1) * .5f) * BoardGeometry.TILE_HEIGHT / (5 * BoardGeometry.TILE_WIDTH));
-        // Repacking beside a route also rotates the candidate groups, rather than only crowding rejected slots.
+        // The count turns the groups, so standard and ultra rough differ.
         double phase = random.nextFloat() * 2 * Math.PI + count * 2.399963, bearing = phase;
         float turn = strike;
         List<BoardScene.Feature> result = new ArrayList<>(count);

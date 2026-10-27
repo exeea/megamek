@@ -41,7 +41,8 @@ class GpuBuildingInteriorTest {
             for (var polygon : entry.getValue().polygons()) { geometry.addAll(List.of(polygon.points())); }
             var area = entry.getKey().contains("roof") ? GpuBuildingInterior.area(geometry)
                   : GpuBuildingInterior.walls(geometry, 9);
-            assertTrue(area.contains(0, 0), "The wall outline must enclose usable volume");
+            // A module keeps its authored XY (GpuBuilding.moduleOffset): its centre moved with both offsets.
+            assertTrue(area.contains(900 + 71, -400 - 23), "The wall outline must enclose usable volume");
             if (volume == null) { volume = area; } else { volume.intersect(area); }
         }
         var footprint = GpuBuildingInterior.triangles(volume);

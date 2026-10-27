@@ -452,25 +452,25 @@ class BoardLegacyImportTest {
     @Test
     void anAuthoredRoadOnACarParkIsKept() {
         // An automatic road that also exits NE, off the N-S lane, toward a road beside it; and a dead end to the south.
-        // A road level the renderer does not draw (5) shows no road.
+        // An unknown road level (5) is drawn as a paved road (HexTile.road, BoardRoad.kind).
         Coords automatic = new Coords(1, 1), beside = automatic.translated(1), deadEnd = new Coords(5, 1),
-              undrawn = new Coords(7, 1);
+              unknown = new Coords(7, 1);
         Board board = Board.createEmptyBoard(9, 3);
         board.setHex(automatic, new Hex(0, "pavement:1;road:1;fluff:5:02", ""));
         board.setHex(beside, new Hex(0, "road:1", ""));
         board.setHex(deadEnd, new Hex(0, "road:1:08;fluff:5:02", ""));
-        board.setHex(undrawn, new Hex(0, "road:5:09;fluff:5:02", ""));
+        board.setHex(unknown, new Hex(0, "road:5:09;fluff:5:02", ""));
         assertEquals("1:2 automatic", road(board.getHex(automatic)));
         List<String> before = List.of(road(board.getHex(automatic)), road(board.getHex(beside)), road(board.getHex(deadEnd)),
-              road(board.getHex(undrawn)));
+              road(board.getHex(unknown)));
         BoardSceneryLayouts.convert(board);
         assertEquals(before, List.of(road(board.getHex(automatic)), road(board.getHex(beside)), road(board.getHex(deadEnd)),
-              road(board.getHex(undrawn))));
+              road(board.getHex(unknown))));
         assertTrue(board.getHex(automatic).containsTerrain(Terrains.FLUFF));
-        // The drawn roads run between their rows; the undrawn one leaves them back to back.
-        for (Coords at : List.of(automatic, deadEnd, undrawn)) {
+        // The roads run between their rows.
+        for (Coords at : List.of(automatic, deadEnd, unknown)) {
             assertRows(board.getHex(at).getDecorations().stream().filter(o -> o.kind().equals("decal")).toList(),
-                  !at.equals(undrawn), at.toString());
+                  true, at.toString());
         }
     }
 

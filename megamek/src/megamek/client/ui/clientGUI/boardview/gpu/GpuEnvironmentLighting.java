@@ -38,8 +38,20 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     private Texture texture;
     private GpuLightingEnvironment image;
     private float shadowStrength = 1, imageGain = 1;
+    /** The board's sky occlusion by its relief (borrowed), else this lighting's own neutral one (owned, made on use). */
+    private GpuSkyVisibility skyVisibility;
+    private GpuSkyVisibility neutralSky;
 
     GpuEnvironmentLighting() { super(TYPE); }
+
+    /** The board's sky visibility, which its owner keeps and disposes; the lit programs read it with this lighting. */
+    void setSkyVisibility(GpuSkyVisibility sky) { skyVisibility = sky; }
+
+    GpuSkyVisibility skyVisibility() {
+        if (skyVisibility != null) { return skyVisibility; }
+        if (neutralSky == null) { neutralSky = new GpuSkyVisibility(); }
+        return neutralSky;
+    }
 
     /**
      * Marks an environment whose lit programs compile specular anti-aliasing (specularAntialiasingFlag,
@@ -90,7 +102,9 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         values.add(identity & 65535, identity >>> 16);
     }
 
+    /** The atlas, made with the sky visibility's volume when a program is built, before its setters bind textures. */
     Texture texture() {
+        if (GpuSkyVisibility.ENABLED) { skyVisibility().texture(); }
         if (texture == null) {
             texture = GpuColorTexture.linear(pixels(GpuLightingEnvironment.ATLAS_SIZE, GpuLightingEnvironment.ATLAS_SIZE),
                   GpuLightingEnvironment.ATLAS_SIZE, GpuLightingEnvironment.ATLAS_SIZE, false);
@@ -110,6 +124,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     }
 
     static void register(DefaultShader shader) {
+        GpuSkyVisibility.register(shader);
         shader.register("u_shadowStrength", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
                 var light = attributes.get(GpuEnvironmentLighting.class, TYPE);
@@ -184,8 +199,14 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
 
     @Override public Attribute copy() {
         var copy = new GpuEnvironmentLighting(); copy.sky.set(sky); copy.horizon.set(horizon);
-        copy.image = image; copy.imageGain = imageGain; copy.shadowStrength = shadowStrength; return copy;
+        copy.image = image; copy.imageGain = imageGain; copy.shadowStrength = shadowStrength;
+        // Borrowed by the copy, which disposes nothing of it.
+        copy.skyVisibility = skyVisibility();
+        return copy;
     }
     @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }
-    @Override public void dispose() { if (texture != null) { texture.dispose(); texture = null; } }
+    @Override public void dispose() {
+        if (texture != null) { texture.dispose(); texture = null; }
+        if (neutralSky != null) { neutralSky.dispose(); neutralSky = null; }
+    }
 }

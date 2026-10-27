@@ -143,7 +143,8 @@ class GpuKeyboardTest {
         SwingUtilities.invokeAndWait(() -> collectAccelerators(menu, items));
         assertTrue(items.size() > 20, "Audit the whole game menu, not just the two overlay toggles");
         for (JMenuItem item : items) {
-            if (ClientGUI.VIEW_UNIT_OVERVIEW.equals(item.getActionCommand())) {
+            // The native view leaves Swing's own items out: the unit overview and Swing's GUI scale.
+            if (GpuMenuCommands.swingOnly(item)) {
                 continue;
             }
             SwingUtilities.invokeAndWait(() -> {

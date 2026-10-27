@@ -82,7 +82,7 @@ final class GpuMenuCommands {
         return result;
     }
 
-    private static boolean swingOnly(JMenuItem item) {
+    static boolean swingOnly(JMenuItem item) {
         return SWING_ONLY.contains(Objects.toString(item.getActionCommand(), ""));
     }
 

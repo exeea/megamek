@@ -28,6 +28,9 @@ final class GpuReviewFrame implements Disposable {
     private boolean occlusion;
     /** Each frame's elapsed seconds; 0, a still capture, unless a review plays frames in time (setFrameSeconds). */
     private float frameSeconds;
+    /** The relief's sky occlusion, on as on the board unless a review turns it off (setSkyVisibility). */
+    private final GpuSkyVisibility skyVisibility = new GpuSkyVisibility();
+    private float skyStrength = 1;
 
     GpuReviewFrame(BoardAtmosphere.Settings settings) {
         atmosphere.setOptions(OPTIONS);
@@ -58,6 +61,9 @@ final class GpuReviewFrame implements Disposable {
 
     void setFrameSeconds(float seconds) { frameSeconds = seconds; }
 
+    /** The sky occlusion by the board's relief for the next frames (GpuSkyVisibility), 0 to 1. */
+    void setSkyVisibility(float strength) { skyStrength = strength; }
+
     /** Borrowed: the occlusion this frame draws with. */
     GpuAmbientOcclusion ambientOcclusion() { return ambientOcclusion; }
 
@@ -67,6 +73,9 @@ final class GpuReviewFrame implements Disposable {
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         ambientOcclusion.configure(terrain.environment(), occlusion);
+        // A capture shows the board's volume at once, not the neutral one the board shows while it is searched.
+        skyVisibility.update(terrain.environment(), scene, skyStrength);
+        skyVisibility.finish();
     }
 
     /** One frame of the scene from the camera, lit, shadowed and composited as on the board. */
@@ -153,6 +162,7 @@ final class GpuReviewFrame implements Disposable {
     @Override
     public void dispose() {
         ambientOcclusion.dispose();
+        skyVisibility.dispose();
         atmosphere.dispose();
     }
 }

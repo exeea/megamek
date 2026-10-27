@@ -206,8 +206,9 @@ class BoardBridgeFootingTest {
         var painted = footing.paint(deck);
         var road = painted.road(deck, at);
         var patches = GpuRoads.deckPatches(tile, deck, road, painted);
-        var asphalt = patches.stream().filter(p -> p.texture().equals("roads/asphalt") && p.fade() == null)
-              .findFirst().orElseThrow();
+        // The opaque core: its only fade carries the traffic wear (GpuRoads.patches).
+        var asphalt = patches.stream().filter(p -> p.texture().equals("roads/asphalt")
+              && (p.fade() == null || p.fade().wheels())).findFirst().orElseThrow();
         var marks = patches.stream().filter(p -> p.texture().equals("concrete-ground")).findFirst().orElseThrow();
         var coat = GpuRoads.deck(tile, BoardBridge.feature(tile), asphalt, painted, surfaces, shape);
         var paint = GpuRoads.deck(tile, BoardBridge.feature(tile), marks, painted, surfaces, shape);
@@ -219,7 +220,8 @@ class BoardBridgeFootingTest {
             var surface = surfaces.computeIfAbsent(bank.coords(), key -> new BoardSurface(scene, bank));
             var bankRoad = BoardRoad.of(scene, bank);
             var bankAsphalt = GpuRoads.patches(bank, bankRoad).stream()
-                  .filter(p -> p.texture().equals("roads/asphalt") && p.fade() == null).findFirst().orElseThrow();
+                  .filter(p -> p.texture().equals("roads/asphalt") && (p.fade() == null || p.fade().wheels()))
+                  .findFirst().orElseThrow();
             var groundCoat = GpuRoads.drape(bank, surface, bankAsphalt);
             var axis = BoardGeometry.center(bank.coords(), 0).sub(BoardGeometry.center(at, 0)).nor();
             var side = new Vector3(-axis.y, axis.x, 0);

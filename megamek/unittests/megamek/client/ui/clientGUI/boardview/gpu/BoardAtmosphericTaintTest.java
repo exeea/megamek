@@ -54,12 +54,15 @@ class BoardAtmosphericTaintTest {
                     }
                     // The multiplicative grade may exceed one; its luminance must not change exposure.
                     assertEquals(luminance(before.tint()), luminance(after.tint()), 0.000001f);
-                    float gradeShift = distance(before.tint(), after.tint());
+                    // Optical taint belongs to the incident environment (BoardAtmosphere.lighting): the board's grade
+                    // never shows it a second time.
+                    assertEquals(0, distance(before.tint(), after.tint()), "Taint never grades the board: " + taint);
                     if (strength == 0 || taint.isBreathable()) {
-                        assertEquals(0, gradeShift, "Clear or untinted air must leave the grade alone");
                         assertSameLighting(before, after, "Clear or untinted air changes nothing");
                     } else {
-                        assertTrue(gradeShift > 0, "Taint must grade the board, not only the sky and fog: " + taint);
+                        // The board receives it through its fog and the incident sky BoardLightingSky generates.
+                        assertTrue(distance(before.fog(), after.fog()) > 0, "Taint colours the fog: " + taint);
+                        assertEquals(taint, after.skySource().taint());
                     }
                 }
             }
@@ -106,8 +109,8 @@ class BoardAtmosphericTaintTest {
             var tainted = BoardAtmosphere.lighting(settings(12, 0, Atmosphere.STANDARD, mild[i]));
             var stronger = BoardAtmosphere.lighting(settings(12, 0, Atmosphere.STANDARD, toxic[i]));
             assertTrue(distance(clear.horizon(), stronger.horizon()) > distance(clear.horizon(), tainted.horizon()));
-            assertTrue(distance(clear.tint(), stronger.tint()) > distance(clear.tint(), tainted.tint()),
-                  "A toxic atmosphere must grade the board more than its tainted counterpart");
+            assertTrue(distance(clear.fog(), stronger.fog()) > distance(clear.fog(), tainted.fog()),
+                  "A toxic atmosphere must colour the fog more than its tainted counterpart");
         }
     }
 

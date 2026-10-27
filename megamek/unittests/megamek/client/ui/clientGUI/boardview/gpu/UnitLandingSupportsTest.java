@@ -45,10 +45,13 @@ class UnitLandingSupportsTest {
         for (int x = 0; x < 3; x++) {
             for (int y = 0; y < 3; y++) {
                 var coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(center) ? 2 : 0, -1, false,
-                      coords.equals(center) ? 1 << 2 : coords.equals(neighbor) ? 1 << 5 : 0, BoardScene.Surface.GRASS,
-                      null, List.of(new BoardScene.Feature("building", 0, 0, 0, 1, 4, 0,
-                      BoardScene.FeatureKind.BUILDING)), List.of()));
+                int exits = coords.equals(center) ? 1 << 2 : coords.equals(neighbor) ? 1 << 5 : 0;
+                // Road exits make a road only with a kind of road (BoardRoad.rendered); a road's clearance reads the
+                // building's actual model (BoardObstacles).
+                tiles.add(new BoardScene.Tile(coords, coords.equals(center) ? 2 : 0, -1, false, exits,
+                      BoardScene.Surface.GRASS, null, null, List.of(new BoardScene.Feature(GpuBuildingTest.ASSET, 0, 0, 0,
+                      1, 4, 0, BoardScene.FeatureKind.BUILDING)), List.of(), BoardLiquid.NONE, null, true,
+                      exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             }
         }
         var scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());

@@ -1007,8 +1007,10 @@ class GpuBridgeSmokeTest {
         edgeStep.scl(1 / edgeStep.dot(across));
         BoardSurface surface = new BoardSurface(scene, roadTile);
         BoardRoad road = BoardRoad.of(scene, roadTile);
+        // The opaque core: its only fade carries the traffic wear (GpuRoads.patches).
         var pavement = GpuRoads.patches(roadTile, road).stream()
-              .filter(patch -> patch.texture().equals("roads/asphalt") && !patch.blended()).findFirst().orElseThrow();
+              .filter(patch -> patch.texture().equals("roads/asphalt") && (!patch.blended() || patch.fade().wheels()))
+              .findFirst().orElseThrow();
         var triangles = GpuRoads.drape(roadTile, surface, pavement);
         var surfaces = new java.util.HashMap<Coords, BoardSurface>();
         surfaces.put(roadTile.coords(), surface);

@@ -347,14 +347,32 @@ Weather particles and tactical/UI passes must retain the intended depth/order.
 **Depth cues** (Tuning → Display, off until switched on, saved) separate nearer terrain from farther terrain in
 clear air, in either projection; the Tactical View keeps clear air. `GpuDepthCues` measures the focus, the mean camera
 distance of the surfaces in the middle two fifths of the view less the orbit pivot's, in a one-texel pass over the
-scene depth, eased over 0.3 s. Before fog, the composite hazes what lies behind the focus towards the fog colour,
-reaching `GpuDepthCues.STRENGTH` over half the depth the view spans (its height times the tangent of the tilt); the
-focus and all in front of it keep their colour. Each pixel depends only on its own depth, so nothing slides across
-the terrain as the camera moves; panning across a cliff edge refocuses the haze over that 0.3 s.
+scene depth, eased over 0.3 s. Before fog, the composite hazes what lies behind the focus towards the fog's light in
+the visible horizon's hue (`BoardAtmosphere.depthHaze`; neutral without air), approaching `GpuDepthCues.STRENGTH`
+(.06) over the depth the view spans (its height times the tangent of the tilt); the focus and all in front of it keep
+their colour. Clear air veils rock a few hundred metres away by only a few percent: this is a board-scale
+exaggeration, kept low because the sunlit haze is far brighter than dark rock. Each pixel depends only on its own depth, so nothing slides across the terrain as the camera moves; panning
+across a cliff edge refocuses the haze over that 0.3 s.
 
-The strength was chosen from `GpuDepthCuesSmokeTest` captures of Crystalline Canyon on NVIDIA; the pass is not timed
-on Iris Xe. A tiled print measures a focus per tile. The program links during loading when the option is on,
-otherwise at its first frame.
+The sky occlusion by the board's relief (`GpuSkyVisibility`, `sky-visibility.glsl`) is lighting, on in the board
+whenever `GpuSkyVisibility.ENABLED` (true; false leaves it out of every program and searches nothing), independent of
+that option: every lit surface's sky light (`skyLight`) is scaled by the share of a uniform sky
+that its point sees past the hexes' tops: their surfaces, or the roofs of the buildings, fuel tanks and industrial
+plants standing on them (the game's height in levels, as if they filled the hex; a collapse lowers it). Trees do not
+count. Sunlit ground changes by a few percent; shade deep in canyons and at the feet of walls, lit by the sky alone,
+darkens most. On the render thread, when the tops change, they are sampled on a 4 m grid (at most 256 cells a side); a
+worker searches 16 horizons to 300 m for each cell of a volume up to two levels above the highest top (half-level
+layers, at most 64) and stores, for each quarter of the compass, the mean cos² of their elevations; the render thread
+uploads it as an RGBA8 3D texture. A surface reads it one cell out along its normal and weighs the
+quarters it faces, so a wall reads the air in front of it and does not count the sky it hides itself. The volume
+rides on the environment's `GpuEnvironmentLighting` (libGDX's 64 attribute types are all taken), whose lit programs
+always compile it, with a neutral volume until the first upload; its strength is a uniform, so neither the volume nor
+the option changes a program. Sculpted ground with both ice and volcanic crust draws without it (the sampler budget);
+other volcanic crust keeps it and draws without the screen-space ambient occlusion instead.
+
+The strength was chosen from `GpuDepthCuesSmokeTest` captures of Crystalline Canyon on NVIDIA; the passes are not
+timed on Iris Xe. A tiled print measures a focus per tile. The haze's program links during loading when the option is
+on, otherwise at its first frame.
 
 Relevant helpers are `camera-depth.glsl`, `ground-layer.glsl`,
 `scattering-phase.glsl`, `sun-visibility.glsl`, `weather-sand.glsl`,

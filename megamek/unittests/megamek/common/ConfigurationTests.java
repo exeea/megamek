@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.io.File;
 
 import org.apache.commons.io.FilenameUtils;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -48,7 +49,27 @@ class ConfigurationTests {
 
     @BeforeEach
     void setUp() {
+        // Other tests may leave a directory set; each case here starts from the defaults.
+        resetDirectories();
         Configuration.setDataDir(new File("testresources/data"));
+    }
+
+    /** The configuration is global: later test classes in this JVM must not read their data from testresources. */
+    @AfterEach
+    void tearDown() {
+        resetDirectories();
+    }
+
+    private static void resetDirectories() {
+        Configuration.setConfigDir(null);
+        Configuration.setDataDir(null);
+        Configuration.setDocsDir(null);
+        Configuration.setArmyTablesDir(null);
+        Configuration.setBoardsDir(null);
+        Configuration.setImagesDir(null);
+        Configuration.setScenariosDir(null);
+        Configuration.setSoundsDir(null);
+        Configuration.setUnitsDir(null);
     }
 
     /**

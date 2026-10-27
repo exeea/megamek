@@ -22,9 +22,9 @@ import com.badlogic.gdx.utils.Disposable;
  */
 final class GpuDepthCues implements Disposable {
     /** The Tuning panel's Depth cues: the haze's strength, from Crystalline Canyon reviews (GpuDepthCuesSmokeTest). */
-    static final float STRENGTH = .12f;
+    static final float STRENGTH = .06f;
     /** The depth behind the focus over which the haze approaches its strength, as a share of the depth the view spans. */
-    private static final float SPAN = .5f;
+    private static final float SPAN = 1;
     /** Seconds over which the focus moves about 63% of the way to a new distance. */
     private static final float FOCUS_EASING = .3f;
     private final Mesh quad;

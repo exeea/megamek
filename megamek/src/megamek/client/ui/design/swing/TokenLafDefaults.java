@@ -427,6 +427,10 @@ public final class TokenLafDefaults {
         values.put("MenuItem.selectionInsets", "0," + rowInset + ",0," + rowInset);
         values.put("MenuItem.selectionArc", number(tokens.radius().get("sm") * 2));
         values.put("@menuItemMargin", MENU_ROW_MARGIN + "," + rowSide + "," + MENU_ROW_MARGIN + "," + rowSide);
+        // The icon column is at least this tall (FlatMenuItemRenderer), so a row is control.sm whatever height the
+        // platform rounds the menu font to.
+        int rowContent = Math.round(tokens.size().get("control.sm")) - 2 * MENU_ROW_MARGIN;
+        values.put("MenuItem.minimumIconSize", "16," + rowContent);
         values.put("MenuBar.itemMargins", MENU_BAR_MARGIN + "," + rowSide + "," + MENU_BAR_MARGIN + "," + rowSide);
         put("CheckBoxMenuItem.icon.checkmarkColor", color("selected.primary"));
         put("CheckBoxMenuItem.icon.disabledCheckmarkColor", color("text.disabled"));
