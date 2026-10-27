@@ -101,11 +101,18 @@ vec3 worn(vec3 turf, float height, float amount) {
 
 float hash(vec3 p); // terrain-concrete.glsl
 
+// Smooth value noise around a crater: turn is the angle in turns (0 to 1), n the bumps per turn; seamless at the join.
+float ringNoise(vec3 id, float turn, float n) {
+    float a = turn * n, i = floor(a), f = a - i;
+    return mix(hash(id + vec3(mod(i, n), 0.0, 9.3)), hash(id + vec3(mod(i + 1.0, n), 0.0, 9.3)), f * f * (3.0 - 2.0 * f));
+}
+
 // Impact craters on lunar ground, placed in world cells so they never follow the material's 12 m repeat: three scales
-// (cells of 26, 9 and 3.5 m), each cell holding at most one crater, kept by its hash. Each is a bowl with a sharp raised
-// rim and an ejecta apron that fades out, in units of its radius, so every size has the same shape; most are old and
-// shallow, a few fresh, deep and bright, with rays. A high sun barely shades their walls, so as on Moon photos their tone
-// carries them too: a pale rim and a duller bowl. Shading only (normal, cavity, albedo): support, movement and
+// (cells of 26, 9 and 3.5 m), each cell holding at most one crater, kept by its hash. Each is a bowl with a raised rim,
+// irregular and slightly polygonal as impacts into uneven ground leave it, in units of its radius, so every size has
+// the same shape; most are old and shallow, the younger ones throw a bright ejecta apron streaked radially, and a few
+// fresh ones are deep, with a bright halo and longer streaks. A high sun barely shades their walls, so as on Moon photos
+// their tone carries them too: a pale rim and a duller bowl. Shading only (normal, cavity, albedo): support, movement and
 // line of sight keep the actual ground. A crater a pixel (of pixel metres) covers much of fades out, so small ones never turn into grain.
 // A crater forms only where its bowl and apron fit on level ground: clear is the pixel's distance in metres to the nearest
 // drop or rise and its gradient over the ground, from which each crater estimates that distance at its own centre, so
@@ -113,7 +120,7 @@ float hash(vec3 p); // terrain-concrete.glsl
 void lunarCraters(vec3 world, float pixel, float clear, vec2 clearGradient, float amount, inout vec3 albedo,
       inout vec3 normal, inout float cavity) {
     vec2 slope = vec2(0.0);
-    float bowl = 0.0, ring = 0.0, fresh = 0.0;
+    float bowl = 0.0, ring = 0.0, fresh = 0.0, ejecta = 0.0;
     for (int scale = 0; scale < 3; scale++) {
         float cell = scale == 0 ? 26.0 : scale == 1 ? 9.0 : 3.5;
         vec2 radius = scale == 0 ? vec2(3.0, 8.0) : scale == 1 ? vec2(1.0, 3.0) : vec2(.4, 1.1);
@@ -130,30 +137,45 @@ void lunarCraters(vec3 world, float pixel, float clear, vec2 clearGradient, floa
                 float s = length(d) / r;
                 float seen = (1.0 - smoothstep(.12, .4, pixel / r))
                       * smoothstep(1.8 * r, 2.8 * r, clear - dot(clearGradient, d));
-                if (s > 2.5 || seen <= 0.0) continue;
+                if (s > 2.9 || seen <= 0.0) continue;
                 // Most craters are old and worn shallow; a few are fresh.
                 float age = hash(id + 6.7);
                 float isFresh = step(.86, age);
+                // A near-round outline: broad smooth lumps, a faint polygonal lean and a ragged edge.
+                float angle = atan(d.y, d.x), turn = angle / 6.2831853 + .5;
+                s *= 1.0 + .04 * sin(2.0 * angle + pick * 71.0) + .035 * sin(3.0 * angle + pick * 53.0)
+                      + .03 * sin(5.0 * angle + age * 37.0) + .02 * sin(6.0 * angle + age * 17.0)
+                      + .05 * (ringNoise(id + 5.0, turn, 31.0) - .5);
+                if (s > 2.5) continue;
                 float depth = mix(.12, .3, age) + .05 * isFresh;
-                // Bowl h = depth (s^2 - 1) + rim inside, rim exp(-3 (s - 1)) outside: the slope dh/ds, along d.
-                float rim = .25 * depth;
-                float dh = s < 1.0 ? 2.0 * depth * s : -3.0 * rim * exp(-3.0 * (s - 1.0));
+                // Bowl h = depth (s^2 - 1) + rim inside, rim exp(-3 (s - 1)) outside: the slope dh/ds, along d, eased
+                // through the crest so the rim rounds over instead of ending in a cut-out edge. The rim stands higher
+                // along some arcs than others, worn down in places.
+                float rim = .25 * depth * mix(.35, 1.5, ringNoise(id + 41.0, turn, 7.0));
+                float dh = mix(2.0 * depth * min(s, 1.0), -3.0 * rim * exp(-3.0 * max(s - 1.0, 0.0)),
+                      smoothstep(.86, 1.1, s));
                 vec2 along = d / max(length(d), 1e-4);
                 slope += dh * along * seen;
                 bowl = max(bowl, (1.0 - smoothstep(.55, 1.0, s)) * depth / .35 * seen);
-                ring = max(ring, exp(-(s - 1.0) * (s - 1.0) / .02) * depth / .35 * seen);
-                if (isFresh > 0.0) {
-                    float angle = atan(d.y, d.x);
-                    float rays = smoothstep(.55, 1.0, sin(angle * 7.0 + pick * 40.0) * sin(angle * 11.0 + age * 30.0));
-                    float apron = smoothstep(.8, 1.0, s) * (1.0 - smoothstep(1.0, 2.5, s));
-                    fresh = max(fresh, max(1.0 - smoothstep(.9, 1.15, s), rays * apron) * seen);
+                ring = max(ring, exp(-(s - 1.0) * (s - 1.0) / .02) * rim / (.25 * .35) * .7 * seen);
+                if (age > .72) {
+                    // The young ones' radial ejecta streaks, each reaching its own distance, clear of the rim;
+                    // narrower than about two pixels they average out to a faint apron instead of shimmering.
+                    float streaks = ringNoise(id + 11.0, turn, 72.0) * ringNoise(id + 23.0, turn, 29.0);
+                    float lane = 6.2831853 * s * r / 72.0;
+                    streaks = mix(.15, smoothstep(.15, .55, streaks), smoothstep(1.0, 3.0, lane / max(pixel, 1e-4)));
+                    float reach = mix(1.8, 2.5, ringNoise(id + 31.0, turn, 17.0));
+                    float apron = smoothstep(1.1, 1.3, s) * (1.0 - smoothstep(reach - .8, reach, s));
+                    ejecta = max(ejecta, streaks * apron * smoothstep(.72, .95, age) * seen);
                 }
+                if (isFresh > 0.0) fresh = max(fresh, (1.0 - smoothstep(.9, 1.15, s)) * seen);
             }
         }
     }
     normal = normalize(normal - vec3(slope, 0.0) * 1.6 * amount);
     cavity *= 1.0 - .25 * bowl * amount;
-    albedo *= (1.0 - .14 * bowl * amount) * (1.0 + .16 * ring * amount) * (1.0 + .22 * fresh * amount);
+    albedo *= (1.0 - .14 * bowl * amount) * (1.0 + .16 * ring * amount) * (1.0 + .22 * fresh * amount)
+          * (1.0 + .5 * ejecta * amount);
 }
 
 // How strongly debris shows on open ground: at rims, at cliff feet, on slopes and in scattered patches.

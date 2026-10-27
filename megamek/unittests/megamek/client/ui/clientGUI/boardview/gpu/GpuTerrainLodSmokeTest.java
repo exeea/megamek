@@ -88,9 +88,6 @@ class GpuTerrainLodSmokeTest {
                     settle(terrain, tactical, scene, camera);
                     var distant = terrain.tacticalSurface(at);
                     assertEquals(TerrainLod.DISTANT, firstLod(terrain));
-                    ((java.util.Map<?, ?>) field(terrain, "cpuGeometry")).clear();
-                    assertEquals(distant, terrain.tacticalSurface(at), "Cold queries must use the installed distant detail");
-                    distant = terrain.tacticalSurface(at);
 
                     // Only the previous tier of a chunk is cached. Refining to FULL passes through MEDIUM,
                     // so test reuse between those adjacent tiers instead of assuming all old tiers survive.
@@ -140,7 +137,7 @@ class GpuTerrainLodSmokeTest {
                     List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
                     BoardScene.Tile before = scene.tile(at);
                     tiles.set(tiles.indexOf(before), new BoardScene.Tile(at, before.elevation() + 2, -1, false, 0,
-                          before.surface(), before.ground(), null, null, null, List.of(), List.of(),
+                          before.surface(), null, null, List.of(), List.of(),
                           BoardLiquid.NONE, null, true));
                     BoardScene edited = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
                     var displayed = terrain.tacticalSurface(at);

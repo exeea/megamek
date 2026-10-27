@@ -73,8 +73,8 @@ class GpuTerrainWeatheringSmokeTest {
                 try {
                     var layout = GpuTerrainShowcaseSmokeTest.scene(family);
                     var tiles = layout.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
-                          tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(),
-                          null, null, null, List.of(), List.of(), tile.liquid(), null, true)).toList();
+                          tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), null, null, List.of(),
+                          List.of(), tile.liquid(), null, true)).toList();
                     var scene = new BoardScene(0, layout.width(), layout.height(), tiles, List.of(), List.of(), -1, "", List.of());
                     terrain.update(scene);
                     terrain.setCombatScars(false);

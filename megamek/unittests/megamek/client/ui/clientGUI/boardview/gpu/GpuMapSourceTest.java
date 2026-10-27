@@ -113,7 +113,7 @@ class GpuMapSourceTest {
                     for (var tile : request.scene().tiles()) {
                         assertTrue(tile.text().stream().anyMatch(label -> label.text().equals(tile.coords().getBoardNum())));
                         assertTrue(tile.text().stream().allMatch(label -> label.argb() == 0xFF000000));
-                        assertSame(displayed.tile(tile.coords()).ground(), tile.ground(), "The print borrows captured 3D art");
+                        assertSame(displayed.tile(tile.coords()).tileset(), tile.tileset(), "The print borrows captured 3D art");
                     }
                     var labels = request.scene().tile(woods).text().stream().map(label -> label.text()).toList();
                     assertTrue(labels.contains("LIGHT"));
@@ -486,8 +486,7 @@ class GpuMapSourceTest {
                     assertEquals(expected.width(), actual.width());
                     for (var tile : actual.tiles()) {
                         var previous = expected.tile(tile.coords());
-                        assertEquals(previous.ground(), tile.ground());
-                        assertEquals(previous.normals(), tile.normals());
+                        assertEquals(previous.tileset(), tile.tileset());
                         assertEquals(previous.decals(), tile.decals());
                         assertEquals(previous.features(), tile.features());
                         assertEquals(previous.text(), tile.text());

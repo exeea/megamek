@@ -84,16 +84,17 @@ class GpuCoverPlantingSmokeTest {
                             supports.put(surface.tile.coords(), BoardTacticalGeometry.Surface.of(surface, scene, 0));
                         }
                         long t3 = System.nanoTime();
-                        long grassRoots = 0, cropRoots = 0, canopy = 0, reeds = 0, paintedRoots = 0;
+                        long grassRoots = 0, cropPlants = 0, reeds = 0, paintedRoots = 0;
                         long plantGrass = 0, plantCrops = 0, plantReeds = 0, plantPainted = 0;
                         for (var tile : tiles) {
                             var support = supports.get(tile.coords());
                             var kind = BoardBiome.plantKind(scene, tile);
                             long start = System.nanoTime();
                             if (kind == BoardScene.Biome.FIELD) {
-                                var crops = GpuBiomeVegetation.plant(scene, tile, support, null);
-                                cropRoots += crops.roots().size / 4;
-                                canopy += crops.canopy().size / 4;
+                                for (var crop : BoardFields.Crop.values()) {
+                                    var plants = GpuBiomeVegetation.plantStalks(scene, tile, support, null, crop);
+                                    cropPlants += plants == null ? 0 : plants.size / 4;
+                                }
                                 plantCrops += System.nanoTime() - start;
                             } else if (kind == BoardScene.Biome.MARSH) {
                                 FloatArray roots = GpuBiomeVegetation.plantReeds(scene, tile, support, 1, null);
@@ -114,10 +115,10 @@ class GpuCoverPlantingSmokeTest {
                         report.append(String.format(Locale.ROOT,
                               "  %s round %d: surfaces %.0f ms, walls %.0f ms, supports %.0f ms (%d faces);"
                                     + " grass %.0f ms for %d roots on %d hexes (painted: %.0f ms for %d roots);"
-                                    + " crops %.0f ms for %d strips + %d runs on %d hexes;"
+                                    + " crops %.0f ms for %d plants on %d hexes;"
                                     + " reeds %.0f ms for %d clumps on %d hexes%n",
                               lod, round, (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, faces, plantGrass / 1e6,
-                              grassRoots, grassHexes, plantPainted / 1e6, paintedRoots, plantCrops / 1e6, cropRoots, canopy,
+                              grassRoots, grassHexes, plantPainted / 1e6, paintedRoots, plantCrops / 1e6, cropPlants,
                               cropHexes, plantReeds / 1e6, reeds, reedHexes));
                     }
                 }

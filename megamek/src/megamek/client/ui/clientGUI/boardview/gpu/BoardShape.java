@@ -24,7 +24,7 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
 
     static Map<String, BoardShape> loadKit(String asset) {
         File root = new File(Configuration.dataDir(), "models/board");
-        return shapes(RigidGlb.load(new FileHandle(new File(root, asset + ".glb")), root.toPath()));
+        return shapes(RigidGlb.load(new FileHandle(megamek.common.board.BoardModelBounds.file(root, asset)), root.toPath()));
     }
 
     /** CPU support uses the same finest authored level as the visible rigid model. */
@@ -40,7 +40,7 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
      */
     static Map<String, BoardShape> loadNodes(String asset, BoardDecoration.Colours colours) {
         File root = new File(Configuration.dataDir(), "models/board");
-        var data = RigidGlb.loadLods(new FileHandle(new File(root, asset + ".glb")), root.toPath()).getFirst();
+        var data = RigidGlb.loadLods(new FileHandle(megamek.common.board.BoardModelBounds.file(root, asset)), root.toPath()).getFirst();
         RigidGlb.recolour(data, colours);
         return shapes(data);
     }

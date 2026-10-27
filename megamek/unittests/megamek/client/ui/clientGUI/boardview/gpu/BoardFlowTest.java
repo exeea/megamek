@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -225,14 +224,13 @@ class BoardFlowTest {
 
     private static BoardScene scene(int width, int height, Map<Coords, Integer> water, Map<Coords, BoardLiquid> types,
           Set<Coords> frozen) {
-        BoardScene.Pixels pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 Coords coords = new Coords(x, y);
                 boolean wet = water.containsKey(coords);
                 tiles.add(new BoardScene.Tile(coords, water.getOrDefault(coords, 0), wet ? 1 : -1, frozen.contains(coords),
-                      0, BoardScene.Surface.ROCK, pixels, null, null, null, List.of(), List.of(),
+                      0, BoardScene.Surface.ROCK, null, null, List.of(), List.of(),
                       wet ? types.getOrDefault(coords, BoardLiquid.WATER) : BoardLiquid.NONE));
             }
         }

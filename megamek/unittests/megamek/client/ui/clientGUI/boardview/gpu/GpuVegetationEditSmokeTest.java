@@ -62,16 +62,15 @@ class GpuVegetationEditSmokeTest {
                     camera.center(BoardGeometry.center(EDIT, 0));
                     BoardScene scene = scene(0, editField);
                     terrain.update(scene);
+                    // The grass engine draws the grass and the fields' plants.
                     var grass = (GpuGroundCover) field(terrain, "groundCover");
-                    var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
-                    settle(terrain, frame, camera, scene, grass, plants);
+                    settle(terrain, frame, camera, scene);
                     GpuReviewFrame.save(new File(output, "before.png"));
                     // The direct cache checks use scene order rather than chunk order; normalize it before
                     // measuring uploads so a harmless reorder does not count as geometry invalidation.
                     grass.visible(scene, camera.camera, scene.tiles(), terrain::planted);
-                    plants.visible(scene, camera.camera, scene.tiles(), terrain::planted);
-                    var grassBefore = submitted(grass, scene, terrain::planted);
-                    var plantsBefore = submitted(plants, scene, terrain::planted);
+                    var grassBefore = submitted(grass, scene, terrain::planted, false);
+                    var plantsBefore = submitted(grass, scene, terrain::planted, true);
                     assertTrue(grassBefore.keySet().stream().anyMatch(c -> c.distance(EDIT) > 2));
                     assertTrue(plantsBefore.keySet().stream().anyMatch(c -> c.distance(EDIT) > 2));
 
@@ -83,17 +82,15 @@ class GpuVegetationEditSmokeTest {
                                   TerrainLod.FULL, java.util.List.of()));
                         }
                     }
-                    long grassUploads = grass.uploads(), plantUploads = plants.uploads();
+                    long uploads = grass.uploads();
                     for (int capture = 0; capture < 5; capture++) {
                         scene = new BoardScene(scene.boardId(), scene.width(), scene.height(), new ArrayList<>(scene.tiles()),
                               List.of(), List.of(), -1, "", List.of());
                         assertFalse(grass.visible(scene, camera.camera, scene.tiles(), replanted::get).isEmpty());
-                        assertFalse(plants.visible(scene, camera.camera, scene.tiles(), replanted::get).isEmpty());
-                        retained(grassBefore, submitted(grass, scene, replanted::get), c -> true);
-                        retained(plantsBefore, submitted(plants, scene, replanted::get), c -> true);
+                        retained(grassBefore, submitted(grass, scene, replanted::get, false), c -> true);
+                        retained(plantsBefore, submitted(grass, scene, replanted::get, true), c -> true);
                     }
-                    assertEquals(grassUploads, grass.uploads(), "Equivalent surfaces must not upload grass again");
-                    assertEquals(plantUploads, plants.uploads(), "Equivalent surfaces must not upload fields again");
+                    assertEquals(uploads, grass.uploads(), "Equivalent surfaces must not upload grass or fields again");
 
                     // A held altitude wheel can publish several snapshots before earlier meshes have finished.
                     // Check every rendered frame, including the actual terrain publication and subsequent root work.
@@ -110,8 +107,8 @@ class GpuVegetationEditSmokeTest {
                         }
                         terrain.refine(camera.camera);
                         frame.render(terrain, camera, scene);
-                        var grassNow = submitted(grass, scene, terrain::planted);
-                        var plantsNow = submitted(plants, scene, terrain::planted);
+                        var grassNow = submitted(grass, scene, terrain::planted, false);
+                        var plantsNow = submitted(grass, scene, terrain::planted, true);
                         retained(grassBefore, grassNow, c -> c.distance(EDIT) > 2);
                         retained(plantsBefore, plantsNow, c -> c.distance(EDIT) > 2);
                         if (editField) { grounded(plantsNow.get(EDIT), terrain.tacticalSurface(EDIT)); }
@@ -123,13 +120,13 @@ class GpuVegetationEditSmokeTest {
 
                     // Changed roots must still converge to a clean build on the final published ground.
                     var freshGrass = new GpuGroundCover();
-                    var freshPlants = new GpuBiomeVegetation();
                     try {
                         freshGrass.visible(scene, camera.camera, scene.tiles(), terrain::planted);
-                        freshPlants.visible(scene, camera.camera, scene.tiles(), terrain::planted);
-                        sameRoots(submitted(freshGrass, scene, terrain::planted), submitted(grass, scene, terrain::planted));
-                        sameRoots(submitted(freshPlants, scene, terrain::planted), submitted(plants, scene, terrain::planted));
-                    } finally { freshGrass.dispose(); freshPlants.dispose(); }
+                        for (boolean fields : new boolean[] { false, true }) {
+                            sameRoots(submitted(freshGrass, scene, terrain::planted, fields),
+                                  submitted(grass, scene, terrain::planted, fields));
+                        }
+                    } finally { freshGrass.dispose(); }
                     Files.writeString(new File(output, "results.txt").toPath(),
                           "Unchanged roots stayed submitted across " + frames + " frames and " + levels.length
                                 + " altitude inputs (50 ms target cadence). Final roots match a clean build.\n"
@@ -152,8 +149,7 @@ class GpuVegetationEditSmokeTest {
               c.getX() >= (editField ? 4 : 5) ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE, c.equals(EDIT) ? level : 0));
     }
 
-    private static void settle(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
-          GpuGroundCover grass, GpuBiomeVegetation plants) {
+    private static void settle(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) {
         long deadline = System.nanoTime() + 30_000_000_000L;
         do {
             terrain.refine(camera.camera);
@@ -164,20 +160,24 @@ class GpuVegetationEditSmokeTest {
     }
 
     /**
-     * The plants a renderer was given that it actually submitted in its drawn batches. A chunk prepared again replants
-     * identical roots, so plants compare by their roots rather than by identity.
+     * The grass, or with {@code fields} the fields' plants, the grass engine was given that it actually submitted in its
+     * drawn batches. A chunk prepared again replants identical roots, so plants compare by their roots rather than by
+     * identity.
      */
-    private static Map<Coords, Roots> submitted(Object renderer, BoardScene scene, Function<Coords, BoardPlants> plants)
-          throws Exception {
+    private static Map<Coords, Roots> submitted(GpuGroundCover cover, BoardScene scene, Function<Coords, BoardPlants> plants,
+          boolean fields) throws Exception {
         var active = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Object batch : GpuBiomeSmokeTest.batches(renderer)) { active.addAll((List<?>) field(batch, "current")); }
+        for (Object batch : GpuBiomeSmokeTest.batches(cover)) { active.addAll((List<?>) field(batch, "current")); }
         var result = new HashMap<Coords, Roots>();
         for (var tile : scene.tiles()) {
             var planted = plants.apply(tile.coords());
             if (planted == null) { continue; }
-            FloatArray roots = renderer instanceof GpuGroundCover ? planted.grass()
-                  : planted.crops() != null ? planted.crops().roots() : planted.reeds();
-            if (roots != null && active.contains(roots)) { result.put(tile.coords(), new Roots(null, roots.toArray())); }
+            var roots = new FloatArray();
+            for (FloatArray part : fields ? new FloatArray[] { planted.wheat(), planted.maize() }
+                  : new FloatArray[] { planted.grass() }) {
+                if (part != null && active.contains(part)) { roots.addAll(part); }
+            }
+            if (roots.size > 0) { result.put(tile.coords(), new Roots(null, roots.toArray())); }
         }
         return result;
     }

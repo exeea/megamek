@@ -11,10 +11,6 @@ in vec2 v_coverFade;
 #ifdef diffuseTextureFlag
 in vec2 v_diffuseUV;
 uniform sampler2D u_diffuseTexture;
-#ifdef biomeVegetationFlag
-uniform float u_biomeKind;
-uniform float u_biomeLod;
-#endif
 #endif
 
 #if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
@@ -23,7 +19,7 @@ uniform float u_biomeLod;
 uniform vec3 u_meadowFinish;
 #endif
 #ifdef biomeVegetationFlag
-// Crops' or sedge's finish (GpuBiomeVegetation.Kind): roughness, metallic and scattering; emission.
+// Sedge's finish (GpuBiomeVegetation.Kind): roughness, metallic and scattering; emission.
 uniform vec3 u_biomeFinish, u_biomeGlow;
 #endif
 
@@ -45,49 +41,19 @@ void main() {
     Finish finish = Finish(.86, 0.0, 0.0, vec3(0.0));
 #if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
     // A meadow's blades are its grass: they take its material's finish where they root, filtered over the blade's own
-    // screen footprint, so every fragment of a blade reads the same texel at the level its size needs.
-    vec2 meadowFootprint = v_cloudPosition.xy * vec2(1.0, -1.0) / u_meadowFinish.z;
-    finish = finishTexel(int(u_meadowFinish.x + .5), v_coverRoot * vec2(1.0, -1.0) / u_meadowFinish.y,
-          mat2(dFdx(meadowFootprint), dFdy(meadowFootprint)));
+    // screen footprint, so every fragment of a blade reads the same texel at the level its size needs. A field's
+    // plants (v_coverData.x, one per draw instance, so whole quads branch alike) keep a dry leaf's.
+    if (v_coverData.x < .5) {
+        vec2 meadowFootprint = v_cloudPosition.xy * vec2(1.0, -1.0) / u_meadowFinish.z;
+        finish = finishTexel(int(u_meadowFinish.x + .5), v_coverRoot * vec2(1.0, -1.0) / u_meadowFinish.y,
+              mat2(dFdx(meadowFootprint), dFdy(meadowFootprint)));
+    }
 #endif
 #ifdef biomeVegetationFlag
     // Their material's finish, as the means of its maps: their artwork is composited at run time.
     finish = Finish(u_biomeFinish.x, u_biomeFinish.y, u_biomeFinish.z, u_biomeGlow);
-#endif
-#if defined(biomeVegetationFlag) && defined(diffuseTextureFlag)
     // Sample before any coverage discard: neighbouring fragments must agree on derivatives during an LOD fade.
-    vec4 plant;
-    vec2 dx = dFdx(v_diffuseUV), dy = dFdy(v_diffuseUV);
-    if (u_biomeKind < 1.5 && u_biomeLod > 1.5) {
-        // A distant canopy run repeats its strip artwork along the furrow; wrap after interpolation, filtering by the
-        // unwrapped derivatives so the repeat seams do not select a coarse mip level. The branch is uniform per draw.
-        // The distant texture stacks the rows' head band over their crowns; the template addresses the near atlas's
-        // overhead band, v .8 to 1.
-        float u = v_diffuseUV.x - max(0.0, ceil(v_diffuseUV.x) - 1.0);
-        float across = clamp((v_diffuseUV.y - .8) * 5.0, 0.0, 1.0) * .5;
-        dx.y *= 2.5; dy.y *= 2.5;
-        plant = textureGrad(u_diffuseTexture, vec2(u, .5 + across), dx, dy);
-        // Seen at an angle, near rows show the grain heads along their sides more than their crowns. Colour the canopy
-        // from the head band in that proportion: the golden heads are what identify a cultivated field.
-        float incline = viewDirection().z;
-        plant.rgb = mix(plant.rgb, textureGrad(u_diffuseTexture, vec2(u, across), dx, dy).rgb,
-              sqrt(max(0.0, 1.0 - incline * incline)));
-        // The canopy stands in for a whole row of plants. Box-filtered mipmaps would thin its alpha below the cut-off
-        // at distance and let the ground show through, so restore its coverage with the mip level.
-        vec2 texels = vec2(textureSize(u_diffuseTexture, 0));
-        vec2 fx = dx * texels, fy = dy * texels;
-        plant.a *= 1.0 + .25 * max(0.0, .5 * log2(max(dot(fx, fx), dot(fy, fy))));
-    } else {
-        plant = texture(u_diffuseTexture, v_diffuseUV);
-        // Hand off between upright cards and overhead crowns: each reads cleanly from its intended viewing angle.
-        if (u_biomeKind < 1.5 && u_biomeLod < 1.5) {
-            float overhead = abs(viewDirection().z);
-            plant.a *= v_diffuseUV.y >= .8 ? smoothstep(.65, .90, overhead)
-                  : 1.0 - smoothstep(.85, .98, overhead);
-        }
-    }
-#endif
-#ifdef biomeVegetationFlag
+    vec4 plant = texture(u_diffuseTexture, v_diffuseUV);
     // Complementary coverage keeps overlapping LODs opaque without doubling leaves or changing depth ownership.
     float coverage = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(.06711056, .00583715))));
     if (coverage < v_coverFade.x || coverage >= v_coverFade.y) discard;

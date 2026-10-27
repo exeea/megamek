@@ -27,6 +27,8 @@ final class GpuUnitShader extends DefaultShader {
     private final int paintNormalMatrix = register("u_paintNormalMatrix");
     private final int markerTexture = register("u_markerTexture");
     private final int markerEnabled = register("u_markerEnabled");
+    private final int paintPlate = register("u_paintPlate");
+    private final int paintPlateEnabled = register("u_paintPlateEnabled");
     private final int damageTexture = register("u_damageTexture");
     private final int damageEnabled = register("u_damageEnabled");
     private final int damageOpacity = register("u_damageOpacity");
@@ -211,6 +213,11 @@ final class GpuUnitShader extends DefaultShader {
         set(markerEnabled, marker ? 1f : 0f);
         if (marker) {
             set(markerTexture, context.textureBinder.bind(paint.marker));
+        }
+        boolean plate = paint != null && paint.plate != null;
+        set(paintPlateEnabled, plate ? 1f : 0f);
+        if (plate) {
+            set(paintPlate, context.textureBinder.bind(paint.plate));
         }
         super.render(part, attributes);
     }

@@ -13,6 +13,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import megamek.common.Hex;
+import megamek.common.WoodsClearingTracker;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardTreeDistribution;
@@ -33,24 +34,31 @@ final class BoardFeatures {
     /** Ultra rough's tooth spacing in tile pixels, the closest that still reads as separate teeth. */
     private static final float CLOSE_TEETH_SPACING = 11;
     /** Tree species by where they grow; repeated names are the common ones. */
-    private static final List<String> TEMPERATE = List.of("tree", "pine", "tree-broad", "birch", "tree-slender",
-          "pine-tall", "pine-broad", "tree-forked", "tree-layered", "birch-tall", "birch-spreading", "birch-young",
-          "pine-slender", "pine-layered");
-    private static final List<String> HIGHLAND = List.of("pine", "pine-tall", "pine-broad", "tree-slender", "pine-tall",
-          "birch", "pine-slender", "pine-layered", "pine-slender", "pine-layered", "birch-tall", "birch-young");
-    private static final List<String> ROCKY = List.of("pine", "tree-dead", "pine-tall", "pine-broad", "pine-slender",
-          "pine-layered");
-    static final List<String> VOLCANO_TREES = List.of("tree-volcano-crown", "tree-volcano-forked", "tree-volcano-spire");
-    private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree",
-          "willow-broad", "willow-broad", "birch-spreading", "tree-forked");
-    private static final List<String> BARREN = List.of("tree-dead");
-    private static final List<String> DESERT = List.of("cactus", "palm", "tree-dead", "cactus-flowers", "palm-bent",
-          "cactus");
-    private static final List<String> PALMS = List.of("palm", "palm-bent");
-    private static final List<String> TROPICAL = List.of("palm", "palm-bent", "tree-broad", "palm", "tree-slender",
-          "palm-bent", "palm", "tree-forked", "palm-bent", "tree-layered");
-    private static final List<String> ORCHARD = List.of("orchard-round", "orchard-spreading", "orchard-upright",
-          "orchard-vase", "orchard-leaning", "orchard-young");
+    private static final List<String> TEMPERATE = List.of("vegetation/tree", "vegetation/pine", "vegetation/tree-broad",
+          "vegetation/birch", "vegetation/tree-slender", "vegetation/pine-tall", "vegetation/pine-broad",
+          "vegetation/tree-forked", "vegetation/tree-layered", "vegetation/birch-tall", "vegetation/birch-spreading",
+          "vegetation/birch-young", "vegetation/pine-slender", "vegetation/pine-layered");
+    private static final List<String> HIGHLAND = List.of("vegetation/pine", "vegetation/pine-tall",
+          "vegetation/pine-broad", "vegetation/tree-slender", "vegetation/pine-tall", "vegetation/birch",
+          "vegetation/pine-slender", "vegetation/pine-layered", "vegetation/pine-slender", "vegetation/pine-layered",
+          "vegetation/birch-tall", "vegetation/birch-young");
+    private static final List<String> ROCKY = List.of("vegetation/pine", "vegetation/tree-dead", "vegetation/pine-tall",
+          "vegetation/pine-broad", "vegetation/pine-slender", "vegetation/pine-layered");
+    static final List<String> VOLCANO_TREES = List.of("vegetation/tree-volcano-crown", "vegetation/tree-volcano-forked",
+          "vegetation/tree-volcano-spire");
+    private static final List<String> WETLAND = List.of("vegetation/willow", "vegetation/tree-slender",
+          "vegetation/tree-dead", "vegetation/willow", "vegetation/tree", "vegetation/willow-broad",
+          "vegetation/willow-broad", "vegetation/birch-spreading", "vegetation/tree-forked");
+    private static final List<String> BARREN = List.of("vegetation/tree-dead");
+    private static final List<String> DESERT = List.of("vegetation/cactus", "vegetation/palm", "vegetation/tree-dead",
+          "vegetation/cactus-flowers", "vegetation/palm-bent", "vegetation/cactus");
+    private static final List<String> PALMS = List.of("vegetation/palm", "vegetation/palm-bent");
+    private static final List<String> TROPICAL = List.of("vegetation/palm", "vegetation/palm-bent",
+          "vegetation/tree-broad", "vegetation/palm", "vegetation/tree-slender", "vegetation/palm-bent",
+          "vegetation/palm", "vegetation/tree-forked", "vegetation/palm-bent", "vegetation/tree-layered");
+    private static final List<String> ORCHARD = List.of("vegetation/orchard-round", "vegetation/orchard-spreading",
+          "vegetation/orchard-upright", "vegetation/orchard-vase", "vegetation/orchard-leaning",
+          "vegetation/orchard-young");
     static final List<String> MARS_CORALS = List.of("mars/finger-spires", "mars/fan-scalloped", "mars/tube-grove",
           "mars/antler-crown", "mars/plate-terraces", "mars/brain-lobes",
           "mars/finger-crown", "mars/fan-folded", "mars/tube-crown",
@@ -103,8 +111,8 @@ final class BoardFeatures {
                 case Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN ->
                       structureModels.containsKey(Terrains.FUEL_TANK);
                 case Terrains.INDUSTRIAL -> structureModels.containsKey(Terrains.INDUSTRIAL);
-                case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE
-                      && !hex.containsTerrain(Terrains.WATER);
+                // A road through water lies on its bed, or out of sight under deeper water (BoardRoad#submerged).
+                case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
                 // Fluff 1 selects the standard road bend, already represented by the captured road exits.
                 case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
                       && BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
@@ -237,13 +245,17 @@ final class BoardFeatures {
         }
         addBridge(hex, result);
         result.addAll(BoardMetalDeposits.capture(hex, coords));
+        if (hex.containsTerrain(Terrains.SOLARIS_ELEVATOR)) {
+            // The lift's walls are no terrain feature of its own: they stand only where the hex rises above a neighbour.
+            result.add(new BoardScene.Feature(ELEVATOR_SHAFT, 0, 0, 0, 1, 0, 0, BoardScene.FeatureKind.SHAFT));
+        }
         if (BoardBackdrop.capture(hex).present()) {
             result.addAll(decorations(hex, coords, board));
             result.addAll(roadControls(hex, coords, board, true));
             return List.copyOf(result);
         }
         if (hex.containsTerrain(Terrains.FIELDS) && !detailedGround(hex, structureModels, blankTerrains)) {
-            add(result, "field", 1, 0, 0);
+            add(result, "vegetation/field", 1, 0, 0);
         }
         Hex vegetation = hex.getAppearance().containsKey("vegetation")
               ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
@@ -266,7 +278,7 @@ final class BoardFeatures {
             float crown = orchard ? (density >= 3 ? .62f : .82f)
                   : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
             List<String> species = mars ? MARS_CORALS
-                  : volcano ? (height == 1 ? List.of("foliage-volcano") : VOLCANO_TREES)
+                  : volcano ? (height == 1 ? List.of("vegetation/foliage-volcano") : VOLCANO_TREES)
                   : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(vegetation)
                   : height == 1 ? List.of(shrub(vegetation, jungle)) : species(vegetation, jungle);
             // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
@@ -306,7 +318,7 @@ final class BoardFeatures {
                 }
                 // Every biome uses the same distribution. Eligibility and size still describe its vegetation:
                 // one mature fungal cup reaches cover height; tropical understory uses its low plant model.
-                List<String> choices = low ? List.of("foliage-jungle") : fungus && index == 0 ? BoardFungus.CUPS : species;
+                List<String> choices = low ? List.of("vegetation/foliage-jungle") : fungus && index == 0 ? BoardFungus.CUPS : species;
                 int speciesIndex = understory ? index / 2 : index;
                 String tree = natural ? BoardTreeDistribution.species(choices, coords, x, y, treeRandom.nextLong())
                       : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + speciesIndex, choices.size()));
@@ -619,9 +631,9 @@ final class BoardFeatures {
      */
     static List<BoardScene.Feature> features(BoardSceneryLayouts.Layout layout, Coords coords, Hex hex) {
         List<BoardScene.Feature> result = new ArrayList<>(layout.components().stream().filter(row -> !row.decal())
-              .map(row -> new BoardScene.Feature(row.asset(), row.x(), row.y(), row.rotation(), row.scale(), 1,
-                    row.z() / BoardGeometry.MODEL_LEVEL_HEIGHT, BoardScene.FeatureKind.SCENERY, 0, true, null, row.stretch(),
-                    row.colours())).toList());
+              .map(row -> new BoardScene.Feature(onGround(row.asset(), hex), row.x(), row.y(), row.rotation(),
+                    row.scale(), 1, row.z() / BoardGeometry.MODEL_LEVEL_HEIGHT, BoardScene.FeatureKind.SCENERY, 0, true, null,
+                    row.stretch(), row.colours())).toList());
         if (layout.components().stream().anyMatch(BoardSceneryLayouts.Component::decal)) {
             // Each row's id names its hex and asset: unique on the board, as a stored object's id is.
             String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":";
@@ -633,18 +645,104 @@ final class BoardFeatures {
         return List.copyOf(result);
     }
 
-    /** The trenches of a dug-in platoon ({@link #withTrench}). */
+    /** The fighting holes of a dug-in platoon ({@link #withTrench}). */
     static final String TRENCH = "scenery/military/trench";
+    /**
+     * A fortified hex's strongpoint, as its layout places it, dug into its ground; and, where that ground is paved, which
+     * cannot be dug, its sandbag emplacement ({@link #onGround}).
+     */
+    static final String FORTIFICATION = "scenery/military/fortification", SANDBAGS = "scenery/military/sandbags";
+
+    /** {@code asset} as built on {@code hex}'s ground: a strongpoint on pavement is sandbagged, not dug. */
+    private static String onGround(String asset, Hex hex) {
+        return asset.equals(FORTIFICATION) && hex.containsTerrain(Terrains.PAVEMENT) ? SANDBAGS : asset;
+    }
+    /** A Solaris elevator's shaft ({@link BoardScene.FeatureKind#SHAFT}). */
+    static final String ELEVATOR_SHAFT = "elevator-shaft";
+
+    /** Whether {@code tile} is a Solaris elevator's: a flat lift in a shaft whose straight walls are steel. */
+    static boolean shaft(BoardScene.Tile tile) {
+        return tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.SHAFT);
+    }
 
     /**
-     * {@code tile} with the trenches of a platoon dug in there (TO:AR p.106): scenery like a terrain-owned row's, which
-     * no hex stores, turned by its hex so neighbouring trenches differ.
+     * {@code tile} with the fighting holes of the platoons dug in there (TO:AR p.106): scenery like a terrain-owned row's,
+     * which no hex stores, turned by its hex so neighbouring holes differ, showing the holes of formation slots
+     * {@code holes} (bit N for slot N, {@link InfantryVisual#slots}). A fortified hex's strongpoint takes the platoons in
+     * instead: they dig none there.
      */
-    static BoardScene.Tile withTrench(BoardScene.Tile tile) {
+    static BoardScene.Tile withTrench(BoardScene.Tile tile, int holes) {
+        if (tile.features().stream().anyMatch(feature -> feature.authoredPlacement() && feature.decoration() == null
+              && BoardGroundCut.digs(feature.asset()))) { return tile; }
         List<BoardScene.Feature> features = new ArrayList<>(tile.features());
         features.add(new BoardScene.Feature(TRENCH, 0, 0, 60 * Math.floorMod(tile.coords().hashCode(), 6), 1, 1, 0,
-              BoardScene.FeatureKind.SCENERY, 0, true));
+              BoardScene.FeatureKind.SCENERY, 0, true, null, megamek.common.board.BoardDecoration.Stretch.NONE,
+              megamek.common.board.BoardDecoration.Colours.NONE, holes));
         return tile.withFeatures(features);
+    }
+
+    /** The timber a saw clearing leaves ({@link #withSawClearing}), modelled at real size. */
+    static final String SAWN_STUMP = "rough/sawn-stump", SAWN_LOG = "rough/sawn-log";
+    /** Half the sawn log's length (4.6 m), in tile px. */
+    private static final float SAWN_LOG_REACH = 6.4f;
+
+    /**
+     * {@code tile} while saws clear its woods (TW p.112): of its trees, a share for each turn of work done, felled from
+     * one side of the hex across (its hex's choice), each leaving a sawn stump where it stood and its log in the ground
+     * already cleared behind it. The game lowers the woods when the work is done.
+     */
+    static BoardScene.Tile withSawClearing(BoardScene.Tile tile, int turnsRemaining) {
+        List<BoardScene.Feature> trees = tile.features().stream()
+              .filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE).toList();
+        if (trees.isEmpty()) { return tile; }
+        int required = WoodsClearingTracker.TURNS_REQUIRED_SINGLE;
+        int done = Math.clamp(required + 1 - turnsRemaining, 1, required);
+        int felled = Math.max(1, Math.round(trees.size() * done / (required + 1f)));
+        double heading = Math.toRadians(60 * Math.floorMod(tile.coords().hashCode(), 6) + 30);
+        float dx = (float) Math.cos(heading), dy = (float) Math.sin(heading);
+        List<BoardScene.Feature> cut = trees.stream()
+              .sorted(Comparator.comparingDouble(tree -> tree.x() * dx + tree.y() * dy)).limit(felled).toList();
+        Random random = new Random(tile.coords().hashCode() * 31L + 0x5a3);
+        List<BoardScene.Feature> features = new ArrayList<>(tile.features());
+        features.removeAll(cut);
+        for (BoardScene.Feature tree : cut) {
+            // The board's trees are drawn larger than life; their timber matches their trunks.
+            float size = 2 * tree.scale(), reach = (SAWN_LOG_REACH + 1.5f) * size;
+            features.add(new BoardScene.Feature(SAWN_STUMP, tree.x(), tree.y(), random.nextFloat() * 360, size, 0, 0,
+                  BoardScene.FeatureKind.ROUGH));
+            double fall = heading + Math.PI + (random.nextFloat() - .5f) * .7f;
+            float x = tree.x() + (float) Math.cos(fall) * reach, y = tree.y() + (float) Math.sin(fall) * reach;
+            if (Math.hypot(x, y) > BoardGeometry.TILE_HEIGHT / 2f - SAWN_LOG_REACH * size) {
+                // A log that would leave the hex lies toward its middle instead.
+                fall = Math.atan2(-tree.y(), -tree.x());
+                x = tree.x() + (float) Math.cos(fall) * reach;
+                y = tree.y() + (float) Math.sin(fall) * reach;
+            }
+            features.add(new BoardScene.Feature(SAWN_LOG, x, y, (float) Math.toDegrees(fall), size, 0, 0,
+                  BoardScene.FeatureKind.ROUGH));
+        }
+        return tile.withFeatures(features);
+    }
+
+    /** A crate of cargo set down on the ground ({@link #withCargo}). */
+    static final String CARGO = "scenery/military/cargo-crate";
+
+    /** {@code tile} with cargo set down on it: a crate beside the middle, where a unit stands, turned by its hex. */
+    static BoardScene.Tile withCargo(BoardScene.Tile tile) {
+        int side = Math.floorMod(tile.coords().hashCode(), 6);
+        double bearing = Math.toRadians(60 * side + 30);
+        List<BoardScene.Feature> features = new ArrayList<>(tile.features());
+        // Larger than life, as the units are; far enough out that its inner end stays clear of the unit.
+        features.add(new BoardScene.Feature(CARGO, (float) Math.cos(bearing) * 19, (float) Math.sin(bearing) * 19,
+              60 * side + 15, 1.6f, 1, 0, BoardScene.FeatureKind.SCENERY, 0, true));
+        return tile.withFeatures(features);
+    }
+
+    /** What {@code feature} has stencilled on it ({@link RigidGlb#label}): a cargo crate's number, two digits its hex picks. */
+    static String label(BoardScene.Tile tile, BoardScene.Feature feature) {
+        if (!feature.asset().equals(CARGO)) { return ""; }
+        int mixed = (tile.coords().getX() * 73_856_093) ^ (tile.coords().getY() * 19_349_663);
+        return Integer.toString(10 + Math.floorMod(mixed, 90));
     }
 
     /**
@@ -696,6 +794,18 @@ final class BoardFeatures {
               : feature.kind() == BoardScene.FeatureKind.BUILDING ? "building"
               : feature.kind() == BoardScene.FeatureKind.INDUSTRIAL ? "industrial"
               : fuelTank(feature) ? "fuelTank" : null;
+    }
+
+    /**
+     * The frame of authored scenery (a feature with {@link BoardScene.Feature#authoredPlacement}) anchored at (x, y) on
+     * the supporting plane {@code base}: the drawn model's and its ground cut's ({@link BoardGroundCut}).
+     */
+    static com.badlogic.gdx.math.Matrix4 authoredTransform(float x, float y, float base, BoardScene.Feature feature) {
+        float scale = feature.scale() * BoardGeometry.hexScale();
+        return new com.badlogic.gdx.math.Matrix4().setToTranslation(x, y,
+                    base + feature.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale())
+              .rotate(com.badlogic.gdx.math.Vector3.Z, feature.rotation()).scale(scale * (float) feature.stretch().x(),
+                    scale * (float) feature.stretch().y(), scale * (float) feature.stretch().z());
     }
 
     /** The same authored frame drives the drawn model, picking, shadows and ground-cover clearance. */
@@ -1003,7 +1113,7 @@ final class BoardFeatures {
                 default -> hex.getLevel() >= 2 || hex.containsTerrain(Terrains.TUNDRA) ? "highland" : "temperate";
             };
         }
-        return "foliage-" + family;
+        return "vegetation/foliage-" + family;
     }
 
     private static void add(List<BoardScene.Feature> result, String asset, float height, float elevation, float rotation) {

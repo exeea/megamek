@@ -12,15 +12,21 @@ import java.util.List;
 import megamek.client.ui.tileset.EquipmentModelPolicy;
 import megamek.client.ui.tileset.UnitModelEquipment;
 import megamek.common.battleArmor.BattleArmor;
+import megamek.common.board.CubeCoords;
+import megamek.common.enums.BasementType;
+import megamek.common.enums.BuildingType;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.AeroSpaceFighter;
 import megamek.common.units.BipedMek;
+import megamek.common.units.BuildingEntity;
 import megamek.common.units.Mek;
 import megamek.common.units.ProneCause;
 import megamek.common.units.Tank;
+import megamek.common.weapons.lasers.innerSphere.medium.ISLaserMedium;
 import org.junit.jupiter.api.Test;
 
 class UnitModelStateTest {
@@ -83,6 +89,40 @@ class UnitModelStateTest {
         assertTrue(UnitModelState.capture(aero).structure().externalSearchlight());
         aero.setExternalSearchlight(false);
         assertFalse(UnitModelState.capture(aero).structure().externalSearchlight());
+    }
+
+    @Test
+    void armedBuildingHexesCaptureTheirOwnWeaponsAndWalls() throws Exception {
+        var building = new BuildingEntity(BuildingType.MEDIUM, 1);
+        building.getInternalBuilding().setBuildingHeight(2);
+        building.getInternalBuilding().addHex(CubeCoords.ZERO, 40, 0, BasementType.NONE, false);
+        building.getInternalBuilding().addHex(new CubeCoords(0, 1, -1), 40, 0, BasementType.NONE, false);
+        building.refreshLocations();
+        building.refreshAdditionalLocations();
+        building.setPosition(new megamek.common.board.Coords(5, 5));
+        var parts = building.getSecondaryPositions();
+        var turret = new WeaponMounted(building, new ISLaserMedium());
+        turret.setMekTurretMounted(true);
+        building.addEquipment(turret, building.getLocationsAt(parts.get(0)).getLast(), false);
+        var ground = new WeaponMounted(building, new ISLaserMedium());
+        building.addEquipment(ground, building.getLocationsAt(parts.get(1)).getFirst(), false);
+        ground.setFacing(2);
+        var upper = new WeaponMounted(building, new ISLaserMedium());
+        building.addEquipment(upper, building.getLocationsAt(parts.get(1)).getLast(), false);
+        upper.setFacing(4);
+        var roof = UnitModelState.capture(building, null, 0).structure();
+        assertEquals(List.of(turret.getEquipmentNum()), indices(roof), "A hex shows only its own weapons");
+        assertTrue(roof.building().walls().isEmpty());
+        assertEquals(2, roof.building().height());
+        var walled = UnitModelState.capture(building, null, 1).structure();
+        assertEquals(List.of(ground.getEquipmentNum(), upper.getEquipmentNum()), indices(walled));
+        assertEquals(java.util.Map.of(ground.getEquipmentNum(), new UnitModelState.Wall(2, 0),
+              upper.getEquipmentNum(), new UnitModelState.Wall(4, 1)), walled.building().walls(),
+              "Wall weapons fire from casemates on their face and floor");
+    }
+
+    private static List<Integer> indices(UnitModelState.Structure structure) {
+        return structure.equipment().stream().map(UnitModelEquipment.Mount::index).toList();
     }
 
     @Test

@@ -51,11 +51,14 @@ final class BoardVegetation {
         return sources;
     }
 
+    /** Whether a hex's sculpted support carries ground cover at this detail. */
+    static boolean covers(BoardScene scene, BoardScene.Tile tile, TerrainLod lod) {
+        return lod != TerrainLod.COARSE && lod != TerrainLod.DISTANT && GpuGroundCover.grows(scene, tile);
+    }
+
     /** A root belongs to its hex, even where a neighbour's finished slope or shallow bank extends over it. */
     static Ground ground(BoardScene scene, BoardSurface own, float floor, Map<Coords, BoardSurface> sources) {
-        if (own.lod() == TerrainLod.COARSE || own.lod() == TerrainLod.DISTANT || !GpuGroundCover.grows(scene, own.tile)) {
-            return null;
-        }
+        if (!covers(scene, own.tile, own.lod())) { return null; }
         List<BoardSurface.Face> faces = new ArrayList<>();
         List<BoardSurface.Face> water = new ArrayList<>(own.waterFaces);
         Map<Vector3, Vector3> normals = new IdentityHashMap<>();

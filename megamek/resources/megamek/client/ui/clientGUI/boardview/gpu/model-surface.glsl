@@ -5,6 +5,7 @@
 uniform vec4 u_modelSurface; // roughness, metallic and scattering factors; finish map present
 uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
 uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
+uniform float u_modelPaintMask; // 1: the albedo's alpha is a paint mask, where alone the vertex colour tints (model.frag)
 in vec2 v_modelUV;
 #endif
 #ifdef modelReliefFlag

@@ -164,7 +164,7 @@ class GpuVerticalScarsSmokeTest {
             var replacement = new java.util.ArrayList<>(scene.tiles());
             var editedTile = scene.tile(at);
             replacement.set(replacement.indexOf(editedTile), new BoardScene.Tile(editedTile.coords(), editedTile.elevation() + 1,
-                  -1, false, 0, editedTile.surface(), editedTile.ground(), null, null, null,
+                  -1, false, 0, editedTile.surface(), null, null,
                   List.of(), List.of(), BoardLiquid.NONE, null, true));
             var editedScene = scene.withTiles(replacement);
             terrain.update(editedScene, camera.camera);

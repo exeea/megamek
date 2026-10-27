@@ -80,7 +80,6 @@ final class GpuMarkers implements Disposable {
     static final boolean NUKE_INCOMING_OUTLINE = true;
     static final boolean OBJECTIVE_OUTLINE = true;
     static final boolean PLAYER_NOTE_OUTLINE = true;
-    static final boolean CARGO_OUTLINE = true;
     static final boolean FLARE_OUTLINE = true;
     static final boolean SAW_CLEARING_OUTLINE = true;
     static final boolean BRIDGE_REPAIRED_OUTLINE = true;
@@ -325,7 +324,6 @@ final class GpuMarkers implements Disposable {
             case NUKE_INCOMING -> NUKE_INCOMING_OUTLINE;
             case OBJECTIVE -> OBJECTIVE_OUTLINE;
             case PLAYER_NOTE -> PLAYER_NOTE_OUTLINE;
-            case CARGO -> CARGO_OUTLINE;
             case FLARE -> FLARE_OUTLINE;
             case SAW_CLEARING -> SAW_CLEARING_OUTLINE;
             case BRIDGE_REPAIRED -> BRIDGE_REPAIRED_OUTLINE;
@@ -538,12 +536,6 @@ final class GpuMarkers implements Disposable {
                 for (int y = 34; y < 68; y += 11) {
                     g.drawLine(37, y, 59, y);
                 }
-            }
-            case CARGO -> {
-                g.drawPolygon(new int[] { 48, 72, 72, 48, 24, 24 }, new int[] { 20, 33, 63, 77, 63, 33 }, 6);
-                g.drawPolyline(new int[] { 24, 48, 72 }, new int[] { 33, 47, 33 }, 3);
-                g.drawLine(48, 47, 48, 77);
-                g.drawLine(36, 27, 60, 40);
             }
             case FLARE -> {
                 g.fillOval(38, 38, 20, 20);

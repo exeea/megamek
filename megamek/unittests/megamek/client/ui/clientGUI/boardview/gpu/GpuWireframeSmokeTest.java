@@ -262,7 +262,7 @@ class GpuWireframeSmokeTest {
                 var features = family == BoardScene.Surface.FUNGUS && scatter
                       ? List.of(new BoardScene.Feature(BoardFungus.SCATTER.get((x + y) % BoardFungus.SCATTER.size()),
                             20, 8, 0, 1, .2f, 0, BoardScene.FeatureKind.SCATTER)) : List.<BoardScene.Feature>of();
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, family, ground, null,
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, family,
                       null, null, features, List.of(), BoardLiquid.NONE, null, true));
             }
         }

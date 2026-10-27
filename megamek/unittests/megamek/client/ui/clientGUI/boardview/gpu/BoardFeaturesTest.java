@@ -260,7 +260,7 @@ class BoardFeaturesTest {
         hex.addTerrain(new Terrain(Terrains.JUNGLE, 2));
         hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         Coords coords = new Coords(1, 1);
-        assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().allMatch(feature -> feature.asset().startsWith("palm")));
+        assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().allMatch(feature -> feature.asset().startsWith("vegetation/palm")));
         hex.addTerrain(new Terrain(Terrains.SNOW, 1));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().allMatch(feature -> feature.asset().endsWith("-snow")));
         hex.removeTerrain(Terrains.SNOW);
@@ -280,8 +280,8 @@ class BoardFeaturesTest {
             hex.setTheme("Desert");
             var themed = BoardFeatures.capture(hex, coords, Map.of());
             assertFalse(themed.isEmpty());
-            assertTrue(themed.stream().allMatch(feature -> feature.asset().startsWith("palm")
-                  || feature.asset().startsWith("cactus") || feature.asset().equals("tree-dead")),
+            assertTrue(themed.stream().allMatch(feature -> feature.asset().startsWith("vegetation/palm")
+                  || feature.asset().startsWith("vegetation/cactus") || feature.asset().equals("vegetation/tree-dead")),
                   "Desert woodland grows cacti, palms and dead trees");
             hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
             assertEquals(themed, BoardFeatures.capture(hex, coords, Map.of()), "Ground paving must not change the biome's trees");
@@ -312,17 +312,17 @@ class BoardFeaturesTest {
         highland.addTerrain(new Terrain(Terrains.WOODS, 2));
         highland.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         long conifers = BoardFeatures.capture(highland, coords, Map.of()).stream()
-              .filter(tree -> tree.asset().startsWith("pine")).count();
+              .filter(tree -> tree.asset().startsWith("vegetation/pine")).count();
         assertTrue(conifers > 9 / 2, "Highland woods are mostly conifers");
         Hex snowfield = new Hex(0);
         snowfield.addTerrain(new Terrain(Terrains.WOODS, 2));
         snowfield.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         snowfield.addTerrain(new Terrain(Terrains.SNOW, 1));
         assertTrue(BoardFeatures.capture(snowfield, coords, Map.of()).stream()
-              .filter(tree -> tree.asset().startsWith("pine")).count() > 9 / 2, "Snowfields grow snow-laden conifers");
+              .filter(tree -> tree.asset().startsWith("vegetation/pine")).count() > 9 / 2, "Snowfields grow snow-laden conifers");
         highland.setTheme("rock");
         assertTrue(BoardFeatures.capture(highland, coords, Map.of()).stream()
-              .allMatch(tree -> tree.asset().startsWith("pine") || tree.asset().equals("tree-dead")),
+              .allMatch(tree -> tree.asset().startsWith("vegetation/pine") || tree.asset().equals("vegetation/tree-dead")),
               "Rocky ground grows hardy conifers and dead trees");
     }
 
@@ -396,6 +396,6 @@ class BoardFeaturesTest {
         hex.addTerrain(new Terrain(Terrains.FIELDS, 1));
         assertEquals(BoardScene.Biome.FIELD, BoardFeatures.biome(hex));
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
-              .noneMatch(feature -> feature.asset().equals("field")), "Instanced crops replace the legacy field prop");
+              .noneMatch(feature -> feature.asset().equals("vegetation/field")), "Instanced crops replace the legacy field prop");
     }
 }

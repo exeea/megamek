@@ -18,10 +18,16 @@ import org.junit.jupiter.api.Test;
 class BoardPaintCoverTest {
     private static final Coords AT = new Coords(4, 4);
 
-    private static List<BoardDecals.Stamp> stamp(BoardDecoration object) { return List.of(new BoardDecals.Stamp(AT, object)); }
+    private static List<BoardDecals.Stamp> stamp(BoardDecoration object) { return stamp(object, AT); }
 
-    private static BoardTacticalGeometry.Surface support(BoardScene scene) {
-        return BoardTacticalGeometry.Surface.of(new BoardSurface(scene, scene.tile(AT)), scene, BoardGeometry.floor(scene));
+    private static List<BoardDecals.Stamp> stamp(BoardDecoration object, Coords at) {
+        return List.of(new BoardDecals.Stamp(at, object));
+    }
+
+    private static BoardTacticalGeometry.Surface support(BoardScene scene) { return support(scene, AT); }
+
+    private static BoardTacticalGeometry.Surface support(BoardScene scene, Coords at) {
+        return BoardTacticalGeometry.Surface.of(new BoardSurface(scene, scene.tile(at)), scene, BoardGeometry.floor(scene));
     }
 
     /** Roots as (x, y, z, rank) entries. */
@@ -73,14 +79,16 @@ class BoardPaintCoverTest {
         assertNull(GpuBankTurf.plant(bank, tile, support(bank), paint));
         for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
             var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, kind, 0));
-            var biome = scene.tile(AT);
-            var covered = BoardDecals.Opacity.of(biome, stamp(COVER));
+            // Crops stand only in a field of wheat or maize.
+            var at = kind == BoardScene.Biome.FIELD ? BoardBiomeTest.CROPS : AT;
+            var biome = scene.tile(at);
+            var covered = BoardDecals.Opacity.of(biome, stamp(COVER, at));
             if (kind == BoardScene.Biome.MARSH) {
                 assertTrue(GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, null).size > 0, "The marsh grows reeds");
                 assertEquals(0, GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, covered).size);
             } else {
-                assertTrue(GpuBiomeVegetation.plant(scene, biome, support(scene), null).roots().size > 0, "The field grows crops");
-                assertEquals(0, GpuBiomeVegetation.plant(scene, biome, support(scene), covered).roots().size);
+                assertTrue(BoardBiomeTest.cropPlants(scene, biome, support(scene, at), null).size > 0, "The field grows crops");
+                assertEquals(0, BoardBiomeTest.cropPlants(scene, biome, support(scene, at), covered).size);
             }
         }
     }

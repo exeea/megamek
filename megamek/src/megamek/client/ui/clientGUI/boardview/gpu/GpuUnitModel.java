@@ -51,6 +51,22 @@ final class GpuUnitModel implements Disposable {
     private final UnitFamilyScale familyScale;
     private final boolean damageLocations;
     private DetailLevels detailLevels = DetailLevels.NONE;
+    private List<WallAnchor> walls = List.of();
+    /**
+     * World units between a casemate's back and its facade, which stands on the hex edge: no part of it may be buried in
+     * the wall, where the see-through pass would outline it.
+     */
+    private static final float WALL_GAP = .15f;
+    /** The share of a face's length casemates side by side may span, clear of its corners. */
+    private static final float WALL_SPAN = .8f;
+
+    /**
+     * A building hex's wall casemate, the node {@code node} of this model, placed on the face {@code face} (0-5 clockwise
+     * from the building's front) at the middle of floor {@code floor} of a hex {@code height} levels high. The model
+     * stands on that hex's roof. It is number {@code slot} of {@code slots} casemates side by side on that wall, each
+     * within {@code bounds} in its own model units, +Y out of the wall.
+     */
+    record WallAnchor(String node, int face, int floor, int height, int slot, int slots, BoundingBox bounds) { }
 
     /**
      * Resolved mesh sets at each detail level. Sets overlap when a component reuses a preceding level.
@@ -181,6 +197,12 @@ final class GpuUnitModel implements Disposable {
 
     DetailLevels detailLevels() {
         return detailLevels;
+    }
+
+    /** Wall casemates to place on their facades whenever the model is placed. */
+    GpuUnitModel walls(List<WallAnchor> anchors) {
+        walls = List.copyOf(anchors);
+        return this;
     }
 
     /**
@@ -356,7 +378,33 @@ final class GpuUnitModel implements Disposable {
         placed.transform.set(ground, new Quaternion(Vector3.Z, -facing))
               .translate(0, 0, 0.5f)
               .scale(scale, scale, thickness);
+        if (!walls.isEmpty()) { placeWalls(placed, scale, thickness); }
         return anchor(placed, camera);
+    }
+
+    /**
+     * Casemates stand on the facade of their face at the middle of their floor, in world units below the roof the
+     * model stands on, whatever the unit scale: walls and floors are the board's, not the unit's.
+     */
+    private void placeWalls(ModelInstance placed, float scale, float thickness) {
+        float facade = (BoardGeometry.height() / 2 + WALL_GAP) / scale;
+        float span = BoardGeometry.height() / (float) Math.sqrt(3) * WALL_SPAN / scale;
+        for (var wall : walls) {
+            Node node = placed.getNode(wall.node());
+            if (node == null) { continue; }
+            float reach = facade - wall.bounds().min.y;
+            // Casemates side by side close up rather than run past the face's corners.
+            float width = wall.bounds().getWidth();
+            float spacing = wall.slots() < 2 ? 0 : Math.max(0, Math.min(width * 1.15f, (span - width) / (wall.slots() - 1)));
+            float along = (wall.slot() - (wall.slots() - 1) / 2f) * spacing;
+            // Faces run clockwise like facings, and rotation about Z the other way, as in placeScaled.
+            float angle = wall.face() * 60;
+            float sin = com.badlogic.gdx.math.MathUtils.sinDeg(angle), cos = com.badlogic.gdx.math.MathUtils.cosDeg(angle);
+            node.rotation.set(Vector3.Z, -angle);
+            node.translation.set(sin * reach + cos * along, cos * reach - sin * along,
+                  ((wall.floor() + .5f - wall.height()) * BoardGeometry.level() - .5f) / thickness);
+        }
+        placed.calculateTransforms();
     }
 
     Vector3 anchor(ModelInstance placed, Camera camera) {

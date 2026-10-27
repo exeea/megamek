@@ -180,9 +180,9 @@ class GpuGraphicsModeSmokeTest {
     }
 
     /**
-     * A Classic build: no water or lava field, wave simulation, tree, scatter, Enhanced decal, biome map,
-     * grass; shared roads, rails and built bridges retain their own materials beside the buildings, and a pointer straight
-     * down picks each column's own hex at its top.
+     * A Classic build: no water or lava field, wave simulation, tree, scatter, Enhanced decal or grass, and of the
+     * biome map only its per-hex texels (which the ice reads); shared roads, rails and built bridges retain their own
+     * materials beside the buildings, and a pointer straight down picks each column's own hex at its top.
      */
     private static void verifyClassic(GpuTerrain terrain, BoardScene scene) throws Exception {
         for (Object chunk : (List<?>) get(terrain, "chunks")) {
@@ -199,7 +199,7 @@ class GpuGraphicsModeSmokeTest {
         }
         assertNull(((GpuOcean) get(terrain, "ocean")).texture(), "No wave simulation");
         assertNull(((GpuOcean) get(terrain, "lavaOcean")).texture());
-        assertNull(get(get(terrain, "biomes"), "texture"), "No biome map");
+        assertEquals(WIDTH, get(get(terrain, "biomes"), "width"), "Only the per-hex biome texels, which the ice reads");
         assertTrue(((Map<?, ?>) get(get(terrain, "groundCover"), "chunks")).isEmpty(), "No grass");
         boolean building = false;
         for (Object chunk : (List<?>) get(terrain, "chunks")) {

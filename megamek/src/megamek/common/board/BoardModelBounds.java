@@ -21,8 +21,8 @@ import megamek.logging.MMLogger;
 
 /**
  * A placed object's model bounds, read without the views (the legacy conversion on the server): its GLB's finest level,
- * the group {@code <file>-lod0}, in board units with Z up as the 3D board loads it; and the object's footprint on the
- * board plane as placed.
+ * the group whose name ends {@code -lod0}, in board units with Z up as the 3D board loads it; and the object's footprint
+ * on the board plane as placed.
  */
 public final class BoardModelBounds {
     private static final MMLogger LOGGER = MMLogger.create(BoardModelBounds.class);
@@ -32,8 +32,8 @@ public final class BoardModelBounds {
     private BoardModelBounds() { }
 
     /**
-     * The GLB under {@code root} that holds {@code asset}: its own file, or for a tree's winter form without one
-     * ({@code <species>-snow}), the bare species' file.
+     * The GLB under {@code root} that holds {@code asset}, a model's path there without {@code .glb}: its own file, or
+     * for a tree's winter form without one ({@code <species>-snow}), the bare species' file.
      */
     public static File file(File root, String asset) {
         File own = new File(root, asset + ".glb");
@@ -79,11 +79,11 @@ public final class BoardModelBounds {
             // Bounds need no textures: an external image is never read.
             binary.getImageReferences().forEach(image -> image.getTarget().accept(ByteBuffer.allocate(0)));
             var model = GltfModelCreatorV2.create(binary);
-            String group = file.getName().substring(0, file.getName().length() - ".glb".length()) + "-lod0";
             float[] bounds = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY,
                   Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
+            // The finest level's group, by its name's ending: a renamed or moved file keeps its levels.
             for (NodeModel root : model.getSceneModels().get(binary.getGltf().getScene()).getNodeModels()) {
-                if (group.equals(root.getName())) { extend(root, bounds); }
+                if (root.getName() != null && root.getName().endsWith("-lod0")) { extend(root, bounds); }
             }
             return bounds[0] <= bounds[3] ? bounds : NONE;
         } catch (IOException | RuntimeException failure) {

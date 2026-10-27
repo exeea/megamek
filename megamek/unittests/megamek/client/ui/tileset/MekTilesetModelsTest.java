@@ -9,7 +9,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import megamek.common.board.CubeCoords;
+import megamek.common.enums.BasementType;
+import megamek.common.enums.BuildingType;
+import megamek.common.equipment.GunEmplacement;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.units.BipedMek;
+import megamek.common.units.BuildingEntity;
+import megamek.common.weapons.lasers.innerSphere.medium.ISLaserMedium;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -38,6 +45,32 @@ class MekTilesetModelsTest {
         mek.setChassis("Unknown");
         assertEquals("units/fallback/biped.json", tileset.modelFor(mek, -1));
         assertNull(new MekTileset(directory.toFile()).modelFor(mek, -1));
+    }
+
+    @Test
+    void armedStructuresAssembleTheBuildingTurretWithTheirGenericModelAsFallback() throws Exception {
+        Files.writeString(directory.resolve("mekset.txt"), """
+              exact "default_gun_emplacement" "emplacement.png" "units/emplacement.json"
+              exact "default_turret" "emplacement.png" "buildings/turret.json"
+              exact "default_hhw" "hhw.png" "units/hhw.json"
+              """);
+        MekTileset tileset = new MekTileset(directory.toFile());
+        tileset.loadFromFile("mekset.txt");
+        GunEmplacement emplacement = new GunEmplacement();
+        assertEquals("buildings/turret.json", tileset.modelFor(emplacement, -1));
+        assertEquals("units/emplacement.json", tileset.genericModelFor(emplacement, -1));
+        // An armed advanced building assembles its roof turret and wall casemates; an unarmed one keeps its own model.
+        BuildingEntity building = new BuildingEntity(BuildingType.MEDIUM, 1);
+        building.getInternalBuilding().setBuildingHeight(1);
+        building.getInternalBuilding().addHex(CubeCoords.ZERO, 40, 0, BasementType.NONE, false);
+        building.refreshLocations();
+        building.refreshAdditionalLocations();
+        assertEquals("units/hhw.json", tileset.modelFor(building, -1));
+        WeaponMounted wall = new WeaponMounted(building, new ISLaserMedium());
+        building.addEquipment(wall, 0, false);
+        wall.setFacing(0);
+        assertEquals("buildings/turret.json", tileset.modelFor(building, -1));
+        assertEquals("units/hhw.json", tileset.genericModelFor(building, -1));
     }
 
     @Test

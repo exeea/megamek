@@ -831,7 +831,7 @@ class GpuWaterShaderSmokeTest {
             // Include dry banks beside roads as well as the pool's submerged terrain.
             int roads = falls && !tile.water() ? 1 : 0;
             tiles.add(new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), false, roads,
-                  tile.surface(), tile.ground(), null, null, null, List.of(), List.of(), tile.liquid(), null, true));
+                  tile.surface(), null, null, List.of(), List.of(), tile.liquid(), null, true));
         }
         return new BoardScene(0, source.width(), source.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
@@ -1059,7 +1059,7 @@ class GpuWaterShaderSmokeTest {
             var tile = scene.tile(at);
             int depth = kind == BoardLiquid.Kind.WATER || kind == BoardLiquid.Kind.HAZARDOUS ? 1 : -1;
             tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, 2, depth,
-                  kind == BoardLiquid.Kind.WATER, 0, tile.surface(), tile.ground(), null, null, null,
+                  kind == BoardLiquid.Kind.WATER, 0, tile.surface(), null, null,
                   List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true));
         }
         return scene.withTiles(tiles);
@@ -1076,7 +1076,7 @@ class GpuWaterShaderSmokeTest {
             for (int y = 0; y < 10; y++) {
                 boolean water = !river || x == 4;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), river && y < 5 ? drop : 0, water ? 2 : -1, false,
-                      0, BoardScene.Surface.ROCK, pixels, null, List.of(), List.of()));
+                      0, BoardScene.Surface.ROCK, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 12, 10, tiles, List.of(), List.of(), -1, "", List.of());

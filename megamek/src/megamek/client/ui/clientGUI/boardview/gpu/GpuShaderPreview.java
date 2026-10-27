@@ -278,7 +278,7 @@ final class GpuShaderPreview implements Disposable {
         light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
         light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
         var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.DIRT,
-              null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, false,
+              null, null, List.of(), List.of(), BoardLiquid.NONE, null, false,
               BoardRoad.Kind.NONE, new BoardFireSmoke(1, 0));
         sampleScene = new BoardScene(-1, 1, 1, List.of(tile), List.of(), List.of(), -1, "Shader preview", List.of());
     }

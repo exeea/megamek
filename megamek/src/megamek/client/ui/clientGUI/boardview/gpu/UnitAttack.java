@@ -33,6 +33,8 @@ final class UnitAttack {
     static final float RECOIL_KICK_SECONDS = .035f;
     static final float RECOIL_RECOVERY_SECONDS = .24f;
     static final float RECOIL_DISTANCE = .9f;
+    /** Rotary barrels run at about this speed through a burst; slow enough that a turn never reads as backwards. */
+    static final float SPIN_TURNS_PER_SECOND = 1.5f;
     static final float PPC_RECOIL_SCALE = 1.5f;
     static final float DEATH_SECONDS = 1.2f;
     static final float MELEE_WALK_SECONDS = 1.05f;
@@ -525,6 +527,28 @@ final class UnitAttack {
     }
 
     float recoil(UnitEquipmentAssembly.Binding binding) { return recoil(profile(binding)); }
+
+    /**
+     * A rotary barrel cluster's turn in degrees: it runs up before the first round, turns at full speed through the
+     * burst and its recoil, and runs down by the end of the attack, a whole number of turns round, so it stops where
+     * it started.
+     */
+    float spin(UnitEquipmentAssembly.Binding binding) {
+        var profile = profile(binding);
+        float rise = ANTICIPATION_SECONDS;
+        // The run-down always finishes inside the attack, however long the burst.
+        float burst = Math.min(duration - .1f,
+              rise + roundDelay(roundCount(profile) - 1, profile) + RECOIL_KICK_SECONDS + RECOIL_RECOVERY_SECONDS);
+        float fall = duration - burst;
+        // Seconds at full speed that the whole run is worth.
+        float run = rise / 2 + (burst - rise) + fall / 2;
+        float degrees = Math.max(1, Math.round(SPIN_TURNS_PER_SECOND * run)) * 360 / run;
+        if (seconds <= 0) { return 0; }
+        if (seconds <= rise) { return degrees * seconds * seconds / (2 * rise); }
+        if (seconds <= burst) { return degrees * (rise / 2 + seconds - rise); }
+        float down = Math.min(seconds - burst, fall);
+        return degrees * (rise / 2 + burst - rise + down - down * down / (2 * fall));
+    }
 
     boolean chargingPpc() {
         return shot() && seconds >= 0 && seconds < ANTICIPATION_SECONDS

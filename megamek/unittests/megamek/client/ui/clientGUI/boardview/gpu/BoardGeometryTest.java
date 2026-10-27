@@ -26,8 +26,8 @@ class BoardGeometryTest {
     void terrainImpactsUseThePickedMaterialAndCacheItForPlayback() {
         for (var material : BoardScene.Surface.values()) {
             for (int water : new int[] { -1, 2 }) {
-                var tile = new BoardScene.Tile(new Coords(0, 0), 0, water, false, 0, material,
-                      null, null, List.of(), List.of());
+                var tile = new BoardScene.Tile(new Coords(0, 0), 0, water, false, 0, material, null, List.of(),
+                      List.of());
                 var board = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
                 var cache = new BoardSurface.Cache();
                 var ray = new Ray(BoardGeometry.center(tile.coords(), 0).add(0, 0, 100), new Vector3(0, 0, -1));
@@ -54,8 +54,8 @@ class BoardGeometryTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? raisedLevel : 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? raisedLevel : 0, -1, false, 0,
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "Movement", List.of());
@@ -101,10 +101,10 @@ class BoardGeometryTest {
     void weatherStartsAtTheLowestHexLevelRegardlessOfDepthOrBoardElevation() {
         for (int base : new int[] { -3, 0, 4 }) {
             for (int wetLevel : new int[] { base, base + 2 }) {
-                var wet = new BoardScene.Tile(new Coords(0, 0), wetLevel, 12, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), List.of());
-                var dry = new BoardScene.Tile(new Coords(1, 0), base, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), List.of());
+                var wet = new BoardScene.Tile(new Coords(0, 0), wetLevel, 12, false, 0, BoardScene.Surface.GRASS, null,
+                      List.of(), List.of());
+                var dry = new BoardScene.Tile(new Coords(1, 0), base, -1, false, 0, BoardScene.Surface.GRASS, null,
+                      List.of(), List.of());
                 BoardScene scene = new BoardScene(0, 2, 1, List.of(wet, dry), List.of(), List.of(), -1, "", List.of());
                 assertEquals(base * BoardGeometry.LEVEL, BoardGeometry.weatherBase(scene));
                 assertTrue(BoardGeometry.floor(scene) < BoardGeometry.weatherBase(scene),
@@ -128,8 +128,8 @@ class BoardGeometryTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 12; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 2, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 2, -1, false, 0, BoardScene.Surface.GRASS, null,
+                      List.of(), List.of()));
             }
         }
         var board = new BoardScene(0, 12, 5, tiles, List.of(), List.of(), -1, "", List.of());
@@ -320,7 +320,7 @@ class BoardGeometryTest {
     void recessedWaterUsesRealDepthAndStillPicksItsHex() {
         for (int depth : new int[] { 0, 1, 2, 7 }) {
             BoardScene.Tile wet = new BoardScene.Tile(new Coords(0, 0), 2, depth, false, 0, BoardScene.Surface.GRASS,
-                  null, null, List.of(), List.of());
+                  null, List.of(), List.of());
             BoardScene scene = new BoardScene(0, 1, 1, List.of(wet), List.of(), List.of(), -1, "", List.of());
             assertTrue(BoardGeometry.groundZ(wet) < BoardGeometry.waterZ(wet));
             assertEquals(2 * BoardGeometry.LEVEL - (depth == 0 ? 2 * BoardGeometry.HEX_SCALE : depth * BoardGeometry.LEVEL),

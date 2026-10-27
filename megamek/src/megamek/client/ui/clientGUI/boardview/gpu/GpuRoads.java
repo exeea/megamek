@@ -626,8 +626,12 @@ final class GpuRoads {
         // A neighbour's ground road at another level paints only the road surface it reserves here; a bridge's deck
         // carries its apron onto the bank on purpose.
         boolean apart = tile.elevation() != surface.tile.elevation() && BoardBridge.feature(tile) == null;
+        // A road through water lies on its bed (BoardRoad#bed); a bridge's apron keeps to the dry bank.
+        boolean bed = surface.tile.liquid().present() && BoardBridge.feature(tile) == null;
         for (var face : surface.groundFaces()) {
-            if (face.finish() != BoardSurface.Finish.TOP || apart && !surface.carries(face, tile)) { continue; }
+            boolean ground = face.finish() == BoardSurface.Finish.TOP
+                  || bed && (face.finish() == BoardSurface.Finish.BED || face.finish() == BoardSurface.Finish.SHORE);
+            if (!ground || apart && !surface.carries(face, tile)) { continue; }
             float area = (face.b().x - face.a().x) * (face.c().y - face.a().y)
                   - (face.b().y - face.a().y) * (face.c().x - face.a().x);
             // Nearly vertical slivers can remain where terrain strips meet. They have no paintable footprint.

@@ -3,6 +3,10 @@
 uniform sampler2D u_markerTexture;
 uniform float u_markerEnabled;
 in vec3 v_paintPosition;
+#ifdef modelSurfaceFlag
+uniform sampler2D u_paintPlate;
+uniform float u_paintPlateEnabled;
+#endif
 uniform sampler2D u_damageTexture;
 uniform float u_damageEnabled;
 uniform float u_damageOpacity;
@@ -26,6 +30,17 @@ vec2 damageUV(vec2 uv) {
 }
 
 vec3 unitOverlays(vec3 diffuse) {
+#ifdef modelSurfaceFlag
+    if (u_paintPlateEnabled > 0.5) {
+        // Paint on a plate (GpuUnitCamouflage): the camouflage, shaded by the plate's light and dark against its mean
+        // (its last mip level), covers the plate only partly, so its steel shows through the paint.
+        const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+        const float paintCover = 0.6;
+        vec3 plate = texture(u_paintPlate, v_modelUV + modelShift).rgb;
+        float tone = dot(plate, luma) / max(dot(textureLod(u_paintPlate, vec2(0.5), 16.0).rgb, luma), 1e-4);
+        diffuse = mix(plate, diffuse * tone, paintCover);
+    }
+#endif
     if (u_markerEnabled > 0.5) {
         vec4 marker = texture(u_markerTexture, v_paintPosition.xy);
         diffuse = mix(diffuse, marker.rgb, marker.a);

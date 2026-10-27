@@ -97,6 +97,9 @@ final class GpuTactical implements Disposable {
     private boolean movementPlanning;
     private Map<FillKey, FillGeometry> fills = Map.of();
     private float[] planeConnections = new float[0];
+    // The fills and tiles planeConnections joins: they follow those and the board's levels, never its terrain detail.
+    private List<BoardTactical.Fill> planeFills;
+    private List<BoardScene.Tile> planeTiles;
     private Map<BoardTactical.Wall, WallGeometry> walls = Map.of();
     private Map<Group, List<Page>> pages = Map.of();
     private Map<BasicStroke, Material> outlines = Map.of();
@@ -221,9 +224,15 @@ final class GpuTactical implements Disposable {
         boolean masked = hexMasks.update(scene, surfaces, true);
         addFills(scene, masked ? List.of() : scene.tactical().fills(), new Group(0, null), groups, nextFills,
               surfaces, clipper, reset, terrainChanged);
-        FloatArray connections = new FloatArray();
-        BoardTacticalGeometry.connectPlanes(scene, scene.tactical().fills(), packed(connections, null));
-        planeConnections = reuse(connections, planeConnections);
+        // The joins read only the fills, tiles and tuning: a detail change keeps them. Panning over a movement envelope
+        // joined its planes again on every refined chunk, the sampled cost of its slowest frames.
+        if (reset || scene.tiles() != planeTiles || !scene.tactical().fills().equals(planeFills)) {
+            FloatArray connections = new FloatArray();
+            BoardTacticalGeometry.connectPlanes(scene, scene.tactical().fills(), packed(connections, null));
+            planeConnections = reuse(connections, planeConnections);
+            planeFills = scene.tactical().fills();
+            planeTiles = scene.tiles();
+        }
         add(groups, PLANES, planeConnections);
         // Keep map restrictions in their own retained pages, outside the sprite-mask fast path.
         addFills(scene, impassable, new Group(3, null), groups, nextFills, surfaces, clipper, reset, terrainChanged);
@@ -732,6 +741,8 @@ final class GpuTactical implements Disposable {
         outlines = Map.of();
         fills = Map.of();
         planeConnections = new float[0];
+        planeFills = null;
+        planeTiles = null;
         walls = Map.of();
         impassable = List.of();
         batch.dispose();

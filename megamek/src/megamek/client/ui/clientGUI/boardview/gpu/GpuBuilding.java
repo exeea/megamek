@@ -47,7 +47,7 @@ final class GpuBuilding implements Disposable {
     }
 
     GpuBuilding(FileHandle file, Path textureRoot, Function<ModelData, Model> upload) {
-        var data = lods(file.nameWithoutExtension(), RigidGlb.loadLods(file, textureRoot));
+        var data = lods(RigidGlb.loadLods(file, textureRoot));
         names = data.stream().map(GpuBuilding::parts).toList();
         roles = names.getFirst().keySet().stream().sorted().toList();
         require(roles.size() <= Character.MAX_VALUE + 1, "Too many building modules");
@@ -88,8 +88,8 @@ final class GpuBuilding implements Disposable {
     }
 
     /** Trim trailing fallbacks, retaining authored level numbers and any gaps filled by the generic reader. */
-    static List<ModelData> lods(String name, List<ModelData> loaded) {
-        require(loaded.getFirst().id.equals(MeshLod.name(name, 0)), "Building requires -lod0");
+    static List<ModelData> lods(List<ModelData> loaded) {
+        require(MeshLod.level(loaded.getFirst().id) == 0, "Building requires -lod0");
         int last = loaded.size() - 1;
         while (last > 0 && loaded.get(last) == loaded.get(last - 1)) { last--; }
         return List.copyOf(loaded.subList(0, last + 1));

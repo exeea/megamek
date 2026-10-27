@@ -43,10 +43,10 @@ class GpuSceneryColourSmokeTest {
     private static final File OUTPUT = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
           "scenery-colours");
     /** The trees whose winter form is a material variant of the bare tree. */
-    static final List<String> SNOW_SPECIES = List.of("orchard-leaning", "orchard-round", "orchard-spreading",
-          "orchard-upright", "orchard-vase", "orchard-young", "pine", "pine-broad", "pine-slender", "pine-layered",
-          "tree-broad", "birch", "willow-broad", "tree-layered", "birch-spreading", "birch-young", "tree-slender", "tree",
-          "birch-tall");
+    static final List<String> SNOW_SPECIES = List.of("vegetation/orchard-leaning", "vegetation/orchard-round", "vegetation/orchard-spreading",
+          "vegetation/orchard-upright", "vegetation/orchard-vase", "vegetation/orchard-young", "vegetation/pine", "vegetation/pine-broad", "vegetation/pine-slender", "vegetation/pine-layered",
+          "vegetation/tree-broad", "vegetation/birch", "vegetation/willow-broad", "vegetation/tree-layered", "vegetation/birch-spreading", "vegetation/birch-young", "vegetation/tree-slender", "vegetation/tree",
+          "vegetation/birch-tall");
 
     /**
      * Paved hexes where the imported board gets a car in a colour far from the model's red: mirrored (magenta), and
@@ -124,7 +124,7 @@ class GpuSceneryColourSmokeTest {
                   BoardDecoration.Placement.ground(), 0, false)));
             imported.setHex(LEVEL_CORAL, coral);
             var tree = imported.getHex(LEVEL_TREE).duplicate();
-            tree.setDecorations(List.of(new BoardDecoration("level-tree", "prop", "tree-broad", null, 0, 0, 0, false, 1,
+            tree.setDecorations(List.of(new BoardDecoration("level-tree", "prop", "vegetation/tree-broad", null, 0, 0, 0, false, 1,
                   BoardDecoration.Placement.ground(), 0, false, 12, 0)));
             imported.setHex(LEVEL_TREE, tree);
             var train = imported.getHex(LEVEL_TRAIN).duplicate();
@@ -153,7 +153,7 @@ class GpuSceneryColourSmokeTest {
         for (var entry : hexes.entrySet()) {
             var objects = imported.getHex(entry.getKey()).getDecorations();
             System.out.printf("COLOUR fixture %s %s: %s%n", entry.getKey().getBoardNum(), entry.getValue(),
-                  objects.stream().filter(o -> !o.asset().equals("tree-broad")).map(o -> o.asset() + o.colours().slots()).toList());
+                  objects.stream().filter(o -> !o.asset().equals("vegetation/tree-broad")).map(o -> o.asset() + o.colours().slots()).toList());
             for (var object : objects) {
                 // Every coat or paint is its family's one mesh in that coat's colours.
                 assertFalse(object.asset().matches("scenery/(vehicles/car-.*|farm/(hen|rooster|bison)-.*|parks/pond-.*)"), object.asset());
@@ -605,7 +605,7 @@ class GpuSceneryColourSmokeTest {
             BoardSceneryLayouts.convert(board);
             for (var coords : List.of(ground, roof)) {
                 var hex = board.getHex(coords).duplicate();
-                hex.setDecorations(List.of(new BoardDecoration("orchard-" + coords.getBoardNum(), "prop", "orchard-round", null,
+                hex.setDecorations(List.of(new BoardDecoration("orchard-" + coords.getBoardNum(), "prop", "vegetation/orchard-round", null,
                       0, 0, 30, true, 1, coords.equals(roof) ? BoardDecoration.Placement.on("building", 0)
                       : BoardDecoration.Placement.ground(), 0, false)));
                 board.setHex(coords, hex);

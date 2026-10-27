@@ -10,7 +10,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -18,7 +17,6 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
-import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -130,11 +128,11 @@ class GpuFoliageSmokeTest {
 
     private static BoardScene treeScene(boolean snow) throws Exception {
         List<String> names = new ArrayList<>(BoardTreeDistributionTest.BASIC_TREES);
-        names.add("tree-dead");
-        if (!snow) { names.addAll(List.of("palm", "palm-bent", "cactus", "cactus-flowers")); }
-        File ground = new File(Configuration.dataDir(), "models/board/tileset/saxarba/base/base_"
-              + (snow ? "snow_light" : "default") + "_0.png");
-        BoardScene.Pixels pixels = new BoardScene.Pixels(ImageIO.read(ground));
+        names.add("vegetation/tree-dead");
+        if (!snow) {
+            names.addAll(List.of("vegetation/palm", "vegetation/palm-bent", "vegetation/cactus",
+                  "vegetation/cactus-flowers"));
+        }
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int index = 0; index < 25; index++) {
             List<BoardScene.Feature> tree = index < names.size()
@@ -142,7 +140,7 @@ class GpuFoliageSmokeTest {
                         BoardScene.FeatureKind.TREE))
                   : List.of();
             tiles.add(new BoardScene.Tile(new Coords(index / 5, index % 5), 0, -1, false, 0,
-                  snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, pixels, null, tree, List.of()));
+                  snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, null, tree, List.of()));
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
     }
@@ -155,9 +153,8 @@ class GpuFoliageSmokeTest {
                 String cover = x == 0 || x == 11 || y == 0 || y == 9 || x == 6 ? ""
                       : "woods:" + (y < 5 ? 1 : 2) + ";foliage_elev:2";
                 var hex = new Hex(0, cover + (x == 6 ? ";road:1:9" : ""), "", coords);
-                var base = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, 0);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, x == 6 ? 9 : 0, BoardScene.Surface.GRASS,
-                      base.ground(), null, null, null, BoardTreeDistributionTest.capture(hex, coords, natural),
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, x == 6 ? 9 : 0, BoardScene.Surface.GRASS, null,
+                      null, BoardTreeDistributionTest.capture(hex, coords, natural),
                       List.of(), BoardLiquid.NONE, null, true, BoardRoad.capture(hex)));
             }
         }

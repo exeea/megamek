@@ -133,7 +133,7 @@ class GpuHexOverlayTest {
                 fixture.source.refresh();
                 BoardScene faded = fixture.source.takeFrame().scene();
                 assertSame(eccm.tile(sample).features(), faded.tile(sample).features(), "Opacity must not recapture terrain");
-                assertSame(eccm.tile(sample).ground(), faded.tile(sample).ground());
+                assertSame(eccm.tile(sample).tileset(), faded.tile(sample).tileset());
                 assertEquals(48, faded.electronicWarfare().strength());
                 fixture.entity.setPosition(new Coords(14, 14));
                 fixture.view.updateEcmList();

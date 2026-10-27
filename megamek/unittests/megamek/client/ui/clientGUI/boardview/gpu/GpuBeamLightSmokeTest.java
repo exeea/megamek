@@ -340,7 +340,7 @@ class GpuBeamLightSmokeTest {
             for (int y = 0; y < 10; y++) {
                 boolean water = lake && x >= 1 && x <= 14 && y >= 2 && y <= 8;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, water ? 2 : -1, false, 0, BoardScene.Surface.GRASS,
-                      pixels, null, null, null, List.of(), List.of(),
+                      null, null, List.of(), List.of(),
                       water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

@@ -140,6 +140,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
     private final GpuJumpJets jumpJets = new GpuJumpJets();
+    private final GpuPilotFlames pilotFlames = new GpuPilotFlames();
     private final GpuUnitCamouflage camouflage = new GpuUnitCamouflage();
     /** The Tactical View's unit bases and badges; created with the HUD's skin, whose icons and font they borrow. */
     private GpuUnitBases unitBases;
@@ -484,6 +485,7 @@ class GpuBattleView extends ApplicationAdapter {
         starShells.dispose();
         terrainEffects.dispose();
         jumpJets.dispose();
+        pilotFlames.dispose();
         waterImpacts.dispose();
         effectDepth.dispose();
         ambientOcclusion.dispose();
@@ -582,6 +584,7 @@ class GpuBattleView extends ApplicationAdapter {
                         attachments.clear();
                         BoardRocks.reload();
                         BoardRough.reload();
+                        BoardGroundCut.reload();
                         BoardFungus.reload();
                         BoardScatter.reload();
                         BoardObstacles.reload();
@@ -705,6 +708,7 @@ class GpuBattleView extends ApplicationAdapter {
         // The 3D Graphics choose what the terrain builds; the first frame already has the saved choice, and a switch
         // rebuilds behind the loading stage below. The Tactical View is the camera and the presentation.
         terrain.setColumns(source.uiPreferences().graphics() == BoardGraphics.CLASSIC);
+        terrain.present(playback.transition(), playback.transitionProgress());
         terrain.update(scene, boardCamera.camera);
         boolean detailChanged = terrain.refine(boardCamera.camera, source.isEditor());
         settings.set(terrain.settings());
@@ -773,8 +777,8 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setWaterEffects(tuning.waterEffects());
         // Sprite meshes bake their atlas UVs. New artwork is appended, so only the moved slots need new meshes.
         Set<BoardScene.Pixels> moved = unitTextures.updateRegions(scene.units().stream().filter(unit -> !unit.sensorContact()
-              && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
-              .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)), Map.of());
+              && (unitModels == null || unitModels.get(unit.model(), unit.id(), unit.part()) == null)).map(BoardScene.Unit::image).distinct()
+              .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)));
         Set<BoardScene.Pixels> images = scene.units().stream().map(BoardScene.Unit::image).collect(Collectors.toSet());
         disposeSpriteModels(sprite -> moved.contains(sprite.pixels()) || !images.contains(sprite.pixels()));
         updateCameraFocus(scene, frame.centerRequest(), instantAction);
@@ -849,6 +853,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (boardCamera.tactical()) { anchorOnBases(); }
         markers.update(unitInstances.values(), boardCamera.camera);
         updateJumpJets();
+        updatePilotFlames();
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
         playback.takeDetonations().forEach(attackEffects::detonate);
         attackEffects.advance(Gdx.graphics.getDeltaTime());
@@ -883,7 +888,14 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("cutaways and light");
         atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
-        terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
+        // An armed building's roof turret and wall casemates are part of it: unlike a unit inside, they never open it.
+        List<ModelInstance> occupants = new ArrayList<>(units);
+        for (var unit : scene.units()) {
+            if (unit.model() != null && unit.model().state() != null && unit.model().state().structure().building() != null) {
+                occupants.remove(unitInstances.get(unit.id() + ":" + unit.part()));
+            }
+        }
+        terrain.animate(Gdx.graphics.getDeltaTime(), occupants, tuning.buildingOpacity(),
               ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
         editorPreview.prepare(scene, terrain, ghosts());
         renderStage("geometry shadows");
@@ -938,6 +950,7 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setMinefields(terrainMarks ? GpuArtilleryBlast.minefields(scene.markers()) : Map.of(),
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
+        pilotFlames.render(boardCamera.camera);
         attackEffects.render(boardCamera.camera, effectDepth);
         designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
         starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
@@ -1011,6 +1024,7 @@ class GpuBattleView extends ApplicationAdapter {
                     terrainEffects.prepare();
                     waterImpacts.prepare();
                     jumpJets.prepare();
+                    pilotFlames.prepare();
                     atmosphere.prepare();
                     terrain.prepareEffects();
                 });
@@ -1413,6 +1427,19 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.endFrame();
     }
 
+    private void updatePilotFlames() {
+        pilotFlames.beginFrame(Gdx.graphics.getDeltaTime());
+        if (unitModels == null) {
+            return;
+        }
+        for (var unit : scene.units()) {
+            var instance = unitInstances.get(unit.id() + ":" + unit.part());
+            if (instance instanceof GpuUnitInstance displayed && displayed.visual() != null) {
+                pilotFlames.update(displayed.visual(), instance, unit);
+            }
+        }
+    }
+
     /** The Tactical View shows every unit as its meeple, whatever the tuning's display; the 3D view follows it. */
     private UnitDisplayMode displayMode() {
         return boardCamera.tactical() ? UnitDisplayMode.ALL_MEEPLES : tuning.unitDisplayMode();
@@ -1466,9 +1493,11 @@ class GpuBattleView extends ApplicationAdapter {
                   && MathUtils.isEqual(position.z, tile.elevation() * BoardGeometry.level())) {
                 position.z = BoardGeometry.groundZ(tile);
             }
+            // A unit on an elevator the server moved rides its platform (GpuTerrain#present).
+            position.z += terrain.liftOffset(unit.location().coords());
             float footprintFacing = facing;
             GpuUnitModel visual = unit.sensorContact() ? markers.model(BoardMarker.Kind.SENSOR_CONTACT)
-                  : unitModels == null ? null : unitModels.get(unit.model(), unit.id());
+                  : unitModels == null ? null : unitModels.get(unit.model(), unit.id(), unit.part());
             boolean authored = !unit.sensorContact() && visual != null;
             boolean dead = !unit.sensorContact() && unit.model() != null && unit.model().state() != null
                   && unit.model().state().pose().dead();
@@ -1484,6 +1513,14 @@ class GpuBattleView extends ApplicationAdapter {
                 visual = spriteModels.computeIfAbsent(new UnitSprite(unit.image(), displayMode().meeple(unit.model())),
                       sprite -> sprite.meeple() ? GpuUnitModel.meeple(sprite.pixels(), unitTextures.region(sprite.pixels()))
                             : GpuUnitModel.sprite(sprite.pixels(), unitTextures.region(sprite.pixels())));
+            }
+            boolean resting = !airborne && (motion == null || !motion.isMoving()) && tile != null;
+            boolean waiting = resting && UnitAnimator.waiting(unit);
+            if (visual.meeple() && resting && !waiting && groundSurfaces.get(scene, tile).dug()) {
+                // A token has no ground contact of its own: at rest it stands on the dug ground under it, as a model does,
+                // in a strongpoint's vehicle pit (BoardGroundCut).
+                float dug = UnitLandingSupports.terrain(scene, position.x, position.y, groundSurfaces);
+                if (dug < position.z && position.z - dug < BoardGeometry.level()) { position.z = dug; }
             }
             String key = unit.id() + ":" + unit.part();
             ModelInstance instance = unitInstances.get(key);
@@ -1581,6 +1618,22 @@ class GpuBattleView extends ApplicationAdapter {
                         playback.conversion(), boardCamera.isTopDown())
                   : visual.place(instance, boardCamera.camera, position, facing, placement);
             anchor = UnitScreenScale.grow(placement, instance, anchor, growth);
+            if (waiting) {
+                // A tank that could go hull down here but has not waits in its strongpoint's hide, at ground level.
+                var box = UnitBounds.local(instance);
+                List<Vector3> hull = new ArrayList<>(4);
+                for (float x : new float[] { box.min.x, box.max.x }) {
+                    for (float y : new float[] { box.min.y, box.max.y }) {
+                        hull.add(new Vector3(x, y, box.min.z).mul(instance.transform));
+                    }
+                }
+                Vector3 hide = BoardGroundCut.hide(tile, groundSurfaces.get(scene, tile).stands(), hull);
+                if (hide != null) {
+                    instance.transform.trn(hide);
+                    position.add(hide);
+                    anchor.add(hide);
+                }
+            }
             UnitAnimator animator = animators.get(key);
             if (authored && animator != null && unit.attachment() == null && animator.groundSupports(scene, placement, sample)) {
                 anchor = visual.anchor(instance, boardCamera.camera);
@@ -1620,7 +1673,10 @@ class GpuBattleView extends ApplicationAdapter {
         return new UnitAnimator(groundSurfaces, () -> scene, crowds);
     }
 
-    /** Frame an action before its clock advances, including when one large frame reaches several queued actions. */
+    /**
+     * Frame an action before its clock advances, including when one large frame reaches several queued actions. A scene
+     * change waits for the terrain to build the ground its moving parts start from (GpuTerrain#ready).
+     */
     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) {
         if (state.movement() != null) {
             boardCamera.frameMovement(state.movement(), motions.get(state.activeEntityId()), state.present(scene), playbackCameraWidth());
@@ -1629,6 +1685,8 @@ class GpuBattleView extends ApplicationAdapter {
         } else if (state.detonation() != null) {
             var strike = state.detonation().result();
             boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
+        } else if (state.transition() != null) {
+            return terrain.ready(state.transition());
         } else {
             return true;
         }
@@ -1786,7 +1844,7 @@ class GpuBattleView extends ApplicationAdapter {
             var key = unit.id() + ":" + unit.part();
             var animator = animators.get(key);
             if (animator == null || !unitInstances.containsKey(key) || unit.model() == null) { continue; }
-            var model = unitModels.loaded(unit.model(), unit.id());
+            var model = unitModels.loaded(unit.model(), unit.id(), unit.part());
             if (model == null) { continue; }
             var target = attack.event.target();
             var targetInstance = target == null ? null : unitInstances.get(target.id() + ":" + target.part());
@@ -1837,7 +1895,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (unitModels == null || unit == null || unit.sensorContact()) {
             return false;
         }
-        var model = unitModels.get(unit.model(), unit.id());
+        var model = unitModels.get(unit.model(), unit.id(), unit.part());
         return model != null && model.rigs().stream().anyMatch(UnitRig::transport);
     }
 
@@ -1847,7 +1905,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (unitModels == null || unit == null || unit.sensorContact() || unit.model() == null || unit.model().state() == null) {
             return;
         }
-        var model = unitModels.get(unit.model(), unit.id());
+        var model = unitModels.get(unit.model(), unit.id(), unit.part());
         if (model == null || model.rigs().isEmpty()) {
             return;
         }

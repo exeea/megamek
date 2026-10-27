@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Stream;
 
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -71,7 +72,8 @@ class GpuTilesetTerrainTest {
                       }
                       return null;
                   });
-            GpuTilesetTerrain.write(tile, surface, BoardFlow.Current.STILL, at -> null, null, null,
+            var art = new TextureRegion();
+            GpuTilesetTerrain.write(tile, surface, BoardFlow.Current.STILL, at -> art, null,
                   (material, draw) -> draw.accept(mesh), (material, draw) -> { }, new HashMap<>(), new BoundingBox());
             assertEquals(6, normals.size(), "Exercise the actual Classic artwork mesh emitter");
             var expected = new Vector3(-rise, 0, 1).nor();
@@ -119,7 +121,7 @@ class GpuTilesetTerrainTest {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
                 int level = coords.equals(CENTER.translated(0)) ? 0 : coords.equals(CENTER.translated(3)) ? 3 : 2;
-                tiles.add(new BoardScene.Tile(coords, level, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+                tiles.add(new BoardScene.Tile(coords, level, -1, false, 0, BoardScene.Surface.GRASS, null,
                       List.of(), List.of()));
             }
         }
@@ -155,7 +157,7 @@ class GpuTilesetTerrainTest {
                 Coords coords = new Coords(x, y);
                 int road = coords.equals(CENTER) ? 1 : coords.equals(north) ? 1 << 3 : 0;
                 tiles.add(new BoardScene.Tile(coords, coords.equals(north) ? 0 : 1, -1, false, road,
-                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -221,7 +223,7 @@ class GpuTilesetTerrainTest {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, 0, coords.equals(south) ? -1 : coords.equals(north) ? 4 : 2,
-                      false, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
+                      false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -253,7 +255,7 @@ class GpuTilesetTerrainTest {
                 boolean low = coords.equals(north) || coords.equals(CENTER.translated(3)) || coords.equals(CENTER.translated(4));
                 tiles.add(new BoardScene.Tile(coords, low ? 1 : coords.equals(CENTER.translated(5)) ? 3 : 2,
                       coords.equals(CENTER.translated(4)) ? -1 : 1, coords.equals(CENTER.translated(3)), 0,
-                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -282,7 +284,7 @@ class GpuTilesetTerrainTest {
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             Coords at = new Coords(x, y);
             tiles.add(new BoardScene.Tile(at, at.equals(CENTER) ? 6 : 1, at.equals(CENTER) ? 1 : -1,
-                  false, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
+                  false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
         var tile = scene.tile(CENTER);
@@ -317,8 +319,8 @@ class GpuTilesetTerrainTest {
                 Coords at = new Coords(x, y);
                 boolean dry = false;
                 for (int d = 0; d < 6; d++) { dry |= (mask & 1 << d) != 0 && at.equals(CENTER.translated(d)); }
-                tiles.add(new BoardScene.Tile(at, 0, dry ? -1 : 2, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(at, 0, dry ? -1 : 2, false, 0, BoardScene.Surface.GRASS, null, List.of(),
+                      List.of()));
             }
             BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
             float floor = BoardGeometry.floor(scene), water = BoardGeometry.waterZ(scene.tile(CENTER));

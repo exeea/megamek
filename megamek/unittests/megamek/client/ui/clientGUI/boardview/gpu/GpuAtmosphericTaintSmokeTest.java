@@ -177,7 +177,7 @@ class GpuAtmosphericTaintSmokeTest {
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 9; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 5 ? 2 : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

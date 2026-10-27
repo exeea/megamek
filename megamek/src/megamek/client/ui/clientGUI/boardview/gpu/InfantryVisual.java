@@ -59,6 +59,26 @@ final class InfantryVisual {
         return List.copyOf(result);
     }
 
+    /**
+     * The formation slot ({@link #FOOT_SLOTS}) of figure {@code member}, its container's number ({@code trooper-N}): a
+     * soldier's own, a battle armour trooper's suit location less one ({@link BattleArmorVisual#parts}).
+     */
+    static int slot(UnitFamilyScale family, int member) {
+        return Math.floorMod(family == UnitFamilyScale.BATTLE_ARMOR ? member - 1 : member, FOOT_SLOTS.length);
+    }
+
+    /** The formation slots a unit's figures stand in, bit N for slot N: the fighting holes it digs in. */
+    static int slots(BoardScene.UnitModel model) {
+        if (model == null || model.state() == null) { return 0; }
+        var structure = model.state().structure();
+        boolean armor = structure.family() == UnitFamilyScale.BATTLE_ARMOR;
+        int slots = 0;
+        for (int index = 0; index < model.figures() && (!armor || index < structure.members().size()); index++) {
+            slots |= 1 << slot(structure.family(), armor ? structure.members().get(index) : index);
+        }
+        return slots;
+    }
+
     static Part figure(int member, int slot, String trooper) {
         float[] position = FOOT_SLOTS[Math.floorMod(slot, FOOT_SLOTS.length)];
         return new Part("trooper-" + member, trooper,

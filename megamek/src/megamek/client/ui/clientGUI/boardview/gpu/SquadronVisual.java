@@ -28,28 +28,11 @@ final class SquadronVisual {
                 var member = members.get(index);
                 var model = FamilyVisual.assemble(library, descriptor, member.structure());
                 try {
-                    String prefix = "fighter-" + member.id();
-                    Node placement = new Node();
-                    placement.id = prefix;
+                    Node placement = UnitEquipmentAssembly.nest(model, "fighter-" + member.id(), member.id(), rigs, bindings);
                     placement.translation.set((index % columns - (columns - 1) / 2f) * 25,
                           ((rows - 1) / 2f - index / columns) * 25, 0);
                     placement.scale.set(.24f, .24f, .24f);
-                    for (Node node : model.instance.nodes) {
-                        UnitEquipmentAssembly.rename(node, prefix);
-                        placement.addChild(node);
-                    }
                     assembled.nodes.add(placement);
-                    model.rigs().forEach(rig -> rigs.add(rig.inside(prefix, prefix + "-")));
-                    for (var binding : model.equipment()) {
-                        var emitters = binding.emitters().stream().map(emitter -> new UnitModelDescriptor.Emitter(
-                              emitter.id(), prefix + "-" + emitter.node(), emitter.position(), emitter.direction(),
-                              emitter.role(), emitter.effect())).toList();
-                        bindings.add(new UnitEquipmentAssembly.Binding(binding.index(), binding.location(),
-                              prefix + "-" + binding.node(), binding.asset(), binding.embedded(), emitters, member.id(),
-                              binding.aimNode() == null ? null : prefix + "-" + binding.aimNode(),
-                              binding.recoilNode() == null ? null : prefix + "-" + binding.recoilNode(), binding.pitchOnly(),
-                              binding.depression()));
-                    }
                 } finally {
                     model.dispose();
                 }

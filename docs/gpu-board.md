@@ -68,7 +68,7 @@ different inputs:
 - `GpuMapSource` captures a preview or editor board directly. Editor operations and
   undo history remain with the existing editor.
 
-Both use `BoardArtwork` for tileset lookup, ground artwork, decals and model selection,
+Both use `BoardArtwork` for the Classic art, decals and model selection,
 and turn each hex into a tile with the same `BoardScene.captureTile`. A game only relabels
 its visible hexes (`BoardArtwork.labels`, `Tile.withText`, which keeps every other field),
 so it shows the board exactly as the 3D preview and editor do.
@@ -253,13 +253,18 @@ thread as `BoardSource.UiPreferences.graphics`) chooses what `GpuTerrain` builds
 first. Enhanced, the default, builds the 3D relief, water and lava fields, trees, scatter, ground cover, biomes and every
 feature. Classic, for low-end computers, is a build mode of the same chunk pipeline (b11-design 2.4):
 
-- **Art.** The update plan composes each hex's column art on a terrain worker: its Saxarba tileset art
-  (`BoardScene.Tile.tileset`, which `BoardArtwork` composes from the 3D board's own tileset, never the 2D board) with
-  `BoardRim.column`'s incline mask along each edge above a lower neighbour, or its high-incline mask where the drop
-  exceeds two levels or the map marks a cliff side there. It goes into the hex's base slot of the ground atlas, which a
-  water neighbour's bank borrows as in Enhanced. The tileset decals, object sprites and bridge art (`Tile.bridge`) go into
-  the decal atlas; Enhanced no longer packs or builds them. Baked road and flat bridge
-  art are omitted because infrastructure uses the shared 3D geometry in both modes.
+- **Art.** The update plan composes each hex's column art on a terrain worker: its Classic art
+  (`BoardScene.Tile.tileset`, which `BoardArtwork` composes from the Classic tileset, `data/models/board/classic`, never
+  the 2D board's) with `BoardRim.column`'s incline mask along each edge above a lower neighbour, or its high-incline mask
+  where the drop exceeds two levels or the map marks a cliff side there. It goes into the hex's base slot of the ground
+  atlas, which a water neighbour's bank borrows. The tileset decals and object sprites go into the decal atlas;
+  Enhanced packs neither, only its legacy paint. Bridges have no Classic art: both graphics draw the same 3D bridge.
+  The tileset holds level-0 ground art; `TilesetLevels` turns each image for the hex's level by its recipe in
+  `classic/tileset/levels.json`: its table's entry (levels -3 to 10, fitted to the old per-level copies), or past the
+  table the nearest entry plus the recipe's formula, eased as `levelGrade` eases heights. The column shader adds
+  Enhanced's `levelGrade`;
+  liquids, as in Enhanced, are not graded. Baked road and flat bridge art are omitted because infrastructure uses the
+  shared 3D geometry in both modes.
 - **Geometry.** A Classic chunk's worker job is `GpuTerrain.prepareColumns`: each hex's `GpuTilesetTerrain.column`, a
   plain column at its level, walled in its material down to lower neighbours or the board's floor. A road leaving a hex
   toward one of another level ramps through their shared edge to the height `BoardSurface.roadEdgeElevation` gives both,
@@ -267,7 +272,7 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   shallows; concrete quays keep their fitted corners (`BoardConcrete`). Road and railway
   carriers use `BoardSurface`, and `prepareInfrastructure` builds the same roads, built bridges,
   bridge footings and tunnels as Enhanced. Natural bridges have a full hex cap over
-  their hollow arch, topped with ordinary dry tileset art matching the span's surface.
+  their hollow arch, topped with the art of an abutting bank of the span's surface; without one the arch shows its rock.
   Flat road and rail carriers retain normal Classic tops and vertical terrain edges;
   actual grades and tunnel openings retain their shared carrier geometry. A nearby
   flat route does not introduce sculpted hillsides into Classic terrain.
@@ -276,17 +281,19 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
 - **Chunk.** The GL thread's collection step writes each column (`GpuTilesetTerrain.write`) into the chunk's opaque
   layer (tops, walls, banks, sand shallows, molten liquid) and its liquid
   layer (open water in its animated frames, `BoardLiquid.textures`, moving with its river's current, and the falls over
-  each drop into the liquid below; hazardous liquid is tinted green). Of the hex's features it builds only buildings,
+  each drop into the liquid below; hazardous liquid is tinted green, Mars and volcano water toned to their theme).
+  Frozen water shows its water's first frame, still and opaque, under Enhanced's ice sheet (`GpuTerrain.lakeIce`).
+  Of the hex's features it builds only buildings,
   fuel tanks, industrial plants, bridges, rail and maglev routes, road controls and placed objects other than plants
   (`GpuTerrain.columnFeature`), standing on their shared carrier or column (`GpuTerrain.GroundView`).
   Tileset decals and sprites, authored paint and tactical markings follow that supporting surface.
 - **Shared.** Everything else is the Enhanced path: the opaque layer draws, casts and receives shadows through the
   terrain pages and the depth snapshot, the liquid layer through the transparent pass, liquids animate with the
   terrain's clocks, picking and overlay draping (`GpuTerrain.tacticalSurface`) read the supporting carrier or column, the wireframe draws it,
-  and an edit rebuilds only the chunks it touches; the change scan also notices the tileset art, bridge art, tileset
+  and an edit rebuilds only the chunks it touches; the change scan also notices the tileset art, tileset
   decals and sprites, which only a Classic build reads. Classic chunks have one level of detail, so the camera never
-  refines them. The board-wide biome map, ground cover and wave simulations are not created, and are released on a
-  switch to Classic.
+  refines them. The ground cover and wave simulations are not created, and are released on a switch to Classic;
+  of the biome map only its per-hex texels are, which the ice over frozen water reads.
 - **Switching.** A change of the setting is a full rebuild either way: `update` sees the wanted graphics differ from
   the installed ones and starts a new build, cancelling running jobs; `ready` stays false until it commits, so the view
   shows its loading stage (overall progress and section grid) and the build uploads with the opening's frame slice;
@@ -323,8 +330,8 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   glare, lightning) applies as in Enhanced; fire and smoke particles are left out, since the tileset art shows them.
 
 Tests: `GpuGraphicsModeSmokeTest` (a game started in Classic builds no water or lava field, wave simulation, tree,
-scatter, grass or biome map; infrastructure retains its shared materials; the building stands on its column;
-overlays drape on and picks hit the column tops; a switch either way shows the loading stage and retires the other
+scatter or grass, of the biome map only its per-hex texels; infrastructure retains its shared materials; the building
+stands on its column; overlays drape on and picks hit the column tops; a switch either way shows the loading stage and retires the other
 build, also when reversed after its atlases were packed; T starts no rebuild), `GpuTilesetTerrainSmokeTest` (an edit
 rebuilds only the chunks of its hex and of the neighbours that read it; water stays inside the shore picking uses;
 review captures), `GpuTilesetTerrainTest` (column geometry), `BoardRimTest.classicColumnsBakeNoCliffStroke`,
@@ -341,9 +348,9 @@ by depth, smoke and fire, and the fixed north-west light (`BoardAtmosphere.TACTI
 
 `GpuBattleView` calls `GpuTerrain.setFluffHidden(boardCamera.tactical())` every frame. The rule is a draw rule only
 (b11-design 4.3): trees, scatter, grass and biome vegetation, building, industrial, fuel tank and placed object models,
-decals and authored paint, combat scars and ground damage, water (Enhanced water pages and ice, Classic liquid frames),
-the ocean and lava wave simulations, spores and geysers hide; the relief or the columns, roads, bridges (3D decks or
-Classic deck art), rough, rubble and fortifications (`Prop.tactical`), tunnel portals and rail and maglev routes stay.
+decals and authored paint, combat scars and ground damage, water (Enhanced water pages and ice, Classic liquid frames
+and ice), the ocean and lava wave simulations, spores and geysers hide; the relief or the columns, roads, bridges,
+rough, rubble and fortifications (`Prop.tactical`), tunnel portals and rail and maglev routes stay.
 Molten lava and magma lie in the opaque layer in both graphics and stay, still (their waves stop). T neither rebuilds
 nor recaches: the 3D prop caches and their pages stay, and the passes draw each chunk's kept props instead, packed on
 the view's first draw of the chunk (`GpuTerrain.Chunk#keptProps`), so only the shadow map is redrawn. Picking is

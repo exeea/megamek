@@ -147,7 +147,7 @@ final class UnitAttachments {
 
     private static GpuUnitModel displayed(GpuUnitModels models, BoardScene.Unit unit, ModelInstance instance) {
         return instance instanceof GpuUnitInstance displayed && displayed.visual() != null ? displayed.visual()
-              : models.get(unit.model(), unit.id());
+              : models.get(unit.model(), unit.id(), unit.part());
     }
 
     /** Fixed friendly/hostile surfaces avoid moving either squad when the other attaches or leaves. */

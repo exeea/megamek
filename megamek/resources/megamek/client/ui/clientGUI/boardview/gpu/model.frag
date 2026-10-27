@@ -47,7 +47,14 @@ void main() {
     vec3 modelShading = modelNormal(modelView, modelFace);
 #endif
     // surface-frame-ready
-#if defined(diffuseTextureFlag) && defined(diffuseColorFlag) && defined(colorFlag)
+#if defined(diffuseTextureFlag) && defined(diffuseColorFlag) && defined(colorFlag) && defined(lightingFlag) \
+      && defined(modelSurfaceFlag)
+    // With a paint mask (u_modelPaintMask) the albedo's alpha confines the vertex colour, a colour slot's, to the paint.
+    vec4 paintAlbedo = texture(u_diffuseTexture, v_diffuseUV + modelShift);
+    float paintShare = u_modelPaintMask > .5 ? paintAlbedo.a : 1.0;
+    vec4 diffuse = vec4(paintAlbedo.rgb * mix(vec3(1.0), v_color.rgb, paintShare),
+          (u_modelPaintMask > .5 ? 1.0 : paintAlbedo.a) * v_color.a) * u_diffuseColor;
+#elif defined(diffuseTextureFlag) && defined(diffuseColorFlag) && defined(colorFlag)
     vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * u_diffuseColor * v_color;
 #elif defined(diffuseTextureFlag) && defined(diffuseColorFlag)
     vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * u_diffuseColor;

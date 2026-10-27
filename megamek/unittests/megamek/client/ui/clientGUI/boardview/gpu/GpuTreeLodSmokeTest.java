@@ -50,9 +50,7 @@ import org.junit.jupiter.api.Test;
 /** Actual submitted triangle counts, shared render passes, and pixel comparisons across the shipped detail levels. */
 @Tag("on-demand")
 class GpuTreeLodSmokeTest {
-    private static final List<String> TREES = java.util.stream.Stream.concat(
-          BoardTreeDistributionTest.BASIC_TREES.stream().flatMap(name -> java.util.stream.Stream.of(name, name + "-snow")),
-          java.util.stream.Stream.of("tree-dead", "tree-dead-snow", "palm", "palm-bent", "cactus", "cactus-flowers")).toList();
+    private static final List<String> TREES = BoardTreeDistributionTest.IMPORTED_TREES;
     /** A projected diameter within each level's band, past the hysteresis of the thresholds on both sides. */
     static final float[] PIXELS = { 200, 60, 32, 12 };
 
@@ -227,7 +225,8 @@ class GpuTreeLodSmokeTest {
               java.nio.file.Path.of(diagnosticSources, "terrain-foliage.frag")).contains("Diagnostic: mapped frame validity");
         boolean scaledMirrored = Boolean.getBoolean("megamek.gpu.impostorScaledMirrored");
         var root = new File(Configuration.dataDir(), "models/board");
-        var manifest = new File(root, "manifest.json").toPath();
+        // Tool data beside the game's sources: mm-data/tools/board-models, never shipped.
+        var manifest = java.nio.file.Path.of("../../mm-data/tools/board-models/manifest.json");
         var catalog = new JsonReader().parse(Files.readString(manifest));
         List<String> names = new java.util.ArrayList<>();
         for (var entry = catalog.child; entry != null; entry = entry.next) {
@@ -298,7 +297,7 @@ class GpuTreeLodSmokeTest {
                     var source = RigidGlb.source(root, name);
                     // The authored-normal repair also affects forked LOD1. Keep its one daylight
                     // control separate from the unchanged62-entry LOD2/3 review matrix.
-                    int[] levels = name.equals("tree-volcano-forked") && hour == 13
+                    int[] levels = name.equals("vegetation/tree-volcano-forked") && hour == 13
                           ? new int[] { 1, 2, 3 } : new int[] { 2, 3 };
                     for (int level : levels) {
                         // Warm once to populate actual program/texture bindings; the animation clock stays zero.
@@ -363,7 +362,7 @@ class GpuTreeLodSmokeTest {
                         assertTrue(covered > 0, "The actual cutout must cover pixels: " + name + " LOD" + level);
                         output.scene().end();
                         output.pixels().begin();
-                        String filename = name + "-" + (hour == 13 ? "day" : "low-sun") + "-lod" + level + ".png";
+                        String filename = name.substring(name.lastIndexOf('/') + 1) + "-" + (hour == 13 ? "day" : "low-sun") + "-lod" + level + ".png";
                         var image = destination.resolve(filename);
                         ImageIO.write(frame.getSubimage(x, y, 128, 128), "png", image.toFile());
                         var row = new java.util.LinkedHashMap<String, Object>();
@@ -426,7 +425,7 @@ class GpuTreeLodSmokeTest {
                 }
             }
             assertEquals(names.size() * 4, rows.size());
-            assertEquals(names.contains("tree-volcano-forked") ? 1 : 0, repairControls.size(),
+            assertEquals(names.contains("vegetation/tree-volcano-forked") ? 1 : 0, repairControls.size(),
                   "One repaired forked LOD1 daylight control when that specimen is selected");
             String selectedSource = System.getProperty("megamek.gpu.impostorSources");
             if (selectedSource != null) {
@@ -537,8 +536,7 @@ class GpuTreeLodSmokeTest {
                 ground.setRGB(x, y, 0xff6b8255);
             }
         }
-        BoardScene.Tile tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
-              new BoardScene.Pixels(ground), null,
+        BoardScene.Tile tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
               List.of(new BoardScene.Feature(name, 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE)),
               List.of());
         return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
@@ -653,14 +651,14 @@ class GpuTreeLodSmokeTest {
             }
             // Inspect the corrected attachment and the newly converted desert plants in the production shader.
             // The default ModelBatch above only verifies silhouettes; it does not shade the cactus normal map.
-            var materialPlants = new ArrayList<>(List.of("pine-tall", "pine-broad", "pine-tall-snow", "palm", "palm-bent", "cactus", "cactus-flowers",
-                  "tree-forked", "tree-layered", "birch-tall", "birch-spreading", "birch-young", "willow-broad",
-                  "pine-slender", "pine-layered"));
+            var materialPlants = new ArrayList<>(List.of("vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-tall-snow", "vegetation/palm", "vegetation/palm-bent", "vegetation/cactus", "vegetation/cactus-flowers",
+                  "vegetation/tree-forked", "vegetation/tree-layered", "vegetation/birch-tall", "vegetation/birch-spreading", "vegetation/birch-young", "vegetation/willow-broad",
+                  "vegetation/pine-slender", "vegetation/pine-layered"));
             if (Boolean.getBoolean("megamek.gpu.materialMigrationReview")) {
-                materialPlants.addAll(List.of("foliage-barren", "foliage-desert", "foliage-highland", "foliage-rocky",
-                      "foliage-snow", "foliage-temperate", "foliage-wetland", "foliage-jungle", "tree-volcano-crown",
-                      "orchard-leaning", "orchard-round", "orchard-spreading", "orchard-upright", "orchard-vase",
-                      "orchard-young"));
+                materialPlants.addAll(List.of("vegetation/foliage-barren", "vegetation/foliage-desert", "vegetation/foliage-highland", "vegetation/foliage-rocky",
+                      "vegetation/foliage-snow", "vegetation/foliage-temperate", "vegetation/foliage-wetland", "vegetation/foliage-jungle", "vegetation/tree-volcano-crown",
+                      "vegetation/orchard-leaning", "vegetation/orchard-round", "vegetation/orchard-spreading", "vegetation/orchard-upright", "vegetation/orchard-vase",
+                      "vegetation/orchard-young"));
             }
             for (String name : materialPlants) {
                 var stand = new GpuTreeInstances.Stand();
@@ -692,7 +690,7 @@ class GpuTreeLodSmokeTest {
                 } finally { paint.dispose(); }
                 // Needle/frond relief fades under mip filtering, unlike the broad cactus skin. It must still
                 // affect real lighting across these views, without changing alpha coverage in any view.
-                assertTrue(normalChanges > (name.startsWith("cactus") ? 100 : 0),
+                assertTrue(normalChanges > (name.startsWith("vegetation/cactus") ? 100 : 0),
                       "Normal detail must affect real plant lighting: " + name
                       + " changed=" + normalChanges);
                 ImageIO.write(detail, "png", new File(System.getProperty("megamek.gpu.screenshots"), "plant-material-" + name + ".png"));

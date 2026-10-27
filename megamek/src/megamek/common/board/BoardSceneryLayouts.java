@@ -472,6 +472,66 @@ public final class BoardSceneryLayouts {
     }
 
     /**
+     * Legacy fix-up: a legacy map's one-sided links between a road and a deck within a level of it ({@link #roadLink}),
+     * its decoded bridges' included, become two-sided. A road whose exit leads into a deck that does not lead back
+     * gives the deck that exit; a deck leading onto a road whose written exits miss it gives the road the exit back (an
+     * automatic road joins such a deck by itself, {@code Hex#setExits}). The game rules then see the link the map drew.
+     */
+    private static void roadLinks(Board board) {
+        Map<BoardLocation, Hex> fixed = new HashMap<>();
+        for (int y = 0; y < board.getHeight(); y++) {
+            for (int x = 0; x < board.getWidth(); x++) {
+                Coords at = new Coords(x, y);
+                Hex hex = board.getHex(at);
+                if (!hex.containsTerrain(Terrains.BRIDGE)) { continue; }
+                Terrain bridge = hex.getTerrain(Terrains.BRIDGE);
+                int exits = bridge.getExits();
+                for (int d = 0; d < 6; d++) {
+                    Hex next = board.getHex(at.translated(d));
+                    if (roadLink(hex, next, d) && next.containsTerrainExit(Terrains.ROAD, (d + 3) % 6)) {
+                        exits |= 1 << d;
+                    }
+                }
+                if (exits != bridge.getExits()) {
+                    Hex next = fixed.computeIfAbsent(BoardLocation.of(at, board.getBoardId()), key -> replacement(hex));
+                    next.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, exits));
+                }
+                for (int d = 0; d < 6; d++) {
+                    Coords side = at.translated(d);
+                    Hex road = board.getHex(side);
+                    int back = (d + 3) % 6;
+                    if ((exits & 1 << d) == 0 || !roadLink(hex, road, d)
+                          || road.containsTerrainExit(Terrains.ROAD, back)
+                          || !road.getTerrain(Terrains.ROAD).hasExitsSpecified()) { continue; }
+                    Hex linked = fixed.computeIfAbsent(BoardLocation.of(side, board.getBoardId()),
+                          key -> replacement(road));
+                    Terrain way = linked.getTerrain(Terrains.ROAD);
+                    linked.addTerrain(new Terrain(Terrains.ROAD, way.getLevel(), true, way.getExits() | 1 << back));
+                }
+            }
+        }
+        if (!fixed.isEmpty()) { board.setHexes(fixed); }
+    }
+
+    /**
+     * Whether the road of {@code next}, across {@code direction} from the bridge hex {@code bridge}, meets its deck: a
+     * road on road ground ({@link #roadGround}) and on no deck of its own, within a level of the deck, which the
+     * bridge hex does not continue on its own dry ground (the road then runs beside or beneath the deck), as the
+     * automatic road exits join a deck ({@code Hex#setExits}).
+     */
+    private static boolean roadLink(Hex bridge, Hex next, int direction) {
+        return next != null && next.containsTerrain(Terrains.ROAD) && !next.containsTerrain(Terrains.BRIDGE)
+              && roadGround(next) && Math.abs(BridgeSpan.deck(bridge) - next.getLevel()) <= 1
+              && (HexTile.liquid(bridge) || !bridge.containsTerrainExit(Terrains.ROAD, direction));
+    }
+
+    /** Ground a road leads along to a deck: dry, or a ford's depth-0 water, whose road lies on its bed in 3D. */
+    private static boolean roadGround(Hex hex) {
+        return !HexTile.liquid(hex) || hex.terrainLevel(Terrains.MAGMA) != 2
+              && !hex.containsTerrain(Terrains.HAZARDOUS_LIQUID) && hex.terrainLevel(Terrains.WATER) == 0;
+    }
+
+    /**
      * Decodes the legacy scenery tokens of {@code hexes}, whether or not the board is native (the editor converts the hexes
      * whose token an edit changed), then types every untyped bridge and marks the board native. Each decodable token
      * ({@link #imported}) becomes the objects its artwork shows, one group per artwork that has several, with ids
@@ -694,6 +754,7 @@ public final class BoardSceneryLayouts {
             maglevPillars(board, maglevs, pillarRows);
             carryRails(board, scanned);
             clearOfConcreteWalls(board, scanned);
+            roadLinks(board);
         }
         design(board, scanned);
         typeBridges(board, bridges);
@@ -709,8 +770,10 @@ public final class BoardSceneryLayouts {
     /**
      * Legacy fix-up: each deck carries the road the 3D board drew on it before decks stored their roads, over all its
      * bridge exits ({@link Terrains#BRIDGE_ROAD}). A built span takes the best road (paved, alley, gravel, dirt) that meets
-     * one of its ends at deck height ({@link #meets}; a road level that is not drawn counts as paved); one that no road
-     * meets an Alley road, unless rails meet it or ride it: a rail bridge's deck stays bare. A natural span carries none.
+     * one of its ends at deck height ({@link #meets}) or that the map lays on the span's own hexes where no ground
+     * carries it: over a liquid, or where the deck lies on the ground ({@link #onDeck}); a road level that is not drawn
+     * counts as paved. One that no road meets an Alley road, unless rails meet it or ride it: a rail bridge's deck
+     * stays bare. A natural span carries none.
      */
     private static void deckRoads(Board board) {
         Function<Coords, Hex> hexes = at -> board.contains(at) ? board.getHex(at) : null;
@@ -730,6 +793,7 @@ public final class BoardSceneryLayouts {
                     rail |= RailRoute.deckRail(hex);
                     rail |= hex.getDecorations().stream().anyMatch(object -> RailRoute.kind(object) == RailRoute.Kind.MAGLEV
                           && object.placement().level(hex) == hex.getLevel() + hex.terrainLevel(Terrains.BRIDGE_ELEV));
+                    if (onDeck(hex)) { best = better(best, hex); }
                     for (int d = 0; d < 6; d++) {
                         Hex next = hexes.apply(member.translated(d));
                         if (next == null || decksJoin(hex, next, d) || !meets(next, hex, (d + 3) % 6)) { continue; }
@@ -737,9 +801,7 @@ public final class BoardSceneryLayouts {
                             rail = true;
                             continue;
                         }
-                        int level = HexTile.road(next) ? next.terrainLevel(Terrains.ROAD) : 1;
-                        if (!DECK_ROAD_RANK.contains(level)) { level = 1; }
-                        if (DECK_ROAD_RANK.indexOf(level) > DECK_ROAD_RANK.indexOf(best)) { best = level; }
+                        best = better(best, next);
                     }
                 }
                 int level = best != 0 ? best : rail ? 0 : 2;
@@ -755,6 +817,23 @@ public final class BoardSceneryLayouts {
         if (!paved.isEmpty()) { board.setHexes(paved); }
     }
 
+    /**
+     * Whether a bridge hex's own ROAD is its deck's: a legacy map lays the road a span carries on its hexes, and where
+     * no ground can carry it, over a liquid or with the deck on the ground, it is the deck's. Under a raised deck on
+     * dry ground it is another road, passing under the bridge.
+     */
+    private static boolean onDeck(Hex bridge) {
+        return bridge.containsTerrain(Terrains.ROAD) && (bridge.getTerrain(Terrains.ROAD).getExits() & 63) != 0
+              && (HexTile.liquid(bridge) || BridgeSpan.deck(bridge) == bridge.getLevel());
+    }
+
+    /** {@code best}, or the ROAD level of {@code road} where the deck prefers it ({@link #DECK_ROAD_RANK}). */
+    private static int better(int best, Hex road) {
+        int level = HexTile.road(road) ? road.terrainLevel(Terrains.ROAD) : 1;
+        if (!DECK_ROAD_RANK.contains(level)) { level = 1; }
+        return DECK_ROAD_RANK.indexOf(level) > DECK_ROAD_RANK.indexOf(best) ? level : best;
+    }
+
     /** Whether the decks of {@code hex} and {@code next} join across {@code direction}: one look span of the 3D board. */
     private static boolean decksJoin(Hex hex, Hex next, int direction) {
         return next.containsTerrain(Terrains.BRIDGE) && BridgeSpan.joined(hex.getTerrain(Terrains.BRIDGE).getExits(),
@@ -763,11 +842,11 @@ public final class BoardSceneryLayouts {
 
     /**
      * Whether a road or ground rail of {@code way} leaves by {@code direction} onto the deck of the bridge hex
-     * {@code bridge}, as the 3D board joins a way to a deck: neither on a liquid, the deck exiting back within a level,
-     * and the bridge hex not continuing the way on its own ground at the same level.
+     * {@code bridge}, as the 3D board joins a way to a deck: on road ground ({@link #roadGround}), the deck exiting
+     * back within a level, and the bridge hex not continuing the way on its own ground at the same level.
      */
     private static boolean meets(Hex way, Hex bridge, int direction) {
-        if (HexTile.liquid(way) || (ways(way) & (1 << direction)) == 0) { return false; }
+        if (!roadGround(way) || (ways(way) & (1 << direction)) == 0) { return false; }
         int back = (direction + 3) % 6;
         boolean continued = !HexTile.liquid(bridge) && (ways(bridge) & (1 << back)) != 0;
         int deck = BridgeSpan.deck(bridge);
@@ -1581,7 +1660,7 @@ public final class BoardSceneryLayouts {
                 JsonNode position = component.get("position");
                 String asset = component.get("asset").asText();
                 // The shared park tree is the only tree slot; every other row is scenery. A stored "kind" is ignored.
-                boolean tree = asset.equals("tree-broad");
+                boolean tree = asset.equals("vegetation/tree-broad");
                 JsonNode stretch = component.get("stretch");
                 JsonNode seat = component.get("seat");
                 var colours = new ArrayList<String>();

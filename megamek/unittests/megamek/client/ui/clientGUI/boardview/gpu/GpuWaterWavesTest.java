@@ -17,8 +17,8 @@ class GpuWaterWavesTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, 2, false, 0, BoardScene.Surface.SAND,
-                      null, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, 2, false, 0, BoardScene.Surface.SAND, null,
+                      List.of(), List.of()));
             }
         }
         var scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

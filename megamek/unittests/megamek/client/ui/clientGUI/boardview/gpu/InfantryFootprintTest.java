@@ -190,7 +190,7 @@ class InfantryFootprintTest {
                 var coords = new Coords(x, y);
                 boolean wet = water.contains(coords);
                 tiles.add(new BoardScene.Tile(coords, wet ? waterLevel : 2, wet ? 1 : -1, false, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.SAND, null, null, List.of(), List.of(),
                       wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

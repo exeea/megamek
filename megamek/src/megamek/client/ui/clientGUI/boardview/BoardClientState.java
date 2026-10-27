@@ -2240,7 +2240,8 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         return switch (mark) {
             case TacticalMark.Flag flag -> boardMarker(BoardMarker.Kind.OBJECTIVE, flag.coords(), flag.color().getRGB(),
                   (flag.label() == null ? "" : flag.label()) + (flag.progress() == null ? "" : " " + flag.progress()));
-            case TacticalMark.Cargo cargo -> boardMarker(BoardMarker.Kind.CARGO, cargo.coords(), "");
+            // Cargo on the ground is a crate in its hex's scenery (BoardFeatures.withCargo).
+            case TacticalMark.Cargo cargo -> null;
             case TacticalMark.Illumination light -> boardMarker(BoardMarker.Kind.FLARE, light.flare().position,
                   Integer.toString(light.flare().turnsToBurn));
             case TacticalMark.CollapseWarning warning ->

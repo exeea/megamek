@@ -170,7 +170,7 @@ class BoardCameraTerrainTest {
         for (int x = 0; x < 20; x++) {
             for (int y = 0; y < 20; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x < 10 ? leftLevel : rightLevel, -1, false, 0,
-                      BoardScene.Surface.CONCRETE, null, null, List.of(), List.of()));
+                      BoardScene.Surface.CONCRETE, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 20, 20, tiles, List.of(), List.of(), -1, "", List.of());

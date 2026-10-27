@@ -30,7 +30,7 @@ class BoardBridgeBankCurveTest {
                 var surfaces = new HashMap<Coords, BoardSurface>();
                 var tile = scene.tile(at);
                 var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces);
-                var authored = BoardShape.loadKit("bridge-terminal").get(
+                var authored = BoardShape.loadKit("bridges/bridge-terminal").get(
                       "bridge-terminal-lod" + (lod == TerrainLod.FULL ? 0 : 1)).polygons();
                 var facets = footing.shape().facets();
                 // Both end blocks retain their horizontal edge lengths after turning with the bank.

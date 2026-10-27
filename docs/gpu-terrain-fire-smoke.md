@@ -23,7 +23,7 @@ For example, `pavement:1;smoke:1` retains pavement beneath smoke, while
 
 `BoardFeatures.surface()` remains the single material classification: explicit terrain and the theme select grass, dirt,
 sand, rock, concrete or snow. Grass is the default for an otherwise unclassified clear hex; the format does not always
-specify a literal ground material. Fire and smoke do not replace this classification or the captured ground artwork.
+specify a literal ground material. Fire and smoke do not replace this classification.
 
 `GpuBoardSource` captures the existing `FIRE` and `SMOKE` levels into immutable `BoardFireSmoke` data in each scene tile.
 Tactical repainting, visible-area changes and playback checkpoints preserve those fields. Removing an effect from the

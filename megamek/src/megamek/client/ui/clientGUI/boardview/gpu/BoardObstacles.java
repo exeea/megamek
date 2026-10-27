@@ -18,6 +18,8 @@ import megamek.common.board.TilesetScenery;
 /** Authored structure footprints used by cosmetic placement; no GPU resources or game occupancy state. */
 final class BoardObstacles {
     private static final Map<File, BoardKit<Geometry>> MODELS = new ConcurrentHashMap<>();
+    /** How thick an earthwork's spoil lies, in metres, where grass and plants still grow through it. */
+    private static final float EARTHWORK_THIN = .2f;
     private final List<Footprint> footprints = new ArrayList<>();
 
     private record Geometry(Map<String, BoardShape> shapes, Map<String, String> modules, BoundingBox bounds) { }
@@ -25,13 +27,22 @@ final class BoardObstacles {
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
     static void reload() { MODELS.clear(); BoardWall.reload(); }
 
-    /** Projected triangles retain empty courtyards and gaps between tanks. */
-    record Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds, boolean localHeight) {
+    /**
+     * Projected triangles retain empty courtyards and gaps between tanks. An earthwork's ({@code thin} above zero: scenery
+     * that digs its hex, BoardGroundCut) keep their world heights, and its {@code ground} is its hex's.
+     */
+    record Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds, boolean localHeight, float thin,
+          float ground) {
+        Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds, boolean localHeight) {
+            this(triangles, low, high, bounds, localHeight, 0, 0);
+        }
+
         Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds) {
             this(triangles, low, high, bounds, false);
         }
 
         boolean obstructs(Vector3 base, float radius, float height) {
+            if (thin > 0) { return earthwork(base); }
             if (base.z + height < low || base.z > high || base.x + radius < bounds.min.x
                   || base.x - radius > bounds.max.x || base.y + radius < bounds.min.y
                   || base.y - radius > bounds.max.y) { return false; }
@@ -44,6 +55,28 @@ final class BoardObstacles {
                       || BoardRelief.distance(base.x, base.y, a.x, a.y, b.x, b.y) <= radius
                       || BoardRelief.distance(base.x, base.y, b.x, b.y, c.x, c.y) <= radius
                       || BoardRelief.distance(base.x, base.y, c.x, c.y, a.x, a.y) <= radius) { return true; }
+            }
+            return false;
+        }
+
+        /**
+         * An earthwork is ground that what grows round it grows to, and through where its spoil lies no thicker than
+         * {@code thin}, so the heap's foot meets the grass without a cleared band. What it digs below the ground and its
+         * thicker heap stay clear.
+         */
+        private boolean earthwork(Vector3 base) {
+            if (base.x < bounds.min.x || base.x > bounds.max.x || base.y < bounds.min.y || base.y > bounds.max.y) {
+                return false;
+            }
+            boolean dug = base.z < ground - thin;
+            for (int i = 0; i < triangles.size(); i += 3) {
+                Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
+                float d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+                if (Math.abs(d) < .00001f) { continue; }
+                float u = ((b.y - c.y) * (base.x - c.x) + (c.x - b.x) * (base.y - c.y)) / d;
+                float v = ((c.y - a.y) * (base.x - c.x) + (a.x - c.x) * (base.y - c.y)) / d;
+                if (u < 0 || v < 0 || u + v > 1) { continue; }
+                if (dug || u * a.z + v * b.z + (1 - u - v) * c.z > base.z + thin) { return true; }
             }
             return false;
         }
@@ -65,7 +98,8 @@ final class BoardObstacles {
     }
 
     private void add(BoardScene scene, BoardScene.Tile tile) {
-        for (var feature : tile.features()) {
+        for (var captured : tile.features()) {
+            var feature = BoardGroundCut.fitted(scene, tile, captured);
             var object = feature.decoration();
             if (feature.asset().equals("bridge") && object == null) {
                 // A pier stands from below the floor up to the deck: its whole column is solid wherever cover could grow.
@@ -89,7 +123,7 @@ final class BoardObstacles {
             if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
                   && feature.kind() != BoardScene.FeatureKind.PROP
                   && feature.kind() != BoardScene.FeatureKind.SCENERY
-                  || feature.asset().equals("bridge") || feature.asset().equals("field")) { continue; }
+                  || feature.asset().equals("bridge") || feature.asset().equals("vegetation/field")) { continue; }
             boolean wall = BoardWall.supports(feature.asset());
             boolean assembled = BoardIndustrial.supports(feature) || wall;
             boolean custom = object == null && !assembled && feature.asset().startsWith("buildings/")
@@ -116,7 +150,10 @@ final class BoardObstacles {
                     points.addAll(triangles);
                 }
             } else {
-                geometry.shapes().values().forEach(shape -> points.addAll(triangles(shape)));
+                // A model's hidden numbered parts, as an empty slot's fighting hole, are no footprint.
+                geometry.shapes().forEach((name, shape) -> {
+                    if (BoardGroundCut.shown(RigidGlb.part(name), feature.parts())) { points.addAll(triangles(shape)); }
+                });
             }
             float turn = (float) Math.toRadians(feature.rotation()), c = (float) Math.cos(turn), s = (float) Math.sin(turn);
             float scale = feature.scale() * BoardGeometry.hexScale();
@@ -171,6 +208,13 @@ final class BoardObstacles {
                 for (Vector3 point : points) {
                     point.z = low + (point.z - bounds.min.z) * verticalScale + upperGround - ground;
                 }
+            }
+            if (object == null && BoardGroundCut.digs(feature.asset())) {
+                // An earthwork stands on its hex's ground at its model's own zero.
+                points.forEach(point -> point.z = low + point.z * verticalScale);
+                footprints.add(new Footprint(List.copyOf(points), low + bounds.min.z * verticalScale,
+                      low + height + upperGround - ground, bounds, false, BoardRelief.metres(EARTHWORK_THIN), ground));
+                continue;
             }
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds, wall));
         }

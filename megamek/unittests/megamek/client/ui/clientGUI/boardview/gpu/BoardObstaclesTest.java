@@ -99,9 +99,9 @@ class BoardObstaclesTest {
                     var t = scene.tile(at);
                     int exits = (1 << direction) | (1 << ((direction + 3) % 6));
                     var tile = new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(),
-                          t.surface(), t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(),
+                          t.surface(), t.decals(), t.decalsWithoutLimbs(),
                           t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(),
-                          t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(), t.groundCover(), t.bridge(),
+                          t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(), t.groundCover(),
                           t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance(), t.cover(), t.barren(),
                           t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(),
                           new RailRoute.Corridor(exits, exits, 0));
@@ -345,7 +345,7 @@ class BoardObstaclesTest {
                 Coords coords = new Coords(x, y);
                 boolean pool = coords.equals(CENTER);
                 tiles.add(new BoardScene.Tile(coords, pool ? 0 : 3, pool ? depth : -1, false, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, pool ? features : List.of(), List.of(),
+                      BoardScene.Surface.SAND, null, null, pool ? features : List.of(), List.of(),
                       pool ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }
@@ -394,7 +394,7 @@ class BoardObstaclesTest {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(structure) ? elevation : 0, -1, false, 0,
-                      surface, null, null, null, null,
+                      surface, null, null,
                       coords.equals(structure) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }

@@ -8,7 +8,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-import megamek.common.Configuration;
 import org.junit.jupiter.api.Test;
 
 class GpuWaterTest {
@@ -26,14 +25,10 @@ class GpuWaterTest {
     @Test
     void portedLiquidAnimationsHaveCompleteFramesAndFoamRetainsItsMaskAndTiming() {
         List<String> paths = new ArrayList<>();
-        for (int level = -3; level <= 10; level++) { paths.add("saxarba/base/base_magma_anim_" + level + ".gif"); }
-        for (String theme : List.of("mars", "volcano")) {
-            for (int depth = 0; depth <= 4; depth++) {
-                paths.add("saxarba/theme_" + theme + "/water_anim_" + theme + "_" + depth + ".gif");
-            }
-        }
+        paths.add("terrain/ground/base_magma_anim.gif");
+        for (int depth = 0; depth <= 4; depth++) { paths.add("terrain/water/anim_water_" + depth + ".gif"); }
         for (String path : paths) {
-            File file = new File(Configuration.dataDir(), "models/board/tileset/" + path);
+            File file = GpuAssets.tilesetFile(path);
             var animation = GpuAssets.readWater(file);
             assertEquals(32, animation.frames().size(), path);
             assertEquals(3.2f, animation.duration(), 0.001f, path);
@@ -46,8 +41,8 @@ class GpuWaterTest {
             }
         }
         for (String flow : List.of("rapids", "torrent")) {
-            var animation = GpuAssets.readAnimation(new File(Configuration.dataDir(),
-                  "models/board/tileset/saxarba/water/" + flow + "_anim.gif"), false);
+            var animation = GpuAssets.readAnimation(GpuAssets.tilesetFile("terrain/water/" + flow + "_anim.gif"),
+                  false);
             assertEquals(32, animation.frames().size());
             assertEquals(3.2f, animation.duration(), 0.001f);
             var first = animation.frames().getFirst();
@@ -62,7 +57,7 @@ class GpuWaterTest {
     @Test
     void optimizedGifPatchesBecomeCompleteWaterFramesWithoutTransparentHoles() {
         for (int depth = 0; depth <= 4; depth++) {
-            var water = GpuAssets.readWater(new File(Configuration.dataDir(), "models/board/tileset/saxarba/anim_water_" + depth + ".gif"));
+            var water = GpuAssets.readWater(GpuAssets.tilesetFile("terrain/water/anim_water_" + depth + ".gif"));
             assertTrue(water.frames().size() > 1);
             assertEquals(water.frames().size(), water.ends().length);
             for (var frame : water.frames()) {

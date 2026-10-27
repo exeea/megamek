@@ -28,25 +28,30 @@ class BoardArtworkTest {
           Terrains.BUILDING, "buildings/saxarba/test/building",
           Terrains.FUEL_TANK, "buildings/saxarba/test/tank",
           Terrains.INDUSTRIAL, "buildings/test/industrial");
-    /** Each structure's art marks its own pixel, so the tileset image shows whose art it holds. */
-    private static final Map<String, Integer> MARKS = Map.of("models/board/tileset/saxarba/test/building.png", 10,
-          "models/board/tileset/saxarba/test/tank.png", 20, "models/board/tileset/test/industrial.png", 30);
+    /**
+     * Each structure's art marks its own pixel, so the tileset image shows whose art it holds. An entry may name art
+     * at its model's key, which draws where no model stands (the shipped tileset names the bare key).
+     */
+    private static final Map<String, Integer> MARKS = Map.of("models/board/classic/buildings/saxarba/test/building.png",
+          10, "models/board/classic/buildings/saxarba/test/tank.png", 20,
+          "models/board/classic/buildings/test/industrial.png", 30);
 
     @TempDir
     Path directory;
 
     @BeforeEach
     void tileset() throws Exception {
-        Path tileset = Files.createDirectories(directory.resolve("models/board/tileset"));
-        Files.writeString(tileset.resolve("saxarba.tileset"), """
-              super * "building:1" "" "saxarba/test/building.png"
-              super * "fuel_tank:1" "" "saxarba/test/tank.png"
-              super * "heavy_industrial:1" "" "test/industrial.png"
-              base * "" "" "ground.png"
+        Path tileset = Files.createDirectories(directory.resolve("models/board/classic/tileset"));
+        Files.writeString(tileset.resolve("classic.tileset"), """
+              super * "building:1" "" "buildings/saxarba/test/building.png"
+              super * "fuel_tank:1" "" "buildings/saxarba/test/tank.png"
+              super * "heavy_industrial:1" "" "buildings/test/industrial.png"
+              base * "" "" "terrain/ground.png"
               """);
-        for (String name : List.of("models/board/tileset/ground.png",
-              "models/board/tileset/saxarba/test/building.png", "models/board/tileset/saxarba/test/tank.png",
-              "models/board/tileset/test/industrial.png", "images/hexes/transparent/HexMask.png")) {
+        for (String name : List.of("models/board/classic/terrain/ground.png",
+              "models/board/classic/buildings/saxarba/test/building.png",
+              "models/board/classic/buildings/saxarba/test/tank.png",
+              "models/board/classic/buildings/test/industrial.png", "images/hexes/transparent/HexMask.png")) {
             var image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
             image.setRGB(0, 0, 0xffffffff);
             if (MARKS.containsKey(name)) { image.setRGB(MARKS.get(name), MARKS.get(name), 0xffff0000); }

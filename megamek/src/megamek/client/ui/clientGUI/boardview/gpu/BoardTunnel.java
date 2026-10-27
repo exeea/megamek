@@ -11,8 +11,8 @@ import megamek.common.board.RailRoute;
 
 /** Cosmetic portals at authored road exits blocked by a tall wall. Never adds a game connection. */
 record BoardTunnel(Coords road, int direction, Vector3 origin, Vector3 along, BoardRoad.Kind kind, boolean bridge, float widthScale) {
-    static final String ASSET = "road-tunnel";
-    static final String BRIDGE_ASSET = "road-tunnel-bridge";
+    static final String ASSET = "scenery/road/road-tunnel";
+    static final String BRIDGE_ASSET = "scenery/road/road-tunnel-bridge";
     // Asset contract: mm-data tools/board-models/road-tunnel.md. +Y points into the cliff, Z is up.
     /** The opening's half width; its elliptical arch rises ARCH_RISE above the piers' SPRING. */
     static final float HALF_WIDTH = 17.5f, SPRING = 6.9f, ARCH_RISE = 10.925f;
@@ -140,43 +140,8 @@ record BoardTunnel(Coords road, int direction, Vector3 origin, Vector3 along, Bo
             float nx = bz - az, nz = ax - bx;
             planes.add(new float[] { nx, 0, nz, nx * ax + nz * az });
         }
-        List<BoardSurface.Face> result = new ArrayList<>(faces.size());
-        for (var face : faces) {
-            List<Vector3> inside = List.of(face.a(), face.b(), face.c());
-            // A separating plane rejects almost every face without allocating clipped polygons.
-            boolean outside = false;
-            for (float[] plane : planes) {
-                if (inside.stream().allMatch(p -> distance(local(p), plane) > 0)) { outside = true; break; }
-            }
-            if (outside) { result.add(face); continue; }
-            for (float[] plane : planes) {
-                if (inside.size() < 3) { break; }
-                List<Vector3> kept = new ArrayList<>(), removed = new ArrayList<>();
-                for (int i = 0; i < inside.size(); i++) {
-                    Vector3 a = inside.get(i), b = inside.get((i + 1) % inside.size());
-                    float da = distance(local(a), plane), db = distance(local(b), plane);
-                    (da <= 0 ? removed : kept).add(a);
-                    if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
-                        float t = da / (da - db);
-                        Vector3 p = new Vector3(a).lerp(b, t);
-                        relief.interpolateShade(a, b, t, p);
-                        kept.add(p);
-                        removed.add(p);
-                    } else if (da == 0) {
-                        kept.add(a);
-                    }
-                }
-                for (int i = 1; i + 1 < kept.size(); i++) {
-                    Vector3 a = kept.getFirst(), b = kept.get(i), c = kept.get(i + 1);
-                    if (new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).len2() > 1e-10f) {
-                        result.add(new BoardSurface.Face(a, b, c, face.finish(), face.landEdge(), face.scatter()));
-                    }
-                }
-                inside = removed;
-            }
-        }
-        faces.clear();
-        faces.addAll(result);
+        BoardSurface.subtract(faces, planes.stream()
+              .<BoardSurface.Boundary>map(plane -> point -> distance(local(point), plane)).toList(), relief);
     }
 
     private static float distance(Vector3 p, float[] plane) {

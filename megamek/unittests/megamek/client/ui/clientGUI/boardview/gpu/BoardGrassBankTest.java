@@ -51,6 +51,9 @@ class BoardGrassBankTest {
                 var rebuilt = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile, lod), scene, floor);
                 assertEquals(planted, GpuGroundCover.plant(scene, tile, rebuilt, null),
                       "An individual cache miss and shared chunk preparation use the same finished support");
+                // Picking and draping read a miss's shape alone, without the neighbours its ground cover borrows.
+                assertEquals(shape(rebuilt), BoardTacticalGeometry.Surface.shape(new BoardSurface(scene, tile, lod),
+                      scene, floor), "Walls borrow only the neighbours' edges");
                 var ground = surface.vegetation();
                 assertNotNull(ground);
                 for (var face : ground.faces()) {
@@ -176,17 +179,29 @@ class BoardGrassBankTest {
         for (int level : new int[] { -3, -1, 0, 1 }) {
             var water = at.translated(0);
             var scene = BoardSurfaceBlendTest.scene(c -> c.equals(water)
-                  ? new BoardScene.Tile(c, level, 1, level == 0, 0, BoardScene.Surface.GRASS, null, null,
+                  ? new BoardScene.Tile(c, level, 1, level == 0, 0, BoardScene.Surface.GRASS,
                         null, null, List.of(), List.of(), BoardLiquid.WATER, null, true)
                   : dry.tile(c));
             assertEquals(meadow, GpuGroundCover.plant(scene, scene.tile(at), support, null),
                   "A frozen shore or water at another elevation does not thin this meadow: " + level);
+            for (var tile : List.of(scene.tile(at), scene.tile(water))) {
+                float floor = BoardGeometry.floor(scene);
+                assertEquals(shape(BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, floor)),
+                      BoardTacticalGeometry.Surface.shape(new BoardSurface(scene, tile), scene, floor),
+                      "A shore's shape keeps its waterline beside water at level " + level);
+            }
         }
         var distant = at.translated(0, 2);
         var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
               0, c.equals(distant) ? 1 : -1, 0));
         assertEquals(meadow, GpuGroundCover.plant(scene, scene.tile(at), support, null),
               "Water beyond the adjoining shore cannot remove inland grass");
+    }
+
+    /** A support's finished shape, without the ground cover support that picking and draping never read. */
+    static BoardTacticalGeometry.Surface shape(BoardTacticalGeometry.Surface support) {
+        return new BoardTacticalGeometry.Surface(support.top(), support.slopes(), support.faces(), support.water(),
+              support.walls(), support.waterfalls(), support.frozenFalls(), support.highestTop(), null);
     }
 
     private static Set<List<Float>> roots(FloatArray roots) {
@@ -266,7 +281,7 @@ class BoardGrassBankTest {
             var scene = BoardSurfaceBlendTest.scene(c -> {
                 var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 4 ? 2 : 0, -1, 0);
                 return new BoardScene.Tile(c, tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
+                      tile.surface(), tile.decals(), tile.decalsWithoutLimbs(),
                       tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(),
                       tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare(), cover);
             });

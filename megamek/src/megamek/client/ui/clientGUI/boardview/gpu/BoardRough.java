@@ -18,7 +18,7 @@ public final class BoardRough {
 
     private static Map<String, BoardShape> load() {
         Map<String, BoardShape> result = new HashMap<>();
-        for (String name : List.of("dragon-tooth", "felled-trunk", "charred-stump", "fallen-stump")) {
+        for (String name : List.of("dragon-tooth", "felled-trunk", "charred-stump", "fallen-stump", "sawn-stump", "sawn-log")) {
             String asset = "rough/" + name;
             result.put(asset, BoardShape.loadModel(asset));
         }
@@ -41,10 +41,11 @@ public final class BoardRough {
             BoardShape shape = KIT.get().get(feature.asset());
             float x = BoardGeometry.centerX(surface.tile.coords()) + feature.x() * BoardGeometry.hexScale();
             float y = BoardGeometry.centerY(surface.tile.coords()) + feature.y() * BoardGeometry.hexScale();
-            float height = feature.height() * BoardGeometry.level();
+            // Height 0 keeps the model's own proportions: timber at its real size.
+            float scale = feature.scale() * BoardGeometry.hexScale();
+            float height = feature.height() > 0 ? feature.height() * BoardGeometry.level() : shape.height() * scale;
             Matrix4 transform = new Matrix4().setToTranslation(x, y, 0).rotate(Vector3.Z, feature.rotation())
-                  .scale(feature.scale() * BoardGeometry.hexScale(), feature.scale() * BoardGeometry.hexScale(),
-                        height / shape.height());
+                  .scale(scale, scale, height / shape.height());
             Map<Vector3, Vector3> points = new HashMap<>();
             float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
             for (BoardShape.Polygon polygon : shape.polygons()) {

@@ -178,6 +178,10 @@ class GpuPropBatchSmokeTest {
                 // Dense authored geometry can exceed the unsigned-short index limit even inside one spatial page.
                 List<Source> samePage = all.stream().map(source -> new Source(0, source.owner(), source.parts())).toList();
                 byte[] reference = pixels(batch, view.camera, environment, samePage, null);
+                // It merges once settled; meanwhile the sources draw as they are.
+                for (int frame = 0; frame < GpuMeshPage.SETTLE_FRAMES; frame++) {
+                    draw(batch, view.camera, environment, samePage, crowded);
+                }
                 assertEquals(new Difference(0, 0), difference(reference,
                       pixels(batch, view.camera, environment, samePage, crowded)), "Page splitting must preserve exact pixels");
                 assertEquals(5, submitted.size, "283,500 vertices must split across five indexable meshes");
@@ -246,9 +250,14 @@ class GpuPropBatchSmokeTest {
         double elapsed = (System.nanoTime() - start) / 1e6;
         Gdx.gl.glFinish();
         Difference difference = difference(reference, capture(!visible.isEmpty()));
-        System.out.printf("Prop batch %s: rebuild submission %.3f ms; %s%n", name, elapsed, difference);
-        assertEquals(rebuilds, aggregate.rebuilds(), name);
+        System.out.printf("Prop batch %s: first submission %.3f ms; %s%n", name, elapsed, difference);
+        // The outdated page and the replaced sources must draw exactly the new geometry at once.
         assertEquals(new Difference(0, 0), difference, name);
+        for (int frame = 0; frame < GpuMeshPage.SETTLE_FRAMES; frame++) {
+            draw(batch, camera, environment, sources, visible, aggregate);
+        }
+        assertEquals(rebuilds, aggregate.rebuilds(), name);
+        assertEquals(new Difference(0, 0), difference(reference, capture(!visible.isEmpty())), "Merged again: " + name);
         draw(batch, camera, environment, sources, visible, aggregate);
         assertEquals(rebuilds, aggregate.rebuilds(), "Settled frame must reuse " + name);
     }
@@ -287,7 +296,8 @@ class GpuPropBatchSmokeTest {
             aggregate.begin();
             Set<Source> shown = new HashSet<>(visible);
             for (Source source : sources) { aggregate.add(source, source.page(), shown.contains(source)); }
-            aggregate.render(batch, environment);
+            // No wall clock: a settled page merges within the frame.
+            aggregate.render(batch, environment, Long.MAX_VALUE);
         }
         batch.end();
     }
@@ -339,7 +349,9 @@ class GpuPropBatchSmokeTest {
                 part.meshPart.set("range", mesh, range[0], range[1], GL20.GL_TRIANGLES);
                 source.add(part);
             }
-            GpuPropBatch.copy(source, copied, new Array<>());
+            var merge = new GpuPropBatch.Merge(source);
+            assertTrue(merge.step(Long.MAX_VALUE));
+            copied.addAll(merge.merged);
             assertEquals(vertices(source), vertices(copied), "Sparse and reversed ranges keep every unsigned index and vertex");
             assertEquals(12, copied.first().meshPart.size);
             assertEquals(12, copied.first().meshPart.mesh.getNumVertices(), "Unused vertices must not enter the copied mesh");

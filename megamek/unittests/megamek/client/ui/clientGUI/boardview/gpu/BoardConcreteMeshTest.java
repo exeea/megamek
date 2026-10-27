@@ -349,7 +349,7 @@ class BoardConcreteMeshTest {
                 Hex hex = new Hex(elevation.applyAsInt(at));
                 if (!natural || x < 8) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
                 hex.addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, cliffs));
-                var art = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
+                var art = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(hex, art, null, new BoardScene.PixelPool(), neighbour -> null));
             }
         }

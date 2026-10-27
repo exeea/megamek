@@ -41,10 +41,9 @@ class BoardTilesTest {
                 assertNotEquals(exits, board.getHex(road).getTerrain(Terrains.ROAD).getExits(), "The neighbour's exits change");
                 fixture.source.refresh();
                 var after = fixture.source.takeFrame().scene();
-                var fresh = BoardTiles.captureAll(board).get(road.getX() * board.getHeight() + road.getY());
-                assertEquals(board.getHex(road).getTerrain(Terrains.ROAD).getExits() & 63, after.tile(road).roadExits());
-                assertEquals(fresh.ground(), after.tile(road).ground(), "The neighbour's road art is recaptured, not cached");
-                assertNotEquals(before.tile(road).ground(), after.tile(road).ground());
+                assertEquals(board.getHex(road).getTerrain(Terrains.ROAD).getExits() & 63, after.tile(road).roadExits(),
+                      "The neighbour's road is recaptured, not cached");
+                assertNotEquals(before.tile(road).roadExits(), after.tile(road).roadExits());
                 assertSame(before.tile(distant), after.tile(distant), "A distant tile keeps its snapshot");
             });
         }

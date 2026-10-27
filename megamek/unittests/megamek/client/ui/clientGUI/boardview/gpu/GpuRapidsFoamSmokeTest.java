@@ -155,7 +155,7 @@ class GpuRapidsFoamSmokeTest {
                 BoardLiquid liquid = BoardLiquid.capture(hex);
                 if (liquid.rapids() > 0) { liquid = new BoardLiquid(liquid.kind(), liquid.theme(), severity); }
                 tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0,
-                      BoardFeatures.surface(hex), pixels, null, null, null, List.of(), List.of(), liquid,
+                      BoardFeatures.surface(hex), null, null, List.of(), List.of(), liquid,
                       null, true));
             }
         }

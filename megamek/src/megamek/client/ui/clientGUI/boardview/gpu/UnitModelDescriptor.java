@@ -151,10 +151,11 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
                   && material.id.length() > "authored/".length();
             require(authored || Set.of("paint", "detail", "bark").contains(material.id),
                   "Unknown material role: " + material.id);
-            // Authored diffuse maps may be embedded or shared. Runtime camouflage still owns the paint role.
+            // Authored diffuse maps may be embedded or shared. Runtime camouflage still owns the paint role; a paint role
+            // on a board material is a painted plate, whose maps stay under the camouflage (GpuUnitCamouflage).
             if (material.textures != null) {
                 for (var texture : material.textures) {
-                    var usages = authored ? Set.of(
+                    var usages = authored || "paint".equals(material.id) ? Set.of(
                           com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_DIFFUSE,
                           com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_NORMAL,
                           com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_AMBIENT,

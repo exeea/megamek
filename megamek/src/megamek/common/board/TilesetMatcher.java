@@ -89,6 +89,12 @@ public final class TilesetMatcher {
         /** The chosen file with '/' separators, as the 3D board's keys use it; "" when the entry names none. */
         public String source() { return index < 0 ? "" : file().replace('\\', '/'); }
 
+        /** The chosen file without its image extension: the 3D key an entry that names no image ({@link #image}) is. */
+        public String key() {
+            String source = source();
+            return image(source) ? source.substring(0, source.lastIndexOf('.')) : source;
+        }
+
         /** Whether the chosen image is art for {@code terrain}: its entry names that terrain. */
         public boolean has(int terrain) { return index >= 0 && entry.hex().containsTerrain(terrain); }
     }
@@ -124,6 +130,14 @@ public final class TilesetMatcher {
 
     /** The directory this tileset's files and includes resolve against, where its images lie too. */
     public File root() { return root; }
+
+    /**
+     * Whether a tileset file names an image (it has an extension). The Classic tileset names a key instead where the 3D
+     * board never draws the art as an image ({@link TilesetScenery} lists the keys).
+     */
+    public static boolean image(String file) {
+        return file.lastIndexOf('.') > Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
+    }
 
     /**
      * Reads the tileset file {@code filename} and its includes, adding their entries to this tileset. Load before the

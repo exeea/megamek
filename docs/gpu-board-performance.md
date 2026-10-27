@@ -45,6 +45,22 @@ Collection/upload is spread over frames, but the frame budget is soft: an indivi
 tile collection or buffer upload can overrun it. Retired chunks are disposed by
 the GL owner once they are no longer installed or cached.
 
+Preparation allocates heavily, about 96 MB a chunk on a 32x34 random board, and
+G1's 5-20 ms collection pauses hitched drags. MegaMek therefore runs generational
+ZGC: `mmJvmOptions` in `megamek/build.gradle` is the one option list for `run`,
+the start scripts behind `MegaMek.sh`, the Windows launcher (`MegaMek.l4j.ini`)
+and the GPU test tasks. MekHQ hosts the board in its own JVM and needs the same
+options in its own build. Dragging that board with a selected unit on an RTX 4070, frames over
+16.7 ms fell from 6-8 to 1-4 a drag, p99 from 19-22 to 14-16 ms and the worst
+frame from 23-34 to 18 ms, the median unchanged. On an Iris Xe the same drag is
+GPU-bound (20-45 ms frames) and measured the same under both collectors. ZGC keeps
+no compressed pointers and wants headroom: the live heap grew by an eighth to a
+quarter (32x34: 380 to 430 MB; 128x192 Valencia: 1.18 to 1.47 GB) and the
+committed heap grows towards `-Xmx` (32x34: 1.1 to 3.0-3.6 GB; Valencia: 3.3 to
+4.1 GB). No soft heap target suits
+both: 1 GB held the small board at 1.4 GB but kept ZGC collecting on Valencia, and
+2 GB did not hold Valencia's load below 4 GB.
+
 The opening screen retains the overall percentage of completed map sections and
 lists the current task for each in-flight section in map order. Task percentages
 and counts measure completed work (hexes, shapes, buffers or discrete operations),
@@ -458,11 +474,32 @@ as a water bed within an error bound; it must not replace the canonical support
 with an unrelated approximation. `TreeLod`, `MeshLod` and `FormationLod` select
 their own tree, rigid-unit and formation representations.
 
-The CPU geometry cache is bounded. Installed tiles keep weak links to their
-finished support so a consumer already retaining that surface can reuse it after
-cache eviction. Do not add a second strong cache for every tile to fix a repeated
-lookup. Ground cover is planted by the same worker on that support and installed
-with the tile; see [fields and marsh](gpu-fields-marsh.md#one-pipeline-for-ground-cover).
+Every installed hex keeps its finished support and water geometry for as long as
+its chunk is installed or cached, as engines keep a loaded chunk's collision:
+picking, draping, placement and replanting read it, and no query rebuilds a hex
+on the render thread. On the 32x34 random board every hex at FULL detail holds
+40 MB (38 KB a hex, 31 KB of it the shape without ground cover support), at
+MEDIUM 16 MB. Chunks keep the detail they had when last in view, so this grows
+with the area seen close up, alongside the chunks' meshes. Before, a bounded
+cache and weak links let collections drop supports, and dragging a 32x34 random
+board with the pointer over it rebuilt 58 hexes (203 ms) on the render thread in
+600 frames; now none, and frames over 16.7 ms on an RTX 4070 fell from 9-16 to
+6-7 a drag. Only a hex its
+preparation gave no support builds one when queried, the shape alone
+(`BoardTacticalGeometry.Surface.shape`); a paint edit replants from a support
+only when it carries ground cover support. Ground cover is planted by the same
+worker on the installed support; see
+[fields and marsh](gpu-fields-marsh.md#one-pipeline-for-ground-cover).
+
+`GpuTactical` joins the movement envelope's and the zones' planes again only when
+their fills, the tiles or the tuning change, not when panning refines a chunk.
+With a selected unit's envelope and the pointer over the board, a 600-frame
+drag sampled 24 ms (RTX 4070) and 21-24 ms (Iris Xe) in surface lookups before
+these changes, and 7-9 and 4-9 ms after; plane joins no longer appear in the
+samples. On the Iris Xe the slowest drag frames then cost what the same view
+costs held still: 28-37 ms of GPU time in the opaque pass with the board filling
+a 1080p window. A chunk replacement adds 3-6 ms there, the shadow map
+`replaceDetail` marks for redrawing.
 
 ## Opaque drawing and pages
 
@@ -479,8 +516,21 @@ with the tile; see [fields and marsh](gpu-fields-marsh.md#one-pipeline-for-groun
 
 Pages receive the source ranges from invisible chunks as well as visible ones.
 Panning changes which existing ranges are selected, not the page's geometry.
-Only replacement source ranges invalidate a page. One bounded page is built per
-frame; original ranges draw while pending pages are prepared.
+Replaced source ranges, such as a chunk's that a pan refines as it comes into
+view, outdate a page without discarding it: its merged meshes keep drawing the
+unchanged sources and the replaced ones draw as they are. Once the page has been
+unchanged for `GpuMeshPage.SETTLE_FRAMES` (30) frames it merges again, a source
+range at a time, within one share of the frame for every page merge
+(`GpuMeshPage.BUILD_NANOS`, 2 ms), and the new meshes replace the old when
+complete. Merging a whole page in the frame a chunk was refined stalled that
+frame: dragging a 32x34 random board at 80 px/hex in the battle view, the worst
+frame went from 103-155 ms to 34 ms on an RTX 4070, and from 623-649 ms to
+56-62 ms on an Iris Xe (p99 109 to 47 ms there; the median rose from 14.6 to
+17.0 ms while replaced chunks drew unmerged). A completed merge's meshes upload
+in their first draw, 4-6 ms of `glBufferData` on the RTX 4070, about one frame
+in a ten-second drag. Uploading each in a merge step of its own, apart from the
+copy or with smaller or dynamic meshes, only moved that cost to other frames:
+over-budget frames stayed at 9-16 per drag in every variant.
 
 Building hover and unit cutaways retain the chunk's complete opaque source in
 the static page. While a chunk is opened, its original ranges are hidden and its

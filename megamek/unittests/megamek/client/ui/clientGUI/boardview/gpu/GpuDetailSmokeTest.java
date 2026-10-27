@@ -133,7 +133,7 @@ class GpuDetailSmokeTest {
                 hex.addTerrain(new Terrain(Terrains.WOODS, 2));
                 hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
                 var coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, pixels, null,
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of()));
             }
         }

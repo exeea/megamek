@@ -131,11 +131,7 @@ final class GpuJumpJets implements Disposable {
             }
         }
         for (var binding : model.equipment()) {
-            var appearance = unit.model().state().appearance();
-            var effective = binding.memberId() < 0 ? appearance : appearance.fighters().get(binding.memberId());
-            if (effective == null || effective.inoperableEquipment().contains(binding.index())
-                  || unit.model().damage().removed().contains(binding.location())
-                  || unit.model().damage().wrecked().contains(binding.location())) {
+            if (!binding.intact(unit.model())) {
                 continue;
             }
             for (var emitter : binding.emitters()) {
@@ -149,7 +145,7 @@ final class GpuJumpJets implements Disposable {
 
     private void emit(String key, ModelInstance instance, Node node, UnitModelDescriptor.Emitter emitter,
           UnitMotion.Sample motion, float width) {
-        if (node == null || motion.jets() == null || !visible(node)) {
+        if (node == null || motion.jets() == null || !UnitModelAttachment.visible(node)) {
             return;
         }
         var nozzle = new Vector3();
@@ -168,23 +164,6 @@ final class GpuJumpJets implements Disposable {
             jets.put(key, jet);
         }
         jet.update(nozzle, exhaust, motion, width);
-    }
-
-    private static boolean visible(Node node) {
-        if (!node.parts.isEmpty()) {
-            for (var part : node.parts) {
-                if (part.enabled && !part.material.id.endsWith(UnitDamageDisplay.WRECKED_SUFFIX)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        for (Node child : node.getChildren()) {
-            if (visible(child)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     void endFrame() {

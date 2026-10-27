@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -232,17 +231,11 @@ class GpuTerrainColorSmokeTest {
     }
 
     private static BoardScene scene() {
-        // Detailed terrain still needs its authored atlas image; the probe replaces the completed pigment later.
-        var image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        int[] argb = new int[84 * 72];
-        Arrays.fill(argb, 0xff808080);
-        image.setRGB(0, 0, 84, 72, argb, 0, 84);
-        var ground = new BoardScene.Pixels(image);
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      ground, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+                      List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

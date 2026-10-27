@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Files;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import com.badlogic.gdx.files.FileHandle;
@@ -49,7 +50,36 @@ class BuildingTurretAssetsTest {
                 checked++;
             }
         }
-        assertEquals(58, checked);
+        assertEquals(63, checked);
+    }
+
+    /**
+     * The fitter places roof and side-arm weapons only at full size: one larger than its socket would fall back. Every
+     * weapon can ride the roof, every launcher the side arms too.
+     */
+    @Test
+    void externalModulesFitTheirSockets() throws Exception {
+        var root = Configuration.dataDir().toPath().resolve("models/" + BuildingTurretVisual.ROOT);
+        var sockets = UnitModelDescriptor.read(root.resolve("head-pods.json")).hardpoints();
+        var pod = sockets.stream().filter(point -> point.id().equals("pod-center")).findFirst().orElseThrow().size();
+        var arm = sockets.stream().filter(point -> point.id().equals("arm-left")).findFirst().orElseThrow().size();
+        int checked = 0;
+        try (var files = Files.list(root)) {
+            for (var file : files.filter(p -> p.toString().endsWith(".json")).toList()) {
+                String name = file.getFileName().toString();
+                if (!new ObjectMapper().readTree(file.toFile()).has("mesh")) { continue; }
+                var descriptor = UnitModelDescriptor.read(file);
+                if (!descriptor.kind().equals("equipment")) { continue; }
+                boolean launcher = descriptor.family().equals("missile");
+                for (var size : launcher ? List.of(pod, arm) : List.of(pod)) {
+                    var bounds = descriptor.bounds();
+                    assertTrue(bounds.max().get(0) - bounds.min().get(0) <= size.get(0), name + " is wider than its socket");
+                    assertTrue(bounds.max().get(2) - bounds.min().get(2) <= size.get(2), name + " is taller than its socket");
+                }
+                checked++;
+            }
+        }
+        assertTrue(checked > 40, "External modules checked: " + checked);
     }
 
     private static void ids(ModelNode node, Set<String> ids) {

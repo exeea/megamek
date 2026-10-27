@@ -141,8 +141,8 @@ class BoardRiverTest {
                 boolean wet = ground == 'W', concrete = ground == 'C' || ground == 'D';
                 int level = ground == 'C' || ground == '1' ? 1 : ground == 'D' ? 3 : ground == '2' ? 2 : 0;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), level, wet ? 1 : -1, false, 0,
-                      concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
-                      null, null, null, null, List.of(), List.of(),
+                      concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, List.of(),
+                      List.of(),
                       wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }
@@ -165,7 +165,7 @@ class BoardRiverTest {
                         Coords coords = new Coords(x, y);
                         boolean wet = coords.equals(frozen) || coords.equals(open);
                         tiles.add(new BoardScene.Tile(coords, 0, wet ? 1 : -1, coords.equals(frozen), 0,
-                              BoardScene.Surface.SNOW, null, null, null, null, List.of(), List.of(),
+                              BoardScene.Surface.SNOW, null, null, List.of(), List.of(),
                               wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
                     }
                 }
@@ -619,7 +619,7 @@ class BoardRiverTest {
                 Coords coords = new Coords(x, y);
                 int depth = water.getOrDefault(coords, -1);
                 tiles.add(new BoardScene.Tile(coords, depth >= 0 ? 0 : 1, depth, false, 0, BoardScene.Surface.SAND,
-                      null, null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
+                      null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
                       null, !special.contains(coords)));
             }
         }

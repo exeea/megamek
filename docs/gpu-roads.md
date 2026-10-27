@@ -458,8 +458,10 @@ of road before it repeats (`GpuAssets.roadCoverage`); one exported wider covers 
 more. Sand and snow verges and markings take their sculpted material's catalogued metres
 (`GpuAssets.sculptCoverage`), so a verge meets the ground beside it at its scale.
 
-Unsupported road levels, custom artwork combinations and submerged roads keep the
-existing artwork fallback. Ice on dry ground supports native roads. Supported road
+A road through shallow (depth 0) water, a ford or a flooded street, lies on its bed in
+Enhanced (`BoardRoad.bed`); under a level or more of water it is out of sight, as in real
+water. A bridge over the water carries the road instead, and Classic's water column shows
+its liquid only. Ice on dry ground supports native roads. Supported road
 fluff uses the native material and geometry, including bent and horizontal routes.
 Roadside-tree and parking-car models contain only their objects. Parking sprites can
 provide cosmetic exits when the hex has no gameplay ROAD; existing ROAD takes

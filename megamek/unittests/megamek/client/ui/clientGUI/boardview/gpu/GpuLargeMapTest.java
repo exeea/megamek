@@ -42,7 +42,7 @@ class GpuLargeMapTest {
             BoardScene initial = fixture.source.takeFrame().scene();
             assertEquals(40_000, initial.tiles().size());
             Set<BoardScene.Pixels> ground = new HashSet<>();
-            initial.tiles().forEach(tile -> ground.add(tile.ground()));
+            initial.tiles().stream().map(BoardScene.Tile::tileset).filter(java.util.Objects::nonNull).forEach(ground::add);
             assertTrue(ground.size() < 1_000, "Repeated artwork must be shared across all 40,000 hexes");
             ground.forEach(pixels -> {
                 assertEquals(84, pixels.width());

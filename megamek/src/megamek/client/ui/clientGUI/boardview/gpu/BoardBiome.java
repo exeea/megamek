@@ -8,7 +8,6 @@ final class BoardBiome {
     static final float EDGE_METRES = 2.2f;
     static final float WET_EDGE_METRES = 14;
     static final float ROW_METRES = 1.15f;
-    static final float ROW_X = .9396926f, ROW_Y = .3420201f;
 
     private BoardBiome() { }
 
@@ -35,8 +34,6 @@ final class BoardBiome {
         }
         return BoardScene.Biome.NONE;
     }
-
-    static float row(float x, float y) { return (x * ROW_X + y * ROW_Y) / ROW_METRES; }
 
     /** Same integer hash/value noise as biomeNoise in terrain-biome.glsl; no tile-local seed or phase. */
     static float wetness(float x, float y) {

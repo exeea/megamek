@@ -29,6 +29,24 @@ final class UnitModelAttachment {
         child.transform.set(parent.transform).mul(node.globalTransform).mul(local);
     }
 
+    /** Whether any of the node's drawn parts is shown and unwrecked: the active detail level, not a lost location. */
+    static boolean visible(Node node) {
+        if (!node.parts.isEmpty()) {
+            for (var part : node.parts) {
+                if (part.enabled && !part.material.id.endsWith(UnitDamageDisplay.WRECKED_SUFFIX)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        for (Node child : node.getChildren()) {
+            if (visible(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The caller owns output vectors. No position or facing is inferred from game rules here. */
     static void emitter(ModelInstance instance, UnitModelDescriptor.Emitter emitter, Vector3 position,
           Vector3 direction) {

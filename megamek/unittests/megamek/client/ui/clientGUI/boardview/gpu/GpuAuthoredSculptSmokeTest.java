@@ -294,12 +294,12 @@ class GpuAuthoredSculptSmokeTest {
     /** Real production geometry and vertex encoding, isolated from unrelated scene models and their loading. */
     private static Specimen specimen(BoardScene.Surface family, Environment environment) throws Exception {
         boolean snow = family == BoardScene.Surface.SNOW;
-        var feature = new BoardScene.Feature(snow ? "rough-boulder" : "tree", 0, 0, 20, 1, .5f, 0,
+        var feature = new BoardScene.Feature(snow ? "rough-boulder" : "vegetation/tree", 0, 0, 20, 1, .5f, 0,
               snow ? BoardScene.FeatureKind.BOULDER : BoardScene.FeatureKind.TREE);
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
             var coords = new Coords(x, y);
-            tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null, null, null,
+            tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null,
                   coords.equals(CENTER) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null, true));
         }
         var scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

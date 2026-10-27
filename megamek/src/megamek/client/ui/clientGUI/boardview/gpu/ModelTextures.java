@@ -88,7 +88,8 @@ final class ModelTextures {
                 material.set(new GpuModelMaterial(surface.roughness(), surface.metallic(), surface.scatter(),
                       surface.map() == null ? null : load.apply(surface.map(), GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE),
                       surface.tint(), surface.glow(), surface.board(), relief == null ? new float[4]
-                            : new float[] { relief.depthU(), relief.depthV(), relief.minimumLayers(), relief.maximumLayers() }));
+                            : new float[] { relief.depthU(), relief.depthV(), relief.minimumLayers(), relief.maximumLayers() },
+                      glb.paintMasks.contains(id)));
                 // The heightmap is the material's bump texture (GpuModelMaterial).
                 if (relief != null) {
                     material.set(TextureAttribute.createBump(load.apply(relief.map(), GpuMaterialMaps.HEIGHT_USAGE)));

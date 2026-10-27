@@ -152,9 +152,8 @@ class BoardBridgeMaterialsTest {
             bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
             bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 0));
             bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-            var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, 1, 0).ground();
-            route.put(at, withDeckRoad(new BoardScene.Tile(at, 0, 1, false, 0, BoardScene.Surface.GRASS,
-                  ground, null, null, null, BoardFeatures.capture(bridge, at, Map.of()), List.of(),
+            route.put(at, withDeckRoad(new BoardScene.Tile(at, 0, 1, false, 0, BoardScene.Surface.GRASS, null, null,
+                  BoardFeatures.capture(bridge, at, Map.of()), List.of(),
                   BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE), deck, deck == BoardRoad.Kind.NONE ? 0 : exits));
         }
         Coords entrance = start.translated((direction + 3) % 6), exit = start.translated(direction, length);
@@ -175,9 +174,9 @@ class BoardBridgeMaterialsTest {
     /** {@code tile} with its deck carrying a road of {@code kind} on {@code exits} (a stored {@code bridge_road}). */
     static BoardScene.Tile withDeckRoad(BoardScene.Tile t, BoardRoad.Kind kind, int exits) {
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(),
+              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(),
               t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
-              t.cliffTopExits(), t.bare(), t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(),
+              t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetDecals(),
               t.tilesetScenery(), t.appearance(), t.cover(), t.barren(), kind, exits, t.deckMud(), t.railBed());
     }
 

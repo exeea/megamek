@@ -74,7 +74,21 @@ final class BoardTacticalGeometry {
             return of(surface, scene, floor, sources);
         }
 
+        /**
+         * The finished shape alone, for readers that take no ground cover support (vegetation), such as picking and
+         * draping. Its walls borrow only the neighbours' edges, which their plain tops share with their sculpted ones,
+         * so they match {@link #of}'s; preparing that support built up to six sculpted neighbours and their walls.
+         */
+        static Surface shape(BoardSurface surface, BoardScene scene, float floor) {
+            return of(surface, scene, floor, Map.of(surface.tile.coords(), surface), false);
+        }
+
         static Surface of(BoardSurface surface, BoardScene scene, float floor, Map<Coords, BoardSurface> sources) {
+            return of(surface, scene, floor, sources, true);
+        }
+
+        private static Surface of(BoardSurface surface, BoardScene scene, float floor,
+              Map<Coords, BoardSurface> sources, boolean cover) {
             List<BoardSurface.Face> top = new ArrayList<>();
             for (BoardSurface.Face face : surface.faces) {
                 if (surface.tile.frozen() && surface.tile.water() ? face.finish() == BoardSurface.Finish.ICE
@@ -86,7 +100,8 @@ final class BoardTacticalGeometry {
             List<BoardSurface.Face> walls = List.copyOf(surface.walls(scene, floor, sources));
             return new Surface(List.copyOf(top), BoardGeometry.tuning().stepsBetweenTops() ? lying(walls) : List.of(),
                   List.copyOf(surface.faces), List.copyOf(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
-                  surface.frozenFalls(), highest(top), BoardVegetation.ground(scene, surface, floor, sources));
+                  surface.frozenFalls(), highest(top),
+                  cover ? BoardVegetation.ground(scene, surface, floor, sources) : null);
         }
     }
     private record Edge(float x1, float y1, float x2, float y2) {

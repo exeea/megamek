@@ -186,8 +186,7 @@ class BoardBridgeTypeTest {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, deck));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0).ground();
-        var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null,
+        var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, null, null,
               BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true,
               BoardRoad.Kind.NONE);
         return type == null ? t : appearance(t, Map.of("bridge", type));
@@ -201,10 +200,10 @@ class BoardBridgeTypeTest {
     }
 
     static BoardScene.Tile appearance(BoardScene.Tile t, Map<String, HexAppearance> appearance) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
+              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
-              t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), appearance);
+              t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), appearance);
     }
 
     private static final Coords AT = new Coords(4, 4);
@@ -306,13 +305,15 @@ class BoardBridgeTypeTest {
               BoardDecoration.Placement.ground(), 0);
         var feature = new BoardScene.Feature(fountain.asset(), 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.PROP, 0, false, fountain);
         for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
+            // Crops stand only in a field of wheat or maize.
+            var at = kind == BoardScene.Biome.FIELD ? BoardBiomeTest.CROPS : AT;
             var plain = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, kind, 0));
-            var base = plain.tile(AT);
-            var placed = BoardNaturalBridgeTest.replace(plain, new BoardScene.Tile(AT, 0, -1, false, 0, base.surface(), base.ground(),
-                  null, null, null, List.of(feature), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
+            var base = plain.tile(at);
+            var placed = BoardNaturalBridgeTest.replace(plain, new BoardScene.Tile(at, 0, -1, false, 0, base.surface(),
+                  null, null, List.of(feature), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
                   BoardFireSmoke.NONE, kind));
-            var obstacles = new BoardObstacles(placed, placed.tile(AT));
-            FloatArray bare = roots(plain, kind), around = roots(placed, kind);
+            var obstacles = new BoardObstacles(placed, placed.tile(at));
+            FloatArray bare = roots(plain, kind, at), around = roots(placed, kind, at);
             Set<List<Float>> kept = new HashSet<>(), all = new HashSet<>();
             for (int i = 0; i < bare.size; i += 4) { all.add(List.of(bare.get(i), bare.get(i + 1))); }
             int inside = 0;
@@ -323,15 +324,13 @@ class BoardBridgeTypeTest {
             System.out.printf("COVER %s: %d plants, %d beside the fountain%n", kind, bare.size / 4, around.size / 4);
             assertEquals(0, inside, kind + ": no plant through the fountain");
             assertTrue(around.size > 0, kind + ": the rest of the hex still grows");
-            // Crop rows split at the fountain into more, shorter strips; reeds are points that keep their places.
-            if (kind == BoardScene.Biome.MARSH) {
-                assertTrue(around.size < bare.size && all.containsAll(kept), "The fountain clears its reeds; the others stay");
-            }
+            // Reeds and plants are points that keep their places.
+            assertTrue(around.size < bare.size && all.containsAll(kept), kind + ": the fountain clears its plants; the others stay");
         }
     }
 
-    private static FloatArray roots(BoardScene scene, BoardScene.Biome kind) {
-        return kind == BoardScene.Biome.MARSH ? GpuBiomeVegetation.plantReeds(scene, scene.tile(AT), support(scene, AT), 1, null)
-              : GpuBiomeVegetation.plant(scene, scene.tile(AT), support(scene, AT), null).roots();
+    private static FloatArray roots(BoardScene scene, BoardScene.Biome kind, Coords at) {
+        return kind == BoardScene.Biome.MARSH ? GpuBiomeVegetation.plantReeds(scene, scene.tile(at), support(scene, at), 1, null)
+              : BoardBiomeTest.cropPlants(scene, scene.tile(at), support(scene, at), null);
     }
 }

@@ -167,7 +167,7 @@ final class GpuMinimap implements GpuHud.Component {
         if (tile.road() != BoardRoad.Kind.NONE) {
             colour.lerp(ROAD, .4f);
         }
-        if (tile.bridge() != null) {
+        if (BoardBridge.feature(tile) != null) {
             colour.lerp(BRIDGE, .6f);
         }
         colour.mul(MathUtils.clamp(1 + ELEVATION_SHADE * tile.elevation(), .7f, 1.3f));

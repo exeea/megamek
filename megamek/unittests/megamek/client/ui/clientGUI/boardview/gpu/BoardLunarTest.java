@@ -60,8 +60,8 @@ class BoardLunarTest {
         var bridge = new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, height, BoardScene.FeatureKind.PROP, 9);
         var label = new BoardHexText(Messages.getString("BoardView1.HEIGHT") + " " + height, 46,
               new Font(Font.SANS_SERIF, Font.PLAIN, 10), -1, false, height);
-        var original = new BoardScene.Tile(ORIGIN, elevation, depth, false, 0, BoardScene.Surface.ROCK,
-              PIXELS, null, List.of(bridge), List.of(label));
+        var original = new BoardScene.Tile(ORIGIN, elevation, depth, false, 0, BoardScene.Surface.ROCK, null,
+              List.of(bridge), List.of(label));
         var lunar = original.lunar(true);
         var raised = BoardBridge.feature(lunar);
         assertEquals(expectedHeight, raised.elevation());
@@ -83,10 +83,10 @@ class BoardLunarTest {
     @Test
     void spansOverDifferentDepthsKeepTheirConnectedDeckLevel() {
         var bridge = new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 1, BoardScene.FeatureKind.PROP, 9);
-        var deep = new BoardScene.Tile(ORIGIN, 0, 2, false, 0, BoardScene.Surface.ROCK,
-              PIXELS, null, List.of(bridge), List.of()).lunar(true);
-        var shallow = new BoardScene.Tile(ORIGIN.translated(3), 0, 1, false, 0, BoardScene.Surface.ROCK,
-              PIXELS, null, List.of(bridge), List.of()).lunar(true);
+        var deep = new BoardScene.Tile(ORIGIN, 0, 2, false, 0, BoardScene.Surface.ROCK, null, List.of(bridge),
+              List.of()).lunar(true);
+        var shallow = new BoardScene.Tile(ORIGIN.translated(3), 0, 1, false, 0, BoardScene.Surface.ROCK, null,
+              List.of(bridge), List.of()).lunar(true);
         assertEquals(3, BoardBridge.feature(deep).elevation());
         assertEquals(2, BoardBridge.feature(shallow).elevation());
         assertTrue(BoardBridge.connected(deep, shallow, 3));
@@ -104,7 +104,7 @@ class BoardLunarTest {
         for (boolean types : new boolean[] { false, true }) {
             var labels = BoardHexText.capture(ORIGIN, hex, Board.createEmptyBoard(1, 1), 1, font, font, false, types,
                   false);
-            var lunar = new BoardScene.Tile(ORIGIN, 0, 2, true, 0, BoardScene.Surface.ROCK, PIXELS, null,
+            var lunar = new BoardScene.Tile(ORIGIN, 0, 2, true, 0, BoardScene.Surface.ROCK, null,
                   List.of(bridge), labels).lunar(true);
             lines.put(types, lunar.text().stream().map(BoardHexText::text).toList());
             assertEquals(3, lunar.text().get(1).elevation(), "HEIGHT 3 or BRIDGE▲3 on the deck, as high as before");
@@ -113,7 +113,7 @@ class BoardLunarTest {
                   .mapToInt(BoardHexText::baseline).max().orElse(0), "The ground lines still end on the bottom edge");
             // In vacuum the frozen water keeps its depth, ICE and TORRENT, and the deck its height; the swamp, the
             // woods and the snow go with the old surface.
-            var airless = new BoardScene.Tile(ORIGIN, 0, 2, true, 0, BoardScene.Surface.ROCK, PIXELS, null,
+            var airless = new BoardScene.Tile(ORIGIN, 0, 2, true, 0, BoardScene.Surface.ROCK, null,
                   List.of(bridge), labels).lunar(false);
             assertEquals(labels.stream().map(BoardHexText::text)
                         .filter(line -> !List.of("SWAMP", "HEAVY", "DEEP SNOW").contains(line)).toList(),
@@ -133,10 +133,10 @@ class BoardLunarTest {
         var building = feature("building", BoardScene.FeatureKind.BUILDING);
         var boulder = feature("boulder-0", BoardScene.FeatureKind.BOULDER);
         var features = List.of(building, boulder, feature("tree-oak", BoardScene.FeatureKind.TREE),
-              feature("foliage-temperate", BoardScene.FeatureKind.TREE),
+              feature("vegetation/foliage-temperate", BoardScene.FeatureKind.TREE),
               feature("scatter-plant", BoardScene.FeatureKind.SCATTER),
               feature("scatter-rock", BoardScene.FeatureKind.SCATTER),
-              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("field", BoardScene.FeatureKind.PROP));
+              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("vegetation/field", BoardScene.FeatureKind.PROP));
         for (var kind : BoardLiquid.Kind.values()) {
             for (var family : BoardScene.Surface.values()) {
                 var lunar = tile(0, -1, new BoardLiquid(kind, "", 2), family, features, true).lunar(true);
@@ -170,10 +170,10 @@ class BoardLunarTest {
         var boulder = feature("rough-boulder", BoardScene.FeatureKind.BOULDER);
         var stone = feature("scatter-rock", BoardScene.FeatureKind.SCATTER);
         var features = List.of(building, boulder, feature("tree-oak", BoardScene.FeatureKind.TREE),
-              feature("foliage-temperate", BoardScene.FeatureKind.TREE),
+              feature("vegetation/foliage-temperate", BoardScene.FeatureKind.TREE),
               feature("scatter-plant", BoardScene.FeatureKind.SCATTER), stone,
               feature(BoardFungus.SCATTER.getFirst(), BoardScene.FeatureKind.SCATTER),
-              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("field", BoardScene.FeatureKind.PROP));
+              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("vegetation/field", BoardScene.FeatureKind.PROP));
         for (var kind : BoardLiquid.Kind.values()) {
             for (var family : BoardScene.Surface.values()) {
                 var liquid = new BoardLiquid(kind, "", 2);
@@ -272,7 +272,7 @@ class BoardLunarTest {
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
                 var coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, PIXELS, null, null, null,
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null,
                       scatter ? BoardFeatures.capture(new Hex(0), coords, Map.of()) : List.of(), List.of(),
                       BoardLiquid.NONE, null, true));
             }
@@ -312,7 +312,7 @@ class BoardLunarTest {
             labels.add(new BoardHexText(Messages.getString("BoardView1.DEPTH") + " " + depth, 56, font, -1, false, 0));
         }
         labels.add(new BoardHexText(Messages.getString("BoardView1.LowFoliage"), 66, font, -1, false, 0));
-        return new BoardScene.Tile(ORIGIN, elevation, depth, frozen, 0, family, PIXELS, PIXELS, PIXELS, PIXELS, features, labels, liquid, PIXELS, false, BoardRoad.Kind.PAVED, BoardFireSmoke.NONE,
+        return new BoardScene.Tile(ORIGIN, elevation, depth, frozen, 0, family, PIXELS, PIXELS, features, labels, liquid, PIXELS, false, BoardRoad.Kind.PAVED, BoardFireSmoke.NONE,
               BoardScene.Biome.MARSH, true, true);
     }
 }

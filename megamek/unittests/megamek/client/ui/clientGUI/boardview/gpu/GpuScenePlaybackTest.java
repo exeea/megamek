@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -140,6 +141,54 @@ class GpuScenePlaybackTest {
         assertEquals(List.of(designation), before.duringPlayback(tagged, false).designations());
     }
 
+    @Test
+    void anElevatorMovesAsOneActionFromItsCheckpointOnceTheBoardShowsItsEnd() {
+        var rider = UnitPlaybackTest.unit(1, 0);
+        var start = UnitPlaybackTest.unit(2, 4);
+        var end = UnitPlaybackTest.unit(2, 2);
+        var lowered = elevator(0, rider, start);
+        var raised = elevator(2, rider, start);
+        var latest = elevator(2, rider, end);
+        var change = BoardScene.TileTransition.of(lowered, raised);
+        assertEquals(List.of(new Coords(0, 0)), change.changes().stream().map(BoardScene.TileTransition.Change::coords).toList());
+        assertNull(BoardScene.TileTransition.of(raised, latest), "Only an elevator that rises or sinks moves");
+        var playback = new UnitPlayback();
+        playback.togglePaused();
+        playback.accept(List.of(new BoardScene.SceneUpdate(lowered), change, new BoardScene.SceneUpdate(raised), move(start, end),
+              new BoardScene.SceneUpdate(latest)), latest, ignored -> false);
+        playback.advance(1, UnitMotion.Speed.NORMAL);
+        assertSame(lowered.tiles(), playback.present(latest).tiles(), "Paused before it moves, its checkpoint waits with it");
+        playback.togglePaused();
+        playback.advance(1, UnitMotion.Speed.NORMAL, ignored -> false);
+        assertSame(change, playback.transition());
+        assertEquals(0, playback.transitionProgress());
+        assertSame(raised.tiles(), playback.present(latest).tiles(),
+              "Its checkpoint applies as it starts, so that the board builds its end while it waits to move");
+        playback.advance(BoardScene.TileTransition.SECONDS / 2 / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+        assertEquals(.5, playback.transitionProgress(), 1e-6);
+        assertNull(playback.movement(), "What follows waits for it");
+        playback.advance(BoardScene.TileTransition.SECONDS / 2 / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+        assertEquals(1, playback.transitionProgress());
+        playback.advance(UnitPlayback.COMPLETION_HOLD_SECONDS, UnitMotion.Speed.NORMAL);
+        assertNull(playback.transition());
+        assertEquals(2, playback.movement().entityId());
+
+        var stepped = new UnitPlayback();
+        stepped.togglePaused();
+        stepped.accept(List.of(new BoardScene.SceneUpdate(lowered), change, new BoardScene.SceneUpdate(raised), move(start, end)),
+              raised, ignored -> false);
+        stepped.stepOnce();
+        stepped.advance(100, UnitMotion.Speed.NORMAL);
+        assertEquals(1, stepped.transitionProgress(), "One step plays the whole change");
+        assertNull(stepped.movement());
+    }
+
+    private static BoardScene elevator(int level, BoardScene.Unit... units) {
+        var shaft = new BoardScene.Feature("shaft", 0, 0, 0, 1, 0, 0, BoardScene.FeatureKind.SHAFT);
+        var tile = new BoardScene.Tile(new Coords(0, 0), level, -1, false, 0, null, null, List.of(shaft), List.of());
+        return new BoardScene(0, 1, 1, List.of(tile), List.of(units), List.of(), -1, "END", List.of());
+    }
+
     private static BoardScene withDesignations(BoardScene scene, List<BoardScene.Designation> designations) {
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),
@@ -169,9 +218,9 @@ class GpuScenePlaybackTest {
         image.setRGB(0, 0, 0xFF000000 | version);
         var pixels = new BoardScene.Pixels(image);
         var feature = new BoardScene.Feature("building-" + version, 0, 0, 0, 1, version, 0, BoardScene.FeatureKind.BUILDING);
-        var tile = new BoardScene.Tile(coords, version, -1, false, 0, BoardScene.Surface.GRASS, pixels, pixels,
+        var tile = new BoardScene.Tile(coords, version, -1, false, 0, BoardScene.Surface.GRASS, pixels,
               List.of(feature), List.of());
-        var marker = new BoardMarker(BoardMarker.Kind.CARGO, coords, 0, 0xFFFF00, "Cargo " + version);
+        var marker = new BoardMarker(BoardMarker.Kind.OBJECTIVE, coords, 0, 0xFFFF00, "Objective " + version);
         var text = new BoardTactical.Text("Objective " + version, new Font(Font.SANS_SERIF, Font.PLAIN, 12), 0, 0, 0xFFFF0000);
         var tactical = new BoardTactical(List.of(), List.of(new BoardTactical.Label(new BoardTactical.Point(0, 0), text,
               BoardTactical.Playback.HOLD_DURING_PLAYBACK)));

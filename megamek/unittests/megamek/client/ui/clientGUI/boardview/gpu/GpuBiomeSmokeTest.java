@@ -16,10 +16,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -52,18 +50,21 @@ class GpuBiomeSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                int maskHandle = 0, cropHandle = 0, sedgeHandle = 0;
+                int maskHandle = 0, sedgeHandle = 0;
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
+                    var cover = (GpuGroundCover) field(terrain, "groundCover");
                     var mask = (GpuBiomeSurface) field(terrain, "biomes");
                     StringBuilder metrics = new StringBuilder("Native 1280x960 fields/marsh checks\n");
                     metrics.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append('\n');
                     for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH, BoardScene.Biome.QUICKSAND, BoardScene.Biome.MUD)) {
                         var scene = scene(kind);
                         boolean vegetation = kind == BoardScene.Biome.FIELD || kind == BoardScene.Biome.MARSH;
+                        // A field's plants are the grass engine's; this renderer draws the reeds.
+                        boolean reeds = kind == BoardScene.Biome.MARSH;
                         camera.setIsometric(true);
                         long previousTriangles = Long.MAX_VALUE;
                         for (int lod = 0; lod < 3; lod++) {
@@ -73,12 +74,19 @@ class GpuBiomeSmokeTest {
                             settle(terrain, plants, frame, camera, scene);
                             GpuReviewFrame.save(new File(output, kind + "-LOD" + lod + ".png"));
                             if (vegetation) {
-                                int offset = kind == BoardScene.Biome.FIELD ? 0 : 3;
-                                int tier = kind == BoardScene.Biome.FIELD && lod == 1 ? 0 : lod;
                                 boolean drawn = false;
-                                for (Object batch : batches(plants)) {
-                                    drawn |= (boolean) field(batch, "crop") == (offset == 0) && (int) field(batch, "lod") == tier
-                                          && !((List<?>) field(batch, "current")).isEmpty();
+                                if (reeds) {
+                                    for (Object batch : batches(plants)) {
+                                        drawn |= (int) field(batch, "lod") == lod && !((List<?>) field(batch, "current")).isEmpty();
+                                    }
+                                } else {
+                                    for (Object chunk : ((Map<?, ?>) field(cover, "chunks")).values()) {
+                                        for (String layer : List.of("wheat", "maize")) {
+                                            for (Object batch : (Object[]) field(field(chunk, layer), "batches")) {
+                                                drawn |= !((List<?>) field(batch, "current")).isEmpty();
+                                            }
+                                        }
+                                    }
                                 }
                                 assertTrue(drawn, kind + " LOD" + lod + " must submit its tier");
                             }
@@ -88,22 +96,21 @@ class GpuBiomeSmokeTest {
                                 if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
                                 var mesh = (GpuInstancedMesh) field(batch, "mesh");
                                 if (mesh == null) { continue; }
-                                int instances = ((com.badlogic.gdx.utils.FloatArray) field(batch, "data")).size / (int) field(batch, "stride");
+                                int instances = ((com.badlogic.gdx.utils.FloatArray) field(batch, "data")).size / 4;
                                 draws++; roots += instances;
                                 triangles += (long) mesh.getNumIndices() / 3 * instances;
                             }
-                            assertEquals(vegetation ? 1 : 0, draws);
+                            assertEquals(reeds ? 1 : 0, draws);
                             // Budget the rendered 3x3 fixture (including its fringe), not just one template's indices.
-                            long budget = !vegetation ? 0 : (kind == BoardScene.Biome.FIELD
-                                  ? new long[] { 210_000, 210_000, 10_000 } : new long[] { 10_476, 2_510, 314 })[lod];
+                            long budget = reeds ? new long[] { 10_476, 2_510, 314 }[lod] : 0;
                             assertTrue(triangles <= budget, kind + " LOD" + lod + " exceeds its plant triangle budget: " + triangles);
-                            assertTrue(triangles < previousTriangles || !vegetation
-                                        || kind == BoardScene.Biome.FIELD && lod == 1 && triangles == previousTriangles,
+                            assertTrue(triangles < previousTriangles || !reeds,
                                   kind + " LOD" + lod + ": " + triangles + " triangles after " + previousTriangles);
                             previousTriangles = triangles;
-                            long uploads = plants.uploads();
+                            long uploads = plants.uploads() + cover.uploads();
                             for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
-                            assertEquals(uploads, plants.uploads(), "Stationary views must not upload plant instances again");
+                            assertEquals(uploads, plants.uploads() + cover.uploads(),
+                                  "Stationary views must not upload plant instances again");
                             metrics.append(kind).append(" LOD").append(lod).append(": ").append(draws).append(" draws, ")
                                   .append(roots).append(" instances, ").append(triangles).append(" triangles\n");
                             if (vegetation) {
@@ -268,29 +275,22 @@ class GpuBiomeSmokeTest {
                     camera.setIsometric(true);
                     camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                     settle(terrain, plants, frame, camera, contacts);
-                    // Near crop rows, the distant canopy and reeds each share one cutout across their batches.
-                    for (String name : List.of("crop", "canopy", "sedge")) {
-                        var texture = (Texture) field(plants, name);
-                        assertTrue(texture.getWidth() <= (name.equals("crop") ? 2048 : 512) && texture.getHeight() <= 640,
-                              "Shared cutouts have bounded upload sizes");
-                        assertEquals(Texture.TextureFilter.MipMapLinearLinear, texture.getMinFilter(),
-                              "Every crop view and the distant canopy must retain trilinear mipmaps");
-                        if (name.equals("crop")) { registeredCrops(texture, output); }
-                        for (Object batch : batches(plants)) {
-                            boolean crop = (boolean) field(batch, "crop"), distant = crop && (int) field(batch, "lod") == 2;
-                            if (crop != !name.equals("sedge") || distant != name.equals("canopy")) { continue; }
-                            var instance = (ModelInstance) field(batch, "instance");
-                            if (instance == null) { continue; }
-                            var diffuse = instance.materials.first().get(TextureAttribute.class, TextureAttribute.Diffuse);
-                            assertEquals(texture, diffuse.textureDescription.texture, "Every LOD must reuse its plant kind's cutout");
-                        }
-                        metrics.append(name).append(" cutout upload: ").append(texture.getWidth()).append('x').append(texture.getHeight())
-                              .append(" RGBA8 plus mipmaps\n");
+                    // The reeds share one cutout across their batches.
+                    var texture = (Texture) field(plants, "sedge");
+                    assertTrue(texture.getWidth() <= 512 && texture.getHeight() <= 512, "The shared cutout has a bounded upload size");
+                    assertEquals(Texture.TextureFilter.MipMapLinearLinear, texture.getMinFilter(),
+                          "The reeds' cutout must retain trilinear mipmaps");
+                    for (Object batch : batches(plants)) {
+                        var instance = (ModelInstance) field(batch, "instance");
+                        if (instance == null) { continue; }
+                        var diffuse = instance.materials.first().get(TextureAttribute.class, TextureAttribute.Diffuse);
+                        assertEquals(texture, diffuse.textureDescription.texture, "Every LOD must reuse the reeds' cutout");
                     }
+                    metrics.append("sedge cutout upload: ").append(texture.getWidth()).append('x').append(texture.getHeight())
+                          .append(" RGBA8 plus mipmaps\n");
                     Files.writeString(new File(output, "metrics.txt").toPath(), metrics.toString());
                     maskHandle = mask.texture().getTextureObjectHandle();
-                    cropHandle = ((Texture) field(plants, "crop")).getTextureObjectHandle();
-                    sedgeHandle = ((Texture) field(plants, "sedge")).getTextureObjectHandle();
+                    sedgeHandle = texture.getTextureObjectHandle();
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
@@ -301,9 +301,6 @@ class GpuBiomeSmokeTest {
                     if (sedgeHandle != 0 && org.lwjgl.opengl.GL11.glIsTexture(sedgeHandle)) {
                         failure.compareAndSet(null, new AssertionError("Sedge texture leaked after disposal"));
                     }
-                    if (cropHandle != 0 && org.lwjgl.opengl.GL11.glIsTexture(cropHandle)) {
-                        failure.compareAndSet(null, new AssertionError("Crop texture leaked after disposal"));
-                    }
                     frame.dispose();
                     BoardGeometry.tune(original);
                     TerrainLod.tune(originalLod);
@@ -312,112 +309,6 @@ class GpuBiomeSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Fields and marsh native renderer", failure.get()); }
-    }
-
-    /**
-     * Crop rows and reeds share a material and vertex layout, but only rows carry a_coverRow. Reeds drawn first, as on
-     * a board with marsh, must not leave the rows a shader that never binds it: the rows would draw as huge clumps.
-     */
-    @Test
-    void cropRowsKeepTheirShapeAfterReedsAreDrawnFirst() throws Exception {
-        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "crop-order");
-        Files.createDirectories(output.toPath());
-        var failure = new AtomicReference<Throwable>();
-        var config = GpuBoardWindow.configuration(false);
-        config.setWindowedMode(800, 600);
-        new Lwjgl3Application(new ApplicationAdapter() {
-            @Override
-            public void create() {
-                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
-                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                Pixmap alone = null, afterReeds = null;
-                try {
-                    var camera = new BoardCamera();
-                    camera.resize(800, 600);
-                    camera.setPerspective(true);
-                    camera.orbit(20, 50);
-                    camera.camera.zoom = BoardGeometry.width() / 600;
-                    camera.center(BoardGeometry.center(new Coords(4, 4), 0));
-                    alone = fields(null, frame, camera, output, "alone");
-                    afterReeds = fields(scene(BoardScene.Biome.MARSH), frame, camera, output, "after-reeds");
-                    int changed = changedPixels(alone, afterReeds);
-                    System.out.println("Crop order initial frames: " + changed + " pixels differ");
-                    assertTrue(changed < alone.getWidth() * alone.getHeight() / 100,
-                          "Crop rows must look the same whether or not reeds were drawn first: " + changed + " pixels differ");
-                } catch (Throwable error) { failure.set(error); }
-                finally {
-                    if (alone != null) { alone.dispose(); }
-                    if (afterReeds != null) { afterReeds.dispose(); }
-                    frame.dispose();
-                    Gdx.app.exit();
-                }
-            }
-        }, config);
-        if (failure.get() != null) { throw new AssertionError("Crop rows after reeds", failure.get()); }
-    }
-
-    /** The fields drawn by a new renderer, after an optional first scene; the caller owns the returned pixels. */
-    private static Pixmap fields(BoardScene first, GpuReviewFrame frame, BoardCamera camera,
-          File output, String label) throws Exception {
-        var terrain = new GpuTerrain();
-        try {
-            var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
-            if (first != null) { settle(terrain, plants, frame, camera, first); }
-            var scene = scene(BoardScene.Biome.FIELD);
-            settle(terrain, plants, frame, camera, scene);
-            Pixmap initial = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
-            try {
-                PixmapIO.writePNG(new FileHandle(new File(output, label + "-first.png")), initial, -1, true);
-                frame.render(terrain, camera, scene);
-                Pixmap repeat = Pixmap.createFromFrameBuffer(0, 0, initial.getWidth(), initial.getHeight());
-                try {
-                    PixmapIO.writePNG(new FileHandle(new File(output, label + "-repeat.png")), repeat, -1, true);
-                    System.out.println("Crop order " + label + " first/repeat: " + changedPixels(initial, repeat)
-                          + " pixels differ; uploads=" + plants.uploads());
-                } finally { repeat.dispose(); }
-                return initial;
-            } catch (Throwable failure) { initial.dispose(); throw failure; }
-        } finally { terrain.dispose(); }
-    }
-
-    /** Same material difference threshold as the cross-order regression; alpha is not display colour. */
-    private static int changedPixels(Pixmap a, Pixmap b) {
-        assertEquals(a.getWidth(), b.getWidth());
-        assertEquals(a.getHeight(), b.getHeight());
-        int changed = 0;
-        for (int y = 0; y < a.getHeight(); y++) {
-            for (int x = 0; x < a.getWidth(); x++) {
-                int first = a.getPixel(x, y), second = b.getPixel(x, y);
-                for (int shift = 8; shift < 32; shift += 8) {
-                    if (Math.abs((first >>> shift & 255) - (second >>> shift & 255)) > 24) { changed++; break; }
-                }
-            }
-        }
-        return changed;
-    }
-
-    static void registeredCrops(Texture texture, File output) {
-        var pixels = new Pixmap(texture.getWidth(), texture.getHeight(), Pixmap.Format.RGBA8888);
-        try {
-            texture.bind(0);
-            org.lwjgl.opengl.GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels.getPixels());
-            PixmapIO.writePNG(new FileHandle(new File(output, "crop-atlas.png")), pixels);
-            int rowWidth = texture.getWidth() / 2;
-            for (int i = 0; i < GpuBiomeVegetation.PLANTS_PER_ROW; i++) {
-                int x = Math.round((i + .5f) * rowWidth / GpuBiomeVegetation.PLANTS_PER_ROW);
-                for (int[] centre : new int[][] { { x, 490 }, { rowWidth + x, 490 }, { x, 576 } }) {
-                    int alpha = 0;
-                    for (int dx = -1; dx <= 1; dx++) {
-                        alpha = Math.max(alpha, pixels.getPixel(centre[0] + dx, centre[1]) & 255);
-                    }
-                    assertTrue(alpha >= 82, "Every variant must register both stems and its crown at the same centre: " + i);
-                }
-                int gap = Math.round(i * (float) rowWidth / GpuBiomeVegetation.PLANTS_PER_ROW);
-                for (int y = 0; y < 640; y++) {
-                    assertEquals(0, pixels.getPixel(gap, y) & 255, "Plant gutters must retain transparent alpha");
-                }
-            }
-        } finally { pixels.dispose(); }
     }
 
     private static int neighbors(BoardScene scene, Coords coords) {
@@ -450,11 +341,10 @@ class GpuBiomeSmokeTest {
             for (int y = 0; y < board.getHeight(); y++) {
                 var coords = new Coords(x, y);
                 var hex = board.getHex(coords);
-                var base = BoardBiomeTest.tile(coords, BoardFeatures.biome(hex), hex.getLevel());
                 tiles.add(new BoardScene.Tile(coords, hex.getLevel(), hex.containsTerrain(Terrains.WATER)
                       ? hex.terrainLevel(Terrains.WATER) : -1, hex.containsTerrain(Terrains.ICE),
                       hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0,
-                      BoardFeatures.surface(hex), base.ground(), null, null, null,
+                      BoardFeatures.surface(hex), null, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.capture(hex), null,
                       BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex), BoardFireSmoke.NONE, BoardFeatures.biome(hex)));
             }
@@ -467,11 +357,16 @@ class GpuBiomeSmokeTest {
         var chunks = new TreeMap<Coords, Object>(Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY));
         chunks.putAll((Map<Coords, ?>) field(renderer, "chunks"));
         var result = new ArrayList<Object>();
-        for (Object chunk : chunks.values()) { result.addAll(List.of((Object[]) field(chunk, "batches"))); }
-        if (renderer instanceof GpuBiomeVegetation) {
-            result.add(field(renderer, "distantCrops"));
-            result.add(field(renderer, "distantReeds"));
+        for (Object chunk : chunks.values()) {
+            if (renderer instanceof GpuBiomeVegetation) { result.addAll(List.of((Object[]) field(chunk, "batches"))); }
+            // The grass engine's chunks hold a layer per kind of blade: grass, then the crops' plants.
+            else {
+                for (String layer : List.of("grass", "wheat", "maize")) {
+                    result.addAll(List.of((Object[]) field(field(chunk, layer), "batches")));
+                }
+            }
         }
+        if (renderer instanceof GpuBiomeVegetation) { result.add(field(renderer, "distantReeds")); }
         return result;
     }
 
@@ -486,7 +381,7 @@ class GpuBiomeSmokeTest {
         long triangles = 0;
         for (Object batch : batches(field(terrain, "groundCover"))) {
             // Terrain skips grass at distant scales without clearing the reusable instance buffers.
-            if (!GpuGroundCover.visibleAtScale(camera.camera)) { break; }
+            if (!GpuGroundCover.visibleAtScale(camera.camera, true, false)) { break; }
             if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
             var mesh = (GpuInstancedMesh) field(batch, "mesh");
             if (mesh == null) { continue; }
@@ -501,9 +396,11 @@ class GpuBiomeSmokeTest {
     /** Removing only the biome mask must affect actual bank faces, not just their adjoining flat hexes. */
     private static void slopeMaterialResponds(GpuTerrain terrain, GpuBiomeSurface mask, GpuReviewFrame frame,
           BoardCamera camera, BoardScene scene) throws Exception {
-        // Measure the ground material itself; taller cutouts can otherwise hide the sampled bank pixels.
+        // Measure the ground material itself; taller cutouts, slabs and plants can otherwise hide the sampled bank pixels.
         var hidden = new ArrayList<IntAttribute>();
-        for (Object batch : batches(field(terrain, "biomeVegetation"))) {
+        var plants = batches(field(terrain, "biomeVegetation"));
+        plants.addAll(batches(field(terrain, "groundCover")));
+        for (Object batch : plants) {
             var instance = (ModelInstance) field(batch, "instance");
             if (instance == null) { continue; }
             var cull = instance.materials.first().get(IntAttribute.class, IntAttribute.CullFace);

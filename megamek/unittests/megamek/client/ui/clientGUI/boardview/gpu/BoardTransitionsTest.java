@@ -25,7 +25,7 @@ class BoardTransitionsTest {
             for (int y = 0; y < 5; y++) {
                 boolean upper = x < 3;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), upper ? step : 0, -1, false, 0,
-                      upper ? high : BoardScene.Surface.GRASS, null, null, null, null, List.of(), List.of(),
+                      upper ? high : BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
                       BoardLiquid.NONE, null, !upper || detailed));
             }
         }

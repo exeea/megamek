@@ -51,8 +51,10 @@ class GpuMarkerCaptureTest {
                 fixture.source.refresh();
             });
             BoardScene scene = fixture.source.takeFrame().scene();
-            assertEquals(5, scene.markers().size());
+            assertEquals(4, scene.markers().size());
             assertTrue(scene.markers().stream().allMatch(marker -> marker.elevation() == 4));
+            assertTrue(scene.tile(ROOF).features().stream().anyMatch(feature -> feature.asset().equals(BoardFeatures.CARGO)),
+                  "Cargo on the ground is a crate in its hex's scenery, not a marker");
             BoardMarker objective = scene.markers().stream().filter(marker -> marker.kind() == BoardMarker.Kind.OBJECTIVE)
                   .findFirst().orElseThrow();
             assertEquals("Defend 2/3", objective.label());
@@ -64,6 +66,7 @@ class GpuMarkerCaptureTest {
                 fixture.source.refresh();
             });
             assertTrue(fixture.source.takeFrame().scene().markers().isEmpty());
+            assertEquals(before.tile(ROOF), fixture.source.takeFrame().scene().tile(ROOF), "Picked-up cargo leaves no crate");
         }
     }
 

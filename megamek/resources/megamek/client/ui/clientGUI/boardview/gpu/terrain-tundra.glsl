@@ -1,40 +1,21 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Reference-authored lichen/tussocks, fungal colonies and barren mineral crust in the shared texture array.
 // Preserve actual image pigments and internal detail instead of thresholding them into flat coloured spots.
-// earth (dry autumn heath), fungus, mineral, wet earth (autumn sedge); normal/AO at colour layer + 1
+// earth (dry fell-field), fungus, mineral, wet earth (autumn sedge); normal/AO at colour layer + 1
 uniform vec4 u_tundraLayers, u_tundraTiles;
+// The earth carpets at their own full size (GpuAssets.tundraCarpets): colour/height and normal/AO, dry 0 and wet 1.
+uniform sampler2DArray u_tundraCarpets, u_tundraCarpetData;
 
 // The ground's distance in metres to the nearest drop (x) and rise (y), set by the sculpt before biomeSurface.
 vec2 tundraLandform = vec2(99.0);
 
-// Frost polygons on open level tundra: the distance in metres to the nearest crack of a jittered network of 12 m cells.
-float tundraTrough(vec2 world) {
-    vec2 p = world / 12.0, g = floor(p), f = p - g;
-    float d1 = 8.0, d2 = 8.0;
-    for (int y = -1; y <= 1; y++) {
-        for (int x = -1; x <= 1; x++) {
-            vec3 id = vec3(g + vec2(x, y), 41.0);
-            vec2 r = vec2(x, y) + .15 + .7 * vec2(hash(id), hash(id + 7.3)) - f;
-            float d = dot(r, r);
-            if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
-        }
-    }
-    return (sqrt(d2) - sqrt(d1)) * 6.0;
-}
-
-// How wet the tundra stands, which sets its sedge share: in the hollows at the foot of rises, along the frost-polygon
-// troughs of open level ground and over broad low stretches; dry rims shed their water. The transitions are metres
-// wide, so the two carpets meet as tones, never as patches.
-float tundraWetness(vec3 world, vec3 face) {
+// How wet the tundra stands, which sets its sedge share: in the hollows at the foot of rises, unless a drop is near.
+// The fell-field carpet carries its own lichen, moss and gravel everywhere else. The transitions are metres wide, so
+// the two carpets meet as tones, never as patches.
+float tundraWetness() {
     float hollow = 1.0 - smoothstep(1.0, 9.0, tundraLandform.y);
-    float low = smoothstep(.5, .85, biomeNoise(world.xy / 70.0 + vec2(13.0, 57.0)));
-    float open = smoothstep(6.0, 12.0, min(tundraLandform.x, tundraLandform.y)) * smoothstep(.9, .98, face.z);
-    // Polygons pattern some stretches of open ground, not all of it, and only damp their troughs.
-    float patterned = smoothstep(.4, .7, biomeNoise(world.xy / 45.0 + vec2(5.0, 31.0)));
-    float trough = (1.0 - smoothstep(.25, 1.0, tundraTrough(world.xy))) * open * patterned * .45
-          * (1.0 - smoothstep(.2, .5, pixelMetres));
     float dry = 1.0 - smoothstep(1.0, 6.0, tundraLandform.x);
-    return clamp(max(max(hollow * .85, low * .7), trough), 0.0, 1.0) * (1.0 - .8 * dry);
+    return hollow * .85 * (1.0 - .8 * dry);
 }
 
 vec3 tundraFamily(float f) {
@@ -102,14 +83,9 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     }
 #endif
     if (kinds.x > .0001) {
-        kinds.w = kinds.x * tundraWetness(world, face);
+        kinds.w = kinds.x * tundraWetness();
         kinds.x -= kinds.w;
     }
-    // Pale reindeer lichen takes over the dry heath on rises, keeping the carpet's own detail.
-    float lichen = (1.0 - smoothstep(1.0, 6.0, tundraLandform.x)) * .55;
-    // The heath drifts between rusty and olive stretches tens of metres across, as autumn tundra does from the air.
-    float rust = smoothstep(.3, .7, biomeNoise(world.xy / 26.0 + vec2(47.0, 19.0)));
-    vec3 drift = mix(vec3(.93, 1.03, .92), vec3(1.1, .95, .86), rust);
     // Keep the mats' colonies intact over broad regions; colour and relief use the same slow translation field. The
     // fine-mixed earth carpets blend their two scales by a quicker field, as ordinary ground does, so their repeat
     // never shows.
@@ -121,20 +97,16 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     float concreteLichen = 0.0;
     for (int i = 0; i < 4; i++) {
         if (kinds[i] < .0001) continue;
-        bool scales = i == 0 || i == 3;
-        float mixer = scales ? scaleMix : variation;
-        vec4 source = tundraTexel(u_terrainLayers, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, mixer, scales);
+        bool carpet = i == 0 || i == 3;
+        // The earth carpets keep their own repeat foremost, for their crisp detail, the larger read only varying it.
+        float mixer = carpet ? scaleMix * .5 : variation, carpetLayer = i == 0 ? 0.0 : 1.0;
+        vec4 source = carpet ? tundraTexel(u_tundraCarpets, carpetLayer, u_tundraTiles[i], projection, mixer, true)
+              : tundraTexel(u_terrainLayers, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, mixer, false);
         float light = dot(source.rgb, vec3(.2126, .7152, .0722));
         vec3 pigment = source.rgb;
         if (i == 0 || i == 3) {
             // Keep a little local geology, without turning fine pigment into another patch coverage mask.
             float cover = max(meadow + snow, .88);
-            if (i == 0) source.rgb *= drift;
-            if (i == 0 && lichen > 0.0) {
-                float mean = max(dot(mapAverage(u_tundraLayers[0], projection.top).rgb, vec3(.2126, .7152, .0722)), .02);
-                vec3 pale = toLinear(vec3(.68, .70, .60)) * clamp(.55 + .45 * light / mean, .4, 1.6);
-                source.rgb = mix(source.rgb, pale, lichen);
-            }
             pigment = mix(color, source.rgb, clamp(cover, 0.0, 1.0));
             // Retain the source's pale lichen branches, leaving concrete visible through the warm soil/tussocks.
             // Relative linear chroma separates pale lichen from warm soil without encoding the sampled pigment.
@@ -153,9 +125,10 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
         }
         treated += pigment * kinds[i];
         mappedFinish = addFinish(mappedFinish,
-              tundraFinish(u_tundraLayers[i], u_tundraTiles[i], projection, mixer, scales), kinds[i]);
+              tundraFinish(u_tundraLayers[i], u_tundraTiles[i], projection, mixer, carpet), kinds[i]);
         if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-            vec4 n = tundraTexel(u_terrainData, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, mixer, scales);
+            vec4 n = carpet ? tundraTexel(u_tundraCarpetData, carpetLayer, u_tundraTiles[i], projection, mixer, true)
+                  : tundraTexel(u_terrainData, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, mixer, false);
             vec3 relief = upNormal(mix(n.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail), face);
 #ifdef volcanicFlag
             if (projection.lying < 1.0) {

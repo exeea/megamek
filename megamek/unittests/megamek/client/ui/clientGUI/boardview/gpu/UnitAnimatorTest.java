@@ -208,6 +208,31 @@ class UnitAnimatorTest {
     }
 
     @Test
+    void rotaryBarrelsRunUpTurnThroughTheBurstAndStopWhereTheyStarted() {
+        var original = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
+        var rotary = ResolvedAttack.Shot.capture(Mounted.createMounted(new BipedMek(), EquipmentType.get("ISRotaryAC5")));
+        var result = original.result();
+        var resolved = new ResolvedAttack(result.id(), result.kind(), result.attacker(), result.target(), result.targetType(),
+              0, "Rotary AC/5", result.limb(), true, List.of(new ResolvedAttack.Mount(1, 0, rotary)), rotary);
+        var attack = new UnitAttack(new BoardScene.Combat(resolved, original.attacker(), original.target(), original.destination()));
+        var binding = new UnitEquipmentAssembly.Binding(0, "RT", "rac", "", false, List.of(), 1);
+        float previous = 0;
+        for (int step = 1; step <= 40; step++) {
+            attack.seconds = attack.duration * step / 40;
+            float turn = attack.spin(binding);
+            assertTrue(turn >= previous, "The cluster never turns backwards");
+            previous = turn;
+        }
+        attack.seconds = UnitAttack.ANTICIPATION_SECONDS;
+        assertTrue(attack.spin(binding) > 0, "The barrels are already turning when the first round leaves");
+        attack.seconds = attack.duration;
+        float total = attack.spin(binding);
+        assertTrue(total >= 360, "At least one whole turn");
+        assertEquals(0, Math.min(total % 360, 360 - total % 360), .01f,
+              "The cluster stops where it started, so it never snaps back to rest");
+    }
+
+    @Test
     void mixedGunsUseTheirOwnCalibreAndPpcKicksOnlyAfterCharging() {
         var original = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
         var small = ResolvedAttack.Shot.capture(Mounted.createMounted(new BipedMek(), EquipmentType.get("ISAC2")));

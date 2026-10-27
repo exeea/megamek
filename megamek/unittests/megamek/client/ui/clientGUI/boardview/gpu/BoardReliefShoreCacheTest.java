@@ -100,8 +100,8 @@ class BoardReliefShoreCacheTest {
                 BoardLiquid liquid = !pool ? BoardLiquid.NONE
                       : molten ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.WATER;
                 BoardScene.Surface family = x == 4 && y == 1 ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), pool ? 0 : 2, pool ? 1 : -1, false, 0, family,
-                      null, null, null, null, List.of(), List.of(), liquid, null, !(x == 0 && y == 0)));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), pool ? 0 : 2, pool ? 1 : -1, false, 0, family, null,
+                      null, List.of(), List.of(), liquid, null, !(x == 0 && y == 0)));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

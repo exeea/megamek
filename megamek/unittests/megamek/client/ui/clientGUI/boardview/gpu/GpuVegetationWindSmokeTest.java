@@ -71,24 +71,26 @@ class GpuVegetationWindSmokeTest {
         GL11.glEnable(GL30.GL_RASTERIZER_DISCARD);
         try {
             Vector3 root = new Vector3(.17f, .23f, .1f);
-            for (int kind = 0; kind <= 2; kind++) {
-                int shader = kind == 0 ? grass : plants;
+            // Grass, wheat and maize (template parts 0 to 2) in the grass program (GpuGroundCover); reeds in their own.
+            for (int kind = 0; kind <= 3; kind++) {
+                boolean reeds = kind == 3;
+                int shader = reeds ? plants : grass;
                 GL20.glUseProgram(shader);
-                GL20.glUniform1f(GL20.glGetUniformLocation(shader, "u_biomeKind"), kind);
                 float previousSpan = -1;
                 for (float strength : new float[] { 0, .25f, .5f, .75f, 1 }) {
                     float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
                     Vector3 calm = null;
                     for (int phase = 0; phase < 64; phase++) {
                         float gustPhase = phase * MathUtils.PI2 / 64;
-                        for (int lod = 0; lod < (kind == 0 ? 1 : 3); lod++) {
+                        for (int lod = 0; lod < (reeds ? 3 : 1); lod++) {
                             GL20.glUniform1f(GL20.glGetUniformLocation(shader, "u_biomeLod"), lod);
                             // Keep this tier visible without changing the tested root or wind.
                             GL20.glUniform1f(GL20.glGetUniformLocation(shader, "u_coverPixels"),
-                                  kind == 0 || lod == 0 ? 600 : lod == 1 ? 160 : 48);
-                            assertTrue(sample(shader, root, strength, gustPhase, 0).len() < .000001f,
-                                  "A gust cannot move the root at any LOD");
-                            Vector3 tip = sample(shader, root, strength, gustPhase, kind == 0 ? 1 : kind == 1 ? 1.04f : 1.1f);
+                                  !reeds || lod == 0 ? 600 : lod == 1 ? 160 : 48);
+                            assertTrue(sample(shader, root, strength, gustPhase, reeds ? new Vector3() : new Vector3(0, 0, kind))
+                                  .len() < .000001f, "A gust cannot move the root at any LOD");
+                            Vector3 tip = sample(shader, root, strength, gustPhase,
+                                  reeds ? new Vector3(0, 0, 1.1f) : new Vector3(0, 1, kind));
                             assertTrue(tip.z > 0, "The centreline must stay above its support");
                             if (lod != 0) { continue; }
                             if (strength == 0) {
@@ -107,12 +109,6 @@ class GpuVegetationWindSmokeTest {
                     }
                 }
             }
-            GL20.glUseProgram(plants);
-            GL20.glUniform1f(GL20.glGetUniformLocation(plants, "u_biomeKind"), 1);
-            GL20.glUniform1f(GL20.glGetUniformLocation(plants, "u_coverPixels"), 600);
-            GL20.glUniform1f(GL20.glGetUniformLocation(plants, "u_biomeLod"), 0);
-            checkRowFaces(plants);
-            GL20.glVertexAttrib4f(15, 0, 0, 0, 1);
             assertEquals(GL11.GL_NO_ERROR, GL11.glGetError());
         } finally {
             GL11.glDisable(GL30.GL_RASTERIZER_DISCARD);
@@ -124,62 +120,6 @@ class GpuVegetationWindSmokeTest {
             GL30.glDeleteVertexArrays(vao);
             GL20.glDeleteProgram(grass); GL20.glDeleteProgram(plants);
         }
-    }
-
-    private static void checkRowFaces(int shader) {
-        float length = GpuBiomeVegetation.ROW_LENGTH, rise = .42f;
-        // Keep the whole strip inside the test view when the configurable plant spacing grows.
-        float clipScale = 1 / (length + 2);
-        GL20.glUniformMatrix4fv(GL20.glGetUniformLocation(shader, "u_projViewTrans"), false,
-              new Matrix4().setToScaling(clipScale, clipScale, clipScale).val);
-        Vector3 along = new Vector3(-BoardBiome.ROW_Y, BoardBiome.ROW_X, 0);
-        Vector3 root = new Vector3(along).scl(length / 2).add(0, 0, .1f);
-        Vector3 side = new Vector3(0, -1, 0), front = new Vector3(1, 0, 0), top = new Vector3(0, 0, 1);
-        float minLean = Float.POSITIVE_INFINITY, maxLean = Float.NEGATIVE_INFINITY;
-        for (float strength : new float[] { 0, .5f, 1 }) {
-            for (float phase : new float[] { 0, 1, 2, 3 }) {
-                for (int i = 0; i < GpuBiomeVegetation.PLANTS_PER_ROW; i++) {
-                    float centre = (i + .5f) / GpuBiomeVegetation.PLANTS_PER_ROW;
-                    for (float height : new float[] { 0, GpuBiomeVegetation.CANOPY_HEIGHT, 1.04f }) {
-                        Vector3 point = new Vector3(centre - .5f, 0, height);
-                        GL20.glVertexAttrib4f(15, length, rise, 0, 1);
-                        Vector3 whole = sample(shader, root, strength, phase, point, side).add(root);
-                        assertTrue(whole.dst(sample(shader, root, strength, phase, point, front).add(root)) < .00001f,
-                              "Side and front must share each variant's stem throughout a gust");
-                        if (height == GpuBiomeVegetation.CANOPY_HEIGHT) {
-                            assertTrue(whole.dst(sample(shader, root, strength, phase, point, top).add(root)) < .00001f,
-                                  "The overhead crown must meet both upright planes throughout a gust");
-                        }
-                        if (height == 0) {
-                            assertTrue(whole.dst(new Vector3(root).mulAdd(along, (centre - .5f) * length)
-                                  .add(0, 0, (centre - .5f) * rise)) < .00001f,
-                                  "Every plant's stem must stay on the supported slope");
-                        }
-                        if (strength == 0 && height == 1.04f) {
-                            Vector3 foot = new Vector3(root).mulAdd(along, (centre - .5f) * length);
-                            float acrossLean = (whole.x - foot.x) * BoardBiome.ROW_X
-                                  + (whole.y - foot.y) * BoardBiome.ROW_Y;
-                            minLean = Math.min(minLean, acrossLean); maxLean = Math.max(maxLean, acrossLean);
-                            assertEquals(whole, sample(shader, root, 0, phase + 1, point, side).add(root),
-                                  "A plant's resting lean must stay still as the wind clock advances");
-                        }
-                        // A hex boundary or bend can split a plant's supporting strip on either side of its centre.
-                        for (float[] interval : new float[][] { { 0, centre + .02f }, { centre - .02f, 1 } }) {
-                            float middle = (interval[0] + interval[1]) / 2 - .5f, span = interval[1] - interval[0];
-                            Vector3 fragment = new Vector3(root).mulAdd(along, middle * length).add(0, 0, middle * rise);
-                            GL20.glVertexAttrib4f(15, length * span, rise * span, interval[0], interval[1]);
-                            for (Vector3 normal : List.of(side, front, top)) {
-                                Vector3 split = sample(shader, fragment, strength, phase, point, normal).add(fragment);
-                                assertTrue(whole.dst(split) < .00002f,
-                                      "Clipping must preserve plant " + i + " at height " + height + " with plane " + normal
-                                            + ": " + whole + " versus " + split);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        assertTrue(maxLean - minLean > .03f, "Calm crop heads must vary across the row while roots stay aligned");
     }
 
     private static int program(boolean grass) {
@@ -221,11 +161,6 @@ class GpuVegetationWindSmokeTest {
             GL20.glUniform1f(GL20.glGetUniformLocation(program, uniform), 1);
         }
         return program;
-    }
-
-    private static Vector3 sample(int program, Vector3 root, float strength, float phase, float height) {
-        return sample(program, root, strength, phase,
-              GL20.glGetUniformLocation(program, "u_biomeKind") >= 0 ? new Vector3(0, 0, height) : new Vector3(0, height, 0));
     }
 
     private static Vector3 sample(int program, Vector3 root, float strength, float phase, Vector3 point) {

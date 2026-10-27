@@ -61,12 +61,11 @@ class GpuOrchardSmokeTest {
                     Coords coords = new Coords(0, 0);
                     for (boolean snow : new boolean[] { false, true }) {
                         for (String form : BoardOrchardTest.FORMS) {
-                            String name = "orchard-" + form + (snow ? "-snow" : "");
+                            String name = "vegetation/orchard-" + form + (snow ? "-snow" : "");
                             var tree = new BoardScene.Feature(name, 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE);
                             // Keep terrain/scatter detail fixed while measuring the submitted tree geometry.
-                            var ground = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, 0).ground();
-                            var tile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
-                                  ground, null, List.of(tree), List.of());
+                            var tile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+                                  List.of(tree), List.of());
                             BoardScene scene = scene(List.of(tile), 1, 1);
                             terrain.update(scene);
                             int[] triangles = new int[TreeLod.LEVELS];
@@ -78,7 +77,7 @@ class GpuOrchardSmokeTest {
                                     var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                     assertNotNull(map);
                                     if (material.id.endsWith("-cutout")) {
-                                        var woodland = assets.model("tree" + (snow ? "-snow" : ""))
+                                        var woodland = assets.model("vegetation/tree" + (snow ? "-snow" : ""))
                                               .getMaterial(material.id).get(TextureAttribute.class, TextureAttribute.Diffuse);
                                         assertSame(woodland.textureDescription.texture, map.textureDescription.texture,
                                               "Orchards share the existing leaf cutout and clamped sampler");
@@ -167,10 +166,9 @@ class GpuOrchardSmokeTest {
     }
 
     private static BoardScene.Tile tile(Coords coords, Hex hex, List<BoardScene.Feature> features) {
-        var base = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, hex.getLevel());
         int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0;
-        return new BoardScene.Tile(coords, hex.getLevel(), -1, false, exits, BoardFeatures.surface(hex),
-              base.ground(), null, null, null, features, List.of(), BoardLiquid.NONE, null,
+        return new BoardScene.Tile(coords, hex.getLevel(), -1, false, exits, BoardFeatures.surface(hex), null, null,
+              features, List.of(), BoardLiquid.NONE, null,
               BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex));
     }
 

@@ -57,7 +57,8 @@ final class GpuBankTurf implements Disposable {
         var center = BoardGeometry.center(tile.coords(), tile.elevation());
         var obstacles = new BoardObstacles(scene, tile);
         float m = BoardRelief.metres(1), level = BoardGeometry.level();
-        var road = BoardRoad.carriageway(tile) ? BoardRoad.way(scene, tile) : null;
+        // Turf grows up to a ground rail's ballast (BoardObstacles); only a road keeps its verge bare.
+        var road = BoardRoad.rendered(tile) ? BoardRoad.way(scene, tile) : null;
         boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
         var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
         for (int edge = 0; edge < 6; edge++) {

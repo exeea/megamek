@@ -33,8 +33,7 @@ class BoardRoadTest {
     static final Coords CENTER = BoardSurfaceBlendTest.CENTER;
 
     static BoardScene.Tile tile(Coords coords, BoardRoad.Kind road, int exits, int level, BoardScene.Surface family) {
-        var base = BoardSurfaceBlendTest.tile(coords, family, level, -1, exits);
-        return new BoardScene.Tile(coords, level, -1, false, exits, family, base.ground(), null, null, null,
+        return new BoardScene.Tile(coords, level, -1, false, exits, family, null, null,
               List.of(), List.of(), BoardLiquid.NONE, null, true, road);
     }
 
@@ -485,11 +484,12 @@ class BoardRoadTest {
                 assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve special road artwork " + fluff);
             }
             hex.removeTerrain(Terrains.ROAD_FLUFF);
-            for (int special : new int[] { Terrains.RUBBLE, Terrains.WATER }) {
-                hex.addTerrain(new Terrain(special, 1));
-                assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve unsupported combination " + special);
-                hex.removeTerrain(special);
-            }
+            hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
+            assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve the unsupported combination with rubble");
+            hex.removeTerrain(Terrains.RUBBLE);
+            hex.addTerrain(new Terrain(Terrains.WATER, 0));
+            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "A road through water lies on its bed");
+            hex.removeTerrain(Terrains.WATER);
             hex.addTerrain(new Terrain(Terrains.ICE, 1));
             assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "The native ice material supports roads on dry ground");
             hex.removeTerrain(Terrains.ICE);

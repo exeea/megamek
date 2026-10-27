@@ -87,12 +87,12 @@ class GpuBuildingTest {
         near.id = "kit-lod0";
         far.id = "kit-lod1";
         third.id = "kit-lod2";
-        assertEquals(List.of(near), GpuBuilding.lods("kit", List.of(near, near, near)));
-        assertEquals(List.of(near, far), GpuBuilding.lods("kit", List.of(near, far, far)));
-        assertEquals(List.of(near, far, third), GpuBuilding.lods("kit", List.of(near, far, third)));
-        assertEquals(List.of(near, near, third), GpuBuilding.lods("kit", List.of(near, near, third)),
+        assertEquals(List.of(near), GpuBuilding.lods(List.of(near, near, near)));
+        assertEquals(List.of(near, far), GpuBuilding.lods(List.of(near, far, far)));
+        assertEquals(List.of(near, far, third), GpuBuilding.lods(List.of(near, far, third)));
+        assertEquals(List.of(near, near, third), GpuBuilding.lods(List.of(near, near, third)),
               "A missing middle level keeps LOD0 until the third level's distance threshold");
-        assertThrows(IllegalArgumentException.class, () -> GpuBuilding.lods("kit", List.of(far, far, far)));
+        assertThrows(IllegalArgumentException.class, () -> GpuBuilding.lods(List.of(far, far, far)));
     }
 
     @Test
@@ -128,7 +128,7 @@ class GpuBuildingTest {
     @Test
     void shippedLightBuildingHasOneLodWithSeparateBaseAndFloor() {
         var file = new FileHandle(TilesetScenery.customBuildingFile("buildings/saxarba/building_light/building_light_00"));
-        var lods = GpuBuilding.lods(file.nameWithoutExtension(), RigidGlb.loadLods(file));
+        var lods = GpuBuilding.lods(RigidGlb.loadLods(file));
         assertEquals(1, lods.size());
         assertEquals(Set.of("base0", "floor0", "roof0"), GpuBuilding.parts(lods.getFirst()).keySet());
     }

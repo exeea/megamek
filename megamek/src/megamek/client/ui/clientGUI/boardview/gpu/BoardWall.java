@@ -59,8 +59,9 @@ final class BoardWall {
     static void reload() { ConnectedKit.reload(); }
 
     private static ConnectedKit.Kit kit(Family family, String name) {
-        File root = new File(Configuration.dataDir(), "models/buildings");
-        return ConnectedKit.kit(new File(root, "walls/" + family.folder + "/" + name + ".glb"), root.toPath());
+        File models = new File(Configuration.dataDir(), "models");
+        // Textures may be the board's shared materials (the light walls' corrugated sheets).
+        return ConnectedKit.kit(new File(models, "buildings/walls/" + family.folder + "/" + name + ".glb"), models.toPath());
     }
 
     /** Derived from the captured board; shared by CPU clearance, picking and the GPU model cache. */

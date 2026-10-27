@@ -307,7 +307,7 @@ final class BoardRelief {
         boolean liquid = tile.liquid().present();
         boolean road = !liquid && BoardRoad.carriageway(tile);
         // Ground a road only approaches is natural ground too: its graded mesh follows the same rim.
-        boolean shaped = !tile.backdrop().present()
+        boolean shaped = !tile.backdrop().present() && !BoardFeatures.shaft(tile)
               && (liquid || road || tile.wayExits() == 0 && tile.road() == BoardRoad.Kind.NONE);
         BoardScene.Surface family = liquid ? waterFamily(scene, tile) : tile.surface();
         return new Site(tile.coords(), tile.groundLevel(), shaped, shaped && tile.detailedGround(), family.ordinal(),
@@ -3402,7 +3402,7 @@ final class BoardRelief {
     /**
      * Sparse field cover: loose stones and low shrubs on open ground, from the hex's own seed and outside the unit
      * anchor. Hexes with features of their own (woods, buildings, rubble) keep only those, and biomes their own cover:
-     * tundra's dwarf shrubs grow with the grass (GpuGroundCover). Placed on the finished top, after the road banks have
+     * tundra's tussocks stand with the foliage (BoardScatter). Placed on the finished top, after the road banks have
      * eased it, so each stands whole on the ground.
      */
     void field(List<BoardSurface.Face> destination) {

@@ -62,6 +62,7 @@ final class GpuAssets implements Disposable {
     private LavaEmission lavaEmission;
     private final Map<String, Sculpt> sculpts = new HashMap<>();
     private TerrainArrays terrainArrays;
+    private MaterialArrays tundraCarpets;
     private float[] roadRelief;
     private MaterialArrays roadArray;
     private Ice ice;
@@ -215,6 +216,30 @@ final class GpuAssets implements Disposable {
     private static String sculptName(String name) { return "terrain/surfaces/" + name; }
 
     /**
+     * The earth-tundra carpets, dry then wet: exported larger than the sculpt grid for their long repeat, they have their
+     * own full-size arrays ({@link #tundraCarpets}). The sculpt arrays keep a copy at their grid, for the carpets'
+     * finish and means, which never widens it.
+     */
+    static final List<String> TUNDRA_CARPETS = List.of("tundra-ground", "tundra-ground-variant");
+
+    /** The earth-tundra carpets' colour/height and normal/AO layers at their exported size, dry then wet. */
+    MaterialArrays tundraCarpets() {
+        if (tundraCarpets == null) {
+            var layers = new ArrayList<Layer>();
+            for (String name : TUNDRA_CARPETS) {
+                String material = sculptName(name);
+                layers.add(layer(material, GpuMaterialMaps.colorLayout(material)));
+                layers.add(layer(material, GpuMaterialMaps.normalLayout(material)));
+            }
+            tundraCarpets = repeatingArray(layers, 2);
+        }
+        return tundraCarpets;
+    }
+
+    /** A layer resampled to the array's grid, whatever its own size. */
+    private static Layer fitted(Layer layer) { return new Layer(1, 1, layer.pixels()); }
+
+    /**
      * The finish ({@link #authoredFinish}) of every board material the terrain draws from arrays: sculpted surfaces, then
      * from {@code firstRoad} on the road materials, in the given stable order of material names. Its layers follow the
      * sculpt normal/AO layers in the sculpt data array ({@link #sculptArray}), raw RGBA8, so the terrain's programs read
@@ -261,8 +286,11 @@ final class GpuAssets implements Disposable {
         for (String name : names) {
             String material = sculptName(name);
             sculptTile(name);
-            layers.add(layer(material, GpuMaterialMaps.colorLayout(material)));
-            layers.add(layer(material, GpuMaterialMaps.normalLayout(material)));
+            Layer color = layer(material, GpuMaterialMaps.colorLayout(material));
+            Layer normal = layer(material, GpuMaterialMaps.normalLayout(material));
+            boolean carpet = TUNDRA_CARPETS.contains(name);
+            layers.add(carpet ? fitted(color) : color);
+            layers.add(carpet ? fitted(normal) : normal);
         }
         int firstRoad = names.size(), count = materials.size();
         float[] surface = new float[count * 4], tint = new float[count * 4], glow = new float[count * 3];
@@ -278,8 +306,10 @@ final class GpuAssets implements Disposable {
             System.arraycopy(finish.glow(), 0, glow, index * 3, 3);
             surfaceLayers[index] = finish.map() == null ? -1 : surfaces.size();
             emissionLayers[index] = finish.emission() == null ? -1 : emissions.size();
-            // A road material's maps take the sculpt grid; only the sculpted surfaces' maps may widen it.
+            // A road material's maps take the sculpt grid; only the sculpted surfaces' maps may widen it, the tundra
+            // carpets' excepted.
             boolean sculpted = index < firstRoad;
+            boolean widens = sculpted && !TUNDRA_CARPETS.contains(names.get(index));
             if (sculpted) {
                 var parallax = GpuMaterialMaps.modelFinish(definition(materials.get(index)));
                 if (parallax.heightmap() != null) {
@@ -288,12 +318,12 @@ final class GpuAssets implements Disposable {
                 }
             }
             if (finish.map() != null) {
-                surfaces.add(new Layer(sculpted ? finish.width() : 1, sculpted ? finish.height() : 1,
+                surfaces.add(new Layer(widens ? finish.width() : 1, widens ? finish.height() : 1,
                       () -> rgbaPixmap(finish.map(), finish.width(), finish.height())));
             }
             if (finish.emission() != null) {
                 FileHandle map = new FileHandle(finish.emission());
-                int[] size = sculpted ? GpuMaterialMaps.size(finish.emission()) : new int[] { 1, 1 };
+                int[] size = widens ? GpuMaterialMaps.size(finish.emission()) : new int[] { 1, 1 };
                 emissions.add(new Layer(size[0], size[1], () -> GpuColorTexture.decode(map)));
             }
         }
@@ -602,17 +632,21 @@ final class GpuAssets implements Disposable {
      * per set of colours with its colour slots replaced ({@link RigidGlb#recolour}). Objects of one colour share their
      * copy, so they still batch together. Placed objects draw the shared mesh instead ({@link #slotted}).
      */
-    Model model(String name, megamek.common.board.BoardDecoration.Colours colours) {
-        if (colours.slots().isEmpty()) { return lodModel(name, 0); }
+    Model model(String name, megamek.common.board.BoardDecoration.Colours colours) { return model(name, colours, ""); }
+
+    /** {@link #model(String, BoardDecoration.Colours)} with {@code label} written on its label materials ({@link RigidGlb#label}). */
+    Model model(String name, megamek.common.board.BoardDecoration.Colours colours, String label) {
+        if (colours.slots().isEmpty() && label.isEmpty()) { return lodModel(name, 0); }
         // A copy's key cannot meet a level's name ("name-lodN").
-        return models.computeIfAbsent(name + colours.slots(), key -> {
-            // The file is decoded once; each set of colours recolours a copy of its vertices for its own GPU mesh.
+        return models.computeIfAbsent(name + colours.slots() + "#" + label, key -> {
+            // The file is decoded once; each set of colours and label changes a copy of its vertices for its own GPU mesh.
             ModelData data = decoded(name).getFirst();
             var mesh = data.meshes.first();
             float[] vertices = mesh.vertices;
             mesh.vertices = vertices.clone();
             try {
                 RigidGlb.recolour(data, colours);
+                RigidGlb.label(data, label);
                 return createModel(data);
             } finally { mesh.vertices = vertices; }
         });
@@ -1065,9 +1099,9 @@ final class GpuAssets implements Disposable {
         return liquids.computeIfAbsent(source, this::loadLiquid);
     }
 
-    /** A file of the board tileset, such as a liquid animation the board plays and the minimap shows. */
+    /** A file of the Classic tileset, such as a liquid animation the board plays and the minimap shows. */
     static File tilesetFile(String path) {
-        return new File(Configuration.dataDir(), "models/board/tileset/" + path);
+        return new File(Configuration.dataDir(), "models/board/classic/" + path);
     }
 
     private Animation<Texture> loadLiquid(BoardLiquid.Textures source) {
@@ -1090,9 +1124,13 @@ final class GpuAssets implements Disposable {
                     int base = image.rgba(pixel), foamPixel = overlay == null ? 0 : overlay.rgba(pixel);
                     float alpha = (foamPixel & 255) / 255f;
                     for (int shift = 24; shift >= 8; shift -= 8) {
-                        float a = GpuColor.linear((base >>> shift & 255) / 255f);
-                        float b = GpuColor.linear((foamPixel >>> shift & 255) / 255f);
-                        pixels[pixel * 4 + (24 - shift) / 8] = a + (b - a) * alpha;
+                        pixels[pixel * 4 + (24 - shift) / 8] = GpuColor.linear((base >>> shift & 255) / 255f);
+                    }
+                    // A themed water takes its tone before its foam, which stays white.
+                    if (source.tone() != null) { tone(pixels, pixel * 4, source.tone()); }
+                    for (int shift = 24; shift >= 8; shift -= 8) {
+                        int at = pixel * 4 + (24 - shift) / 8;
+                        pixels[at] += (GpuColor.linear((foamPixel >>> shift & 255) / 255f) - pixels[at]) * alpha;
                     }
                     pixels[pixel * 4 + 3] = (base & 255) / 255f;
                 }
@@ -1106,6 +1144,14 @@ final class GpuAssets implements Disposable {
             frames.forEach(Texture::dispose);
             throw error;
         }
+    }
+
+    /** A themed water's pixel at {@code at}: the plain water's linear luminance in its {@link BoardLiquid.Tone}. */
+    private static void tone(float[] pixels, int at, BoardLiquid.Tone tone) {
+        float luminance = .2126f * pixels[at] + .7152f * pixels[at + 1] + .0722f * pixels[at + 2];
+        pixels[at] = Math.min(1, luminance * tone.red());
+        pixels[at + 1] = Math.min(1, luminance * tone.green());
+        pixels[at + 2] = Math.min(1, luminance * tone.blue());
     }
 
     static Animation<BoardScene.Pixels> readWater(File file) {
@@ -1241,6 +1287,7 @@ final class GpuAssets implements Disposable {
         coverages.clear();
         catalog = null;
         if (terrainArrays != null) { terrainArrays.arrays().dispose(); terrainArrays = null; }
+        if (tundraCarpets != null) { tundraCarpets.dispose(); tundraCarpets = null; }
         roadRelief = null;
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }
         if (ice != null) { ice.maps().dispose(); ice = null; }

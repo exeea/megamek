@@ -272,7 +272,7 @@ class BoardUltraSublevelTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 Coords at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(source.apply(at), artwork, null, pool,
                       c -> c.getX() < 0 || c.getY() < 0 || c.getX() >= width || c.getY() >= height ? null : source.apply(c)));
             }

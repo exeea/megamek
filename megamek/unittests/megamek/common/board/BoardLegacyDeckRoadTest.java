@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
  * b13 ways: a legacy board's decks get the road the 3D board drew on them before decks stored their roads, once, in the
  * conversion: a built span the best road that meets it, over all its exits; one no road meets an Alley road, unless it
  * is a rail bridge; a natural span nothing. Its bridge exits are written out, so a deck drawn later never joins it by
- * itself. A native board is taken as it is.
+ * itself, and a one-sided link between a road and a deck within a level of it joins. A native board is taken as it is.
  */
 class BoardLegacyDeckRoadTest {
     /** A N-S span of two decks over water, 0102 and 0103, between the banks 0101 and 0104 (level and tokens given). */
@@ -58,9 +58,48 @@ class BoardLegacyDeckRoadTest {
 
     @Test
     void onlyARoadThatMeetsTheDeckAtItsHeightVotes() {
-        // A paved road beside the bridge (NE-SW, no exit toward it) and one two levels below the deck do not meet it.
-        assertEquals(3, deckRoad(span(0, "road:1:18", "road:3", false)));
+        // A paved road two levels below the deck does not meet it.
         assertEquals(3, deckRoad(span(-2, "road:1", "road:3", false)));
+    }
+
+    @Test
+    void aRoadThroughAFordMeetsTheDeck() {
+        // As Flooded City's streets: depth-0 water, whose road lies on its bed.
+        assertEquals(1, deckRoad(span("road:1;water:0", "road:3")));
+    }
+
+    @Test
+    void aMapsOneSidedLinksBetweenARoadAndADeckWithinALevelJoin() {
+        // The deck leads onto a road (NE-SW) whose written exits miss it: the road leads back, and votes.
+        Board beside = span(0, "road:1:18", "road:3", false);
+        assertEquals(18 | 1 << 3, beside.getHex(0, 0).getTerrain(Terrains.ROAD).getExits());
+        assertEquals(1, deckRoad(beside));
+        // A road leads into a deck that does not lead back to it: the deck leads back, and the road votes (an Alley
+        // otherwise: pavement is no road).
+        Board into = BoardLoader.initializeBoard("""
+              size 1 4
+              hex 0101 0 "pavement:1" ""
+              hex 0102 0 "water:1;bridge:1:09;bridge_cf:40;bridge_elev:0" ""
+              hex 0103 0 "water:1;bridge:1:01;bridge_cf:40;bridge_elev:0" ""
+              hex 0104 0 "road:1:01" ""
+              end""");
+        BoardSceneryLayouts.convert(into);
+        assertEquals(9, into.getHex(0, 2).getTerrain(Terrains.BRIDGE).getExits());
+        assertEquals(1, deckRoad(into));
+    }
+
+    @Test
+    void aSpanCarriesTheRoadTheMapLaysOnItsHexesOverWaterAndWithItsDeckOnTheGround() {
+        // As Rural vs Urban: decks on the ground at both ends, raised over the water, the map's paved road on each.
+        Board board = BoardLoader.initializeBoard("""
+              size 1 4
+              hex 0101 0 "bridge:1:08;road:1;bridge_cf:40;bridge_elev:0" ""
+              hex 0102 -2 "water:2;bridge:1:09;road:1;bridge_cf:40;bridge_elev:2" ""
+              hex 0103 -2 "water:2;bridge:1:09;road:1;bridge_cf:40;bridge_elev:2" ""
+              hex 0104 0 "bridge:1:01;road:1;bridge_cf:40;bridge_elev:0" ""
+              end""");
+        BoardSceneryLayouts.convert(board);
+        assertEquals(1, deckRoad(board), "Paved, not the Alley of a span no road meets");
     }
 
     @Test

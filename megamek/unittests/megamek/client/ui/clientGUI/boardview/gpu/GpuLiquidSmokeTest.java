@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
@@ -57,7 +56,7 @@ class GpuLiquidSmokeTest {
     private static void checkInterpolation(GpuSceneTestOutput surface) {
         BoardScene original = scene();
         List<BoardScene.Tile> flat = original.tiles().stream()
-              .map(tile -> tile(tile.coords(), 0, tile.liquid(), tile.ground(), tile.frozen())).toList();
+              .map(tile -> tile(tile.coords(), 0, tile.liquid(), tile.frozen())).toList();
         BoardScene scene = new BoardScene(0, original.width(), original.height(), flat, List.of(), List.of(), -1, "", List.of());
         GpuTerrain gif = new GpuTerrain(false), shader = new GpuTerrain(true);
         try {
@@ -136,8 +135,8 @@ class GpuLiquidSmokeTest {
             Coords changed = pool(1);
             var tiles = new ArrayList<>(scene.tiles());
             BoardScene.Tile old = scene.tile(changed);
-            tiles.set(changed.getX() * scene.height() + changed.getY(), tile(changed, old.elevation(), BoardLiquid.WATER,
-                  old.ground(), false));
+            tiles.set(changed.getX() * scene.height() + changed.getY(), tile(changed, old.elevation(),
+                  BoardLiquid.WATER, false));
             BoardScene edited = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
             camera.setIsometric(false);
             camera.fit(scene);
@@ -268,11 +267,6 @@ class GpuLiquidSmokeTest {
     private static Coords pool(int family) { return new Coords(1 + (family % 3) * 3, 1 + (family / 3) * 3); }
 
     private static BoardScene scene() {
-        BufferedImage gray = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < 72; y++) {
-            for (int x = 0; x < 84; x++) { gray.setRGB(x, y, 0xff888888); }
-        }
-        BoardScene.Pixels ground = new BoardScene.Pixels(gray);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 10; y++) {
@@ -289,14 +283,14 @@ class GpuLiquidSmokeTest {
                         frozen = family == 8;
                     }
                 }
-                tiles.add(tile(coords, elevation, liquid, ground, frozen));
+                tiles.add(tile(coords, elevation, liquid, frozen));
             }
         }
         return new BoardScene(0, 9, 10, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
-    private static BoardScene.Tile tile(Coords coords, int elevation, BoardLiquid liquid, BoardScene.Pixels ground, boolean frozen) {
+    private static BoardScene.Tile tile(Coords coords, int elevation, BoardLiquid liquid, boolean frozen) {
         return new BoardScene.Tile(coords, elevation, liquid.present() && !liquid.molten() ? 2 : -1, frozen, 0,
-              BoardScene.Surface.ROCK, ground, null, null, null, List.of(), List.of(), liquid);
+              BoardScene.Surface.ROCK, null, null, List.of(), List.of(), liquid);
     }
 }

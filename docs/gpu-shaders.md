@@ -190,7 +190,9 @@ frames are bit-identical with and without the pre-pass; on an Iris Xe, `GL_EQUAL
 edges and tufts (5 to 2133 of a 1080p view's 2.07 million) and on cliff relief (0 to 5). On an Iris Xe at 1080p the 40
 by 40 forest's middle view draws in 32 ms instead of 53.5 ms; the cliff chunks take the Box Canyon's middle view from
 19.2 to 13.5 ms and the calibration board's from 22.2 to 20.7 ms, leave the Jotun Mountains' unchanged within its
-rounds' spread of about 1 ms, and the 48 by 48 city and Grassland 3 have none. `GpuDepthPrepassSmokeTest` checks the
+rounds' spread of about 1 ms, and the 48 by 48 city and Grassland 3 have none. Grass and the crops' plants stay out: they
+shade about 1.55 fragments per visible pixel, and on an Iris Xe their twins saved about 1 ms on the Farmland board's views
+and cost about 1 ms on Mesa City's grass. `GpuDepthPrepassSmokeTest` checks the
 parity and shader edits; `GpuDepthPrepassBenchmarkSmokeTest` times it.
 
 Ambient occlusion (`GpuAmbientOcclusion`; the Display page's Ambient occlusion, off until switched on, and its

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -110,18 +109,12 @@ class BoardPlaneConnectionsTest {
     }
 
     static BoardScene scene(Coords raised, int level) {
-        BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        var graphics = image.createGraphics();
-        graphics.setColor(new Color(155, 190, 110));
-        graphics.fillRect(0, 0, 84, 72);
-        graphics.dispose();
-        var pixels = new BoardScene.Pixels(image);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? level : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

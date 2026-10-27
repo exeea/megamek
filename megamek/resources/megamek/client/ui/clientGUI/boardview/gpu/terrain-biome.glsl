@@ -43,6 +43,28 @@ vec3 biomeSoilNormal(MaterialProjection p, vec3 face, float mixer) {
     return normalize(mix(steep, upNormal(biomePlanar(u_biomeSoilLayer + 1.0, p, mixer, true).rgb, face), p.lying));
 }
 
+// BoardFields in GLSL: the field code of the parcel at p (metres), and the metres from p to that parcel's nearest edge.
+float fieldStripEdge(int strip) { return 90.0 * (float(strip) + .5 * (biomeHash(ivec2(strip * 7 + 3, 41)) - .5)); }
+float fieldCutEdge(int strip, int cut, float spacing) {
+    return spacing * (float(cut) + .5 * (biomeHash(ivec2(strip * 5 + 2, cut * 3 - 7)) - .5));
+}
+int fieldParcel(vec2 p, out float edge) {
+    int strip = int(floor(p.x / 90.0));
+    if (p.x < fieldStripEdge(strip)) strip--;
+    else if (p.x >= fieldStripEdge(strip + 1)) strip++;
+    float normalX = biomeHash(ivec2(strip * 5 - 2, 17)) < .5 ? -.5 : .5;
+    float spacing = 75.0 * (.75 + .5 * biomeHash(ivec2(strip * 3 - 1, 9)));
+    float c = p.x * normalX + p.y * .8660254;
+    int cut = int(floor(c / spacing));
+    if (c < fieldCutEdge(strip, cut, spacing)) cut--;
+    else if (c >= fieldCutEdge(strip, cut + 1, spacing)) cut++;
+    edge = min(min(p.x - fieldStripEdge(strip), fieldStripEdge(strip + 1) - p.x),
+          min(c - fieldCutEdge(strip, cut, spacing), fieldCutEdge(strip, cut + 1, spacing) - c));
+    float pick = biomeHash(ivec2(strip * 13 + 1, cut * 7 - 3));
+    int crop = pick < .5 ? 0 : 1;
+    return crop | (biomeHash(ivec2(strip * 3 + 11, cut * 5 + 1)) < .5 ? 0 : normalX > 0.0 ? 1 : 2) << 1;
+}
+
 void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight, float sand,
       float deckMud, float region, inout vec3 color, inout vec3 normal, inout float cavity, inout Finish finish,
       inout float grass, inout vec3 bounce, out float pool, out float damp) {
@@ -95,22 +117,34 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     float fine = biomeNoise(world.xy * 12.0);
     float grain = mix(fine, .5, smoothstep(.03, .15, pixelMetres));
     if (fringe.x > 0.0) {
-        vec2 direction = vec2(.9396926, .3420201);
+        // Each parcel has its crop, wheat or maize, and its row direction (BoardFields). Parcels meet at grass
+        // headlands, their width kept to a pixel at least.
+        float headland;
+        int code = fieldParcel(world.xy, headland);
+        bool maize = (code & 1) == 1;
+        float soft = max(.4, pixelMetres);
+        float tilled = smoothstep(1.2 - soft, 1.2 + soft, headland);
+        float angle = float(code >> 1) * 1.0471976;
+        vec2 direction = vec2(cos(angle), sin(angle));
         float row = dot(world.xy, direction) / 1.15;
         float rowWidth = (abs(dot(worldDx.xy, direction)) + abs(dot(worldDy.xy, direction))) / 1.15;
         float visible = 1.0 - smoothstep(.25, .8, rowWidth);
         float ridge = .5 + .5 * cos(row * 6.2831853);
-        float canopy = mix(.60, smoothstep(.22, .70, ridge) * mix(.78, 1.0, grain), visible);
+        // Between the plants the ground is tilled earth. As they fade (cropPlants), it takes the stand's own colour from
+        // above (terrain-crops.glsl), under the billboards too, which fade later. The hex's projected size is the
+        // plants' own, across the screen, where a view tilting away does not foreshorten the ground. Standing crops
+        // keep clear of the headland by their own reach.
+        float canopy = (1.0 - cropPlants(CROP_HEX_METRES / max(length(worldDx.xy), 1e-4)))
+              * smoothstep(1.6 - soft, 2.8 + soft, headland);
         // The broad field margin is weathered cultivated earth; rows/canopy stay on their supported ground.
         float planted = cover.x / max(fringe.x, .0001);
         vec4 soil = biomePlanar(u_biomeSoilLayer, projection, broad, false);
-        vec3 earth = mix(toLinear(vec3(.20, .14, .075)), toLinear(vec3(.33, .255, .14)), soil.a) * mix(.78, 1.20, grain);
-        // Under nearby plants the rows are in their shade. Where plants dissolve at distance, the ground takes the crop
-        // artwork's own range, from its leaves to its golden heads, so a field keeps its colour.
-        vec3 crop = mix(mix(toLinear(vec3(.30, .39, .09)), toLinear(vec3(.49, .46, .18)), broad * .7),
-              mix(toLinear(vec3(.40, .44, .17)), toLinear(vec3(.58, .54, .25)), broad * .7), 1.0 - visible) * mix(.85, 1.15, grain);
+        vec3 earth = cropEarth(soil.a) * mix(.78, 1.20, grain);
+        float incline = viewDirection().z;
+        vec3 crop = cropCanopy(maize, broad, sqrt(max(0.0, 1.0 - incline * incline))) * mix(.92, 1.08, grain);
         float amount = materialWeights(vec4(1.0 - fringe.x, fringe.x, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
+        amount *= tilled;
         color = mix(color, mix(earth, crop, canopy * planted * .95), amount);
         finish = mixFinish(finish, planarFinish(u_biomeSoilLayer, projection.top, projection.topGradient, u_biomeSoilTile,
               broad), amount);
@@ -119,8 +153,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
             soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
             normal = normalize(mix(normal, soilNormal, amount));
         }
-        normal = normalize(normal + vec3(direction * sin(row * 6.2831853) * .30 * visible * cover.x, 0.0));
-        cavity *= 1.0 - cover.x * (1.0 - ridge) * .30 * visible;
+        normal = normalize(normal + vec3(direction * sin(row * 6.2831853) * .3 * visible * cover.x * tilled, 0.0));
+        cavity *= 1.0 - cover.x * tilled * (1.0 - ridge) * .30 * visible;
         grass *= 1.0 - amount;
         bounce = mix(bounce, vec3(.17, .15, .065), amount);
     }

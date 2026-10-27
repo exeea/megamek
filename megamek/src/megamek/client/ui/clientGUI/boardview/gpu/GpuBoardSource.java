@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -44,6 +45,7 @@ import megamek.client.ui.clientGUI.tooltip.HexTooltip;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
+import megamek.client.ui.tileset.UnitModelEquipment;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.TagInfo;
@@ -65,6 +67,7 @@ import megamek.common.moves.MovePath;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceManager;
+import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
 import megamek.common.units.BulldozerRules;
 import megamek.common.units.Entity;
@@ -101,9 +104,15 @@ final class GpuBoardSource implements BoardSource {
     private volatile GpuEditorPreview.Data workGhosts = GpuEditorPreview.Data.NONE;
     private List<TacticalMark> workMarks = List.of();
     private List<BoardScene.Tile> workTiles = List.of();
-    /** The scene's tiles, {@link #tiles} with dug-in platoons' trenches, and what they were made from (EDT). */
-    private List<BoardScene.Tile> trenchedTiles = List.of(), trenchedFrom = List.of();
-    private Set<Coords> trenched = Set.of();
+    private Map<Coords, Integer> workDigging = Map.of();
+    /** The scene's tiles, {@link #tiles} with what marks set on the ground, and what they were made from (EDT). */
+    private List<BoardScene.Tile> markedTiles = List.of(), markedFrom = List.of();
+    private List<TacticalMark> groundMarks = List.of();
+    /**
+     * EDT: the fighting holes of each hex its platoons are dug in: the formation slots their figures stood in when they
+     * dug in ({@link InfantryVisual#slots}), kept while they stay dug in, so a casualty leaves its hole empty.
+     */
+    private Map<Coords, Integer> holes = Map.of();
     private final UnitCamouflage camouflage = new UnitCamouflage();
     private final GpuReportLog reports = new GpuReportLog();
     private final GpuBattleStatus battleStatus = new GpuBattleStatus();
@@ -290,7 +299,7 @@ final class GpuBoardSource implements BoardSource {
                 Entity old = event.getOldEntity();
                 UnitLocation start = old == null || old.getPosition() == null ? null
                       : new UnitLocation(old.getId(), old.getPosition(), old.getFacing(), old.getElevation(),
-                            old.getBoardId(), old.getProneCause(), UnitLocation.Form.capture(old), old.getFallSide(), old.isHullDown());
+                            old.getBoardId(), proneCause(old), UnitLocation.Form.capture(old), old.getFallSide(), old.isHullDown());
                 int startAltitude = old == null ? 0 : old.getAltitude();
                 Entity takeoff = old == null ? event.getEntity() : old;
                 int jumpMP = type == EntityMovementType.MOVE_JUMP ? takeoff.getAnyTypeMaxJumpMP() : 0;
@@ -384,6 +393,20 @@ final class GpuBoardSource implements BoardSource {
                     || expected.getClientgui().getCurrentBoardState().orElse(null) == expected);
     }
 
+    /**
+     * How a unit lies: its own prone cause, or voluntarily prone for infantry hitting the deck while that is its cover.
+     * Dug in, or in a fortified hex, it has the +2 of that cover instead, never both (TO:AR p.106): it mans its holes or
+     * trench.
+     */
+    private megamek.common.units.ProneCause proneCause(Entity entity) {
+        var hex = view.game.getHexOf(entity);
+        return entity instanceof megamek.common.units.Infantry infantry && infantry.isHitTheDeck()
+              && infantry.getDugIn() != megamek.common.units.Infantry.DUG_IN_COMPLETE
+              && (hex == null || !hex.containsTerrain(Terrains.FORTIFIED))
+              && entity.getProneCause() == megamek.common.units.ProneCause.NONE
+              ? megamek.common.units.ProneCause.VOLUNTARY : entity.getProneCause();
+    }
+
     private void captureMovement(int entityId, UnitLocation start, List<UnitLocation> path, EntityMovementType type,
             int jumpMP, int startAltitude, int movementMP) {
         if (closed || path.isEmpty()) {
@@ -421,6 +444,11 @@ final class GpuBoardSource implements BoardSource {
             if (points.isEmpty() || !points.getLast().equals(point)) {
                 points.add(point);
             }
+        }
+        // An infantry path carries no posture: troops that hit the deck lie down where their movement ends.
+        if (!points.isEmpty() && entity instanceof megamek.common.units.Infantry
+              && proneCause(entity) != points.getLast().proneCause()) {
+            points.add(points.getLast().withProneCause(proneCause(entity)));
         }
         // Older paths carry no conversion observations. Show their known final conversion at arrival.
         var finalForm = UnitLocation.Form.capture(entity);
@@ -537,13 +565,20 @@ final class GpuBoardSource implements BoardSource {
             return;
         }
         var usedImages = new IdentityHashMap<Image, Boolean>();
-        var firing = unit(attacker, -1, result.attacker().coords(), false, usedImages);
+        // A building drawn hex by hex fires from the hex that holds the weapon: its roof turret or wall casemate.
+        int firingPart = firingPart(attacker, result.equipmentIndex());
+        var firing = unit(attacker, firingPart,
+              firingPart < 0 ? result.attacker().coords() : attacker.getSecondaryPositions().get(firingPart), false, usedImages);
         if (result.shot() != null && result.shot().launch() != null) {
             firing = inForm(firing, attacker, unitWaypoint(attacker, result.attacker().coords(),
                   result.attacker().elevation(), result.attacker().facing(), attacker.getAltitude(), result.attacker().form()),
                   result.attacker().form());
         }
-        var receiving = target == null ? null : unit(target, -1, result.target().coords(), false, usedImages);
+        // A building drawn hex by hex is hit on the armed hex shot at; a shot at an unarmed hex has only its impact point.
+        boolean targetByHex = target != null && drawnByHex(target);
+        int receivingPart = targetByHex ? armedPart(armedHexes(target), result.target().coords()) : -1;
+        var receiving = target == null || targetByHex && receivingPart < 0 ? null
+              : unit(target, receivingPart, result.target().coords(), false, usedImages);
         if (frame != null) {
             var observed = frame.scene().units().stream().collect(Collectors.toMap(BoardScene.Unit::id,
                   java.util.function.Function.identity(), (first, second) -> first));
@@ -593,10 +628,13 @@ final class GpuBoardSource implements BoardSource {
     private synchronized void publishScene(Frame next, boolean detectGear) {
         if (next.scene() == null) { pendingEvents.clear(); frame = next; return; }
         if (frame != null && frame.scene() == null) { frame = null; }
+        var lifts = frame != null && frame.boardGeneration() == next.boardGeneration()
+              ? BoardScene.TileTransition.of(frame.scene(), next.scene()) : null;
         if (detectGear && frame != null && frame.boardGeneration() == next.boardGeneration()) {
+            // A unit drawn in parts moves as one: its first drawn part stands for it, never another part's hex.
             Map<Integer, BoardScene.Unit> previous = new HashMap<>();
             frame.scene().units().stream().filter(unit -> !unit.sensorContact())
-                  .forEach(unit -> previous.put(unit.id(), unit));
+                  .forEach(unit -> previous.putIfAbsent(unit.id(), unit));
             for (var old : previous.values()) {
                 Entity entity = view.game.getEntity(old.id());
                 if (entity != null && (!visible(entity) || sensorContact(entity))) {
@@ -605,6 +643,7 @@ final class GpuBoardSource implements BoardSource {
             }
             for (var unit : next.scene().units()) {
                 var old = previous.get(unit.id());
+                if (old != null && old.part() != unit.part()) { continue; }
                 if (UnitConversion.changes(old, unit)) {
                     queueAnimation(new BoardScene.Conversion(next.scene().boardId(), old, unit));
                 }
@@ -616,7 +655,7 @@ final class GpuBoardSource implements BoardSource {
                           List.of(old.location(), unit.location()), EntityMovementType.MOVE_SAFE_THRUST, 0,
                           entity == null ? 0 : movementMP(entity, EntityMovementType.MOVE_SAFE_THRUST), unit));
                 } else if (old != null && old.attachment() == null && unit.attachment() == null
-                      && UnitMotion.forcedChange(old, unit)) {
+                      && UnitMotion.forcedChange(old, unit) && !rides(lifts, old, unit)) {
                     // No movement path accompanied this authoritative update (push, domino displacement, or fall).
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
                           List.of(old.location(), unit.location()), EntityMovementType.MOVE_NONE, 0, 0, unit));
@@ -626,11 +665,23 @@ final class GpuBoardSource implements BoardSource {
         if (frame != null && frame.boardGeneration() == next.boardGeneration()) {
             queueAttachments(frame.scene(), next.scene());
         }
+        if (lifts != null) { queueAnimation(lifts); }
         if (frame == null || frame.boardGeneration() != next.boardGeneration() || !next.scene().samePlaybackState(frame.scene())
               || (!pendingEvents.isEmpty() && !(pendingEvents.getLast() instanceof BoardScene.SceneUpdate))) {
             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
         }
         frame = next;
+    }
+
+    /**
+     * A unit standing on an elevator the server moved keeps its place on the platform: it rides it up or down
+     * ({@link BoardScene.TileTransition}), no forced move.
+     */
+    private static boolean rides(BoardScene.TileTransition lifts, BoardScene.Unit before, BoardScene.Unit after) {
+        var from = before.location();
+        var to = after.location();
+        return lifts != null && from.coords().equals(to.coords()) && lifts.moves(to.coords())
+              && !UnitMotion.changesPosture(from, to);
     }
 
     /** Close carrier movement at its destination before releasing any of its exterior passengers. */
@@ -907,7 +958,10 @@ final class GpuBoardSource implements BoardSource {
             boolean sensor = sensorContact(entity);
             boolean wholeModel = !sensor && GpuUnitModels.ENABLED
                   && MMStaticDirectoryManager.getMekTileset().modelFor(entity, -1) != null;
-            if (entity.getSecondaryPositions().isEmpty() || sensor || wholeModel) {
+            if (wholeModel && drawnByHex(entity)) {
+                // An armed building drawn hex by hex shows each hex that holds weapons: its roof turret and casemates.
+                armedHexes(entity).forEach((part, coords) -> units.add(unit(entity, part, coords, false, usedImages)));
+            } else if (entity.getSecondaryPositions().isEmpty() || sensor || wholeModel) {
                 units.add(unit(entity, -1, entity.getPosition(), sensor, usedImages));
             } else {
                 entity.getSecondaryPositions().forEach((part, coords) ->
@@ -933,7 +987,14 @@ final class GpuBoardSource implements BoardSource {
             var live = units.stream().map(BoardScene.Unit::id).collect(Collectors.toSet());
             view.getWrecks().stream()
                   .filter(entity -> !live.contains(entity.getId()) && visible(entity) && !sensorContact(entity))
-                  .forEach(entity -> units.add(wreck(entity, usedImages)));
+                  .forEach(entity -> {
+                      // A building drawn hex by hex leaves a wreck on each armed hex.
+                      if (drawnByHex(entity)) {
+                          armedHexes(entity).forEach((part, coords) -> units.add(wreck(entity, part, coords, usedImages)));
+                      } else {
+                          units.add(wreck(entity, -1, entity.getPosition(), usedImages));
+                      }
+                  });
         }
         if (GpuUnitModels.ENABLED) {
             var shown = units.stream().map(BoardScene.Unit::id).collect(Collectors.toSet());
@@ -973,7 +1034,7 @@ final class GpuBoardSource implements BoardSource {
         GpuMovePlan.Snapshot move = moves.capture(panel, hover, pointer.pointedZ());
         Point light = view.getTerrainLightDirection();
         var rulerSnapshot = los.capture();
-        BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), trenchedTiles(board), units,
+        BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), markedTiles(board, units), units,
               List.of(), actorId, view.game.getPhase().localizedName(), commands,
               light == null || light.x == 0 && light.y == 0 ? null : new BoardScene.Light(light.x, -light.y),
               firingLines(), view.getWeaponRanges().stream().map(range -> new BoardScene.RangeBorder(
@@ -984,7 +1045,7 @@ final class GpuBoardSource implements BoardSource {
                     TacticalStyle.rangeColor(label.bracket()).getRGB(),
                     TacticalStyle.rangeText(label.bracket()))).toList(), fieldOfView,
               view.electronicWarfare(), designations(), starShells());
-        captureWorkGhosts(board);
+        captureWorkGhosts(board, units);
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);
@@ -1021,44 +1082,86 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * EDT: the scene's tiles: {@link #tiles} with a trench on every hex a platoon is dug in, the same tiles while
-     * neither changes.
+     * EDT: the scene's tiles: {@link #tiles} with what the marks set on the ground, which no hex stores: a dug-in
+     * platoon's trench, the felled timber of woods being cleared by saws, cargo set down. The same tiles while none of
+     * that changes.
      */
-    private List<BoardScene.Tile> trenchedTiles(Board board) {
-        Set<Coords> dug = trenches(board, true);
-        if (tiles != trenchedFrom || !dug.equals(trenched)) {
-            List<BoardScene.Tile> next = new ArrayList<>(tiles);
-            for (Coords coords : dug) {
-                int index = coords.getX() * board.getHeight() + coords.getY();
-                next.set(index, BoardFeatures.withTrench(tiles.get(index)));
+    private List<BoardScene.Tile> markedTiles(Board board, List<BoardScene.Unit> units) {
+        List<TacticalMark> marks = view.getMarks().stream().filter(mark -> switch (mark) {
+            case TacticalMark.DugIn dugIn -> dugIn.complete() && board.contains(dugIn.coords());
+            case TacticalMark.SawClearing saw -> board.contains(saw.coords());
+            case TacticalMark.Cargo cargo -> board.contains(cargo.coords());
+            default -> false;
+        }).toList();
+        // A hex keeps the holes it was dug with, and gains those of any platoon that digs in beside them.
+        Map<Coords, Integer> dug = new HashMap<>();
+        for (TacticalMark mark : marks) {
+            if (mark instanceof TacticalMark.DugIn dugIn) {
+                dug.merge(dugIn.coords(), holes.getOrDefault(dugIn.coords(), 0) | slots(units, dugIn.coords()),
+                      (a, b) -> a | b);
             }
-            trenchedTiles = dug.isEmpty() ? tiles : List.copyOf(next);
-            trenchedFrom = tiles;
-            trenched = dug;
         }
-        return trenchedTiles;
+        boolean changed = !dug.equals(holes);
+        holes = Map.copyOf(dug);
+        if (tiles != markedFrom || !marks.equals(groundMarks) || changed) {
+            List<BoardScene.Tile> next = new ArrayList<>(tiles);
+            for (TacticalMark mark : marks) {
+                Coords coords = switch (mark) {
+                    case TacticalMark.DugIn dugIn -> dugIn.coords();
+                    case TacticalMark.SawClearing saw -> saw.coords();
+                    case TacticalMark.Cargo cargo -> cargo.coords();
+                    default -> throw new IllegalStateException(mark.toString());
+                };
+                int index = coords.getX() * board.getHeight() + coords.getY();
+                next.set(index, switch (mark) {
+                    case TacticalMark.SawClearing saw -> BoardFeatures.withSawClearing(next.get(index), saw.turnsRemaining());
+                    case TacticalMark.Cargo cargo -> BoardFeatures.withCargo(next.get(index));
+                    default -> BoardFeatures.withTrench(next.get(index), holes.get(coords));
+                });
+            }
+            markedTiles = marks.isEmpty() ? tiles : List.copyOf(next);
+            markedFrom = tiles;
+            groundMarks = marks;
+        }
+        return markedTiles;
     }
 
-    /** The hexes of the board where a platoon is dug in ({@code complete}), or digging in. */
-    private Set<Coords> trenches(Board board, boolean complete) {
-        return view.getMarks().stream().<Coords>mapMulti((mark, result) -> {
-            if (mark instanceof TacticalMark.DugIn dugIn && dugIn.complete() == complete && board.contains(dugIn.coords())) {
-                result.accept(dugIn.coords());
+    /** The hexes of the board where a platoon is digging in, with the formation slots of the figures there. */
+    private Map<Coords, Integer> digging(Board board, List<BoardScene.Unit> units) {
+        Map<Coords, Integer> digging = new HashMap<>();
+        for (TacticalMark mark : view.getMarks()) {
+            if (mark instanceof TacticalMark.DugIn dugIn && !dugIn.complete() && board.contains(dugIn.coords())) {
+                digging.put(dugIn.coords(), slots(units, dugIn.coords()));
             }
-        }).collect(Collectors.toSet());
+        }
+        return digging;
+    }
+
+    /** The formation slots the figures of the troops in sight at {@code coords} stand in ({@link InfantryVisual#slots}). */
+    private static int slots(List<BoardScene.Unit> units, Coords coords) {
+        int slots = 0;
+        for (var unit : units) {
+            if (!unit.sensorContact() && UnitAnimator.troops(unit) && unit.location().coords().equals(coords)) {
+                slots |= InfantryVisual.slots(unit.model());
+            }
+        }
+        return slots;
     }
 
     /**
      * EDT: bridges being built, hexes being fortified, rubble being cleared and trenches being dug, as the hexes will be
      * when the work is done; rebuilt when that work or the board's tiles change.
      */
-    private void captureWorkGhosts(Board board) {
+    private void captureWorkGhosts(Board board, List<BoardScene.Unit> units) {
         List<TacticalMark> work = view.getMarks().stream().filter(mark -> mark instanceof TacticalMark.BridgeBuild
               || mark instanceof TacticalMark.Fortify || mark instanceof TacticalMark.RubbleClear
               || mark instanceof TacticalMark.DugIn dugIn && !dugIn.complete()).toList();
-        if (work.equals(workMarks) && tiles == workTiles) { return; }
+        // A trench being dug shows the holes of the figures digging it.
+        Map<Coords, Integer> digging = digging(board, units);
+        if (work.equals(workMarks) && tiles == workTiles && digging.equals(workDigging)) { return; }
         workMarks = work;
         workTiles = tiles;
+        workDigging = digging;
         Map<Coords, Hex> before = new LinkedHashMap<>(), done = new LinkedHashMap<>();
         for (TacticalMark mark : work) {
             var finished = finished(board, mark);
@@ -1068,14 +1171,13 @@ final class GpuBoardSource implements BoardSource {
             }
         }
         // A trench is no terrain: a hex being dug stays as it is, unless other work there changes it.
-        Set<Coords> digging = trenches(board, false);
-        for (Coords coords : digging) {
+        for (Coords coords : digging.keySet()) {
             before.putIfAbsent(coords, board.getHex(coords));
             done.putIfAbsent(coords, board.getHex(coords));
         }
         workGhosts = GpuEditorPreview.work(before, done, (coords, hex) -> {
             BoardScene.Tile tile = terrain.preview(board, coords, hex, at -> done.getOrDefault(at, board.getHex(at)));
-            return tile != null && digging.contains(coords) ? BoardFeatures.withTrench(tile) : tile;
+            return tile != null && digging.containsKey(coords) ? BoardFeatures.withTrench(tile, digging.get(coords)) : tile;
         });
     }
 
@@ -1316,18 +1418,18 @@ final class GpuBoardSource implements BoardSource {
         return EntityVisibilityUtils.onlyDetectedBySensors(view.getLocalPlayer(), entity);
     }
 
-    private BoardScene.Unit wreck(Entity entity, Map<Image, Boolean> usedImages) {
-        var captured = unit(entity, -1, entity.getPosition(), false, usedImages);
+    private BoardScene.Unit wreck(Entity entity, int part, Coords coords, Map<Image, Boolean> usedImages) {
+        var captured = unit(entity, part, coords, false, usedImages);
         var model = captured.model();
-        var state = model == null ? UnitModelState.capture(entity) : model.state();
+        var state = model == null ? UnitModelState.capture(entity, null, part) : model.state();
         var pose = state.pose();
         var dead = new UnitModelState(state.structure(), state.appearance(),
               new UnitModelState.Pose(pose.proneCause(), pose.facing(), pose.secondaryFacing(), pose.form(), true,
-                    pose.armsFlipped(), pose.hullDown()));
+                    pose.armsFlipped(), pose.hullDown(), pose.canHullDown()));
         model = model == null ? new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, dead)
               : new BoardScene.UnitModel(model.asset(), model.fallback(), model.variant(), model.figures(), model.twist(), model.damage(), dead);
         // The 3D board has no wreck artwork: the unit keeps its own artwork and mesh, fallen and fully damaged.
-        return new BoardScene.Unit(captured.id(), -1, captured.name(), captured.location(), captured.image(), false, null,
+        return new BoardScene.Unit(captured.id(), part, captured.name(), captured.location(), captured.image(), false, null,
               captured.height(), captured.airborne(), model, captured.outlineRgb(), captured.footprint(), null, captured.heat());
     }
 
@@ -1342,6 +1444,47 @@ final class GpuBoardSource implements BoardSource {
         return retained(sensor ? view.getRadarBlipImage() : view.getTilesetManager().textureFor(entity, part), usedImages);
     }
 
+    /**
+     * Whether an armed building is drawn hex by hex: when it covers several hexes and one of them holds weapons. Each
+     * hex holding weapons is then a part of its own, at its own roof, with the size of a one-hex turret, and the
+     * building is never drawn whole.
+     */
+    private static boolean drawnByHex(Entity entity) {
+        return entity instanceof AbstractBuildingEntity building && UnitModelEquipment.armedStructure(building)
+              && building.getSecondaryPositions().size() > 1 && !armedHexes(building).isEmpty();
+    }
+
+    /** The parts of a building drawn hex by hex: its hexes that hold weapons, in part order. */
+    private static TreeMap<Integer, Coords> armedHexes(Entity entity) {
+        var building = (AbstractBuildingEntity) entity;
+        var armed = new TreeMap<Integer, Coords>();
+        building.getSecondaryPositions().forEach((part, coords) -> {
+            if (!building.getWeaponsAt(coords).isEmpty()) { armed.put(part, coords); }
+        });
+        return armed;
+    }
+
+    /** The armed part standing on {@code hex}, or -1. */
+    private static int armedPart(Map<Integer, Coords> armed, Coords hex) {
+        return armed.entrySet().stream().filter(entry -> entry.getValue().equals(hex)).map(Map.Entry::getKey)
+              .findFirst().orElse(-1);
+    }
+
+    /**
+     * The part of a building drawn hex by hex that makes an attack: the hex holding its weapon; its first armed hex
+     * stands for it in its death. -1 for a unit drawn whole.
+     */
+    private static int firingPart(Entity entity, int equipment) {
+        if (!drawnByHex(entity)) {
+            return -1;
+        }
+        var armed = armedHexes(entity);
+        var mounted = equipment < 0 ? null : entity.getEquipment(equipment);
+        int part = mounted == null ? -1
+              : armedPart(armed, ((AbstractBuildingEntity) entity).getLocationCoords(mounted.getLocation()));
+        return part < 0 ? armed.firstKey() : part;
+    }
+
     private BoardScene.Unit unit(Entity entity, int part, Coords coords, boolean sensor,
           Map<Image, Boolean> usedImages) {
         BoardScene.Pixels pixels = unitImage(entity, part, sensor, usedImages);
@@ -1352,14 +1495,18 @@ final class GpuBoardSource implements BoardSource {
         if (footprint.isEmpty()) {
             footprint = List.of(coords);
         }
+        // An armed building's turret stands on its roof; its wall casemates hang from there (GpuUnitModel.walls).
+        int elevation = !sensor && entity instanceof AbstractBuildingEntity building
+              && UnitModelEquipment.armedStructure(building)
+              ? entity.getElevation() + building.getHeight(coords) : entity.getElevation();
         BoardScene.Waypoint location = airborne
               ? unitWaypoint(entity, coords, facing)
               : footprint.size() > 1 && UnitFootprint.terrainSupported(entity.getMovementMode())
-                    ? new BoardScene.Waypoint(coords, UnitFootprint.support(board, coords, footprint, entity.getElevation()), facing)
-                    : waypoint(coords, sensor ? 0 : entity.getElevation(), facing);
+                    ? new BoardScene.Waypoint(coords, UnitFootprint.support(board, coords, footprint, elevation), facing)
+                    : waypoint(coords, sensor ? 0 : elevation, facing);
         if (!sensor) {
             location = location.withAeroState(aeroState(entity, entity.getElevation(), airborne))
-                  .withProneCause(entity.getProneCause())
+                  .withProneCause(proneCause(entity))
                   .withFallSide(entity instanceof Mek ? entity.getFallSide() : null).withHullDown(entity.isHullDown());
             if (location.aeroState() != null) {
                 location = location.withFootprint(footprint);

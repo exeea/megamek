@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -242,12 +241,7 @@ class BoardTerrainDetailTest {
 
     private static BoardScene.Tile tile(Coords coords, BoardScene.Surface family, int level, int depth, int road,
           List<BoardScene.Feature> features) {
-        BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < 72; y++) {
-            for (int x = 0; x < 84; x++) { image.setRGB(x, y, 0xff7b875b); }
-        }
-        BoardScene.Pixels pixels = new BoardScene.Pixels(image);
-        return new BoardScene.Tile(coords, level, depth, false, road, family, pixels, null, null, null,
+        return new BoardScene.Tile(coords, level, depth, false, road, family, null, null,
               features, List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, road == 0);
     }
 }

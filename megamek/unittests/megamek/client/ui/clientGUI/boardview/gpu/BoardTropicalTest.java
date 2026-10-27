@@ -44,11 +44,11 @@ class BoardTropicalTest {
             assertEquals(.5f, tile.groundCover().desert(), .00001f);
             assertEquals(0, tile.groundCover().grass());
             assertEquals(3, tile.features().stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE
-                  && !f.asset().equals("foliage-jungle")).count());
-            assertEquals(3, tile.features().stream().filter(f -> f.asset().equals("foliage-jungle")).count());
-            palms += (int) tile.features().stream().filter(f -> f.asset().startsWith("palm")).count();
-            broadleaf += (int) tile.features().stream().filter(f -> f.asset().startsWith("tree")).count();
-            assertFalse(tile.features().stream().anyMatch(f -> f.asset().startsWith("pine")));
+                  && !f.asset().equals("vegetation/foliage-jungle")).count());
+            assertEquals(3, tile.features().stream().filter(f -> f.asset().equals("vegetation/foliage-jungle")).count());
+            palms += (int) tile.features().stream().filter(f -> f.asset().startsWith("vegetation/palm")).count();
+            broadleaf += (int) tile.features().stream().filter(f -> f.asset().startsWith("vegetation/tree")).count();
+            assertFalse(tile.features().stream().anyMatch(f -> f.asset().startsWith("vegetation/pine")));
             assertEquals(1, hex.terrainLevel(Terrains.WOODS));
             assertEquals(2, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
             assertEquals(3, hex.getTerrain(Terrains.GROUND_FLUFF).getExits());
@@ -68,16 +68,16 @@ class BoardTropicalTest {
             var road = BoardRoad.clearance(at, hex, c -> null);
             int canopy = density == 1 ? 3 : density == 2 ? 9 : 16;
             assertEquals(canopy, trees.stream().filter(f -> f.height() >= 2).count());
-            assertEquals(canopy, trees.stream().filter(f -> f.asset().equals("foliage-jungle")).count());
+            assertEquals(canopy, trees.stream().filter(f -> f.asset().equals("vegetation/foliage-jungle")).count());
             assertEquals(trees, BoardFeatures.capture(hex, at, Map.of()), "Capture is deterministic");
             for (var tree : trees) {
                 assertTrue(road.distance(tree.x(), tree.y()) >= BoardRoad.SHOULDER + 2);
-                assertTrue(tree.asset().equals("foliage-jungle") ? tree.height() < 1 : tree.height() <= 2.2f);
+                assertTrue(tree.asset().equals("vegetation/foliage-jungle") ? tree.height() < 1 : tree.height() <= 2.2f);
             }
             var low = new Hex(0, terrain + ":" + density + ";foliage_elev:1", "tropical", at);
             var shrubs = BoardFeatures.capture(low, at, Map.of());
             assertEquals(canopy, shrubs.size());
-            assertTrue(shrubs.stream().allMatch(f -> f.asset().equals("foliage-jungle") && f.height() <= 1.1f));
+            assertTrue(shrubs.stream().allMatch(f -> f.asset().equals("vegetation/foliage-jungle") && f.height() <= 1.1f));
         }
     }
 

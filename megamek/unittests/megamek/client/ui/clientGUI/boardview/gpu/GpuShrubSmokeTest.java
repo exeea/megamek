@@ -30,7 +30,6 @@ import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
-import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -53,13 +52,13 @@ class GpuShrubSmokeTest {
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
                 try (var outputFrame = new GpuSceneTestOutput()) {
                     profiler.enable();
-                    BoardScene.Pixels ground = new BoardScene.Pixels(ImageIO.read(new File(Configuration.dataDir(),
-                          "models/board/tileset/saxarba/base/base_default_0.png")));
+                    BoardScene.Pixels ground = new BoardScene.Pixels(ImageIO.read(
+                          GpuAssets.tilesetFile("terrain/ground/base_default.png")));
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     camera.setIsometric(true);
                     for (String family : FAMILIES) {
-                        String name = "foliage-" + family;
+                        String name = "vegetation/foliage-" + family;
                         terrain.update(scene(List.of(tile(family, new Coords(0, 0), ground)), 1, 1));
                         // The placed shrub's projected diameter selects its level: the board measures its placed bounds.
                         float diameter = 0;
@@ -162,7 +161,7 @@ class GpuShrubSmokeTest {
         environment.set(ColorAttribute.createAmbientLight(1, 1, 1, 1));
         try {
             for (String family : FAMILIES) {
-                String name = "foliage-" + family;
+                String name = "vegetation/foliage-" + family;
                 var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                 for (float tilt : new float[] { 0, 55, 80 }) {
                     for (int bearing = 0; bearing < 360; bearing += 90) {
@@ -195,8 +194,8 @@ class GpuShrubSmokeTest {
     }
 
     private static BoardScene.Tile tile(String family, Coords coords, BoardScene.Pixels ground) {
-        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, ground, null,
-              List.of(new BoardScene.Feature("foliage-" + family, 0, 0, 20, 1.7f, 1.1f, 0,
+        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+              List.of(new BoardScene.Feature("vegetation/foliage-" + family, 0, 0, 20, 1.7f, 1.1f, 0,
                     BoardScene.FeatureKind.TREE)), List.of());
     }
 

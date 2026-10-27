@@ -33,9 +33,9 @@ class BoardOrchardTest {
             var trees = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(6, trees.size());
             assertTrue(trees.stream().allMatch(tree -> FORMS.contains(
-                  tree.asset().replace("orchard-", "").replace("-snow", ""))));
+                  tree.asset().replace("vegetation/orchard-", "").replace("-snow", ""))));
             for (var tree : trees) {
-                assertTrue(tree.asset().startsWith("orchard-"));
+                assertTrue(tree.asset().startsWith("vegetation/orchard-"));
                 assertEquals(theme.equals("snow"), tree.asset().endsWith("-snow"));
                 assertEquals(BoardScene.FeatureKind.TREE, tree.kind());
                 assertTrue(tree.height() >= height && tree.height() <= height * 1.1f);
@@ -70,7 +70,7 @@ class BoardOrchardTest {
             hex.addTerrain(new Terrain(Terrains.WOODS, density));
             var trees = BoardFeatures.capture(hex, coords, Map.of());
             assertTrue(trees.size() < previous);
-            assertTrue(trees.stream().allMatch(tree -> tree.asset().startsWith("orchard-")));
+            assertTrue(trees.stream().allMatch(tree -> tree.asset().startsWith("vegetation/orchard-")));
             previous = trees.size();
         }
         hex.removeTerrain(Terrains.WOODS);
@@ -81,12 +81,12 @@ class BoardOrchardTest {
         hex.addTerrain(new Terrain(Terrains.JUNGLE, 1));
         assertFalse(BoardFeatures.orchard(hex));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .noneMatch(tree -> tree.asset().startsWith("orchard-")));
+              .noneMatch(tree -> tree.asset().startsWith("vegetation/orchard-")));
         hex.removeTerrain(Terrains.JUNGLE);
         hex.addTerrain(new Terrain(Terrains.WOODS, 1));
         hex.addTerrain(new Terrain(Terrains.FLUFF, 11));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .noneMatch(tree -> tree.asset().startsWith("orchard-")));
+              .noneMatch(tree -> tree.asset().startsWith("vegetation/orchard-")));
     }
 
     @Test
@@ -98,7 +98,7 @@ class BoardOrchardTest {
               .filter(tree -> tree.kind() == BoardScene.FeatureKind.TREE).toList();
         assertEquals(6, trees.size());
         for (var tree : trees) {
-            assertTrue(tree.asset().startsWith("orchard-") && tree.asset().endsWith("-snow"));
+            assertTrue(tree.asset().startsWith("vegetation/orchard-") && tree.asset().endsWith("-snow"));
             assertTrue(road.distance(tree.x(), tree.y()) >= BoardRoad.SHOULDER + 2);
         }
     }
@@ -109,7 +109,7 @@ class BoardOrchardTest {
         File root = new File(Configuration.dataDir(), "models/board");
         var shapes = new HashSet<Integer>();
         for (String form : FORMS) {
-            String name = "orchard-" + form + (snow ? "-snow" : "");
+            String name = "vegetation/orchard-" + form + (snow ? "-snow" : "");
             var levels = RigidGlb.loadLods(RigidGlb.source(root, name), root.toPath());
             assertEquals(4, levels.size(), name);
             assertNotSame(levels.get(0), levels.get(1));

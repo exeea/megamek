@@ -19,11 +19,12 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
-import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.IntArray;
 import com.badlogic.gdx.utils.ShortArray;
 
 /**
@@ -71,16 +72,11 @@ final class GpuPropBatch implements Disposable {
         }
     }
 
-    void render(ModelBatch batch, Environment environment) {
-        boolean built = false;
+    /** Pages merge until {@code deadline} (System.nanoTime), the frame's share for every page (GpuMeshPage.advance). */
+    void render(ModelBatch batch, Environment environment, long deadline) {
         if (enabled) {
             for (GpuMeshPage page : pages.values()) {
-                page.update();
-                if (!built && page.needsBuild()) {
-                    page.build();
-                    rebuilds++;
-                    built = true;
-                }
+                if (page.advance(deadline)) { rebuilds++; }
                 page.render(batch, environment);
             }
         }
@@ -106,46 +102,114 @@ final class GpuPropBatch implements Disposable {
                     | GpuLinearColors.TYPE | BOARD_MAPS)) == 0 || GpuTerrain.batchableSculpt(value.material));
     }
 
-    /** Chunk caches already contain world-space vertices. Copy them without normalizing their normals again. */
-    static void copy(Array<Renderable> source, Array<Renderable> destination, Array<GpuMeshPage.Range> ranges) {
-        Array<Renderable> ordered = new Array<>(source);
-        new ModelCache.Sorter().sort(null, ordered);
-        MeshBuilder builder = null;
-        VertexAttributes attributes = null;
-        Material material = null;
-        Renderable combined = null;
-        FloatArray points = new FloatArray();
-        ShortArray indices = new ShortArray();
-        try {
-            for (Renderable value : ordered) {
-                Mesh mesh = value.meshPart.mesh;
-                // An indexed part cannot reference more distinct vertices than either of these counts.
-                int vertices = Math.min(mesh.getNumVertices(), value.meshPart.size);
-                if (builder == null || !attributes.equals(mesh.getVertexAttributes())
-                      || builder.getNumVertices() + vertices > 65536) {
-                    if (builder != null) { builder.end(); }
-                    builder = new MeshBuilder();
-                    builder.begin(attributes = mesh.getVertexAttributes(), GL20.GL_TRIANGLES);
-                    material = null;
-                }
-                if (material == null || !material.same(value.material, true)) {
-                    combined = new Renderable();
-                    combined.material = material = value.material;
-                    builder.part("props", GL20.GL_TRIANGLES, combined.meshPart);
-                    destination.add(combined);
-                }
-                int offset = builder.getNumIndices();
-                // LibGDX's addMesh(part) reads the entire source mesh for every small range. Copy only the
-                // referenced vertex span, reusing scratch buffers instead of retaining whole chunk arrays.
-                copyVertices(mesh, value.meshPart.offset, value.meshPart.size, points, indices);
-                builder.addMesh(points.items, indices.items, 0, indices.size);
-                ranges.add(new GpuMeshPage.Range(value, combined, offset, builder.getNumIndices() - offset));
+    /**
+     * A page's merge, a source range at a time. Chunk caches already contain world-space vertices: each range's
+     * referenced vertices are appended as they are and its indices renumbered, into meshes of up to 65536 vertices with
+     * one part per run of a material. A frame continues it for its share of time only (GpuMeshPage.advance).
+     */
+    static final class Merge implements Disposable {
+        final Array<Renderable> merged = new Array<>();
+        final Array<GpuMeshPage.Range> ranges = new Array<>();
+        private final Array<Renderable> ordered;
+        private final FloatArray points = new FloatArray(), vertices = new FloatArray();
+        private final ShortArray indices = new ShortArray(), elements = new ShortArray();
+        // Per vertex of the current range's span, its index in the mesh being filled, or -1 where unreferenced.
+        private final IntArray renumbered = new IntArray();
+        private final BoundingBox bounds = new BoundingBox();
+        private VertexAttributes attributes;
+        private Material material;
+        private Renderable combined;
+        // The next source range, and the first part of the mesh being filled.
+        private int next, first;
+
+        Merge(Array<Renderable> source) {
+            ordered = new Array<>(source);
+            new ModelCache.Sorter().sort(null, ordered);
+        }
+
+        /** Merges at least one range, and more until the deadline (System.nanoTime); true once all are merged. */
+        boolean step(long deadline) {
+            try {
+                do {
+                    if (next == ordered.size) {
+                        flush();
+                        return true;
+                    }
+                    append(ordered.get(next++));
+                } while (System.nanoTime() < deadline);
+                return false;
+            } catch (RuntimeException | Error failure) {
+                dispose();
+                throw failure;
             }
-            if (builder != null) { builder.end(); }
-        } catch (RuntimeException | Error failure) {
-            disposeMeshes(destination);
+        }
+
+        private void append(Renderable value) {
+            Mesh mesh = value.meshPart.mesh;
+            // Only the referenced vertex span, reusing scratch buffers instead of retaining whole chunk arrays.
+            copyVertices(mesh, value.meshPart.offset, value.meshPart.size, points, indices);
+            int stride = mesh.getVertexSize() / Float.BYTES, span = points.size / stride;
+            // A sparse range's span can hold many vertices it does not reference: append only those it does.
+            int[] index = renumbered.setSize(span);
+            Arrays.fill(index, 0, span, -1);
+            int referenced = 0;
+            for (int i = 0; i < indices.size; i++) {
+                int vertex = Short.toUnsignedInt(indices.items[i]);
+                if (index[vertex] < 0) { index[vertex] = 0; referenced++; }
+            }
+            if (attributes == null || !attributes.equals(mesh.getVertexAttributes())
+                  || vertices.size / stride + referenced > 65536) {
+                flush();
+                attributes = mesh.getVertexAttributes();
+                material = null;
+            }
+            if (material == null || !material.same(value.material, true)) {
+                combined = new Renderable();
+                combined.material = material = value.material;
+                combined.meshPart.primitiveType = GL20.GL_TRIANGLES;
+                combined.meshPart.offset = elements.size;
+                merged.add(combined);
+                bounds.inf();
+            }
+            int position = attributes.findByUsage(VertexAttributes.Usage.Position).offset / Float.BYTES;
+            for (int vertex = 0, slot = vertices.size / stride; vertex < span; vertex++) {
+                if (index[vertex] < 0) { continue; }
+                index[vertex] = slot++;
+                int at = vertex * stride + position;
+                bounds.ext(points.items[at], points.items[at + 1], points.items[at + 2]);
+                vertices.addAll(points.items, vertex * stride, stride);
+            }
+            int offset = elements.size;
+            short[] added = elements.ensureCapacity(indices.size);
+            for (int i = 0; i < indices.size; i++) {
+                added[offset + i] = (short) index[Short.toUnsignedInt(indices.items[i])];
+            }
+            elements.size += indices.size;
+            combined.meshPart.size = elements.size - combined.meshPart.offset;
+            bounds.getCenter(combined.meshPart.center);
+            bounds.getDimensions(combined.meshPart.halfExtents).scl(.5f);
+            combined.meshPart.radius = combined.meshPart.halfExtents.len();
+            ranges.add(new GpuMeshPage.Range(value, combined, offset, indices.size));
+        }
+
+        /** The parts from first on share one new mesh of the appended vertices and indices. */
+        private void flush() {
+            if (elements.size > 0) {
+                int count = vertices.size / (attributes.vertexSize / Float.BYTES);
+                Mesh mesh = new Mesh(true, count, elements.size, attributes);
+                mesh.setVertices(vertices.items, 0, vertices.size);
+                mesh.setIndices(elements.items, 0, elements.size);
+                for (int i = first; i < merged.size; i++) { merged.get(i).meshPart.mesh = mesh; }
+            }
+            vertices.clear();
+            elements.clear();
+            first = merged.size;
+        }
+
+        @Override
+        public void dispose() {
+            disposeMeshes(merged);
             ranges.clear();
-            throw failure;
         }
     }
 
@@ -165,7 +229,7 @@ final class GpuPropBatch implements Disposable {
         for (int i = 0; i < count; i++) { selected[i] = (short) (Short.toUnsignedInt(selected[i]) - first); }
     }
 
-    /** Counts page builds caused by source replacement, never by visibility changes. */
+    /** Counts completed page merges, which source replacement causes, never visibility changes. */
     long rebuilds() { return rebuilds; }
 
     /** Transfers the temporary builder's tightly sized meshes to destination; source meshes remain borrowed. */

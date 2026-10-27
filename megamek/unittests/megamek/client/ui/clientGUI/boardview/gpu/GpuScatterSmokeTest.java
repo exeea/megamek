@@ -54,14 +54,15 @@ class GpuScatterSmokeTest {
             BoardScene captured = fixture.source.takeFrame().scene();
             // Isolate the baked scatter layer from the separate living grass and sculpted-ground systems.
             var tiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
-                  tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
+                  tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
                   tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(), tile.liquid(),
                   tile.tileset(), false)).toList();
             BoardScene scene = new BoardScene(0, 16, 16, tiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(-24, -30));
-            BoardScene bare = new BoardScene(0, 16, 16, scene.tiles().stream().map(tile -> new BoardScene.Tile(
-                  tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
-                  tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), List.of(),
+            BoardScene bare = new BoardScene(0, 16, 16,
+                  scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
+                  tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.decals(),
+                  tile.decalsWithoutLimbs(), List.of(),
                   tile.text())).toList(), List.of(), List.of(), -1, "", List.of(), scene.light());
             var configuration = GpuBoardWindow.configuration(false);
             configuration.setWindowedMode(1440, 1000);
@@ -154,9 +155,9 @@ class GpuScatterSmokeTest {
                                 }
                             }
                         }
-                        BoardScene approach = approach(scene.tiles().getFirst().ground(), List.of(features.getFirst()));
+                        BoardScene approach = approach(List.of(features.getFirst()));
                         terrain.update(approach);
-                        plain.update(approach(scene.tiles().getFirst().ground(), List.of()));
+                        plain.update(approach(List.of()));
                         camera.camera.zoom = .25f;
                         camera.center(BoardGeometry.center(new Coords(0, 0), 0));
                         assertEquals(count(profiler, () -> plain.render(camera.camera))[0],
@@ -302,11 +303,11 @@ class GpuScatterSmokeTest {
         }
     }
 
-    private static BoardScene approach(BoardScene.Pixels ground, List<BoardScene.Feature> details) {
-        var empty = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
-              ground, null, details, List.of());
-        var road = new BoardScene.Tile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS,
-              ground, null, List.of(), List.of());
+    private static BoardScene approach(List<BoardScene.Feature> details) {
+        var empty = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, null, details,
+              List.of());
+        var road = new BoardScene.Tile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS, null, List.of(),
+              List.of());
         return new BoardScene(0, 1, 2, List.of(empty, road), List.of(), List.of(), -1, "", List.of());
     }
 

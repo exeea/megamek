@@ -18,15 +18,15 @@ The 3D board reads the existing rough terrain and its `fluff` value:
 | --- | --- |
 | `rough:*` | Existing geology-dependent boulders |
 | `rough:*,fluff:1` | Staggered rows of flat-topped concrete Dragon's Teeth |
-| `rough:*,fluff:2` | Standing and toppled charred stumps, fallen trunks and broken branches |
+| `rough:*,fluff:2` | Charred snags, snapped trunks lying on the ground, broken branches |
 
 Both rough levels support these appearances. Ultra rough has denser cover.
 Adjacent rows of Dragon's Teeth alternate by half a tooth spacing. Every tooth
 has the same width and height, across rows, hexes and both rough levels.
 The charred standing trunks reach 1.8–2.1 elevation levels and have enlarged
-footprints, comparable in height to the existing desert dead tree. Large stumps
-alternate between standing and lying on the ground, with the toppled version
-reusing the same broken rim, bark and roots. Smaller logs remain between them.
+footprints, comparable in height to the existing desert dead tree. Large pieces
+alternate between snags standing on their roots and thick trunks lying on the ground,
+each snapped into a crown of splinters. Smaller broken branches remain between them.
 This is visual scale only; rough terrain does not gain woods rules.
 Placement remains deterministic across snapshots and leaves road and bridge
 approaches clear. Unsupported fluff values retain ordinary rough boulders and
@@ -43,11 +43,14 @@ consumed rough fluff decal. The board's terrain and movement rules are unchanged
 rendering, terrain picking, camera collision and unit footing. Ground sampling
 without rough cover still excludes these obstacles. A model spanning a receding
 edge or a slope steeper than 80% of its own height is omitted rather than left
-floating. Both camera modes and terrain detail levels use these same low-poly
-meshes. Water geometry snapshots retain their obstacle placements.
+floating. Both camera modes use the same meshes. Water geometry snapshots retain their obstacle placements.
 
-The four assets live in `mm-data/data/models/board/rough` and use the shared
-concrete and bark textures. The tooth has 28 triangles, trunk 91, and each stump pose 112. Their maximum
+The assets live in `mm-data/data/models/board/rough`. The dragon tooth (28 triangles) uses the shared concrete
+texture. The timber (`felled-trunk`, `charred-stump`, `fallen-stump`, and the saw clearing's `sawn-stump` and
+`sawn-log`) are game meshes of at most 500 triangles with two coarser levels, each with its own albedo, normal and
+occlusion maps (`<name>_albedo/_normal/_occlusion.png`) baked from a dense sculpt in the timber photo materials
+(`textures/scenery/timber-bark`, `timber-char`, `timber-endgrain`). A ROUGH feature of height 0 keeps its model's own
+proportions: the sawn timber is modelled at real size. The rough pieces' maximum
 footprint radii are three board units for standing stumps and six for the other pieces
 before placement scaling, matching capture's route clearance. No GL resources
 are retained in scene snapshots; GPU models and

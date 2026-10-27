@@ -36,7 +36,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardRoadGrade` | Reserves a carriageway's ground and gives its height: edge levels, ramp shares, Classic/Enhanced profiles. |
 | `BoardRoadCut` | Meshes reserved road ground and removes the terrain over it, with cut faces; builds containment walls. |
 | `BoardRoadBank` | Enhanced: moves natural ground near roads vertically into banks and embankments. |
-| `BoardRim` | Builds CPU cliff-rim shading masks, for the 3D tops and the Classic columns, during bounded terrain preparation. |
+| `BoardRim` | Builds CPU cliff-rim shading masks on the Classic columns' art during bounded terrain preparation. |
 
 ## Roads, bridges and authored terrain
 
@@ -54,6 +54,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardTunnel` | Detects cosmetic portals at eligible cliff-facing road/deck exits and supplies their placement. |
 | `BoardRocks`, `BoardShape` | Load reusable rock/scatter CPU mesh data; shape loading is separate from placement policy. |
 | `BoardRough` | Places authored rough variants and supplies matching occupied geometry for drawing, picking and support. |
+| `BoardGroundCut` | Digs authored scenery's `cut` group into a hex's Enhanced top as DUG ground, places its `stands` for resting troops and parked transports, fits earthworks to the hex's top, and tints their earth to its ground (a dug-in platoon's holes, a fortified hex's strongpoint). |
+| `BoardElevator` | A Solaris elevator's platform (diamond-plate top in a hazard-striped band) and, raised, its open lift (deck, scissor table and its cylinders, machinery pit), which the terrain draws in place of the hex's top and walls, and at each height while the platform moves. |
 | `BoardScatter`, `GpuScatter` | Choose stable small-prop positions, then bake their textured drawing data into chunk batches. |
 | `GpuBuilding` | Loads modular kits, validates module roles, stores assembly recipes and exposes module picking data. |
 | `GpuBuildingInterior` | Builds floor sheets and columns clipped to the roof's actual occupied footprint. |
@@ -69,8 +71,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardSurfaceBlend` | Evaluates cross-family material coverage at a world position, including height-limited cliff contacts. |
 | `GpuSurfaceBlend` | Refines shading attributes on boundary faces and groups their material palettes while preserving surface planes. |
 | `GpuBiomeSurface` | Packs per-hex biome data into a texture consumed by the terrain shaders. |
-| `GpuBiomeVegetation` | Prepares field/marsh roots and draws crop/reed tiers with shared instanced buffers. |
-| `GpuGroundCover` | Prepares deterministic grass roots, retains supported surfaces and draws GPU-shaped grass blades. |
+| `GpuBiomeVegetation` | Plants crop plants and marsh roots; draws reed tiers with shared instanced buffers. |
+| `GpuGroundCover` | Prepares deterministic grass roots, retains supported surfaces and draws GPU-shaped grass blades and crop plants. |
 | `GpuTreeInstances` | Instances trees, modular building parts and placed objects in every view (a recolourable model's slot colours per instance; mirror images in batches of their own); reuses buffers when placements and pass selections agree. |
 | `TerrainLod`, `TreeLod` | Choose terrain sampling and tree mesh detail from projected size, with stable transitions; `TreeLod` also holds the Object LoD size class and zoom threshold for small placed objects. |
 
@@ -123,7 +125,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `UnitModelSelection` | Uses the tileset's model identity and captures the appropriate variant/figure count; sensor contacts expose no model identity. |
 | `UnitModelState` | Captures immutable loadout, anatomy, surviving members, appearance and pose state after visibility filtering. |
 | `UnitModelDescriptor` | Reads/validates the JSON body, rig, mount, emitter and recipe contract. |
-| `RigidGlb` | Decodes rigid GLB geometry on the CPU and converts coordinates/colors while preserving named parts; also builds the shared colour-slot mesh of a recolourable model, which placed objects draw in every view, and packs a placement's slot colours. |
+| `RigidGlb` | Decodes rigid GLB geometry on the CPU and converts coordinates/colors while preserving named parts; also builds the shared colour-slot mesh of a recolourable model, which placed objects draw in every view, packs a placement's slot colours, and writes a label on a model's label quads. |
 | `MeshLod` | Resolves asset node names and missing-level fallback at load time. |
 | `GpuUnitModels`, `GpuUnitModel` | Own the shared unit asset library and each loaded model's geometry/placement metadata. |
 | `ModelTextures` | Caches textures for its owning asset library; borrowed models do not independently dispose them. |
@@ -156,7 +158,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `UnitPlayback` | Orders resolved movement, attacks, scene checkpoints, concealment and attachment events on one GL-owned timeline. |
+| `UnitPlayback` | Orders resolved movement, attacks, scene checkpoints, scene changes in motion (`TileTransition`: moving elevators), concealment and attachment events on one GL-owned timeline. |
 | `UnitMotion` | Interpolates a captured movement route and jump/fall motion without writing back to game paths. |
 | `UnitAnimator` | Evaluates rigid poses from authored rest transforms, captured state and the playback clock. |
 | `UnitAttack`, `UnitVolley` | Track attack timing and grouped target passes within that timeline. |
@@ -166,6 +168,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `UnitAttachmentMotion` | Tracks boarding/release transforms and motion on the same playback clock. |
 | `GpuAttackEffects` | Chooses visual attacks and their emitters from the posed loadout. |
 | `GpuMissileEffects`, `GpuExplosionEffects`, `GpuJumpJets` | Render batched missiles, bounded fire/smoke volumes and visible jump exhaust. |
+| `GpuPilotFlames` | Renders the pilot flame every working flamer keeps at its `flame` emitter: a blue gas core and flickering fire tongues in the flamer stream's shader. |
 | `GpuTerrainEffects` | Maintains board fire/smoke emitters and their projected-size detail. |
 | `GpuEffectBatch`, `GpuEffectDepth` | Batch effect geometry and lazily provide opaque scene depth for soft intersections. |
 
@@ -203,9 +206,10 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | --- | --- |
 | `boardview/BoardClientState` | Owns client presentation state shared by renderers: tactical state (the game's tactical capture pass), annotations, focus and client integration. |
 | `boardview/BoardView` | Paints the Legacy 2D board and bridges its input to the shared client state. |
-| `boardview/BoardArtwork` | Paints terrain artwork from the 3D tileset's resolved layers (`TilesetScenery`) and maps selected tileset art to native assets; also serves printable board output. |
+| `boardview/BoardArtwork` | Paints the Classic art from the Classic tileset's resolved layers (`TilesetScenery`) and maps selected tileset art to native assets; also serves printable board output. |
+| `common/board/BoardModelIds` | The board models' stable ids for saved boards (`models/board/uids.json`, opaque id → path): a `.board2` stores a model's path and id and loads it by its id. |
 | `common/board/BoardSceneryLayouts` | The one legacy conversion (`convert`, image-free, run where a board is loaded: `BoardFile.loadSheet`, old saves, previews, the editor), the post-combine seam pass (`joinSheets`), the one statement of what is taken (`takenTokens`: objects, a design or nothing, for every legacy art token), the taken-token strip (`withoutTakenTokens`) and the editor's stamps. |
-| `common/board/TilesetMatcher`, `TilesetScenery` | Text-only tileset matching shared by the 2D tileset and the 3D artwork; the one "taken" predicate (`TilesetScenery.Layer.taken`); designed layers in tileset order (`appearanceLayers`). |
+| `common/board/TilesetMatcher`, `TilesetScenery` | Text-only tileset matching shared by the 2D tileset and the 3D artwork (the Classic tileset, `data/models/board/classic/tileset`, whose entries name a Classic image or a 3D key: `TilesetMatcher.image`); the one "taken" predicate (`TilesetScenery.Layer.taken`); designed layers in tileset order (`appearanceLayers`). |
 | `common/board/RailRoute` | Terrain-backed ground/deck rail and maglev, the shared writer, gentle pieces, junction layouts and buffer stops. Layer-aware joins and corridor courses serve both rendering and editor snapping/riders; road and rail logic never reads stored route objects. |
 | `tileset/HexTileset` | The 2D tileset's images; the game's (with a game) matches a hex's designs as the tokens they stand for (`BoardEditorBlueprint.artwork`), so the 2D board of a `.board2` draws building art, transitions, kerbs, orchards and rough. |
 | `common/board/BridgeSpan` | The span unit of bridges and the one bridge-type decode the conversion stores. |

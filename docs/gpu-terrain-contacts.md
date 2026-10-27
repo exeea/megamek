@@ -26,9 +26,12 @@ evaluate the same cover.
 
 The horizontal field starts with `WIDTH_METRES` (7 m) and varies in world space.
 Height limits keep the receiving ground near the actual cliff foot: it climbs the face
-in tongues that follow the contact's own patches, from a fifth of `FOOT_METRES` (2.7 m)
-to all of it, so the foot is a broken line, not the bank's contour. A tall cliff can
-contribute its own material to the ground below. At stacked junctions the GPU palette
+in tongues of one world field (`footTongue`), from a fifth of `FOOT_METRES` (2.7 m)
+to all of it, so the foot is a broken line, not the bank's contour. A bank's vertices
+carry that ground's share of their cover uncut (`Footing`), and the shader cuts it back
+per pixel by the height above the toe (`footCover`), so the tongues keep their shape at
+every mesh density; point queries such as grass roots apply the same cut (`footReach`).
+A tall cliff can contribute its own material to the ground below. At stacked junctions the GPU palette
 can retain four families.
 If authored mixtures contribute more than four at one point, small shading triangles
 retain the four strongest contributions; weaker covers at those crowded junctions
@@ -50,16 +53,18 @@ intercepts the five recognized transition kinds (desert, grass, tropical grass, 
 and Moon) and omits their painted overlay from the GPU decal pass. `BoardScene.Tile`
 instead captures their target material proportions: strengths 1–5 use 1/6, 2/6, 3/6,
 4/6 and 5/6, leaving some base material at both ends. The board and Legacy 2D artwork
-are unchanged. Unknown ground artwork keeps its existing fallback handling.
+are unchanged. A hex whose markings Enhanced cannot represent shows its surface's default ground, and the terrain
+build logs a warning naming it.
 
 These weights feed the same world-space contact field as neighboring terrain, so
 the native shader blends color, normal, height, roughness and occlusion together;
 grass placement reads the same coverage. Authored gradients interpolate the complete
 materials, including their colors, on level ground and banks alike (`coverGradient`), so
 a bank meets its foot in the same mixture. Ordinary boundaries keep about half their
-height-based breakup on level ground; on a bank the two families interlock by the height
-of their own relief, so snow or dust fills the hollows of the soil instead of fading over it. Lighting and each material's own texture still affect
-the displayed pixel color.
+height-based breakup on level ground and banks alike; on a bank the breakup follows the
+height of each family's own relief, so snow or dust settles in the hollows of the soil, and
+the bank meets the ground at its foot and crest in the same faded contact. Lighting and
+each material's own texture still affect the displayed pixel color.
 An edited strength invalidates neighboring material meshes and grass coverage.
 
 ## Contacts inside one family

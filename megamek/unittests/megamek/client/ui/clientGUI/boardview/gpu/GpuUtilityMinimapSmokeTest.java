@@ -423,7 +423,7 @@ class GpuUtilityMinimapSmokeTest {
                   && tile.coords().getY() >= 3 && tile.coords().getX() < scene.width() - 3
                   && tile.coords().getY() < scene.height() - 3).toList();
             BoardScene.Tile open = inner.stream().filter(tile -> !wooded(tile) && !tile.water()
-                  && tile.bridge() == null && tile.tileset() != null).findFirst().orElseThrow();
+                  && BoardBridge.feature(tile) == null && tile.tileset() != null).findFirst().orElseThrow();
             BoardScene.Tile wooded = inner.stream().filter(GpuUtilityMinimapSmokeTest::wooded).findFirst()
                   .orElseThrow();
             int openColour = sample(image, first, origin, scale, open.coords());
@@ -487,7 +487,7 @@ class GpuUtilityMinimapSmokeTest {
     private static BoardScene withLiquid(BoardScene scene, Coords coords, BoardLiquid liquid) {
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> !tile.coords().equals(coords) ? tile
               : new BoardScene.Tile(tile.coords(), tile.elevation(), 1, false, tile.roadExits(), tile.surface(),
-                    tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
+                    tile.decals(), tile.decalsWithoutLimbs(),
                     tile.features(), tile.text(), liquid, tile.tileset())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),

@@ -212,8 +212,12 @@ final class BoardSurface {
      */
     static final float VALLEY = 7;
 
-    /** DRESSING is thin detail on the ground, such as tree pits: drawn and picked, never raising what stands there. */
-    enum Finish { TOP, RIM, CAP, WALL, OUTCROP, SHORE, BED, BANK, ICE, DRESSING, ROUGH }
+    /**
+     * DRESSING is thin detail on the ground, such as tree pits: drawn and picked, never raising what stands there. DUG is
+     * ground a feature's model digs and draws itself, as a trench's floor ({@link BoardGroundCut}): it supports and
+     * picks, and the terrain never draws it.
+     */
+    enum Finish { TOP, RIM, CAP, WALL, OUTCROP, SHORE, BED, BANK, ICE, DRESSING, ROUGH, DUG }
     /**
      * landEdge is the edge a bank or wall face stands on (bank artwork takes the hex across it); else -1.
      * Scatter marks cosmetic cover for rendering only; the canonical geometry retains its support/picking behavior.
@@ -325,8 +329,16 @@ final class BoardSurface {
      */
     final List<Face> iceSlab = new ArrayList<>(), iceBroken = new ArrayList<>(), iceLeads = new ArrayList<>();
     private List<BoardRough.Placement> roughModels = List.of();
+    /** Where troops resting here stand, as the scenery dug into the hex marks it ({@link BoardGroundCut}). */
+    private List<BoardGroundCut.Stand> stands = List.of();
+    /** Whether scenery dug into the hex's top ({@link Finish#DUG}). */
+    private boolean dug;
 
     List<BoardRough.Placement> roughModels() { return roughModels; }
+
+    List<BoardGroundCut.Stand> stands() { return stands; }
+
+    boolean dug() { return dug; }
     final List<Vector3> water = new ArrayList<>();
     /** The surface overlap inside cliff recesses; these same faces also belong to waterFaces. */
     final List<Face> cliffWater = new ArrayList<>();
@@ -548,6 +560,7 @@ final class BoardSurface {
             relief.top(faces, bedOutline, openMouths, crestLine, falls);
             meetWetCliffs();
             reserveRoads();
+            dig();
             relief.field(faces);
             int roughStart = faces.size();
             relief.boulders(faces);
@@ -2678,6 +2691,64 @@ final class BoardSurface {
         return Float.isFinite(height) ? height : Float.isFinite(nearby) ? nearby : fallback;
     }
 
+    /** Digs the hex's scenery into its top, which gives way where the scenery's models draw dug ground instead. */
+    private void dig() {
+        stands = BoardGroundCut.dig(scene, tile, faces, relief, this::diggable);
+        dug = faces.stream().anyMatch(face -> face.finish() == Finish.DUG);
+    }
+
+    /** Whether scenery may dig {@code face} away: the hex's own top, but not a road over it. */
+    private boolean diggable(Face face) {
+        return face.finish() == Finish.TOP && !reservedFaces.contains(face);
+    }
+
+    /** One side of a convex region ({@link #subtract}): its signed distance at a point, positive outside. */
+    interface Boundary { float distance(Vector3 point); }
+
+    /**
+     * Removes the part of {@code faces} inside the convex region within all of {@code region}'s boundaries and keeps the
+     * rest, cut exactly along it. New vertices take their face's shading from {@code relief}.
+     */
+    static void subtract(List<Face> faces, List<Boundary> region, BoardRelief relief) {
+        List<Face> result = new ArrayList<>(faces.size());
+        for (var face : faces) {
+            List<Vector3> inside = List.of(face.a(), face.b(), face.c());
+            // A separating boundary rejects almost every face without allocating clipped polygons.
+            boolean outside = false;
+            for (Boundary boundary : region) {
+                if (inside.stream().allMatch(p -> boundary.distance(p) > 0)) { outside = true; break; }
+            }
+            if (outside) { result.add(face); continue; }
+            for (Boundary boundary : region) {
+                if (inside.size() < 3) { break; }
+                List<Vector3> kept = new ArrayList<>(), removed = new ArrayList<>();
+                for (int i = 0; i < inside.size(); i++) {
+                    Vector3 a = inside.get(i), b = inside.get((i + 1) % inside.size());
+                    float da = boundary.distance(a), db = boundary.distance(b);
+                    (da <= 0 ? removed : kept).add(a);
+                    if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
+                        float t = da / (da - db);
+                        Vector3 p = new Vector3(a).lerp(b, t);
+                        relief.interpolateShade(a, b, t, p);
+                        kept.add(p);
+                        removed.add(p);
+                    } else if (da == 0) {
+                        kept.add(a);
+                    }
+                }
+                for (int i = 1; i + 1 < kept.size(); i++) {
+                    Vector3 a = kept.getFirst(), b = kept.get(i), c = kept.get(i + 1);
+                    if (new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).len2() > 1e-10f) {
+                        result.add(new Face(a, b, c, face.finish(), face.landEdge(), face.scatter()));
+                    }
+                }
+                inside = removed;
+            }
+        }
+        faces.clear();
+        faces.addAll(result);
+    }
+
     private static float square(float value) { return value * value; }
 
     /** Derived once per immutable terrain snapshot; repeated pointer rays reuse the rendered topology. */
@@ -2685,21 +2756,27 @@ final class BoardSurface {
         return walls(scene, floor, Map.of());
     }
 
+    /** Vertical faces down each side to the lower neighbour: a Classic column's sides, or a Solaris elevator's shaft. */
+    List<Face> straightWalls(List<Side> sides) {
+        List<Face> result = new ArrayList<>();
+        for (var side : sides) {
+            var a = side.a(); var b = side.b();
+            var lowA = new Vector3(a.x, a.y, side.lowA());
+            var lowB = new Vector3(b.x, b.y, side.lowB());
+            int drop = Math.round(Math.max(a.z - lowA.z, b.z - lowB.z) / BoardGeometry.level());
+            Finish finish = BoardRim.high(tile, BoardGeometry.edgeDirection(side.edge()), drop)
+                  ? Finish.OUTCROP : Finish.WALL;
+            if (a.z > lowA.z) { result.add(new Face(a, lowA, lowB, finish, side.edge())); }
+            if (b.z > lowB.z) { result.add(new Face(a, lowB, b, finish, side.edge())); }
+        }
+        return result;
+    }
+
     /** Neighbours must have completed construction; only their immutable edge topography is borrowed. */
     List<Face> walls(BoardScene scene, float floor, Map<Coords, BoardSurface> neighbors) {
         if (wallFaces == null || wallFloor != floor) {
-            if (columns) {
-                wallFaces = new ArrayList<>();
-                for (var side : sides(scene, floor, neighbors)) {
-                    var a = side.a(); var b = side.b();
-                    var lowA = new Vector3(a.x, a.y, side.lowA());
-                    var lowB = new Vector3(b.x, b.y, side.lowB());
-                    int drop = Math.round(Math.max(a.z - lowA.z, b.z - lowB.z) / BoardGeometry.level());
-                    Finish finish = BoardRim.high(tile, BoardGeometry.edgeDirection(side.edge()), drop)
-                          ? Finish.OUTCROP : Finish.WALL;
-                    if (a.z > lowA.z) { wallFaces.add(new Face(a, lowA, lowB, finish, side.edge())); }
-                    if (b.z > lowB.z) { wallFaces.add(new Face(a, lowB, b, finish, side.edge())); }
-                }
+            if (columns || BoardFeatures.shaft(tile)) {
+                wallFaces = straightWalls(sides(scene, floor, neighbors));
             } else { wallFaces = reserveWalls(relief.walls(sides(scene, floor, neighbors), neighbors), floor); }
             wallFaces.addAll(retainingWalls);
             for (int d = 0; d < 6; d++) {

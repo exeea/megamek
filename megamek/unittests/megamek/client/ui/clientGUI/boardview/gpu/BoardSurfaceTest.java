@@ -251,7 +251,7 @@ class BoardSurfaceTest {
             List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
             BoardScene.Tile tile = scene.tile(FIRST);
             tiles.set(FIRST.getX() * scene.height() + FIRST.getY(), new BoardScene.Tile(FIRST, 0, -1, false,
-                  exits, tile.surface(), tile.ground(), null, null, null, List.of(), List.of(), BoardLiquid.NONE,
+                  exits, tile.surface(), null, null, List.of(), List.of(), BoardLiquid.NONE,
                   null, false, exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             scene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
             Vector3 gate = BoardGeometry.center(FIRST, 0)
@@ -425,7 +425,7 @@ class BoardSurfaceTest {
                         Coords coords = new Coords(x, y);
                         boolean wet = river.contains(coords);
                         tiles.add(new BoardScene.Tile(coords, wet ? 0 : 1, wet ? 1 : -1, false, 0,
-                              BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
+                              BoardScene.Surface.SAND, null, null, List.of(), List.of(),
                               wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
                     }
                 }
@@ -461,7 +461,7 @@ class BoardSurfaceTest {
                     for (int y = 0; y < 7; y++) {
                         boolean wet = x == 3 && y > 0 && y < 6;
                         tiles.add(new BoardScene.Tile(new Coords(x, y), x < 3 ? 1 : 0, wet ? 1 : -1, false,
-                              0, family, null, null, null, null, List.of(), List.of(),
+                              0, family, null, null, List.of(), List.of(),
                               wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
                     }
                 }
@@ -745,7 +745,7 @@ class BoardSurfaceTest {
             for (int x = 0; x < 7; x++) {
                 for (int y = 0; y < 7; y++) {
                     tiles.add(new BoardScene.Tile(new Coords(x, y), random.nextInt(3) == 0 ? 1 : 0,
-                          random.nextInt(5) == 0 ? -1 : random.nextInt(4), false, 0, BoardScene.Surface.GRASS, art,
+                          random.nextInt(5) == 0 ? -1 : random.nextInt(4), false, 0, BoardScene.Surface.GRASS,
                           null, List.of(), List.of()));
                 }
             }
@@ -1356,7 +1356,7 @@ class BoardSurfaceTest {
             for (int y = 0; y < height; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, levels.getOrDefault(coords, 0), levels.containsKey(coords) ? 1 : -1,
-                      frozen && levels.containsKey(coords), 0, BoardScene.Surface.GRASS, art, null, List.of(), List.of()));
+                      frozen && levels.containsKey(coords), 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
@@ -1390,7 +1390,7 @@ class BoardSurfaceTest {
                 boolean wet = random.nextInt(5) < 2;
                 tiles.add(new BoardScene.Tile(new Coords(x, y), wet ? random.nextInt(2) : random.nextInt(4),
                       wet ? random.nextInt(3) : -1, false, 0, BoardScene.Surface.values()[random.nextInt(4)], null,
-                      null, null, null, List.of(), List.of(), wet ? BoardLiquid.WATER : BoardLiquid.NONE, null,
+                      null, List.of(), List.of(), wet ? BoardLiquid.WATER : BoardLiquid.NONE, null,
                       true));
             }
         }
@@ -1422,7 +1422,7 @@ class BoardSurfaceTest {
                 Coords coords = new Coords(x, y);
                 boolean wet = depths.containsKey(coords);
                 tiles.add(new BoardScene.Tile(coords, levels.getOrDefault(coords, land), wet ? depths.get(coords) : -1,
-                      frozen && wet, 0, BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
+                      frozen && wet, 0, BoardScene.Surface.SAND, null, null, List.of(), List.of(),
                       wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }
@@ -1443,7 +1443,7 @@ class BoardSurfaceTest {
         BoardScene.Tile tile = scene.tile(coords);
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
         tiles.set(coords.getX() * scene.height() + coords.getY(), new BoardScene.Tile(coords, hex.getLevel(),
-              water ? 1 : -1, false, tile.roadExits(), tile.surface(), tile.ground(), null, null, null,
+              water ? 1 : -1, false, tile.roadExits(), tile.surface(), null, null,
               BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null,
               false, tile.road()));
         return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
@@ -1465,7 +1465,7 @@ class BoardSurfaceTest {
                 boolean wet = river && (first || second);
                 // A road's exits come with its drawn road, as a captured hex has them: only a carriageway is graded.
                 tiles.add(new BoardScene.Tile(coords, !river && first ? elevation : 0, wet ? 2 : -1, false, exits,
-                      BoardScene.Surface.GRASS, art, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
                       wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, false,
                       exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             }

@@ -36,6 +36,15 @@ final class InfantryMotion {
     private BoardSurface roughSurface;
     private float[] roughLayout;
     private final Map<String, Vector3> roughOffsets = new LinkedHashMap<>();
+    /**
+     * Where troopers resting in the unit's hex stand this frame, and where its vehicles park ({@link BoardGroundCut});
+     * none to keep their layout.
+     */
+    private List<BoardGroundCut.Stand> stands = List.of(), troopStands = List.of(), vehicleStands = List.of();
+    /** The unit's family, which numbers its figures ({@link InfantryVisual#slot}). */
+    private UnitFamilyScale family;
+    /** The vehicles parked at a vehicle stand this frame, by container. */
+    private final java.util.Set<String> parked = new java.util.HashSet<>();
 
     private static final class Member {
         final UnitRig rig;
@@ -166,12 +175,20 @@ final class InfantryMotion {
      * @param room     the world units that the steps on each edge of the unit's hex, or the sectors of other troops
      *                 sharing it, take from its level ground, which the formation keeps clear of;
      *                 {@link InfantryFootprint#NO_STEPS} for a hex level to its edges and a formation alone in it
+     * @param stands   where troopers resting in the unit's hex stand, facing out, as a trench's fire bays; none to keep
+     *                 the formation's own layout
      * @param crowds   the view's packing of the hexes troops share with other units, which members join at rest
      * @param seconds  the frame's animation time, which members spend walking to new spots
      * @param instant  whether members take new spots at once
      */
-    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room, HexCrowds crowds,
-          float seconds, boolean instant) {
+    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room,
+          List<BoardGroundCut.Stand> stands, HexCrowds crowds, float seconds, boolean instant) {
+        family = unit.model() == null || unit.model().state() == null ? null : unit.model().state().structure().family();
+        if (stands != this.stands) {
+            this.stands = stands;
+            troopStands = stands.stream().filter(stand -> stand.kind() == BoardGroundCut.Kind.TROOP).toList();
+            vehicleStands = stands.stream().filter(stand -> stand.kind() == BoardGroundCut.Kind.VEHICLE).toList();
+        }
         position(model, unit, motion, room);
         settle(unit, motion, crowds, model.horizontalScale(unit), room, seconds, instant);
     }
@@ -225,8 +242,9 @@ final class InfantryMotion {
             for (Member member : members.values()) {
                 if (member.rig.trooper()) {
                     var individual = motion.member(unit.id(), member.rig.container());
-                    float target = watchHeading(unit.id(), member.rig.container(), member.rest,
-                          unit.location().coords().hashCode());
+                    var stand = stand(member, 0);
+                    float target = stand != null ? stand.heading() : watchHeading(unit.id(), member.rig.container(),
+                          member.rest, unit.location().coords().hashCode());
                     if (individual.moving() || individual.progress() != 0 || motion.group() == null) {
                         member.orient(individual.moving() ? individual.heading() : MathUtils.lerpAngleDeg(individual.heading(), target,
                               Math.min(1, individual.settledSeconds() / UnitMotion.FORMATION_SETTLE_SECONDS)));
@@ -271,6 +289,8 @@ final class InfantryMotion {
               && (travel == null || travel.stage() == UnitMotion.Stage.UNLOAD && travel.progress() >= 1);
         Vector3 center = BoardGeometry.center(unit.location().coords(), 0);
         walking = false;
+        parked.clear();
+        int vehicle = 0;
         for (Member member : members.values()) {
             // Members of a staggered group land one after another, after the formation's own movement ended.
             boolean resting = still && !(member.rig.trooper() && motion.member(unit.id(), member.rig.container()).moving());
@@ -278,6 +298,15 @@ final class InfantryMotion {
             // A member that has just arrived stands where its movement ended, then walks only any further way.
             if (resting && !member.rested) { member.shown.set(spot); }
             member.rested = resting;
+            var stand = resting ? stand(member, member.rig.transport() ? vehicle++ : 0) : null;
+            if (stand != null) {
+                spot.set(stand.x() / scale, stand.y() / scale, spot.z);
+                if (stand.kind() == BoardGroundCut.Kind.VEHICLE) {
+                    // A transport parks as its stand faces, beside the next, in from its pit's ramp.
+                    member.orient(stand.heading());
+                    parked.add(member.rig.container());
+                }
+            }
             if (resting) {
                 // A trooper takes the ground of its watch heading, which it keeps once there, not the room it would
                 // need to turn.
@@ -299,6 +328,24 @@ final class InfantryMotion {
             member.age = Math.min(2, member.age + 1);
             member.node.translation.set(member.shown);
         }
+    }
+
+    /**
+     * A member's stand in its hex: a trooper's that of its formation slot ({@link InfantryVisual#slot}), as its own
+     * fighting hole, or one by its slot where there is none; the formation's {@code vehicle}th vehicle's in turn while
+     * there are vehicle stands left; null for none.
+     */
+    private BoardGroundCut.Stand stand(Member member, int vehicle) {
+        if (member.rig.transport()) { return vehicle < vehicleStands.size() ? vehicleStands.get(vehicle) : null; }
+        if (troopStands.isEmpty() || !member.rig.trooper()) { return null; }
+        int slot = InfantryVisual.slot(family, Integer.parseInt(member.rig.container().substring("trooper-".length())));
+        return troopStands.stream().filter(stand -> stand.number() == slot).findFirst()
+              .orElse(troopStands.get(Math.floorMod(slot, troopStands.size())));
+    }
+
+    /** Whether the member {@code container} is a vehicle parked at a vehicle stand, as in a strongpoint's pit. */
+    boolean parked(String container) {
+        return parked.contains(container);
     }
 
     /** One frame's walk toward the spot, with the gait eased in and out and the walker facing its way. */

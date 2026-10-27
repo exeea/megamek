@@ -669,8 +669,8 @@ final class GpuBoardTuning {
         });
         section(skin, "Terrain detail");
         grass = checkbox(skin, "Grass blades", "tuning-grass");
-        grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades.",
-              skin, "menu"));
+        grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades; "
+              + "fields' crops stay.", skin, "menu"));
         waterEffects = checkbox(skin, "Water effects", "tuning-water-effects");
         waterEffects.addListener(new TextTooltip("Animate water: waves, currents, foam, ripples, glitter and the "
               + "light patterns on riverbeds, with cloud reflections. Uncheck for calm water with simpler sunlight "

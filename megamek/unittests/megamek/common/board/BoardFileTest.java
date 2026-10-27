@@ -181,6 +181,21 @@ class BoardFileTest {
         assertFalse(saved.contains("rotationX")); assertFalse(saved.contains("rotationY"));
         assertEquals(0, BoardFile.readNative(saved).getHex(0, 0).getDecorations().getFirst().rotationX());
     }
+    /** A board stores each model's path and its stable id: one saved before the model moved still finds it. */
+    @Test void aModelSavedBeforeItMovedLoadsFromItsNewPathByItsId() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        board.getHex(0, 0).setDecorations(List.of(new BoardDecoration("tree", "prop", "vegetation/pine", null, 0, 0, 0,
+              false, 1, BoardDecoration.Placement.ground(), 0)));
+        String saved = encode(board);
+        String uid = BoardModelIds.uid("vegetation/pine");
+        assertNotNull(uid);
+        assertTrue(saved.contains("\"asset\":\"vegetation/pine\",\"uid\":\"" + uid + "\""), saved);
+        // Saved while the pine still lay at the board root: its old path beside its id.
+        String old = saved.replace("\"asset\":\"vegetation/pine\"", "\"asset\":\"pine\"");
+        assertEquals("vegetation/pine", BoardFile.readNative(old).getHex(0, 0).getDecorations().getFirst().asset());
+        assertEquals("pine", BoardFile.readNative(old.replace(uid, "unknown0")).getHex(0, 0).getDecorations().getFirst().asset(),
+              "An id no model has keeps the saved path");
+    }
     @Test void stretchRoundTripsOnlyWhenSetAndEveryCopyOrTransformKeepsIt() throws Exception {
         Board board = Board.createEmptyBoard(1, 1);
         var stretch = new BoardDecoration.Stretch(.805556, 1, 1.5);

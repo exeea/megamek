@@ -61,7 +61,7 @@ class GpuRiverTerrainSmokeTest {
                 boolean detailed = BoardFeatures.detailedGround(hex, building
                       ? Map.of(Terrains.BUILDING, features.getFirst().asset()) : Map.of());
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, land ? -1 : 2, false, 0,
-                      land ? family : BoardScene.Surface.GRASS, pixels, null, null, null, features, List.of(),
+                      land ? family : BoardScene.Surface.GRASS, null, null, features, List.of(),
                       land ? BoardLiquid.NONE : BoardLiquid.WATER, null, detailed));
             }
         }
@@ -82,7 +82,7 @@ class GpuRiverTerrainSmokeTest {
                 Coords coords = new Coords(x, y);
                 boolean land = x >= 8 && y >= 6 || dock.contains(coords);
                 tiles.add(new BoardScene.Tile(coords, 0, land ? -1 : 2, false, 0,
-                      land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, pixels, null, null, null,
+                      land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null,
                       List.of(), List.of(), land ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
             }
         }
@@ -100,8 +100,8 @@ class GpuRiverTerrainSmokeTest {
                 Coords at = new Coords(x, y);
                 Hex hex = board.getHex(at);
                 Map<Integer, String> selected = hex.containsTerrain(Terrains.BUILDING) ? models : Map.of();
-                tiles.add(new BoardScene.Tile(at, hex.getLevel(), -1, false, 0, BoardFeatures.surface(hex),
-                      pixels, null, null, null, BoardFeatures.capture(hex, at, selected), List.of(),
+                tiles.add(new BoardScene.Tile(at, hex.getLevel(), -1, false, 0, BoardFeatures.surface(hex), null, null,
+                      BoardFeatures.capture(hex, at, selected), List.of(),
                       BoardLiquid.NONE, null, BoardFeatures.detailedGround(hex, selected)));
             }
         }
@@ -116,8 +116,8 @@ class GpuRiverTerrainSmokeTest {
             for (int y = 0; y < 7; y++) {
                 int level = y < 3 ? x / 3 + 1 : 0;
                 int depth = x % 3 == 1 ? 1 : -1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, pixels,
-                      null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
+                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, null, null, List.of(),
+                      List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
                       null, true));
             }
         }
@@ -133,8 +133,8 @@ class GpuRiverTerrainSmokeTest {
             for (int y = 0; y < board.getHeight(); y++) {
                 var hex = board.getHex(x, y);
                 int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0, family, pixels,
-                      null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
+                tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0, family, null, null,
+                      List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
                       null, true));
             }
         }
@@ -159,8 +159,8 @@ class GpuRiverTerrainSmokeTest {
                     case 'W' -> 2;
                     default -> -1;
                 };
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, pixels,
-                      null, null, null, List.of(), List.of(),
+                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, null, null, List.of(),
+                      List.of(),
                       depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

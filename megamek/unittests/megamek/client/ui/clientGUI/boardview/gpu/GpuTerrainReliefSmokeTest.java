@@ -199,18 +199,17 @@ class GpuTerrainReliefSmokeTest {
     }
 
     private static void checkCoverCache(BoardScene source) {
-        BoardScene.Pixels pixels = source.tiles().getFirst().ground();
         BoardCamera camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.camera.zoom = .26f;
         camera.center(BoardGeometry.center(new Coords(0, 0), 0));
         GpuGroundCover cover = new GpuGroundCover();
         try {
-            BoardScene first = coverScene(pixels, null, 0);
+            BoardScene first = coverScene(0);
             var plants = plants(first);
             var model = prepareCover(cover, first, camera, plants).getFirst();
             long uploads = cover.uploads();
-            BoardScene tactical = coverScene(pixels, pixels, 0), edited = coverScene(pixels, pixels, 1);
+            BoardScene tactical = coverScene(0), edited = coverScene(1);
             assertSame(model, prepareCover(cover, tactical, camera, plants).getFirst(),
                   "Tactical-only snapshot replacement must retain grass GPU resources");
             assertEquals(uploads, cover.uploads(), "Unchanged ground must not upload grass instances again");
@@ -239,7 +238,7 @@ class GpuTerrainReliefSmokeTest {
                   "A changed candidate list cannot reuse old submissions");
             prepareCover(cover, edited, camera, editedPlants);
             uploads = cover.uploads();
-            prepareCover(cover, edited, camera, plants(coverScene(pixels, pixels, 2)));
+            prepareCover(cover, edited, camera, plants(coverScene(2)));
             assertTrue(cover.uploads() > uploads, "New support at the same camera and scene must replace grass roots");
         } finally { cover.dispose(); }
     }
@@ -259,9 +258,9 @@ class GpuTerrainReliefSmokeTest {
         return instances;
     }
 
-    private static BoardScene coverScene(BoardScene.Pixels pixels, BoardScene.Pixels tactical, int elevation) {
-        var tile = new BoardScene.Tile(new Coords(0, 0), elevation, -1, false, 0, BoardScene.Surface.GRASS, pixels,
-              null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true);
+    private static BoardScene coverScene(int elevation) {
+        var tile = new BoardScene.Tile(new Coords(0, 0), elevation, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+              List.of(), List.of(), BoardLiquid.NONE, null, true);
         return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
     }
 
@@ -278,8 +277,8 @@ class GpuTerrainReliefSmokeTest {
                 boolean water = (x >= 6 && y >= 4) || y >= 6;
                 if (water) { level = 0; }
                 int depth = water ? x >= 7 ? 2 : 1 : -1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, pixels,
-                      null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, null, null, List.of(),
+                      List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

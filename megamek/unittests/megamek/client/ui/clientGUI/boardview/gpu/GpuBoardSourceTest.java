@@ -26,15 +26,12 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
-import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.NuclearDetonation;
 import megamek.common.Player;
@@ -42,8 +39,14 @@ import megamek.common.ResolvedAttack;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.CubeCoords;
 import megamek.common.board.HexTile;
+import megamek.common.board.TilesetMatcher;
+import megamek.common.board.TilesetScenery;
+import megamek.common.enums.BasementType;
+import megamek.common.enums.BuildingType;
 import megamek.common.enums.GamePhase;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.event.GameAttackResolvedEvent;
 import megamek.common.event.GameNuclearDetonationEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
@@ -52,6 +55,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Aero;
+import megamek.common.units.BuildingEntity;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
@@ -59,6 +63,7 @@ import megamek.common.units.Targetable;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import megamek.common.units.UnitLocation;
+import megamek.common.weapons.lasers.innerSphere.medium.ISLaserMedium;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -150,6 +155,86 @@ class GpuBoardSourceTest {
                 saved.forEach(gui::setColor);
             }
         });
+    }
+
+    @Test
+    void armedBuildingsShowEachArmedHexOnItsRoof() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            var fort = threeHexBuilding(2, new Coords(8, 8));
+            var fortHexes = fort.getSecondaryPositions();
+            var turret = new WeaponMounted(fort, new ISLaserMedium());
+            fort.addEquipment(turret, fort.getLocationsAt(fortHexes.get(0)).getLast(), false);
+            turret.setMekTurretMounted(true);
+            var wall = new WeaponMounted(fort, new ISLaserMedium());
+            fort.addEquipment(wall, fort.getLocationsAt(fortHexes.get(1)).getFirst(), false);
+            wall.setFacing(2);
+            var bunker = threeHexBuilding(3, new Coords(12, 8));
+            var bunkerHexes = bunker.getSecondaryPositions();
+            var gun = new WeaponMounted(bunker, new ISLaserMedium());
+            bunker.addEquipment(gun, bunker.getLocationsAt(bunkerHexes.get(2)).getLast(), false);
+            gun.setMekTurretMounted(true);
+            SwingUtilities.invokeAndWait(() -> {
+                for (var building : List.of(fort, bunker)) {
+                    building.setOwner(fixture.player);
+                    building.setDeployed(true);
+                    fixture.game.addEntity(building, false);
+                }
+                fixture.source.refresh();
+            });
+            var scene = fixture.source.takeFrame().scene();
+            assertEquals(List.of(fortHexes.get(0), fortHexes.get(1)), hexes(scene, 2),
+                  "Each hex holding weapons is drawn on its own; an unarmed hex is only the board's building");
+            assertEquals(List.of(bunkerHexes.get(2)), hexes(scene, 3), "A building armed in one hex is that hex alone");
+            for (var unit : scene.units().stream().filter(unit -> unit.id() > 1).toList()) {
+                assertEquals(List.of(unit.location().coords()), unit.footprint(), "A hex's turret, never stretched over the building");
+                assertEquals(fixture.game.getBoard().getHex(unit.location().coords()).getLevel() + 2,
+                      unit.location().elevation(), 1e-6, "Its roof turret stands, and its casemates hang, from its roof");
+            }
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.source.refresh();
+                shoot(fixture, fort, wall.getEquipmentNum(), fixture.entity, fixture.entity.getPosition());
+                shoot(fixture, fixture.entity, 0, fort, fortHexes.get(0));
+                shoot(fixture, fixture.entity, 0, fort, fortHexes.get(2));
+                fixture.source.refresh();
+            });
+            var frame = fixture.source.takeFrame();
+            assertTrue(frame.timeline().stream().noneMatch(BoardScene.Movement.class::isInstance),
+                  "Parts in different hexes are one standing unit, never a move from one hex to another");
+            var shots = frame.timeline().stream().filter(BoardScene.Combat.class::isInstance).map(BoardScene.Combat.class::cast)
+                  .toList();
+            assertEquals(1, shots.get(0).attacker().part(), "A wall weapon fires from its own hex");
+            assertEquals(0, shots.get(1).target().part(), "A shot at an armed hex hits that hex");
+            assertNull(shots.get(2).target(), "A shot at an unarmed hex has only its impact point");
+            var playback = new UnitPlayback();
+            playback.accept(frame.timeline(), frame.scene(), ignored -> false);
+            playback.advance(.01f, UnitMotion.Speed.NORMAL);
+            assertEquals(List.of(fortHexes.get(0), fortHexes.get(1)), hexes(playback.present(frame.scene()), 2),
+                  "While the volley plays, the firing hex stands in for itself, never for the building's other hex");
+        }
+    }
+
+    private static BuildingEntity threeHexBuilding(int id, Coords position) {
+        var building = new BuildingEntity(BuildingType.MEDIUM, 1);
+        building.getInternalBuilding().setBuildingHeight(2);
+        for (var hex : List.of(CubeCoords.ZERO, new CubeCoords(0, 1, -1), new CubeCoords(1, 0, -1))) {
+            building.getInternalBuilding().addHex(hex, 40, 0, BasementType.NONE, false);
+        }
+        building.refreshLocations();
+        building.refreshAdditionalLocations();
+        building.setId(id);
+        building.setPosition(position);
+        return building;
+    }
+
+    private static List<Coords> hexes(BoardScene scene, int id) {
+        return scene.units().stream().filter(unit -> unit.id() == id).map(unit -> unit.location().coords()).toList();
+    }
+
+    private static void shoot(GpuBoardFixture fixture, Entity attacker, int equipment, Entity target, Coords hex) {
+        var shot = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.SHOT,
+              new UnitLocation(attacker.getId(), attacker.getPosition(), 0, 0, 0), new UnitLocation(target.getId(), hex, 0, 0, 0),
+              Targetable.TYPE_ENTITY, equipment, "ISMediumLaser", Entity.LOC_NONE, true);
+        fixture.game.fireGameEvent(new GameAttackResolvedEvent(fixture.game, shot, attacker, target));
     }
 
     @Test
@@ -309,14 +394,8 @@ class GpuBoardSourceTest {
                 fixture.game.getBoard().setHex(coords, hex);
                 fixture.source.refresh();
                 var tile = fixture.source.takeFrame().scene().tile(coords);
-                HexTileset tileset = new HexTileset(fixture.game, new File(Configuration.dataDir(), "models/board/tileset"));
-                try {
-                    tileset.loadFromFile("saxarba.tileset");
-                } catch (java.io.IOException error) {
-                    throw new IllegalStateException(error);
-                }
-                var sources = tileset.getSupers(fixture.game.getBoard().getHex(coords)).stream()
-                      .map(tileset::imageSource).map(path -> "buildings/" + path.substring(0, path.lastIndexOf('.'))).toList();
+                var sources = TilesetScenery.tileset().select(fixture.game.getBoard().getHex(coords)).supers().stream()
+                      .map(TilesetMatcher.Pick::key).toList();
                 assertEquals(1, tile.features().size());
                 assertTrue(sources.contains(tile.features().getFirst().asset()));
                 assertTrue(tile.text().stream().anyMatch(label -> label.elevation() == 3));
@@ -348,15 +427,8 @@ class GpuBoardSourceTest {
                 assertEquals(3, tile.features().size());
                 assertTrue(tile.detailedGround(), "Modeled structures must preserve native ground in theme: " + theme);
                 // Default single-hex buildings may select a prefab rather than the connected-building family.
-                HexTileset tileset = new HexTileset(fixture.game, new File(Configuration.dataDir(), "models/board/tileset"));
-                try {
-                    tileset.loadFromFile("saxarba.tileset");
-                } catch (java.io.IOException error) {
-                    throw new IllegalStateException(error);
-                }
-                var buildingSources = tileset.getSupers(fixture.game.getBoard().getHex(coords)).stream()
-                      .filter(image -> tileset.imageHasTerrain(image, Terrains.BUILDING))
-                      .map(tileset::imageSource).map(path -> "buildings/" + path.substring(0, path.lastIndexOf('.'))).toList();
+                var buildingSources = TilesetScenery.tileset().select(fixture.game.getBoard().getHex(coords)).supers().stream()
+                      .filter(pick -> pick.has(Terrains.BUILDING)).map(TilesetMatcher.Pick::key).toList();
                 assertTrue(tile.features().stream().anyMatch(feature -> buildingSources.contains(feature.asset())
                       && feature.height() == 4 && feature.kind() == BoardScene.FeatureKind.BUILDING));
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/fuel_tanks/fuel_tank_medium_")
@@ -384,7 +456,7 @@ class GpuBoardSourceTest {
             });
             BoardScene.Tile unlabeled = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
             assertFalse(unlabeled.text().stream().anyMatch(label -> label.text().equals("0101")));
-            assertTrue(samePixels(labeled.ground(), unlabeled.ground()));
+            assertTrue(samePixels(labeled.tileset(), unlabeled.tileset()));
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setCoordsEnabled(coords));
         }
@@ -461,7 +533,7 @@ class GpuBoardSourceTest {
             });
             BoardScene after = fixture.source.takeFrame().scene();
             assertTrue(samePixels(before.units().getFirst().image(), after.units().getFirst().image()));
-            assertTrue(samePixels(before.tile(new Coords(0, 0)).ground(), after.tile(new Coords(0, 0)).ground()));
+            assertTrue(samePixels(before.tile(new Coords(0, 0)).tileset(), after.tile(new Coords(0, 0)).tileset()));
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setShadowMap(shadows);
@@ -490,9 +562,9 @@ class GpuBoardSourceTest {
                 }
             });
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
-            assertEquals(HexTile.WIDTH, after.ground().width());
-            assertEquals(HexTile.HEIGHT, after.ground().height());
-            assertTrue(samePixels(tile.ground(), after.ground()));
+            assertEquals(HexTile.WIDTH, after.tileset().width());
+            assertEquals(HexTile.HEIGHT, after.tileset().height());
+            assertTrue(samePixels(tile.tileset(), after.tileset()));
         } finally {
             SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMapZoomIndex(originalZoom));
         }
@@ -686,7 +758,7 @@ class GpuBoardSourceTest {
                 fixture.source.refresh();
             });
             BoardScene.Tile empty = fixture.source.takeFrame().scene().tile(original);
-            assertTrue(samePixels(occupied.ground(), empty.ground()));
+            assertTrue(samePixels(occupied.tileset(), empty.tileset()));
         }
     }
 
@@ -707,7 +779,7 @@ class GpuBoardSourceTest {
                 fixture.source.refresh();
             });
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(destination);
-            assertTrue(samePixels(before.ground(), after.ground()),
+            assertTrue(samePixels(before.tileset(), after.tileset()),
                   "The Legacy 2D moving-unit ghost must not be baked into the captured terrain");
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setShowMoveStep(moveStep));
@@ -725,7 +797,7 @@ class GpuBoardSourceTest {
                 fixture.source.refresh();
             });
             BoardScene.Tile ranged = fixture.source.takeFrame().scene().tile(coords);
-            assertSame(before.ground(), ranged.ground());
+            assertSame(before.tileset(), ranged.tileset());
             assertFalse(fixture.source.takeFrame().scene().tactical().fills().isEmpty());
             SwingUtilities.invokeAndWait(() -> {
                 fixture.view.removeMarks(List.of(range));
@@ -748,35 +820,7 @@ class GpuBoardSourceTest {
             });
             BoardScene.Tile cleared = fixture.source.takeFrame().scene().tile(coords);
             assertTrue(fixture.source.takeFrame().scene().tactical().fills().isEmpty());
-            assertTrue(samePixels(before.ground(), cleared.ground()));
-        }
-    }
-
-    @Test
-    void groundLeavesRoughToItsBouldersAndKeepsRubbleArtwork() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            Coords coords = new Coords(0, 16);
-            AtomicReference<BufferedImage> plain = new AtomicReference<>();
-            AtomicReference<BufferedImage> rough = new AtomicReference<>();
-            AtomicReference<BufferedImage> rubble = new AtomicReference<>();
-            SwingUtilities.invokeAndWait(() -> {
-                Hex hex = fixture.game.getBoard().getHex(coords);
-                hex.setTheme("desert");
-                fixture.view.clearArtwork();
-                plain.set(groundArt(fixture, coords));
-                hex.addTerrain(new Terrain(Terrains.ROUGH, 1));
-                fixture.view.clearArtwork();
-                rough.set(groundArt(fixture, coords));
-                hex.removeTerrain(Terrains.ROUGH);
-                hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
-                fixture.view.clearArtwork();
-                rubble.set(groundArt(fixture, coords));
-                hex.removeTerrain(Terrains.RUBBLE);
-            });
-            assertTrue(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rough.get())),
-                  "Rough's native boulders must not also be painted into the ground");
-            assertFalse(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rubble.get())),
-                  "Rubble's painted stones must reach the ground artwork");
+            assertTrue(samePixels(before.tileset(), cleared.tileset()));
         }
     }
 
@@ -815,9 +859,7 @@ class GpuBoardSourceTest {
             });
             BoardScene markedScene = fixture.source.takeFrame().scene();
             BoardScene.Tile marked = markedScene.tile(coords);
-            assertTrue(samePixels(before.ground(), marked.ground()));
-            assertTrue(before.normals() != null);
-            assertSame(before.normals(), marked.normals(), "Tactical-only refreshes retain the captured ground normals");
+            assertTrue(samePixels(before.tileset(), marked.tileset()), "Tactical-only refreshes retain the captured art");
             assertTrue(markedScene.markers().stream().anyMatch(symbol -> symbol.coords().equals(coords)
                   && symbol.kind() == megamek.client.ui.clientGUI.boardview.BoardMarker.Kind.ARTILLERY_AUTO_HIT));
             SwingUtilities.invokeAndWait(() -> {
@@ -826,11 +868,6 @@ class GpuBoardSourceTest {
             });
             assertTrue(fixture.source.takeFrame().scene().markers().isEmpty(), "Removed symbols must leave no stale marker");
         }
-    }
-
-    private static BufferedImage groundArt(GpuBoardFixture fixture, Coords coords) {
-        Board board = fixture.game.getBoard();
-        try (var artwork = new BoardArtwork()) { return artwork.capture(board, coords, board.getHex(coords)).terrain(); }
     }
 
     /**
@@ -1125,6 +1162,40 @@ class GpuBoardSourceTest {
             assertEquals(megamek.common.units.ProneCause.FORCED, movement.path().getLast().proneCause());
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             assertTrue(fixture.source.takeFrame().movements().isEmpty());
+        }
+    }
+
+    @Test
+    void anElevatorTheServerMovesPlaysBeforeItsCheckpointAndItsRiderRidesIt() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            var coords = fixture.entity.getPosition();
+            SwingUtilities.invokeAndWait(() -> {
+                var hex = fixture.game.getBoard().getHex(coords).duplicate();
+                hex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.SOLARIS_ELEVATOR,
+                      hex.getLevel() + 2, true, 1));
+                fixture.game.getBoard().setHex(coords, hex);
+                fixture.source.refresh();
+            });
+            fixture.source.takeFrame();
+            // The end phase swaps the hex's level with the elevator's; the unit keeps its elevation above the hex.
+            SwingUtilities.invokeAndWait(() -> {
+                var hex = fixture.game.getBoard().getHex(coords).duplicate();
+                int level = hex.getLevel();
+                hex.setLevel(hex.getTerrain(megamek.common.units.Terrains.SOLARIS_ELEVATOR).getLevel());
+                hex.removeTerrain(megamek.common.units.Terrains.SOLARIS_ELEVATOR);
+                hex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.SOLARIS_ELEVATOR, level, true, 1));
+                fixture.game.getBoard().setHex(coords, hex);
+                fixture.source.refresh();
+            });
+            var timeline = fixture.source.takeFrame().timeline();
+            var lift = timeline.stream().filter(BoardScene.TileTransition.class::isInstance)
+                  .map(BoardScene.TileTransition.class::cast).findFirst().orElseThrow();
+            assertEquals(List.of(coords), lift.changes().stream().map(BoardScene.TileTransition.Change::coords).toList());
+            assertEquals(2, lift.changes().getFirst().after().elevation() - lift.changes().getFirst().before().elevation());
+            assertTrue(timeline.get(timeline.indexOf(lift) + 1) instanceof BoardScene.SceneUpdate,
+                  "Its checkpoint follows it, so that it applies as the elevator starts to move");
+            assertTrue(timeline.stream().noneMatch(BoardScene.Movement.class::isInstance),
+                  "The unit on the platform rides it: no forced move");
         }
     }
 }

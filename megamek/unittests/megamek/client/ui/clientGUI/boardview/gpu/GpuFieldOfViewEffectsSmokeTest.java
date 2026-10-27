@@ -58,7 +58,7 @@ class GpuFieldOfViewEffectsSmokeTest {
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 7; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
                 var visibility = x < 3 ? BoardFieldOfView.Visibility.VISIBLE
                       : x < 6 ? BoardFieldOfView.Visibility.SENSOR : BoardFieldOfView.Visibility.BLOCKED;
                 hexes.add(new BoardFieldOfView.Hex(visibility, 0, x >= 6));

@@ -37,7 +37,7 @@ class GpuWaterCoverageTest {
                     for (int y = 0; y < 7; y++) {
                         boolean water = x == 3 && y > 0 && y < 6;
                         tiles.add(new BoardScene.Tile(new Coords(x, y), 0, water ? depth : -1, frozen && water, 0,
-                              family, null, null, null, null, List.of(), List.of(),
+                              family, null, null, List.of(), List.of(),
                               water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
                     }
                 }
@@ -181,8 +181,8 @@ class GpuWaterCoverageTest {
         var scene = raisedPool(depth);
         Coords coords = new Coords(4, 4);
         var water = new BoardSurface(scene, scene.tile(coords));
-        var landTile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
-              null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true);
+        var landTile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, List.of(),
+              List.of(), BoardLiquid.NONE, null, true);
         var tiles = scene.tiles().stream().map(tile -> tile.coords().equals(coords) ? landTile : tile).toList();
         var landScene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
         var land = new BoardSurface(landScene, landTile);
@@ -281,7 +281,7 @@ class GpuWaterCoverageTest {
                 boolean high = x == 4 && y == 4, low = x == 4 && y == 3;
                 int level = high ? 5 : low ? -1 : x == 3 && y == 3 ? 2 : y == 4 || y == 5 ? 1 : 0;
                 tiles.add(new BoardScene.Tile(coords, level, high || low ? depth : -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
                       high || low ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
             }
         }

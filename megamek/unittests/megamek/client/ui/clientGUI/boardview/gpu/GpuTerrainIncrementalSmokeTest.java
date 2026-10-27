@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.ref.Reference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -54,7 +53,7 @@ class GpuTerrainIncrementalSmokeTest {
                         var tile = scene.tile(at);
                         var tiles = new ArrayList<>(scene.tiles());
                         tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, tile.elevation(),
-                              tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
+                              tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
                               tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(),
                               tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(),
                               tile.impassable(), tile.blackIce(), exits));
@@ -71,27 +70,15 @@ class GpuTerrainIncrementalSmokeTest {
 
                     scene = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.GRASS);
                     incremental.update(scene);
-                    Map<Coords, BoardTacticalGeometry.Surface> beforeEviction = new HashMap<>();
-                    for (var tile : scene.tiles()) { beforeEviction.put(tile.coords(), incremental.tacticalSurface(tile.coords())); }
-                    ((Map<?, ?>) field(incremental, "cpuGeometry")).clear();
+                    Map<Coords, BoardTacticalGeometry.Surface> installed = new HashMap<>();
+                    for (var tile : scene.tiles()) { installed.put(tile.coords(), incremental.tacticalSurface(tile.coords())); }
+                    // An installed hex keeps its support while its chunk lives: a collection never makes a query rebuild it.
+                    System.gc();
                     for (var tile : scene.tiles()) {
-                        assertSame(beforeEviction.get(tile.coords()), incremental.tacticalSurface(tile.coords()),
-                              "Live vegetation support must survive query-cache eviction without reconstruction");
-                    }
-                    assertTrue(((Map<?, ?>) field(incremental, "cpuGeometry")).isEmpty(),
-                          "Retained support must not churn the bounded query cache");
-                    // A weak link does not own geometry. Exercise the cold path once the link is gone too.
-                    for (Object chunk : (List<?>) field(incremental, "chunks")) {
-                        for (Object tile : ((Map<?, ?>) field(chunk, "tileMeshes")).values()) {
-                            ((Reference<?>) field(tile, "support")).clear();
-                        }
-                    }
-                    for (var tile : scene.tiles()) {
-                        assertEquals(beforeEviction.get(tile.coords()), incremental.tacticalSurface(tile.coords()),
-                              "Evicted query geometry must reproduce the installed surface at " + tile.coords());
+                        assertSame(installed.get(tile.coords()), incremental.tacticalSurface(tile.coords()),
+                              "Queries borrow the installed support at " + tile.coords());
                     }
                     for (Coords at : List.of(new Coords(4, 4), new Coords(5, 5), new Coords(0, 3), new Coords(7, 7))) {
-                        ((Map<?, ?>) field(incremental, "cpuGeometry")).clear();
                         var tile = scene.tile(at);
                         scene = edit(scene, at, tile.elevation() + 1, tile.waterDepth(), BoardScene.Surface.SAND);
                         incremental.update(scene);
@@ -109,9 +96,13 @@ class GpuTerrainIncrementalSmokeTest {
         GpuTerrain fresh = new GpuTerrain();
         try {
             fresh.update(scene);
+            // A hex its preparation gave no support holds the shape alone; ground cover compares as planted.
             for (var tile : scene.tiles()) {
-                assertTrue(fresh.tacticalSurface(tile.coords()).equals(incremental.tacticalSurface(tile.coords())),
+                assertEquals(BoardGrassBankTest.shape(fresh.tacticalSurface(tile.coords())),
+                      BoardGrassBankTest.shape(incremental.tacticalSurface(tile.coords())),
                       "Support geometry differs at " + tile.coords());
+                assertEquals(fresh.planted(tile.coords()), incremental.planted(tile.coords()),
+                      "Ground cover differs at " + tile.coords());
             }
             var expected = triangles(fresh);
             var actual = triangles(incremental);
@@ -166,19 +157,17 @@ class GpuTerrainIncrementalSmokeTest {
 
     private static BoardScene edit(BoardScene scene, Coords at, int level, int depth, BoardScene.Surface family) {
         var tiles = new ArrayList<>(scene.tiles());
-        var before = scene.tile(at);
-        tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, level, depth, false, 0, family,
-              before.ground(), null, null, null, List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
+        tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, level, depth, false, 0, family, null,
+              null, List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 
     private static BoardScene dryScene() {
-        var pixels = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.GRASS).tiles().getFirst().ground();
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 16; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      pixels, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+                      List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 17, 16, tiles, List.of(), List.of(), -1, "", List.of());

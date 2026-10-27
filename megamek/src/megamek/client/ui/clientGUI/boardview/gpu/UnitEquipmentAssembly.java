@@ -62,12 +62,19 @@ final class UnitEquipmentAssembly {
     /**
      * One real mounted item, even for split criticals or a multi-barrel launcher. Emitter nodes are assembly-local.
      *
-     * @param depression visual depression stop in degrees for a pitch-only mount (its cradle clears the hull there)
+     * @param depression visual depression stop in degrees for a pitch-only mount (it clears the hull there)
+     * @param spinNode   the rotary barrel cluster that spins about the barrel axis while the weapon fires, if any
      */
     record Binding(int index, String location, String node, String asset, boolean embedded,
           List<UnitModelDescriptor.Emitter> emitters, int memberId, String aimNode, String recoilNode, boolean pitchOnly,
-          float depression) {
+          float depression, String spinNode) {
         static final float DEPRESSION = 20;
+
+        Binding(int index, String location, String node, String asset, boolean embedded,
+              List<UnitModelDescriptor.Emitter> emitters, int memberId, String aimNode, String recoilNode, boolean pitchOnly,
+              float depression) {
+            this(index, location, node, asset, embedded, emitters, memberId, aimNode, recoilNode, pitchOnly, depression, null);
+        }
 
         Binding(int index, String location, String node, String asset, boolean embedded,
               List<UnitModelDescriptor.Emitter> emitters, int memberId, String aimNode, String recoilNode) {
@@ -84,14 +91,36 @@ final class UnitEquipmentAssembly {
         Binding {
             emitters = List.copyOf(emitters);
         }
+
+        /** This binding in a merged model whose nodes {@link UnitEquipmentAssembly#rename} gave {@code prefix}. */
+        Binding prefixed(String prefix, int member) {
+            return new Binding(index, location, prefix + "-" + node, asset, embedded, emitters.stream()
+                  .map(emitter -> new UnitModelDescriptor.Emitter(emitter.id(), prefix + "-" + emitter.node(),
+                        emitter.position(), emitter.direction(), emitter.role(), emitter.effect())).toList(), member,
+                  aimNode == null ? null : prefix + "-" + aimNode, recoilNode == null ? null : prefix + "-" + recoilNode,
+                  pitchOnly, depression, spinNode == null ? null : prefix + "-" + spinNode);
+        }
+
+        /** Whether it still works on the unit: operable, in a location neither removed nor wrecked. */
+        boolean intact(BoardScene.UnitModel unit) {
+            var appearance = unit.state().appearance();
+            var effective = memberId < 0 ? appearance : appearance.fighters().get(memberId);
+            return effective != null && !effective.inoperableEquipment().contains(index)
+                  && !unit.damage().removed().contains(location) && !unit.damage().wrecked().contains(location);
+        }
     }
 
     private record Pending(UnitModelEquipment.Mount mount, UnitModelDescriptor.Hardpoint point,
           JsonValue placement, UnitEquipmentModels.Visual visual, GpuUnitModels.ModularAsset module,
           float scale, float offsetX, float offsetZ) {
+        /**
+         * A planned mount's {@code offsetX} and {@code offsetZ} move it along its socket's x and z, as a launcher hangs
+         * off its arm bracket or stands on its roof posts.
+         */
         Pending(UnitModelEquipment.Mount mount, UnitModelDescriptor.Hardpoint point, JsonValue placement,
               UnitEquipmentModels.Visual visual, GpuUnitModels.ModularAsset module) {
-            this(mount, point, placement, visual, module, placement.getFloat("scale", 1), 0, 0);
+            this(mount, point, placement, visual, module, placement.getFloat("scale", 1), placement.getFloat("offsetX", 0),
+                  placement.getFloat("offsetZ", 0));
         }
     }
 
@@ -585,7 +614,8 @@ final class UnitEquipmentAssembly {
             }
         }
         socket.mul(point.transform());
-        socket.translate(item.offsetX(), 0, item.offsetZ());
+        // The packer steps x and z; a planned mount's offsetY brings a weapon centred on its trunnion to a rear datum.
+        socket.translate(item.offsetX(), item.placement().getFloat("offsetY", 0), item.offsetZ());
         float scale = item.scale();
         if (!Float.isFinite(scale) || scale <= 0 || scale > point.maxScale()) {
             throw new IllegalArgumentException("Invalid mount scale: " + point.id());
@@ -667,7 +697,8 @@ final class UnitEquipmentAssembly {
               articulated && joints.containsKey("aim") ? prefix + "-" + joints.get("aim") : null,
               articulated && joints.containsKey("recoil") ? prefix + "-" + joints.get("recoil") : null,
               articulated && joints.containsKey("elevation"),
-              item.placement().getFloat("depression", Binding.DEPRESSION)));
+              item.placement().getFloat("depression", Binding.DEPRESSION),
+              articulated && joints.containsKey("spin") ? prefix + "-" + joints.get("spin") : null));
     }
 
     /** A bay's launchers are sized together, so its first large launcher cannot consume every remaining slot. */
@@ -851,8 +882,8 @@ final class UnitEquipmentAssembly {
     }
 
     private static float dimension(Pending item, int axis) {
-        var bounds = item.module().descriptor().bounds();
-        return (bounds.max().get(axis) - bounds.min().get(axis)) * item.scale();
+        var size = restBounds(item.module(), item.placement().get("omit")).getDimensions(new Vector3());
+        return (axis == 0 ? size.x : axis == 1 ? size.y : size.z) * item.scale();
     }
 
     private static float[] bayHeights(List<Pending> bay, int columns) {
@@ -877,9 +908,7 @@ final class UnitEquipmentAssembly {
 
     private static UnitModelMountArea.Fit fit(MountFrame frame, GpuUnitModels.ModularAsset module,
           Matrix4 transform, Pending item, float scale, Vector3 center, Vector3 size) {
-        var bounds = module.descriptor().bounds();
-        var box = new BoundingBox(UnitModelDescriptor.vector(bounds.min()), UnitModelDescriptor.vector(bounds.max()))
-              .mul(new Matrix4(frame.inverse()).mul(transform));
+        var box = restBounds(module, item.placement().get("omit")).mul(new Matrix4(frame.inverse()).mul(transform));
         box.getDimensions(size);
         box.getCenter(center);
         // A held physical weapon extends beyond its mount; reserve the grip rather than shrinking its blade/head.
@@ -926,18 +955,18 @@ final class UnitEquipmentAssembly {
         if (launcher && placement.has("insertion")) {
             throw new IllegalArgumentException("Authored launchers use encased true/false, not numeric insertion");
         }
-        if (module.joints().containsKey("elevation")) {
-            if (placement.getBoolean("encased", false) || placement.has("insertion")) {
-                throw new IllegalArgumentException("An external weapon cradle cannot be inserted into a front bay");
-            }
+        if (launcher) {
+            // One launcher serves bay, arm and roof: encased, only its front quarter stands out of the bay face.
+            var bounds = module.bounds();
+            return placement.getBoolean("encased", false)
+                  ? bounds.max().get(1) - .25f * (bounds.max().get(1) - bounds.min().get(1)) : 0;
+        }
+        // An exposed weapon rides its roof mount whole: it is inserted nowhere.
+        if (module.joints().containsKey("elevation") && !placement.getBoolean("encased", true)) {
             return 0;
         }
-        if (launcher) {
-            return placement.getBoolean("encased", false)
-                  ? .75f * (module.bounds().max().get(1) - module.bounds().min().get(1)) : 0;
-        }
         if (placement.has("encased") && (!"equipment-v1".equals(module.rig()) || !placement.getBoolean("encased"))) {
-            throw new IllegalArgumentException("An exposed weapon requires its complete external body and cradle profile");
+            throw new IllegalArgumentException("Only turret weapon modules are encased, and exposed ones pitch on a trunnion");
         }
         float insertion = placement.getFloat("insertion", 0);
         if (!Float.isFinite(insertion) || insertion < 0
@@ -947,6 +976,25 @@ final class UnitEquipmentAssembly {
         return insertion;
     }
 
+    /**
+     * A module's rest bounds without the nodes {@code omit} names: a planned mount's {@code omit}, the parts its
+     * installation leaves out (a turret gun's receiver in a front bay, its mantlet on the roof). The fitter sizes a
+     * module by them; the turret assembly removes those nodes once their detail levels are attached.
+     */
+    static BoundingBox restBounds(GpuUnitModels.ModularAsset module, JsonValue omit) {
+        if (omit == null) {
+            var bounds = module.descriptor().bounds();
+            return new BoundingBox(UnitModelDescriptor.vector(bounds.min()), UnitModelDescriptor.vector(bounds.max()));
+        }
+        var instance = new ModelInstance(module.model());
+        for (String id : omit.asStringArray()) {
+            var node = instance.getNode(id, true);
+            if (node != null) { node.detach(); }
+        }
+        instance.calculateTransforms();
+        return instance.calculateBoundingBox(new BoundingBox());
+    }
+
     private static double area(UnitModelDescriptor.Bounds bounds) {
         return (bounds.max().get(0) - bounds.min().get(0)) * (bounds.max().get(2) - bounds.min().get(2));
     }
@@ -954,6 +1002,23 @@ final class UnitEquipmentAssembly {
     static void rename(Node node, String prefix) {
         node.id = prefix + "-" + node.id;
         node.getChildren().forEach(child -> rename(child, prefix));
+    }
+
+    /**
+     * Moves an assembled model into a merged one, as a squadron's fighters or a building hex's turret and casemates: its
+     * nodes, renamed with {@code prefix}, under a new node {@code prefix}, which this returns; its rigs and bindings,
+     * renamed alike, into {@code rigs} and {@code bindings}. The caller disposes {@code model}.
+     */
+    static Node nest(GpuUnitModel model, String prefix, int member, List<UnitRig> rigs, List<Binding> bindings) {
+        Node placement = new Node();
+        placement.id = prefix;
+        for (Node node : model.instance.nodes) {
+            rename(node, prefix);
+            placement.addChild(node);
+        }
+        model.rigs().forEach(rig -> rigs.add(rig.inside(prefix, prefix + "-")));
+        model.equipment().forEach(binding -> bindings.add(binding.prefixed(prefix, member)));
+        return placement;
     }
 
     static String armForm(UnitModelState.MekAnatomy anatomy, String location) {

@@ -63,8 +63,8 @@ class GpuWaterProgramsSmokeTest {
               | VertexAttributes.Usage.ColorPacked | VertexAttributes.Usage.TextureCoordinates;
         var model = new ModelBuilder().createBox(1, 1, 1, material, attributes);
         try {
-            var tile = new BoardScene.Tile(new Coords(0, 0), 0, 1, false, 0, BoardScene.Surface.ROCK,
-                  null, null, List.of(), List.of());
+            var tile = new BoardScene.Tile(new Coords(0, 0), 0, 1, false, 0, BoardScene.Surface.ROCK, null, List.of(),
+                  List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, scene.tiles().getFirst());
             var pool = new GpuWaterShader(scene, surface, true, false, null);

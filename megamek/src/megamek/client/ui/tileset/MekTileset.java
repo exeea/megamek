@@ -96,6 +96,8 @@ public class MekTileset {
     private static final String BA_STRING = "default_ba";
     private static final String PROTO_STRING = "default_proto";
     private static final String GUN_EMPLACEMENT_STRING = "default_gun_emplacement";
+    /** The modular building turret: gun emplacements and armed buildings (UnitModelEquipment.armedStructure). */
+    private static final String TURRET_STRING = "default_turret";
     private static final String WIGE_STRING = "default_wige";
     private static final String AERO_STRING = "default_aero";
     private static final String SMALL_CRAFT_AERO_STRING = "default_small_craft_aero";
@@ -151,6 +153,7 @@ public class MekTileset {
     private MekEntry default_ba;
     private MekEntry default_proto;
     private MekEntry default_gun_emplacement;
+    private MekEntry default_turret;
     private MekEntry default_wige;
     private MekEntry default_aero;
     private MekEntry default_small_craft_aero;
@@ -260,6 +263,12 @@ public class MekTileset {
         entry = chassis.get(entity.getFullChassis().toUpperCase(Locale.ROOT) + suffix);
         if (entry != null && entry.getModelFile() != null) {
             return entry.getModelFile();
+        }
+        // The turret and wall casemates assemble from the loadout; the generic model stays the fallback for one they
+        // cannot build.
+        if (default_turret != null && default_turret.getModelFile() != null
+              && UnitModelEquipment.armedStructure(entity)) {
+            return default_turret.getModelFile();
         }
         return genericModelFor(entity, secondaryPos, form);
     }
@@ -476,6 +485,7 @@ public class MekTileset {
         default_ba = exact.get(BA_STRING.toUpperCase(Locale.ROOT));
         default_proto = exact.get(PROTO_STRING.toUpperCase(Locale.ROOT));
         default_gun_emplacement = exact.get(GUN_EMPLACEMENT_STRING.toUpperCase(Locale.ROOT));
+        default_turret = exact.get(TURRET_STRING.toUpperCase(Locale.ROOT));
         default_wige = exact.get(WIGE_STRING.toUpperCase(Locale.ROOT));
         default_aero = exact.get(AERO_STRING.toUpperCase(Locale.ROOT));
         default_small_craft_aero = exact.get(SMALL_CRAFT_AERO_STRING.toUpperCase(Locale.ROOT));

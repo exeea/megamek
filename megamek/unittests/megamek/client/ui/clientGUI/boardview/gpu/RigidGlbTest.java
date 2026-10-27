@@ -242,6 +242,17 @@ class RigidGlbTest {
         }
     }
 
+    /** Only a group's {@code -lodN} ending counts: {@code mesh.glb} may hold {@code a-lod0} and {@code a-lod2}. */
+    @Test
+    void aLevelIsItsGroupsEndingWhateverTheFileIsCalled() throws Exception {
+        var document = levels();
+        ((ObjectNode) document.get("nodes").get(4)).put("name", "a-lod0");
+        ((ObjectNode) document.get("nodes").get(5)).put("name", "a-lod2");
+        var levels = RigidGlb.loadLods(file(document, false));
+        assertSame(levels.get(0), levels.get(1), "Missing LOD1 reuses LOD0 data");
+        assertNotSame(levels.get(1), levels.get(2), "The authored LOD2 loads");
+    }
+
     @Test
     void requiresLod0AndIdentityPackagingGroups() throws Exception {
         var absent = levels();
@@ -498,15 +509,49 @@ class RigidGlbTest {
     void theJsonLevelCountIsTheDecodedLevels() {
         var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board");
         var expected = java.util.Map.of("scenery/vehicles/car", 1, "scenery/maglev/cab", 2, "fungus/cup-chalice", 3,
-              "tree-broad", 4, "mars/brain-lobes", 4);
+              "vegetation/tree-broad", 4, "mars/brain-lobes", 4);
         for (var entry : expected.entrySet()) {
-            var file = root.resolve(entry.getKey() + ".glb").toFile();
+            var file = megamek.common.board.BoardModelBounds.file(root.toFile(), entry.getKey());
             int levels = RigidGlb.levels(file);
             assertEquals((int) entry.getValue(), levels, entry.getKey());
             var data = RigidGlb.loadLods(new FileHandle(file), root);
             for (int level = 0; level < data.size(); level++) {
                 assertEquals(Math.min(level, levels - 1), data.indexOf(data.get(level)), entry.getKey() + " level " + level);
             }
+        }
+    }
+
+    /**
+     * The shipped cargo crate: a label's characters take their atlas cells on the middle places of each side, the outer
+     * places stay on the blank cell, and nothing but the label moves; its body's albedo alpha is a paint mask.
+     */
+    @Test
+    void aLabelWritesItsCharactersOnTheMiddlePlacesAndLeavesTheRestBlank() {
+        var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board");
+        var file = root.resolve("scenery/military/cargo-crate.glb").toFile();
+        var crate = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(file), root).getFirst();
+        assertEquals(java.util.Set.of("cargo-crate"), crate.paintMasks);
+        assertEquals(java.util.Set.of("cargo-crate-stencil"), crate.labels);
+        var label = java.util.Arrays.stream(crate.meshes.first().parts).filter(part -> part.id.equals("cargo-crate-label"))
+              .findFirst().orElseThrow();
+        java.util.Set<Integer> places = new java.util.TreeSet<>();
+        for (short index : label.indices) { places.add(Short.toUnsignedInt(index)); }
+        float[] blank = crate.meshes.first().vertices.clone();
+        RigidGlb.label(crate, "47");
+        float[] written = crate.meshes.first().vertices;
+        int four = RigidGlb.LABEL_CHARACTERS.indexOf('4'), seven = RigidGlb.LABEL_CHARACTERS.indexOf('7');
+        for (int vertex = 0; vertex < blank.length / RigidGlb.STRIDE; vertex++) {
+            int at = vertex * RigidGlb.STRIDE + 10;
+            int place = (int) Math.floor(blank[at]);
+            if (!places.contains(vertex) || place == 0 || place == 3) {
+                assertArrayEquals(java.util.Arrays.copyOfRange(blank, at - 10, at + 2),
+                      java.util.Arrays.copyOfRange(written, at - 10, at + 2), "vertex " + vertex);
+                continue;
+            }
+            int character = place == 1 ? four : seven;
+            float u = (blank[at] - place) * 8, v = blank[at + 1] * 8;
+            assertEquals(place + (character % 8 + u) / 8, written[at], 1e-5f);
+            assertEquals((character / 8 + v) / 8, written[at + 1], 1e-5f);
         }
     }
 
@@ -586,10 +631,10 @@ class RigidGlbTest {
     @Test
     void aWinterFormIsTheBareTreesSnowVariant() {
         var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board").toFile();
-        var source = RigidGlb.source(root, "pine-snow");
-        assertEquals(new java.io.File(root, "pine.glb"), source.file());
+        var source = RigidGlb.source(root, "vegetation/pine-snow");
+        assertEquals(new java.io.File(root, "vegetation/pine.glb"), source.file());
         assertEquals("snow", source.variant());
-        var bare = RigidGlb.loadLods(RigidGlb.source(root, "pine"), root.toPath());
+        var bare = RigidGlb.loadLods(RigidGlb.source(root, "vegetation/pine"), root.toPath());
         var snow = RigidGlb.loadLods(source, root.toPath());
         com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial crown = null;
         for (var material : snow.getFirst().materials) { if (material.id.equals("canopy-snow-cutout")) { crown = material; } }

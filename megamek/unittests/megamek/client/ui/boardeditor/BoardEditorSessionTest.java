@@ -267,7 +267,7 @@ class BoardEditorSessionTest {
             send(session, Action.OBJECT_VALUE, "scale", "0.8");
             send(session, Action.OBJECT_VALUE, "level", Integer.toString(i));
         }
-        send(session, Action.ASSET, "", "birch-young");
+        send(session, Action.ASSET, "", "vegetation/birch-young");
         session.pointer(at, .3, -.2, false); session.finishStroke();
         send(session, Action.OBJECT_VALUE, "scale", "0.4");
         assertEquals(4, session.snapshot().objects().size());
@@ -446,7 +446,7 @@ class BoardEditorSessionTest {
 
     @Test void dragRetainsItsObjectAcrossHexBoundariesAndRejectsAnOutsideCentre() {
         var session = session();
-        send(session, Action.ASSET, "", "birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.ASSET, "", "vegetation/birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
         String id = session.snapshot().object();
         send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false, id);
         for (double x : new double[] { .5, 1.2, .4, 1.7 }) {
@@ -470,7 +470,7 @@ class BoardEditorSessionTest {
               -.1, .1, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
         var middle = new megamek.common.board.BoardDecoration("a", "prop", "scenery/vehicles/car", null,
               0, -.1, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
-        var last = new megamek.common.board.BoardDecoration("x", "prop", "birch-young", null,
+        var last = new megamek.common.board.BoardDecoration("x", "prop", "vegetation/birch-young", null,
               .1, .2, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
         var original = java.util.List.of(first, middle, last);
         session.board().getHex(at).setDecorations(original);
@@ -502,7 +502,7 @@ class BoardEditorSessionTest {
               -.1, .1, 0, false, 1, ground, 0).withGroup("picnic");
         var bench = new megamek.common.board.BoardDecoration("bench", "prop", "scenery/vehicles/car", null,
               .1, .1, 0, false, 1, ground, 0).withGroup("picnic");
-        var loose = new megamek.common.board.BoardDecoration("loose", "prop", "birch-young", null,
+        var loose = new megamek.common.board.BoardDecoration("loose", "prop", "vegetation/birch-young", null,
               0, -.2, 0, false, 1, ground, 0);
         session.board().getHex(at).setDecorations(java.util.List.of(table, bench, loose));
         send(session, Action.SELECT_OBJECT, "", "table");
@@ -559,7 +559,7 @@ class BoardEditorSessionTest {
     @Test void aPropPutDownOnIceStandsOnTheIce() {
         var session = session();
         session.board().setHex(at, new megamek.common.Hex(0, "water:1;ice:1", ""));
-        send(session, Action.ASSET, "", "birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.ASSET, "", "vegetation/birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
         assertEquals(megamek.common.board.BoardDecoration.Placement.surface("ice", "top", 0),
               session.snapshot().objects().getFirst().placement());
     }
@@ -616,7 +616,7 @@ class BoardEditorSessionTest {
         assertEquals("asphalt", session.board().getHex(at).getAppearance().get("road").material());
         send(session, Action.VARIANT, "road", "road/material/dirt");
         assertEquals(3, session.board().getHex(at).terrainLevel(Terrains.ROAD));
-        send(session, Action.ASSET, "", "birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.ASSET, "", "vegetation/birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
         String first = session.snapshot().object();
         send(session, Action.BRUSH_VALUE, "object:rotation", "90"); session.pointer(at, 0, 0, false); session.finishStroke();
         String second = session.snapshot().object(); send(session, Action.REMOVE_OBJECT, first, "");
@@ -995,7 +995,7 @@ class BoardEditorSessionTest {
         Coords deck = new Coords(5, 5);
         session.pointer(deck, 0, 0, false); session.finishStroke();
         send(session, Action.ADD_COMPONENT, "", "bridge");
-        send(session, Action.ASSET, "", "birch-young");
+        send(session, Action.ASSET, "", "vegetation/birch-young");
         session.pointer(deck, 0, 0, false, null, false, "bridge"); session.finishStroke();
         String tree = session.snapshot().object();
         assertTrue(session.snapshot().issues().stream().noneMatch(issue -> issue.coords().equals(deck)));
@@ -1118,7 +1118,7 @@ class BoardEditorSessionTest {
 
     @Test void liveNumericDragIsOneUndoStepAndRetainsItsSurfaceReceiver() {
         var session = session();
-        send(session, Action.ASSET, "", "birch-young"); session.pointer(at, .2, .1, false); session.finishStroke();
+        send(session, Action.ASSET, "", "vegetation/birch-young"); session.pointer(at, .2, .1, false); session.finishStroke();
         var original = session.snapshot().objects().getFirst();
         for (String value : java.util.List.of("1.1", "1.8", "3.5")) {
             session.command(new Command(Action.OBJECT_VALUE, "offset", value), null, true);
@@ -1203,7 +1203,7 @@ class BoardEditorSessionTest {
 
     @Test void globalThemeIsUndoableWithoutLosingHexOverridesOrObjects() {
         var session = session();
-        send(session, Action.ASSET, "", "birch-young"); session.pointer(at, .2, .1, false); session.finishStroke();
+        send(session, Action.ASSET, "", "vegetation/birch-young"); session.pointer(at, .2, .1, false); session.finishStroke();
         var objects = session.snapshot().objects();
         send(session, Action.THEME, "", "snow");
         send(session, Action.MAP_THEME, "", "desert");

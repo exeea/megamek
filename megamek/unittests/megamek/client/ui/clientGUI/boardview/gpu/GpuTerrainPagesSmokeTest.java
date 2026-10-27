@@ -78,7 +78,7 @@ class GpuTerrainPagesSmokeTest {
             for (int i = 0; i < 8; i++) { current.add(source(i, 0)); }
             owned.addAll(current);
             parity(batch, pages, camera, current, 0b00001110);
-            for (int warmup = 0; warmup < 3; warmup++) { draw(batch, pages, camera, current, -1); }
+            settle(batch, pages, camera, current, -1);
             assertEquals(2, pages.rebuilds());
             byte[] full = parity(batch, pages, camera, current, -1);
             int visible = 0;
@@ -110,14 +110,18 @@ class GpuTerrainPagesSmokeTest {
             owned.add(replacement);
             current.set(0, replacement);
             parity(batch, pages, camera, current, -1);
+            settle(batch, pages, camera, current, -1);
             assertEquals(3, pages.rebuilds(), "Only the edited chunk's page rebuilds");
             Source hiddenReplacement = source(4, 24);
             owned.add(hiddenReplacement);
             current.set(4, hiddenReplacement);
             parity(batch, pages, camera, current, 0b00001111);
+            settle(batch, pages, camera, current, 0b00001111);
             assertEquals(3, pages.rebuilds(), "An edited invisible page waits until it is needed");
+            // Revisiting part of an edited page draws its new geometry at once (parity), and merges it once settled.
             parity(batch, pages, camera, current, 0b00010000);
-            assertEquals(4, pages.rebuilds(), "First revisiting part of an edited page must draw its new geometry");
+            settle(batch, pages, camera, current, 0b00010000);
+            assertEquals(4, pages.rebuilds(), "A revisited edited page merges again");
             Source unindexed = source(1, 0);
             owned.add(unindexed);
             unindexed.parts().first().meshPart.mesh.setIndices(new short[0]);
@@ -148,6 +152,14 @@ class GpuTerrainPagesSmokeTest {
         return original;
     }
 
+    /** Frames until every page unchanged for GpuMeshPage.SETTLE_FRAMES has merged. */
+    private static void settle(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
+          List<Source> sources, int visible) {
+        for (int frame = 0; frame <= GpuMeshPage.SETTLE_FRAMES; frame++) {
+            draw(batch, pages, camera, sources, visible);
+        }
+    }
+
     private static void draw(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
           List<Source> sources, int visible) {
         Gdx.gl.glDepthMask(true);
@@ -157,7 +169,8 @@ class GpuTerrainPagesSmokeTest {
             pages.add(sources.get(i).parts(), i / 4, visible < 0 || (visible & (1 << i)) != 0);
         }
         batch.begin(camera.camera);
-        pages.render(batch, null);
+        // No wall clock: a settled page merges within the frame.
+        pages.render(batch, null, Long.MAX_VALUE);
         batch.end();
     }
 

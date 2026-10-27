@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -239,11 +238,6 @@ class GpuTerrainShowcaseSmokeTest {
     }
 
     static BoardScene scene(BoardScene.Surface family) {
-        BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < 72; y++) {
-            for (int x = 0; x < 84; x++) { image.setRGB(x, y, 0xff8a8a70); }
-        }
-        BoardScene.Pixels pixels = new BoardScene.Pixels(image);
         int width = LAYOUT[0].length(), height = LAYOUT.length;
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
@@ -264,8 +258,8 @@ class GpuTerrainShowcaseSmokeTest {
                     rough.addTerrain(new Terrain(Terrains.ROUGH, 1));
                     features.addAll(BoardFeatures.capture(rough, coords, Map.of()));
                 }
-                var tile = new BoardScene.Tile(coords, level, depth, false, 0, family, pixels,
-                      null, null, null, features, List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
+                var tile = new BoardScene.Tile(coords, level, depth, false, 0, family, null, null, features, List.of(),
+                      water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
                 tiles.add(family == BoardScene.Surface.LUNAR ? tile.lunar(true) : tile);
             }
         }

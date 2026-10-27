@@ -28,7 +28,7 @@ import megamek.common.board.Coords;
 
 /**
  * The Classic graphics' terrain, as the libGDX board drew it: every hex a plain column at its
- * level, topped by its Saxarba tileset art with the cliff-top rim along each drop and walled in its material down to
+ * level, topped by its Classic tileset art with the cliff-top rim along each drop and walled in its material down to
  * its lower neighbours or the board's floor. Only connected road and rail inclines cut the flat top, using the shared
  * route profiles with vertical sides. Generated bridges retain their own shapes; natural bridges keep a normal hex cap
  * over their hollow passage. Liquid retains its hex outline above a recessed bed. Drawing, tactical overlays and picking
@@ -45,10 +45,8 @@ final class GpuTilesetTerrain {
 
     /** The old board's material walls: their art repeats every 96 units at hex scale 1. */
     private static final float WALL_REPEAT = 96;
-    /** A deck at its hex's own level lies this far above the ground, in hex-scale units, as the libGDX board's did. */
-    private static final float DECK_LIFT = .16f;
     /** Liquid moves this far above the surface, in hex-scale units. */
-    private static final float LIQUID_LIFT = .05f;
+    static final float LIQUID_LIFT = .05f;
     /**
      * As the libGDX board's falls: hanging this far clear of the wall, in hex-scale units, their art repeating every 48
      * units down and 24 along at hex scale 1, the lip and the foot turning in four steps each.
@@ -72,14 +70,14 @@ final class GpuTilesetTerrain {
     }
 
     /**
-     * Writes the hex's column {@code surface} into a chunk: its art tops, banks, shallows, walls and bridge deck into
+     * Writes the hex's column {@code surface} into a chunk: its art tops, banks, shallows and walls into
      * {@code opaque}, which casts and receives shadows, and its open liquid into {@code liquid}, molten liquid into
      * {@code opaque} as the 3D relief does, each liquid material with its frames in {@code animations} by its id.
-     * {@code art} gives a hex's column art (null without any), {@code deck} the bridge art, or null. Grows
-     * {@code bounds} by everything written. CPU only: the shapes are emitted on a terrain worker.
+     * {@code art} gives a hex's column art (null without any). Grows {@code bounds} by everything written. CPU only:
+     * the shapes are emitted on a terrain worker.
      */
     static void write(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
-          BoardFlow.Current current, Function<Coords, TextureRegion> art, TextureRegion deck, GpuAssets assets,
+          BoardFlow.Current current, Function<Coords, TextureRegion> art, GpuAssets assets,
           BiConsumer<Material, Consumer<MeshPartBuilder>> opaque, BiConsumer<Material, Consumer<MeshPartBuilder>> liquid,
           Map<String, GpuTerrain.LiquidSurface> animations, BoundingBox bounds) {
         Coords coords = tile.coords();
@@ -88,9 +86,17 @@ final class GpuTilesetTerrain {
         String rock = tile.liquid().molten() ? "terrain/classic/rock" : null;
         // SPACE is transparent, as in Enhanced: the atmosphere's space sky shows through. Its column still picks.
         boolean space = tile.backdrop() == BoardBackdrop.SPACE;
+        // Frozen water shows its water's first frame, still, under the ice sheet the terrain lays over it.
+        TextureRegion still = tile.frozen() && tile.water()
+              ? new TextureRegion(assets.liquid(tile.liquid().textures(tile.waterDepth()), 0)) : null;
+        Material frozen = still == null ? null : frozenWater(tile, still.getTexture());
         for (BoardSurface.Face face : surface.faces()) {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
             if (space) { continue; }
+            if (frozen != null) {
+                opaque.accept(frozen, mesh -> artTriangle(mesh, coords, face, still, normals));
+                continue;
+            }
             if (face.finish() == BoardSurface.Finish.BANK || face.finish() == BoardSurface.Finish.BED) {
                 opaque.accept(classic(assets, rock != null ? rock : "terrain/classic/water-bed"),
                       mesh -> bank(mesh, tile, face, false));
@@ -98,8 +104,12 @@ final class GpuTilesetTerrain {
             }
             Coords source = face.landEdge() < 0 ? coords : coords.translated(BoardGeometry.edgeDirection(face.landEdge()));
             TextureRegion region = art.apply(source);
-            opaque.accept(material(region == null ? null : region.getTexture()),
-                  mesh -> artTriangle(mesh, coords, face, region, normals));
+            if (region == null) {
+                // No Classic art (an airless presentation's hex): its surface's Classic material, as its walls.
+                opaque.accept(classic(assets, tile.surface().classicWall), mesh -> bank(mesh, tile, face, false));
+            } else {
+                opaque.accept(material(region.getTexture()), mesh -> artTriangle(mesh, coords, face, region, normals));
+            }
             if (face.finish() == BoardSurface.Finish.SHORE) {
                 Material sand = classic(assets, rock != null ? rock : "terrain/classic/sand");
                 sand.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
@@ -112,18 +122,8 @@ final class GpuTilesetTerrain {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
             opaque.accept(classic(assets, side(tile.surface(), face.finish())), mesh -> wall(mesh, face));
         }
-        if (deck != null && !BoardBridge.guideway(tile)) {
-            Material material = material(deck.getTexture());
-            // The art is transparent beside the deck: cut out there, so the deck writes depth only where it lies.
-            // The default shader tests alpha only for blended materials.
-            material.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA), FloatAttribute.createAlphaTest(.5f));
-            for (BoardSurface.Face face : deck(tile)) {
-                bounds.ext(face.a()).ext(face.b()).ext(face.c());
-                opaque.accept(material, mesh -> artTriangle(mesh, coords, face, deck, Map.of()));
-            }
-        }
         if (tile.liquid().present() && !tile.frozen()) {
-            BoardLiquid.Textures source = tile.liquid().textures(tile.waterDepth(), tile.elevation());
+            BoardLiquid.Textures source = tile.liquid().textures(tile.waterDepth());
             var layer = tile.liquid().molten() ? opaque : liquid;
             TextureRegion frame = new TextureRegion(assets.liquid(source, 0));
             Material pool = liquid(new Liquid(tile.liquid(), source, current, false), assets, animations);
@@ -135,18 +135,13 @@ final class GpuTilesetTerrain {
         }
     }
 
-    /** Airless (lunar) tiles and fixtures without tileset art show their ground. */
-    static BoardScene.Pixels art(BoardScene.Tile tile) {
-        return tile.tileset() != null ? tile.tileset() : tile.ground();
-    }
-
     /** A natural cap carries dry terrain, never the water or legacy bridge sprite beneath it. */
     static BoardScene.Pixels naturalBridgeArt(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck) {
         if (deck == null || !deck.natural()) { return null; }
         for (int d = 0; d < 6; d++) {
             var bank = scene.neighbor(tile, d);
-            if (BoardBridge.abutment(tile, bank, d) && bank.surface() == deck.surface() && art(bank) != null) {
-                return art(bank);
+            if (BoardBridge.abutment(tile, bank, d) && bank.surface() == deck.surface() && bank.tileset() != null) {
+                return bank.tileset();
             }
         }
         return null;
@@ -277,7 +272,8 @@ final class GpuTilesetTerrain {
 
     /**
      * As the libGDX board's: the liquid's animated frames, water translucent, magma opaque and glowing. Equal liquids
-     * share one material, by its id, and its frames are registered in {@code animations} under that id.
+     * share one material, by its id, and its frames are registered in {@code animations} under that id. Like
+     * Enhanced's, no liquid is graded by its level.
      */
     private static Material liquid(Liquid key, GpuAssets assets, Map<String, GpuTerrain.LiquidSurface> animations) {
         Texture frame = assets.liquid(key.source(), 0);
@@ -365,38 +361,6 @@ final class GpuTilesetTerrain {
         return new MeshPartBuilder.VertexInfo().setPos(point).setNor(normal).setUV(u, point.z / repeat).setCol(Color.WHITE);
     }
 
-    /** The bridge's art laid flat over its hex, at its deck's height. */
-    static float deckZ(BoardScene.Tile tile) {
-        BoardScene.Feature bridge = BoardBridge.feature(tile);
-        return (tile.elevation() + bridge.elevation()) * BoardGeometry.level() + DECK_LIFT * BoardGeometry.hexScale();
-    }
-
-    /**
-     * The Classic bridge's deck as a bridge shape: the plane of its art over the hex, which placed objects, decals and
-     * paint on the bridge take there. Never drawn or picked.
-     */
-    static BoardBridge.Shape deckShape(BoardScene.Tile tile) {
-        List<BoardBridge.Facet> facets = new ArrayList<>(6);
-        for (BoardSurface.Face face : deck(tile)) {
-            facets.add(new BoardBridge.Facet(face.a(), face.b(), face.c(), new Vector3(Vector3.Z), BoardBridge.Part.TOP));
-        }
-        return BoardBridge.shape(tile.surface(), tile.elevation(), facets);
-    }
-
-    private static List<BoardSurface.Face> deck(BoardScene.Tile tile) {
-        float z = deckZ(tile);
-        Vector3 center = BoardGeometry.center(tile.coords(), 0);
-        center.z = z;
-        List<BoardSurface.Face> faces = new ArrayList<>(6);
-        for (int edge = 0; edge < 6; edge++) {
-            Vector3 a = BoardGeometry.corner(tile.coords(), 0, edge), b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
-            a.z = z;
-            b.z = z;
-            faces.add(new BoardSurface.Face(center, a, b, BoardSurface.Finish.TOP));
-        }
-        return faces;
-    }
-
     /** Classic artwork retains the nominal hex coordinates, including its actual route ramps. */
     private static void artTriangle(MeshPartBuilder mesh, Coords coords, BoardSurface.Face face, TextureRegion region,
           Map<Vector3, Vector3> normals) {
@@ -408,6 +372,15 @@ final class GpuTilesetTerrain {
     /** A classic board material with its finish (its .tres, GpuAssets.finish). */
     private static Material classic(GpuAssets assets, String name) {
         return assets.finish(name, material(assets.material(name)));
+    }
+
+    /** Frozen water's still frame: opaque, ungraded like every liquid, tinted or toned as its open water is. */
+    private static Material frozenWater(BoardScene.Tile tile, Texture frame) {
+        Material material = material(frame);
+        material.remove(Grading.TYPE);
+        material.id = "column-frozen:" + tile.liquid() + ":" + tile.waterDepth();
+        GpuTerrain.liquidColour(material, tile.liquid(), frame);
+        return material;
     }
 
     /** One fixed id: equal materials share one draw in their chunk layer. */

@@ -32,7 +32,7 @@ class BoardVolcanoFoliageTest {
                         var cover = cover(hex, at);
                         assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, cover.size());
                         for (var feature : cover) {
-                            assertTrue(height == 1 ? feature.asset().equals("foliage-volcano")
+                            assertTrue(height == 1 ? feature.asset().equals("vegetation/foliage-volcano")
                                   : BoardFeatures.VOLCANO_TREES.contains(feature.asset()), feature.asset());
                             assertTrue(feature.height() >= height && feature.height() <= height * 1.1f);
                         }
@@ -76,7 +76,7 @@ class BoardVolcanoFoliageTest {
     void allFourAssetsLoadWithinTheExistingTreeBudgetsAndKeepTheirRootsAndHeight() {
         var root = new File("data/models/board").toPath().toAbsolutePath();
         var names = new ArrayList<>(BoardFeatures.VOLCANO_TREES);
-        names.add("foliage-volcano");
+        names.add("vegetation/foliage-volcano");
         int[] budgets = { 480, 240, 96, 12 };
         for (String name : names) {
             var levels = RigidGlb.loadLods(new FileHandle(root.resolve(name + ".glb").toFile()), root);
@@ -100,8 +100,8 @@ class BoardVolcanoFoliageTest {
                 assertTrue(triangles > 0 && triangles <= budgets[lod] && triangles < previous, name + " LOD " + lod);
                 previous = triangles;
                 assertEquals(0, low, .001f, name + " roots touch the ground");
-                assertEquals(name.equals("foliage-volcano") ? 18 : 30, high, .001f, name + " keeps its height");
-                if (name.equals("foliage-volcano") && lod == 0) {
+                assertEquals(name.equals("vegetation/foliage-volcano") ? 18 : 30, high, .001f, name + " keeps its height");
+                if (name.equals("vegetation/foliage-volcano") && lod == 0) {
                     assertTrue(right - left > high * 1.4f, "Low thickets have their own spreading proportions");
                 }
                 assertEquals(lod == 3 ? 1 : 2, level.meshes.first().parts.length, "Shared bark and cutout draw parts");

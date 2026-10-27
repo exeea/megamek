@@ -75,7 +75,6 @@ class BoardImpassableTest {
                         preview.refresh();
                         var marked = fixture.source.takeFrame().scene().tile(coords);
                         assertTrue(marked.impassable());
-                        assertEquals(plain.ground(), marked.ground());
                         assertEquals(plain.decals(), marked.decals(), "The legacy symbol must not duplicate the native marking");
                         assertTrue(plain.sameGeometry(marked));
                         assertTrue(preview.takeFrame().scene().tile(coords).impassable());
@@ -191,7 +190,7 @@ class BoardImpassableTest {
     }
 
     private static BoardScene.Tile capture(Hex hex, Coords coords) {
-        var artwork = new BoardArtwork.HexImage(coords, null, null, null, null, List.of(), Map.of(), null);
+        var artwork = new BoardArtwork.HexImage(coords, null, null, List.of(), Map.of(), null);
         return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 }

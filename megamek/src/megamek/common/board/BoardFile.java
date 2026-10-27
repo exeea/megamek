@@ -270,13 +270,13 @@ public final class BoardFile {
             Map<String, HexAppearance> values = new LinkedHashMap<>();
             appearances.fields().forEachRemaining(field -> {
                 JsonNode style = field.getValue();
-                only(style, "variant", "asset", "material", "strength", "colours", "rotation", "tracks", "beside", "trafficControl");
+                only(style, "variant", "asset", "uid", "material", "strength", "colours", "rotation", "tracks", "beside", "trafficControl");
                 var control = style.has("trafficControl") ? HexAppearance.TrafficControl.valueOf(
                       string(style, "trafficControl", "").toUpperCase(java.util.Locale.ROOT)) : null;
                 if (control != null) {
                     require(field.getKey().equals("road") || field.getKey().equals("bridgeRoad"), "Traffic controls belong to a road");
                 }
-                HexAppearance value = new HexAppearance(string(style, "variant", null), string(style, "asset", null),
+                HexAppearance value = new HexAppearance(string(style, "variant", null), asset(style),
                       string(style, "material", null), style.has("strength") ? number(style, "strength", 0) : null,
                       colours(style), style.has("rotation") ? integer(style, "rotation", 0) : null,
                       style.has("tracks") ? integer(style, "tracks", 0) : null,
@@ -290,7 +290,7 @@ public final class BoardFile {
             require(entry.get("decorations").isArray(), "decorations must be an array");
             List<BoardDecoration> values = new ArrayList<>();
             for (JsonNode object : entry.get("decorations")) {
-                only(object, "id", "kind", "asset", "name", "position", "rotation", "rotationX", "rotationY", "mirror", "scale", "placement", "drawOrder", "clipToHex", "group", "bare",
+                only(object, "id", "kind", "asset", "uid", "name", "position", "rotation", "rotationX", "rotationY", "mirror", "scale", "placement", "drawOrder", "clipToHex", "group", "bare",
                       "connections", "tracks", "pillars", "stretch", "colours");
                 double x = 0, y = 0;
                 if (object.has("position")) {
@@ -315,7 +315,7 @@ public final class BoardFile {
                     only(target, "terrain", "surface");
                     receiver = new BoardDecoration.Receiver(string(target, "terrain", null), string(target, "surface", null));
                 }
-                values.add(new BoardDecoration(string(object, "id", null), kind, string(object, "asset", null),
+                values.add(new BoardDecoration(string(object, "id", null), kind, asset(object),
                       string(object, "name", null), x, y, number(object, "rotation", 0), bool(object, "mirror", false),
                       number(object, "scale", 1), new BoardDecoration.Placement(string(placement, "mode", null),
                             placement.has("level") ? number(placement, "level", 0) : null, receiver,
@@ -411,7 +411,7 @@ public final class BoardFile {
             ObjectNode styles = node.putObject("appearance");
             hex.getAppearance().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
                 ObjectNode style = styles.putObject(entry.getKey()); HexAppearance value = entry.getValue();
-                put(style, "variant", value.variant()); put(style, "asset", value.asset()); put(style, "material", value.material());
+                put(style, "variant", value.variant()); putAsset(style, value.asset()); put(style, "material", value.material());
                 if (value.strength() != null) { style.put("strength", value.strength()); }
                 if (value.rotation() != null) { style.put("rotation", value.rotation()); }
                 if (value.tracks() != null) { style.put("tracks", value.tracks()); }
@@ -423,7 +423,8 @@ public final class BoardFile {
         if (!hex.getDecorations().isEmpty()) {
             ArrayNode objects = node.putArray("decorations");
             hex.getDecorations().forEach(value -> {
-                ObjectNode object = objects.addObject().put("id", value.id()).put("kind", value.kind()).put("asset", value.asset());
+                ObjectNode object = objects.addObject().put("id", value.id()).put("kind", value.kind());
+                putAsset(object, value.asset());
                 put(object, "name", value.name());
                 put(object, "group", value.group());
                 if (value.x() != 0 || value.y() != 0) { object.putArray("position").add(value.x()).add(value.y()); }
@@ -469,6 +470,15 @@ public final class BoardFile {
 
     private static void at(ObjectNode node, Coords at) { node.putArray("at").add(at.getX() + 1).add(at.getY() + 1); }
     private static void put(ObjectNode node, String key, String value) { if (value != null) { node.put(key, value); } }
+
+    /** A model's path and its stable id ({@link BoardModelIds}), so the board still finds it once it moves. */
+    private static void putAsset(ObjectNode node, String asset) {
+        put(node, "asset", asset);
+        put(node, "uid", BoardModelIds.uid(asset));
+    }
+
+    /** A saved model's current path: by its stable id, else as saved. */
+    private static String asset(JsonNode node) { return BoardModelIds.path(string(node, "uid", null), string(node, "asset", null)); }
     private static void require(boolean condition, String message) { if (!condition) { throw new IllegalArgumentException(message); } }
     private static void only(JsonNode node, String... names) {
         require(node != null && node.isObject(), "Expected an object");

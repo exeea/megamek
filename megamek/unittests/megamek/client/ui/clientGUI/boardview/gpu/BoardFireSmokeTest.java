@@ -83,7 +83,6 @@ class BoardFireSmokeTest {
                     fixture.source.refresh();
                     var burning = fixture.source.takeFrame().scene().tile(coords);
                     assertEquals(plain.surface(), burning.surface());
-                    assertEquals(plain.ground(), burning.ground(), "The original ground stays below the effect");
                     assertEquals(plain.decals(), burning.decals(), "No flat fire or smoke underneath the volume");
                     assertEquals(plain.detailedGround(), burning.detailedGround());
                     assertEquals(new BoardFireSmoke(2, 2), burning.fireSmoke());

@@ -30,6 +30,8 @@ final class GpuModelMaterial extends Attribute {
     final boolean board;
     /** Depth along U and V in UV units; the deep parallax's minimum and maximum layers, 0 for one step. */
     final float[] relief;
+    /** The albedo's alpha is a paint mask (RigidGlb.Data#paintMasks): the vertex colour, a colour slot's, tints the paint alone. */
+    final boolean paintMask;
 
     GpuModelMaterial(float roughness, float metallic, Texture map) {
         this(roughness, metallic, 0, map, WHITE, BLACK, false, new float[4]);
@@ -37,6 +39,11 @@ final class GpuModelMaterial extends Attribute {
 
     GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
           boolean board, float[] relief) {
+        this(roughness, metallic, scatter, map, tint, glow, board, relief, false);
+    }
+
+    GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
+          boolean board, float[] relief, boolean paintMask) {
         super(TYPE);
         this.roughness = roughness;
         this.metallic = metallic;
@@ -46,6 +53,7 @@ final class GpuModelMaterial extends Attribute {
         this.glow = glow.clone();
         this.board = board;
         this.relief = relief.clone();
+        this.paintMask = paintMask;
     }
 
     static void register(DefaultShader shader) {
@@ -81,6 +89,12 @@ final class GpuModelMaterial extends Attribute {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 target.set(id, attributes.get(GpuModelMaterial.class, TYPE).board ? 1f : 0f);
+            }
+        });
+        shader.register("u_modelPaintMask", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, attributes.get(GpuModelMaterial.class, TYPE).paintMask ? 1f : 0f);
             }
         });
         shader.register("u_modelGlow", new BaseShader.LocalSetter() {
@@ -123,7 +137,9 @@ final class GpuModelMaterial extends Attribute {
     }
 
     @Override
-    public Attribute copy() { return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief); }
+    public Attribute copy() {
+        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask);
+    }
 
     @Override
     protected boolean equals(Attribute other) { return compareTo(other) == 0; }
@@ -137,6 +153,7 @@ final class GpuModelMaterial extends Attribute {
         result = 31 * result + Arrays.hashCode(glow);
         result = 31 * result + Boolean.hashCode(board);
         result = 31 * result + Arrays.hashCode(relief);
+        result = 31 * result + Boolean.hashCode(paintMask);
         return 31 * result + (map == null ? 0 : map.getTextureObjectHandle());
     }
 
@@ -151,6 +168,7 @@ final class GpuModelMaterial extends Attribute {
         if (order == 0) { order = Arrays.compare(glow, surface.glow); }
         if (order == 0) { order = Boolean.compare(board, surface.board); }
         if (order == 0) { order = Arrays.compare(relief, surface.relief); }
+        if (order == 0) { order = Boolean.compare(paintMask, surface.paintMask); }
         if (order == 0) {
             order = Integer.compare(map == null ? 0 : map.getTextureObjectHandle(),
                   surface.map == null ? 0 : surface.map.getTextureObjectHandle());

@@ -664,8 +664,8 @@ class GpuHexTextSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), (neighbours
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null, List.of(),
+                      (neighbours
                             ? y == LABELED.getY() && Math.abs(x - LABELED.getX()) == 1
                             : coords.equals(LABELED)) ? text : List.of()));
             }
@@ -944,8 +944,8 @@ class GpuHexTextSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), x < size / 2 ? firstPage : labels));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+                      List.of(), x < size / 2 ? firstPage : labels));
             }
         }
         return new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());
@@ -1225,7 +1225,7 @@ class GpuHexTextSmokeTest {
                 Coords coords = new Coords(x, y);
                 boolean labeled = coords.equals(LABELED);
                 tiles.add(new BoardScene.Tile(coords, cliff && y >= 4 ? 8 : 2, -1, false, 0,
-                      BoardScene.Surface.GRASS, ground, null, null, null,
+                      BoardScene.Surface.GRASS, null, null,
                       labeled && detailedLabels ? rocks : List.of(), labeled ? text : List.of(),
                       BoardLiquid.NONE, null, detailedLabels));
             }

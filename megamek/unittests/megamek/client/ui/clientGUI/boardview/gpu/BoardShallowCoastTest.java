@@ -63,6 +63,8 @@ class BoardShallowCoastTest {
                 var rebuilt = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile, lod), scene, floor);
                 assertEquals(roots, BoardPlants.plant(scene, tile, rebuilt, lod, List.of()).grass(),
                       "A single-hex rebuild and shared chunk preparation keep the same roots");
+                assertEquals(BoardGrassBankTest.shape(rebuilt), BoardTacticalGeometry.Surface.shape(
+                      new BoardSurface(scene, tile, lod), scene, floor), "A coast's shape keeps its waterline walls");
                 for (int i = 0; i < roots.size; i += 4) {
                     float x = roots.get(i), y = roots.get(i + 1), z = roots.get(i + 2);
                     assertTrue(BoardGeometry.contains(tile.coords(), x, y), "Roots stay in their canonical owner");
@@ -162,7 +164,7 @@ class BoardShallowCoastTest {
     void shallowWetlandBanksRemainOwnedByReeds() {
         var scene = BoardSurfaceBlendTest.scene(c -> c.equals(BoardSurfaceBlendTest.CENTER)
               ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, 0, 0)
-              : new BoardScene.Tile(c, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, null, null,
+              : new BoardScene.Tile(c, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
                     List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE,
                     BoardScene.Biome.MARSH, false));
         var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
@@ -188,7 +190,7 @@ class BoardShallowCoastTest {
 
     private static BoardScene coast(BoardScene.Surface land, int depth, boolean frozen, BoardLiquid liquid) {
         return BoardSurfaceBlendTest.scene(c -> c.equals(BoardSurfaceBlendTest.CENTER)
-              ? new BoardScene.Tile(c, 0, depth, frozen, 0, BoardScene.Surface.GRASS, null, null, null, null,
+              ? new BoardScene.Tile(c, 0, depth, frozen, 0, BoardScene.Surface.GRASS, null, null,
                     List.of(), List.of(), liquid, null, true)
               : BoardSurfaceBlendTest.tile(c, land, 0, -1, 0));
     }

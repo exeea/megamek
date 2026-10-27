@@ -5,12 +5,14 @@ import java.util.List;
 
 import megamek.common.equipment.AmmoType.AmmoTypeEnum;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.equipment.WeaponType;
 import megamek.common.equipment.WeaponTypeFlag;
 import megamek.common.equipment.enums.MiscTypeFlag;
+import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.weapons.bayWeapons.BayWeapon;
@@ -47,6 +49,20 @@ public final class UnitModelEquipment {
               location(entity, mounted.getLocation()), location(entity, mounted.getSecondLocation()),
               mounted.isRearMounted(), mounted.isOmniPodMounted(), mounted.getSize(), policy, family(mounted.getType()), members,
               guided(mounted));
+    }
+
+    /**
+     * Whether the unit is an armed structure drawn from its weapons: a gun emplacement, or an advanced building with
+     * weapons, its turret-mounted ones on its roof (TO:AR p. 132) and the others in casemates on its walls.
+     */
+    public static boolean armedStructure(Entity entity) {
+        return entity instanceof GunEmplacement
+              || entity instanceof AbstractBuildingEntity building && !building.getWeaponList().isEmpty();
+    }
+
+    /** Whether a building weapon fires from a wall: not turret-mounted, facing one of its hex's six faces. */
+    public static boolean wallMounted(AbstractBuildingEntity building, WeaponMounted weapon) {
+        return !building.isTurretMounted(weapon) && weapon.getFacing() >= 0;
     }
 
     /** Whether this launcher is linked to an Artemis IV, Artemis V or prototype Artemis fire-control system. */

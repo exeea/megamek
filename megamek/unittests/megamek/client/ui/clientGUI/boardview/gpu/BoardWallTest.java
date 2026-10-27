@@ -266,8 +266,8 @@ class BoardWallTest {
             var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS, elevation, -1, 0);
             var features = walls.containsKey(coords) ? List.of(new BoardScene.Feature(
                   "buildings/wall-" + walls.get(coords), 0, 0, 0, 1, height, 0, BoardScene.FeatureKind.BUILDING)) : List.<BoardScene.Feature>of();
-            return new BoardScene.Tile(coords, elevation, -1, false, 0, tile.surface(), tile.ground(),
-                  null, null, null, features, List.of(), BoardLiquid.NONE, null, true);
+            return new BoardScene.Tile(coords, elevation, -1, false, 0, tile.surface(), null, null, features, List.of(),
+                  BoardLiquid.NONE, null, true);
         });
     }
 

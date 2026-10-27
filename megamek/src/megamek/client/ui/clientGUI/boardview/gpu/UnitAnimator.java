@@ -21,6 +21,11 @@ import megamek.common.units.ProneCause;
 /** Per-unit rigid pose state, evaluated from authored rest transforms and the shared movement/playback clock. */
 final class UnitAnimator {
     static final float HOVER_PERIOD_SECONDS = 2.6f;
+    /** A wall casemate's gun shield: yaws like a building turret, within its three-hexside arc. */
+    static final String CASEMATE_RIG = "building-casemate-v1";
+    private static final java.util.Set<String> BUILDING_RIGS = java.util.Set.of("building-turret-v1", CASEMATE_RIG);
+    /** Half a casemate's arc: three hexsides, 120 degrees, centred on its face. */
+    static final float CASEMATE_ARC = 60;
     static final float HOVER_LEVELS = .2f;
     private static final float HOVER_PHASE_STEP = .381966f;
     static final float PHYSICAL_APPROACH_HEXES = UnitAttack.PHYSICAL_APPROACH_HEXES;
@@ -37,6 +42,8 @@ final class UnitAnimator {
     private final List<Joint> mounts = new ArrayList<>();
     private final InfantryMotion formation = new InfantryMotion();
     private final Vector3 recoilDirection = new Vector3();
+    /** Each firing rotary mount's barrel turn this frame, in degrees. */
+    private final Map<String, Float> mountSpin = new HashMap<>();
     private final Map<String, Float> mountRecoil = new HashMap<>();
     private final Map<String, Quaternion> retainedTurretYaw = new HashMap<>();
     private record TurretTurn(Object group, Quaternion start) { }
@@ -101,6 +108,8 @@ final class UnitAnimator {
         final float restFloor;
         final float restHeight;
         final Vector3 restCenter;
+        /** The body's middle in its root's own frame, which a trooper lies down about. */
+        final Vector3 restMiddle;
         final float cycleDistance;
         final float groundReach;
         final float stepLift;
@@ -131,6 +140,7 @@ final class UnitAnimator {
             restFloor = restBounds.min.z;
             restHeight = restBounds.getDepth();
             restCenter = restBounds.getCenter(new Vector3());
+            restMiddle = new Vector3(restCenter).mul(new Matrix4(sourceRoot.globalTransform).inv());
             memberScale = sourceRoot.globalTransform.getScaleY();
             float shortestLeg = Float.POSITIVE_INFINITY;
             for (String[] leg : LEGS) {
@@ -198,6 +208,13 @@ final class UnitAnimator {
         return room;
     }
 
+    /** Where troops resting in the unit's hex stand, as the scenery dug in there marks it ({@link BoardGroundCut}). */
+    private List<BoardGroundCut.Stand> stands(BoardScene.Unit unit) {
+        BoardScene board = scene.get();
+        BoardScene.Tile tile = board == null || formation.isEmpty() ? null : board.tile(unit.location().coords());
+        return tile == null ? List.of() : surfaces.get(board, tile).stands();
+    }
+
     /** Conventional infantry or battle armor: drawn as a formation of figures, with or without transports. */
     static boolean troops(BoardScene.Unit unit) {
         var family = unit.model() == null || unit.model().state() == null ? null : unit.model().state().structure().family();
@@ -210,6 +227,7 @@ final class UnitAnimator {
         // World units per model unit of travel; a grown unit's strides and wheel turns cover more (UnitScreenScale).
         float groundScale = model.horizontalScale(unit) * growth;
         mountRecoil.clear();
+        mountSpin.clear();
         if (instance != placed) {
             instance = placed;
             List<Body> previous = new ArrayList<>(bodies);
@@ -221,7 +239,7 @@ final class UnitAnimator {
                 if (node != null && rest != null) {
                     mounts.add(new Joint(node, rest));
                 }
-                for (String joint : new String[] { binding.aimNode(), binding.recoilNode() }) {
+                for (String joint : new String[] { binding.aimNode(), binding.recoilNode(), binding.spinNode() }) {
                     if (joint != null && placed.getNode(joint) != null && model.instance.getNode(joint) != null) {
                         mounts.add(new Joint(placed.getNode(joint), model.instance.getNode(joint)));
                     }
@@ -263,7 +281,9 @@ final class UnitAnimator {
         airborne = approach(airborne, motion.airborne(unit) ? 1 : 0, seconds, snap);
         bodies.forEach(Body::reset);
         mounts.forEach(Joint::reset);
-        formation.apply(model, unit, motion, stepRoom(unit), crowds, seconds, snap);
+        // Troops on the deck lie in their own places, not down in another platoon's hole, where nothing would show them.
+        formation.apply(model, unit, motion, stepRoom(unit), posture == ProneCause.VOLUNTARY ? List.of() : stands(unit),
+              crowds, seconds, snap);
         for (Body body : bodies) {
             boolean mek = body.rig.mek() && unit.model().state().structure().anatomy() != null;
             var bodyMotion = motion.member(unit.id(), body.rig.container());
@@ -305,7 +325,10 @@ final class UnitAnimator {
                 float activity = memberStep != null ? memberStep.standing() : smooth(bodyMotion.progress() * 12)
                       * (bodyMotion.moving() ? 1 : 1 - smooth(bodyMotion.settledSeconds() / UnitMotion.FORMATION_SETTLE_SECONDS));
                 float bodyKneel = mek ? kneel : body.rig.trooper() && Math.floorMod(identity, 3) == 0 ? 1 - activity : 0;
-                if (body.rig.trooper()) { gait *= 1 - bodyKneel; }
+                // Troops that have hit the deck lie flat (UnitMotion.Posture: voluntarily prone), neither kneeling nor walking.
+                float lying = body.rig.trooper() ? crouch : 0;
+                bodyKneel *= 1 - lying;
+                if (body.rig.trooper()) { gait *= (1 - bodyKneel) * (1 - lying); }
                 if (body.rig.meeple()) {
                     // Without limbs, the figure hops along its own path as a Mek token does (MeepleAnimator.bounce).
                     float hops = distance * body.memberScale / (MEEPLE_HOP_LENGTH * body.restHeight);
@@ -321,13 +344,26 @@ final class UnitAnimator {
                 if (body.rig.trooper()) {
                     // Both hands keep the rifle together. The BA arm cannon already points forward at rest.
                     float carry = "infantry".equals(body.rig.family()) ? 70 - 15 * activity + 20 * bodyKneel : 0;
-                    float sway = MathUtils.sin(localPhase) * 3 * gait;
+                    // Lying, the elbows rest on the ground ahead of the shoulders and the forearms aim the rifle forward.
+                    float sway = MathUtils.sin(localPhase) * 3 * gait + 150 * lying;
+                    carry = carry * (1 - lying) + 40 * lying;
                     body.rotate("leftArm", Vector3.X, sway);
                     body.rotate("rightArm", Vector3.X, sway);
                     body.rotate("leftForearm", Vector3.X, carry);
                     body.rotate("rightForearm", Vector3.X, carry);
                     body.rotate("head", Vector3.Z, MathUtils.sin(clock * .55f + seed) * 4 * (1 - activity));
                     body.rotate("torso", Vector3.X, -6 * bodyKneel + MathUtils.sin(clock * 2 + seed) * .7f * (1 - activity));
+                    // Face down on the ground, head up to look along the rifle; about the body's middle rather than
+                    // its feet, so it keeps its standing spot, inside its hex.
+                    Joint root = body.joints.get("root");
+                    if (root != null && lying > 0) {
+                        Node node = root.node();
+                        Vector3 middle = new Vector3(body.restMiddle).scl(node.scale);
+                        node.translation.add(new Vector3(middle).mul(node.rotation));
+                        root.rotate(Vector3.X, -90 * lying);
+                        node.translation.sub(middle.mul(node.rotation));
+                    }
+                    body.rotate("head", Vector3.X, 60 * lying);
                 } else {
                     body.rotate("leftArm", Vector3.X, -MathUtils.sin(localPhase) * 9 * gait);
                     body.rotate("rightArm", Vector3.X, MathUtils.sin(localPhase) * 9 * gait);
@@ -383,8 +419,11 @@ final class UnitAnimator {
                 var pose = unit.model().state().pose();
                 var turret = body.joints.get("turret");
                 var retained = turret == null ? null : retainedTurretYaw.get(turret.node().id);
-                if ("building-turret-v1".equals(body.rig.type()) && retained != null) {
+                if (BUILDING_RIGS.contains(body.rig.type()) && retained != null) {
                     turret.node().rotation.set(retained);
+                } else if (CASEMATE_RIG.equals(body.rig.type())) {
+                    // A wall casemate faces out of its wall until it fires; the unit's turret facing is the roof's.
+                    body.rotate("turret", Vector3.Z, 0);
                 } else {
                     body.rotate("turret", Vector3.Z, -(pose.secondaryFacing() - pose.facing()) * 60);
                 }
@@ -408,6 +447,15 @@ final class UnitAnimator {
     void apply(GpuUnitModel model, ModelInstance placed, BoardScene.Unit unit, UnitMotion.Sample motion,
           float clock, float seconds, boolean instant, float twist) {
         apply(model, placed, unit, motion, clock, seconds, instant, twist, 1);
+    }
+
+    /**
+     * Whether a tank that could go hull down where it is, but has not, waits in its strongpoint's hide at ground level
+     * ({@link BoardGroundCut#hide}) instead of standing in its vehicle pit.
+     */
+    static boolean waiting(BoardScene.Unit unit) {
+        return unit.model() != null && unit.model().state() != null && unit.model().state().pose().canHullDown()
+              && !hullDown(unit);
     }
 
     static boolean hullDown(BoardScene.Unit unit) {
@@ -572,7 +620,8 @@ final class UnitAnimator {
     boolean groundSupports(BoardScene scene, BoardScene.Unit unit, UnitMotion.Sample motion) {
         if (dying) { return false; }
         boolean rough = formation.roughGround(instance, scene, unit, motion, surfaces, stepRoom(unit));
-        boolean contact = groundContact != null && groundContact.apply(scene, unit, motion);
+        boolean contact = groundContact != null && groundContact.apply(scene, unit, motion,
+              container -> container == null ? !waiting(unit) : formation.parked(container));
         boolean lifted = liftMembers();
         return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough || lifted;
     }
@@ -705,6 +754,7 @@ final class UnitAnimator {
                 for (var binding : model.equipment()) {
                     if (attack.fires(binding)) {
                         mountRecoil.merge(binding.node(), attack.recoil(binding), Math::max);
+                        if (binding.spinNode() != null) { mountSpin.merge(binding.node(), attack.spin(binding), Math::max); }
                     }
                 }
             }
@@ -853,6 +903,8 @@ final class UnitAnimator {
             if (binding.aimNode() != null) {
                 // New modules opt in to a mechanical recoil joint. A laser/launcher with only aim stays fixed.
                 if (binding.recoilNode() != null) { applyWeaponRecoil(instance, model.instance, binding, recoil == null ? 0 : recoil); }
+                Float spin = mountSpin.get(binding.node());
+                if (binding.spinNode() != null) { applyWeaponSpin(instance, model.instance, binding, spin == null ? 0 : spin); }
                 continue;
             }
             Node node = instance.getNode(binding.node()), rest = model.instance.getNode(binding.node());
@@ -870,6 +922,15 @@ final class UnitAnimator {
         Node node = posed.getNode(binding.recoilNode()), original = rest.getNode(binding.recoilNode());
         if (node == null || original == null) { return; }
         node.translation.set(original.translation).mulAdd(Vector3.Y, -UnitAttack.RECOIL_DISTANCE * strength);
+        posed.calculateTransforms();
+    }
+
+    /** Turns a rotary barrel cluster about its barrel axis (local +Y) from its rest pose. */
+    static void applyWeaponSpin(ModelInstance posed, ModelInstance rest, UnitEquipmentAssembly.Binding binding, float degrees) {
+        if (binding.spinNode() == null) { return; }
+        Node node = posed.getNode(binding.spinNode()), original = rest.getNode(binding.spinNode());
+        if (node == null || original == null) { return; }
+        node.rotation.set(original.rotation).mul(new Quaternion(Vector3.Y, degrees));
         posed.calculateTransforms();
     }
 
@@ -1092,7 +1153,12 @@ final class UnitAnimator {
     }
 
     private boolean buildingTurret(Node node) {
-        return bodies.stream().anyMatch(body -> "building-turret-v1".equals(body.rig.type())
+        return bodies.stream().anyMatch(body -> BUILDING_RIGS.contains(body.rig.type())
+              && body.joints.get("turret") != null && body.joints.get("turret").node() == node);
+    }
+
+    private boolean casemate(Node node) {
+        return bodies.stream().anyMatch(body -> CASEMATE_RIG.equals(body.rig.type())
               && body.joints.get("turret") != null && body.joints.get("turret").node() == node);
     }
 
@@ -1118,17 +1184,23 @@ final class UnitAnimator {
         target.rot(inverse).nor();
         if (forward.isZero() || target.isZero()) { return new Quaternion(); }
         if (pitchOnly) {
-            // A cradle's transverse trunnion is a hinge, not a ball joint.
+            // A weapon's transverse trunnion is a hinge, not a ball joint.
             float angle = MathUtils.atan2(forward.y * target.z - forward.z * target.y,
                   forward.y * target.y + forward.z * target.z) * MathUtils.radiansToDegrees;
-            // The external cradle kit clears the hull down to its binding's stop (-20 degrees unless front bays
-            // sit below the barrel). This is a visual mechanical stop; it does not alter legal firing arcs.
+            // The weapon clears the hull down to its binding's stop (-20 degrees unless front bays sit below the
+            // barrel). This is a visual mechanical stop; it does not alter legal firing arcs.
             return new Quaternion(Vector3.X, MathUtils.clamp(angle, Math.max(-limit, -depression), limit));
         }
         if (buildingTurret(joint)) {
-            // The bearing can yaw; barrel elevation belongs to the weapon's aim joint.
+            // The bearing can yaw; barrel elevation belongs to the weapon's aim joint. A wall casemate's shield turns
+            // only within its weapons' arc, three hexsides centred on its face: its rest heading, wherever it now points.
             float angle = MathUtils.atan2(forward.x * target.y - forward.y * target.x,
                   forward.x * target.x + forward.y * target.y) * MathUtils.radiansToDegrees;
+            if (casemate(joint)) {
+                float current = joint.rotation.getAngleAround(Vector3.Z);
+                current = current > 180 ? current - 360 : current;
+                angle = MathUtils.clamp(current + angle, -CASEMATE_ARC, CASEMATE_ARC) - current;
+            }
             return new Quaternion(Vector3.Z, angle);
         }
         var rotation = new Quaternion().setFromCross(forward, target);

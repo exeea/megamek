@@ -80,6 +80,8 @@ public class HexTileset implements BoardListener, AutoCloseable {
     private final TilesetMatcher matcher;
     /** Each entry's images in its file order, loaded on first use. */
     private final Map<TilesetMatcher.Entry, List<Image>> entryImages = new IdentityHashMap<>();
+    /** The one empty image every key file stands for ({@link TilesetMatcher#image}). */
+    private Image keyImage;
     private IGame observedGame;
     private GameListener gameListener;
     private final Set<Board> observedBoards = new java.util.HashSet<>();
@@ -197,10 +199,19 @@ public class HexTileset implements BoardListener, AutoCloseable {
         return entryImages.computeIfAbsent(pick.entry(), this::loadImages).get(pick.index());
     }
 
-    /** The entry's images in its file order; the loader returns a placeholder for a file it cannot read. */
+    /**
+     * The entry's images in its file order: a blank one for a file that is a key ({@link TilesetMatcher#image}), and
+     * the loader's placeholder for a file it cannot read.
+     */
     private List<Image> loadImages(TilesetMatcher.Entry entry) {
         List<Image> images = new ArrayList<>(entry.files().size());
         for (String filename : entry.files()) {
+            if (!TilesetMatcher.image(filename)) {
+                // A key, not an image: nothing to draw, and no layer for the blank test.
+                if (keyImage == null) { keyImage = ImageUtil.createAcceleratedImage(HEX_W, HEX_H); }
+                images.add(keyImage);
+                continue;
+            }
             File imgFile = new MegaMekFile(imageRoot, filename).getFile();
             Image image = ImageUtil.loadImageFromFile(imgFile.toString());
             images.add(image);

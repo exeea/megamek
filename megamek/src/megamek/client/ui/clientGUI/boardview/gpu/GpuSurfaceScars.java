@@ -300,8 +300,12 @@ final class GpuSurfaceScars implements Disposable {
         }
     }
 
-    /** Draws the pages in view whose receiver is {@code shown}: a scar hides with the object the zoom hides. */
-    void render(Camera camera, ModelBatch batch, Environment environment, int boardRows, Predicate<Receiver> shown) {
+    /**
+     * Draws the pages in view whose receiver is {@code shown}: a scar hides with the object the zoom hides. Pages merge
+     * until {@code deadline} (GpuMeshPage.advance).
+     */
+    void render(Camera camera, ModelBatch batch, Environment environment, int boardRows, Predicate<Receiver> shown,
+          long deadline) {
         batches.begin(camera);
         for (Page page : tiles.values()) {
             Coords at = page.key.receiver().coords();
@@ -309,7 +313,7 @@ final class GpuSurfaceScars implements Disposable {
             int group = at.getX() / span * ((boardRows + span - 1) / span) + at.getY() / span;
             batches.add(page.parts, group, camera.frustum.boundsInFrustum(page.bounds) && shown.test(page.key.receiver()));
         }
-        batches.render(batch, environment);
+        batches.render(batch, environment, deadline);
     }
 
     private final class Page {

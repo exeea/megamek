@@ -304,7 +304,7 @@ class GpuHexSurfaceSmokeTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());

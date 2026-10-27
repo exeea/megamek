@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -147,8 +146,8 @@ class BoardWetCliffTest {
             var deeper = LAND.translated(0);
             var shallower = LAND.translated(1);
             var tiles = new ArrayList<>(shallowScene.tiles());
-            tiles.set(deeper.getX() * 7 + deeper.getY(), new BoardScene.Tile(deeper, 0, 2, false, 0, BoardScene.Surface.SAND, null,
-                  null, null, null, List.of(), List.of(), BoardLiquid.WATER, null, true));
+            tiles.set(deeper.getX() * 7 + deeper.getY(), new BoardScene.Tile(deeper, 0, 2, false, 0,
+                  BoardScene.Surface.SAND, null, null, List.of(), List.of(), BoardLiquid.WATER, null, true));
             var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
             var a = new BoardSurface(scene, scene.tile(deeper));
             var b = new BoardSurface(scene, scene.tile(shallower));
@@ -174,16 +173,13 @@ class BoardWetCliffTest {
     /** A low river with abrupt changes of bed depth and bank height, including cliff/slope junctions. */
     static BoardScene mixedDepthScene() {
         List<BoardScene.Tile> tiles = new ArrayList<>();
-        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
-        image.setRGB(0, 0, 0xff8a8a70);
-        var pixels = new BoardScene.Pixels(image);
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 7; y++) {
                 boolean water = x >= 1 && x <= 7 && (y == 3 || y == 4 && x >= 3 && x <= 6);
                 int depth = !water ? -1 : new int[] { 1, 2, 1, 5, 2, 1, 2 }[x - 1];
                 int level = water ? -2 : y < 3 ? x == 4 ? 9 : x == 5 ? -2 : x < 5 ? 1 : 3 : -2;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, BoardScene.Surface.GRASS,
-                      pixels, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
+                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, BoardScene.Surface.GRASS, null,
+                      null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
                       null, true));
             }
         }
@@ -207,7 +203,7 @@ class BoardWetCliffTest {
                 var coords = new Coords(x, y);
                 boolean land = coords.equals(LAND);
                 tiles.add(new BoardScene.Tile(coords, land ? level : 0, land ? -1 : depth, false, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, List.of(), List.of(),
+                      BoardScene.Surface.SAND, null, null, List.of(), List.of(),
                       land ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
             }
         }

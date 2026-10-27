@@ -603,7 +603,7 @@ class GpuPlaybackCameraTest {
 
     private static BoardScene scene(int selectedId, BoardScene.Unit... units) {
         var tiles = IntStream.range(0, 12).mapToObj(row -> new BoardScene.Tile(new Coords(0, row), 0, -1, false, 0,
-              BoardScene.Surface.GRASS, null, null, List.of(), List.of())).toList();
+              BoardScene.Surface.GRASS, null, List.of(), List.of())).toList();
         return new BoardScene(0, 1, 12, tiles, List.of(units), List.of(), selectedId, "Movement", List.of());
     }
 }

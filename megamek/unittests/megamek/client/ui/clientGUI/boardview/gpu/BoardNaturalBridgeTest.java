@@ -439,7 +439,7 @@ class BoardNaturalBridgeTest {
             var scene = scene(BoardScene.Surface.GRASS, water, true);
             var tile = scene.tile(CENTER);
             var without = new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(),
-                  tile.roadExits(), tile.surface(), tile.ground(), null, null, null, List.of(), List.of(),
+                  tile.roadExits(), tile.surface(), null, null, List.of(), List.of(),
                   tile.liquid(), null, true, tile.road());
             var groundOnly = replace(scene, without);
             var before = new BoardSurface(groundOnly, without);
@@ -698,7 +698,7 @@ class BoardNaturalBridgeTest {
                 var ground = BoardRoadTest.tile(at, road ? BoardRoad.Kind.GRAVEL : BoardRoad.Kind.NONE,
                       road ? (1 << ((direction + 1) % 6)) | (1 << ((direction + 4) % 6)) : 0, level, family);
                 if (water && canyon) {
-                    ground = new BoardScene.Tile(at, 0, 1, false, 0, family, ground.ground(), null, null, null,
+                    ground = new BoardScene.Tile(at, 0, 1, false, 0, family, null, null,
                           List.of(), List.of(), BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE);
                 }
                 tiles.add(at.equals(bridge) ? bridge(ground, (1 << direction) | (1 << ((direction + 3) % 6))) : ground);
@@ -714,7 +714,7 @@ class BoardNaturalBridgeTest {
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 3));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
         return BoardBridgeTypeTest.appearance(new BoardScene.Tile(ground.coords(), ground.elevation(), ground.waterDepth(),
-              ground.frozen(), ground.roadExits(), ground.surface(), ground.ground(), null, null, null,
+              ground.frozen(), ground.roadExits(), ground.surface(), null, null,
               BoardFeatures.capture(hex, ground.coords(), Map.of()), List.of(), ground.liquid(), null, true, ground.road()),
               Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
     }

@@ -335,9 +335,9 @@ class BoardConcreteShoreTest {
                 boolean land = Math.abs(relative.dot(axis)) <= 280 * BoardGeometry.HEX_SCALE
                       && Math.abs(relative.x * -axis.y + relative.y * axis.x) <= 85 * BoardGeometry.HEX_SCALE;
                 var surface = land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS;
-                tiles.add(new BoardScene.Tile(at, land ? level : 0, -1, false, 0, surface, null, null, null, null,
+                tiles.add(new BoardScene.Tile(at, land ? level : 0, -1, false, 0, surface, null, null,
                       at.equals(objectAt) ? features : List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
-                      BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false, BoardSurfaceBlend.solid(surface), null,
+                      BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false, BoardSurfaceBlend.solid(surface),
                       false, null, null, at.equals(objectAt) ? appearance : Map.of(), null));
             }
         }
@@ -465,8 +465,8 @@ class BoardConcreteShoreTest {
                     Coords at = new Coords(x, y);
                     boolean concrete = at.equals(CENTER);
                     tiles.add(new BoardScene.Tile(at, concrete ? 0 : elevation, -1, false, 0,
-                          concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
-                          null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                          concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, List.of(),
+                          List.of(), BoardLiquid.NONE, null, true));
                 }
             }
             BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -758,8 +758,8 @@ class BoardConcreteShoreTest {
                     Coords at = new Coords(x, y);
                     boolean water = at.equals(CENTER) || at.equals(upstream);
                     tiles.add(new BoardScene.Tile(at, at.equals(upstream) ? 1 : 0, water ? 2 : -1, false, 0,
-                          water ? BoardScene.Surface.GRASS : BoardScene.Surface.CONCRETE,
-                          null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
+                          water ? BoardScene.Surface.GRASS : BoardScene.Surface.CONCRETE, null, null, List.of(),
+                          List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
                           null, true));
                 }
             }
@@ -820,7 +820,7 @@ class BoardConcreteShoreTest {
         if (elevation == 0) { return scene; }
         return scene.withTiles(scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
               tile.surface() == BoardScene.Surface.CONCRETE ? elevation : tile.elevation(), -1, false, 0,
-              tile.surface(), tile.ground(), null, null, null, tile.features(), List.of(), BoardLiquid.NONE, null,
+              tile.surface(), null, null, tile.features(), List.of(), BoardLiquid.NONE, null,
               tile.detailedGround())).toList());
     }
 
@@ -916,7 +916,7 @@ class BoardConcreteShoreTest {
                 List<BoardScene.Feature> features = dry && buildings
                       ? List.of(new BoardScene.Feature("building", 0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of();
                 tiles.add(new BoardScene.Tile(coords, 0, dry ? -1 : 2, false, 0,
-                      dry ? family : BoardScene.Surface.GRASS, null, null, null, null, features, List.of(),
+                      dry ? family : BoardScene.Surface.GRASS, null, null, features, List.of(),
                       dry ? BoardLiquid.NONE : BoardLiquid.WATER, null,
                       features.isEmpty() || family == BoardScene.Surface.CONCRETE));
             }

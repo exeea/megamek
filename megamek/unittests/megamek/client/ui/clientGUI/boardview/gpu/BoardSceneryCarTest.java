@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
 import javax.imageio.ImageIO;
@@ -33,7 +34,7 @@ class BoardSceneryCarTest {
             var cars = layout.components().stream().filter(c -> c.asset().startsWith("scenery/vehicles/car")).toList();
             assertEquals(COUNTS.get(index).intValue(), cars.size(), variant);
             assertFalse(Files.exists(root.resolve(name + ".glb")), "No duplicate car geometry stays in the layout");
-            BufferedImage reference = ImageIO.read(root.resolve("tileset/fluff/cars_" + variant + ".gif").toFile());
+            BufferedImage reference = ImageIO.read(new File(Configuration.hexesDir(), "fluff/cars_" + variant + ".gif"));
             for (var car : cars) {
                 assertFalse(car.tree());
                 var data = RigidGlb.loadLods(new FileHandle(root.resolve(car.asset() + ".glb").toFile()), root).getFirst();

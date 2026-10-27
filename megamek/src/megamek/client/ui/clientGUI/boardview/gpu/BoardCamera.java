@@ -24,7 +24,7 @@ import megamek.logging.MMLogger;
 /** One camera for the 3D view and the Tactical View: orbit presets and free flight over the same board geometry. */
 final class BoardCamera {
     private static final MMLogger LOGGER = MMLogger.create(BoardCamera.class);
-    private static final float ISOMETRIC_TILT = 54.73561f;
+    static final float ISOMETRIC_TILT = 54.73561f;
     // Manual zoom limits: smaller values zoom in, larger values zoom out.
     private static final float MIN_ZOOM = 0.05f;
     private static final float MAX_ZOOM = 20f;

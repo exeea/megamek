@@ -207,8 +207,8 @@ class GpuInfantryRoughSmokeTest {
             if (!tile.coords().equals(unit.location().coords())) { return tile; }
             var rocks = List.of(new BoardScene.Feature("rough-boulder", 0, 0, 0, 4.8f, .5f, 0, BoardScene.FeatureKind.BOULDER),
                   new BoardScene.Feature("rough-boulder", 0, 0, 90, 4.8f, .5f, 0, BoardScene.FeatureKind.BOULDER));
-            return new BoardScene.Tile(tile.coords(), tile.elevation(), -1, false, 0, tile.surface(), tile.ground(),
-                  null, null, null, rocks, List.of(), BoardLiquid.NONE, null, true);
+            return new BoardScene.Tile(tile.coords(), tile.elevation(), -1, false, 0, tile.surface(), null, null, rocks,
+                  List.of(), BoardLiquid.NONE, null, true);
         }).toList();
         BoardScene scene = new BoardScene(0, original.width(), original.height(), tiles, List.of(unit), List.of(), -1, "", List.of());
         var model = ((GpuUnitModels) field(view, "unitModels")).get(unit.model(), unit.id());

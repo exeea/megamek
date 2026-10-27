@@ -1,7 +1,8 @@
 # Grass and shared vegetation wind
 
-`GpuGroundCover` draws low grass, and tundra's dwarf shrubs, over finished terrain. Crops and wetland plants
-belong to `GpuBiomeVegetation`; trees belong to `GpuTreeInstances`. Grass, crops
+`GpuGroundCover` draws low grass over finished terrain, and the fields' crop
+plants among it. `GpuBiomeVegetation` plants the crops and draws the wetland
+plants; trees belong to `GpuTreeInstances`. Grass, crops
 and reeds follow one ground-cover contract, described in
 [fields and marsh](gpu-fields-marsh.md#one-pipeline-for-ground-cover): terrain
 workers plant them with each chunk, chunks keep persistent instance buffers, and
@@ -14,24 +15,25 @@ density and mesh rules.
 | --- | --- |
 | `BoardVegetation`, `BoardBiome` | Terrain eligibility, deterministic placement inputs and shared growth fields. |
 | `BoardPlants` | What each terrain detail level plants; grass and bank turf on medium and full detail. |
-| `GpuGroundCover` | Root planting for terrain workers, projected density, blade and shrub templates and per-chunk submission. |
+| `GpuGroundCover` | Root planting for terrain workers, projected density, blade templates and per-chunk submission. |
 | `GpuBankTurf` | Six curved turf-edge cutouts, fitted to finished bank contours and retained with the grass chunk. |
-| `terrain-grass.glsl` | Blade and dwarf-shrub shape, root-fixed bending and per-root detail selection. |
+| `terrain-grass.glsl` | Blade shape, root-fixed bending and per-root detail selection. |
 | `terrain-meadow.glsl` | Growth variation shared by ground color and grass shape. |
 | `terrain-vegetation-wind.glsl` | World-space gust used by grass, crops and marsh plants. |
 | `terrain-vegetation.frag` | Plant surface lighting, root darkening and wetness. |
 | `terrain-ground-color.glsl`, `terrain-bank-color.glsl` | Terrain pigment and elevation grading shared with the turf; the atlas contributes neutral blade detail. |
 | `GpuTerrain` | Wind phase integration, finished support surfaces and pass ordering. |
 
-The **Grass blades** control under Tuning → Terrain skips grass preparation and
-drawing when disabled. Cached roots remain available when it is re-enabled.
+The **Grass blades** control under Tuning → Terrain hides the grass and bank turf;
+the crops' plants stand either way. Planted roots remain available when it is
+re-enabled.
 Ground shading, crops, marsh plants and trees have separate controls/owners.
 
 ## Roots and drawing
 
 Roots are deterministic positions on finished terrain triangles, filtered by
 existing surface and road rules. Terrain workers plant them for every hex of a
-full-detail chunk (`GpuGroundCover.plant`), and the installed tile keeps them.
+medium- or full-detail chunk (`GpuGroundCover.plant`), and the installed tile keeps them.
 Each instance stores position plus a stable sample rank. Density selects an
 ordered prefix by rank: existing roots do not move when density changes.
 
@@ -120,26 +122,10 @@ These pigment controls are separate from normals, wetness and lighting. Ground
 matching avoids pale halos on raised tiles or green strips across authored
 grass-to-sand gradients. The Grass blades control also hides these crowns.
 
-Two shared blade templates contain three or seven triangles. The vertex shader
+The blade templates, coarse and fine, hold three or seven triangles for grass, five
+or nine for a wheat stalk and 23 or 49 for a maize plant. The vertex shader
 derives curvature, orientation, color variation and wind from the root; the
-fragment shader adds lighting and wetness.
-
-Tundra grows dwarf shrubs on the same roots instead of blades. Where its
-coverage (`BoardBiome`) times a clump field about 1.6 m across outgrows the
-grass, a root becomes a shrub, at 7 % of a blade's chance since a shrub spreads
-far wider; the root carries rank + .5, so the prefix by whole rank still draws
-both kinds. Each chunk keeps a third buffer of these roots for the shrub
-template: twelve diamond leaves, which the vertex shader arranges into a
-mound, steeper on its crown than at its rim. Each shrub draws one of four forms
-(a low mat of needles, a prostrate spread of round leaves, upright bushes of round
-or narrow leaves) and its size, mostly small with a few broad ones, 0.45 to 1.65 m
-in radius: 2.5 times a real dwarf shrub, as the blades are oversized too. Each takes
-one colour from colonies metres across of crowberry, bearberry, dwarf birch and
-willow. Being few and broad, every shrub stands from 250 projected pixels per hex
-(the blades from 500), so they show at play distance. Shrubs
-share the blades' wind (less sway), scars, lighting and Grass blades control, and
-are drawn at every grass scale. No blade grows on full tundra, so the
-carpet's own detail stays visible between the clumps. The grass color pass has no draws
+fragment shader adds lighting and wetness. The grass color pass has no draws
 below its visible scale, one at a uniform orthographic scale, and at most two in
 perspective. Grass receives shadows but does not cast a separate shadow per blade.
 
@@ -167,8 +153,9 @@ at every detail level; when the full-detail chunk lands, only the heights change
 with the ground under them, and the chunk uploads once without a blade moving.
 Roots that do arrive while their hex is already on screen without any, the only
 case left, grow in over half a second instead of appearing at once
-(`GpuGroundCover.visible`); roots a chunk brought while off screen show
-complete.
+(`GpuGroundCover.visible`), and the frame their growth ends submits them in full
+before a still view reuses its submission; roots a chunk brought while off screen
+show complete.
 
 The meadow field varies blade height and thickness continuously, keeping shorter
 growth in sparse patches. Blades full-coverage proportions:
@@ -179,8 +166,16 @@ unchanged. The shared maximum height also controls shrub sizing; altering blade
 proportions must not unintentionally admit more shrub geometry through placement checks.
 The meadow field is also used for ground color. Avoid introducing a
 separate fragment cutoff or procedural field that makes bare ground disagree with
-root placement. Grass is drawn after opaque terrain so its instances do not split
-terrain material batches.
+root placement. Grass and the crops' plants draw in their own batch
+(`GpuTerrain.renderCover`) after the depth pre-pass and before the terrain's
+colour flush: the ground they hide fails the depth test instead of being shaded,
+and their instances do not split terrain material batches. On an Iris Xe at 1080p
+this takes the Farmland board's views at 198, 83 and 52 px/hex from 40.5, 45.0
+and 45.0 ms to 32.6, 37.5 and 38.1 ms, and Mesa City's grass views by 1 to 2 ms;
+on NVIDIA the frames match the old order but for single pixels at roots. Two further
+changes measured within noise on the Iris Xe in A/B runs on those views and were not
+kept: one draw per chunk in the orthographic view (roots interleaved by rank instead
+of a range per hex), and the grid shade taken once per plant in the vertex stage.
 
 ## Wind
 
@@ -190,7 +185,7 @@ Zero strength leaves the plants still. Increasing strength increases both the
 bend and the gust's travel rate.
 
 Grass blends angular poses around fixed roots so slider steps remain useful
-throughout the range. Crops keep leaves attached to their leaning stalks; marsh
+throughout the range. Crop plants keep their leaves on their swaying stalks; marsh
 plants form a deeper arch. Detailed, simplified and distant plant meshes use the
 same world-space gust. Wind changes update shader inputs without regenerating
 roots or uploading unchanged instance buffers.

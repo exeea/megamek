@@ -280,7 +280,7 @@ final class GpuFireControl implements Disposable {
         } finally {
             graphics.dispose();
         }
-        Pixmap pixels = GpuTextures.pixmap(new BoardScene.Pixels(image), 0, false);
+        Pixmap pixels = GpuTextures.pixmap(new BoardScene.Pixels(image), 0);
         try {
             Texture texture = new Texture(pixels, true);
             texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);

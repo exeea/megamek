@@ -210,7 +210,7 @@ class GpuTerrainGradeSmokeTest {
                 var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS,
                       coords.getX() < 4 ? upper : upper - 2, -1, 0);
                 return new BoardScene.Tile(coords, tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-                      tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(),
+                      tile.surface(), tile.decals(), tile.decalsWithoutLimbs(),
                       tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(),
                       tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare(), cover);
             });
@@ -228,7 +228,7 @@ class GpuTerrainGradeSmokeTest {
                   / (camera.viewportHeight * camera.zoom);
             assertEquals(projectedHexPixels, hexPixels, .001f,
                   "Bank projection and production detail selection must agree on physical pixel scale");
-            assertTrue(GpuGroundCover.visibleAtScale(camera), "The bank probe requires visible ground cover");
+            assertTrue(GpuGroundCover.visibleAtScale(camera, true, false), "The bank probe requires visible ground cover");
             System.out.println("Elevation bank camera level=" + upper + " zoom=" + camera.zoom
                   + " hexPixels=" + hexPixels + " target=" + target);
             terrain.setGrass(true);

@@ -107,7 +107,7 @@ class GpuIndustrialSmokeTest {
             if (!neighbor && index == 1) { index = -1; }
             Hex hex = new Hex(0);
             hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, height + Math.max(0, index)));
-            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(), null, null, null,
+            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), null, null,
                   index < 0 ? List.of() : BoardFeatures.capture(hex, coords, Map.of(Terrains.INDUSTRIAL, asset(index))),
                   List.of(), BoardLiquid.NONE, null, true);
         });

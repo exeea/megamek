@@ -19,8 +19,10 @@ import megamek.common.battlefieldSupport.BFSAssetType;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.battlefieldSupport.OverlayStyle;
 import megamek.common.battlefieldSupport.StripeDirection;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.icons.Camouflage;
 import megamek.common.options.OptionsConstants;
+import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
@@ -38,7 +40,13 @@ import megamek.common.units.TripodMek;
 record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
     record Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
           int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm,
-          UnitFamilyScale family, String unitIcon, int fieldGuns) {
+          UnitFamilyScale family, String unitIcon, int fieldGuns, @Nullable Building building) {
+        Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
+              int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm,
+              UnitFamilyScale family, String unitIcon, int fieldGuns) {
+            this(movement, equipment, members, activeTroopers, externalSearchlight, anatomy, bodyForm, family, unitIcon,
+                  fieldGuns, null);
+        }
         Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
               int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm,
               UnitFamilyScale family) {
@@ -66,7 +74,29 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
         String iconKey() {
             return unitIcon == null ? null : unitIcon.replace('\\', '/').toLowerCase(Locale.ROOT);
         }
+
+        /** The same structure carrying only {@code mounts}: one roof turret or wall casemate of a building. */
+        Structure withEquipment(List<UnitModelEquipment.Mount> mounts) {
+            return new Structure(movement, mounts, members, activeTroopers, externalSearchlight, anatomy, bodyForm, family,
+                  unitIcon, fieldGuns, building);
+        }
     }
+
+    /**
+     * Where an advanced building's weapons sit in its drawn hex: the hex's height in levels, and each wall weapon's
+     * casemate. A weapon not listed rides the roof turret.
+     */
+    record Building(int height, Map<Integer, Wall> walls) {
+        Building {
+            walls = Map.copyOf(walls);
+        }
+    }
+
+    /**
+     * A wall weapon's casemate: the face it fires from, 0-5 clockwise from the building's front, whose three hexsides
+     * are its arc, and its floor, 0 for the ground floor.
+     */
+    record Wall(int face, int floor) { }
 
     /** Family-only structure; resting proportions never depend on transient gameplay height or posture. */
     record BodyForm(String configuration, int size, int turrets, List<FlightMember> fighters) {
@@ -129,8 +159,16 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
 
     record Marker(int rgb, StripeDirection direction, OverlayStyle style, BoardScene.Pixels image) { }
 
+    /**
+     * @param canHullDown whether a combat vehicle could go hull down where it is, as only a fortified hex lets it
+     *                    (TO:AR p.19), hull down or not
+     */
     record Pose(ProneCause proneCause, int facing, int secondaryFacing, megamek.common.units.UnitLocation.Form form,
-          boolean dead, boolean armsFlipped, boolean hullDown) {
+          boolean dead, boolean armsFlipped, boolean hullDown, boolean canHullDown) {
+        Pose(ProneCause proneCause, int facing, int secondaryFacing, megamek.common.units.UnitLocation.Form form,
+              boolean dead, boolean armsFlipped, boolean hullDown) {
+            this(proneCause, facing, secondaryFacing, form, dead, armsFlipped, hullDown, false);
+        }
         Pose(ProneCause proneCause, int facing, int secondaryFacing, megamek.common.units.UnitLocation.Form form,
               boolean dead, boolean armsFlipped) {
             this(proneCause, facing, secondaryFacing, form, dead, armsFlipped, false);
@@ -151,11 +189,31 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
         return capture(entity, null);
     }
 
-    /** The Swing-owned tileset supplies the icon identity; the renderer only receives this immutable snapshot. */
     static UnitModelState capture(Entity entity, String unitIcon) {
+        return capture(entity, unitIcon, -1);
+    }
+
+    /**
+     * The Swing-owned tileset supplies the icon identity; the renderer only receives this immutable snapshot.
+     *
+     * @param part the drawn part of a large unit, or -1 for all of it: an armed building drawn hex by hex captures only
+     *             the equipment in that hex
+     */
+    static UnitModelState capture(Entity entity, String unitIcon, int part) {
         List<UnitModelEquipment.Mount> equipment = new ArrayList<>();
         Set<Integer> inoperable = new TreeSet<>();
+        var armed = entity instanceof AbstractBuildingEntity building && UnitModelEquipment.armedStructure(building)
+              ? building : null;
+        var hex = armed == null ? null : part < 0 ? armed.getPosition() : armed.getSecondaryPositions().get(part);
+        Map<Integer, Wall> walls = new HashMap<>();
         for (var mount : entity.getEquipment()) {
+            if (armed != null && part >= 0 && !java.util.Objects.equals(hex, armed.getLocationCoords(mount.getLocation()))) {
+                continue;
+            }
+            // A building's turret-mounted weapons ride its roof; one facing a wall fires from a casemate in it.
+            if (armed != null && mount instanceof WeaponMounted weapon && UnitModelEquipment.wallMounted(armed, weapon)) {
+                walls.put(mount.getEquipmentNum(), new Wall(weapon.getFacing(), armed.getLocationLevel(mount.getLocation())));
+            }
             var visual = UnitModelEquipment.describe(entity, mount);
             if (visual.policy() != EquipmentModelPolicy.NONE) {
                 equipment.add(visual);
@@ -213,13 +271,23 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
               || entity.getQuirks().booleanOption(OptionsConstants.QUIRK_POS_SEARCHLIGHT));
         return new UnitModelState(new Structure(movement, equipment, members, troopers,
               externalLamp, anatomy, form, UnitFamilyScale.forEntity(entity), unitIcon,
-              entity instanceof ConvInfantry infantry ? infantry.activeFieldWeapons().size() : 0),
+              entity instanceof ConvInfantry infantry ? infantry.activeFieldWeapons().size() : 0,
+              armed == null ? null : new Building(hex == null ? 1 : armed.getHeight(hex), walls)),
               new Appearance(inoperable, entity.isUsingSearchlight(), appearance, fighterAppearances,
                     UnitModelSelection.bodyStage(entity)),
               new Pose(entity instanceof Mek ? entity.getProneCause() : ProneCause.NONE,
                     entity.getFacing(), entity.getSecondaryFacing(), megamek.common.units.UnitLocation.Form.capture(entity),
                     entity.isDestroyed() || entity.isDoomed(),
                     // Ask both: a unit that cannot flip should never be shown flipped, whatever the flag says.
-                    entity.canFlipArms() && entity.getArmsFlipped(), entity.isHullDown()));
+                    entity.canFlipArms() && entity.getArmsFlipped(), entity.isHullDown(), canHullDown(entity)));
+    }
+
+    /** Whether a combat vehicle could go hull down where it is: a fortified hex, with the rule in play (TO:AR p.19). */
+    private static boolean canHullDown(Entity entity) {
+        var game = entity.getGame();
+        var hex = game == null ? null : game.getHexOf(entity);
+        return entity instanceof Tank tank && tank.isHullDownCapable() && hex != null
+              && hex.containsTerrain(megamek.common.units.Terrains.FORTIFIED)
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_HULL_DOWN);
     }
 }

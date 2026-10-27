@@ -67,7 +67,7 @@ class GpuFieldOfViewCliffSmokeTest {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
-                      BoardScene.Surface.CONCRETE, pixels, null, List.of(), List.of()));
+                      BoardScene.Surface.CONCRETE, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

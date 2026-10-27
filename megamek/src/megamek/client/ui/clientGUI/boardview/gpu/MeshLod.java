@@ -14,6 +14,11 @@ final class MeshLod {
         return shape + "-lod" + level;
     }
 
+    /** A level group's level, read from its name's {@code -lod<N>} ending whatever precedes it; -1 for any other name. */
+    static int level(String group) {
+        return group != null && group.matches(".*-lod[0-9]") ? group.charAt(group.length() - 1) - '0' : -1;
+    }
+
     /** The lookup returns null only for an absent level; malformed assets must still report their load error. */
     static <T> List<T> load(String shape, int count, Function<String, T> lookup) {
         if (count < 1) { throw new IllegalArgumentException("A mesh needs LOD0"); }

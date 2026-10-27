@@ -98,6 +98,10 @@ final class RigidGlb {
         final Map<String, Image> images = new HashMap<>();
         final Map<String, Float> alphaTests = new HashMap<>();
         final Map<String, Surface> surfaces = new HashMap<>();
+        /** Materials whose albedo alpha is a paint mask (extras {@code mmPaintMask}, {@link GpuModelMaterial#paintMask}). */
+        final Set<String> paintMasks = new HashSet<>();
+        /** Materials that draw a label's characters (extras {@code mmLabel}, {@link #label}). */
+        final Set<String> labels = new HashSet<>();
         /** Each vertex's colour slot (0 none, n the n-th of {@link #colourSlots}), in the geometry's vertex order. */
         byte[] slots = new byte[0];
         List<ColourSlot> colourSlots = List.of();
@@ -142,15 +146,9 @@ final class RigidGlb {
      */
     static int levels(File file) {
         try {
-            var document = document(file);
-            var scenes = (List<?>) document.get("scenes");
-            Object index = document.get("scene");
-            var roots = (List<?>) ((Map<?, ?>) scenes.get(index instanceof Number number ? number.intValue() : 0)).get("nodes");
-            var nodes = (List<?>) document.get("nodes");
             int highest = 0;
-            for (Object root : roots) {
-                if (((Map<?, ?>) nodes.get(((Number) root).intValue())).get("name") instanceof String name
-                      && name.matches(".*-lod[0-" + (LEVELS - 1) + "]")) {
+            for (String name : rootNames(document(file))) {
+                if (name.matches(".*-lod[0-" + (LEVELS - 1) + "]")) {
                     highest = Math.max(highest, name.charAt(name.length() - 1) - '0');
                 }
             }
@@ -158,6 +156,102 @@ final class RigidGlb {
         } catch (IOException | RuntimeException error) {
             throw new IllegalArgumentException("Cannot read the levels of " + file + ": " + error.getMessage(), error);
         }
+    }
+
+    /** The names of a GLB's root nodes in its default scene, from its JSON chunk ({@link #document}). */
+    private static List<String> rootNames(Map<?, ?> document) {
+        var scenes = (List<?>) document.get("scenes");
+        Object index = document.get("scene");
+        var roots = (List<?>) ((Map<?, ?>) scenes.get(index instanceof Number number ? number.intValue() : 0)).get("nodes");
+        var nodes = (List<?>) document.get("nodes");
+        List<String> result = new ArrayList<>();
+        for (Object root : roots) {
+            if (((Map<?, ?>) nodes.get(((Number) root).intValue())).get("name") instanceof String name) { result.add(name); }
+        }
+        return result;
+    }
+
+    /** The root groups a model may hold beside its levels, which the board reads as data ({@link BoardGroundCut}). */
+    static final String CUT = "cut", STANDS = "stands";
+
+    /**
+     * A model's {@link #CUT} triangles and the numbered part each belongs to ({@link #part}, -1 for none), the frames of
+     * the empties in its {@link #STANDS} group by name, and the convex outline of its finest level seen from above
+     * (x, y pairs), in the board's Z-up model units; empty where it has none.
+     */
+    record Groundwork(List<Vector3[]> cut, int[] cutParts, Map<String, Matrix4> stands, float[] outline) {
+        static final Groundwork NONE = new Groundwork(List.of(), new int[0], Map.of(), new float[0]);
+    }
+
+    /**
+     * The number of a model's numbered part named {@code part-N}, as one of a platoon's fighting holes: a node of each
+     * level and a child of its {@link #CUT} group; -1 for any other name.
+     */
+    static int part(String name) {
+        return name != null && name.matches("part-\\d+") ? Integer.parseInt(name.substring("part-".length())) : -1;
+    }
+
+    /** A file's {@link Groundwork}, read without its images; a file without those groups is never read beyond its JSON. */
+    static Groundwork groundwork(File file) {
+        try {
+            var names = rootNames(document(file));
+            if (!names.contains(CUT) && !names.contains(STANDS)) { return Groundwork.NONE; }
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Cannot read the ground work of " + file + ": " + error.getMessage(), error);
+        }
+        try (var input = Files.newInputStream(file.toPath())) {
+            var binary = (GltfAssetV2) new GltfAssetReader().readWithoutReferences(input);
+            binary.getImageReferences().forEach(image -> image.getTarget().accept(ByteBuffer.allocate(0)));
+            var model = GltfModelCreatorV2.create(binary);
+            List<Vector3[]> cut = new ArrayList<>(), finest = new ArrayList<>();
+            List<Integer> cutParts = new ArrayList<>();
+            List<NodeModel> stands = new ArrayList<>();
+            for (var root : model.getSceneModels().get(binary.getGltf().getScene()).getNodeModels()) {
+                if (CUT.equals(root.getName())) {
+                    for (var child : root.getChildren()) {
+                        triangles(child, cut);
+                        while (cutParts.size() < cut.size()) { cutParts.add(part(child.getName())); }
+                    }
+                }
+                if (STANDS.equals(root.getName())) { stands.addAll(root.getChildren()); }
+                if (root.getName() != null && root.getName().endsWith("-lod0")) { triangles(root, finest); }
+            }
+            FloatArray points = new FloatArray();
+            finest.forEach(triangle -> { for (Vector3 point : triangle) { points.add(point.x, point.y); } });
+            // The hull closes on its first point.
+            var hull = points.size < 6 ? new FloatArray(2) : new com.badlogic.gdx.math.ConvexHull().computePolygon(points, false);
+            Map<String, Matrix4> frames = new java.util.TreeMap<>();
+            for (var stand : stands) {
+                frames.put(stand.getName(), new Matrix4(Z_UP).mul(new Matrix4(stand.computeGlobalTransform(null))).mul(Y_UP));
+            }
+            return new Groundwork(List.copyOf(cut), cutParts.stream().mapToInt(Integer::intValue).toArray(),
+                  java.util.Collections.unmodifiableMap(frames),
+                  java.util.Arrays.copyOf(hull.items, Math.max(0, hull.size - 2)));
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Cannot read the ground work of " + file + ": " + error.getMessage(), error);
+        }
+    }
+
+    /** Every triangle of a node and its children under their global transforms, glTF's Y up turned to Z up. */
+    private static void triangles(NodeModel node, List<Vector3[]> result) {
+        Matrix4 transform = new Matrix4(Z_UP).mul(new Matrix4(node.computeGlobalTransform(null)));
+        for (var mesh : node.getMeshModels()) {
+            for (var primitive : mesh.getMeshPrimitiveModels()) {
+                var positions = primitive.getAttributes().get("POSITION");
+                float[] p = attribute(positions, positions.getCount(), 3);
+                var index = primitive.getIndices();
+                AccessorData indices = index == null ? null : index.getAccessorData();
+                int count = index == null ? positions.getCount() : index.getCount();
+                require(primitive.getMode() == GL20.GL_TRIANGLES && count % 3 == 0, "Expected triangles");
+                Vector3[] triangle = new Vector3[3];
+                for (int i = 0; i < count; i++) {
+                    int vertex = indices == null ? i : (int) component(indices, i, 0);
+                    triangle[i % 3] = new Vector3(p[vertex * 3], p[vertex * 3 + 1], p[vertex * 3 + 2]).mul(transform);
+                    if (i % 3 == 2) { result.add(triangle.clone()); }
+                }
+            }
+        }
+        for (var child : node.getChildren()) { triangles(child, result); }
     }
 
     /** A GLB file's JSON chunk, without its buffers. */
@@ -218,6 +312,51 @@ final class RigidGlb {
                 int at = vertex * STRIDE + 6 + channel;
                 vertices[at] = shade(vertices[at], defaults[channel]) * GpuColor.linear(replacements[channel]);
             }
+        }
+    }
+
+    /** A label atlas's characters, in its cells' order: 8 by 8 from the top left, the first one blank. */
+    static final String LABEL_CHARACTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+    private static final int LABEL_CELLS = 8;
+
+    /**
+     * Writes {@code text} on {@code data}'s label materials ({@link Data#labels}): each of their quads is one character
+     * place, its index the integer part of its U, and maps its atlas cell's fraction (U and V within the first, blank
+     * cell). The text is centred over the places; characters outside {@link #LABEL_CHARACTERS} are blank.
+     */
+    static void label(ModelData data, String text) {
+        var model = (Data) data;
+        if (model.labels.isEmpty()) { return; }
+        Set<String> parts = new HashSet<>();
+        for (var node : model.nodes) { collectLabelParts(node, model.labels, parts); }
+        float[] vertices = model.meshes.first().vertices;
+        Set<Integer> labelled = new java.util.TreeSet<>();
+        for (var part : model.meshes.first().parts) {
+            if (!parts.contains(part.id)) { continue; }
+            for (short index : part.indices) { labelled.add(Short.toUnsignedInt(index)); }
+        }
+        int places = 0;
+        for (int vertex : labelled) { places = Math.max(places, (int) Math.floor(vertices[vertex * STRIDE + 10]) + 1); }
+        String shown = text.toUpperCase(java.util.Locale.ROOT);
+        shown = shown.substring(0, Math.min(shown.length(), places));
+        int start = (places - shown.length()) / 2;
+        for (int vertex : labelled) {
+            int at = vertex * STRIDE + 10;
+            int place = (int) Math.floor(vertices[at]);
+            float u = (vertices[at] - place) * LABEL_CELLS, v = vertices[at + 1] * LABEL_CELLS;
+            int character = place - start >= 0 && place - start < shown.length()
+                  ? Math.max(0, LABEL_CHARACTERS.indexOf(shown.charAt(place - start))) : 0;
+            vertices[at] = place + (character % LABEL_CELLS + u) / LABEL_CELLS;
+            vertices[at + 1] = (character / LABEL_CELLS + v) / LABEL_CELLS;
+        }
+    }
+
+    private static void collectLabelParts(ModelNode node, Set<String> materials, Set<String> parts) {
+        for (var part : node.parts) {
+            if (materials.contains(part.materialId)) { parts.add(part.meshPartId); }
+        }
+        if (node.children != null) {
+            for (var child : node.children) { collectLabelParts(child, materials, parts); }
         }
     }
 
@@ -328,21 +467,23 @@ final class RigidGlb {
         var source = asset.model();
         var roots = source.getSceneModels().get(asset.scene()).getNodeModels();
         String shape = file.nameWithoutExtension();
-        Map<String, NodeModel> groups = new HashMap<>();
-        // Every level is named, so which mesh draws at a given size is always visible in the file itself.
-        boolean grouped = roots.stream().anyMatch(node -> node.getName() != null && node.getName().matches(".*-lod[0-3]"));
-        require(grouped, "Name the levels of " + file.name() + " as groups " + MeshLod.name(shape, 0)
-              + " (and optionally " + MeshLod.name(shape, 1) + " to " + MeshLod.name(shape, LEVELS - 1) + ")");
+        Map<Integer, NodeModel> groups = new HashMap<>();
+        // Every level is named, so which mesh draws at a given size is always visible in the file itself: a group's name
+        // ends with its level, whatever precedes it, so a renamed or moved file keeps its levels.
         for (var group : roots) {
-            require(Set.of(MeshLod.name(shape, 0), MeshLod.name(shape, 1), MeshLod.name(shape, 2), MeshLod.name(shape, 3))
-                  .contains(group.getName()), "Unexpected LOD group: " + group.getName());
-            require(groups.put(group.getName(), group) == null, "Duplicate LOD group: " + group.getName());
+            if (CUT.equals(group.getName()) || STANDS.equals(group.getName())) { continue; }
+            int level = MeshLod.level(group.getName());
+            require(level >= 0 && level < LEVELS, "Unexpected LOD group in " + file.name() + ": " + group.getName()
+                  + " (name the levels' groups ...-lod0, and optionally ...-lod1 to ...-lod" + (LEVELS - 1) + ")");
+            require(groups.put(level, group) == null, "Duplicate LOD group: " + group.getName());
             require(group.getMeshModels().isEmpty() && !group.getChildren().isEmpty(), "LOD groups contain child nodes");
             require(java.util.Arrays.equals(new Matrix4().val, group.computeLocalTransform(null)),
                   "LOD group transforms must be identity; transform the child rig instead");
         }
-        return MeshLod.load(shape, LEVELS, name -> groups.containsKey(name)
-              ? convert(file, name, asset, groups.get(name).getChildren(), variant) : null);
+        return MeshLod.load(shape, LEVELS, name -> {
+            var group = groups.get(MeshLod.level(name));
+            return group == null ? null : convert(file, group.getName(), asset, group.getChildren(), variant);
+        });
     }
 
     private record Asset(GltfModel model, int scene, Map<TextureModel, Image> images, Path textureRoot,
@@ -475,6 +616,10 @@ final class RigidGlb {
                 var target = new ModelMaterial();
                 target.id = changes.containsKey("name") ? (String) changes.get("name") : material.getName();
                 require(target.id != null && materialNames.add(target.id), "Material names must be unique");
+                if (material.getExtras() instanceof Map<?, ?> extras) {
+                    if (Boolean.TRUE.equals(extras.get("mmPaintMask"))) { result.paintMasks.add(target.id); }
+                    if (Boolean.TRUE.equals(extras.get("mmLabel"))) { result.labels.add(target.id); }
+                }
                 if (material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) {
                     float cutoff = material.getAlphaCutoff();
                     require(Float.isFinite(cutoff) && cutoff >= 0 && cutoff <= 1, "Invalid alpha cutoff");

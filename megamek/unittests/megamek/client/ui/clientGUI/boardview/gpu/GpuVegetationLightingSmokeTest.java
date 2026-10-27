@@ -69,7 +69,7 @@ class GpuVegetationLightingSmokeTest {
             assertTrue(!lighting.equals(disabled));
             var missing = new ArrayList<String>();
             var root = BoardGeometry.center(new Coords(0, 0), 0);
-            for (String species : List.of("tree-dead", "pine-snow", "grass")) {
+            for (String species : List.of("vegetation/tree-dead", "vegetation/pine-snow", "grass")) {
                 var stand = new GpuTreeInstances.Stand();
                 if (!species.equals("grass")) { stand.add(species, new Matrix4().setToTranslation(root)); }
                 for (boolean top : new boolean[] { true, false }) {
@@ -118,7 +118,7 @@ class GpuVegetationLightingSmokeTest {
                     var root = new Vector3(28, -12, 0);
                     var emitter = new GpuLavaLighting.Source(0, root.cpy().add(12, -12, 28), 1,
                           new Vector3(1.8f, .24f, .025f), 40);
-                    for (String species : List.of("tree", "tree-dead", "pine-snow", "cactus")) {
+                    for (String species : List.of("vegetation/tree", "vegetation/tree-dead", "vegetation/pine-snow", "vegetation/cactus")) {
                         var stand = new GpuTreeInstances.Stand();
                         stand.add(species, new Matrix4().setToTranslation(root));
                         for (boolean top : new boolean[] { true, false }) {
@@ -191,7 +191,7 @@ class GpuVegetationLightingSmokeTest {
                     timings = new GpuStageTimings();
                     board = scene(BoardLiquid.Kind.NONE, false);
                     for (int x = 0; x < 24; x++) for (int y = 0; y < 24; y++) {
-                        stand.add("tree", new Matrix4().setToTranslation(x * 12, y * 12, 0));
+                        stand.add("vegetation/tree", new Matrix4().setToTranslation(x * 12, y * 12, 0));
                     }
                     for (int i = 0; i < 32; i++) {
                         emitters.add(new GpuLavaLighting.Source(0, new Vector3(40 + i % 8 * 28, 40 + i / 8 * 56, 20),
@@ -325,8 +325,8 @@ class GpuVegetationLightingSmokeTest {
 
     private static BoardScene scene(BoardScene.Surface surface, BoardLiquid.Kind kind, boolean hidden) {
         var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, surface,
-              pixels, null, null, null, List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true);
+        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, surface, null, null, List.of(), List.of(),
+              new BoardLiquid(kind, "", 0), null, true);
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
         return new BoardScene(scene.boardId(), 1, 1, scene.tiles(), scene.units(), scene.plannedPath(), scene.selectedId(),
               scene.phase(), scene.commands(), scene.light(), scene.firingLines(), scene.rangeBorders(), scene.markers(),

@@ -25,8 +25,6 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
-import com.badlogic.gdx.utils.JsonReader;
-import com.badlogic.gdx.utils.JsonValue;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -39,8 +37,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFoliageTest {
     @ParameterizedTest
-    @ValueSource(strings = { "pine", "pine-tall", "pine-broad", "pine-snow", "pine-tall-snow", "pine-broad-snow",
-          "pine-slender", "pine-layered", "pine-slender-snow", "pine-layered-snow" })
+    @ValueSource(strings = { "vegetation/pine", "vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-snow", "vegetation/pine-tall-snow", "vegetation/pine-broad-snow",
+          "vegetation/pine-slender", "vegetation/pine-layered", "vegetation/pine-slender-snow", "vegetation/pine-layered-snow" })
     void upperPineBranchesStayAttachedToTheirBentTrunk(String name) {
         File root = new File(Configuration.dataDir(), "models/board");
         var near = RigidGlb.loadLods(RigidGlb.source(root, name), root.toPath()).getFirst();
@@ -92,7 +90,7 @@ class BoardFoliageTest {
     @Test
     void cactusPadsFormOneClosedConnectedSurfaceAtEveryMeshLod() {
         File root = new File(Configuration.dataDir(), "models/board");
-        var levels = RigidGlb.loadLods(new FileHandle(new File(root, "foliage-desert.glb")), root.toPath());
+        var levels = RigidGlb.loadLods(new FileHandle(new File(root, "vegetation/foliage-desert.glb")), root.toPath());
         // The last level is the impostor's open cards, not a cactus body.
         for (var data : levels.subList(0, 3)) {
             // Hard normals and UV seams split render vertices; weld only positions for the topology check.
@@ -150,12 +148,12 @@ class BoardFoliageTest {
             hex.addTerrain(new Terrain(Terrains.WOODS, density));
             var features = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, features.size());
-            assertTrue(features.stream().allMatch(feature -> feature.asset().equals("foliage-" + family)
+            assertTrue(features.stream().allMatch(feature -> feature.asset().equals("vegetation/foliage-" + family)
                   && feature.kind() == BoardScene.FeatureKind.TREE && feature.height() >= 1 && feature.height() <= 1.1f));
             assertEquals(features, BoardFeatures.capture(hex, coords, Map.of()), "Roots remain deterministic");
             hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, density == 3 ? 3 : 2));
             assertFalse(BoardFeatures.capture(hex, coords, Map.of()).stream()
-                  .anyMatch(feature -> feature.asset().startsWith("foliage-")), "Tall woods retain their tree models");
+                  .anyMatch(feature -> feature.asset().startsWith("vegetation/foliage-")), "Tall woods retain their tree models");
             hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 1));
         }
     }
@@ -172,17 +170,17 @@ class BoardFoliageTest {
               Terrains.SNOW, "snow").entrySet()) {
             hex.addTerrain(new Terrain(entry.getKey(), 1));
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-                  .allMatch(feature -> feature.asset().equals("foliage-" + entry.getValue())));
+                  .allMatch(feature -> feature.asset().equals("vegetation/foliage-" + entry.getValue())));
             hex.removeTerrain(entry.getKey());
         }
         hex.removeTerrain(Terrains.WOODS);
         hex.addTerrain(new Terrain(Terrains.JUNGLE, 2));
         hex.setTheme("desert");
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .allMatch(feature -> feature.asset().equals("foliage-jungle")));
+              .allMatch(feature -> feature.asset().equals("vegetation/foliage-jungle")));
         hex.addTerrain(new Terrain(Terrains.SNOW, 1));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .allMatch(feature -> feature.asset().equals("foliage-snow")));
+              .allMatch(feature -> feature.asset().equals("vegetation/foliage-snow")));
         hex.removeTerrain(Terrains.JUNGLE);
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).isEmpty());
     }
@@ -191,7 +189,7 @@ class BoardFoliageTest {
     @ValueSource(strings = { "temperate", "highland", "rocky", "wetland", "desert", "jungle", "barren", "snow" })
     void glbContainsThreeTexturedMeshesAndAnImpostorInTheSameRootCoordinates(String family) {
         File root = new File(Configuration.dataDir(), "models/board");
-        var levels = RigidGlb.loadLods(new FileHandle(new File(root, "foliage-" + family + ".glb")), root.toPath());
+        var levels = RigidGlb.loadLods(RigidGlb.source(root, "vegetation/foliage-" + family), root.toPath());
         assertEquals(4, levels.size());
         assertNotSame(levels.get(0), levels.get(1));
         assertNotSame(levels.get(1), levels.get(2));
@@ -243,7 +241,7 @@ class BoardFoliageTest {
         assertTrue(atlases != null && atlases.length > 0);
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
         for (File atlas : atlases) {
-            String plant = atlas.getName().replace(".png", "");
+            String plant = "vegetation/" + atlas.getName().replace(".png", "");
             var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
                   .getFirst();
             Map<String, BufferedImage> textures = new HashMap<>();
@@ -319,14 +317,11 @@ class BoardFoliageTest {
     @Test
     void distantTreeLevelsKeepTheirOutline() {
         File root = new File(Configuration.dataDir(), "models/board");
-        JsonValue manifest = new JsonReader().parse(new FileHandle(new File(root, "manifest.json")));
         float across = (float) Math.cos(Math.toRadians(35)), up = (float) Math.sin(Math.toRadians(35));
         // The board camera's views: from 35 degrees above on four sides, and from straight above.
         float[][] views = { { across, 0, up }, { 0, across, up }, { -across, 0, up }, { 0, -across, up }, { 0, 0, 1 } };
-        for (JsonValue entry : manifest) {
-            // Entries with an authoring source identify the imported tree catalog.
-            if (!entry.has("source")) { continue; }
-            var levels = RigidGlb.loadLods(RigidGlb.source(root, entry.name), root.toPath());
+        for (String tree : BoardTreeDistributionTest.IMPORTED_TREES) {
+            var levels = RigidGlb.loadLods(RigidGlb.source(root, tree), root.toPath());
             // Summing overlapping card areas is not silhouette coverage. The native tree LOD regression measures
             // alpha-tested pixels for these crowns at the same scale and from several bearings instead.
             boolean cutout = false;
@@ -335,7 +330,7 @@ class BoardFoliageTest {
             double near = outline(levels.get(0), views);
             for (int lod = 1; lod <= 2; lod++) {
                 double kept = outline(levels.get(lod), views) / near;
-                assertTrue(kept >= 2 / 3.0, entry.name + " LOD" + lod + " keeps " + kept + " of the near outline");
+                assertTrue(kept >= 2 / 3.0, tree + " LOD" + lod + " keeps " + kept + " of the near outline");
             }
         }
     }

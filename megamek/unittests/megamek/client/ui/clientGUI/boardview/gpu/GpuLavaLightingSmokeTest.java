@@ -150,8 +150,8 @@ class GpuLavaLightingSmokeTest {
         var fov = new ArrayList<BoardFieldOfView.Hex>();
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
             var liquid = x >= 3 && kind != BoardLiquid.Kind.NONE ? new BoardLiquid(kind, "", 0) : BoardLiquid.NONE;
-            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.ROCK,
-                  pixels, null, null, null, List.of(), List.of(), liquid, null, true));
+            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.ROCK, null, null,
+                  List.of(), List.of(), liquid, null, true));
             fov.add(hidden && x >= 3 ? new BoardFieldOfView.Hex(BoardFieldOfView.Visibility.BLOCKED, 0)
                   : BoardFieldOfView.Hex.VISIBLE);
         }

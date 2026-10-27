@@ -60,6 +60,15 @@ final class GpuUnitCamouflage implements Disposable {
             }
             var material = part.material.copy();
             material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, color)));
+            // A paint role on a board material is a painted plate: under camouflage its albedo is only the light and
+            // dark the paint takes (GpuUnitShader); its finish and normal map stay.
+            var surface = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+            var own = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
+            Texture plate = camo != null && surface != null && surface.board && own != null
+                  ? own.textureDescription.texture : null;
+            if (plate != null) {
+                material.remove(TextureAttribute.Diffuse);
+            }
             if (camo != null && camo.image() != null) {
                 var diffuse = TextureAttribute.createDiffuse(texture(camo.image(), true));
                 float density = 10f / Math.max(1, camo.scale());
@@ -70,7 +79,7 @@ final class GpuUnitCamouflage implements Disposable {
             }
             Texture marker = camo == null || camo.marker() == null || camo.marker().image() == null
                   ? null : texture(camo.marker().image(), false);
-            material.set(new Paint(camo == null ? 0 : camo.rotation(), marker,
+            material.set(new Paint(camo == null ? 0 : camo.rotation(), marker, plate,
                   new Matrix4(normalization).mul(node.globalTransform),
                   new Matrix3().set(node.globalTransform).inv().transpose()));
             part.material = material;
@@ -142,31 +151,39 @@ final class GpuUnitCamouflage implements Disposable {
         static final long TYPE = register("unitCamouflage");
         final float cos, sin;
         final Texture marker;
+        /** The painted plate's albedo, whose light and dark shade the camouflage; null for a plain paint role. */
+        final Texture plate;
         final Matrix4 transform;
         final Matrix3 normalMatrix;
 
         Paint(float degrees, Texture marker, Matrix4 transform, Matrix3 normalMatrix) {
-            this(MathUtils.cosDeg(degrees), MathUtils.sinDeg(degrees), marker, transform, normalMatrix);
+            this(degrees, marker, null, transform, normalMatrix);
         }
 
-        private Paint(float cos, float sin, Texture marker, Matrix4 transform, Matrix3 normalMatrix) {
+        Paint(float degrees, Texture marker, Texture plate, Matrix4 transform, Matrix3 normalMatrix) {
+            this(MathUtils.cosDeg(degrees), MathUtils.sinDeg(degrees), marker, plate, transform, normalMatrix);
+        }
+
+        private Paint(float cos, float sin, Texture marker, Texture plate, Matrix4 transform, Matrix3 normalMatrix) {
             super(TYPE);
             this.cos = cos;
             this.sin = sin;
             this.marker = marker;
+            this.plate = plate;
             this.transform = new Matrix4(transform);
             this.normalMatrix = new Matrix3(normalMatrix);
         }
 
         @Override
         public Attribute copy() {
-            return new Paint(cos, sin, marker, transform, normalMatrix);
+            return new Paint(cos, sin, marker, plate, transform, normalMatrix);
         }
 
         @Override
         public boolean equals(Object other) {
             return other instanceof Paint paint
                   && marker == paint.marker
+                  && plate == paint.plate
                   && compareTo(paint) == 0;
         }
 
@@ -178,7 +195,7 @@ final class GpuUnitCamouflage implements Disposable {
 
         @Override
         public int hashCode() {
-            return Objects.hash(type, cos, sin, marker, Arrays.hashCode(normalMatrix.val), Arrays.hashCode(transform.val));
+            return Objects.hash(type, cos, sin, marker, plate, Arrays.hashCode(normalMatrix.val), Arrays.hashCode(transform.val));
         }
 
         @Override
@@ -197,6 +214,10 @@ final class GpuUnitCamouflage implements Disposable {
             if (comparison == 0) {
                 comparison = Integer.compare(marker == null ? 0 : marker.getTextureObjectHandle(),
                       paint.marker == null ? 0 : paint.marker.getTextureObjectHandle());
+            }
+            if (comparison == 0) {
+                comparison = Integer.compare(plate == null ? 0 : plate.getTextureObjectHandle(),
+                      paint.plate == null ? 0 : paint.plate.getTextureObjectHandle());
             }
             return comparison == 0 ? Arrays.compare(transform.val, paint.transform.val) : comparison;
         }

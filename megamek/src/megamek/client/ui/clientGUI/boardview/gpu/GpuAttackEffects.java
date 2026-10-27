@@ -30,6 +30,8 @@ final class GpuAttackEffects implements Disposable {
     private static final int FLAME_PUFFS = 32;
     private static final float MUZZLE_BLAST_SECONDS = .11f;
     private static final float MUZZLE_SMOKE_SECONDS = .34f;
+    /** A Gauss round's electromagnetic discharge at the muzzle; it burns nothing, so it leaves no fire or smoke. */
+    private static final float GAUSS_DISCHARGE_SECONDS = .18f;
     private static final float PPC_BEAM_WIDTH = 4.3f;
     // Beam shader kinds; particle kinds belong to the separate particle shader.
     private static final int LASER = 0, PPC = 1, PPC_GLOW = 2;
@@ -76,6 +78,8 @@ final class GpuAttackEffects implements Disposable {
         { new Color(1, .4f, .1f, .8f), new Color(.25f, .85f, .35f, .85f), new Color(.5f, .3f, 1, .85f) },
         { new Color(1, .85f, .15f, .4f), new Color(.1f, .85f, .8f, .4f), new Color(.85f, .2f, .85f, .4f) } };
     private Color laser = LASERS[0][0];
+    /** Whether the current attack's weapon is a Gauss rifle: magnetic coils, not propellant, throw its slugs. */
+    private boolean gauss;
     /** The current laser's light: its colour in linear light, as bright as a muzzle flash. */
     private Vector3 laserLight = new Vector3();
     /** The current laser's or PPC's light power against its family's reference: {@link #beamScale(WeaponType, int)}. */
@@ -156,6 +160,7 @@ final class GpuAttackEffects implements Disposable {
         muzzleCount = 0;
         var weapon = EquipmentType.get(attack.event.result().equipmentName()) instanceof WeaponType type ? type : null;
         laser = laserTint(weapon, attack.event.attackerClan());
+        gauss = weapon != null && weapon.hasFlag(WeaponType.F_GAUSS);
         laserLight = laserLight(laser);
         beamScale = beamScale(weapon,
               attack.event.attacker().location().coords().distance(attack.event.destination().coords()));
@@ -163,7 +168,7 @@ final class GpuAttackEffects implements Disposable {
         var event = attack.event;
         var unit = event.attacker();
         var instance = instances.get(unit.id() + ":" + unit.part());
-        var assembly = library == null ? null : library.loaded(unit.model(), unit.id());
+        var assembly = library == null ? null : library.loaded(unit.model(), unit.id(), unit.part());
         var receiving = event.target();
         var victim = receiving == null ? null : instances.get(receiving.id() + ":" + receiving.part());
         UnitAttack.center(instance, unit.location(), point);
@@ -505,7 +510,7 @@ final class GpuAttackEffects implements Disposable {
                       || !counter.interception().id().equals(salvo.interception().id())) { continue; }
                 var unit = counter.event.attacker();
                 var instance = instances.get(unit.id() + ":" + unit.part());
-                var assembly = library == null ? null : library.loaded(unit.model(), unit.id());
+                var assembly = library == null ? null : library.loaded(unit.model(), unit.id(), unit.part());
                 int before = counters.size();
                 if (assembly != null && instance != null) {
                     for (var binding : assembly.equipment()) {
@@ -594,7 +599,9 @@ final class GpuAttackEffects implements Disposable {
                 float cannon = UnitAttack.cannonScale(profiles[index]);
                 float age = attack.seconds - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index];
                 if (age < 0 || emitted[index] == null) { continue; }
-                if (cannon > 0 && "bullet".equals(effect)) {
+                if (gauss && "bullet".equals(effect)) {
+                    gaussDischarge(muzzles[index], forwards[index], gaussSize(profiles[index]), age);
+                } else if (cannon > 0 && "bullet".equals(effect)) {
                     cannonMuzzle(muzzles[index], forwards[index], emitted[index], cannon, age, index * 31);
                 }
                 float contact = contactSeconds(index);
@@ -637,7 +644,9 @@ final class GpuAttackEffects implements Disposable {
                         float travel = age / (contact - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index]);
                         emitted[index].position(travel, arcs[index], point);
                         emitted[index].position(Math.max(0, travel - .07f), arcs[index], end);
-                        projectiles.ribbon(camera, end, point, .275f * Math.max(1, cannon), TRACER, 1);
+                        // A Gauss slug streaks blue-white; propellant rounds leave the warm tracer.
+                        if (gauss) { projectiles.ribbon(camera, end, point, .2f * gaussSize(profiles[index]), ENERGY_TRAIL, 1); }
+                        else { projectiles.ribbon(camera, end, point, .275f * Math.max(1, cannon), TRACER, 1); }
                     }
                 }
             }
@@ -702,6 +711,21 @@ final class GpuAttackEffects implements Disposable {
                   .mulAdd(flameUp, MathUtils.cos(angle) * size * time * 1.5f);
             muzzlePuff(size * (1 + time), 2 + puff + time, .9f * (1 - time * time));
         }
+    }
+
+    /** A blue-white flash and crackle that leaves the muzzle with the slug and fades: no fire, no smoke. */
+    private void gaussDischarge(Vector3 muzzle, Vector3 forward, float size, float age) {
+        if (age < 0 || age >= GAUSS_DISCHARGE_SECONDS) { return; }
+        float time = age / GAUSS_DISCHARGE_SECONDS, fade = (1 - time) * (1 - time);
+        point.set(muzzle).mulAdd(forward, size * .5f);
+        electricGlow(point, size * (2 + time * 4), fade);
+        point.set(muzzle).mulAdd(forward, size * (1 + time * 6));
+        glow(point, size * (1.3f + time * 2), ENERGY_GLOW, time, .9f * fade);
+    }
+
+    /** A Gauss discharge grows with its slug's damage: the Light Gauss's 8 to the Heavy Gauss's 25, a HAG's small slugs. */
+    private static float gaussSize(ResolvedAttack.Shot profile) {
+        return profile == null ? 1.6f : MathUtils.clamp((float) Math.sqrt(Math.max(1, profile.damagePerHit()) / 5), .6f, 2.4f);
     }
 
     private void muzzlePuff(float radius, float kind, float alpha) {

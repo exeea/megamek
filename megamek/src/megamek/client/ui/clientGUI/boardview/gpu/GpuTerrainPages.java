@@ -60,17 +60,11 @@ final class GpuTerrainPages implements Disposable {
         }
     }
 
-    void render(ModelBatch batch, Environment environment) {
+    /** Pages merge until {@code deadline} (System.nanoTime); meanwhile their sources draw as GpuMeshPage describes. */
+    void render(ModelBatch batch, Environment environment, long deadline) {
         if (active) {
-            // Copy/upload at most one bounded page per frame; originals draw while other pages await preparation.
-            boolean built = false;
             for (GpuMeshPage page : pages.values()) {
-                page.update();
-                if (!built && page.needsBuild()) {
-                    page.build();
-                    built = true;
-                    rebuilds++;
-                }
+                if (page.advance(deadline)) { rebuilds++; }
                 page.render(batch, environment);
             }
         }

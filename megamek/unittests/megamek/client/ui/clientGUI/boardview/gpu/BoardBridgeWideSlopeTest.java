@@ -120,10 +120,10 @@ class BoardBridgeWideSlopeTest {
         var t = scene.tile(at);
         int exits = (1 << direction) | (1 << ((direction + 3) % 6));
         var corridor = new RailRoute.Corridor(exits, beside ? exits : 0, 0);
-        var tile = new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(),
+        var tile = new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(),
+              t.surface(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(),
               t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
-              t.cliffTopExits(), t.bare(), t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
+              t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
               Map.of("bridge", truss ? HexAppearance.TRUSS : HexAppearance.BUILT_BRIDGE), t.cover(), t.barren(),
               t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(), corridor);
         return BoardBridgeMaterialsTest.replace(scene, tile);

@@ -167,7 +167,7 @@ class BoardTunnelTest {
     /** {@code t} with a bridge two levels up whose deck carries a gravel road over its exits. */
     private static BoardScene.Tile bridge(BoardScene.Tile t, int exits) {
         return BoardBridgeMaterialsTest.withDeckRoad(new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(),
-              t.frozen(), t.roadExits(), t.surface(), t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), List.of(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 2, BoardScene.FeatureKind.PROP, exits)),
+              t.frozen(), t.roadExits(), t.surface(), t.decals(), t.decalsWithoutLimbs(), List.of(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 2, BoardScene.FeatureKind.PROP, exits)),
               t.text(), t.liquid(), t.tileset(), t.detailedGround(), t.road()), BoardRoad.Kind.GRAVEL, exits);
     }
 

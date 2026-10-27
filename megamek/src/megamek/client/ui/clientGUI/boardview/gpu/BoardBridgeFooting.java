@@ -34,7 +34,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     private static final BoardKit<List<Block>> KIT = new BoardKit<>(BoardBridgeFooting::load);
 
     private static List<Block> load() {
-        var shapes = BoardShape.loadKit("bridge-terminal");
+        var shapes = BoardShape.loadKit("bridges/bridge-terminal");
         for (String name : shapes.keySet()) {
             if (!name.matches("bridge-terminal-lod[01]")) {
                 throw new IllegalArgumentException("Unexpected bridge terminal mesh: " + name);

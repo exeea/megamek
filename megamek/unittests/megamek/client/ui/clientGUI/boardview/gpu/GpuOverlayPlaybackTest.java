@@ -154,7 +154,7 @@ class GpuOverlayPlaybackTest {
         } finally {
             graphics.dispose();
         }
-        var markers = List.of(marker(BoardMarker.Kind.COLLAPSE_WARNING, version), marker(BoardMarker.Kind.CARGO, version),
+        var markers = List.of(marker(BoardMarker.Kind.COLLAPSE_WARNING, version), marker(BoardMarker.Kind.FLARE, version),
               marker(BoardMarker.Kind.OBJECTIVE, version), marker(BoardMarker.Kind.PLAYER_NOTE, version),
               marker(version.equals("old") ? BoardMarker.Kind.MINEFIELD : BoardMarker.Kind.BRIDGE_BUILD, version));
         return new BoardScene(0, 1, 1, scene.tiles(), scene.units(), move(1).path(), 1, "MOVEMENT", List.of(), null,

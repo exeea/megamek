@@ -68,7 +68,8 @@ class GpuResourcesSmokeTest {
         GpuAssets assets = new GpuAssets();
         try {
             List<String> names = new ArrayList<>();
-            var manifest = new JsonReader().parse(new FileHandle(new File(Configuration.dataDir(), "models/board/manifest.json")));
+            // Tool data beside the game's sources: mm-data/tools/board-models, never shipped.
+            var manifest = new JsonReader().parse(new FileHandle(new File("../../mm-data/tools/board-models/manifest.json")));
             manifest.forEach(asset -> names.add(asset.name));
             names.addAll(List.of("buildings/saxarba/building_hard/building_hard_00",
                   "buildings/saxarba/building_hard/building_hard_01",
@@ -82,7 +83,7 @@ class GpuResourcesSmokeTest {
                 assertTrue(bounds.isValid() && bounds.getWidth() > 0 && bounds.getDepth() > 0, name);
             }
             for (int depth = 0; depth <= 4; depth++) {
-                var source = BoardLiquid.WATER.textures(depth, 0);
+                var source = BoardLiquid.WATER.textures(depth);
                 assertNotSame(assets.liquid(source, 0), assets.liquid(source, 0.25f), "GIF frames must advance");
             }
         } finally {
@@ -91,12 +92,11 @@ class GpuResourcesSmokeTest {
     }
 
     private void checkChunkPicking() {
-        BoardScene.Pixels art = hexPixels(java.awt.Color.GREEN);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 17; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 8 ? 3 : 0, x == 7 && y == 8 ? 1 : -1, false, 0,
-                      BoardScene.Surface.GRASS, art, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 17, 17, tiles, List.of(), List.of(), -1, "", List.of());
@@ -144,7 +144,7 @@ class GpuResourcesSmokeTest {
             }
             List<BoardScene.Tile> elevated = new ArrayList<>(tiles);
             elevated.set(tiles.indexOf(scene.tile(moved)), new BoardScene.Tile(moved, 6, -1, false, 0,
-                  BoardScene.Surface.GRASS, art, null, List.of(), List.of()));
+                  BoardScene.Surface.GRASS, null, List.of(), List.of()));
             BoardScene elevatedScene = new BoardScene(0, 17, 17, elevated, List.of(), List.of(), -1, "", List.of());
             Ray ray = new Ray(BoardGeometry.center(moved, 6).add(0, 0, 1000), new Vector3(0, 0, -1));
             BoardGeometry.Hit expected = BoardGeometry.hit(elevatedScene, ray);
@@ -157,21 +157,6 @@ class GpuResourcesSmokeTest {
             terrain.update(elevatedScene);
             assertEquals(expected, terrain.hit(elevatedScene, ray),
                   "Installing the edited terrain must publish its picking surface at the same time");
-            terrain.update(scene);
-            // Splitting a shared artwork slot must rebuild the edited chunk without rebuilding distant geometry.
-            Coords edited = new Coords(8, 8), distant = new Coords(0, 0);
-            var untouched = terrain.tacticalSurface(distant);
-            var beforeEdit = terrain.tacticalSurface(edited);
-            Coords bank = new Coords(7, 8);
-            var beforeBank = terrain.tacticalSurface(bank);
-            BoardScene.Tile previous = scene.tile(edited);
-            List<BoardScene.Tile> changed = new ArrayList<>(tiles);
-            changed.set(tiles.indexOf(previous), new BoardScene.Tile(edited, previous.elevation(), -1, false, 0,
-                  BoardScene.Surface.GRASS, hexPixels(java.awt.Color.YELLOW), null, List.of(), List.of()));
-            terrain.update(new BoardScene(0, 17, 17, changed, List.of(), List.of(), -1, "", List.of()));
-            assertSame(untouched, terrain.tacticalSurface(distant), "An artwork edit must leave distant chunks intact");
-            assertNotSame(beforeEdit, terrain.tacticalSurface(edited));
-            assertNotSame(beforeBank, terrain.tacticalSurface(bank), "Banks across a chunk border borrow the edited artwork");
         } finally {
             terrain.dispose();
         }
@@ -223,7 +208,6 @@ class GpuResourcesSmokeTest {
         ModelInstance unit = new ModelInstance(model);
         BoardCamera camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        BoardScene.Pixels art = hexPixels(new java.awt.Color(119, 137, 75));
         Coords target = new Coords(2, 2);
         try {
             for (int depth : new int[] { -1, 0, 1, 2 }) {
@@ -232,7 +216,7 @@ class GpuResourcesSmokeTest {
                     for (int y = 0; y < 5; y++) {
                         Coords coords = new Coords(x, y);
                         tiles.add(new BoardScene.Tile(coords, x == 4 ? 2 : 0,
-                              coords.equals(target) ? depth : -1, false, 0, BoardScene.Surface.GRASS, art, null,
+                              coords.equals(target) ? depth : -1, false, 0, BoardScene.Surface.GRASS, null,
                               coords.equals(target) && depth < 0
                                     ? List.of(new BoardScene.Feature("buildings/saxarba/building_hard/building_hard_00",
                                           0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of(),
@@ -375,8 +359,9 @@ class GpuResourcesSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
         BoardScene.Tile tile = scene.tile(target);
         tiles.set(target.getX() * scene.height() + target.getY(), new BoardScene.Tile(target, 0, -1, false, 0,
-              tile.surface(), tile.ground(), null,
-              List.of(new BoardScene.Feature("tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE)), List.of()));
+              tile.surface(), null,
+              List.of(new BoardScene.Feature("vegetation/tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE)),
+              List.of()));
         BoardScene trees = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
         GpuTerrain terrain = new GpuTerrain();
         Vector3 point = BoardGeometry.center(target, 0).add(0, 0, 10);
@@ -409,7 +394,7 @@ class GpuResourcesSmokeTest {
             assertFalse(atlas.update(Map.of("one", sand, "two", sand)), "Shared slots can update together");
             assertSame(atlas.region("one"), atlas.region("two"));
             var unchanged = atlas.region("one");
-            assertEquals(java.util.Set.of("two"), atlas.updateRegions(Map.of("one", sand, "two", grass), Map.of()),
+            assertEquals(java.util.Set.of("two"), atlas.updateRegions(Map.of("one", sand, "two", grass)),
                   "Only the edited alias may invalidate mesh UVs");
             assertSame(unchanged, atlas.region("one"), "An edit must preserve unrelated slots and their texture page");
             assertNotSame(atlas.region("one"), atlas.region("two"));
@@ -542,8 +527,8 @@ class GpuResourcesSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? elevation : 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      pixels, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? elevation : 0, -1, false, 0,
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), light);

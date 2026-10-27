@@ -41,7 +41,7 @@ class GpuStandaloneEditorSmokeTest {
                         BoardDecoration.Placement.ground(), 0),
                   new BoardDecoration("car-air", "prop", "scenery/vehicles/car", null, .23, .12, 65, false, .8,
                         BoardDecoration.Placement.absolute(6), 0),
-                  new BoardDecoration("tree", "prop", "birch-young", null, -.3, .3, 0, true, 1,
+                  new BoardDecoration("tree", "prop", "vegetation/birch-young", null, -.3, .3, 0, true, 1,
                         BoardDecoration.Placement.ground(), 0),
                   new BoardDecoration("deck-paint", "decal", "decal/damage/rubble-light-path", null, 0, 0, 0, false, 1,
                         BoardDecoration.Placement.surface("bridge", "deck", 0), 0)));

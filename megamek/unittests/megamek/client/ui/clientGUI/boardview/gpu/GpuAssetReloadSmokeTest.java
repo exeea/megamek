@@ -89,7 +89,7 @@ class GpuAssetReloadSmokeTest {
                 ModelInstance originalInstance;
                 float treeHeight, rockHeight, scatterHeight, otherScatterHeight, unitHeight;
                 BoardGeometry.Tuning tuning;
-                Path tileset = directory.resolve("models/board/tileset/saxarba.tileset");
+                Path tileset = directory.resolve("models/board/classic/tileset/classic.tileset");
                 byte[] tilesetBytes;
                 Path rockMesh = directory.resolve("models/board/rocks/block-0.glb");
                 byte[] rockBytes;
@@ -126,7 +126,7 @@ class GpuAssetReloadSmokeTest {
                             originalRoughness = assets().finishArrays(surfaces(sculptLayers), sculptLayers.size()).maps();
                             sculptTile = assets().sculptTile("grassland-ground");
                             asphaltCoverage = assets().roadCoverage("roads/asphalt");
-                            treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
+                            treeHeight = assets().model("vegetation/tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
                             scatterHeight = BoardScatter.bush(BoardScene.Surface.SAND, 0).height();
                             otherScatterHeight = BoardScatter.bush(BoardScene.Surface.SAND, 1).height();
@@ -189,7 +189,7 @@ class GpuAssetReloadSmokeTest {
                             assertEquals(asphaltCoverage, assets().roadCoverage("roads/asphalt"),
                                   "Edits wait for the actual Reload action");
                             assertSame(originalEmission, assets().lavaEmission(), "Edits wait for the actual Reload action");
-                            scaleMesh(directory.resolve("models/board/tree.glb"));
+                            scaleMesh(directory.resolve("models/board/vegetation/tree.glb"));
                             scaleMesh(directory.resolve("models/board/rocks/block-0.glb"));
                             scaleMesh(directory.resolve("models/board/scatter/bush-0.glb"));
                             scaleMesh(glb.directory.resolve("mesh.glb"));
@@ -258,7 +258,7 @@ class GpuAssetReloadSmokeTest {
                             texture.bind();
                             GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels);
                             assertEquals(0x0000ffff, pixels.getInt(0), "The new image must reach GPU memory");
-                            assertEquals(treeHeight * 2, assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight(), .001f);
+                            assertEquals(treeHeight * 2, assets().model("vegetation/tree").calculateBoundingBox(new BoundingBox()).getHeight(), .001f);
                             assertEquals(rockHeight * 2, BoardRocks.rock(true, 0).height(), .001f);
                             assertEquals(scatterHeight * 2, BoardScatter.bush(BoardScene.Surface.SAND, 0).height(), .001f);
                             assertEquals(otherScatterHeight, BoardScatter.bush(BoardScene.Surface.SAND, 1).height(),
@@ -465,7 +465,7 @@ class GpuAssetReloadSmokeTest {
             var definition = GodotMaterial.read(textures.resolve(material + ".tres").toFile(), textures.toFile());
             assertEquals(catalogued(catalog, material, definition), assets.sculpt(name).tile(), .000001f, name);
         }
-        for (String name : List.of("bank-turf", "crop-row-front", "crop-row-side", "crop-row-top")) {
+        for (String name : List.of("bank-turf")) {
             Texture image = assets.material("vegetation/" + name);
             assertEquals(1024, image.getWidth(), name);
             assertEquals(1024, image.getHeight(), name);

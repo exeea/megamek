@@ -42,12 +42,10 @@ class GpuColorTextureSmokeTest {
     Path directory;
 
     @Test
-    void squareArtworkKeepsCropRegistrationAndTrimmedGougeProportions() {
+    void squareArtworkKeepsTrimmedGougeProportions() {
         nativeCheck(() -> {
             var previous = megamek.common.Configuration.dataDir();
-            var crops = directory.resolve("models/board/textures/vegetation");
             var scars = directory.resolve("models/board/textures/terrain/damage");
-            Files.createDirectories(crops);
             Files.createDirectories(scars);
             // Other brush styles remain the real independent round-impact controls.
             try (var files = Files.list(previous.toPath().resolve("models/board/textures/terrain/damage"))) {
@@ -55,54 +53,9 @@ class GpuColorTextureSmokeTest {
                     Files.copy(file, scars.resolve(file.getFileName()));
                 }
             }
-            var registration = new StringBuilder("{");
-            for (String view : List.of("side", "front", "top")) {
-                if (registration.length() > 1) { registration.append(','); }
-                registration.append('"').append(view).append("\":[");
-                for (int i = 0; i < 7; i++) {
-                    if (i > 0) { registration.append(','); }
-                    registration.append('[').append((i + .5) / 7).append(',')
-                          .append(view.equals("top") ? .5 : .875).append(']');
-                }
-                registration.append(']');
-            }
-            Files.writeString(crops.resolve("crop-row.json"), registration.append('}'));
-            for (String view : List.of("side", "front", "top")) { BoardMaterialFiles.tres(crops, "crop-row-" + view); }
-            var compose = GpuBiomeVegetation.class.getDeclaredMethod("cropTextures");
-            compose.setAccessible(true);
-            int[][] original = null;
             try {
                 megamek.common.Configuration.setDataDir(directory.toFile());
                 for (boolean square : new boolean[] { false, true }) {
-                    for (String view : List.of("side", "front", "top")) {
-                        boolean top = view.equals("top");
-                        int width = square ? 1024 : top ? 2172 : 1536;
-                        int height = square ? 1024 : top ? 724 : 1024;
-                        var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-                        for (int i = 0; i < 7; i++) {
-                            // Keep the synthetic silhouette symmetric about its registered stem at either resolution.
-                            int stem = (int) ((i + .5) * width / 7), halfWidth = width / 35;
-                            for (int y = height / 4; y <= (top ? height * 3 / 4 : height * 7 / 8); y++) {
-                                for (int x = stem - halfWidth; x <= stem + halfWidth; x++) {
-                                    image.setRGB(x, y, 0xff60b030);
-                                }
-                            }
-                        }
-                        javax.imageio.ImageIO.write(image, "png", crops.resolve("crop-row-" + view + "_albedo.png").toFile());
-                    }
-                    var textures = (Texture[]) compose.invoke(null);
-                    try {
-                        GpuBiomeSmokeTest.registeredCrops(textures[0], directory.toFile());
-                        int[][] bounds = cropBounds(textures[0]);
-                        if (original == null) { original = bounds; }
-                        else {
-                            for (int plant = 0; plant < bounds.length; plant++) for (int edge = 0; edge < 4; edge++) {
-                                assertEquals(original[plant][edge], bounds[plant][edge], 2,
-                                      "Full-atlas aspect changes must preserve composed plant placement/size: " + plant);
-                            }
-                        }
-                    } finally { for (var texture : textures) { texture.dispose(); } }
-
                     int height = square ? 256 : 64;
                     var image = new BufferedImage(256, height, BufferedImage.TYPE_INT_ARGB);
                     for (int y = height / 4; y < height * 3 / 4; y++) {
@@ -128,31 +81,6 @@ class GpuColorTextureSmokeTest {
                 }
             } finally { megamek.common.Configuration.setDataDir(previous); }
         });
-    }
-
-    private static int[][] cropBounds(Texture texture) {
-        var pixels = new Pixmap(texture.getWidth(), texture.getHeight(), Pixmap.Format.RGBA8888);
-        try {
-            texture.bind(0);
-            GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels.getPixels());
-            int[][] bounds = new int[21][4];
-            int rowWidth = texture.getWidth() / 2;
-            for (int band = 0; band < 3; band++) for (int i = 0; i < 7; i++) {
-                int[] box = bounds[band * 7 + i];
-                box[0] = box[1] = Integer.MAX_VALUE; box[2] = box[3] = -1;
-                int origin = band == 1 ? rowWidth : 0;
-                for (int y = band == 2 ? 512 : 0; y < (band == 2 ? 640 : 512); y++) {
-                    for (int x = origin + i * rowWidth / 7; x < origin + (i + 1) * rowWidth / 7; x++) {
-                        if ((pixels.getPixel(x, y) & 255) < 82) { continue; }
-                        box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y);
-                        box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
-                    }
-                }
-                assertTrue(box[2] - box[0] > 20 && box[3] - box[1] > 20,
-                      "Every registered plant view must have a meaningful silhouette");
-            }
-            return bounds;
-        } finally { pixels.dispose(); }
     }
 
     @Test
@@ -484,13 +412,12 @@ class GpuColorTextureSmokeTest {
     }
 
     @Test
-    void sceneAtlasUpdatesAndReloadsKeepSrgbWhileUiAndNormalPagesStayNumeric() {
+    void sceneAtlasUpdatesAndReloadsKeepSrgbWhileUiPagesStayNumeric() {
         nativeCheck(() -> {
             var scene = new GpuTextures<String>(true, true);
             var ui = new GpuTextures<String>(true);
             var first = pixels(0x80808080);
             var second = pixels(0x40404040);
-            var normal = pixels(0x4080C080);
             try (var sample = new Sampler(false)) {
                 var uploads = new java.util.ArrayList<Integer>();
                 int[] mipBuilds = { 0 };
@@ -500,25 +427,19 @@ class GpuColorTextureSmokeTest {
                     if (method.getName().equals("glGenerateMipmap")) { mipBuilds[0]++; }
                     return method.invoke(originalGl, arguments);
                 })) {
-                    scene.update(Map.of("a", first), Map.of("a", normal));
+                    scene.update(Map.of("a", first));
                 }
-                assertEquals(2, uploads.size(), "One color and one normal page need one initial upload each");
-                assertEquals(1, uploads.stream().filter(format -> format == com.badlogic.gdx.graphics.GL30.GL_SRGB8_ALPHA8).count(),
-                      "Only the color page uses sRGB storage, from its very first upload");
-                assertEquals(2, mipBuilds[0], "Generate the two final page mip chains once each");
+                assertEquals(List.of(com.badlogic.gdx.graphics.GL30.GL_SRGB8_ALPHA8), uploads,
+                      "The color page uses sRGB storage from its one initial upload");
+                assertEquals(1, mipBuilds[0], "Generate the final page mip chain once");
                 ui.update(Map.of("a", first));
                 TextureRegion region = scene.region("a");
                 assertTrue(GpuColorTexture.isColor(region.getTexture()));
                 assertFalse(GpuColorTexture.isColor(ui.region("a").getTexture()));
                 assertEquals(.21586050, sample.read(region)[0], .001);
                 assertEquals(128.0 / 255, sample.read(ui.region("a"))[0], .001);
-                Texture normalPage = scene.normal(region.getTexture());
-                assertFalse(GpuColorTexture.isColor(normalPage));
-                assertPixel(sample.read(normalPage, centerU(region), centerV(region), 0, 0),
-                      64.0 / 255, 128.0 / 255, 192.0 / 255, 128.0 / 255, .001,
-                      "Normal atlas channels are data, including alpha");
 
-                assertFalse(scene.update(Map.of("a", second), Map.of("a", normal)), "An in-place repaint keeps its UVs");
+                assertFalse(scene.update(Map.of("a", second)), "An in-place repaint keeps its UVs");
                 assertSame(region, scene.region("a"));
                 assertPixel(sample.read(region), .05126946, .05126946, .05126946, 64.0 / 255, .001,
                       "Partial page upload retains sRGB storage and straight alpha");
@@ -526,7 +447,7 @@ class GpuColorTextureSmokeTest {
                 assertEquals(.05126946, sample.read(region)[0], .001, "Managed reupload uses the updated page backing pixels");
 
                 // A new slot shares the existing page; its upload must retain the color storage contract.
-                scene.update(Map.of("a", second, "b", first), Map.of("a", normal, "b", normal));
+                scene.update(Map.of("a", second, "b", first));
                 assertEquals(.05126946, sample.read(scene.region("a"))[0], .001);
                 assertEquals(.21586050, sample.read(scene.region("b"))[0], .001);
                 assertTrue(GpuColorTexture.isColor(scene.region("b").getTexture()));
@@ -543,23 +464,20 @@ class GpuColorTextureSmokeTest {
             scene.retainReplacedPages();
             var first = pixels(0x80808080, 100);
             var second = pixels(0x40404040, 100);
-            var normal = pixels(0x4080C080, 100);
             try (var sample = new Sampler(false)) {
-                scene.update(Map.of("a", first), Map.of("a", normal));
+                scene.update(Map.of("a", first));
                 scene.publish();
                 TextureRegion original = scene.region("a");
                 // Two 100px slots cannot share the original 128px page. Adding a key appends a page,
                 // rather than repainting or rebuilding the page already borrowed by displayed meshes.
-                scene.update(Map.of("a", first, "b", second), Map.of("a", normal, "b", normal));
+                scene.update(Map.of("a", first, "b", second));
                 assertSame(original, scene.region("a"));
                 TextureRegion added = scene.region("b");
                 assertTrue(original.getTexture() != added.getTexture(), "Exercise a genuinely new atlas page");
-                var oldPages = List.of(original.getTexture(), added.getTexture(),
-                      scene.normal(original.getTexture()), scene.normal(added.getTexture()));
+                var oldPages = List.of(original.getTexture(), added.getTexture());
                 var handles = oldPages.stream().map(Texture::getTextureObjectHandle).toList();
-                // An oversized replacement forces a new atlas pair while published old pages stay alive.
-                scene.update(Map.of("a", pixels(0x80808080, 130), "b", second),
-                      Map.of("a", pixels(0x4080C080, 130), "b", normal));
+                // An oversized replacement forces a new atlas while published old pages stay alive.
+                scene.update(Map.of("a", pixels(0x80808080, 130), "b", second));
                 for (Texture texture : oldPages) { texture.load(texture.getTextureData()); }
                 assertEquals(.21586050, sample.read(original)[0], .001,
                       "Retired original page still owns its managed backing pixels");
@@ -574,9 +492,6 @@ class GpuColorTextureSmokeTest {
                 TextureRegion current = scene.region("a");
                 current.getTexture().load(current.getTexture().getTextureData());
                 assertEquals(.21586050, sample.read(current)[0], .001);
-                assertPixel(sample.read(scene.normal(current.getTexture()), centerU(current), centerV(current), 0, 0),
-                      64.0 / 255, 128.0 / 255, 192.0 / 255, 128.0 / 255, .001,
-                      "Replacement normal page keeps raw channels and matching UVs");
             } finally { scene.dispose(); }
         });
     }

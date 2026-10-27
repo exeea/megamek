@@ -35,7 +35,7 @@ class BoardTundraTest {
         assertEquals(BoardScene.Biome.TUNDRA, BoardBiome.kind(after));
         assertFalse(before.sameGeometry(after), "Editing tundra must invalidate captured ground/plant data");
         assertTrue(after.detailedGround());
-        assertEquals(!after.barren(), GpuGroundCover.grows(scene, after), "Tundra grows its dwarf shrubs where air is");
+        assertFalse(GpuGroundCover.grows(scene, after), "Dense meadow blades must not obscure the crust");
         assertEquals(1, board.getHex(at).terrainLevel(Terrains.TUNDRA));
         assertEquals(theme, board.getHex(at).getTheme());
         for (var lod : TerrainLod.values()) {
@@ -43,6 +43,25 @@ class BoardTundraTest {
                   .filter(f -> f.finish() == BoardSurface.Finish.TOP).toList();
             assertEquals(6, top.size(), "Crust detail belongs in the material, not extra flat terrain geometry");
         }
+    }
+
+    @Test
+    void tussocksStandAsLowAsGrassClearOfTheUnitAndOnlyOnEarthTundra() {
+        int tussocks = 0;
+        for (int x = 0; x < 12; x++) for (int y = 0; y < 12; y++) {
+            var coords = new Coords(x, y);
+            for (var feature : BoardFeatures.capture(new Hex(0, "tundra:1", "grass"), coords, java.util.Map.of())) {
+                if (!feature.asset().equals(BoardScatter.TUSSOCK)) { continue; }
+                tussocks++;
+                assertTrue(feature.height() < .5f, "Grass height, far below the low woods, so never mistaken for cover");
+                assertTrue(Math.hypot(feature.x(), feature.y()) >= 9, "The unit at the centre stands clear");
+            }
+            for (String theme : List.of("fungus", "mars", "lunar", "volcano")) {
+                assertTrue(BoardFeatures.capture(new Hex(0, "tundra:1", theme), coords, java.util.Map.of()).stream()
+                      .noneMatch(feature -> feature.asset().equals(BoardScatter.TUSSOCK)), theme + " grows no tussocks");
+            }
+        }
+        assertTrue(tussocks > 12 * 12 && tussocks < 12 * 12 * 10, "A few tussocks a hex, in clusters: " + tussocks);
     }
 
     @ParameterizedTest
@@ -99,42 +118,14 @@ class BoardTundraTest {
         var center = new Coords(4, 4);
         var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
               c.getX() >= 5 ? BoardScene.Biome.TUNDRA : BoardScene.Biome.NONE, 0));
-        int blades = 0, shrubs = 0;
-        // The meadow's hex and the tundra's beside it.
-        for (var at : List.of(center, center.translated(1))) {
-            var tile = scene.tile(at);
-            var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var roots = GpuGroundCover.plant(scene, tile, support, null);
-            for (int i = 0; i < roots.size; i += 4) {
-                float tundra = BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, roots.items[i], roots.items[i + 1], 0);
-                if (roots.items[i + 3] % 1 == 0) {
-                    blades++;
-                    assertTrue(tundra < .45f, "Grass cannot fill the tundra side of the contact");
-                } else {
-                    shrubs++;
-                    assertTrue(tundra > .5f, "Dwarf shrubs keep to the tundra side of the contact");
-                }
-            }
-        }
-        assertTrue(blades > 0, "The untreated meadow still grows grass");
-        assertTrue(shrubs > 0, "The tundra grows its dwarf shrubs");
-    }
-
-    @Test
-    void tundraGrowsClumpedDwarfShrubsAndNoMeadowBlades() {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.TUNDRA, 0));
-        var tile = scene.tile(new Coords(4, 4));
+        var tile = scene.tile(center);
         var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
         var roots = GpuGroundCover.plant(scene, tile, support, null);
-        assertEquals(roots, GpuGroundCover.plant(scene, tile, support, null), "Rebuilding must not move the shrubs");
-        for (int i = 3; i < roots.size; i += 4) {
-            assertEquals(.5f, roots.items[i] % 1, "Every tundra root grows a dwarf shrub, never a blade over the carpet");
+        assertTrue(roots.size > 0, "The untreated meadow still grows grass");
+        for (int i = 0; i < roots.size; i += 4) {
+            assertTrue(BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA,
+                  roots.items[i], roots.items[i + 1], 0) < .45f, "Grass cannot fill the tundra side of the contact");
         }
-        int shrubs = roots.size / 4;
-        assertTrue(shrubs > 20 && shrubs < 4096 * .15f, "A few broad shrubs, with the carpet open between them: " + shrubs);
-        var full = new BoardSurface(scene, tile, TerrainLod.FULL);
-        assertTrue(full.faces.stream().map(face -> full.relief.shade(face.a())).noneMatch(shade ->
-              shade != null && shade.kind() == BoardRelief.Kind.PLANT), "No second, baked shrub kit on tundra");
     }
 
     static Board board(String theme, boolean tundra) {

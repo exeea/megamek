@@ -288,29 +288,31 @@ dependencies {
     testImplementation 'org.apache.xmlgraphics:batik-svggen:1.19'
 }
 
-application {
-    mainClass = 'megamek.MegaMek'
-    applicationDefaultJvmArgs = [
-            '-Xmx4096m',
+ext {
+    // XStream save games reflect over java.util and java.util.concurrent collections; the unit tests open them too.
+    mmAddOpens = [
             '--add-opens',
             'java.base/java.util=ALL-UNNAMED',
             '--add-opens',
-            'java.base/java.util.concurrent=ALL-UNNAMED',
-            '-Dsun.awt.disablegrab=true'
+            'java.base/java.util.concurrent=ALL-UNNAMED'
     ]
-}
-
-ext {
+    // The one set of JVM options for every MegaMek launch: run, the start scripts (MegaMek.sh), the Windows launcher
+    // (MegaMek.l4j.ini) and the tasks that run the game's code like it.
     mmJvmOptions = [
             '-Xmx4096m',
-            '--add-opens',
-            'java.base/java.util=ALL-UNNAMED',
-            '--add-opens',
-            'java.base/java.util.concurrent=ALL-UNNAMED',
+            // Generational ZGC pauses for under a millisecond; G1's 5-20 ms pauses hitched the 3D board while it panned.
+            '-XX:+UseZGC',
+            '-XX:+ZGenerational'
+    ] + mmAddOpens + [
             '-Dsun.awt.disablegrab=true'
     ]
     fileStagingDir = "${layout.buildDirectory.get()}/files"
     atlasedImages = "${fileStagingDir}/atlasedImages.txt"
+}
+
+application {
+    mainClass = 'megamek.MegaMek'
+    applicationDefaultJvmArgs = mmJvmOptions
 }
 
 jar {
@@ -615,6 +617,8 @@ tasks.register('createStartScripts', CreateStartScripts) {
     description = 'Create shell script for generic distribution.'
     applicationName = 'MegaMek'
     mainClass = application.mainClass
+    // MegaMek.sh runs this script.
+    defaultJvmOpts = mmJvmOptions
     outputDir = startScripts.outputDir
     classpath = jar.outputs.files + files(project.sourceSets.main.runtimeClasspath.files)
             .filter { it.name.endsWith(".jar") }
@@ -811,10 +815,8 @@ test {
     minHeapSize = "1024m"
     maxHeapSize = "8192m"
 
-    // Match the runtime add-opens (see application/mmJvmOptions) so tests can exercise the XStream
-    // save-game path, which reflects over java.util.concurrent collections such as CopyOnWriteArrayList.
-    jvmArgs '--add-opens', 'java.base/java.util=ALL-UNNAMED',
-            '--add-opens', 'java.base/java.util.concurrent=ALL-UNNAMED'
+    // The runtime's add-opens, so tests can exercise the XStream save-game path.
+    jvmArgs mmAddOpens
     // Linked GL programs stay under build/, so test runs never evict the player's (mmconf/gpu-program-cache).
     systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
 

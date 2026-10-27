@@ -208,8 +208,8 @@ class GpuSnowColorLodSmokeTest {
             for (int y = 0; y < 7; y++) {
                 var material = name.equals("snow") || (name.equals("mixed") && x < 3)
                       ? BoardScene.Surface.SNOW : BoardScene.Surface.DIRT;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, material, pixels,
-                      null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, material, null, null, List.of(),
+                      List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

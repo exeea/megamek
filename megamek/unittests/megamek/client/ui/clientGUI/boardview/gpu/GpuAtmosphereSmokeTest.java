@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -109,29 +108,10 @@ class GpuAtmosphereSmokeTest {
             checkSkyDirections();
             checkForegroundWeather();
         }
-        BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        var graphics = image.createGraphics();
-        graphics.setColor(new java.awt.Color(155, 155, 155));
-        graphics.fillRect(0, 0, 84, 72);
-        graphics.dispose();
-        BoardScene.Pixels pixels = new BoardScene.Pixels(image);
-        BufferedImage darkImage = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        graphics = darkImage.createGraphics();
-        graphics.setColor(new java.awt.Color(65, 65, 65));
-        graphics.fillRect(0, 0, 84, 72);
-        graphics.dispose();
-        BoardScene.Pixels darkPixels = new BoardScene.Pixels(darkImage);
-        BufferedImage normalImage = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        graphics = normalImage.createGraphics();
-        graphics.setColor(new java.awt.Color(128, 128, 255));
-        graphics.fillRect(0, 0, 84, 72);
-        graphics.dispose();
-        BoardScene.Pixels normals = new BoardScene.Pixels(normalImage);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      x == 1 && y == 2 ? darkPixels : pixels, x % 2 == 0 ? normals : null, null,
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
                       List.of(), List.of()));
             }
         }
@@ -301,7 +281,7 @@ class GpuAtmosphereSmokeTest {
                 }
             }
             Files.writeString(new File(output, "atmosphere-timing.txt").toPath(), timing);
-            checkLargeBoard(atmosphere, terrain, batch, tower, camera, pixels, normals);
+            checkLargeBoard(atmosphere, terrain, batch, tower, camera);
         } finally {
             atmosphere.dispose();
             terrain.dispose();
@@ -1130,7 +1110,7 @@ class GpuAtmosphereSmokeTest {
         draw(atmosphere, terrain, batch, tower, camera, scene, lunar);
         assertEquals(dryLunarGround, sample(camera, plain), "Airless conditions suppress rain and wet ground together");
         var snowTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0, -1, false, 0,
-              BoardScene.Surface.SNOW, tile.ground(), tile.normals(), null, List.of(), List.of())).toList();
+              BoardScene.Surface.SNOW, null, List.of(), List.of())).toList();
         var snow = new BoardScene(0, 7, 7, snowTiles, List.of(), List.of(), -1, "", List.of());
         terrain.update(snow);
         draw(atmosphere, terrain, batch, tower, camera, snow, BoardAtmosphere.DEFAULTS);
@@ -1138,7 +1118,7 @@ class GpuAtmosphereSmokeTest {
         drawScene(atmosphere, terrain, batch, List.of(tower), camera, snow, rain, null, 0);
         assertEquals(frozenGround, sample(camera, plain), "Snow artwork must not acquire a liquid-water sheen");
         var pavementTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0, -1, false, 0,
-              BoardScene.Surface.CONCRETE, tile.ground(), tile.normals(), null, List.of(), List.of())).toList();
+              BoardScene.Surface.CONCRETE, null, List.of(), List.of())).toList();
         var pavement = new BoardScene(0, 7, 7, pavementTiles, List.of(), List.of(), -1, "", List.of());
         terrain.update(pavement);
         Vector3 sun = atmosphere.lighting().direction().cpy().scl(-1);
@@ -1161,13 +1141,13 @@ class GpuAtmosphereSmokeTest {
 
     /** A reproducible larger workload, not a whole-game FPS claim: static terrain and 64 simple lit casters. */
     private void checkLargeBoard(GpuAtmosphere atmosphere, GpuTerrain terrain, ModelBatch batch, ModelInstance tower,
-          BoardCamera camera, BoardScene.Pixels pixels, BoardScene.Pixels normals) throws IOException {
+          BoardCamera camera) throws IOException {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         List<ModelInstance> units = new ArrayList<>();
         for (int x = 0; x < 64; x++) {
             for (int y = 0; y < 64; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                      pixels, x % 2 == 0 ? normals : null, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+                      List.of(), List.of()));
                 if (x % 8 == 4 && y % 8 == 4) {
                     ModelInstance unit = new ModelInstance(tower.model);
                     unit.transform.setToTranslation(BoardGeometry.center(new Coords(x, y), 0).add(0, 0, 54));

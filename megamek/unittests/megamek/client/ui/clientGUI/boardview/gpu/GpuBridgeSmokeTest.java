@@ -980,9 +980,8 @@ class GpuBridgeSmokeTest {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
         return BoardSurfaceBlendTest.scene(coords -> {
             if (coords.equals(CENTER)) {
-                var art = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS, -2, 1, 0).ground();
-                return new BoardScene.Tile(coords, -2, 1, false, 0, BoardScene.Surface.GRASS,
-                      art, null, null, null, BoardFeatures.capture(bridge, coords, Map.of()), List.of(),
+                return new BoardScene.Tile(coords, -2, 1, false, 0, BoardScene.Surface.GRASS, null, null,
+                      BoardFeatures.capture(bridge, coords, Map.of()), List.of(),
                       BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE);
             }
             int road = 0;

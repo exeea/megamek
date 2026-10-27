@@ -10,22 +10,34 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.units.Terrains;
+import megamek.logging.MMLogger;
 
 /**
- * The 3D board's tileset art of a hex, as text: which images of its own tileset copy
- * ({@code data/models/board/tileset/saxarba.tileset}, used whatever the player's 2D tileset, parsed once per JVM) a hex
- * selects, how the 3D board treats each scenery layer, and which layers the legacy conversion takes. It reads no image,
- * so the conversion runs headless on the server; the 3D board's paint ({@code BoardArtwork}) paints from the same result.
+ * The 3D board's tileset art of a hex, as text: which entries of the Classic graphics' tileset
+ * ({@code data/models/board/classic/tileset/classic.tileset}, used whatever the player's 2D tileset, parsed once per
+ * JVM) a hex selects, how the 3D board treats each scenery layer, and which layers the legacy conversion takes. An
+ * entry names a Classic image, or the key of art the 3D board never draws as an image: a structure's model
+ * ({@code buildings/...}), the scenery layout ({@code scenery/...}) or legacy decal ({@code decal/...}) the conversion
+ * turns a token into, the quay sprite ({@code quay/...}), a road ({@code route}: the 3D roads draw it), a bridge
+ * ({@code bridge}: both graphics draw the 3D bridge), a container yard ({@code design}: its design draws it), water
+ * and rapids ({@code water}: the water animation, tinted or toned; frozen, its still first frame under the ice), space
+ * ({@code space}: transparent) and molten magma ({@code magma}: its animated surface covers the column). It reads no
+ * image, so the conversion runs headless on the server; the 3D board's paint ({@code BoardArtwork}) paints from the
+ * same result.
  * Thread-safe: the parsed tileset is shared and only read.
  */
 public final class TilesetScenery {
+    private static final MMLogger LOGGER = MMLogger.create(TilesetScenery.class);
     /** The parsed tileset of the data directory it was read from ({@link TilesetMatcher#root}). */
     private static volatile TilesetMatcher tileset;
+    /** The structure models the tileset names that do not exist, each reported once. */
+    private static final Set<String> MISSING = ConcurrentHashMap.newKeySet();
 
     /** The terrains whose tileset art is scenery: a layer matching one of them is classified ({@link #resolve}). */
     public static final List<Integer> SCENERY_TERRAINS = List.of(Terrains.FLUFF, Terrains.GROUND_FLUFF,
@@ -74,9 +86,9 @@ public final class TilesetScenery {
     }
 
     /**
-     * One scenery layer of a hex: its picked image, the hex terrains it matched, its kind, its key (a MODEL's model key
-     * {@code scenery/<file>}, or a PAINT layer's legacy decal id {@code decal/<file>}, else null), and whether the legacy
-     * conversion takes it. Taken are exactly the model layers and legacy decals whose token is decodable
+     * One scenery layer of a hex: its picked entry file, the hex terrains it matched, its kind, its key (a MODEL's
+     * layout key {@code scenery/...}, or a PAINT layer's legacy decal id {@code decal/...}, else null), and whether the
+     * legacy conversion takes it. Taken are exactly the model layers and legacy decals whose token is decodable
      * ({@link BoardSceneryLayouts#imported}), pillar art on a bridge included; the 3D board must not draw those again.
      */
     public record Layer(TilesetMatcher.Pick pick, Set<Integer> terrains, Kind kind, String key, boolean taken) {
@@ -90,7 +102,7 @@ public final class TilesetScenery {
     }
 
     /** The transparent image of the tileset's wildcard entries ({@code fluff:*}, {@code road_fluff:*} and the like). */
-    private static final String BLANK = "saxarba/misc/blank.png";
+    private static final String BLANK = "tileset/blank.png";
 
     /** A hex's scenery layers in drawing order, and the {@link Scenery} they give. */
     public record Resolved(List<Layer> layers, Scenery scenery) {
@@ -119,14 +131,14 @@ public final class TilesetScenery {
         return tileset;
     }
 
-    private static File root() { return new File(Configuration.dataDir(), "models/board/tileset"); }
+    private static File root() { return new File(Configuration.dataDir(), "models/board/classic"); }
 
     private static TilesetMatcher load() {
         var result = new TilesetMatcher(root());
         try {
-            result.load("saxarba.tileset");
+            result.load("tileset/classic.tileset");
         } catch (IOException exception) {
-            throw new IllegalStateException("Cannot load the 3D board's Saxarba tileset", exception);
+            throw new IllegalStateException("Cannot load the Classic tileset", exception);
         }
         return result;
     }
@@ -172,8 +184,8 @@ public final class TilesetScenery {
     }
 
     /**
-     * The hex's structure models by structure terrain: a designed building's model, else the model beside the tileset
-     * art a structure's image selects; only models whose GLB file exists.
+     * The hex's structure models by structure terrain: a designed building's model, else the model a structure's entry
+     * names; only models whose GLB file exists.
      */
     public static Map<Integer, String> structureModels(Hex hex) {
         return structureModels(tileset(), hex);
@@ -192,12 +204,14 @@ public final class TilesetScenery {
             List<TilesetMatcher.Pick> images = new ArrayList<>(appearanceLayers(definitions, hex, false));
             images.add(definitions.select(hex).base());
             for (TilesetMatcher.Pick image : images) {
-                String source = image == null ? "" : image.source();
-                int extension = source.lastIndexOf('.');
-                if (extension > 0) {
-                    String model = "buildings/" + source.substring(0, extension);
+                String model = image == null ? "" : image.key();
+                if (model.startsWith("buildings/")) {
                     boolean legacy = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile();
                     boolean custom = customBuildingFile(model).isFile();
+                    // An entry that names only the key has no art to fall back to.
+                    if (!legacy && !custom && !TilesetMatcher.image(image.source()) && MISSING.add(model)) {
+                        LOGGER.warn("The Classic tileset names the structure model {}, which does not exist", model);
+                    }
                     for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
                         if ((legacy || custom) && hex.containsTerrain(terrain) && image.has(terrain)) {
                             models.putIfAbsent(terrain, model);
@@ -274,35 +288,32 @@ public final class TilesetScenery {
                 result.add(new Layer(layer, types, Kind.SKIPPED, null, false));
                 continue;
             }
-            String source = layer.source();
+            String key = layer.key();
             // Both GPU views use the fitted quay wall. Its old perspective sprite must not also be
             // projected onto the seabed or baked into the Tactical View's ground artwork.
-            if (source.startsWith("Structured_Pavement/Fluff/quay_fluff")) {
+            if (key.startsWith("quay/")) {
                 result.add(new Layer(layer, types, Kind.QUAY, null, false));
                 continue;
             }
-            int extension = source.lastIndexOf('.');
-            String asset = extension < 0 ? "" : "scenery/" + source.substring(0, extension);
             // layouts.json is the one legacy key -> mesh table; no mesh sits at a legacy key.
-            if (!asset.isEmpty() && BoardSceneryLayouts.hasLayout(asset)) {
-                models.add(new Scenery.Model(asset, types));
+            if (!key.isEmpty() && BoardSceneryLayouts.hasLayout(key)) {
+                models.add(new Scenery.Model(key, types));
                 // The selected parking sprite specifies a visual route even without gameplay ROAD terrain.
                 // These are ordinary hex-direction bits consumed by the existing road engine.
-                cosmeticRoadExits |= switch (source) {
-                    case "fluff/cars_1.gif", "fluff/cars_4.gif" -> 18;
-                    case "fluff/cars_2.gif", "fluff/cars_5.gif", "fluff/cars_7.gif" -> 36;
-                    case "fluff/cars_3.gif", "fluff/cars_6.gif", "fluff/cars_8.gif" -> 9;
+                cosmeticRoadExits |= switch (key) {
+                    case "scenery/fluff/cars_1", "scenery/fluff/cars_4" -> 18;
+                    case "scenery/fluff/cars_2", "scenery/fluff/cars_5", "scenery/fluff/cars_7" -> 36;
+                    case "scenery/fluff/cars_3", "scenery/fluff/cars_6", "scenery/fluff/cars_8" -> 9;
                     default -> 0; // The 2b/3b variants intentionally omit the road.
                 };
-                result.add(new Layer(layer, types, Kind.MODEL, asset, BoardSceneryLayouts.imported(types, hex)));
+                result.add(new Layer(layer, types, Kind.MODEL, key, BoardSceneryLayouts.imported(types, hex)));
             } else if (types.contains(Terrains.ROAD) && HexTile.road(hex)) {
                 // Road-fluff surface variants use the same material, joins and relief as every other road.
                 result.add(new Layer(layer, types, Kind.ROAD_SURFACE, null, false));
             } else {
-                String decal = extension < 0 ? "" : "decal/" + source.substring(0, extension);
-                boolean legacy = BoardDecalArt.legacy(decal) != null;
-                if (legacy) { legacyDecals.add(new Scenery.Model(decal, types)); }
-                result.add(new Layer(layer, types, Kind.PAINT, legacy ? decal : null,
+                boolean legacy = BoardDecalArt.legacy(key) != null;
+                if (legacy) { legacyDecals.add(new Scenery.Model(key, types)); }
+                result.add(new Layer(layer, types, Kind.PAINT, legacy ? key : null,
                       legacy && BoardSceneryLayouts.imported(types, hex)));
             }
         }

@@ -17,7 +17,16 @@ record BoardLiquid(Kind kind, String theme, int rapids) {
     /** The green tint of a hazardous liquid's water art, in the board's liquid material and on the minimap. */
     static final Color HAZARDOUS_TINT = new Color(0.4f, 1, 0.12f, 1);
 
-    record Textures(String base, String foam) { }
+    /**
+     * A themed water's colour: its frames are the plain water's, each linear channel their linear luminance times this,
+     * fitted to the mean colours of the themes' former animations.
+     */
+    record Tone(float red, float green, float blue) { }
+
+    private static final Tone MARS = new Tone(3.93f, 2.06f, .43f), VOLCANO = new Tone(1.44f, .51f, .61f);
+
+    /** {@code tone}: the colour its water frames take ({@link Tone}), null for the plain water's own. */
+    record Textures(String base, String foam, Tone tone) { }
 
     static BoardLiquid capture(Hex hex) {
         // Which hexes hold a liquid is common (HexTile.liquid), the legacy conversion's statement too.
@@ -45,12 +54,19 @@ record BoardLiquid(Kind kind, String theme, int rapids) {
         return present() && other.present() && molten() == other.molten();
     }
 
-    Textures textures(int depth, int elevation) {
-        String base = molten() ? "saxarba/base/base_magma_anim_" + Math.clamp(elevation, -3, 10) + ".gif"
-              : theme.isEmpty() ? "saxarba/anim_water_" + Math.clamp(depth, 0, 4) + ".gif"
-              : "saxarba/theme_" + theme + "/water_anim_" + theme + "_" + Math.clamp(depth, 0, 4) + ".gif";
+    /**
+     * The liquid's Classic animations at {@code depth}, the same at every level; themed water is the plain water toned.
+     */
+    Textures textures(int depth) {
+        String base = molten() ? "terrain/ground/base_magma_anim.gif"
+              : "terrain/water/anim_water_" + Math.clamp(depth, 0, 4) + ".gif";
         String foam = rapids == 0 || molten() ? ""
-              : "saxarba/water/" + (rapids == 1 ? "rapids_anim.gif" : "torrent_anim.gif");
-        return new Textures(base, foam);
+              : "terrain/water/" + (rapids == 1 ? "rapids_anim.gif" : "torrent_anim.gif");
+        Tone tone = switch (theme) {
+            case "mars" -> MARS;
+            case "volcano" -> VOLCANO;
+            default -> null;
+        };
+        return new Textures(base, foam, tone);
     }
 }

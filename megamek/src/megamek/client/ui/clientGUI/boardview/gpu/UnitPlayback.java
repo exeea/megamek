@@ -191,6 +191,12 @@ final class UnitPlayback {
                 } else if (active instanceof BoardScene.AttachmentChange change) {
                     attachment = new UnitAttachmentMotion(change);
                     attachmentStart = 0;
+                } else if (active instanceof BoardScene.TileTransition) {
+                    // A scene change runs on the action clock, as a strike does; its checkpoint applies as it starts.
+                    combatSeconds = 0;
+                    combatContact = 0;
+                    combatTerrainRelease = 0;
+                    combatDuration = BoardScene.TileTransition.SECONDS;
                 }
             }
             if (!completed) {
@@ -428,7 +434,8 @@ final class UnitPlayback {
     }
 
     private boolean beforeTerrainRelease() {
-        return attack == null && !(active instanceof BoardScene.Detonation) || combatSeconds + 1e-7 < combatTerrainRelease;
+        return attack == null && !(active instanceof BoardScene.Detonation) && !(active instanceof BoardScene.TileTransition)
+              || combatSeconds + 1e-7 < combatTerrainRelease;
     }
 
     private boolean sameVolley(BoardScene.Combat next) {
@@ -441,6 +448,16 @@ final class UnitPlayback {
         if (primary.defensive()) { return next.entityId() == primary.event.result().target().entityId(); }
         return next.entityId() == primary.event.entityId()
               && next.attacker().location().samePose(primary.event.attacker().location());
+    }
+
+    /** The scene change under way, through its completion hold, a review included; null when none plays. */
+    BoardScene.TileTransition transition() {
+        return active instanceof BoardScene.TileTransition change ? change : null;
+    }
+
+    /** How far {@link #transition} has played, 0 to 1. */
+    float transitionProgress() {
+        return active instanceof BoardScene.TileTransition ? (float) Math.min(1, combatSeconds / combatDuration) : 0;
     }
 
     UnitConversion conversion() { return conversion; }
@@ -602,7 +619,7 @@ final class UnitPlayback {
         if (review == null || review.seconds + 1e-7 >= review.contactSeconds) {
             return live;
         }
-        Map<Integer, BoardScene.Unit> shown = new LinkedHashMap<>();
+        Map<Drawn, BoardScene.Unit> shown = new LinkedHashMap<>();
         holdUnits(review.event, shown, true);
         return live.withUnits(replaced(live.units(), shown));
     }
@@ -638,7 +655,7 @@ final class UnitPlayback {
             retainMotions(scene.units());
             return scene;
         }
-        Map<Integer, BoardScene.Unit> shown = new LinkedHashMap<>();
+        Map<Drawn, BoardScene.Unit> shown = new LinkedHashMap<>();
         if (active != null && !completed && beforeImpact()) {
             if (attack == null) { holdUnits(active, shown, true); }
             else { attacks.forEach(shot -> holdUnits(shot.event, shown, true)); }
@@ -650,7 +667,7 @@ final class UnitPlayback {
             var change = attachment.event;
             var endpoint = change.destination();
             var before = change.before();
-            shown.put(before.id(), new BoardScene.Unit(before.id(), before.part(), before.name(), endpoint, before.image(),
+            shown.put(Drawn.of(before), new BoardScene.Unit(before.id(), before.part(), before.name(), endpoint, before.image(),
                   false, before.annotations(), before.height(), false, before.model(), before.outlineRgb(),
                   List.of(endpoint.coords()), attachment.boarding() ? change.after().attachment() : null, before.heat()));
         }
@@ -659,15 +676,25 @@ final class UnitPlayback {
         return scene.withUnits(units);
     }
 
-    /** The units with the held ones in their place. */
-    private static List<BoardScene.Unit> replaced(List<BoardScene.Unit> units, Map<Integer, BoardScene.Unit> shown) {
+    /** One drawn piece of a unit: the whole unit (part -1), or one hex of a building drawn hex by hex. */
+    private record Drawn(int id, int part) {
+        static Drawn of(BoardScene.Unit unit) {
+            return new Drawn(unit.id(), unit.part());
+        }
+    }
+
+    /** The units with the held ones in their place, each drawn part by its own held part. */
+    private static List<BoardScene.Unit> replaced(List<BoardScene.Unit> units, Map<Drawn, BoardScene.Unit> shown) {
         List<BoardScene.Unit> result = new ArrayList<>();
+        Set<Integer> present = new HashSet<>();
         for (var unit : units) {
-            var replacement = shown.remove(unit.id());
+            present.add(unit.id());
+            var replacement = shown.remove(Drawn.of(unit));
             result.add(replacement == null ? unit : replacement);
         }
-        // An already-visible victim may be removed by the game before its final received attack has played.
-        result.addAll(shown.values());
+        // An already-visible victim may be removed by the game before its final received attack has played: a whole
+        // unit, or one hex of a building drawn hex by hex. A whole-unit hold never doubles a unit drawn in parts.
+        shown.values().stream().filter(held -> held.part() >= 0 || !present.contains(held.id())).forEach(result::add);
         return result;
     }
 
@@ -683,7 +710,7 @@ final class UnitPlayback {
         }
     }
 
-    private void holdUnits(BoardScene.Animation event, Map<Integer, BoardScene.Unit> shown, boolean playing) {
+    private void holdUnits(BoardScene.Animation event, Map<Drawn, BoardScene.Unit> shown, boolean playing) {
         if (!playing && checkpoints
               && !(event instanceof BoardScene.Combat combat && combat.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH)) {
             // The preceding checkpoint already contains the waiting unit's then-visible pose and appearance.
@@ -691,12 +718,12 @@ final class UnitPlayback {
             return;
         }
         if (event instanceof BoardScene.Combat combat) {
-            shown.putIfAbsent(combat.attacker().id(), combat.attacker());
+            hold(shown, combat.attacker());
             if (combat.target() != null) {
-                shown.putIfAbsent(combat.target().id(), combat.target());
+                hold(shown, combat.target());
             }
         } else if (event instanceof BoardScene.Conversion change) {
-            shown.putIfAbsent(change.entityId(), playing && conversion != null ? conversion.displayed() : change.before());
+            hold(shown, playing && conversion != null ? conversion.displayed() : change.before());
         } else if (event instanceof BoardScene.Movement movement && movement.unit() != null) {
             var unit = movement.unit();
             var appearance = checkpoints && settledScene != null ? settledScene.units().stream()
@@ -704,12 +731,17 @@ final class UnitPlayback {
             var location = playing ? movement.path().getLast() : movement.path().getFirst();
             var footprint = location.footprint().isEmpty()
                   ? playing ? unit.footprint() : List.of(location.coords()) : location.footprint();
-            shown.putIfAbsent(unit.id(), new BoardScene.Unit(unit.id(), unit.part(), appearance.name(), location, appearance.image(),
+            hold(shown, new BoardScene.Unit(unit.id(), unit.part(), appearance.name(), location, appearance.image(),
                   false, appearance.annotations(), unit.height(), unit.airborne(), appearance.model(), unit.outlineRgb(), footprint,
                   appearance.attachment(), appearance.heat()));
         } else if (event instanceof BoardScene.AttachmentChange change) {
-            shown.putIfAbsent(change.entityId(), change.before());
-            shown.putIfAbsent(change.carrier().id(), change.carrier());
+            hold(shown, change.before());
+            hold(shown, change.carrier());
         }
+    }
+
+    /** Holds a unit's captured appearance for its drawn part, unless an earlier event already holds that part. */
+    private static void hold(Map<Drawn, BoardScene.Unit> shown, BoardScene.Unit unit) {
+        shown.putIfAbsent(Drawn.of(unit), unit);
     }
 }

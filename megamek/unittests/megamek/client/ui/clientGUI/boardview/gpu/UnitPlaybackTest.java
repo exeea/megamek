@@ -29,7 +29,7 @@ class UnitPlaybackTest {
         var victim = unit(2, 0);
         var before = scene(victim);
         var after = new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(new Coords(0, 0), -3, -1,
-              false, 0, null, null, null, List.of(), List.of())), List.of(), List.of(), -1, "FIRING", List.of());
+              false, 0, null, null, List.of(), List.of())), List.of(), List.of(), -1, "FIRING", List.of());
         var strike = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), 0, 10000, 109, 184, 3);
         var playback = new UnitPlayback();
         playback.accept(List.of(new BoardScene.SceneUpdate(before), new BoardScene.Detonation(strike),
@@ -469,7 +469,7 @@ class UnitPlaybackTest {
     }
 
     static BoardScene scene(BoardScene.Unit... units) {
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, null, List.of(), List.of());
+        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, List.of(), List.of());
         return new BoardScene(0, 1, 1, List.of(tile), List.of(units), List.of(), -1, "MOVEMENT", List.of());
     }
 

@@ -454,7 +454,7 @@ class BoardBridgeSlopeTest {
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, height));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        return new BoardScene.Tile(at, ground, -1, false, 0, tile.surface(), tile.ground(), null, null, null,
+        return new BoardScene.Tile(at, ground, -1, false, 0, tile.surface(), null, null,
               BoardFeatures.capture(hex, at, Map.of()), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
     }
 }

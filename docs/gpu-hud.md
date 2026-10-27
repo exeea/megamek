@@ -44,8 +44,14 @@ Sections: [1 Architecture](#1-architecture) · [2 Input](#2-input-routing) · [3
   makes the Legacy 2D sprites from them, and both boards share their look (`TacticalStyle`) and glyphs
   (`TacticalGlyphs`).
 - In 3D, work under way shows as the board editor's blue ghosts of what it builds (`GpuEditorPreview.work`): a bridge
-  being built, a fortified hex's sandbags, a cleared rubble path, a trench being dug. A dug-in platoon's trench
-  (`scenery/military/trench`) is scenery of its hex in the scene (`BoardFeatures.withTrench`); no hex stores it.
+  being built, a fortified hex's sandbags, a cleared rubble path, a trench being dug. What marks set on the ground is
+  scenery of its hex in the scene, which no hex stores (`GpuBoardSource.markedTiles`): a dug-in platoon's trench
+  (`scenery/military/trench`, `BoardFeatures.withTrench`); woods being cleared by saws, whose trees fall from one side
+  a share for each turn of work, each leaving a sawn stump and its log (`BoardFeatures.withSawClearing`; the game
+  lowers the woods when the work is done); and cargo set down, a worn military container
+  (`scenery/military/cargo-crate`, `BoardFeatures.withCargo`) that replaces the cargo marker and stays in the Tactical View.
+  Its sides are stencilled with a two-digit number its hex picks (`BoardFeatures.label`, written by `RigidGlb.label`); its
+  paint is a colour slot, olive by default.
 - Special hexes draw no pictures in 3D: markers are native icons, and artillery and bomb landings show as their blasts,
   craters and drift lines. The server reports each dropped bomb's landing from the bomb's own mount, so the blast takes
   its type's area and style (`GpuArtilleryBlast`). `HexDrawPlugin`s paint only the Legacy 2D board and the saved

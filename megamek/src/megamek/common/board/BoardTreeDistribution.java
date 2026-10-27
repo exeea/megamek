@@ -15,8 +15,8 @@ public final class BoardTreeDistribution {
     /** Cosmetic stands and irregular spacing for all vegetation; false restores the original layouts. */
     public static final boolean NATURAL = true;
     /** The park trees: a legacy park's broad tree slot and paved ground's woods draw from these. */
-    public static final List<String> PARK = List.of("tree-broad", "tree", "birch", "tree-forked", "tree-layered",
-          "birch-spreading");
+    public static final List<String> PARK = List.of("vegetation/tree-broad", "vegetation/tree", "vegetation/birch",
+          "vegetation/tree-forked", "vegetation/tree-layered", "vegetation/birch-spreading");
     /** The vegetation design that draws no trees while the woods stay for the rules. */
     public static final String NO_TREES = "woods/no-trees";
     /** The terrains whose art draws trees: the Tactical View's base tile leaves them out where {@link #noTrees} holds. */
@@ -63,7 +63,7 @@ public final class BoardTreeDistribution {
     }
 
     private static boolean sameFamily(String a, String b) {
-        if (a.startsWith("tree-dead") != b.startsWith("tree-dead")) { return false; }
+        if (a.startsWith("vegetation/tree-dead") != b.startsWith("vegetation/tree-dead")) { return false; }
         int endA = a.indexOf('-'), endB = b.indexOf('-');
         if (endA < 0) { endA = a.length(); }
         if (endB < 0) { endB = b.length(); }

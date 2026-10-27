@@ -580,20 +580,24 @@ class GpuCoverBenchmarkSmokeTest {
          */
         int[] coverage(BoardCamera camera) throws Exception {
             Set<Object> drawn = Collections.newSetFromMap(new IdentityHashMap<>());
-            for (Object batch : batches(kind == Kind.GRASS ? grass : plants)) { drawn.addAll((List<?>) field(batch, "current")); }
+            for (Object batch : batches(renderer())) { drawn.addAll((List<?>) field(batch, "current")); }
             int complete = 0, visible = 0;
             for (var tile : hexes) {
                 Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
                 if (!camera.camera.frustum.sphereInFrustum(center, BoardGeometry.width() * .5f)) { continue; }
-                if (kind == Kind.GRASS && BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera.camera,
-                      new Vector3(center).mulAdd(camera.camera.direction, -BoardGeometry.width() * .75f)) <= 120) { continue; }
+                float pixels = BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera.camera,
+                      new Vector3(center).mulAdd(camera.camera.direction, -BoardGeometry.width() * .75f));
+                if (kind == Kind.GRASS && pixels <= 120 || kind == Kind.FIELDS && pixels <= GpuBiomeVegetation.CROP_FADE[0]) {
+                    continue;
+                }
                 visible++;
                 if (kind == Kind.WOODS) { complete++; continue; }
                 var planted = terrain.planted(tile.coords());
                 if (planted == null) { continue; }
                 boolean shown = switch (kind) {
-                    case FIELDS -> planted.crops() != null && (planted.crops().roots().size == 0
-                          || drawn.contains(planted.crops().roots()) || drawn.contains(planted.crops().canopy()));
+                    case FIELDS -> (planted.wheat() != null || planted.maize() != null)
+                          && (planted.wheat() == null || drawn.contains(planted.wheat()))
+                          && (planted.maize() == null || drawn.contains(planted.maize()));
                     case GRASS -> planted.grass() != null && (planted.grass().size == 0 || drawn.contains(planted.grass()));
                     case MARSH -> planted.reeds() != null && (planted.reeds().size == 0 || drawn.contains(planted.reeds()));
                     case WOODS -> true;
@@ -603,12 +607,21 @@ class GpuCoverBenchmarkSmokeTest {
             return new int[] { complete, visible };
         }
 
+        /** The renderer drawing this kind's plants: the grass engine draws the fields' too. */
+        private Object renderer() { return kind == Kind.MARSH ? plants : grass; }
+
         long uploads() {
-            return kind == Kind.GRASS ? grass.uploads() : kind == Kind.WOODS ? terrain.treeInstanceUploads() : plants.uploads();
+            return kind == Kind.MARSH ? plants.uploads() : kind == Kind.WOODS ? terrain.treeInstanceUploads() : grass.uploads();
         }
 
         void hide() throws Exception {
             if (kind == Kind.GRASS) { terrain.setGrass(false); }
+            else if (kind == Kind.FIELDS) {
+                // The fields' plants stand whatever the Grass blades option: a scene taken for one without fields hides them.
+                terrain.setGrass(false);
+                set(terrain, "fieldsScene", field(terrain, "coverScene"));
+                set(terrain, "fields", false);
+            }
             else if (kind == Kind.WOODS) {
                 for (Object chunk : (List<?>) field(terrain, "chunks")) {
                     Map<?, ?> stand = (Map<?, ?>) field(field(chunk, "stand"), "trees");
@@ -616,11 +629,15 @@ class GpuCoverBenchmarkSmokeTest {
                     stand.clear();
                 }
             }
-            else { ((Map<?, ?>) field(plants, "kinds")).clear(); set(plants, "view", null); }
+            else { ((Set<?>) field(plants, "marshes")).clear(); set(plants, "view", null); }
         }
 
         void show() throws Exception {
             if (kind == Kind.GRASS) { terrain.setGrass(true); }
+            else if (kind == Kind.FIELDS) {
+                terrain.setGrass(true);
+                set(terrain, "fieldsScene", null);
+            }
             else if (kind == Kind.WOODS) {
                 List<?> chunks = (List<?>) field(terrain, "chunks");
                 for (int index = 0; index < chunks.size(); index++) {
@@ -646,12 +663,12 @@ class GpuCoverBenchmarkSmokeTest {
             }
             int draws = 0, ranges = 0;
             long instances = 0, triangles = 0;
-            for (Object batch : batches(kind == Kind.GRASS ? grass : plants)) {
+            for (Object batch : batches(renderer())) {
                 if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
                 var mesh = (GpuInstancedMesh) field(batch, "mesh");
                 if (mesh == null) { continue; }
                 long count;
-                if (kind != Kind.GRASS) { count = ((FloatArray) field(batch, "data")).size / (int) field(batch, "stride"); }
+                if (kind == Kind.MARSH) { count = ((FloatArray) field(batch, "data")).size / 4; }
                 else if (mesh.drawInstances >= 0) { count = mesh.drawInstances; }
                 else {
                     // One bound buffer per chunk, drawn as one base-instance call per hex range.

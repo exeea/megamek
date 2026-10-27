@@ -131,7 +131,8 @@ final class GpuWaterPages implements Disposable {
                 page.mesh.add(page.copies.isEmpty() ? page.sources.get(i) : page.copies.get(i), page.visibility.get(i));
             }
             page.mesh.update();
-            if (!page.copies.isEmpty() && page.mesh.needsBuild()) { page.mesh.build(); }
+            // A water page merges at once, its installations coalesced above.
+            if (!page.copies.isEmpty() && page.mesh.needsBuild()) { page.mesh.build(Long.MAX_VALUE); }
             if (buildStarted != 0) { maxBuildNanos = Math.max(maxBuildNanos, System.nanoTime() - buildStarted); }
         }
     }

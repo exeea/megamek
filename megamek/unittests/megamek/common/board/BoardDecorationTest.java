@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 class BoardDecorationTest {
     private static BoardDecoration tree(String id, double x, double rotation, BoardDecoration.Placement placement) {
-        return new BoardDecoration(id, "prop", "birch-young", null, x, .2, rotation, false, .4, placement, 0);
+        return new BoardDecoration(id, "prop", "vegetation/birch-young", null, x, .2, rotation, false, .4, placement, 0);
     }
 
     /**

@@ -194,7 +194,7 @@ class UnitFootprintTest {
         for (int x = 0; x < 8; x++) {
             for (int y = 0; y < 8; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), x == 3 && y == 3 ? 4 : x == 7 ? 12 : 0,
-                      -1, false, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
+                      -1, false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         var destination = new Coords(5, 5);

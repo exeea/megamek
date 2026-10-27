@@ -57,7 +57,7 @@ class BoardSurfaceCacheTest {
         var walls = first.walls(scene, BoardGeometry.floor(scene));
         BoardScene.Pixels paint = pixels(0xff123456);
         List<BoardScene.Tile> painted = scene.tiles().stream().map(t -> new BoardScene.Tile(t.coords(), t.elevation(),
-              t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), paint, paint, paint, paint,
+              t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), paint, paint,
               t.features(), t.text(), t.liquid(), paint, t.detailedGround())).toList();
         BoardScene next = new BoardScene(0, 7, 7, painted, List.of(), List.of(), -1, "", List.of());
 
@@ -194,8 +194,8 @@ class BoardSurfaceCacheTest {
     }
 
     private static BoardScene.Tile shape(BoardScene.Tile t, int elevation, int roadExits, BoardScene.Surface surface) {
-        return new BoardScene.Tile(t.coords(), elevation, t.waterDepth(), t.frozen(), roadExits, surface, t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
+        return new BoardScene.Tile(t.coords(), elevation, t.waterDepth(), t.frozen(), roadExits, surface, t.decals(),
+              t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround());
     }
 
@@ -206,12 +206,11 @@ class BoardSurfaceCacheTest {
     }
 
     private static BoardScene scene(int boardId, int width, int height, boolean detailed) {
-        BoardScene.Pixels art = pixels(0xff345678);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, art,
-                      null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, detailed));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+                      List.of(), List.of(), BoardLiquid.NONE, null, detailed));
             }
         }
         return new BoardScene(boardId, width, height, tiles, List.of(), List.of(), -1, "", List.of());

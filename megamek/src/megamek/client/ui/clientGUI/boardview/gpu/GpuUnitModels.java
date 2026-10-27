@@ -37,7 +37,10 @@ final class GpuUnitModels implements Disposable {
     private final Path root;
     private final Map<Path, JsonValue> descriptors = new HashMap<>();
     private final Map<Path, ModularAsset> modular = new HashMap<>();
-    private final Map<Integer, Assembly> assemblies = new HashMap<>();
+    /** Each unit's assembly, and each drawn part's of a large unit drawn in parts (an armed building hex by hex). */
+    private final Map<AssemblyKey, Assembly> assemblies = new HashMap<>();
+
+    private record AssemblyKey(int unit, int part) { }
     private final Set<Path> failed = new HashSet<>();
     private final Map<String, Texture> modelTextures = new HashMap<>();
     private Texture bark;
@@ -172,7 +175,11 @@ final class GpuUnitModels implements Disposable {
 
     /** Effects may use a displayed assembly, but must never rebuild a past loadout during recovery after a refit. */
     GpuUnitModel loaded(BoardScene.UnitModel selection, int unitId) {
-        var assembly = assemblies.get(unitId);
+        return loaded(selection, unitId, -1);
+    }
+
+    GpuUnitModel loaded(BoardScene.UnitModel selection, int unitId, int part) {
+        var assembly = assemblies.get(new AssemblyKey(unitId, part));
         return selection != null && !tactical && selection.state() != null
               && assembly != null && assembly.matches(selection, displayMode.meeple(selection))
               ? assembly.model() : null;
@@ -180,11 +187,17 @@ final class GpuUnitModels implements Disposable {
 
     /** @return the unit's assembly, or {@code null} for its artwork token or sprite */
     GpuUnitModel get(BoardScene.UnitModel selection, int unitId) {
+        return get(selection, unitId, -1);
+    }
+
+    /** @return the assembly of the unit, or of its drawn part {@code part} (-1 for all of it) */
+    GpuUnitModel get(BoardScene.UnitModel selection, int unitId, int part) {
         if (selection == null || tactical) {
             return null;
         }
         boolean meeple = displayMode.meeple(selection);
-        Assembly cached = assemblies.get(unitId);
+        var key = new AssemblyKey(unitId, part);
+        Assembly cached = assemblies.get(key);
         if (selection.state() != null && cached != null && cached.matches(selection, meeple)) {
             return cached.model();
         }
@@ -197,7 +210,7 @@ final class GpuUnitModels implements Disposable {
             if (cached != null) {
                 cached.dispose();
             }
-            assemblies.put(unitId, new Assembly(selection.asset(), selection.fallback(), selection.variant(),
+            assemblies.put(key, new Assembly(selection.asset(), selection.fallback(), selection.variant(),
                   selection.figures(), meeple, selection.state().structure(), model));
         }
         return model;
@@ -244,7 +257,8 @@ final class GpuUnitModels implements Disposable {
             LOGGER.warn("Cannot load 3D unit asset {}; using its fallback: {}", descriptor, error.getMessage());
             return null;
         }
-        if (meeple) {
+        // A turret always shows its weapons, whatever the display mode.
+        if (meeple && !"building-turret".equals(value.getString("kind", null))) {
             // Troops stand as their recipe's meeple formation; every other unit is its artwork token.
             String figures = value.getString("meeple", null);
             return figures == null ? null : load(figures, selection, false);
@@ -415,7 +429,7 @@ final class GpuUnitModels implements Disposable {
 
     void retainAssemblies(Set<Integer> visibleIds) {
         assemblies.entrySet().removeIf(entry -> {
-            if (visibleIds.contains(entry.getKey())) {
+            if (visibleIds.contains(entry.getKey().unit())) {
                 return false;
             }
             entry.getValue().dispose();

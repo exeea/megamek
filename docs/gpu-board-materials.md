@@ -91,12 +91,11 @@ What keeps its own shading:
   emissive factors. On a plant it keeps its role's response (bark .90, snow .95, leaves passing
   .35 of their light), and untextured mycelium glows its own vertex colour.
 - Impostor cards draw their plant's baked look; fungal glow breathes slowly across a colony.
-- Crop rows and marsh sedge, whose artwork is composited at run time, take their material's
-  finish as the means of its maps: a uniform roughness, metallic, scattering and glow.
+- Marsh sedge, whose artwork is composited at run time, takes its material's finish as the
+  means of its maps: a uniform roughness, metallic, scattering and glow. Crop plants have no
+  artwork; they shade as dry leaves (roughness .86).
 - Meadow blades are their grass: they take the grass material's finish where they root, as
   turf takes its ground's.
-- All three crop-row views take `crop-row-side`'s finish; `crop-row-front` and `crop-row-top`
-  give their colour only.
 - Ground-damage brushes (`terrain/damage`) and the scatter atlas's props read their colour only:
   scars and scatter set their own finish.
 - Modular buildings' bark takes `vegetation/bark`'s colour; its plant role gives it bark's .90.
@@ -262,30 +261,32 @@ these values safely).
 | `terrain/ice/ice-sheet` | 1024 | – |
 | `terrain/lava/lava-crust`, `terrain/lava/lava-flow` | 1024 | – |
 | `terrain/surfaces/concrete-mulch` | 512 | 1 |
-| `terrain/surfaces/arid-cliff`, `arid-debris`, `concrete-bank`, `concrete-ground`, `desert-cap`, `desert-ground`, `dirt-debris`, `dirt-ground`, `fungus-bank`, `fungus-cliff`, `fungus-debris`, `grassland-ground`, `lunar-cliff`, `lunar-debris`, `lunar-ground`, `mars-cap`, `mars-cliff`, `mars-ground`, `rock-ground`, `sand-ground`, `sand-verge`, `scatter-stone`, `snow-ground`, `temperate-bank`, `temperate-cliff`, `temperate-debris`, `tropical-ground`, `tundra-ground`, `tundra-ground-variant`, `volcano-cap`, `volcano-cliff`, `volcano-ground` | 512 | 12 |
+| `terrain/surfaces/arid-cliff`, `arid-debris`, `concrete-bank`, `concrete-ground`, `desert-cap`, `desert-ground`, `dirt-debris`, `dirt-ground`, `fungus-bank`, `fungus-cliff`, `fungus-debris`, `grassland-ground`, `lunar-cliff`, `lunar-debris`, `lunar-ground`, `mars-cap`, `mars-cliff`, `mars-ground`, `rock-ground`, `sand-ground`, `sand-verge`, `scatter-stone`, `snow-ground`, `temperate-bank`, `temperate-cliff`, `temperate-debris`, `tropical-ground`, `volcano-cap`, `volcano-cliff`, `volcano-ground` | 512 | 12 |
 | `terrain/surfaces/biome-soil` | 512 | 20 |
 | `terrain/surfaces/fungus-ground` | 512 | 22 |
 | `terrain/surfaces/tundra-mat` | 512 | 24 |
+| `terrain/surfaces/tundra-ground`, `tundra-ground-variant` | 1024 | 48 |
 | `terrain/surfaces/tundra-crust` | 512 | 28 |
 | `terrain/surfaces/biome-mud`, `ground-scorch` | 512 | 64 |
 
-### Constrained (78)
+### Constrained (96)
 
-- `scenery/`: `demolition-materials`, `geyser-travertine`, `pool-water`, `rubble-brick`, `rubble-debris-concrete`, `rubble-debris-masonry`, `rubble-debris-timber`, `rubble-fines`, `rubble-slab`, `rubble-steel`, `rubble-timber`, `tunnel-concrete`
+- `scenery/`: `demolition-materials`, `geyser-travertine`, `pool-water`, `rubble-brick`, `rubble-debris-concrete`, `rubble-debris-masonry`, `rubble-debris-timber`, `rubble-fines`, `rubble-slab`, `rubble-steel`, `rubble-timber`, `timber-bark`, `timber-char`, `timber-endgrain`, `tunnel-concrete`
+- `structures/common/`: `chrome`, `corrugated`, `diamond-plate`, `hazard-stripes`, `iron`, `safety-yellow`, `steel`
 - `structures/facades/`: `facade-fortress`, `facade-hangar`, `facade-hard`, `facade-heavy`, `facade-industrial`, `facade-light`, `facade-medium`, `facade-tank`
 - `structures/industrial/`: `fan`
+- `structures/turret/`: `turret-dark`, `turret-edge`, `turret-paint`
 - `terrain/classic/`: `concrete`, `dirt`, `fungus`, `high-incline-dark`, `incline-dark`, `lunar`, `mars`, `rock`, `sand`, `snow`, `volcano`, `water-bed`
 - `terrain/damage/`: `ballistic-blast`, `ballistic-gouge`, `explosive-blast`, `fire-burn`, `laser-blast`, `laser-gouge`, `plasma-splash`, `ppc-blast`, `ppc-gouge`
-- `vegetation/`: `bank-turf`, `bark`, `birch-bark`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `crop-row-front`, `crop-row-side`, `crop-row-top`, `fern-cutout`, `marsh-sedge`, `palm-bark`, `palm-frond-cutout`, `palm-fronds`, `shrub-cutout`, `snow`
+- `vegetation/`: `bank-turf`, `bark`, `birch-bark`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `fern-cutout`, `marsh-sedge`, `palm-bark`, `palm-frond-cutout`, `palm-fronds`, `shrub-cutout`, `snow`, `tundra-tussock`, `tundra-tussock-dry`
 - `vegetation/fungus/`: `fungus-atlas`
 - `vegetation/mars/`: `mars-coral-atlas`
 - `vegetation/orchard/`: `orchard-leaning`, `orchard-round`, `orchard-spreading`, `orchard-upright`, `orchard-vase`, `orchard-young`
 - `vegetation/shrubs/`: `shrub-barren`, `shrub-desert`, `shrub-highland`, `shrub-rocky`, `shrub-snow`, `shrub-temperate`, `shrub-wetland`
 - `vegetation/volcano/`: `cinder-bark`, `cinder-cutout`
 
-The three crop-row views keep their plants' stem and crown anchors in
-`textures/vegetation/crop-row.json`. Tree impostor atlases under
-`textures/vegetation/impostors` are baked renders of the models, not materials.
+Tree impostor atlases under `textures/vegetation/impostors` are baked renders of the models, not
+materials.
 
 ## Authoring and export
 

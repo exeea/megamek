@@ -50,7 +50,7 @@ class GpuTundraSmokeTest {
 
     private static void checkVariants(GpuShaderManager manager, File output) throws Exception {
         String source = GpuShaderSource.readDisk("terrain-tundra.glsl");
-        String boundary = "float tundraWetness(vec3 world, vec3 face) {";
+        String boundary = "float tundraWetness() {";
         assertTrue(source.contains(boundary), "The diagnostic must change only the dry/wet carpet selection");
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,

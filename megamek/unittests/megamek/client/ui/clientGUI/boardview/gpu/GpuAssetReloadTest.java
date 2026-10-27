@@ -24,14 +24,13 @@ class GpuAssetReloadTest {
     Path directory;
 
     @Test
-    void gameplayAndPreviewRereadImagesNormalsAndTilesetMappingsWithoutChangingTheBoard() throws Exception {
+    void gameplayAndPreviewRereadImagesAndTilesetMappingsWithoutChangingTheBoard() throws Exception {
         File data = Configuration.dataDir();
         File images = Configuration.imagesDir();
-        Path tileset = Files.createDirectories(directory.resolve("models/board/tileset"));
-        Path normals = Files.createDirectories(directory.resolve("models/board/normals"));
-        Files.writeString(tileset.resolve("saxarba.tileset"), "base 0 \"\" \"\" \"ground.png\"\n");
-        png(tileset.resolve("ground.png"), 0xffff0000);
-        png(normals.resolve("ground.png.png"), 0xff8080ff);
+        Path classic = Files.createDirectories(directory.resolve("models/board/classic"));
+        Path tileset = Files.createDirectories(classic.resolve("tileset")).resolve("classic.tileset");
+        Files.writeString(tileset, "base 0 \"\" \"\" \"ground.png\"\n");
+        png(classic.resolve("ground.png"), 0xffff0000);
         try (var fixture = GpuBoardFixture.create(Board.createEmptyBoard(6, 6))) {
             Configuration.setImagesDir(images);
             Configuration.setDataDir(directory.toFile());
@@ -40,23 +39,22 @@ class GpuAssetReloadTest {
                     fixture.source.reloadAssets();
                     Board board = fixture.game.getBoard();
                     long generation = fixture.source.takeFrame().boardGeneration();
-                    assertArtwork(fixture.source, 0xff0000ff, 0x8080ffff);
-                    assertArtwork(preview, 0xff0000ff, 0x8080ffff);
-                    png(tileset.resolve("ground.png"), 0xff0000ff);
-                    png(normals.resolve("ground.png.png"), 0xff40c0ff);
+                    assertArtwork(fixture.source, 0xff0000ff);
+                    assertArtwork(preview, 0xff0000ff);
+                    png(classic.resolve("ground.png"), 0xff0000ff);
                     fixture.source.refresh();
                     preview.refresh();
-                    assertArtwork(preview, 0xff0000ff, 0x8080ffff);
+                    assertArtwork(preview, 0xff0000ff);
                     fixture.source.reloadAssets();
                     preview.reloadAssets();
-                    assertArtwork(fixture.source, 0x0000ffff, 0x40c0ffff);
-                    assertArtwork(preview, 0x0000ffff, 0x40c0ffff);
-                    png(tileset.resolve("replacement.png"), 0xff00ff00);
-                    Files.writeString(tileset.resolve("saxarba.tileset"), "base 0 \"\" \"\" \"replacement.png\"\n");
+                    assertArtwork(fixture.source, 0x0000ffff);
+                    assertArtwork(preview, 0x0000ffff);
+                    png(classic.resolve("replacement.png"), 0xff00ff00);
+                    Files.writeString(tileset, "base 0 \"\" \"\" \"replacement.png\"\n");
                     fixture.source.reloadAssets();
                     preview.reloadAssets();
-                    assertArtwork(fixture.source, 0x00ff00ff, 0x8080ffff);
-                    assertArtwork(preview, 0x00ff00ff, 0x8080ffff);
+                    assertArtwork(fixture.source, 0x00ff00ff);
+                    assertArtwork(preview, 0x00ff00ff);
                     assertEquals(generation, fixture.source.takeFrame().boardGeneration());
                     assertSame(board, fixture.game.getBoard());
                     assertEquals(1, fixture.source.takeFrame().scene().units().size());
@@ -72,10 +70,8 @@ class GpuAssetReloadTest {
         }
     }
 
-    private static void assertArtwork(BoardSource source, int color, int normal) {
-        var tile = source.takeFrame().scene().tile(new Coords(2, 2));
-        assertEquals(color, tile.ground().rgba(36 * 84 + 42));
-        assertEquals(normal, tile.normals().rgba(36 * 84 + 42));
+    private static void assertArtwork(BoardSource source, int color) {
+        assertEquals(color, source.takeFrame().scene().tile(new Coords(2, 2)).tileset().rgba(36 * 84 + 42));
     }
 
     static void png(Path file, int color) throws Exception {

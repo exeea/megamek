@@ -176,8 +176,9 @@ unchanged draw counts alone do not establish identical GPU time.
 Existing field, mud, marsh, quicksand and tundra overlays retain their own maps;
 they inherit the ground-family response, with damp ground reducing dry wear and
 wetland pools suppressing it. Submerged beds and active magma/cooling-crust
-materials omit the pigment effect. Pigment wear applies to sculpted ground tops;
-cover erosion shares the natural top/slope material mix so the rim contact stays
+materials omit the pigment effect. Pigment wear applies to sculpted ground tops and
+the level toe and lip of natural banks, fading as they steepen, so a bank meets its
+foot in the same worn tone; cover erosion shares the natural top/slope material mix so the rim contact stays
 continuous. The control does not affect separately drawn roads, buildings,
 vegetation or units.
 
@@ -479,8 +480,11 @@ The lunar pairs are 512 pixels square, span 12 metres each, and carry 3.75, 24 a
 12 centimetres of estimated shading relief.
 Lunar ground also carries impact craters placed in world cells, never on the maps' 12 m repeat
 (`lunarCraters` in terrain-sculpt.frag): three scales, from about half a metre to eight metres across, each a bowl
-with a sharp raised rim and a fading apron, mostly old and shallow, a few fresh and bright with rays. A high sun
-barely shades them, so a pale rim and a duller bowl carry them too. They are shading only (normal, cavity, albedo) on
+whose raised rim rounds over at its crest. No crater is a circle: its outline has broad lumps, a faint polygonal lean
+and a ragged edge, and its rim stands higher along some arcs than others. Most are old and shallow; the younger ones
+throw a bright ejecta apron, streaked radially out to about two and a half radii (streaks narrower than two pixels
+average to a faint apron), and a few fresh ones are deep with a bright halo. A high sun barely shades them, so a pale
+rim and a duller bowl carry them too. They are shading only (normal, cavity, albedo) on
 level ground: support, movement and line of sight keep the actual surface. A crater smaller than a few pixels fades
 out, so none turns into grain. A crater forms only where its bowl and apron clear the nearest drop or rise (each
 estimates the ground's rim and foot distance at its own centre), so a step or its talus never cuts one. Every lunar surface is lit as moon dust (`Surface.regolith`, `regolithResponse` in
@@ -572,7 +576,7 @@ the strata tint.
 | Every ground, debris, bank, cliff and cap map not listed below | 12 |
 | Cast concrete wall map | 12; panel joints have their own constructed dimensions |
 | Fungal ground | 22 |
-| Tundra ground (dry, wet) / mat / crust | 12 / 24 / 28 |
+| Tundra ground dry / wet / mat / crust | 48 / 48 / 24 / 28 |
 | Tree-pit mulch / mud / ground scorch | 1 / 64 / 64 |
 | Wetland earth | 9; the shared earth map sampled at 45% of its 20 m source span |
 | Road and bridge deck maps | 6 for the ordinary repeat of one legacy detail unit |
@@ -709,27 +713,29 @@ suppress it; fields, marsh, quicksand and mud keep their biome precedence. Expli
 SAND or SNOW also covers it. A Snow *theme* can show exposed tundra between snow
 remnants. None of these appearance choices changes the board's terrain or rules.
 
-The `tundra-ground`, `tundra-ground-variant`, `tundra-mat` and `tundra-crust` color/height and normal/AO
-maps are 512 pixels square. Earth tundra is autumn: `tundra-ground` is a dry heath carpet (dwarf birch, bearberry,
-crowberry and moss mixed at a fine scale, rust, ochre and olive with faint lichen flecks) and `tundra-ground-variant` a
-wet sedge and moss carpet, both from photographic studies, repeating over 12 metres with 10 and 7 cm of relief. Like
-ordinary ground, each carpet is also read 2.37 times larger and turned, the two blended by a world field, so its
-repeat does not show; the fungal mat repeats over 24 metres and the mineral crust over 28. The land decides where each carpet lies
-(`tundraWetness` in terrain-tundra.glsl, from the ground's rim and foot distances): sedge fills the hollows at the
-foot of rises, broad low stretches and the damp troughs of frost polygons (12 m cells on open level ground, in some
-stretches only); pale reindeer lichen takes over the heath on dry rises near drops, and the heath drifts gently
-between rusty and olive stretches tens of metres across. Every transition is metres wide, so the carpets meet as
-tones, never as patches: no hard-edged single-species blobs, which read as camouflage. Material Maker projects and
+Earth tundra's dry carpet, `tundra-ground`, is a fell-field from a photographic study: gravelly soil with pebbles,
+pale reindeer-lichen cushions, olive moss and red bearberry, graded warmer and more saturated toward the user's
+reference and lightly sharpened. It is 1024 pixels square over 48 metres (21 texels per metre), with 10 cm of relief:
+its lichen, moss and gravel stretches are tens of metres across, as in the reference, so no repeat shows at play
+distance. `tundra-ground-variant` is the same place's wet hollow, from a study made with the fell-field as its
+reference: sedge, rust-red sphagnum, bearberry and small dark pools, also 1024 pixels over 48 metres, with 7 cm.
+The two carpets have their own colour and normal arrays at their full size (`GpuAssets.tundraCarpets`); the shared
+sculpt arrays keep a copy at their 512 grid for the carpets' finish and means, which never widens that grid. Like
+ordinary ground, each carpet is also read 2.37 times larger and turned, blended by a world field at half the weight
+ordinary ground gives it, so the carpets keep their own detail foremost. The fungal mat and mineral crust stay in the shared arrays, 512 pixels over 24 and 28 metres.
+Sedge fills the hollows at the foot of rises, unless a drop is near (`tundraWetness` in terrain-tundra.glsl, from the
+ground's rim and foot distances); the fell-field carries its own lichen, moss and gravel everywhere else. The
+transition is metres wide, so the carpets meet as tones, never as patches.
+
+Earth tundra's straw grass tussocks are not in the carpet (they were painted out of its source) but stand as meshes:
+`foliage-tussock.glb` (`BoardScatter.tussocks`), up to ten a hex in loose clusters that run on across hex edges, clear
+of the unit at the centre. They draw with the trees in the foliage pass, with its four levels of detail, and stand
+as tall as the meadow's tallest blades, far below the low woods, so they never read as cover; the Tactical View omits
+them like the grass. Fungal mats, mineral crust and pavement lichen grow none. Material Maker projects and
 their required source images remain the authoring source of truth.
 
-Tundra's dwarf shrubs grow with the grass blades ([grass](gpu-grass-rendering.md)): crowberry, bearberry, dwarf
-birch and willow in their autumn colours, in clumps about 1.6 m across with the carpet open between them. Shapes and
-sizes mix shrub by shrub (needle mats, prostrate spreads, upright bushes, 2.5 times life size like the oversized
-blades, so they read at play distance); colours change by colonies metres across. No meadow blade grows over the carpet, and the
-relief's field dressing adds no second shrub kit there.
-
 `BoardTundraTest` checks native capture, theme preservation, precedence, cliff
-reach, connected coverage, grass roots and the dwarf shrubs' roots. `GpuTundraSmokeTest` renders paired
+reach, connected coverage, grass roots and the tussocks. `GpuTundraSmokeTest` renders paired
 base/tundra patches for ten themes, terraced slopes and paved lichen through the actual OpenGL renderer in both
 cameras, saving review images under `build/gpu-board-review/tundra`.
 
@@ -774,7 +780,7 @@ Neither the board's elevations nor its gameplay cliff exits are modified.
 The opaque black hex cap lies one visual level below the authored sublevel, so
 even equal-level neighbours have an exposed rim. `Tile.groundLevel()` is the one
 derived height used by the surface and its receiving cliffs. The cap replaces
-ground artwork, relief and vegetation in the sculpted view, seals the sky, and
+the ground, relief and vegetation in the sculpted view, seals the sky, and
 remains pickable. Tactical View keeps its existing tileset pit artwork at the
 authored game elevation. Neighbouring pits at the same level join without an internal wall. Pit
 edits invalidate the cap and surrounding cliff geometry.

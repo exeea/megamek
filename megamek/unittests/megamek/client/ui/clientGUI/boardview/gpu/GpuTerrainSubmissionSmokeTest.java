@@ -290,11 +290,11 @@ class GpuTerrainSubmissionSmokeTest {
                   ? List.of(new BoardScene.Feature("buildings/saxarba/building_hard/building_hard_00",
                         0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING))
                   : coords.equals(new Coords(2, 4))
-                        ? List.of(new BoardScene.Feature("tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE))
+                        ? List.of(new BoardScene.Feature("vegetation/tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE))
                         : List.of();
             tiles.add(new BoardScene.Tile(coords, tile.elevation(), tile.waterDepth(), false, 0,
-                  BoardScene.Surface.values()[coords.getX() % BoardScene.Surface.values().length], tile.ground(),
-                  null, tile.water() ? null : marking, null, features, List.of(), tile.liquid(), null, true));
+                  BoardScene.Surface.values()[coords.getX() % BoardScene.Surface.values().length],
+                  tile.water() ? null : marking, null, features, List.of(), tile.liquid(), null, true));
         }
         return new BoardScene(0, relief.width(), relief.height(), tiles, List.of(), List.of(), -1, "", List.of(),
               new BoardScene.Light(-24, -30));

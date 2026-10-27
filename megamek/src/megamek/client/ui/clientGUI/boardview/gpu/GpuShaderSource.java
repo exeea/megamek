@@ -178,6 +178,10 @@ final class GpuShaderSource {
         functions += read("terrain-patterns.glsl");
         functions += read("water-optics.glsl");
         functions += read("terrain-hexes.glsl");
+        // Fields' ground takes its crops' colours.
+        if (source.contains("// sculpt-material-functions")) {
+            functions += GpuBiomeVegetation.cropSource();
+        }
         String ground = source.contains("// ground-surface-functions") ? read("ground-surface.glsl") : "";
         // The one lighting entry, wherever a surface is lit through it. It reads a nuclear scorch from the ground
         // damage's directory, so every terrain surface lit there shows it.

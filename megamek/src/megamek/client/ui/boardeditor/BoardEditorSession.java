@@ -2701,7 +2701,8 @@ public final class BoardEditorSession {
         }
         var entry = blueprint.asset(object.asset());
         return entry != null && entry.layout() != null || modelFiles.computeIfAbsent(object.asset(),
-              name -> new java.io.File(Configuration.dataDir(), "models/board/" + name + ".glb").isFile());
+              name -> megamek.common.board.BoardModelBounds.file(new java.io.File(Configuration.dataDir(), "models/board"), name)
+                    .isFile());
     }
 
     /** XY is normalized to the same odd-column lattice as the board renderer, with north-positive Y. */

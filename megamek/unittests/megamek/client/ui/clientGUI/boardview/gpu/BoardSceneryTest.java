@@ -80,8 +80,8 @@ class BoardSceneryTest {
         for (String support : List.of("pavement:1", "water:2",
               "pavement:1;building:2;bldg_elev:3;bldg_cf:90")) {
             var bare = capture(new Hex(0, support, ""));
-            // Untranslated paint and terrain-owned art keep their sprites; art the conversion took has none.
-            for (String decoration : List.of("fluff:14:0", "geyser:1")) {
+            // Terrain-owned art keeps its sprite; art the conversion takes (fluff, decals) has none.
+            for (String decoration : List.of("geyser:1")) {
                 var hex = new Hex(0, support + ";" + decoration, "");
                 var image = capture(hex);
                 assertTrue(alpha(image.tilesetDecals()) + alpha(image.tilesetScenery()) > 0,
@@ -213,7 +213,8 @@ class BoardSceneryTest {
             var hex = new Hex(0, "pavement:1;" + terrain, "");
             var image = capture(hex);
             assertTrue(image.scenery().models().isEmpty(), terrain);
-            assertTrue(alpha(image.decals()) > 0, terrain);
+            // A surface symbol is a legacy decal: the conversion turns it into a decal both views draw.
+            assertFalse(image.scenery().decals().isEmpty(), terrain);
             assertTrue(tile(hex, image).detailedGround(), terrain);
         }
     }

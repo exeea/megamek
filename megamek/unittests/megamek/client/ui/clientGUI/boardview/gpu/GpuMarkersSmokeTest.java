@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -134,7 +133,7 @@ class GpuMarkersSmokeTest {
             BoardScene.Unit contact = scene.units().getFirst();
             ModelInstance sensor = new ModelInstance(markers.model(BoardMarker.Kind.SENSOR_CONTACT).instance.model);
             List<BoardMarker> dense = new ArrayList<>(scene.markers());
-            for (var kind : List.of(BoardMarker.Kind.MINEFIELD, BoardMarker.Kind.CARGO, BoardMarker.Kind.OBJECTIVE)) {
+            for (var kind : List.of(BoardMarker.Kind.MINEFIELD, BoardMarker.Kind.FLARE, BoardMarker.Kind.OBJECTIVE)) {
                 dense.add(new BoardMarker(kind, contact.location().coords(), 2));
             }
             for (boolean top : new boolean[] { false, true }) {
@@ -388,13 +387,12 @@ class GpuMarkersSmokeTest {
     }
 
     private static void checkAllKinds(GpuMarkers markers, GpuTerrain terrain, GpuAtmosphere atmosphere,
-          GpuUnitVisibility visibility, ModelBatch batch, List<Pixmap> captures) {
-        BoardScene.Pixels ground = ridge().tiles().getFirst().ground();
+          GpuUnitVisibility visibility, ModelBatch batch, List<Pixmap> captures) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 15; x++) {
             for (int y = 0; y < 12; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, ground, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         String[] labels = { "Sensor", "Collapse", "Minefield", "Charges", "Incoming", "Target", "Adjusted", "Auto hit",
@@ -441,17 +439,11 @@ class GpuMarkersSmokeTest {
     }
 
     private static BoardScene ridge() {
-        BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        var graphics = image.createGraphics();
-        graphics.setColor(new java.awt.Color(111, 130, 76));
-        graphics.fillRect(0, 0, 84, 72);
-        graphics.dispose();
-        var pixels = new BoardScene.Pixels(image);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 6; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), y >= 3 ? 5 : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 7, 6, tiles, List.of(), List.of(), -1, "", List.of(), null, List.of(), List.of(),

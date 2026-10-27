@@ -49,6 +49,85 @@ tileset. `GpuBuilding` assembles seeded floor/roof recipes to the game's height;
 Use [modular buildings](gpu-modular-buildings.md) for kit assembly and
 [asset proportions](board-asset-proportions.md) for legacy models and bridge assets.
 
+A Solaris elevator's hex (`BoardFeatures.shaft`, from its `SOLARIS_ELEVATOR` terrain) is a flat, unsculpted lift
+platform: its relief keeps lattice edges and its walls are straight (`BoardSurface.straightWalls`, as a Classic
+column's), which picking, support and the camera use. Enhanced draws neither its top nor its walls: the platform
+(`BoardElevator`) has a diamond-plate top inside a hazard-striped band 1.2 m wide, whose stripes run along each rim
+edge, and its level painted on as a decal (`decals/elevator`: an up-and-down arrow and the number). The paint is
+painted plate: drawn with the plate's UVs, it takes the plate's normals, occlusion and relief in a matte, non-metal
+finish, so the lugs stand through it (a decal turned on the platform paints flat). Raised above its
+lowest neighbour, the platform stands open on its lift (the deck's hazard-striped rim and girders on a
+massive scissor table, two planes of safety-yellow box-girder arms on chrome axles and cast hubs, tied by torsion
+tubes, rolling on rails and pushed open by a hydraulic cylinder outside each plane in every stage; its paint, steel and
+iron grime over where wear gathers, round its pins and joints and low in the pit, `BoardElevator.Lift#wear`), standing
+in a machinery pit sunk below the lowest ground beside it: diamond plate behind a hazard-striped curb, each wall
+lined up to its side's ground, cut only to the rim beside another raised lift and closed up to the deck where no lower
+ground lies beside it. All of it is in the shared `structures/common` materials: `steel`, `iron`, `chrome`,
+`safety-yellow`, `hazard-stripes` and `diamond-plate`, each with its whole finish. Nothing
+scatters on it. Classic keeps its column art.
+
+When the server moves elevators (`ElevatorProcessor`, end phase), `GpuBoardSource` queues one
+`BoardScene.TileTransition`, the timeline's event for hexes that change in motion, just before the checkpoint that holds
+their new levels; the units on them get no forced move. `UnitPlayback` plays it as one action (1.5 s of animation
+time) and applies its checkpoint as it starts. It waits until the terrain shows each moving hex at the lower of its two
+heights (`GpuTerrain#ready`), so the ground beside it keeps its walls down to there. `GpuTerrain#present` takes the
+hex's top and lift out of its chunk's draws. It draws the top raised to the platform's eased height, on a lift built for
+that height, which casts its shadow as a unit does, and the units on it ride along (`liftOffset`). Once the action
+ends, the platforms hold their end height until the after tiles are installed. Meanwhile, picking, ground support, hex
+text and overlays follow the installed tiles. Classic columns snap.
+
+Authored scenery can dig into its hex (`BoardGroundCut`): a model's `cut` group is the ground it digs out, triangles
+at the floors' depth. In Enhanced the hex's top (not a road over it) gives way over them and they become the ground there
+(`BoardSurface.Finish.DUG`): picking, ground support and the camera use them, and the terrain never draws them, as the
+model draws its own floor and walls. Grass, plants and hex overlays, which keep to the top, stay out. Classic columns
+keep their flat top. A model's `stands` group marks where troops resting in its hex stand (`InfantryMotion`): they walk
+to the stands, face out from them and step down onto the dug ground there (`UnitGroundContact`), a meeple by its middle
+as a vehicle does. Its `vehicle-N` stands are where a platoon's transports park. Infantry hitting the deck lies prone
+(`GpuBoardSource.proneCause`) only while that is its cover: dug in or in a fortified hex it has the +2 of that cover
+instead, never both (TO:AR p.106), and mans its holes or trench.
+
+Two earthworks dig in (built by `tools/board-models/military`). A dug-in platoon (TO:AR p.106) digs a fighting hole for
+each of its figures round its hex's centre (`scenery/military/trench`, `BoardFeatures.withTrench`): 1.4 m deep, roomy
+enough for battle armour, their earth thrown forward, no timber, and far enough apart that a battle armour squad's
+meeples stand clear of each other. The model holds six holes, one per formation slot, each a numbered part (`part-N`
+nodes and cut pieces, `stand-N`, `RigidGlb.part`); a feature shows the parts its `parts` mask names
+(`BoardGroundCut.showParts`, `BoardGroundCut.shown`). The hex keeps the holes of the slots its figures stood in when they
+dug in (`GpuBoardSource.holes`, `InfantryVisual.slots`) for as long as they stay dug in, so a casualty leaves its hole
+empty; each figure stands in its own slot's hole. A digging platoon shows its figures' holes as a ghost. A fortified hex
+(its layout's `scenery/military/fortification`) is a strongpoint filling the hex: a vehicle pit 1.8 m deep at the centre,
+wide enough for a tank at any heading, its ramp out to one corner, and round it a fire trench 2.2 m deep with five
+revetted fire bays, their stands numbered for the formation slots nearest them, and duckboards on its trodden floor. The
+trench is open where the ramp leaves and behind the pit, at the hide: level ground for a tank that could go hull down
+there (TO:AR p.19) but has not. Such a tank (`UnitAnimator.waiting`) waits toward the hide, keeping its facing, as far
+out as its hull stays inside the hex, on the bearing within 40 degrees of the hide's that takes it furthest, hanging over
+the pit where no bearing takes it clear (`BoardGroundCut.hide`). A hull-down
+tank and a mechanized platoon's transports, side by side at the pit's vehicle stands, settle onto its floor by their
+hull's middle; so does whatever else stands in the hex's middle and cannot use the strongpoint, as a Mek or a Large
+Vehicle, and meeple tokens stand in the pit as models do. A platoon dug in in a fortified hex takes to its strongpoint
+and digs no holes. Pavement cannot be dug (TO:AUE p.153), so a paved fortified hex is
+built up instead (`scenery/military/sandbags`, `BoardFeatures.onGround`): sandbag walls 1.83 m high round the hex,
+open at the same corner and hide, with a firing notch (a top bag left out) at each of five fire positions and a
+revetment round the centre for vehicles. It digs nothing; the same stands put its troops behind the notches, a
+hull-down tank and the transports in the revetment and a waiting tank toward the hide, all on the pavement. Near, a
+wall is one shell of whole bags, nothing modelled behind its faces, each bag a photographed one projected onto it (the
+`fortified-sandbag` material, made from two photographic studies by `sandbag_atlas.py`): the bags whose outline shows
+are modelled pillows (the top course, the ends, a notch's), the rest flat faces under the material's strong relief;
+bags turn round its corners, and at its ends one bag sags over the shorter course below it before the courses above
+rake back half a bag each; about 12,000 triangles. Further out it is a prism with the photographs on its faces, its
+ends sloped alike.
+
+Each earthwork keeps within a hexagon short of its hex's edges. On a level hex it draws at full size; beside a step,
+cliff or shore its top stops short of, it shrinks across (not in depth) about its anchor until it keeps inside the top
+(`BoardGroundCut.fitted`, from `BoardRelief.topInset` and the model's outline). The drawn model, its cut, its stands, its
+ghost and the plants round it all use that fit. Its walls and spoil are the shared `dirt-ground`, the strongpoint's
+trench floor `biome-mud`, in one colour slot, which takes the colour of the ground drawn in the hex
+(`BoardGroundCut.earth`): each family by its share of the hex's cover (so sand over a grass theme and desert
+transitions count), as its ground material's mean albedo stands to dirt's. Soil (grass, dirt, snow, tropical,
+pavement) keeps the model's own colours; Mars digs red earth, the Moon grey, a volcano black. Its spoil's foot frays
+into lobes, islands and scattered clods, and grass and plants grow up to it and through its spoil where that lies thin:
+an earthwork's footprint (`BoardObstacles`) keeps them only out of its heap where it is over 20 cm thick and out of
+what it digs, with no cleared band round it.
+
 ## Ground appearance and vegetation
 
 `BoardSurfaceBlend` supplies a continuous material-contact field.

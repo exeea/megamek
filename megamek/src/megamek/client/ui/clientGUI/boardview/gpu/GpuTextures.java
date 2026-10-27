@@ -25,59 +25,51 @@ import com.badlogic.gdx.utils.Disposable;
 /** Shared atlas ownership. Pixel changes update existing slots without invalidating mesh UVs. */
 final class GpuTextures<K> implements Disposable {
     private static final int ATLAS_BLEED = 2;
-    private record Images(BoardScene.Pixels color, BoardScene.Pixels normal) { }
 
     /** One packed slot. Keys with equal artwork share it; {@code users} counts them. */
     private static final class Entry {
-        final Images images;
+        final BoardScene.Pixels pixels;
         final String name;
-        final TextureRegion region, normal;
+        final TextureRegion region;
         int users;
 
-        Entry(Images images, String name, TextureRegion region, TextureRegion normal) {
-            this.images = images;
+        Entry(BoardScene.Pixels pixels, String name, TextureRegion region) {
+            this.pixels = pixels;
             this.name = name;
             this.region = region;
-            this.normal = normal;
         }
     }
 
     private final Map<K, Entry> entries = new HashMap<>();
     /** The slots some key uses, by artwork. A slot whose last key moved on stays packed until the pages are rebuilt. */
-    private final Map<Images, Entry> slots = new HashMap<>();
-    private final Map<Texture, Texture> normals = new IdentityHashMap<>();
+    private final Map<BoardScene.Pixels, Entry> slots = new HashMap<>();
     // PixmapPacker owns layout and CPU pixels only; each atlas owns its managed page textures.
     private final Map<PixmapPacker.Page, Texture> pageTextures = new IdentityHashMap<>();
     private final boolean mipmaps;
     private final boolean sceneColors;
     private PixmapPacker packer;
     private TextureAtlas atlas;
-    private PixmapPacker normalPacker;
-    private TextureAtlas normalAtlas;
     private int slotCount;
     private long packedArea, liveArea;
     private boolean retainReplaced;
-    private record Pages(TextureAtlas color, PixmapPacker colorPacker, TextureAtlas normal, PixmapPacker normalPacker)
-          implements Disposable {
+    private record Pages(TextureAtlas color, PixmapPacker colorPacker) implements Disposable {
         @Override
         public void dispose() {
-            for (Disposable resource : new Disposable[] { color, colorPacker, normal, normalPacker }) {
-                if (resource != null) { resource.dispose(); }
-            }
+            if (color != null) { color.dispose(); }
+            if (colorPacker != null) { colorPacker.dispose(); }
         }
     }
     private final List<Pages> retired = new ArrayList<>();
-    private TextureAtlas publishedColor, publishedNormal;
+    private TextureAtlas publishedColor;
 
     /** Terrain keeps old atlas pages alive until all meshes borrowing them have been retired. */
     void retainReplacedPages() { retainReplaced = true; }
 
-    void publish() { publishedColor = atlas; publishedNormal = normalAtlas; }
+    void publish() { publishedColor = atlas; }
 
     void releaseRetiredPages() {
         retired.removeIf(pages -> {
-            if (pages.color() != null && pages.color() == publishedColor
-                  || pages.normal() != null && pages.normal() == publishedNormal) { return false; }
+            if (pages.color() != null && pages.color() == publishedColor) { return false; }
             pages.dispose();
             return true;
         });
@@ -85,16 +77,13 @@ final class GpuTextures<K> implements Disposable {
 
     private void replacePages() {
         if (!retainReplaced) { dispose(); return; }
-        Pages pages = new Pages(atlas, packer, normalAtlas, normalPacker);
-        if (atlas != null && atlas == publishedColor || normalAtlas != null && normalAtlas == publishedNormal) {
+        Pages pages = new Pages(atlas, packer);
+        if (atlas != null && atlas == publishedColor) {
             retired.add(pages);
         } else { pages.dispose(); }
         atlas = null;
         packer = null;
-        normalAtlas = null;
-        normalPacker = null;
         pageTextures.clear();
-        normals.clear();
         entries.clear();
         slots.clear();
         slotCount = 0;
@@ -118,42 +107,33 @@ final class GpuTextures<K> implements Disposable {
 
     /** Returns true only when the atlas layout changes. Must run on the GL thread. */
     boolean update(Map<K, BoardScene.Pixels> images) {
-        return update(images, Map.of());
-    }
-
-    /** Optional pre-generated normals share each color slot's placement and lifetime. */
-    boolean update(Map<K, BoardScene.Pixels> colors, Map<K, BoardScene.Pixels> normalImages) {
-        return !updateRegions(colors, normalImages).isEmpty();
+        return !updateRegions(images).isEmpty();
     }
 
     /** Keys whose UVs or texture pages changed; unchanged meshes can keep their existing atlas references. */
-    Set<K> updateRegions(Map<K, BoardScene.Pixels> colors, Map<K, BoardScene.Pixels> normalImages) {
-        boolean normalMaps = !normalImages.isEmpty();
-        if (colors.isEmpty()) {
+    Set<K> updateRegions(Map<K, BoardScene.Pixels> images) {
+        if (images.isEmpty()) {
             Set<K> changed = Set.copyOf(entries.keySet());
             replacePages();
             return changed;
         }
         // An edit hands back the same pixel objects for every slot it left alone. Those are told apart by reference,
         // so a large board costs one lookup per slot rather than a rebuilt index, and only the rest get a look.
-        Map<K, Images> changed = atlas != null && (normalAtlas != null) == normalMaps
-              && entries.size() == colors.size() ? changedSlots(colors, normalImages) : null;
+        Map<K, BoardScene.Pixels> changed =
+              atlas != null && entries.size() == images.size() ? changedSlots(images) : null;
         if (changed != null && changed.isEmpty()) { return Set.of(); }
         if (changed != null && retainReplaced) {
-            Set<K> appended = append(changed, normalMaps);
+            Set<K> appended = append(changed);
             if (appended != null) { return appended; }
         }
-        Map<K, Images> images = new HashMap<>();
-        colors.forEach((key, pixels) -> images.put(key, images(pixels, normalImages.get(key))));
-        Map<Entry, Images> replacements = new IdentityHashMap<>();
-        boolean sameLayout = atlas != null && (normalAtlas != null) == normalMaps && entries.keySet().equals(images.keySet())
+        Map<Entry, BoardScene.Pixels> replacements = new IdentityHashMap<>();
+        boolean sameLayout = atlas != null && entries.keySet().equals(images.keySet())
               && images.entrySet().stream().allMatch(item -> {
                   Entry old = entries.get(item.getKey());
-                  Images pixels = item.getValue();
-                  Images shared = replacements.putIfAbsent(old, pixels);
+                  BoardScene.Pixels pixels = item.getValue();
+                  BoardScene.Pixels shared = replacements.putIfAbsent(old, pixels);
                   // A shared slot can change in place only if all of its users still agree.
-                  return old.images.color().width() == pixels.color().width()
-                        && old.images.color().height() == pixels.color().height()
+                  return old.pixels.width() == pixels.width() && old.pixels.height() == pixels.height()
                         && (shared == null || shared.equals(pixels));
               });
         // Previously different images may become identical after an edit; merge those slots too.
@@ -161,42 +141,37 @@ final class GpuTextures<K> implements Disposable {
         // Pending terrain must not repaint the pages still displayed by the previous revision. Append changed
         // artwork to new slots; publication will switch every mesh whose UVs changed in the same frame.
         sameLayout &= !retainReplaced || replacements.entrySet().stream()
-              .allMatch(item -> item.getKey().images.equals(item.getValue()));
+              .allMatch(item -> item.getKey().pixels.equals(item.getValue()));
         if (sameLayout) {
             Set<Texture> updated = new HashSet<>();
             Map<Entry, Entry> next = new IdentityHashMap<>();
             replacements.forEach((old, pixels) -> {
-                if (!old.images.equals(pixels)) {
+                if (!old.pixels.equals(pixels)) {
                     // PixmapPacker duplicates one edge pixel. Refresh it as well as the interior when a slot changes.
-                    replace(packer, old.name, old.region, pixels.color(), false);
-                    Entry entry = new Entry(pixels, old.name, old.region, old.normal);
+                    replace(packer, old.name, old.region, pixels);
+                    Entry entry = new Entry(pixels, old.name, old.region);
                     entry.users = old.users;
                     next.put(old, entry);
                     updated.add(old.region.getTexture());
-                    if (normalMaps) {
-                        replace(normalPacker, old.name, old.normal,
-                              pixels.normal() == null ? pixels.color() : pixels.normal(), pixels.normal() == null);
-                        updated.add(old.normal.getTexture());
-                    }
                 }
             });
             // Two slots may have traded artwork; clear every replaced one before indexing the new contents.
-            next.keySet().forEach(old -> slots.remove(old.images));
-            next.values().forEach(entry -> slots.put(entry.images, entry));
+            next.keySet().forEach(old -> slots.remove(old.pixels));
+            next.values().forEach(entry -> slots.put(entry.pixels, entry));
             entries.replaceAll((key, old) -> next.getOrDefault(old, old));
             if (mipmaps) { updated.forEach(GpuTextures::regenerateMipmaps); }
             return Set.of();
         }
         Map<K, Entry> before = new HashMap<>(entries);
-        Set<Images> unique = new HashSet<>(images.values());
+        Set<BoardScene.Pixels> unique = new HashSet<>(images.values());
         long area = unique.stream().mapToLong(GpuTextures::area).sum();
         long addedArea = unique.stream().filter(pixels -> !slots.containsKey(pixels))
               .mapToLong(GpuTextures::area).sum();
-        int imageWidth = unique.stream().mapToInt(pixels -> pixels.color().width()).max().orElse(0);
-        int imageHeight = unique.stream().mapToInt(pixels -> pixels.color().height()).max().orElse(0);
+        int imageWidth = unique.stream().mapToInt(BoardScene.Pixels::width).max().orElse(0);
+        int imageHeight = unique.stream().mapToInt(BoardScene.Pixels::height).max().orElse(0);
         // Append new artwork without moving any live slot. Compact only when discarded artwork would more
-        // than double the live storage (with one page of headroom), or the page format/size must change.
-        boolean repack = atlas == null || (normalAtlas != null) != normalMaps
+        // than double the live storage (with one page of headroom), or the page size must change.
+        boolean repack = atlas == null
               || imageWidth + 3 * ATLAS_BLEED > packer.getPageWidth()
               || imageHeight + 3 * ATLAS_BLEED > packer.getPageHeight()
               || packedArea + addedArea > Math.max(2 * area, (long) packer.getPageWidth() * packer.getPageHeight());
@@ -208,21 +183,14 @@ final class GpuTextures<K> implements Disposable {
             int width = Math.max(side, imageWidth + 3 * ATLAS_BLEED);
             int height = Math.max(side, imageHeight + 3 * ATLAS_BLEED);
             packer = new PixmapPacker(width, height, Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
-            if (normalMaps) {
-                normalPacker = new PixmapPacker(width, height, Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
-            }
         }
-        Map<Images, String> names = new LinkedHashMap<>();
+        Map<BoardScene.Pixels, String> names = new LinkedHashMap<>();
         images.forEach((key, pixels) -> {
-            if (!slots.containsKey(pixels) && !names.containsKey(pixels)) {
-                names.put(pixels, pack(pixels, normalMaps));
-            }
+            if (!slots.containsKey(pixels) && !names.containsKey(pixels)) { names.put(pixels, pack(pixels)); }
         });
         if (!names.isEmpty()) {
             atlas = atlas(packer, atlas, names.values());
-            if (normalMaps) { normalAtlas = atlas(normalPacker, normalAtlas, names.values()); }
-            names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name),
-                  normalMaps ? normalAtlas.findRegion(name) : null));
+            names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name)));
         }
         // Rebind every key; a slot no key uses any more leaves the index, its pixels staying packed until a repack.
         entries.clear();
@@ -241,25 +209,15 @@ final class GpuTextures<K> implements Disposable {
         return moved;
     }
 
-    private static Images images(BoardScene.Pixels color, BoardScene.Pixels normal) {
-        if (normal != null && (normal.width() != color.width() || normal.height() != color.height())) {
-            throw new IllegalArgumentException("Normal map dimensions must match the ground artwork");
-        }
-        return new Images(color, normal);
-    }
-
     /** The keys given other artwork than their slot holds, in the order given; {@code null} if a key is new. */
-    private Map<K, Images> changedSlots(Map<K, BoardScene.Pixels> colors,
-          Map<K, BoardScene.Pixels> normalImages) {
-        Map<K, Images> changed = new LinkedHashMap<>();
-        for (var item : colors.entrySet()) {
+    private Map<K, BoardScene.Pixels> changedSlots(Map<K, BoardScene.Pixels> images) {
+        Map<K, BoardScene.Pixels> changed = new LinkedHashMap<>();
+        for (var item : images.entrySet()) {
             Entry old = entries.get(item.getKey());
             if (old == null) { return null; }
-            BoardScene.Pixels normal = normalImages.get(item.getKey());
-            if (old.images.color() == item.getValue() && old.images.normal() == normal) { continue; }
+            if (old.pixels == item.getValue()) { continue; }
             // The same artwork under another object is still the slot's artwork.
-            Images images = images(item.getValue(), normal);
-            if (!old.images.equals(images)) { changed.put(item.getKey(), images); }
+            if (!old.pixels.equals(item.getValue())) { changed.put(item.getKey(), item.getValue()); }
         }
         return changed;
     }
@@ -270,76 +228,66 @@ final class GpuTextures<K> implements Disposable {
      * the meshes still showing them. Returns {@code null} when the pages must be rebuilt instead, which the full
      * update decides by the same rule.
      */
-    private Set<K> append(Map<K, Images> changed, boolean normalMaps) {
+    private Set<K> append(Map<K, BoardScene.Pixels> changed) {
         Map<Entry, Integer> arrivals = new IdentityHashMap<>();
-        Set<Images> fresh = new HashSet<>();
+        Set<BoardScene.Pixels> fresh = new HashSet<>();
         long addedArea = 0;
         for (var item : changed.entrySet()) {
-            Images images = item.getValue();
+            BoardScene.Pixels pixels = item.getValue();
             arrivals.merge(entries.get(item.getKey()), -1, Integer::sum);
-            Entry target = slots.get(images);
+            Entry target = slots.get(pixels);
             if (target != null) {
                 arrivals.merge(target, 1, Integer::sum);
-            } else if (images.color().width() + 3 * ATLAS_BLEED > packer.getPageWidth()
-                  || images.color().height() + 3 * ATLAS_BLEED > packer.getPageHeight()) {
+            } else if (pixels.width() + 3 * ATLAS_BLEED > packer.getPageWidth()
+                  || pixels.height() + 3 * ATLAS_BLEED > packer.getPageHeight()) {
                 return null;
-            } else if (fresh.add(images)) {
-                addedArea += area(images);
+            } else if (fresh.add(pixels)) {
+                addedArea += area(pixels);
             }
         }
         long area = liveArea + addedArea;
         for (var item : arrivals.entrySet()) {
-            if (item.getKey().users + item.getValue() == 0) { area -= area(item.getKey().images); }
+            if (item.getKey().users + item.getValue() == 0) { area -= area(item.getKey().pixels); }
         }
         if (packedArea + addedArea > Math.max(2 * area, (long) packer.getPageWidth() * packer.getPageHeight())) {
             return null;
         }
-        Map<Images, String> names = new LinkedHashMap<>();
-        for (Images images : changed.values()) {
-            if (fresh.contains(images) && !names.containsKey(images)) { names.put(images, pack(images, normalMaps)); }
+        Map<BoardScene.Pixels, String> names = new LinkedHashMap<>();
+        for (BoardScene.Pixels pixels : changed.values()) {
+            if (fresh.contains(pixels) && !names.containsKey(pixels)) { names.put(pixels, pack(pixels)); }
         }
-        if (!names.isEmpty()) {
-            atlas = atlas(packer, atlas, names.values());
-            if (normalMaps) { normalAtlas = atlas(normalPacker, normalAtlas, names.values()); }
-        }
-        names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name),
-              normalMaps ? normalAtlas.findRegion(name) : null));
-        changed.forEach((key, images) -> {
+        if (!names.isEmpty()) { atlas = atlas(packer, atlas, names.values()); }
+        names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name)));
+        changed.forEach((key, pixels) -> {
             entries.get(key).users--;
-            Entry entry = slots.get(images);
+            Entry entry = slots.get(pixels);
             entry.users++;
             entries.put(key, entry);
         });
         for (Entry entry : arrivals.keySet()) {
             if (entry.users == 0) {
-                slots.remove(entry.images);
-                liveArea -= area(entry.images);
+                slots.remove(entry.pixels);
+                liveArea -= area(entry.pixels);
             }
         }
         return changed.keySet();
     }
 
-    /** Packs artwork into the next slot of both packers and returns the slot's name. */
-    private String pack(Images pixels, boolean normalMaps) {
+    /** Packs artwork into the next slot and returns the slot's name. */
+    private String pack(BoardScene.Pixels pixels) {
         String name = "image" + slotCount++;
-        pack(packer, name, pixels.color(), false);
-        if (normalMaps) {
-            // Identical sizes and insertion order give both atlases the same pages and UVs.
-            // Deduplicate the pair: identical colors can carry different authored normal maps.
-            pack(normalPacker, name, pixels.normal() == null ? pixels.color() : pixels.normal(), pixels.normal() == null);
-        }
+        pack(packer, name, pixels);
         packedArea += area(pixels);
         return name;
     }
 
-    private void index(Images pixels, String name, TextureRegion region, TextureRegion normal) {
-        if (normal != null) { normals.put(region.getTexture(), normal.getTexture()); }
-        slots.put(pixels, new Entry(pixels, name, region, normal));
+    private void index(BoardScene.Pixels pixels, String name, TextureRegion region) {
+        slots.put(pixels, new Entry(pixels, name, region));
         liveArea += area(pixels);
     }
 
-    private static long area(Images pixels) {
-        return (long) (pixels.color().width() + ATLAS_BLEED) * (pixels.color().height() + ATLAS_BLEED);
+    private static long area(BoardScene.Pixels pixels) {
+        return (long) (pixels.width() + ATLAS_BLEED) * (pixels.height() + ATLAS_BLEED);
     }
 
     private TextureAtlas atlas(PixmapPacker source, TextureAtlas result, Iterable<String> names) {
@@ -350,7 +298,7 @@ final class GpuTextures<K> implements Disposable {
             var page = source.getPage(name);
             if (pageTextures.containsKey(page)) { continue; }
             Pixmap pixels = page.getPixmap();
-            Texture texture = new Texture(sceneColors && source == packer
+            Texture texture = new Texture(sceneColors
                   ? GpuColorTexture.data(pixels, mipmaps, true)
                   : new PixmapTextureData(pixels, pixels.getFormat(), mipmaps, false, true));
             result.getTextures().add(texture);
@@ -379,8 +327,8 @@ final class GpuTextures<K> implements Disposable {
         return result;
     }
 
-    private static void pack(PixmapPacker target, String name, BoardScene.Pixels pixels, boolean flatNormal) {
-        Pixmap pixmap = pixmap(pixels, 0, flatNormal);
+    private static void pack(PixmapPacker target, String name, BoardScene.Pixels pixels) {
+        Pixmap pixmap = pixmap(pixels, 0);
         try {
             target.pack(name, pixmap);
         } finally {
@@ -388,9 +336,9 @@ final class GpuTextures<K> implements Disposable {
         }
     }
 
-    private static void replace(PixmapPacker target, String name, TextureRegion region, BoardScene.Pixels pixels, boolean flatNormal) {
+    private static void replace(PixmapPacker target, String name, TextureRegion region, BoardScene.Pixels pixels) {
         Pixmap page = target.getPage(name).getPixmap();
-        Pixmap pixmap = pixmap(pixels, 1, flatNormal);
+        Pixmap pixmap = pixmap(pixels, 1);
         try {
             // Keep the managed backing image in sync for context restoration as well.
             page.setBlending(Pixmap.Blending.None);
@@ -422,14 +370,12 @@ final class GpuTextures<K> implements Disposable {
         Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
     }
 
-    static Pixmap pixmap(BoardScene.Pixels image, int border, boolean flatNormal) {
+    static Pixmap pixmap(BoardScene.Pixels image, int border) {
         Pixmap result = new Pixmap(image.width() + 2 * border, image.height() + 2 * border, Pixmap.Format.RGBA8888);
         result.setBlending(Pixmap.Blending.None);
         // One direct-buffer write loop instead of one JNI call per pixel. RGBA bytes have fixed order.
         var buffer = result.getPixels().duplicate().order(ByteOrder.BIG_ENDIAN).asIntBuffer();
-        if (flatNormal) {
-            while (buffer.hasRemaining()) { buffer.put(0x8080ffff); }
-        } else if (border == 0) {
+        if (border == 0) {
             image.writeRgba(buffer, 0, image.width() * image.height());
         } else {
             for (int y = -border; y < image.height() + border; y++) {
@@ -446,15 +392,9 @@ final class GpuTextures<K> implements Disposable {
         return entries.get(key).region;
     }
 
-    /** The normal page uses exactly the diffuse page's UVs, including its duplicated border and mip levels. */
-    Texture normal(Texture diffuse) {
-        return normals.get(diffuse);
-    }
-
     @Override
     public void dispose() {
         publishedColor = null;
-        publishedNormal = null;
         releaseRetiredPages();
         if (atlas != null) {
             atlas.dispose();
@@ -464,16 +404,7 @@ final class GpuTextures<K> implements Disposable {
             packer.dispose();
             packer = null;
         }
-        if (normalAtlas != null) {
-            normalAtlas.dispose();
-            normalAtlas = null;
-        }
-        if (normalPacker != null) {
-            normalPacker.dispose();
-            normalPacker = null;
-        }
         pageTextures.clear();
-        normals.clear();
         entries.clear();
         slots.clear();
         slotCount = 0;

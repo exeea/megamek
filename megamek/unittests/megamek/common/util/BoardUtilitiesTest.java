@@ -172,7 +172,7 @@ class BoardUtilitiesTest {
         Board board = Board.createEmptyBoard(3, 3);
         var at = new megamek.common.board.Coords(1, 1);
         var hex = new megamek.common.Hex(0, "road:1:9;building:1:65;bldg_cf:15;bldg_elev:1", "");
-        var object = new megamek.common.board.BoardDecoration("tree", "prop", "tree", null, .2, -.1, 30,
+        var object = new megamek.common.board.BoardDecoration("tree", "prop", "vegetation/tree", null, .2, -.1, 30,
               false, .8, megamek.common.board.BoardDecoration.Placement.ground(), 0).withGroup("grove");
         hex.setDecorations(java.util.List.of(object)); board.setHex(at, hex);
         BoardUtilities.flip(board, true, false);

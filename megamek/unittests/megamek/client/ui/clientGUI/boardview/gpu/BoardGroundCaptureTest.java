@@ -49,8 +49,8 @@ class BoardGroundCaptureTest {
             var game = new Game();
             game.setBoard(board);
             try (var source = new GpuMapSource(game, null, null);
-                  var original = new HexTileset(new File(Configuration.dataDir(), "models/board/tileset"))) {
-                original.loadFromFile("saxarba.tileset");
+                  var original = new HexTileset(new File(Configuration.dataDir(), "models/board/classic"))) {
+                original.loadFromFile("tileset/classic.tileset");
                 var scene = source.takeFrame().scene();
                 int structured = 0;
                 for (var tile : scene.tiles()) {
@@ -125,8 +125,8 @@ class BoardGroundCaptureTest {
             var board = Board.createEmptyBoard(1, 1);
             var coords = new Coords(0, 0);
             try (var artwork = new BoardArtwork();
-                  var original = new HexTileset(new File(Configuration.dataDir(), "models/board/tileset"))) {
-                original.loadFromFile("saxarba.tileset");
+                  var original = new HexTileset(new File(Configuration.dataDir(), "models/board/classic"))) {
+                original.loadFromFile("tileset/classic.tileset");
                 for (int family = 1; family <= 5; family++) {
                     for (int exits : new int[] { 15, 57, 63 }) {
                         var hex = new Hex(0, "pavement:" + level + ":" + exits + ";ground_fluff:" + family + ":3", "grass", coords);
@@ -155,8 +155,8 @@ class BoardGroundCaptureTest {
             var board = Board.createEmptyBoard(1, 1);
             var at = new Coords(0, 0);
             try (var artwork = new BoardArtwork();
-                  var original = new HexTileset(new File(Configuration.dataDir(), "models/board/tileset"))) {
-                original.loadFromFile("saxarba.tileset");
+                  var original = new HexTileset(new File(Configuration.dataDir(), "models/board/classic"))) {
+                original.loadFromFile("tileset/classic.tileset");
                 for (String frozen : new String[] { "", ";ice:1" }) {
                     var fullWater = tilesetPixels(original, new Hex(0, "water:" + depth + ":63" + frozen, "grass", at));
                     for (int exits = 0; exits < 64; exits++) {
@@ -217,8 +217,9 @@ class BoardGroundCaptureTest {
                     var tile = BoardScene.captureTile(hex, image, null, new BoardScene.PixelPool(), neighbour -> null);
                     assertTrue(tile.detailedGround());
                     if (decoration.equals("fluff:50:1")) {
-                        assertNotNull(tile.decals(), "Surface markings remain visible");
-                        assertNotNull(tile.tilesetDecals());
+                        // A ground symbol is a legacy decal: the conversion turns it into a decal both views draw.
+                        assertFalse(image.scenery().decals().isEmpty(), "Surface markings remain visible");
+                        assertNull(tile.decals(), "No Classic paint duplicates the decal");
                     } else if (decoration.startsWith("woods:")) {
                         // A container yard's art is its woods' look (b12), never tileset scenery or paint.
                         assertNull(tile.decals());
@@ -227,7 +228,7 @@ class BoardGroundCaptureTest {
                     } else {
                         assertNull(tile.decals(), "Modeled scenery must not retain a painted pavement duplicate");
                         assertFalse(image.scenery().models().isEmpty(), "Keep models selected by composite tileset rules");
-                        assertNotNull(tile.tilesetScenery(), "Tactical View keeps the original scenery");
+                        assertNull(tile.tilesetScenery(), "Its model draws it: no Classic sprite duplicates it");
                     }
                 }
             }

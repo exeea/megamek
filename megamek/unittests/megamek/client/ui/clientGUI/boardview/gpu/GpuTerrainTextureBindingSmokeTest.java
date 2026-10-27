@@ -46,7 +46,7 @@ class GpuTerrainTextureBindingSmokeTest {
                     atlas.publish();
                     var displayed = atlas.region("hex");
                     pixels.setRGB(0, 0, 0xff0000ff);
-                    assertEquals(java.util.Set.of("hex"), atlas.updateRegions(Map.of("hex", new BoardScene.Pixels(pixels)), Map.of()));
+                    assertEquals(java.util.Set.of("hex"), atlas.updateRegions(Map.of("hex", new BoardScene.Pixels(pixels))));
                     assertNotSame(displayed, atlas.region("hex"));
                     assertEquals(0xff0000ff, rgba(displayed), "The old mesh must still sample its red artwork");
                     assertEquals(0x0000ffff, rgba(atlas.region("hex")), "The pending mesh receives the blue replacement");
@@ -76,22 +76,30 @@ class GpuTerrainTextureBindingSmokeTest {
             public void create() {
                 GpuTextures<String> atlas = new GpuTextures<>(true);
                 try {
-                    var pixels = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.SAND).tiles().getFirst().ground();
                     atlas.retainReplacedPages();
-                    atlas.update(Map.of("hex", pixels));
+                    atlas.update(Map.of("hex", hex(0)));
                     atlas.publish();
                     Texture displayed = atlas.region("hex").getTexture();
                     int displayedHandle = displayed.getTextureObjectHandle();
-                    for (int i = 0; i < 32; i++) {
+                    Object displayedPages = field(atlas, "atlas");
+                    int repacks = 0;
+                    for (int i = 1; i <= 32; i++) {
                         Texture pending = atlas.region("hex").getTexture();
-                        // Changing the page format forces a repack without manufacturing enormous images.
-                        atlas.updateRegions(Map.of("hex", pixels), i % 2 == 0 ? Map.of("hex", pixels) : Map.of());
+                        Object pendingPages = field(atlas, "atlas");
+                        // New artwork each time: once the packed slots outgrow the live one, the pages repack.
+                        atlas.updateRegions(Map.of("hex", hex(i)));
                         atlas.releaseRetiredPages();
                         assertEquals(displayedHandle, displayed.getTextureObjectHandle());
                         assertTrue(org.lwjgl.opengl.GL11.glIsTexture(displayedHandle));
-                        if (pending != displayed) { assertEquals(0, pending.getTextureObjectHandle()); }
-                        assertEquals(1, ((List<?>) field(atlas, "retired")).size(), "Canceled pages must not accumulate");
+                        // Pages appended to the displayed atlas retire with it; only an undisplayed atlas is released.
+                        if (field(atlas, "atlas") != pendingPages && pendingPages != displayedPages) {
+                            repacks++;
+                            assertEquals(0, pending.getTextureObjectHandle(), "A replaced pending page is released");
+                        }
+                        assertTrue(((List<?>) field(atlas, "retired")).size() <= 1,
+                              "Canceled pages must not accumulate");
                     }
+                    assertTrue(repacks > 0, "Exercise replacing pending pages");
                     atlas.publish();
                     atlas.releaseRetiredPages();
                     assertEquals(0, displayed.getTextureObjectHandle(), "Retire old pages after replacement meshes publish");
@@ -115,7 +123,6 @@ class GpuTerrainTextureBindingSmokeTest {
                 GpuTerrain terrain = new GpuTerrain();
                 try {
                     List<BoardScene.Tile> tiles = new ArrayList<>();
-                    BoardScene.Pixels ground = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.GRASS).tiles().getFirst().ground();
                     // 45 water chunks exceed libGDX's maximum 32 texture slots, even without other samplers.
                     for (int x = 0; x < 72; x++) {
                         for (int y = 0; y < 40; y++) {
@@ -123,7 +130,7 @@ class GpuTerrainTextureBindingSmokeTest {
                             // otherwise be the frame's last draw instead of a water surface.
                             boolean border = x == 0 || y == 0 || x == 71 || y == 39;
                             tiles.add(new BoardScene.Tile(new Coords(x, y), 0, border ? -1 : 1, false, 0,
-                                  BoardScene.Surface.GRASS, ground, null, List.of(), List.of()));
+                                  BoardScene.Surface.GRASS, null, List.of(), List.of()));
                         }
                     }
                     BoardScene scene = new BoardScene(0, 72, 40, tiles, List.of(), List.of(), -1, "", List.of());
@@ -170,6 +177,15 @@ class GpuTerrainTextureBindingSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Water texture lifetime", failure.get()); }
     }
 
+    /** One hex of artwork, its own for each {@code shade}. */
+    private static BoardScene.Pixels hex(int shade) {
+        var image = new java.awt.image.BufferedImage(84, 72, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 72; y++) {
+            for (int x = 0; x < 84; x++) { image.setRGB(x, y, 0xff000000 | shade * 0x010203); }
+        }
+        return new BoardScene.Pixels(image);
+    }
+
     private static void checkPixmapRows() {
         var image = new java.awt.image.BufferedImage(12, 3, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 3; y++) {
@@ -178,18 +194,16 @@ class GpuTerrainTextureBindingSmokeTest {
         var source = new BoardScene.Pixels(image);
         for (var pixels : List.of(source, source.compact())) {
             for (int border = 0; border <= 2; border++) {
-                for (boolean flat : new boolean[] { false, true }) {
-                    var pixmap = GpuTextures.pixmap(pixels, border, flat);
-                    try {
-                        for (int y = 0; y < pixmap.getHeight(); y++) {
-                            for (int x = 0; x < pixmap.getWidth(); x++) {
-                                int argb = image.getRGB(Math.clamp(x - border, 0, 11), Math.clamp(y - border, 0, 2));
-                                assertEquals(flat ? 0x8080ffff : Integer.rotateLeft(argb, 8), pixmap.getPixel(x, y),
-                                      "Atlas uploads must preserve RGBA channels and duplicate the complete border");
-                            }
+                var pixmap = GpuTextures.pixmap(pixels, border);
+                try {
+                    for (int y = 0; y < pixmap.getHeight(); y++) {
+                        for (int x = 0; x < pixmap.getWidth(); x++) {
+                            int argb = image.getRGB(Math.clamp(x - border, 0, 11), Math.clamp(y - border, 0, 2));
+                            assertEquals(Integer.rotateLeft(argb, 8), pixmap.getPixel(x, y),
+                                  "Atlas uploads must preserve RGBA channels and duplicate the complete border");
                         }
-                    } finally { pixmap.dispose(); }
-                }
+                    }
+                } finally { pixmap.dispose(); }
             }
         }
     }

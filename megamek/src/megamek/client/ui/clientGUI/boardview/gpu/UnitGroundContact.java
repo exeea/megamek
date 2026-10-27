@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
@@ -58,7 +59,12 @@ final class UnitGroundContact {
         return UnitBounds.subtree(copy);
     }
 
-    boolean apply(BoardScene scene, BoardScene.Unit unit, UnitMotion.Sample motion) {
+    /**
+     * @param parked whether the vehicle body in a container (null: the unit's own) parks in dug ground: a transport at a
+     *               vehicle stand, a vehicle in its hex's middle, as in a strongpoint's pit, but not one waiting in the
+     *               hide
+     */
+    boolean apply(BoardScene scene, BoardScene.Unit unit, UnitMotion.Sample motion, Predicate<String> parked) {
         if (unit.sensorContact() || unit.footprint().size() > 1 || motion.airborne(unit)) { return false; }
         boolean changed = false;
         for (var body : bodies) {
@@ -68,13 +74,20 @@ final class UnitGroundContact {
                   ? member.posture().crouch() > 0 || member.posture().fallen() > 0 || member.posture().kneel() > 0
                   : unit.model().state().pose().proneCause() != megamek.common.units.ProneCause.NONE
                         || UnitAnimator.hullDown(unit))) { continue; }
+            boolean resting = !member.moving() && motion.boarding() == null;
+            // What rests in dug ground, troops, Meks and vehicles parked there, stands on it, below the hex's top (a
+            // trench's floor, a vehicle pit's), where the check below would refuse them.
+            if (resting && (!vehicle(body) || parked.test(body.rig.container()))
+                  && standUpright(body, scene, unit, true)) {
+                changed = true;
+                continue;
+            }
             var frame = new Matrix4(instance.transform).mul(body.root.globalTransform);
             var center = new Vector3(0, 0, body.bounds.min.z).mul(frame);
             float ground = UnitLandingSupports.terrain(scene, center.x, center.y, surfaces);
             // A roof, bridge, airborne elevation or unmodelled cliff step is not this unit's ground plane.
             if (!Float.isFinite(ground) || Math.abs(center.z - ground) > 2 * BoardGeometry.hexScale()) { continue; }
-            if (body.rig.trooper() && !member.moving() && motion.boarding() == null
-                  && standOnRough(body, scene, unit)) {
+            if (resting && body.rig.trooper() && standUpright(body, scene, unit, false)) {
                 changed = true;
                 continue;
             }
@@ -105,23 +118,44 @@ final class UnitGroundContact {
         return changed;
     }
 
+    private static boolean vehicle(Body body) {
+        return body.rig.transport() || "vehicle-v1".equals(body.rig.type());
+    }
+
     private float difference(BoardScene scene, Matrix4 frame, Vector3 offset) {
         var plus = new Vector3(offset).mul(frame);
         var minus = new Vector3(offset).scl(-1).mul(frame);
         return UnitLandingSupports.terrain(scene, plus.x, plus.y, surfaces) - UnitLandingSupports.terrain(scene, minus.x, minus.y, surfaces);
     }
 
-    /** After the formation sought a gap, stand upright on any boulder left underfoot rather than moving off a rim. */
-    private boolean standOnRough(Body body, BoardScene scene, BoardScene.Unit unit) {
+    /**
+     * Stand upright on what is underfoot: after the formation sought a gap, on any boulder left there rather than moving
+     * off a rim; or, {@code dug}, on the hex's dug ground, as a trench's floor below its top ({@link BoardGroundCut}). A
+     * body without feet there, a vehicle or a meeple, settles its middle onto it, down in a pit or hole whose walls its
+     * corners may reach.
+     */
+    private boolean standUpright(Body body, BoardScene scene, BoardScene.Unit unit, boolean dug) {
         var tile = scene.tile(unit.location().coords());
-        if (tile == null || surfaces.get(scene, tile).rough.isEmpty()) { return false; }
-        float lift = Float.NEGATIVE_INFINITY;
+        BoardSurface surface = tile == null ? null : surfaces.get(scene, tile);
+        if (surface == null || (dug ? !surface.dug() : surface.rough.isEmpty())) { return false; }
+        List<Vector3> points = new ArrayList<>();
         for (var contact : body.contacts) {
-            Vector3 point = new Vector3(contact.point).mul(contact.node.globalTransform).mul(instance.transform);
-            float height = UnitLandingSupports.ground(scene, point.x, point.y, surfaces);
+            points.add(new Vector3(contact.point).mul(contact.node.globalTransform).mul(instance.transform));
+        }
+        if (dug && (vehicle(body) || body.rig.meeple())) {
+            Vector3 middle = new Vector3();
+            for (Vector3 point : points) { middle.mulAdd(point, 1f / points.size()); }
+            points = List.of(middle);
+        }
+        float lift = Float.NEGATIVE_INFINITY;
+        for (Vector3 point : points) {
+            float height = dug ? UnitLandingSupports.terrain(scene, point.x, point.y, surfaces)
+                  : UnitLandingSupports.ground(scene, point.x, point.y, surfaces);
             if (Float.isFinite(height)) { lift = Math.max(lift, height - point.z); }
         }
-        if (!Float.isFinite(lift) || lift <= .001f || lift > BoardGeometry.level()) { return false; }
+        // Up onto a boulder, and in dug ground down to its floor too; never further than a level.
+        if (!Float.isFinite(lift) || lift > BoardGeometry.level()
+              || (dug ? lift < -BoardGeometry.level() : lift <= .001f)) { return false; }
         float parentUp = body.root.getParent() == null ? instance.transform.getScaleZ()
               : new Vector3(Vector3.Z).rot(body.root.getParent().globalTransform).rot(instance.transform).z;
         if (parentUp <= .0001f) { return false; }

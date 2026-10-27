@@ -23,9 +23,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardTreeDistributionTest {
-    static final List<String> BASIC_TREES = List.of("tree", "tree-broad", "tree-slender", "tree-forked", "tree-layered",
-          "birch", "birch-tall", "birch-spreading", "birch-young", "willow", "willow-broad", "pine", "pine-tall",
-          "pine-broad", "pine-slender", "pine-layered");
+    static final List<String> BASIC_TREES = List.of("vegetation/tree", "vegetation/tree-broad", "vegetation/tree-slender",
+          "vegetation/tree-forked", "vegetation/tree-layered", "vegetation/birch", "vegetation/birch-tall",
+          "vegetation/birch-spreading", "vegetation/birch-young", "vegetation/willow", "vegetation/willow-broad",
+          "vegetation/pine", "vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-slender", "vegetation/pine-layered");
+    /** The trees imported from the Quaternius pack (data/models/board/README.md), each with its winter form. */
+    static final List<String> IMPORTED_TREES = java.util.stream.Stream.concat(
+          BASIC_TREES.stream().flatMap(name -> java.util.stream.Stream.of(name, name + "-snow")),
+          java.util.stream.Stream.of("vegetation/tree-dead", "vegetation/tree-dead-snow", "vegetation/palm", "vegetation/palm-bent",
+                "vegetation/cactus", "vegetation/cactus-flowers")).toList();
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, boolean natural) {
         return BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, TilesetScenery.Scenery.EMPTY, natural)
@@ -108,7 +114,7 @@ class BoardTreeDistributionTest {
 
     @Test
     void singleFamilyPalettesAlsoFormStands() {
-        List<String> forms = List.of("orchard-round", "orchard-spreading", "orchard-upright", "orchard-vase");
+        List<String> forms = List.of("vegetation/orchard-round", "vegetation/orchard-spreading", "vegetation/orchard-upright", "vegetation/orchard-vase");
         var coords = new Coords(5, 3);
         var random = new Random(730);
         var counts = new java.util.HashMap<String, Integer>();
@@ -163,7 +169,7 @@ class BoardTreeDistributionTest {
                     if (!material.id.endsWith("-cutout")) { continue; }
                     assertEquals(.5f, ((RigidGlb.Data) model).alphaTests.get(material.id), .0001f);
                     var texture = ((RigidGlb.Data) model).images.get(material.textures.first().fileName);
-                    assertTrue(texture.file().endsWith((tree.startsWith("pine") ? "conifer" : "broadleaf")
+                    assertTrue(texture.file().endsWith((tree.startsWith("vegetation/pine") ? "conifer" : "broadleaf")
                           + (snow ? "-snow" : "") + "-cutout_albedo.png"), "Variants borrow the existing texture");
                 }
             }

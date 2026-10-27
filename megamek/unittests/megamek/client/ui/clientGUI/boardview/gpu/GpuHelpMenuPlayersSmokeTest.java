@@ -547,7 +547,7 @@ class GpuHelpMenuPlayersSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 16; x++) {
             for (int y = 0; y < 17; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, null, null, null, List.of(),
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, null, null, List.of(),
                       List.of()));
             }
         }

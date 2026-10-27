@@ -172,6 +172,16 @@ final class BoardRoad {
     }
 
     /**
+     * A road through shallow water, a ford or a flooded street, which Enhanced lays on the bed ({@link #bed}). Under a
+     * level or more of water a road is out of sight, as in real water; a bridge carries its road over the water
+     * instead, and molten liquid hides its bed.
+     */
+    static boolean submerged(BoardScene.Tile tile) {
+        return tile.road() != Kind.NONE && tile.liquid().present() && !tile.liquid().molten() && tile.waterDepth() == 0
+              && BoardBridge.feature(tile) == null;
+    }
+
+    /**
      * A carriageway the ground is shaped and cleared for ({@link BoardScene.Tile#wayExits}): a rendered road, or rails on
      * the tile's detailed, dry ground.
      */
@@ -189,22 +199,32 @@ final class BoardRoad {
 
     /** Roads painting this dry, level ground, including their shoulders across neighbouring hex edges. */
     static List<BoardRoad> nearby(BoardScene scene, BoardScene.Tile tile) {
-        return nearby(scene, tile, false);
+        return nearby(scene, tile, false, false);
     }
 
     /** The same neighbouring courses for placement clearance, including ground rails without a road. */
     static List<BoardRoad> nearbyWays(BoardScene scene, BoardScene.Tile tile) {
-        return nearby(scene, tile, true);
+        return nearby(scene, tile, true, false);
     }
 
-    private static List<BoardRoad> nearby(BoardScene scene, BoardScene.Tile tile, boolean clearance) {
-        if (tile == null || tile.liquid().present()) { return List.of(); }
+    /** {@link #nearbyWays} without rails alone: ground cover grows up to their ballast (BoardObstacles). */
+    static List<BoardRoad> nearbyRoads(BoardScene scene, BoardScene.Tile tile) {
+        return nearbyWays(scene, tile).stream().filter(way -> rendered(scene.tile(way.owner()))).toList();
+    }
+
+    /** Roads painting the bed of a {@link #submerged} road's hex: its own and those meeting it at its level. */
+    static List<BoardRoad> bed(BoardScene scene, BoardScene.Tile tile) {
+        return submerged(tile) ? nearby(scene, tile, false, true) : List.of();
+    }
+
+    private static List<BoardRoad> nearby(BoardScene scene, BoardScene.Tile tile, boolean clearance, boolean bed) {
+        if (tile == null || tile.liquid().present() != bed) { return List.of(); }
         List<BoardRoad> result = new ArrayList<>();
         for (int direction = -1; direction < 6; direction++) {
             var source = direction < 0 ? tile : scene.neighbor(tile, direction);
             // A graded road's ramp and corridor reach a neighbour of another level too; drawn roads keep to their level.
             if (source == null || !clearance && source.elevation() != tile.elevation()
-                  || !(clearance ? carriageway(source) : rendered(source))) { continue; }
+                  || !(clearance ? carriageway(source) : rendered(source) || bed && submerged(source))) { continue; }
             // Only an actual apron entrance ends at concrete. Through-roads and roundabouts keep their full width
             // where their sides cross a fitted concrete edge, including concrete carrying another road.
             if (!clearance && direction >= 0 && tile.surface() == BoardScene.Surface.CONCRETE
