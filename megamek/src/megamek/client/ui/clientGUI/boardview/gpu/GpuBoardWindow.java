@@ -659,7 +659,7 @@ public final class GpuBoardWindow {
     }
 
     /**
-     * EDT: frees the one native window for the developer UI library. Returns true when none is open; closes a map
+     * EDT: the board window's part of {@link GpuNativeWindow#claim}. Returns true when none is open; closes a map
      * preview and runs {@code then} once it is gone; refuses beside a board or an editor.
      */
     static synchronized boolean yieldNativeWindow(Window owner, Runnable then) {
@@ -703,12 +703,9 @@ public final class GpuBoardWindow {
     }
 
     private static void start(GpuBoardWindow window) {
-        // The developer UI library holds the one native window; it closes first and the board then starts.
-        if (GpuUiLibraryWindow.closeThen(() -> start(window))) {
-            return;
-        }
-        // So does the start screen; it reopens when an editor it opened closes
-        if (GpuStartWindow.closeThen(() -> start(window))) {
+        // The UI library or the start screen closes first and the board then starts; the start screen reopens when an
+        // editor it opened closes
+        if (!GpuNativeWindow.claim(window.swingWindow, () -> start(window))) {
             return;
         }
         try {

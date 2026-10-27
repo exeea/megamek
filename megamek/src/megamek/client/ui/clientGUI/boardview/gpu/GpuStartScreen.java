@@ -33,6 +33,7 @@ import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
+import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
@@ -99,6 +100,7 @@ import megamek.common.game.Game;
 import megamek.common.game.IGame;
 import megamek.common.icons.Camouflage;
 import megamek.common.interfaces.PlanetaryConditionsUsing;
+import megamek.common.net.NetworkAddresses;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -236,6 +238,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     private UiButton connectButton;
     /** Counts pages shown and reads asked for; a background read whose count is no longer current is dropped. */
     private int generation;
+    /** Set once the screen is disposed, so results that arrive after it are dropped. GPU thread only. */
+    private boolean disposed;
     /** The Load game page's list, kept while it shows so its scroll stays; and its note, or null. */
     private Actor saveList;
     private Label loadNote;
@@ -637,10 +641,12 @@ final class GpuStartScreen extends ApplicationAdapter {
      */
     private <T> void background(String name, Supplier<T> work, Consumer<T> done) {
         int asked = generation;
+        // Gdx.app moves to the next native window once this one closes; results stay with this one
+        Application app = Gdx.app;
         Thread thread = new Thread(() -> {
             T result = work.get();
-            Gdx.app.postRunnable(() -> {
-                if (asked == generation) {
+            app.postRunnable(() -> {
+                if (!disposed && asked == generation) {
                     done.accept(result);
                 }
             });
@@ -789,18 +795,22 @@ final class GpuStartScreen extends ApplicationAdapter {
             if (stage.getKeyboardFocus() == show) {
                 stage.setKeyboardFocus(hostButton);
             }
-            lookUp(StartHostForm::publicAddress, publicAddress);
+            lookUp(NetworkAddresses::publicAddress, publicAddress);
         });
-        lookUp(StartHostForm::localAddress, local);
+        lookUp(NetworkAddresses::localAddress, local);
         return table;
     }
 
     /** Finds an address off the GPU thread, then shows it, or that it wasn't found, in {@code label}. */
     private void lookUp(Supplier<String> address, Label label) {
+        Application app = Gdx.app;
         Thread thread = new Thread(() -> {
             String found = address.get();
-            Gdx.app.postRunnable(() -> label.setText(found == null
-                  ? Messages.getString("StartScreen.noAddress") : found));
+            app.postRunnable(() -> {
+                if (!disposed) {
+                    label.setText(found == null ? Messages.getString("StartScreen.noAddress") : found);
+                }
+            });
         }, "MegaMek-start-address");
         thread.setDaemon(true);
         thread.start();
@@ -2328,6 +2338,8 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        disposed = true;
+        generation++;
         window.disposing();
         for (Object disposable : new Object[] { stage, batch, shapes, backdrop, logoTexture }) {
             if (disposable instanceof com.badlogic.gdx.utils.Disposable resource) {

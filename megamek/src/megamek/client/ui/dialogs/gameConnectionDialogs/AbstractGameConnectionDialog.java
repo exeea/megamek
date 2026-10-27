@@ -136,6 +136,20 @@ public abstract class AbstractGameConnectionDialog {
         }
     }
 
+    /**
+     * Releases the card so the next {@link #setVisible} builds it again. The dialog is closed whenever
+     * {@link #setVisible} returns; callers that used it as a {@code JDialog} still call this afterwards.
+     */
+    public void dispose() {
+        pane = null;
+        mainButton = null;
+        playerNameField = null;
+        playerNameCombo = null;
+        nameField = null;
+        portInput = null;
+        portField = null;
+    }
+
     private TokenDialogPane pane() {
         if (pane == null) {
             nameField = new TokenFormField(Messages.getString("MegaMek.GameConnection.name"), createNameInput())

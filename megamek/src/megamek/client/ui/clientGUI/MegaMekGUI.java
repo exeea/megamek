@@ -78,7 +78,6 @@ import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.UnitLoadingDialog;
 import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
-import megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
 import megamek.client.ui.dialogs.randomArmy.AbstractRandomArmyDialog;
@@ -127,7 +126,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
     private IGameManager gameManager;
     private CommonSettingsDialog settingsDialog;
     private AbstractRandomArmyDialog randomArmyDialog;
-    private NetworkInformationDialog networkInformationDialog;
 
     private static MegaMekController controller;
 
@@ -236,13 +234,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
      */
     void showEditor() {
         megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.openEditor(frame, null, false);
-    }
-
-    /**
-     * Display the board editor and load the given board
-     */
-    void showEditor(String boardFile) {
-        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.openEditor(frame, new File(boardFile), false);
     }
 
     void showSkinEditor() {
@@ -786,20 +777,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             case ABOUT -> new MMAboutDialog(frame).show();
             case QUIT -> quit();
         }
-    }
-
-    private void showNetworkInformation() {
-        // Display the network information screen
-        getNetworkInformationDialog().refresh();
-        getNetworkInformationDialog().pack();
-        getNetworkInformationDialog().setVisible(true);
-    }
-
-    public NetworkInformationDialog getNetworkInformationDialog() {
-        if (networkInformationDialog == null) {
-            networkInformationDialog = new NetworkInformationDialog(this.frame);
-        }
-        return networkInformationDialog;
     }
 
     @Override

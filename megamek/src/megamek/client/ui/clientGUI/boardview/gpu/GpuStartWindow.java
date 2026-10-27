@@ -4,6 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.AWTEvent;
 import java.awt.Dialog;
 import java.awt.Frame;
+import java.awt.GraphicsConfiguration;
+import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.HeadlessException;
 import java.awt.Rectangle;
@@ -13,6 +15,7 @@ import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -211,10 +214,14 @@ public final class GpuStartWindow {
             throw new IllegalStateException("Install the start window's owner before opening it");
         }
         if (open != null) {
-            open.focus();
+            if (open.closeRequested) {
+                closeThen(() -> open(greet));
+            } else {
+                open.focus();
+            }
             return;
         }
-        if (!GpuBoardWindow.yieldNativeWindow(anchor, () -> open(greet))) {
+        if (!GpuNativeWindow.claim(anchor, () -> open(greet))) {
             return;
         }
         GpuStartWindow window = new GpuStartWindow(greet);
@@ -293,25 +300,52 @@ public final class GpuStartWindow {
     }
 
     /**
-     * GLFW screen coordinates are device pixels on Windows, while Swing's are scaled by the display's scale; macOS and
-     * X11 share theirs.
+     * GLFW screen coordinates are device pixels on Windows, while Swing's are scaled by each display's scale around
+     * that display's origin; macOS and X11 share theirs. Uses the display under the rectangle's centre.
      */
-    private static Rectangle toSwing(Rectangle glfw) {
-        double scale = swingScale();
-        return new Rectangle((int) Math.round(glfw.x / scale), (int) Math.round(glfw.y / scale),
-              (int) Math.round(glfw.width / scale), (int) Math.round(glfw.height / scale));
-    }
-
-    private static double swingScale() {
+    static Rectangle toSwing(Rectangle glfw) {
         if (SharedLibraryLoader.os != Os.Windows) {
-            return 1;
+            return new Rectangle(glfw);
         }
         try {
-            return GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDefaultConfiguration()
-                  .getDefaultTransform().getScaleX();
+            List<Rectangle> screens = new ArrayList<>();
+            List<Double> scales = new ArrayList<>();
+            for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+                GraphicsConfiguration configuration = device.getDefaultConfiguration();
+                screens.add(configuration.getBounds());
+                scales.add(configuration.getDefaultTransform().getScaleX());
+            }
+            return toSwing(glfw, screens, scales);
         } catch (HeadlessException headless) {
-            return 1;
+            return new Rectangle(glfw);
         }
+    }
+
+    /**
+     * {@code glfw} in Swing coordinates, given each display's Swing bounds (device pixel origin, scaled size) and scale;
+     * the first display, the primary, when none holds its centre.
+     */
+    static Rectangle toSwing(Rectangle glfw, List<Rectangle> screens, List<Double> scales) {
+        if (screens.isEmpty()) {
+            return new Rectangle(glfw);
+        }
+        double centreX = glfw.getCenterX();
+        double centreY = glfw.getCenterY();
+        int at = 0;
+        for (int i = 0; i < screens.size(); i++) {
+            Rectangle screen = screens.get(i);
+            double scale = scales.get(i);
+            if (centreX >= screen.x && centreX < screen.x + screen.width * scale
+                  && centreY >= screen.y && centreY < screen.y + screen.height * scale) {
+                at = i;
+                break;
+            }
+        }
+        Rectangle screen = screens.get(at);
+        double scale = scales.get(at);
+        return new Rectangle((int) Math.round(screen.x + (glfw.x - screen.x) / scale),
+              (int) Math.round(screen.y + (glfw.y - screen.y) / scale),
+              (int) Math.round(glfw.width / scale), (int) Math.round(glfw.height / scale));
     }
 
     private void run() {
@@ -385,9 +419,21 @@ public final class GpuStartWindow {
         }
         if (failure != null && !closeRequested) {
             LOGGER.error(failure, "The start screen's native window failed");
-            String key = windowCreated ? "StartScreen.failure" : "StartScreen.glFailure";
-            JOptionPane.showMessageDialog(null, Messages.getString(key, String.valueOf(failure)),
-                  Messages.getString("StartScreen.title"), JOptionPane.ERROR_MESSAGE);
+            String title = Messages.getString("StartScreen.title");
+            if (!windowCreated) {
+                JOptionPane.showMessageDialog(null, Messages.getString("StartScreen.glFailure", String.valueOf(failure)),
+                      title, JOptionPane.ERROR_MESSAGE);
+                System.exit(1);
+            }
+            // It ran before, so a fresh window may well work
+            String[] choices = { Messages.getString("StartScreen.reopen"), Messages.getString("StartScreen.quit") };
+            int choice = JOptionPane.showOptionDialog(null,
+                  Messages.getString("StartScreen.failure", String.valueOf(failure)), title,
+                  JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE, null, choices, choices[0]);
+            if (choice == 0) {
+                open(false);
+                return;
+            }
             System.exit(1);
         }
         Runnable then = afterClose;

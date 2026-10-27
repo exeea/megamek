@@ -51,7 +51,8 @@ Agreed so far:
 | Ownership | Vicente owns UI decisions and presents them to the team. |
 | Review | Runnable galleries opened from MegaMek: one Swing, one libGDX. The Swing library is the complete set; libGDX is a subset that grows on demand. |
 | Naming, translucency | Role-based token names with a `UiTheme` rename pass; surfaces get opaque and overlay values. |
-| In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby stays Swing. |
+| In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby is being ported to libGDX; until then it stays Swing. |
+| Native window | One libGDX window for the whole run, switching between screens (start, editor and preview, game, later the lobby). It hides while the Swing lobby shows instead of closing. Until that scene host lands, the start screen, board window and UI library are separate applications that take turns through one shared check. |
 | Animation | Broad UI animation (for example panel reveals) comes after the unification pass. |
 
 ## Sources inventoried
