@@ -202,7 +202,8 @@ class BoardBridgeSlopeTest {
                         }
                     }
                     if (roadLevel == 0) {
-                        assertTrue(road.faces.stream().allMatch(f -> Math.max(f.a().z, Math.max(f.b().z, f.c().z)) <= lift),
+                        // The ground: loose scatter stones stand on it at their own height.
+                        assertTrue(road.foundation().stream().allMatch(f -> Math.max(f.a().z, Math.max(f.b().z, f.c().z)) <= lift),
                               "The raised block must not pull the bank or shoreline up into its sides");
                         var along = new Vector3(roadCenter).sub(center);
                         along.z = 0;
