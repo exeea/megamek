@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.swing.JTextPane;
 import javax.swing.Timer;
 
@@ -56,6 +57,7 @@ import megamek.client.ui.widget.SkinSpecification;
 import megamek.client.ui.widget.SkinSpecification.UIComponents;
 import megamek.client.ui.widget.SkinXMLHandler;
 import megamek.common.internationalization.I18n;
+import org.apache.commons.text.StringEscapeUtils;
 
 /**
  * @author Drake
@@ -729,6 +731,29 @@ public class TipOfTheDay {
         tipGraphics.setTransform(oldTransform);
     }
 
+    /**
+     * Every tip in the bundle as plain text, with its key bindings filled in, for screens that draw text themselves.
+     * Line breaks become newlines and the tips' HTML markup and entities are removed.
+     */
+    public static List<String> plainTips(String bundleName) {
+        List<String> tips = new ArrayList<>();
+        for (String key : I18n.getKeys(bundleName)) {
+            String tip = plainText(mapKeybinds(I18n.getTextAt(bundleName, key)));
+            if (!tip.isBlank()) {
+                tips.add(tip);
+            }
+        }
+        return tips;
+    }
+
+    /** A tip's HTML as plain text: a line per {@code <br>}, without markup or entities, each line trimmed. */
+    static String plainText(String html) {
+        String text = html.replaceAll("(?i)<br\\s*/?>", "\n").replaceAll("<[^>]*>", "");
+        text = StringEscapeUtils.unescapeHtml4(text).replace('\u00a0', ' ');
+        return text.lines().map(line -> line.strip().replaceAll(" {2,}", " ")).filter(line -> !line.isEmpty())
+              .collect(Collectors.joining("\n"));
+    }
+
     private String mapVariables(String text) {
         if (text == null || text.isEmpty()) {
             return "";
@@ -737,7 +762,7 @@ public class TipOfTheDay {
         return text;
     }
 
-    private String mapKeybinds(String text) {
+    private static String mapKeybinds(String text) {
         if (!text.contains(KEYBIND_VARIABLE_PREFIX)) {
             return text; // No keybind variables to replace
         }

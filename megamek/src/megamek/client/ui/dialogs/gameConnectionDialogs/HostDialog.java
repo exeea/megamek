@@ -32,38 +32,43 @@
  */
 package megamek.client.ui.dialogs.gameConnectionDialogs;
 
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
-import java.awt.event.ActionEvent;
-import java.io.Serial;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.util.Vector;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JTextField;
-import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 
+import com.formdev.flatlaf.FlatClientProperties;
+import megamek.MMConstants;
 import megamek.client.ui.Messages;
+import megamek.client.ui.design.swing.TokenButtons.Size;
+import megamek.client.ui.design.swing.TokenChoices;
+import megamek.client.ui.design.swing.TokenCollapsibleSection;
+import megamek.client.ui.design.swing.TokenFields;
+import megamek.client.ui.design.swing.TokenFormField;
+import megamek.client.ui.design.swing.TokenSections;
+import megamek.codeUtilities.StringUtility;
 import megamek.server.Server;
 
 /**
- * The host game dialog shown when hosting a new game and when loading a game
+ * The host game dialog shown when hosting a new game, a scenario or a saved game: the player name, then the online
+ * options (password, port and the server browser) in a section that starts closed unless one of them was changed.
  */
 public class HostDialog extends AbstractGameConnectionDialog {
-    @Serial
-    private static final long serialVersionUID = -103094006944170081L;
-
     // Some fields are accessed for the results of the dialog
     private String serverPass;
     private boolean register;
     private String metaserver;
 
-    private JTextField serverPassField;
-    private JCheckBox chkRegister;
-    private JTextField metaserverField;
+    private JPasswordField serverPassInput;
+    private JCheckBox registerBox;
+    private JTextField metaserverInput;
+    private TokenFormField metaserverField;
+    private TokenCollapsibleSection online;
 
     /** Constructs a host game dialog for hosting or loading a game. */
     public HostDialog(JFrame frame) {
@@ -79,74 +84,75 @@ public class HostDialog extends AbstractGameConnectionDialog {
     }
 
     public HostDialog(JFrame frame, String playerName, Vector<String> playerNames) {
-        super(frame, Messages.getString("MegaMek.HostDialog.title"), true, playerName, playerNames);
+        super(frame, Messages.getString("MegaMek.HostDialog.title"), playerName, playerNames);
     }
 
-    //region Initialization
     @Override
-    protected JPanel createMiddlePanel() {
-        JLabel playerNameLabel = new JLabel(Messages.getString("MegaMek.yourNameL"), SwingConstants.RIGHT);
-        JLabel serverPassLabel = new JLabel(Messages.getString("MegaMek.serverPassL"), SwingConstants.RIGHT);
-        JLabel portLabel = new JLabel(Messages.getString("MegaMek.portL"), SwingConstants.RIGHT);
-        JLabel metaserverLabel = new JLabel(Messages.getString("MegaMek.metaserverL"), SwingConstants.RIGHT);
+    protected JComponent createBody() {
+        String lastPass = getClientPreferences().getLastServerPass();
+        serverPassInput = TokenFields.password(Size.REGULAR);
+        serverPassInput.putClientProperty(FlatClientProperties.STYLE, "showRevealButton: true");
+        serverPassInput.setText(lastPass);
+        TokenFormField serverPassField = new TokenFormField(Messages.getString("MegaMek.GameConnection.password"),
+              serverPassInput).setHelper(Messages.getString("MegaMek.GameConnection.passwordHelper"));
 
-        setPlayerName(getClientPreferences().getLastPlayerName());
-        playerNameLabel.setLabelFor(getPlayerNameField());
-        addPlayerNameActionListener(this);
-
-        serverPassField = new JTextField(getClientPreferences().getLastServerPass(), 16);
-        serverPassLabel.setLabelFor(serverPassField);
-        serverPassField.addActionListener(this);
-
-        setPortField(new JTextField(getClientPreferences().getLastServerPort() + "", 4));
-        portLabel.setLabelFor(getPortField());
-        getPortField().addActionListener(this);
-
-        setMetaserver(getClientPreferences().getMetaServerName());
-        metaserverField = new JTextField(getMetaserver());
-        metaserverLabel.setEnabled(false);
-        metaserverLabel.setLabelFor(metaserverField);
-        metaserverField.setEnabled(false);
-
-        chkRegister = new JCheckBox(Messages.getString("MegaMek.registerC"));
-        setRegister(false);
-        chkRegister.setSelected(isRegister());
-        metaserverLabel.setEnabled(chkRegister.isSelected());
-        chkRegister.addItemListener(event -> {
-            metaserverLabel.setEnabled(chkRegister.isSelected());
-            metaserverField.setEnabled(chkRegister.isSelected());
+        registerBox = TokenChoices.check(Messages.getString("MegaMek.GameConnection.register"), false);
+        metaserverInput = TokenFields.text(Size.REGULAR);
+        metaserverInput.setText(getClientPreferences().getMetaServerName());
+        metaserverField = new TokenFormField(Messages.getString("MegaMek.GameConnection.metaserver"),
+              metaserverInput);
+        metaserverField.setVisible(false);
+        registerBox.addItemListener(event -> {
+            metaserverField.setVisible(registerBox.isSelected());
+            contentChanged();
         });
 
-        JPanel middlePanel = new JPanel(new GridBagLayout());
-        GridBagConstraints c = new GridBagConstraints();
-        c.fill = GridBagConstraints.NONE;
-        c.weightx = 0.0;
-        c.weighty = 0.0;
-        c.insets = new Insets(5, 5, 5, 5);
-        c.gridwidth = 1;
-        c.anchor = GridBagConstraints.EAST;
-
-        addOptionRow(middlePanel, c, playerNameLabel, getPlayerNameField());
-        addOptionRow(middlePanel, c, serverPassLabel, serverPassField);
-        addOptionRow(middlePanel, c, portLabel, getPortField());
-
-        c.gridwidth = GridBagConstraints.REMAINDER;
-        c.anchor = GridBagConstraints.WEST;
-        middlePanel.add(chkRegister, c);
-
-        addOptionRow(middlePanel, c, metaserverLabel, metaserverField);
-
-        return middlePanel;
+        boolean changed = !StringUtility.isNullOrBlank(lastPass)
+              || getClientPreferences().getLastServerPort() != MMConstants.DEFAULT_PORT;
+        online = TokenSections.collapsible(Messages.getString("MegaMek.GameConnection.online"),
+              column(pair(serverPassField, portField()), registerBox, metaserverField), changed);
+        online.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent event) {
+                contentChanged();
+            }
+        });
+        return column(nameField(), online);
     }
-    //endregion Initialization
 
-    //region Getters and Setters
+    @Override
+    protected String actionText() {
+        return Messages.getString("MegaMek.GameConnection.host");
+    }
+
+    @Override
+    protected int lastPort() {
+        return getClientPreferences().getLastServerPort();
+    }
+
+    @Override
+    protected void reveal(JComponent input) {
+        if (SwingUtilities.isDescendingFrom(input, online.getContent())) {
+            online.setExpanded(true);
+        }
+    }
+
+    @Override
+    protected void accept() {
+        super.accept();
+        setServerPass(new String(serverPassInput.getPassword()));
+        setRegister(registerBox.isSelected());
+        setMetaserver(metaserverInput.getText().trim());
+        getClientPreferences().setLastServerPass(getServerPass() == null ? "" : getServerPass());
+        getClientPreferences().setValue("megamek.megamek.metaservername", getMetaserver());
+    }
+
     public String getServerPass() {
         return serverPass;
     }
 
     public void setServerPass(String serverPass) {
-        this.serverPass = serverPass == null ? null : serverPass.trim();
+        this.serverPass = Server.validatePassword(serverPass);
     }
 
     public boolean isRegister() {
@@ -163,35 +169,5 @@ public class HostDialog extends AbstractGameConnectionDialog {
 
     public void setMetaserver(String metaserver) {
         this.metaserver = metaserver;
-    }
-    //endregion Getters and Setters
-
-    //region Validation
-    @Override
-    public boolean dataValidation(String errorTitleKey) {
-        try {
-            setServerPass(Server.validatePassword(getServerPass()));
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(getOwner(), Messages.getString("MegaMek.ServerPasswordError"),
-                  Messages.getString(errorTitleKey), JOptionPane.ERROR_MESSAGE);
-            return false;
-        }
-        return super.dataValidation(errorTitleKey);
-    }
-    //endregion Validation
-
-    @Override
-    public void actionPerformed(ActionEvent e) {
-        // reached from the Okay button or pressing Enter in the text fields
-        super.actionPerformed(e);
-
-        setServerPass(serverPassField.getText());
-        setRegister(chkRegister.isSelected());
-        setMetaserver(metaserverField.getText());
-
-        // update settings
-        getClientPreferences().setLastServerPass(getServerPass());
-        getClientPreferences().setValue("megamek.megamek.metaservername", getMetaserver());
-        setVisible(false);
     }
 }

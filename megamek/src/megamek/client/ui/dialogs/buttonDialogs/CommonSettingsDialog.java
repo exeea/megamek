@@ -60,6 +60,7 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.event.MouseInputAdapter;
 
+import jakarta.annotation.Nullable;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.ColourSelectorButton;
@@ -400,6 +401,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
           "CommonSettingsDialog.showUnitDisplayNamesOnMinimap.name"));
     private JComboBox<String> skinFiles;
     private JComboBox<UITheme> uiThemes;
+    private final JCheckBox classicThemes = new JCheckBox(Messages.getString("CommonSettingsDialog.classicThemes"));
     private final JCheckBox reduceMotion = new JCheckBox(Messages.getString("CommonSettingsDialog.reduceMotion"));
     private final JCheckBox colorBlindPalette = new JCheckBox(
           Messages.getString("CommonSettingsDialog.colorBlindPalette"));
@@ -2641,6 +2643,12 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         row.add(uiThemes);
         comps.add(row);
 
+        classicThemes.setToolTipText(Messages.getString("CommonSettingsDialog.classicThemes.tooltip"));
+        classicThemes.addActionListener(e -> fillThemes(selectedThemeClassName()));
+        row = new ArrayList<>();
+        row.add(classicThemes);
+        comps.add(row);
+
         colorBlindPalette.setToolTipText(Messages.getString("CommonSettingsDialog.colorBlindPalette.tooltip"));
         row = new ArrayList<>();
         row.add(colorBlindPalette);
@@ -2978,13 +2986,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             model.setSelectedItem(GUIP.getSkinFile());
             skinFiles.setModel(model);
 
-            uiThemes.removeAllItems();
-            for (LookAndFeelInfo lafInfo : UIManager.getInstalledLookAndFeels()) {
-                if (GUIPreferences.isSupportedLookAndFeel(lafInfo)) {
-                    uiThemes.addItem(new UITheme(lafInfo.getClassName(), lafInfo.getName()));
-                }
-            }
-            uiThemes.setSelectedItem(new UITheme(GUIP.getUITheme()));
+            classicThemes.setSelected(!GUIPreferences.isMegaMekTheme(GUIP.getUITheme()));
+            fillThemes(GUIP.getUITheme());
             reduceMotion.setSelected(GUIP.getReduceMotion());
             colorBlindPalette.setSelected(GUIP.getColorBlindPalette());
 
@@ -4517,6 +4520,32 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     static SettingsCheckBox createShowIpAddressesInChatCheckBox() {
         return new SettingsCheckBox(SETTINGS_TEXT, "CommonSettingsDialog.showIPAddressesInChat",
             List.of(IMPORTANT_BADGE));
+    }
+
+    /**
+     * Lists the MegaMek themes, plus the classic Flat themes when "Show classic themes" is on, and selects the given
+     * theme. A selected classic theme stays listed so that hiding the classic themes never silently changes it.
+     */
+    private void fillThemes(@Nullable String selectedClassName) {
+        uiThemes.removeAllItems();
+        // Two passes so the MegaMek themes always lead the list
+        for (boolean megaMekPass : new boolean[] { true, false }) {
+            for (LookAndFeelInfo lafInfo : UIManager.getInstalledLookAndFeels()) {
+                boolean megaMekTheme = GUIPreferences.isMegaMekTheme(lafInfo.getClassName());
+                boolean shown = megaMekTheme || classicThemes.isSelected()
+                      || lafInfo.getClassName().equals(selectedClassName);
+                if ((megaMekTheme == megaMekPass) && GUIPreferences.isSupportedLookAndFeel(lafInfo) && shown) {
+                    uiThemes.addItem(new UITheme(lafInfo.getClassName(), lafInfo.getName()));
+                }
+            }
+        }
+        if (selectedClassName != null) {
+            uiThemes.setSelectedItem(new UITheme(selectedClassName));
+        }
+    }
+
+    private @Nullable String selectedThemeClassName() {
+        return (uiThemes.getSelectedItem() instanceof UITheme theme) ? theme.getClassName() : null;
     }
 
     private static JButton applicationIconButton(String name, int codePoint, String accessibleName) {

@@ -33,6 +33,7 @@
  */
 package megamek.client.bot.ui.swing;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.swing.JFrame;
 
 import megamek.client.bot.BotClient;
@@ -52,10 +53,13 @@ import megamek.common.event.player.GamePlayerDisconnectedEvent;
 
 public record BotGUI(JFrame frame, BotClient bot) implements GameListener {
 
+    /** Every bot listens for the game's start; the readme nag shows once a run, not once a bot. */
+    private static final AtomicBoolean NAGGED = new AtomicBoolean();
+
     @Override
     public void gamePhaseChange(GamePhaseChangeEvent e) {
         if (bot.getGame().getPhase().isLounge() || bot.getGame().getPhase().isStartingScenario()) {
-            if (new BotReadmeNagDialog(frame()).showDialog().isConfirmed()) {
+            if (NAGGED.compareAndSet(false, true) && new BotReadmeNagDialog(frame()).showDialog().isConfirmed()) {
                 new BotHelpDialog(frame).setVisible(true);
             }
         }

@@ -38,6 +38,23 @@ class TokenDialogPaneTest {
     }
 
     @Test
+    void footerForExistingWindowsSizesTheButtonsAlike() {
+        JButton okay = TokenButtons.style(new JButton("Ok"), TokenButtons.Kind.PRIMARY, TokenButtons.Size.REGULAR);
+        JButton cancel = TokenButtons.style(new JButton("A much longer cancel"), TokenButtons.Kind.SECONDARY,
+              TokenButtons.Size.REGULAR);
+        JPanel footer = TokenDialogs.footer(okay, cancel);
+        footer.setSize(footer.getPreferredSize().width + 100, footer.getPreferredSize().height);
+        footer.doLayout();
+
+        assertSame(okay, footer.getComponent(0));
+        assertEquals(okay.getWidth(), cancel.getWidth());
+        assertTrue(okay.getWidth() >= UIUtil.scaleForGUI(TokenDialogPane.BUTTON_MIN_WIDTH));
+        assertTrue(okay.getHeight() >= UIUtil.scaleForGUI(TokenButtons.Size.REGULAR.height()));
+        assertTrue(okay.getX() < cancel.getX());
+        assertTrue(Math.abs(footer.getWidth() - (cancel.getX() + cancel.getWidth()) - okay.getX()) <= 1);
+    }
+
+    @Test
     void mainActionShowsFirst() {
         TokenDialogPane pane = new TokenDialogPane("Title");
         JButton go = pane.primary("Go");
@@ -91,6 +108,34 @@ class TokenDialogPaneTest {
         assertNull(closes.get(1));
         assertNull(closes.get(2));
         assertSame(go, closes.get(3));
+    }
+
+    @Test
+    void aFailedCheckKeepsTheDialogOpenButCancelStillCloses() {
+        TokenDialogPane pane = new TokenDialogPane("Host").body(new JTextField());
+        JButton cancel = pane.cancel("Cancel");
+        JButton go = pane.primary("Go");
+        boolean[] valid = {false};
+        List<JButton> checked = new ArrayList<>();
+        pane.check(button -> {
+            checked.add(button);
+            return valid[0];
+        });
+        List<JButton> closes = new ArrayList<>();
+        pane.assemble(true, closes::add);
+
+        go.doClick();
+        pane.getActionMap().get("accept").actionPerformed(new ActionEvent(pane, ActionEvent.ACTION_PERFORMED, ""));
+        assertTrue(closes.isEmpty());
+        assertEquals(List.of(go, go), checked);
+
+        cancel.doClick();
+        valid[0] = true;
+        go.doClick();
+        assertEquals(2, closes.size());
+        assertNull(closes.get(0));
+        assertSame(go, closes.get(1));
+        assertEquals(3, checked.size());
     }
 
     @Test

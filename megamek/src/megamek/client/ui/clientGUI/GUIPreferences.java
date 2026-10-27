@@ -51,6 +51,8 @@ import javax.swing.UIManager;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
+import megamek.client.ui.design.swing.MegaMekDarkLaf;
+import megamek.client.ui.design.swing.MegaMekLightLaf;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
@@ -489,6 +491,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GPU_BOARD_SIZE_WIDTH = "GpuBoardSizeWidth";
     public static final String GPU_BOARD_SIZE_HEIGHT = "GpuBoardSizeHeight";
     public static final String GPU_BOARD_MAXIMIZED = "GpuBoardMaximized";
+    /** Where the libGDX start window sits, in GLFW screen coordinates, as the GPU board keys are. */
+    public static final String START_WINDOW_POS_X = "StartWindowPosX";
+    public static final String START_WINDOW_POS_Y = "StartWindowPosY";
+    public static final String START_WINDOW_SIZE_WIDTH = "StartWindowSizeWidth";
+    public static final String START_WINDOW_SIZE_HEIGHT = "StartWindowSizeHeight";
+    public static final String START_WINDOW_MAXIMIZED = "StartWindowMaximized";
     /** Width of the GPU board's report panel, as last dragged. */
     public static final String GPU_REPORT_PANEL_WIDTH = "GpuReportPanelWidth";
     public static final String PLANETARY_CONDITIONS_POS_X = "PlanetaryConditionsPosX";
@@ -1078,6 +1086,11 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(GPU_BOARD_SIZE_WIDTH, 1280);
         store.setDefault(GPU_BOARD_SIZE_HEIGHT, 800);
         store.setDefault(GPU_BOARD_MAXIMIZED, true);
+        store.setDefault(START_WINDOW_POS_X, -1);
+        store.setDefault(START_WINDOW_POS_Y, -1);
+        store.setDefault(START_WINDOW_SIZE_WIDTH, 1280);
+        store.setDefault(START_WINDOW_SIZE_HEIGHT, 800);
+        store.setDefault(START_WINDOW_MAXIMIZED, true);
         store.setDefault(GPU_REPORT_PANEL_WIDTH, 362);
         store.setDefault(PLANETARY_CONDITIONS_POS_X, -1);
         store.setDefault(PLANETARY_CONDITIONS_POS_Y, -1);
@@ -1101,7 +1114,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SOFT_CENTER, false);
         store.setDefault(AUTO_CENTER, true);
         store.setDefault(AUTO_SELECT_NEXT, true);
-        store.setDefault(UI_THEME, "com.formdev.flatlaf.FlatDarculaLaf");
+        store.setDefault(UI_THEME, MegaMekDarkLaf.class.getName());
         store.setDefault(REDUCE_MOTION, false);
         store.setDefault(COLOR_BLIND_PALETTE, false);
 
@@ -2112,6 +2125,26 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getGpuBoardMaximized() {
         return store.getBoolean(GPU_BOARD_MAXIMIZED);
+    }
+
+    public int getStartWindowPosX() {
+        return store.getInt(START_WINDOW_POS_X);
+    }
+
+    public int getStartWindowPosY() {
+        return store.getInt(START_WINDOW_POS_Y);
+    }
+
+    public int getStartWindowSizeWidth() {
+        return store.getInt(START_WINDOW_SIZE_WIDTH);
+    }
+
+    public int getStartWindowSizeHeight() {
+        return store.getInt(START_WINDOW_SIZE_HEIGHT);
+    }
+
+    public boolean getStartWindowMaximized() {
+        return store.getBoolean(START_WINDOW_MAXIMIZED);
     }
 
     public int getGpuReportPanelWidth() {
@@ -3179,6 +3212,26 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setGpuBoardMaximized(boolean maximized) {
         store.setValue(GPU_BOARD_MAXIMIZED, maximized);
+    }
+
+    public void setStartWindowPosX(int x) {
+        store.setValue(START_WINDOW_POS_X, x);
+    }
+
+    public void setStartWindowPosY(int y) {
+        store.setValue(START_WINDOW_POS_Y, y);
+    }
+
+    public void setStartWindowSizeWidth(int width) {
+        store.setValue(START_WINDOW_SIZE_WIDTH, width);
+    }
+
+    public void setStartWindowSizeHeight(int height) {
+        store.setValue(START_WINDOW_SIZE_HEIGHT, height);
+    }
+
+    public void setStartWindowMaximized(boolean maximized) {
+        store.setValue(START_WINDOW_MAXIMIZED, maximized);
     }
 
     public void setGpuReportPanelWidth(int width) {
@@ -4419,10 +4472,20 @@ public class GUIPreferences extends PreferenceStoreProxy {
     // endregion Colours
 
     /**
-     * @return True when the MM suite supports the given laf, currently all formdev "Flat ..." and the system default.
+     * @return True when the MM suite supports the given laf: the MegaMek themes and all formdev "Flat ..." themes.
      */
     public static boolean isSupportedLookAndFeel(UIManager.LookAndFeelInfo lookAndFeelInfo) {
-        return lookAndFeelInfo.getClassName().toLowerCase().contains("formdev");
+        return isMegaMekTheme(lookAndFeelInfo.getClassName())
+              || lookAndFeelInfo.getClassName().toLowerCase().contains("formdev");
+    }
+
+    /**
+     * @return True for the design system's MegaMek Dark and MegaMek Light themes; every other supported theme is a
+     *       "classic" theme that the settings only list on request.
+     */
+    public static boolean isMegaMekTheme(@Nullable String lookAndFeelClassName) {
+        return MegaMekDarkLaf.class.getName().equals(lookAndFeelClassName)
+              || MegaMekLightLaf.class.getName().equals(lookAndFeelClassName);
     }
 
     public File[] getMinimapThemes() {

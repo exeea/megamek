@@ -35,8 +35,10 @@ The same checks run as a unit test, along with a test that the Swing themes pick
 **MegaMek Dark** and **MegaMek Light** are FlatLaf look and feels
 ([`MegaMekDarkLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekDarkLaf.java),
 [`MegaMekLightLaf`](../../megamek/src/megamek/client/ui/design/swing/MegaMekLightLaf.java)). They are registered next
-to the four stock themes, so any suite app can pick them in its settings; the stock themes and the current default are
-unchanged for now. They have no properties file: [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java)
+to the four stock themes, so any suite app can pick them in its settings. MegaMek Dark is MegaMek's default theme
+(MegaMekLab and MekHQ keep their own defaults for now). MegaMek's settings list only the two MegaMek themes; the four
+stock themes are "classic" themes, listed after them when **Show classic themes** is on, and a player who already uses
+one keeps it. They have no properties file: [`TokenLafDefaults`](../../megamek/src/megamek/client/ui/design/swing/TokenLafDefaults.java)
 builds the FlatLaf values from the token file when the theme loads, so a token change reaches Swing with no second
 copy.
 
@@ -474,11 +476,16 @@ because FlatLaf has no hover edge or minimum height for inputs. A read-only spin
 still step.
 
 **libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `TokenFieldStyle`s
-`input<variant>` and `input<variant>-compact` (`UiTheme.INPUT_VARIANTS`: plain or search, each with error, warning or
-read-only). [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java) adds the hover scene2d lacks,
+`input<variant>` and `input<variant>-compact` (`UiTheme.INPUT_VARIANTS`: plain, search or reveal, each with error,
+warning or read-only). [`UiTextField`](../../megamek/src/megamek/client/ui/gdx/UiTextField.java) adds the hover scene2d lacks,
 the status icon, `status(Status)` and `readOnly(true)`; `UiTextField.Area` is the text area. `UiKit` builds them:
-`input(text, compact)`, `password(compact)`, `tokenSearch(placeholder, compact)`, `area(text, rows)` and
-`formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)). It is the
+`input(text, compact)`, `password(compact)`, `tokenPassword(compact)`, `tokenSearch(placeholder, compact)`,
+`area(text, rows)` and `formField(label, input)` ([`UiFormField`](../../megamek/src/megamek/client/ui/gdx/UiFormField.java)), whose input
+fills the width the form gives it, down to none, instead of `TextField`'s fixed 150 minimum, and whose status reaches
+the field inside a search or password input. `tokenPassword` is Swing's password field with FlatLaf's reveal
+button: a compact icon button at the trailing edge, the `show` eye while the text is bullets and the crossed-out `hide`
+eye while it shows as typed, in both presentations; it is a keyboard stop after the field and is hidden when the field
+is read-only. It is the
 in-game subset: there is no number spinner yet (`UiNumber`'s scrub stays the HUD's number control), and read-only text
 can not be selected, because scene2d has no read-only field. hud-v3's own fields take the look without new controls:
 `UiKit.search(placeholder, true)` builds the search field on `input-search` with a leading glyph and a compact icon
@@ -579,8 +586,11 @@ faces from the `tab-over` and `seg-*` drawables and the `OptionStyle` colors
 [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers. `UiKit` builds them:
 `tokenTabs(compact, labels...)` and `tokenSegmented(compact, labels...)`. A click, or Left and Right while the bar has
 keyboard focus, fires a `ChangeEvent` from the bar; `select(i)` from code fires none. `option(i).hovered`, `held` and
-`focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no Tab
-traversal yet.
+`focused` freeze those states for the gallery. A view gives the bar keyboard focus itself, since libGDX has no general Tab
+traversal yet; the start screen (`GpuStartScreen`) handles it itself: Up, Down and Tab move through every button, check
+box, segmented control and text field on the page (its text fields turn their own Tab traversal off with
+`setFocusTraversal(false)`), Left and Right switch a segmented control, Enter or Space presses a button, Enter in a text
+field submits the page, and Esc returns to the main menu.
 
 hud-v3's own `UiKit.segmented` takes the Token v0 look from the `token-segment` and `token-tab` styles (add
 `-compact` for 28 high): `hud-seg` becomes the regular segmented control, `hud-pill` the compact one, and `hud-tab` and
@@ -604,7 +614,8 @@ options should stay visible.
 | Rows | `control.sm` (28) high; a `surface.hover` wash, inset `xs`, on the row under the pointer or the keyboard; a `selected.primary` check before the current value, in a leading `icon.sm` slot |
 
 - **Sizes** match inputs: regular `control.md` (36), compact `control.sm` (28). The face is as wide as its widest item
-  or placeholder, so it does not jump when the value changes. The inline face is `control.sm` high.
+  or placeholder, so it does not jump when the value changes. Held narrower by its layout, it keeps its padding and
+  chevron and ends the value with an ellipsis. The inline face is `control.sm` high.
 - **Inline** is for a value inside a header or running text, where a box would be too heavy.
 - **The check marks the current value**, in `selected.primary`; the wash only follows the pointer.
 - **Keys.** Enter, Space or Down opens the list on the current value; Up and Down move, Home and End jump, Enter
@@ -934,12 +945,18 @@ that the user moves around or keeps open beside the game open as a **window** wi
 card (a [`TokenModalCard`](../../megamek/src/megamek/client/ui/design/swing/TokenModalCard.java) in the window's layered
 pane) and returns the pressed button, or null when cancelled; it waits like a modal dialog. When the window has no
 room for the card it opens a window instead, which `TokenDialogs.window(owner, pane)` also does on request. The
-shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. While a card is open
+shortcuts `message`, `confirm` and `confirmDanger` cover the common cases. A form checks its inputs with
+`check(button -> ...)`: giving false keeps the dialog open, so the form can show its errors under the inputs and move
+the focus to the first wrong one; cancelling is never checked. While a card is open
 `UIUtil.isModalDialogDisplayed()` is true, so MegaMek's hotkeys stand down as they do for a modal dialog.
 
 Existing `JOptionPane` dialogs keep their windows but take the footer's layout through the MegaMek themes: the token
 status icons, `xxl` padding, buttons centred, as wide as each other, at least 88 and with the main one first. Their
-titles stay in the title bar. Moving them to `TokenDialogs` gives them the card.
+titles stay in the title bar. Moving them to `TokenDialogs` gives them the card. Other existing dialog windows take
+the same footer from `TokenDialogs.footer(buttons...)`: the buttons restyled with `TokenButtons.style`, the main one
+first, centred `md` apart, as wide as each other, at least 88 wide and `control.md` high, `xl` below the content and
+`xxl` from the window's edges. MegaMek's `AbstractButtonDialog` family uses it; its Host and Connect dialogs are
+cards.
 
 **libGDX.** `UiKit.dialog(title, close, true)` is the card: the token panel frame padded `xl` above the header and
 `xxl` elsewhere, the title in `headline`, sentence case, and the compact icon button for close, `xl` above the body. Its
@@ -1004,6 +1021,8 @@ frame.
 | Motion | Edge, ticks and wash ease with the [control timings](#motion); reduce motion makes them instant |
 
 - **Only the outermost frame has ticks.** Panels inside a panel, such as the cards in a sidebar, use the plain frame.
+  A card inside a screen that has its own corners, such as the start screen's tip card, keeps the panel's fill and
+  padding with a 1px `border.subtle` edge all round and no ticks (`token-panel-plain`).
 - **Paper roll.** Every ticked frame (panels, dialog cards, status cards) has edges only at the top and bottom. The
   focus ring still goes all round.
 - **Selectable panels are controls.** A click, or Space or Enter with the focus on it, selects the panel; in a group
@@ -1183,7 +1202,7 @@ newest on top and the hover pause are the developers' work.
 
 Outside the galleries, only the two Swing themes and the libGDX button, input, choice, tab, segmented and select
 styles read the tokens; lists, trees, menus, tooltips, scrollbars, sliders, tables, progress bars, sections, split
-panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. The Swing
-themes are selectable but not the default, and no view uses the new controls yet. The all-caps decision is final
-([Presentation mode](#presentation-mode)); next comes a trial of MegaMek's Swing startup path on them; hud-v3 moves only once the
-developers accept the system.
+panes, dialogs, status cards, panels, chips, badges and toasts are Swing-only for now, and so is motion. MegaMek Dark is
+MegaMek's default theme, and the trial of MegaMek's Swing startup path on the new controls is under way (see the
+gap analysis's Next steps). The all-caps decision is final ([Presentation mode](#presentation-mode)); hud-v3 moves only
+once the developers accept the system.

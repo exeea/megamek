@@ -34,6 +34,8 @@ class UiSelectSmokeTest {
             select.select(1);
             select.invalidate();
             assertEquals(width, select.getPrefWidth(), .01f, "the face keeps its width whatever is current");
+            assertTrue(select.getMinWidth() < width / 2,
+                  "held narrower, the face ellipsizes its value rather than overflow its padding");
             select.placeholder("Choose a ruleset that is longer than every item");
             assertTrue(select.getPrefWidth() > width, "the face makes room for its placeholder");
             assertEquals(-1, select.getSelectedIndex());

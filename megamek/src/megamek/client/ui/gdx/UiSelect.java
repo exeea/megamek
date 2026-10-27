@@ -69,7 +69,8 @@ public final class UiSelect extends Table {
         }
         float side = kind == Kind.INLINE ? tokens.space().get("xs") : border + tokens.space().get("md");
         float trailing = kind == Kind.INLINE ? tokens.space().get("xs") : border + tokens.space().get("sm");
-        labelCell = add(label).left().growX().minWidth(widest);
+        // The widest item is the preferred width, so the face doesn't jump; held narrower, the value ellipsizes
+        labelCell = add(label).left().growX().minWidth(0).prefWidth(widest);
         add(chevron).size(icon).padLeft(tokens.space().get("xs"));
         padLeft(side).padRight(trailing);
         popup = new UiListPopup(kit, items).onChoose(this::choose);
@@ -136,7 +137,7 @@ public final class UiSelect extends Table {
     public UiSelect placeholder(String text) {
         placeholder = text;
         GlyphLayout layout = new GlyphLayout(font, text);
-        labelCell.minWidth(Math.max(widest, layout.width));
+        labelCell.prefWidth(Math.max(widest, layout.width));
         selected = -1;
         refresh();
         invalidateHierarchy();

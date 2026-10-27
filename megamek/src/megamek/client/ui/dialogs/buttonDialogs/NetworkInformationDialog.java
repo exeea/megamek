@@ -36,11 +36,7 @@ import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.io.Serial;
-import java.net.InetAddress;
-import java.net.URL;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -50,6 +46,7 @@ import javax.swing.JPanel;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.common.net.NetworkAddresses;
 
 /**
  * A JPanel that holds the networking information about the network information of the current session.
@@ -82,11 +79,6 @@ public class NetworkInformationDialog extends AbstractButtonDialog implements Ac
         super(cg.getFrame(), "NetworkInformationDialog", "NetworkInformation.title");
         clientGui = cg;
         init(cg.getFrame());
-    }
-
-    public NetworkInformationDialog(JFrame frame) {
-        super(frame, "NetworkInformationDialog", "NetworkInformation.title");
-        init(frame);
     }
 
     private void init(JFrame frame) {
@@ -161,29 +153,10 @@ public class NetworkInformationDialog extends AbstractButtonDialog implements Ac
     }
 
     private String getIPaddress(boolean localIP) {
-        String thisIpAddress = "";
-
-        if (localIP) {
-            try {
-                InetAddress thisIp = InetAddress.getLocalHost();
-                thisIpAddress = thisIp.getHostAddress();
-            } catch (Exception e) {
-            }
-            if (thisIpAddress.isEmpty()) {
-                thisIpAddress = "Could not obtain local IP address";
-            }
-        } else {
-            try {
-                URL whatismyip = new URL("http://checkip.amazonaws.com");
-                BufferedReader in = new BufferedReader(new InputStreamReader(whatismyip.openStream()));
-                thisIpAddress = in.readLine();
-                in.close();
-            } catch (Exception e) {
-            }
-            if (thisIpAddress.isEmpty()) {
-                thisIpAddress = "Could not obtain public IP address";
-            }
+        String address = localIP ? NetworkAddresses.localAddress() : NetworkAddresses.publicAddress();
+        if (address == null || address.isEmpty()) {
+            return localIP ? "Could not obtain local IP address" : "Could not obtain public IP address";
         }
-        return thisIpAddress;
+        return address;
     }
 }

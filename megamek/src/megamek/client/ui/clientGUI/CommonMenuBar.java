@@ -42,7 +42,6 @@ import java.awt.Component;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
 import java.util.HashMap;
@@ -75,22 +74,16 @@ import megamek.common.preference.PreferenceChangeEvent;
 import megamek.logging.MMLogger;
 
 /**
- * The menu bar that is used across MM, i.e. in the main menu and the lobby and game.
+ * The menu bar of the lobby and the game.
  */
 public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferenceChangeListener {
     private final static MMLogger logger = MMLogger.create(CommonMenuBar.class);
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
-    /** True when this menu is attached to the game's main menu. */
-    private final boolean isMainMenu;
-
-    /** True when this menu is attached to a client (lobby or in game). */
-    private final boolean isGame;
-
     /**
      * Supplies the client whose game the bug report packager should save. The menu bar is built before any client
-     * exists - and for the main menu, none ever does - so this is resolved lazily and defaults to no client.
+     * exists, so this is resolved lazily and defaults to no client.
      */
     private Supplier<Client> clientSupplier = () -> null;
 
@@ -98,13 +91,11 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private GamePhase phase = GamePhase.UNKNOWN;
 
     // The Game menu
-    private final JMenuItem gameStart = new JMenuItem(getString("CommonMenuBar.fileGameStart"));
     private final JMenuItem gameLoad = new JMenuItem(getString("CommonMenuBar.fileGameLoad"));
     private final JMenuItem gameSave = new JMenuItem(getString("CommonMenuBar.fileGameSave"));
     private final JMenuItem gameQSave = new JMenuItem(getString("CommonMenuBar.fileGameQuickSave"));
     private final JMenuItem gameQLoad = new JMenuItem(getString("CommonMenuBar.fileGameQuickLoad"));
     private final JMenuItem gameSaveServer = new JMenuItem(getString("CommonMenuBar.fileGameSaveServer"));
-    private final JMenuItem gameConnect = new JMenuItem(getString("CommonMenuBar.fileGameConnect"));
     private final JCheckBoxMenuItem gameRoundReport = new JCheckBoxMenuItem(getString("CommonMenuBar.viewRoundReport"));
     private final JMenuItem gameEditBots = new JMenuItem(getString("CommonMenuBar.editBots"));
     /** Asks for the Game Master role; only shown while nobody holds it and the game allows one. */
@@ -140,16 +131,10 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     // The Units menu
     private final JMenuItem fileUnitsReinforce = new JMenuItem(getString("CommonMenuBar.fileUnitsReinforce"));
     private final JMenuItem fileUnitsReinforceRAT = new JMenuItem(getString("CommonMenuBar.fileUnitsReinforceRAT"));
-    private final JMenuItem fileCreateRandom = new JMenuItem("Create Random Army");
     private final JMenuItem fileUnitsPaste = new JMenuItem(getString("CommonMenuBar.fileUnitsPaste"));
     private final JMenuItem fileUnitsCopy = new JMenuItem(getString("CommonMenuBar.fileUnitsCopy"));
     private final JMenuItem fileUnitsSave = new JMenuItem(getString("CommonMenuBar.fileUnitsSave"));
-    private final JMenuItem fileUnitsBrowse = new JMenuItem(getString("CommonMenuBar.fileUnitsBrowse"));
-
     // The Board menu
-    private final JMenuItem boardNew = new JMenuItem(getString("CommonMenuBar.fileBoardNew"));
-    private final JMenuItem boardOpen = new JMenuItem(getString("CommonMenuBar.fileBoardOpen"));
-    private final JMenu boardRecent = new JMenu(getString("CommonMenuBar.fileBoardRecent"));
     private final JMenuItem boardSaveAs = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAs"));
     private final JMenuItem boardSaveAsImage = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAsImage"));
     private final JMenuItem boardSaveAsImageUnits = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAsImageUnits"));
@@ -168,7 +153,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JMenuItem viewZoomIn = new JMenuItem(getString("CommonMenuBar.viewZoomIn"));
     /**
      * The board's renderer: Legacy 2D, Classic or Enhanced ({@link #rendererMenu}). It is enabled in every state:
-     * outside a game's board (main menu, lobby) a choice is saved for the next one.
+     * outside a game's board (the lobby) a choice is saved for the next one.
      */
     private final JMenu viewRenderer = rendererMenu(this);
     private final JMenuItem viewZoomOut = new JMenuItem(getString("CommonMenuBar.viewZoomOut"));
@@ -234,7 +219,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
      * Tells this menu bar how to find the client whose game should be saved for a bug report.
      *
      * <p>Set this once the client exists. Without it, the bug report packager still works but produces an archive of
-     * logs and system information only, which is the correct behaviour for the main menu.</p>
+     * logs and system information only.</p>
      *
      * @param clientSupplier supplies the current client; may return {@code null} when no game is running
      */
@@ -243,32 +228,22 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     }
 
     public static CommonMenuBar getMenuBarForGame() {
-        var menuBar = new CommonMenuBar(false, true);
-        menuBar.updateEnabledStates();
-        return menuBar;
-    }
-
-    public static CommonMenuBar getMenuBarForMainMenu() {
-        var menuBar = new CommonMenuBar(true, false);
+        var menuBar = new CommonMenuBar();
         menuBar.updateEnabledStates();
         return menuBar;
     }
 
     /** Creates the common MegaMek menu bar. */
-    private CommonMenuBar(boolean isMainMenu, boolean isGame) {
-        this.isMainMenu = isMainMenu;
-        this.isGame = isGame;
+    private CommonMenuBar() {
         // Create the Game menu
         JMenu menu = new JMenu(Messages.getString("CommonMenuBar.FileMenu"));
         menu.setMnemonic(VK_F);
         add(menu);
-        initMenuItem(gameStart, menu, FILE_GAME_NEW);
         initMenuItem(gameLoad, menu, FILE_GAME_LOAD, VK_L);
         initMenuItem(gameSave, menu, FILE_GAME_SAVE, VK_S);
         initMenuItem(gameQSave, menu, FILE_GAME_QUICK_SAVE);
         initMenuItem(gameQLoad, menu, FILE_GAME_QUICK_LOAD);
         initMenuItem(gameSaveServer, menu, FILE_GAME_SAVE_SERVER);
-        initMenuItem(gameConnect, menu, FILE_GAME_CONNECT);
 
         // Create the Unit List sub-menu.
         menu = new JMenu(Messages.getString("CommonMenuBar.GameMenu"));
@@ -291,7 +266,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(fileUnitsPaste, menu, FILE_UNITS_PASTE);
         fileUnitsPaste.setAccelerator(KeyStroke.getKeyStroke(VK_V, CTRL_DOWN_MASK));
         initMenuItem(fileUnitsReinforce, menu, FILE_UNITS_REINFORCE);
-        initMenuItem(isMainMenu ? fileCreateRandom : fileUnitsReinforceRAT, menu, FILE_UNITS_REINFORCE_RAT);
+        initMenuItem(fileUnitsReinforceRAT, menu, FILE_UNITS_REINFORCE_RAT);
         initMenuItem(fileUnitsSave, menu, FILE_UNITS_SAVE);
         menu.addSeparator();
 
@@ -305,9 +280,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(fileRefreshCache, menu, FILE_REFRESH_CACHE);
         JMenuItem fileRebuildCache = new JMenuItem(getString("CommonMenuBar.fileUnitsRebuildUnitCache"));
         initMenuItem(fileRebuildCache, menu, FILE_REBUILD_CACHE);
-        initMenuItem(fileUnitsBrowse, menu, FILE_UNITS_BROWSE);
-        // The accelerator overlaps with that for changing label style, but they are never active at the same time
-        fileUnitsBrowse.setAccelerator(KeyStroke.getKeyStroke(VK_B, CTRL_DOWN_MASK));
         menu.addSeparator();
 
         initMenuItem(fireSaveWeaponOrder, menu, FIRE_SAVE_WEAPON_ORDER);
@@ -316,10 +288,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         menu = new JMenu(Messages.getString("CommonMenuBar.BoardMenu"));
         menu.setMnemonic(VK_B);
         add(menu);
-        initMenuItem(boardNew, menu, BOARD_NEW);
-        initMenuItem(boardOpen, menu, BOARD_OPEN, VK_O);
-        initMenuItem(boardRecent, menu, BOARD_OPEN, VK_O);
-        initializeRecentBoardsMenu();
         initMenuItem(boardSaveAs, menu, BOARD_SAVE_AS);
         menu.addSeparator();
 
@@ -423,8 +391,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
 
         menu.addSeparator();
 
-        // The client is resolved when the button is pressed, not now: this menu bar is also built for the main menu,
-        // where no game exists yet. A null client is a supported state and yields a logs-only archive.
+        // The client is resolved when the button is pressed, not now: this menu bar is built before the client exists.
+        // A null client is a supported state and yields a logs-only archive.
         // This must stay a lambda rather than the method reference clientSupplier::get, which would capture the
         // placeholder supplier installed above and ignore whatever setClientSupplier later provides.
         menu.add(new ShowBugReportDialogAction(this, new CopySystemDataAction(),
@@ -449,7 +417,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         setKeyBinds();
         GUIP.addPreferenceChangeListener(this);
         KeyBindParser.addPreferenceChangeListener(this);
-        RecentBoardList.addListener(this);
     }
 
     /** Sets/updates the accelerators from the KeyCommandBinds preferences. */
@@ -554,11 +521,11 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     }
 
     /**
-     * Manages the enabled states of the menu items depending on where the menu is employed.
+     * Manages the enabled states of the menu items depending on the game's phase.
      */
     private synchronized void updateEnabledStates() {
-        boolean isLobby = isGame && phase.isLounge();
-        boolean isInGame = isGame && phase.isDuringOrAfter(GamePhase.DEPLOYMENT);
+        boolean isLobby = phase.isLounge();
+        boolean isInGame = phase.isDuringOrAfter(GamePhase.DEPLOYMENT);
         boolean isInGameBoardView = isInGame && phase.isOnMap();
         boolean canSave = !phase.isUnknown()
               && !phase.isSelection()
@@ -570,10 +537,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewAccessibilityWindow.setEnabled(false);
         helpUiLibrary.setVisible(isLobby);
 
-        gameQLoad.setEnabled(isMainMenu || isLobby);
-        gameLoad.setEnabled(isMainMenu || isLobby);
-        gameStart.setEnabled(isMainMenu);
-        gameConnect.setEnabled(isMainMenu);
+        gameQLoad.setEnabled(isLobby);
+        gameLoad.setEnabled(isLobby);
 
         gameSave.setEnabled(isLobby || (isInGame && canSave));
         gameSaveServer.setEnabled(isLobby || (isInGame && canSave));
@@ -586,25 +551,21 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         gameAllHotLoadOff.setVisible(isLobby && hotLoadAvailable);
         boardSaveAs.setEnabled(isInGame); // TODO: should work in the lobby
         boardSaveAsImage.setEnabled(isInGame); // TODO: should work in the lobby
-        boardNew.setEnabled(isMainMenu);
-        boardOpen.setEnabled(isMainMenu);
-        boardRecent.setEnabled(isMainMenu && !RecentBoardList.getRecentBoards().isEmpty());
         fileUnitsPaste.setEnabled(isLobby);
         fileUnitsCopy.setEnabled(isLobby);
         // reinforcing a player during a game is a gamemaster's job and lives on the Game Master menu; the same
-        // dialog outside a game is how anybody builds an army, so the main menu and the lobby keep it
+        // dialog outside a game is how anybody builds an army, so the lobby keeps it
         fileUnitsReinforce.setEnabled(isInGame && isNotVictory && localPlayerHoldsGameMasterRole);
         fileUnitsReinforceRAT.setEnabled(isNotVictory
-              && (isMainMenu || isLobby || (isInGame && localPlayerHoldsGameMasterRole)));
+              && (isLobby || (isInGame && localPlayerHoldsGameMasterRole)));
         fileUnitsSave.setEnabled(isLobby || (isInGame && canSave));
-        fileUnitsBrowse.setEnabled(isMainMenu);
         boardSaveAsImageUnits.setEnabled(isInGame);
         gamePlayerList.setEnabled(isInGame);
         gameRoundsInAir.setEnabled(isInGame);
         viewLabels.setEnabled(isInGameBoardView);
 
         gameGameOptions.setEnabled(isInGame || isLobby);
-        gameNetworkInformation.setEnabled(isInGame || isLobby || isMainMenu);
+        gameNetworkInformation.setEnabled(isInGame || isLobby);
         gamePlayerSettings.setEnabled(isInGame);
 
         viewMinimap.setEnabled(isInGameBoardView);
@@ -709,7 +670,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case GUIPreferences.MINI_REPORT_ENABLED -> gameRoundReport.setSelected(GUIP.getMiniReportEnabled());
             case GUIPreferences.PLAYER_LIST_ENABLED -> gamePlayerList.setSelected(GUIP.getPlayerListEnabled());
             case GUIPreferences.ROUNDS_IN_AIR_ENABLED -> gameRoundsInAir.setSelected(GUIP.getRoundsInAirEnabled());
-            case RecentBoardList.RECENT_BOARDS_UPDATED -> initializeRecentBoardsMenu();
             case GUIPreferences.BOT_COMMANDS_ENABLED, GUIPreferences.BOT_COMMANDS_LOCATION ->
                   updateBotCommandsSelection();
             case GUIPreferences.BOARD_VIEW_3D, GUIPreferences.BOARD_GRAPHICS -> updateRendererSelection();
@@ -720,7 +680,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     public void die() {
         GUIP.removePreferenceChangeListener(this);
         KeyBindParser.removePreferenceChangeListener(this);
-        RecentBoardList.removeListener(this);
     }
 
     private void initMenuItem(JMenuItem item, JMenu menu, String command) {
@@ -812,19 +771,5 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private void updateRendererSelection() {
         selectRenderer(viewRenderer, !GUIP.getUse3DBoard() ? VIEW_LEGACY_2D
               : GUIP.getBoardGraphics() == BoardGraphics.CLASSIC ? VIEW_GRAPHICS_CLASSIC : VIEW_GRAPHICS_ENHANCED);
-    }
-
-    /**
-     * Updates the Recent Boards submenu with the current list of recent boards
-     */
-    private void initializeRecentBoardsMenu() {
-        List<String> recentBoards = RecentBoardList.getRecentBoards();
-        boardRecent.removeAll();
-        for (String recentBoard : recentBoards) {
-            File boardFile = new File(recentBoard);
-            JMenuItem item = new JMenuItem(boardFile.getName());
-            initMenuItem(item, boardRecent, BOARD_RECENT + "|" + recentBoard);
-        }
-        boardRecent.setEnabled(!recentBoards.isEmpty());
     }
 }

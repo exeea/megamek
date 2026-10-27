@@ -32,98 +32,71 @@
  */
 package megamek.client.ui.dialogs.gameConnectionDialogs;
 
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
-import java.awt.event.ActionEvent;
-import java.io.Serial;
+import java.util.List;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
 import javax.swing.JTextField;
-import javax.swing.SwingConstants;
 
 import megamek.client.ui.Messages;
-import megamek.server.Server;
+import megamek.client.ui.design.swing.TokenButtons.Size;
+import megamek.client.ui.design.swing.TokenFields;
+import megamek.client.ui.design.swing.TokenFormField;
+import megamek.codeUtilities.StringUtility;
 
-/** The Connect to game (as Bot or Player) dialog */
+/** The Connect to game (as Bot or Player) dialog: the player name, then the server address beside its port. */
 public class ConnectDialog extends AbstractGameConnectionDialog {
-    @Serial
-    private static final long serialVersionUID = 5895056240077042429L;
-
     private String serverAddress;
-    private JTextField serverAddressField;
+    private JTextField serverAddressInput;
+    private TokenFormField serverAddressField;
 
     public ConnectDialog(JFrame frame) {
         this(frame, "");
     }
 
     public ConnectDialog(JFrame frame, String playerName) {
-        super(frame, Messages.getString("MegaMek.ConnectDialog.title"), true, playerName);
+        super(frame, Messages.getString("MegaMek.ConnectDialog.title"), playerName);
     }
 
-    //region Initialization
     @Override
-    protected JPanel createMiddlePanel() {
-        JLabel yourNameL = new JLabel(Messages.getString("MegaMek.yourNameL"), SwingConstants.RIGHT);
-        JLabel serverAddrL = new JLabel(Messages.getString("MegaMek.serverAddrL"), SwingConstants.RIGHT);
-        JLabel portL = new JLabel(Messages.getString("MegaMek.portL"), SwingConstants.RIGHT);
-        setPlayerName(getClientPreferences().getLastPlayerName());
-        addPlayerNameActionListener(this);
-        serverAddressField = new JTextField(getClientPreferences().getLastConnectAddr(), 16);
-        serverAddressField.addActionListener(this);
-        setPortField(new JTextField(getClientPreferences().getLastConnectPort() + "", 4));
-        getPortField().addActionListener(this);
-
-        JPanel middlePanel = new JPanel(new GridBagLayout());
-        GridBagConstraints c = new GridBagConstraints();
-        c.fill = GridBagConstraints.NONE;
-        c.weightx = 0.0;
-        c.weighty = 0.0;
-        c.insets = new Insets(5, 5, 5, 5);
-        c.gridwidth = 1;
-
-        addOptionRow(middlePanel, c, yourNameL, getPlayerNameField());
-        addOptionRow(middlePanel, c, serverAddrL, serverAddressField);
-        addOptionRow(middlePanel, c, portL, getPortField());
-
-        return middlePanel;
+    protected JComponent createBody() {
+        serverAddressInput = TokenFields.text(Size.REGULAR);
+        serverAddressInput.setText(getClientPreferences().getLastConnectAddr());
+        serverAddressField = new TokenFormField(Messages.getString("MegaMek.GameConnection.address"),
+              serverAddressInput);
+        return column(nameField(), pair(serverAddressField, portField()));
     }
-    //endregion Initialization
 
-    //region Getters and Setters
+    @Override
+    protected String actionText() {
+        return Messages.getString("MegaMek.GameConnection.connect");
+    }
+
+    @Override
+    protected int lastPort() {
+        return getClientPreferences().getLastConnectPort();
+    }
+
+    @Override
+    protected void checkInputs(List<JComponent> wrong) {
+        boolean blank = StringUtility.isNullOrBlank(serverAddressInput.getText());
+        serverAddressField.setError(blank ? Messages.getString("MegaMek.GameConnection.addressError") : null);
+        if (blank) {
+            wrong.add(serverAddressInput);
+        }
+    }
+
+    @Override
+    protected void accept() {
+        super.accept();
+        setServerAddress(serverAddressInput.getText().trim());
+        getClientPreferences().setLastConnectAddr(getServerAddress());
+    }
+
     public String getServerAddress() {
         return serverAddress;
     }
 
     public void setServerAddress(String serverAddress) {
         this.serverAddress = serverAddress;
-    }
-    //endregion Getters and Setters
-
-    //region Validation
-    @Override
-    public boolean dataValidation(String errorTitleKey) {
-        try {
-            setServerAddress(Server.validateServerAddress(getServerAddress()));
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(getOwner(), Messages.getString("MegaMek.ServerAddressError"),
-                  Messages.getString(errorTitleKey), JOptionPane.ERROR_MESSAGE);
-            return false;
-        }
-        return super.dataValidation(errorTitleKey);
-    }
-    //endregion Validation
-
-    @Override
-    public void actionPerformed(ActionEvent e) {
-        // reached from the Okay button or pressing Enter in the text fields
-        super.actionPerformed(e);
-        setServerAddress(serverAddressField.getText().trim());
-
-        // update settings
-        getClientPreferences().setLastConnectAddr(getServerAddress());
-        setVisible(false);
     }
 }

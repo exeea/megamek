@@ -33,7 +33,6 @@
 package megamek.client.ui.dialogs.buttonDialogs;
 
 import java.awt.BorderLayout;
-import java.awt.GridLayout;
 import java.awt.event.ActionEvent;
 import java.util.ResourceBundle;
 import javax.swing.JDialog;
@@ -42,6 +41,10 @@ import javax.swing.JPanel;
 
 import megamek.MegaMek;
 import megamek.client.ui.buttons.MMButton;
+import megamek.client.ui.design.swing.TokenButtons;
+import megamek.client.ui.design.swing.TokenButtons.Kind;
+import megamek.client.ui.design.swing.TokenButtons.Size;
+import megamek.client.ui.design.swing.TokenDialogs;
 import megamek.client.ui.dialogs.abstractDialogs.AbstractDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.logging.MMLogger;
@@ -145,15 +148,15 @@ public abstract class AbstractButtonDialog extends AbstractDialog {
     }
 
     /**
-     * @return the created Button Panel
+     * @return the created Button Panel: the token dialog footer with Ok as the main action, then Cancel
      */
     protected JPanel createButtonPanel() {
-        JPanel panel = new JPanel(new GridLayout(1, 2));
-        panel.add(new MMButton("okButton", resources.getString("Ok.text"),
-              resources.getString("Ok.toolTipText"), this::okButtonActionPerformed));
-        panel.add(new MMButton("cancelButton", resources.getString("Cancel.text"),
-              resources.getString("Cancel.toolTipText"), this::cancelActionPerformed));
-        return panel;
+        return TokenDialogs.footer(
+              TokenButtons.style(new MMButton("okButton", resources.getString("Ok.text"),
+                    resources.getString("Ok.toolTipText"), this::okButtonActionPerformed), Kind.PRIMARY, Size.REGULAR),
+              TokenButtons.style(new MMButton("cancelButton", resources.getString("Cancel.text"),
+                    resources.getString("Cancel.toolTipText"), this::cancelActionPerformed), Kind.SECONDARY,
+                    Size.REGULAR));
     }
     // endregion Initialization
 

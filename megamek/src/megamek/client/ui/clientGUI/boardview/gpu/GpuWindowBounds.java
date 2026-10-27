@@ -52,6 +52,22 @@ record GpuWindowBounds(int x, int y, int width, int height, boolean maximized) {
         preferences.setGpuBoardMaximized(maximized);
     }
 
+    /** The start window's bounds. Read on the Swing thread before the GPU thread starts. */
+    static GpuWindowBounds loadStart(GUIPreferences preferences) {
+        return new GpuWindowBounds(preferences.getStartWindowPosX(), preferences.getStartWindowPosY(),
+              preferences.getStartWindowSizeWidth(), preferences.getStartWindowSizeHeight(),
+              preferences.getStartWindowMaximized());
+    }
+
+    /** Saves these as the start window's bounds, on the Swing thread. */
+    void saveStart(GUIPreferences preferences) {
+        preferences.setStartWindowPosX(x);
+        preferences.setStartWindowPosY(y);
+        preferences.setStartWindowSizeWidth(width);
+        preferences.setStartWindowSizeHeight(height);
+        preferences.setStartWindowMaximized(maximized);
+    }
+
     Rectangle rectangle() {
         return new Rectangle(x, y, width, height);
     }
