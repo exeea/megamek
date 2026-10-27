@@ -20,6 +20,7 @@ import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import javax.swing.AbstractAction;
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
@@ -138,6 +139,7 @@ public class TokenDialogPane extends JPanel {
     private boolean mainIsDanger;
     private boolean framed;
     private Consumer<JButton> closer = button -> { };
+    private Predicate<JButton> check = button -> true;
 
     public TokenDialogPane(String title) {
         super(new GridBagLayout());
@@ -183,6 +185,15 @@ public class TokenDialogPane extends JPanel {
     /** Adds a help button to the header that runs {@code help}; the dialog stays open. */
     public TokenDialogPane help(Runnable help) {
         this.help = help;
+        return this;
+    }
+
+    /**
+     * Checks a choice before it closes the dialog, such as a form's main action whose inputs show their errors:
+     * {@code check} gives false to keep the dialog open. Cancelling is never checked.
+     */
+    public TokenDialogPane check(Predicate<JButton> check) {
+        this.check = check == null ? button -> true : check;
         return this;
     }
 
@@ -371,7 +382,13 @@ public class TokenDialogPane extends JPanel {
                     button.removeActionListener(listener);
                 }
             }
-            button.addActionListener((Closing) event -> closer.accept(isCancel(button) ? null : button));
+            button.addActionListener((Closing) event -> {
+                if (isCancel(button)) {
+                    closer.accept(null);
+                } else if (check.test(button)) {
+                    closer.accept(button);
+                }
+            });
             footer.add(button);
         }
         return footer;
@@ -434,14 +451,20 @@ public class TokenDialogPane extends JPanel {
     static final class EqualRow implements LayoutManager {
         private final int gap;
         private final int minWidth;
+        private final int minHeight;
 
         EqualRow(int gap, int minWidth) {
+            this(gap, minWidth, 0);
+        }
+
+        EqualRow(int gap, int minWidth, int minHeight) {
             this.gap = gap;
             this.minWidth = minWidth;
+            this.minHeight = minHeight;
         }
 
         private Dimension cell(Container parent) {
-            Dimension cell = new Dimension(minWidth, 0);
+            Dimension cell = new Dimension(minWidth, minHeight);
             for (Component component : parent.getComponents()) {
                 if (component.isVisible()) {
                     Dimension size = component.getPreferredSize();

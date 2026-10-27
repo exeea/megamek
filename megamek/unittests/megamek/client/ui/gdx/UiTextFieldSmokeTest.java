@@ -33,7 +33,35 @@ class UiTextFieldSmokeTest {
                 assertEquals(height, ui.kit.input("Atlas", compact).getPrefHeight(), .01f);
                 assertEquals(height, ui.kit.password(compact).getPrefHeight(), .01f);
                 assertEquals(height, ui.kit.tokenSearch("Search", compact).getPrefHeight(), .01f);
+                assertEquals(height, ui.kit.tokenPassword(compact).getPrefHeight(), .01f);
             }
+        });
+    }
+
+    @Test
+    void revealShowsThePasswordAndSwapsTheEye() {
+        UiTestStage.run(ui -> {
+            UiKit.TokenPassword password = ui.kit.tokenPassword(false);
+            ui.stage.addActor(password);
+            password.setBounds(100, 300, 240, 36);
+            password.field.setText("secret");
+            assertTrue(password.field.isPasswordMode());
+            password.reveal.fire(new com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent());
+            assertTrue(password.shown());
+            assertFalse(password.field.isPasswordMode());
+            assertSame(ui.theme.skin.getDrawable("icon-hide"),
+                  ((com.badlogic.gdx.scenes.scene2d.ui.Image) password.reveal.icons.get(0)).getDrawable());
+            password.shown(false);
+            assertTrue(password.field.isPasswordMode());
+
+            UiFormField form = ui.kit.formField("Password", password);
+            form.error("Wrong password.");
+            assertSame(UiTextField.Status.ERROR, password.field.status());
+            assertSame(ui.theme.skin.get("input-reveal-error", TextField.TextFieldStyle.class),
+                  password.field.getStyle());
+            password.field.readOnly(true);
+            password.act(0);
+            assertFalse(password.reveal.isVisible(), "a read-only password has no reveal");
         });
     }
 

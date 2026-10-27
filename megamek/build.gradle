@@ -227,6 +227,12 @@ dependencies {
     // JAWT gives the native windows of Swing dialogs that the 3D window owns on macOS and Linux. Pure Java (its
     // natives are in LWJGL's core), it must match the LWJGL version libGDX brings.
     implementation 'org.lwjgl:lwjgl-jawt:3.3.3'
+    // Native File Dialog: the start screen's file pickers are the system's own on Windows, as the 3D window has no
+    // Swing look to match. Same LWJGL version; elsewhere, and where its natives can't load, Swing's chooser stands in.
+    implementation 'org.lwjgl:lwjgl-nfd:3.3.3'
+    ['natives-windows', 'natives-windows-x86', 'natives-windows-arm64'].each { natives ->
+        runtimeOnly "org.lwjgl:lwjgl-nfd:3.3.3:${natives}"
+    }
     // CPU-only glTF decoding; terrain workers and unit validation share the same mesh data.
     implementation 'de.javagl:jgltf-model:2.0.4'
     runtimeOnly "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-desktop"

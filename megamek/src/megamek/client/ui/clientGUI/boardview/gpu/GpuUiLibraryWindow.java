@@ -189,7 +189,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             open.focus();
             return;
         }
-        if (!GpuBoardWindow.yieldNativeWindow(owner, () -> showLibrary(owner))) {
+        if (!GpuNativeWindow.claim(owner, () -> showLibrary(owner))) {
             return;
         }
         GpuUiLibraryWindow window = new GpuUiLibraryWindow(GUIPreferences.getInstance().getGUIScale());

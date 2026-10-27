@@ -51,7 +51,8 @@ Agreed so far:
 | Ownership | Vicente owns UI decisions and presents them to the team. |
 | Review | Runnable galleries opened from MegaMek: one Swing, one libGDX. The Swing library is the complete set; libGDX is a subset that grows on demand. |
 | Naming, translucency | Role-based token names with a `UiTheme` rename pass; surfaces get opaque and overlay values. |
-| In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby stays Swing. |
+| In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby is being ported to libGDX; until then it stays Swing. |
+| Native window | One libGDX window for the whole run, switching between screens (start, editor and preview, game, later the lobby). It hides while the Swing lobby shows instead of closing. Until that scene host lands, the start screen, board window and UI library are separate applications that take turns through one shared check. |
 | Animation | Broad UI animation (for example panel reveals) comes after the unification pass. |
 
 ## Sources inventoried
@@ -66,7 +67,7 @@ Agreed so far:
 | Framed command button | `mekhq/gui/baseComponents/FramedCommandButton(Style)` | Swing | Corner ticks that grow into a full frame on hover (320 ms). Theme-derived teal, dark and light. Base of the Immersive dialogs' response buttons. |
 | Standalone launcher | `mm-launcher/.../gui/LauncherTheme` | Swing, **no FlatLaf and no megamek dependency** | A copy of the Immersive palette (identical RGB values). Honors Windows high-contrast mode. |
 | App startup screens | MegaMek `client/ui/widget/MegaMekButton` + `SkinSpecification`/`SkinXMLHandler` (`defaultSkin.xml`); used by MekHQ `StartupScreenPanel` and MegaMek's main menu | Swing, image-skinned | Bitmap backgrounds, text colors from skin XML (white / yellow active / grey disabled). |
-| Everything else in Swing | MM, MML, MHQ | FlatLaf | User picks one of four stock themes: Flat Light, Flat IntelliJ, Flat Dark, Flat Darcula (`MegaMek.java`); MML and MHQ apply the stored choice. No custom FlatLaf properties anywhere. |
+| Everything else in Swing | MM, MML, MHQ | FlatLaf | User picks one of four stock themes: Flat Light, Flat IntelliJ, Flat Dark, Flat Darcula (`MegaMek.java`); MML and MHQ apply the stored choice. No custom FlatLaf properties anywhere. (Since the Swing trial, MegaMek defaults to MegaMek Dark and lists the stock themes as classic ones.) |
 
 About 128 MekHQ source files reference an Immersive component or the interstellar map, so the blue palette has real
 reach.
@@ -361,6 +362,81 @@ work for Swing, and item 11 is under investigation.
   selection for items in collections, mint only for focus and accents, an outside focus ring on cream faces and a
   faint cream disabled-on look, in Swing and libGDX; see [tokens.md](tokens.md#color-roles).
 - A Swing trial: move MegaMek's startup path (everything before the libGDX board opens) onto the themes and the new
-  controls, so the developers can judge the system in real use.
+  controls, so the developers can judge the system in real use. The startup path is also reorganized where the old
+  layout gets in the way. Steps, one screen at a time:
+  1. ~~Theme~~: MegaMek Dark is MegaMek's default; settings list the MegaMek themes, the stock ones behind **Show
+     classic themes**. Players who picked a theme keep it.
+  2. ~~Shared dialog footers~~: `AbstractButtonDialog`, `AbstractValidationButtonDialog` and the Host/Connect
+     dialogs put their buttons in `TokenDialogs.footer`, Ok as the primary button first. Dialogs with their own
+     footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
+  3. Main menu, in libGDX (a Swing version dropped frames on ordinary machines, and the 2D board that kept the
+     startup path in Swing is going away): a full-window game screen over the battle art
+     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back" greeting and reveal on app launch (an
+     instant cut with reduce motion), with Settings, Help and Tools on screen and Up, Down, Tab and Enter moving
+     through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
+     sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
+     left. The window opens maximized the first time and remembers its bounds;
+     the lobby opens at the same bounds. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
+     notice waits for the reveal to end. The old splash medal is dropped. Its pages replace the menu in the menu's own
+     column, with Back (Esc) to return, so the art stays in view. ~~G1, the window and menu~~, ~~G2, the Host
+     page~~, ~~G3, the Connect page~~, ~~G4, Load game~~, ~~G5, the scenario browser~~ and ~~G6, the briefing~~ are
+     done. **New game** opens the Host page: the player name, then a closed
+     **Online options** section
+     (password, port, the server browser and the local and public addresses), **Host game** and Back. The section
+     opens by itself when the password or port was changed before or the port is wrong; errors show under the
+     inputs, and Enter in a field hosts while Tab moves to the next control. The password has an eye button that shows
+     it as typed, in both presentations, because a game password is a word shared with friends and there is no
+     confirm field to catch a typo. The local address shows at once; the public one is only asked of
+     checkip.amazonaws.com when the player clicks **Show**, so it stays off streams and screenshots and MegaMek makes no
+     outside request unasked. **Connect to a game** opens the Connect page: a **Player | Bot** segmented control at
+     the top, the name, the server address beside its port, a **Strategic BattleForce game** check box for the player
+     only (there is no SBF bot), **Connect** (**Connect bot**, which opens the bot setup) and Back; errors show under
+     the inputs as on Host. It has no password: joining a game never asks for one, since MegaMek's server password
+     only guards game options and server commands, which ask for it when they need it. When `savegames` has a
+     save, a **Continue** item tops the menu with the newest save's name and how long ago it was saved, and takes
+     the accent from New game. **Load game** opens a list of the saves, newest first, with when each was saved, and
+     **Browse files…** for others. Clicking a save (or Continue) loads it at once when the player's last name is the
+     save's only human player; otherwise, and from each row's **Options…** and from Browse files, it opens the Host
+     form titled Load game, with the save's name and date on top and a **Play as** select of the saved players and
+     **Watch as observer**, which asks for an observer name. Sides the save marks as bots come back as default
+     Princess bots under their saved names. A save that cannot be read, has no version or comes from another
+     version says so in the page instead of a popup. **Scenario** opens the scenario browser: a search field (every
+     word must match the name, group or planet) beside a group select (All scenarios or one folder) over a list of
+     names, each with its group and planet, and **Open a file…**. On Windows, Browse files and Open a file use the
+     system's open-file dialog (LWJGL's Native File Dialog, on its own thread, natively owned by the start window
+     so it stays in front); elsewhere, or if it fails, Swing's chooser. Picking a scenario opens the **briefing**:
+     the title, single player or multiplayer, the description and the players, each with a camo swatch that opens
+     the camo chooser (scenarios skip the lobby, so this is the only place to change it; multiplayer sides start in
+     their own colour). In single player you are the first player and the others are bots; in multiplayer each
+     player has a You | Human | Bot select, the first is You and the rest Bot, an observer name shows when nobody is
+     You, and the server password and port show only while a side is Human. **Rules** and **Conditions** lines
+     summarise the game options and planetary conditions, with **Change…** opening their Swing dialogs (or "Set by
+     the scenario" when the scenario fixes them); Start no longer pops them up. **Start scenario** reads
+     "Starting…" while it works and comes back if the start fails, rebuilding the game with the player's choices
+     when the server already took it. The load and scenario pages are wider than the menu, so long names fit, and
+     their list fills the room left in the column. Ctrl+click on Load game and Scenario still reaches quick load
+     and the last scenario. Follow-ups: a **Load anyway** for saves from another version (to propose to the MegaMek
+     team), the map thumbnail and the native dialog on macOS and Linux (step 5.5), and libGDX camo, options and
+     conditions pickers with the lobby's dialogs (step 8). To review a page without clicking through it, set
+     `MM_START_PAGE` (such as `host+online+reveal`, `connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with
+     `MM_START_SCENARIO` naming the scenario file) before `gradlew :megamek:run`;
+     `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
+     `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`).
+  4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
+     main action named for what it does (**Host game**, **Connect**) and errors under the inputs instead of popups.
+     Host keeps the password, port and server browser in a closed **Online options** section, which opens when the
+     password or port was changed before or one of them is wrong. Bot setup moves with the lobby's dialogs (step 8). The new main menu shows these forms as
+     its own pages; the card stays for MekHQ.
+  5. ~~The scenario flow~~: the scenario browser and the briefing in the start screen's column (G5 and G6 in step 3).
+  5.5. Start screen follow-ups, before the lobby:
+     - A map thumbnail on the briefing, ideally drawn by the 3D board, so a scenario shows its battlefield before it
+       starts.
+     - The system's file dialog on macOS and Linux. LWJGL's Native File Dialog supports both, but it is only enabled
+       on Windows so far: on macOS it must run on the main thread, which the start window's loop holds (so it would
+       open from that loop and pause drawing while it is open), and on Linux it uses GTK, which needs checking
+       beside AWT. Both need testing on real machines; Swing's chooser stays the fallback.
+  6. The lobby as a briefing room in game mode: a top bar with Ready and summary chips, players on the left, forces in
+     the centre, the battlefield (map, conditions, victory) on the right and a chat dock.
+  7. The unit selector. 8. The lobby's dialogs. 9. A settings check.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.

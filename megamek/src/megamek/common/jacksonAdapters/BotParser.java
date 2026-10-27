@@ -39,9 +39,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import megamek.client.bot.AIType;
 import megamek.client.bot.princess.BehaviorSettings;
-import megamek.client.ui.dialogs.ScenarioDialog;
 
 public final class BotParser {
+
+    /** The {@link BotInfo#type()} of a Princess bot. */
+    public static final int T_BOT = 2;
 
     static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
 
@@ -53,7 +55,7 @@ public final class BotParser {
 
         @Override
         public int type() {
-            return ScenarioDialog.T_BOT;
+            return T_BOT;
         }
     }
 

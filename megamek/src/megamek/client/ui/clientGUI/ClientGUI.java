@@ -202,28 +202,15 @@ public class ClientGUI extends AbstractClientGUI
 
     // region Variable Declarations
     // region action commands
-    // region main menu
-    // Note: anything located in menu bars is not located here but in their menu
-    public static final String MAIN_SKIN_NEW = "mainSkinNew";
-    public static final String MAIN_QUIT = "mainQuit";
-    // endregion
     // region file menu
     // game submenu
-    public static final String FILE_GAME_NEW = "fileGameNew";
     public static final String FILE_GAME_SAVE = "fileGameSave";
     public static final String FILE_GAME_LOAD = "fileGameLoad";
     public static final String FILE_GAME_SAVE_SERVER = "fileGameSaveServer";
     public static final String FILE_GAME_QUICK_SAVE = "fileGameQSave";
     public static final String FILE_GAME_QUICK_LOAD = "fileGameQLoad";
-    public static final String FILE_GAME_SCENARIO = "fileGameScenario";
-    public static final String FILE_GAME_CONNECT_BOT = "fileGameConnectBot";
-    public static final String FILE_GAME_CONNECT = "fileGameConnect";
-    public static final String FILE_GAME_CONNECT_SBF = "fileGameConnectSbf";
     public static final String FILE_GAME_EDIT_BOTS = "editBots";
     // board submenu
-    public static final String BOARD_NEW = "fileBoardNew";
-    public static final String BOARD_OPEN = "fileBoardOpen";
-    public static final String BOARD_RECENT = "recent";
     public static final String BOARD_SAVE_AS = "fileBoardSaveAs";
     public static final String BOARD_SAVE_AS_IMAGE = "fileBoardSaveAsImage";
     public static final String BOARD_SAVE_AS_IMAGE_UNITS = "fileBoardSaveAsImageUnits";
@@ -233,7 +220,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String FILE_UNITS_REINFORCE_RAT = "fileUnitsReinforceRAT";
     public static final String FILE_REFRESH_CACHE = "fileRefreshCache";
     public static final String FILE_REBUILD_CACHE = "fileRebuildCache";
-    public static final String FILE_UNITS_BROWSE = "fileUnitsBrowse";
     public static final String FILE_UNITS_OPEN = "fileUnitsOpen";
     public static final String FILE_UNITS_SAVE = "fileUnitsSave";
     public static final String FILE_UNITS_PASTE = "fileUnitsPaste";
