@@ -6,6 +6,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
@@ -14,10 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-/** Overlays authoring assets from a sibling mm-data checkout before the existing asset reload. */
+/** Overlays authoring models and their textures from a sibling mm-data checkout before the existing asset reload. */
 final class GpuAssetSync {
-    private static final List<String> ASSET_DIRECTORIES = List.of("models", "images", "board-editor", "shaders");
-
     record Result(Path source, int copied) { }
 
     /** Immutable worker snapshot; total is -1 until the file inventory is complete. */
@@ -42,9 +41,8 @@ final class GpuAssetSync {
             throw new IOException("Asset source and staged data directories overlap: " + source + ", " + targetRoot);
         }
         List<Path> files = new ArrayList<>();
-        for (String name : ASSET_DIRECTORIES) {
-            Path directory = source.resolve(name);
-            if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) { continue; }
+        Path directory = source.resolve("models");
+        if (Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
             Files.walkFileTree(directory, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) throws IOException {
@@ -71,10 +69,11 @@ final class GpuAssetSync {
         for (Path file : files) {
             Path relative = source.relativize(file), destination = target.resolve(relative);
             progress.accept(new Progress("Checking assets", completed, files.size(), copied, relative));
-            checkDestination(destination.getParent(), targetRoot);
+            // The inventory already checked every parent directory. Only repeat that check before a write.
             checkDestination(destination, targetRoot);
             if (!Files.exists(destination) || Files.mismatch(file, destination) != -1) {
                 progress.accept(new Progress("Copying assets", completed, files.size(), copied, relative));
+                checkDestination(destination.getParent(), targetRoot);
                 copy(file, destination);
                 copied++;
             }
@@ -96,8 +95,15 @@ final class GpuAssetSync {
 
     /** Do not follow staged links into the source checkout or another directory. Parents are checked on entry. */
     private static void checkDestination(Path path, Path root) throws IOException {
-        if (Files.isSymbolicLink(path)
-              || (Files.exists(path, LinkOption.NOFOLLOW_LINKS) && !path.toRealPath().startsWith(root))) {
+        BasicFileAttributes attributes;
+        try {
+            attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException missing) {
+            return;
+        }
+        // Ordinary files cannot redirect traversal. Resolving their full path again is costly on Windows;
+        // directories and other entries still need it to catch junctions as well as symbolic links.
+        if (attributes.isSymbolicLink() || (!attributes.isRegularFile() && !path.toRealPath().startsWith(root))) {
             throw new IOException("Cannot sync through a linked asset destination: " + path);
         }
     }

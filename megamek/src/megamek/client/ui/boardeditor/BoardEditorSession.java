@@ -413,6 +413,8 @@ public final class BoardEditorSession {
     public Game game() { return game; }
     public Board board() { return game.getBoard(); }
     public Path path() { return path; }
+    /** The current save target, or the native-format suggestion for an imported board. */
+    public Path suggestedPath() { return path != null ? path : suggested; }
     public Path lastSavedPath() { return lastSavedPath; }
     public boolean lastSaveFromAssembledPreview() { return lastSaveFromAssembledPreview; }
     /** Copy and Paste also use {@code clipboard} for hexes as text (the editor window passes the system clipboard). */
@@ -866,7 +868,7 @@ public final class BoardEditorSession {
                     // A value opens that file (a Recent Boards entry); none asks for one.
                     if (confirmDiscard(owner)) {
                         if (command.value().isEmpty()) { chooseOpen(owner); }
-                        else { Path file = Path.of(command.value()); open(file); remember(file); }
+                        else { openChosen(Path.of(command.value())); }
                     }
                 }
                 case SAVE, SAVE_AS -> chooseSave(owner, command.action() == Action.SAVE_AS);
@@ -937,8 +939,14 @@ public final class BoardEditorSession {
     public boolean chooseOpen(Window owner) throws IOException {
         JFileChooser chooser = new JFileChooser(Configuration.boardsDir()); chooser.setFileFilter(new BoardFileFilter());
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) { return false; }
-        open(chooser.getSelectedFile().toPath()); remember(chooser.getSelectedFile().toPath()); return true;
+        openChosen(chooser.getSelectedFile().toPath()); return true;
     }
+
+    /** User-facing Open, shared by the Swing and Scene2D document dialogs. */
+    public void openChosen(Path file) throws IOException { open(file); remember(file); }
+
+    /** User-facing Save, shared by the Swing and Scene2D document dialogs. */
+    public void saveChosen(Path file) throws IOException { save(file); remember(file); }
 
     /**
      * Adds a file the user opened or saved to the Recent Boards list that the launcher and the editor's menu show. Only
@@ -969,7 +977,7 @@ public final class BoardEditorSession {
                   Messages.getString("BoardEditor.replaceFile", target.getFileName().toString()), Messages.getString("BoardEditor.saveTitle"),
                   JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) { return false; }
         }
-        try { save(target); remember(target); return true; }
+        try { saveChosen(target); return true; }
         catch (IOException failure) {
             message = Messages.getString("BoardEditor.saveFailed", String.valueOf(failure.getMessage())); revision++; return false;
         }

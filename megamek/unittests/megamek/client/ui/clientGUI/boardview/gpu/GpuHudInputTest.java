@@ -66,6 +66,7 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Player;
 import megamek.common.board.Coords;
@@ -448,6 +449,38 @@ class GpuHudInputTest {
 
         update(moving, planned, null);
         assertNull(hud.stage.getKeyboardFocus(), "an answered dialog keeps no focus");
+    }
+
+    @Test
+    void aGameDialogStillUsesTheConfiguredCancelKey() {
+        var waiting = status(3, GamePhase.MOVEMENT, false, Entity.NONE, 1);
+        var preferences = with(preferences(), Map.of("binds", List.of(
+              new GpuBoardSource.Bind(KeyCommandBind.CANCEL, KeyEvent.VK_Q, CTRL_DOWN_MASK, "Ctrl+Q"))));
+        hud.update(frame(waiting, GpuHudData.EMPTY), GpuHud.HudView.EMPTY, message(), preferences);
+        clearInvocations(source);
+        assertTrue(press(Input.Keys.Q, KeyEvent.VK_Q, CTRL_DOWN_MASK));
+        verify(source).answer(message().id(), GpuBoardWindow.DialogAnswer.cancelled(message()));
+    }
+
+    @Test
+    void anOverlayKeepsItsTextFocusWhenAGameDialogArrivesUnderneath() {
+        var waiting = status(3, GamePhase.MOVEMENT, false, Entity.NONE, 1);
+        update(waiting);
+        UiModal overlay = new UiModal(new UiKit(theme.skin), () -> { }, false);
+        TextField field = textField();
+        overlay.add(field);
+        hud.stage.addActor(overlay);
+        overlay.open(true);
+        hud.stage.setKeyboardFocus(field);
+        update(waiting, GpuHudData.EMPTY, message());
+        assertSame(field, hud.stage.getKeyboardFocus(), "The arriving game prompt must not steal the picker's text focus");
+        update(waiting, GpuHudData.EMPTY, message());
+        assertSame(field, hud.stage.getKeyboardFocus());
+        assertSame(overlay, UiModal.active(hud.stage));
+        overlay.open(false);
+        overlay.remove();
+        update(waiting, GpuHudData.EMPTY, message());
+        assertSame(hud.stage.getRoot().findActor("modal-dialog"), hud.stage.getKeyboardFocus());
     }
 
     @Test

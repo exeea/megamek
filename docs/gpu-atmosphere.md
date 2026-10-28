@@ -349,8 +349,9 @@ clear air, in either projection; the Tactical View keeps clear air. `GpuDepthCue
 distance of the surfaces in the middle two fifths of the view less the orbit pivot's, in a one-texel pass over the
 scene depth, eased over 0.3 s. Before fog, the composite hazes what lies behind the focus towards the fog's light in
 the visible horizon's hue (`BoardAtmosphere.depthHaze`; neutral without air), approaching `GpuDepthCues.STRENGTH`
-(.06) over the depth the view spans (its height times the tangent of the tilt); the focus and all in front of it keep
-their colour. Clear air veils rock a few hundred metres away by only a few percent: this is a board-scale
+(.08) over the depth the view spans (its height times the tangent of the tilt, and at least twice its height, so from
+straight above, where the only depth is the relief's, a drop of a few levels hazes little); the focus and all in front
+of it keep their colour. Clear air veils rock a few hundred metres away by only a few percent: this is a board-scale
 exaggeration, kept low because the sunlit haze is far brighter than dark rock. Each pixel depends only on its own
 depth, so nothing slides across the terrain as the camera moves; panning across a cliff edge refocuses the haze over
 that 0.3 s.

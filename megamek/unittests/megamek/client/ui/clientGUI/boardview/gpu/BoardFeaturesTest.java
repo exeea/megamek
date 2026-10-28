@@ -11,6 +11,8 @@ import java.util.Map;
 
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
+import megamek.common.board.TilesetScenery;
 import megamek.common.units.BipedMek;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Terrain;
@@ -21,6 +23,20 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2, 3, 4 })
+    void tankFarmDesignsUseFuelTankFeaturesWithoutBuildingInteriors(int weight) {
+        Hex hex = new Hex(0, "fuel_tank:" + weight + ":4;fuel_tank_cf:15;fuel_tank_elev:3;fuel_tank_magn:100", "");
+        hex.setAppearance(Map.of("fuelTank", new HexAppearance("building/tank-farm", null, null, null)));
+        var models = TilesetScenery.structureModels(hex);
+        assertEquals(java.util.Set.of(Terrains.FUEL_TANK), models.keySet());
+        var features = BoardFeatures.capture(hex, new Coords(1, 1), models);
+        assertEquals(1, features.size());
+        assertEquals(BoardScene.FeatureKind.FUEL_TANK, features.getFirst().kind(),
+              "Only BUILDING features generate interior floors and struts");
+        assertEquals(3, features.getFirst().height());
+    }
+
     @Test
     void liveCrossingsReplaceOnlyOldPanelsOnTheSameRoadAndRailSurface() {
         var hex = new Hex(0, "road:1:18;rail:1:9;bridge:1:9;bridge_elev:2;bridge_road:1:18", "");

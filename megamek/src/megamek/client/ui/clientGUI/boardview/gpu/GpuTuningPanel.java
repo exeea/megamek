@@ -30,6 +30,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiFileDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
@@ -62,6 +63,7 @@ final class GpuTuningPanel implements GpuHud.Component {
     private final GpuHudState state;
     private final BoardCamera camera;
     private final GpuBoardTuning tuning;
+    private final UiFileDialog files;
     /** The window-sized root that places the panel; presses beside the panel reach the board. */
     private final Table root = new Table() {
         @Override
@@ -92,6 +94,14 @@ final class GpuTuningPanel implements GpuHud.Component {
         this.state = state;
         this.camera = camera;
         this.tuning = tuning;
+        files = new UiFileDialog(ui);
+        tuning.onChooseEnvironment(() -> {
+            if (root.getStage() == null) { return; }
+            files.show(root.getStage(), new UiFileDialog.Options(text("FileDialog.panoramaTitle"), UiFileDialog.Mode.OPEN,
+                  "lighting-environments", java.nio.file.Path.of(System.getProperty("user.home", ".")), "",
+                  new UiFileDialog.Filter(text("FileDialog.panoramaFilter"), "hdr", "png", "jpg", "jpeg")),
+                  file -> { if (file != null) { tuning.loadEnvironment(file, source); } });
+        });
         root.setName("tuning-panel");
         root.top().right();
         button = GpuUtilityBar.utility(ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button");
@@ -101,6 +111,12 @@ final class GpuTuningPanel implements GpuHud.Component {
     @Override
     public Actor actor() {
         return root;
+    }
+
+    @Override public void dispose() {
+        files.close();
+        tuning.onChooseEnvironment(() -> { });
+        if (choices != null) { choices.cancel(); }
     }
 
     /** The developer's Tuning utility. */

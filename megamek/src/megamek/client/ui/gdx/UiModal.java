@@ -132,6 +132,9 @@ public final class UiModal extends Table {
         return actor instanceof UiModal modal ? modal : null;
     }
 
+    /** The stage's visible modal, if any; scenes route keys here before their own shortcuts/camera controls. */
+    public static UiModal active(Stage stage) { return topmost(stage.getRoot()); }
+
     @Override
     public void draw(Batch batch, float parentAlpha) {
         if (getStage() != null && topmost(getStage().getRoot()) == this) {

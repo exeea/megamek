@@ -116,18 +116,10 @@ final class GpuModalDialog implements GpuHud.Component {
         if (request == null) {
             return;
         }
-        Stage stage = root.getStage();
         if (prompt == null) {
             prompt = new Prompt(request);
             dialogCell = root.add(prompt.dialog);
             sized = null;
-            if (stage != null) {
-                stage.setKeyboardFocus(prompt.first == null ? root : prompt.first);
-            }
-        } else if (stage != null && prompt.first != null && !prompt.answered
-              && (stage.getKeyboardFocus() == null || stage.getKeyboardFocus() == root)) {
-            // A press beside the field ended its focus; typing goes to the field again.
-            stage.setKeyboardFocus(prompt.first);
         }
         GpuHud.Metrics metrics = inputs.metrics();
         if (!metrics.equals(sized)) {
@@ -137,6 +129,17 @@ final class GpuModalDialog implements GpuHud.Component {
             root.invalidate();
         }
         prompt.reveal();
+        focus();
+    }
+
+    /** Also called after HUD layout makes this slot visible; a higher modal retains its own text field. */
+    void focus() {
+        Stage stage = root.getStage();
+        if (stage == null || UiModal.active(stage) != root) { return; }
+        root.focus();
+        if (prompt != null && prompt.first != null && !prompt.answered && stage.getKeyboardFocus() == root) {
+            stage.setKeyboardFocus(prompt.first);
+        }
     }
 
     /** CANCEL while a dialog is pending: closes an open choice list, otherwise presses the cancel button. */

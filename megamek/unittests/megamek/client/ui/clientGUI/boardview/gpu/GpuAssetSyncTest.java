@@ -27,8 +27,9 @@ class GpuAssetSyncTest {
         write(target.resolve("models/unchanged.glb"), "same");
         write(source.resolve("models/changed.glb"), "new mesh");
         write(target.resolve("models/changed.glb"), "old mesh");
-        write(source.resolve("images/new.png"), "new image");
-        write(source.resolve("images/Thumbs.db"), "ignored");
+        write(source.resolve("models/textures/new.png"), "new image");
+        write(source.resolve("models/Thumbs.db"), "ignored");
+        write(source.resolve("images/new.png"), "ignored");
         write(source.resolve("mekfiles/unit.mtf"), "ignored");
         List<GpuAssetSync.Progress> updates = new ArrayList<>();
 
@@ -51,7 +52,8 @@ class GpuAssetSyncTest {
         assertEquals(2, updates.getLast().copied());
         assertEquals(2, updates.stream().filter(p -> p.phase().equals("Copying assets")).count());
         assertEquals("new mesh", Files.readString(target.resolve("models/changed.glb")));
-        assertEquals("new image", Files.readString(target.resolve("images/new.png")));
+        assertEquals("new image", Files.readString(target.resolve("models/textures/new.png")));
+        assertFalse(Files.exists(target.resolve("images")));
     }
 
     @Test
@@ -70,14 +72,18 @@ class GpuAssetSyncTest {
 
     @ParameterizedTest
     @ValueSource(strings = { "installation/data", "repository/megamek/data" })
-    void findsSiblingAndOverlaysOnlyAssets(String layout) throws Exception {
+    void findsSiblingAndOverlaysOnlyModelsAndTheirTextures(String layout) throws Exception {
         Path source = directory.resolve("mm-data/data");
         Path target = directory.resolve(layout);
         var assets = List.of("models/board/wall.glb", "models/board/textures/wall.tres",
-              "models/board/textures/wall_emission.png", "models/board/textures/materials.json",
-              "images/units/unit.png", "board-editor/blueprint.json", "shaders/unit-material.frag");
+              "models/board/textures/wall_emission.png", "models/board/textures/materials.json");
         for (String asset : assets) { write(source.resolve(asset), asset); }
-        write(source.resolve("mekfiles/unit.mtf"), "not artwork");
+        var excluded = List.of("images/units/unit.png", "board-editor/blueprint.json",
+              "shaders/unit-material.frag", "mekfiles/unit.mtf");
+        for (String asset : excluded) {
+            write(source.resolve(asset), "authoring file");
+            write(target.resolve(asset), "runtime file");
+        }
         write(source.resolve("models/.DS_Store"), "metadata");
         write(source.resolve("images/Thumbs.db"), "metadata");
         write(target.resolve("models/local.glb"), "local asset");
@@ -87,7 +93,7 @@ class GpuAssetSyncTest {
         assertEquals(source.toRealPath(), result.source());
         assertEquals(assets.size(), result.copied());
         for (String asset : assets) { assertEquals(asset, Files.readString(target.resolve(asset))); }
-        assertFalse(Files.exists(target.resolve("mekfiles")));
+        for (String asset : excluded) { assertEquals("runtime file", Files.readString(target.resolve(asset))); }
         assertFalse(Files.exists(target.resolve("models/.DS_Store")));
         assertFalse(Files.exists(target.resolve("images/Thumbs.db")));
         assertEquals("local asset", Files.readString(target.resolve("models/local.glb")));
@@ -162,6 +168,24 @@ class GpuAssetSyncTest {
 
         assertThrows(IOException.class, () -> GpuAssetSync.sync(target));
         assertFalse(Files.exists(outside.resolve("wall.glb")));
+    }
+
+    @Test
+    void refusesToReplaceStagedFileLinks() throws Exception {
+        Path target = directory.resolve("installation/data");
+        Path outside = directory.resolve("outside.glb");
+        write(outside, "outside mesh");
+        write(directory.resolve("mm-data/data/models/wall.glb"), "new mesh");
+        Files.createDirectories(target.resolve("models"));
+        try {
+            Files.createSymbolicLink(target.resolve("models/wall.glb"), outside);
+        } catch (IOException | UnsupportedOperationException unsupported) {
+            assumeTrue(false, "Symbolic links unavailable: " + unsupported.getMessage());
+        }
+
+        assertThrows(IOException.class, () -> GpuAssetSync.sync(target));
+        assertEquals("outside mesh", Files.readString(outside));
+        assertTrue(Files.isSymbolicLink(target.resolve("models/wall.glb")));
     }
 
     private static void write(Path file, String contents) throws IOException {

@@ -156,6 +156,20 @@ class BoardEditorBlueprintPaletteTest {
     }
 
     @Test
+    void fuelTanksBelongOnlyToIndustryAndObsoleteIndustrialCardsAreAbsent() {
+        assertEquals(List.of("industry/gameplay"), BLUEPRINT.entry("fuelTank/default").sections());
+        assertNull(BLUEPRINT.entry("building/tank-farm"), "One fuel-tank card, under Industry");
+        assertEquals("fuelTank", BLUEPRINT.variant("building/tank-farm").owner());
+        assertTrue(BLUEPRINT.variants("building").stream().noneMatch(variant -> variant.asset().contains("/fuel_tanks/")));
+        for (String suffix : List.of("a", "b", "c", "d")) {
+            String id = "buildings/saxarba/misc/heavy_industrial_" + suffix;
+            assertNull(BLUEPRINT.entry(id), "The obsolete industrial design is not a palette card");
+            assertNotNull(BLUEPRINT.variant(id), "Saved maps can still resolve the old design");
+            assertFalse(BLUEPRINT.variants("building").contains(BLUEPRINT.variant(id)), "The design picker also omits it");
+        }
+    }
+
+    @Test
     void theSealedDomeAndTankFarmLooksHaveAPieceForEveryWeightAndExits() {
         assertEquals("buildings/saxarba/bsealed_medium/bsealed_medium_12",
               BLUEPRINT.variant("building/sealed").model(new Hex(0, "building:2:12", "")));
@@ -165,9 +179,10 @@ class BoardEditorBlueprintPaletteTest {
         sealed.setAppearance(java.util.Map.of("building", new HexAppearance("building/sealed", null, null, null)));
         assertEquals("buildings/saxarba/bsealed_medium/bsealed_medium_12", TilesetScenery.structureModels(sealed).get(Terrains.BUILDING));
         for (String look : List.of("building/sealed", "building/tank-farm")) {
+            String terrain = look.equals("building/tank-farm") ? "fuel_tank" : "building";
             for (int weight = 1; weight <= 4; weight++) {
                 for (int exits = 0; exits < 64; exits++) {
-                    String model = BLUEPRINT.variant(look).model(new Hex(0, "building:" + weight + ":" + exits, ""));
+                    String model = BLUEPRINT.variant(look).model(new Hex(0, terrain + ":" + weight + ":" + exits, ""));
                     // A legacy per-combination model, or the design's kit that stands for all of them.
                     assertTrue(new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
                           || TilesetScenery.customBuildingFile(model).isFile(), look + ": " + model);

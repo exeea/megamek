@@ -66,6 +66,7 @@ final class GpuMapSource implements BoardSource {
     /** EDT-owned measurement; map previews and battles share the same model and native panel. */
     private RulerModel ruler;
     private final BoardEditorSession editor;
+    private final GpuEditorFiles editorFiles;
     private final Runnable requestClose;
     private final Runnable requestLegacy2D;
     private final Runnable requestEditor;
@@ -165,6 +166,7 @@ final class GpuMapSource implements BoardSource {
         this.game = game;
         this.owner = owner;
         this.editor = editor;
+        editorFiles = editor == null ? null : new GpuEditorFiles(editor);
         this.requestClose = requestClose;
         this.requestLegacy2D = requestLegacy2D;
         this.requestEditor = requestEditor;
@@ -501,7 +503,12 @@ final class GpuMapSource implements BoardSource {
             } else if (editor != null && keyCode != KeyEvent.VK_SHIFT && keyCode != KeyEvent.VK_CONTROL
                   && keyCode != KeyEvent.VK_ALT && keyCode != KeyEvent.VK_META) {
                 finishEditorStroke();
-                editor.key(keyCode, modifiers, owner);
+                var action = BoardEditorSession.DOCUMENT_KEYS.stream()
+                      .filter(binding -> binding.key() == keyCode && binding.modifiers() == modifiers)
+                      .map(BoardEditorSession.DocumentKey::action).findFirst().orElse(null);
+                if (action == null || !editorFiles.command(new BoardEditorSession.Command(action))) {
+                    editor.key(keyCode, modifiers, owner);
+                }
             }
             refresh();
         });
@@ -609,9 +616,17 @@ final class GpuMapSource implements BoardSource {
         onSwing(() -> {
             if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()) {
                 finishEditorStroke();
-                editor.command(command, owner);
+                if (!editorFiles.command(command)) { editor.command(command, owner); }
                 refresh();
             }
+        });
+    }
+
+    @Override public GpuEditorFiles.Prompt editorFilePrompt() { return editorFiles == null ? null : editorFiles.prompt(); }
+
+    @Override public void answerEditorFile(GpuEditorFiles.Prompt prompt, Path file, int answer) {
+        onSwing(() -> {
+            if (!closed && editorFiles != null) { editorFiles.answer(prompt, file, answer); refresh(); }
         });
     }
 
@@ -737,6 +752,7 @@ final class GpuMapSource implements BoardSource {
         if (!SwingUtilities.isEventDispatchThread()) { SwingUtilities.invokeLater(this::close); return; }
         if (closed) { return; }
         closed = true;
+        if (editorFiles != null) { editorFiles.clear(); }
         printRequest.set(null);
         finishEditorStroke();
         timer.stop();

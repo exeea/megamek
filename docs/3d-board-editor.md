@@ -16,6 +16,12 @@ The editor's Menu also has the old editor's file and help commands (parity batch
 
 ## Editing
 
+Fuel tanks have one card under **Industry**. Their weights may differ across connected hexes, and their models have no
+building interiors. The former Buildings → Tank farm card and four obsolete Heavy Industrial A–D cards are removed
+from the palette; the obsolete industrial designs also leave the building design picker, while saved maps retain them.
+Existing `.board2` terrain, appearances and object placements load as stored, without automatic corrections.
+Ordinary buildings retain their existing connection rules.
+
 The palette includes **Space** under Ground & Water and **Wall** under Buildings.
 Space keeps a selectable transparent plane and enables the shared, slowly drifting
 star background, in both graphics: a Classic column draws no tileset art on a Space hex. Walls keep `building:5`. Drawing them uses the road/bridge path preview: retrace to take

@@ -190,8 +190,8 @@ public final class TilesetScenery {
     }
 
     /**
-     * The hex's structure models by structure terrain: a designed building's model, else the model a structure's entry
-     * names; only models whose GLB file exists.
+     * The hex's structure models by structure terrain: a designed building's or fuel tank's model, else its tileset entry;
+     * only models whose GLB file exists.
      */
     public static Map<Integer, String> structureModels(Hex hex) {
         return structureModels(tileset(), hex);
@@ -199,12 +199,13 @@ public final class TilesetScenery {
 
     private static Map<Integer, String> structureModels(TilesetMatcher definitions, Hex hex) {
         Map<Integer, String> models = new HashMap<>();
-        var building = hex.getAppearance().get("building");
-        if (building != null && hex.containsTerrain(Terrains.BUILDING)) {
-            var variant = BoardEditorBlueprint.get().variant(building.variant());
-            String asset = building.asset() != null ? building.asset() : variant == null ? null : variant.model(hex);
+        for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK }) {
+            var design = hex.getAppearance().get(terrain == Terrains.BUILDING ? "building" : "fuelTank");
+            if (design == null || !hex.containsTerrain(terrain)) { continue; }
+            var variant = BoardEditorBlueprint.get().variant(design.variant());
+            String asset = design.asset() != null ? design.asset() : variant == null ? null : variant.model(hex);
             if (asset != null && !asset.isBlank() && (new File(Configuration.dataDir(), "models/board/" + asset + ".glb").isFile()
-                  || asset.startsWith("buildings/") && customBuildingFile(asset).isFile())) { models.put(Terrains.BUILDING, asset); }
+                  || asset.startsWith("buildings/") && customBuildingFile(asset).isFile())) { models.put(terrain, asset); }
         }
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
             List<TilesetMatcher.Pick> images = new ArrayList<>(appearanceLayers(definitions, hex, false));

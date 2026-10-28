@@ -281,13 +281,15 @@ supply its value. For a helper change, inspect all consumers recorded through
 
 Tuning → Reload assets first checks for a sibling `mm-data` checkout, beside either
 the installation or the repository containing Gradle's `megamek/data` directory.
-It copies new or byte-different files from `mm-data/data/models`, `images`,
-`board-editor` and `shaders` into the running data directory in the background,
+It copies new or byte-different files only from `mm-data/data/models` (including
+its textures and descriptors) into the running data directory in the background,
 then reloads textures, models, descriptors, tilesets and shaders. Save authoring
-changes in `mm-data` and press Reload assets to preview them with the current
-camera and tuning settings. Files present only in the running data directory are
-left in place; source deletions are not propagated. Without a sibling checkout,
-Reload assets simply rereads the running data directory as before. Live shader
+changes in `mm-data/data/models` and press Reload assets to preview them with the
+current camera and tuning settings. Files present only in the running data directory
+are left in place; source deletions are not propagated. Other data directories are
+not scanned or copied; edits there must already be in the running data directory.
+Without a sibling checkout, Reload assets simply rereads the running data directory
+as before. Live shader
 drafts remain separate from an asset-file reload.
 
 The JVM property `-Dmegamek.gpu.shaderExport=<directory>` writes assembled program

@@ -24,9 +24,11 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.Dialog;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiFileDialog;
 import megamek.client.ui.gdx.UiHexSides;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
+import megamek.client.ui.gdx.UiMessageDialog;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
@@ -49,6 +51,9 @@ final class GpuMapHud implements GpuBoardHud {
     private final GpuHudKit kit;
     private final GpuHudState state;
     private final GpuTuningPanel tuning;
+    private final UiFileDialog files;
+    private GpuEditorFiles.Prompt filePrompt;
+    private UiModal fileQuestion;
     private final Container<Actor> tuningSlot;
     private final Table top = new Table();
     private final Table utilityRow = new Table();
@@ -83,6 +88,7 @@ final class GpuMapHud implements GpuBoardHud {
         this.tuningModel = tuningModel;
         kit = new GpuHudKit(skin);
         UiKit ui = kit.ui;
+        files = new UiFileDialog(ui);
         state = new GpuHudState(history);
         stage = new Stage(new ScreenViewport(), batch);
         north = source.isEditor() ? new GpuEditorNorth(ui) : null;
@@ -208,7 +214,7 @@ final class GpuMapHud implements GpuBoardHud {
         wireframe.pressed(tuningModel.wireframe()).setDisabled(!GpuWireframe.supported());
         menu.pressed(state.dialog == Dialog.MENU);
         tuning.update(new GpuHud.Inputs(frame, view, dialog, preferences, metrics, List.of()));
-        if (state.dialog == Dialog.TUNING) { tuningSlot.toFront(); }
+        if (state.dialog == Dialog.TUNING && UiModal.active(stage) == null) { tuningSlot.toFront(); }
         showMenu(frame.globalCommands());
         List<com.badlogic.gdx.math.Rectangle> occupied = new ArrayList<>();
         if (editor == null) {
@@ -340,6 +346,7 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public void draw() {
+        showFilePrompt();
         kit.update(Set.of());
         stage.getViewport().apply();
         stage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
@@ -364,12 +371,31 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public boolean isModal() {
-        return state.dialog == Dialog.MENU;
+        return UiModal.active(stage) != null || source.editorFilePrompt() != null || state.dialog == Dialog.MENU;
+    }
+
+    private void showFilePrompt() {
+        GpuEditorFiles.Prompt next = source.editorFilePrompt();
+        if (next == filePrompt) { return; }
+        filePrompt = next;
+        if (fileQuestion != null) { fileQuestion.open(false); fileQuestion.remove(); fileQuestion = null; }
+        if (next == null) { return; }
+        state.dialog = Dialog.NONE;
+        contextMenu.cancel();
+        if (next.file() != null) {
+            files.show(stage, next.file(), path -> source.answerEditorFile(next, path, -1));
+        } else {
+            fileQuestion = UiMessageDialog.show(kit.ui, stage, next.title(), next.message(), next.answers(),
+                  answer -> source.answerEditorFile(next, null, answer));
+        }
     }
 
     /** Esc closes the open menu or tuning panel; the open menu takes its list keys. */
     @Override
     public boolean keyDown(int key, int awt, int modifiers) {
+        UiModal active = UiModal.active(stage);
+        if (active != null) { active.focus(); stage.keyDown(key); return true; }
+        if (source.editorFilePrompt() != null) { return true; }
         if (state.dialog == Dialog.MENU) {
             if (key == Input.Keys.ESCAPE) { state.dialog = Dialog.NONE; }
             else { stage.keyDown(key); }
@@ -397,7 +423,7 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public boolean keyUp(int key, int awt) {
-        return (isTextEditing() || contextMenu.isVisible() || state.dialog != Dialog.NONE) && stage.keyUp(key);
+        return (isModal() || isTextEditing() || contextMenu.isVisible() || state.dialog != Dialog.NONE) && stage.keyUp(key);
     }
 
     @Override
@@ -463,6 +489,7 @@ final class GpuMapHud implements GpuBoardHud {
         tuning.dispose();
         losPanel.dispose();
         contextMenu.cancel(); contextMenu.remove();
+        files.close();
         stage.dispose();
         kit.dispose();
     }

@@ -828,6 +828,53 @@ the size), merged into the same font. Icons are Material Symbols Rounded glyphs 
 
 ## 9. Swing in GPU mode
 
+The board editor's Open, Save, Save As and Save As Image use `UiFileDialog` in the window's Scene2D stage. The Open
+flow's unsaved-change, save-validation, overwrite and error prompts also remain in that stage. `GpuEditorFiles`
+owns that interaction on the EDT and publishes an immutable prompt; replies are accepted only for that prompt
+and board. `BoardEditorSession` still loads/saves boards and updates Recent Boards. Other Swing workflows below
+are unchanged.
+
+`UiFileDialog` is shared by the Tuning lighting-environment picker and can be used by any desktop Scene2D scene:
+
+```java
+// Construct on the render thread, alongside the scene's UiKit and Stage.
+UiFileDialog files = new UiFileDialog(ui);
+files.show(stage, new UiFileDialog.Options(title, UiFileDialog.Mode.OPEN,
+      "my-file-purpose", defaultFolder, "", new UiFileDialog.Filter(description, "png", "jpg")),
+      path -> { if (path != null) { load(path); } });
+// Close with the scene, before disposing its stage/skin.
+files.close();
+```
+
+The callback runs on the render thread, once, with a path or null on cancellation. It does not perform the actual
+file load/save. SAVE mode appends the filter's first extension when needed and confirms replacement before returning
+an existing file. Directory enumeration and path validation run on workers; cancelled or superseded results cannot
+update the scene. `close()` cancels outstanding reads without calling back into a disposed scene. The picker borrows
+the stage/skin and owns no GL resources.
+
+Locations are stored in Java's per-user preferences, under `megamek/client/ui/gdx`, using the caller's purpose key.
+Boards and lighting environments have separate keys; successful navigation is remembered even on Cancel. A missing
+location falls back to its readable ancestor, then the caller's folder/home. Drives, UNC paths and Unix paths use
+Java NIO; no native dialog or AWT filesystem service is involved. The picker offers Back/Forward/Up, locations,
+an editable path, filename and search. Ctrl/Cmd+L focuses the path, Ctrl/Cmd+F search, Alt+arrows navigate, F5 refreshes,
+Tab/Shift+Tab traverse controls, Enter opens and Escape cancels. There is no hidden-files toggle.
+Selecting a folder enters it when Open/Save is activated, including after tabbing to the button. Editing the
+filename clears that selection; navigating folders in SAVE mode retains the suggested filename.
+Paths retain Unicode text; the glyphs shown in filenames depend on the supplied UiKit fonts' coverage.
+
+Scenes with their own input dispatch must check `UiModal.active(stage)` before scene shortcuts, focus that modal,
+route keys to the stage, and suspend held camera input while it is active. `GpuMapHud` and `GpuHud` do this. Ordinary
+stage input dispatch needs no extra picker-specific handler. Continue acting/drawing the stage and updating its
+viewport on resize; the picker sizes itself in stage units. The battle HUD preserves existing game-dialog key
+bindings, and an incoming game prompt leaves the higher picker's focused field intact.
+
+Coverage: `FileDialogPathsTest`, `GpuEditorFilesTest`, `UiFileDialogSmokeTest`, and `GpuFileDialogSmokeTest` cover
+filesystem/path handling, document preservation and stale replies, rendering/focus/resize/fullscreen, and the two
+real HUD integrations. `GpuHudInputTest` and `GpuChatToastModalSmokeTest` check game-dialog key routing and focus,
+including a prompt arriving underneath another modal. Desktop execution is verified on Windows only; Linux and
+macOS runs remain required for platform verification. The Windows run skips symlink creation when the account lacks
+that privilege.
+
 While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replaces the battle view's Swing surfaces.
 
 Native startup, including scenarios, constructs neither the Swing Unit Display panel nor its dialog. Weapon and

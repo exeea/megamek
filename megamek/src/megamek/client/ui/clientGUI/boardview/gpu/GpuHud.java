@@ -452,17 +452,11 @@ final class GpuHud implements GpuBoardHud {
         }
     }
 
-    /** While a dialog is pending the keyboard focus stays inside it; afterwards nothing of it keeps the focus. */
+    /** Only the highest modal owns focus, including file pickers above a pending game prompt. */
     private void keepModalFocus() {
-        Actor focus = stage.getKeyboardFocus();
-        if (inputs.dialog() != null && (focus == null || !focus.isDescendantOf(modal.actor()))) {
-            stage.setKeyboardFocus(modal.actor());
-        } else if (inputs.dialog() == null && focus != null && focus.isDescendantOf(modal.actor())) {
-            stage.setKeyboardFocus(null);
-        }
-        if (inputs.dialog() == null) {
-            centeredDialogs.focus();
-        }
+        UiModal active = UiModal.active(stage);
+        if (active == modal.actor()) { modal.focus(); }
+        else if (active != null) { active.focus(); }
     }
 
     /** The stage bounds (y up) of the shown panels, as the last layout placed them. */
@@ -526,7 +520,7 @@ final class GpuHud implements GpuBoardHud {
 
     @Override
     public boolean isModal() {
-        return centeredDialogOpen() || inputs != null && inputs.dialog() != null;
+        return UiModal.active(stage) != null || centeredDialogOpen() || inputs != null && inputs.dialog() != null;
     }
 
     /**
@@ -538,6 +532,10 @@ final class GpuHud implements GpuBoardHud {
     @Override
     public boolean keyDown(int key, int awt, int modifiers) {
         swallowTyped = false;
+        UiModal active = UiModal.active(stage);
+        if (active != null && active != centeredDialogs && active != modal.actor()) {
+            active.focus(); stage.keyDown(key); consumedKeys.add(key); return true;
+        }
         boolean consumed = inputs != null && dispatch(key, binds(awt, modifiers));
         if (consumed) {
             consumedKeys.add(key);

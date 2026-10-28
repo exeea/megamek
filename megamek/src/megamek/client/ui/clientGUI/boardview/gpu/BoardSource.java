@@ -184,6 +184,8 @@ interface BoardSource extends AutoCloseable {
     default Map<Coords, List<BoardEditorTerrain.Badge>> editorBadges() { return Map.of(); }
     default List<String> editorThemes() { return List.of(); }
     default void editorCommand(megamek.client.ui.boardeditor.BoardEditorSession.Command command, long generation) { }
+    default GpuEditorFiles.Prompt editorFilePrompt() { return null; }
+    default void answerEditorFile(GpuEditorFiles.Prompt prompt, java.nio.file.Path file, int answer) { }
     default void editorValue(megamek.client.ui.boardeditor.BoardEditorSession.Command command, boolean finished, long generation) { }
     default void editorPointer(Coords coords, double x, double y, boolean drag, long generation) { }
     default void editorPointer(Coords coords, double x, double y, boolean drag, String object, long generation) {

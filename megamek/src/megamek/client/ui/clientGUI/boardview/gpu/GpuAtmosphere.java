@@ -30,7 +30,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 /** Scene grading, bounded fog/shafts and wind-driven cloud shadows. Owns its GL resources. */
 final class GpuAtmosphere implements Disposable {
     /** Balance between the ambient light and the spotlight (sun/moon) */
-    static final float AMBIENT_LIGHT_BALANCE = 0.22f;
+    static final float AMBIENT_LIGHT_BALANCE = 0.20f;
     /** Maximum local deviation from the shared ground-layer height, in terrain levels. */
     static final float FOG_HEIGHT_VARIATION = 1.25f;
     /** Thins the spaces between fog banks; 0 gives a uniform layer, 1 permits clear gaps. */

@@ -1,17 +1,14 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.Component;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
-import javax.swing.JDialog;
-import javax.swing.JFileChooser;
 import javax.swing.SwingUtilities;
-import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -157,6 +154,7 @@ final class GpuBoardTuning {
     private GpuLightingEnvironment environmentImage;
     private int environmentRequest;
     private TextButton chooseEnvironment;
+    private Runnable environmentChooser = () -> { };
     /** Show the sky that lights the scene as the backdrop; not saved. */
     private final CheckBox lightingSky;
     private Label environmentStatus;
@@ -493,7 +491,7 @@ final class GpuBoardTuning {
               new Knob("Shadows", 0, 100, 1, "%.0f%%",
                     "Cast-shadow strength: 0 removes geometry shadows; 100 keeps full occlusion. Independent of moon contrast."),
               new Knob("Ambient light", 0, 100, 1, "%.0f%%",
-                    "Ambient/direct balance: 22 is the default daylight balance, 0 is direct only, 100 is ambient only."),
+                    "Ambient/direct balance: 20 is the default daylight balance, 0 is direct only, 100 is ambient only."),
               new Knob("Sky contribution", 0, 200, 1, "%.0f%%",
                     "Scales sky illumination and reflections. 100 is the default; 0 removes them. The visible sky is unchanged.")),
               this::applyRendering, 0);
@@ -503,7 +501,7 @@ final class GpuBoardTuning {
         chooseEnvironment.addListener(new ChangeListener() {
             @Override public void changed(ChangeEvent event, Actor actor) {
                 chooseEnvironment.setChecked(false);
-                chooseEnvironment(source);
+                environmentChooser.run();
             }
         });
         rows.add(chooseEnvironment).colspan(3).left().row();
@@ -712,7 +710,7 @@ final class GpuBoardTuning {
         reloadAssets.setName("tuning-reload-assets");
         reloadAssets.setDisabled(source == null);
         reloadAssets.setProgrammaticChangeEvents(false);
-        reloadAssets.addListener(new TextTooltip("Copy changed assets from a sibling mm-data checkout, when available, then reload "
+        reloadAssets.addListener(new TextTooltip("Copy changed files from a sibling mm-data/data/models directory, when available, then reload "
               + "textures, GLB meshes, model descriptors, tilesets and shaders from disk. "
               + "Save your edited files first. The board rebuilds with your current camera and tuning settings.", skin, "menu"));
         assetReloadStatus = new Label("", skin, "small");
@@ -1063,42 +1061,27 @@ final class GpuBoardTuning {
         if (environmentImage != options.environmentImage()) { setEnvironmentImage(options.environmentImage()); }
     }
 
+    void onChooseEnvironment(Runnable choose) { environmentChooser = choose; }
+
     /** CPU-only file decode/filtering publishes one immutable result to this window's render thread. */
-    private void chooseEnvironment(BoardSource source) {
+    void loadEnvironment(Path file, BoardSource source) {
         if (chooseEnvironment.isDisabled()) { return; }
         chooseEnvironment.setDisabled(true);
         int request = ++environmentRequest;
         var application = Gdx.app;
-        SwingUtilities.invokeLater(() -> {
-            var chooser = new JFileChooser() {
-                @Override protected JDialog createDialog(Component parent) {
-                    JDialog dialog = super.createDialog(parent);
-                    // The native board is not an AWT owner, so its dialog-raising listener cannot find this picker.
-                    dialog.setAlwaysOnTop(true);
-                    return dialog;
-                }
-            };
-            chooser.setDialogTitle("Lighting environment (2:1 panorama; visible sky stays unchanged)");
-            chooser.setFileFilter(new FileNameExtensionFilter("Panorama: HDR, PNG, JPEG", "hdr", "png", "jpg", "jpeg"));
-            if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) {
-                application.postRunnable(() -> { if (request == environmentRequest) { chooseEnvironment.setDisabled(false); } });
-                return;
+        environmentStatus.setText("Preparing " + file.getFileName());
+        CompletableFuture.supplyAsync(() -> {
+            try { return GpuLightingEnvironment.load(file); }
+            catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }).whenComplete((image, failure) -> application.postRunnable(() -> {
+            if (request != environmentRequest || source != null && source.isClosed()) { return; }
+            chooseEnvironment.setDisabled(false);
+            if (failure == null) { setEnvironmentImage(image); }
+            else {
+                Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                environmentStatus.setText("Previous lighting kept: " + cause.getMessage());
             }
-            var file = chooser.getSelectedFile().toPath();
-            application.postRunnable(() -> { if (request == environmentRequest) { environmentStatus.setText("Preparing " + file.getFileName()); } });
-            CompletableFuture.supplyAsync(() -> {
-                try { return GpuLightingEnvironment.load(file); }
-                catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
-            }).whenComplete((image, failure) -> application.postRunnable(() -> {
-                if (request != environmentRequest || source != null && source.isClosed()) { return; }
-                chooseEnvironment.setDisabled(false);
-                if (failure == null) { setEnvironmentImage(image); }
-                else {
-                    Throwable cause = failure.getCause() == null ? failure : failure.getCause();
-                    environmentStatus.setText("Previous lighting kept: " + cause.getMessage());
-                }
-            }));
-        });
+        }));
     }
 
     void setEnvironmentImage(GpuLightingEnvironment image) {
