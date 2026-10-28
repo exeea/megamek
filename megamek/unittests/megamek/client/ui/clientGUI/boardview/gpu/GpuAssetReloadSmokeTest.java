@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.lwjgl.opengl.GL11;
 
-/** Real button, EDT capture, file edits, GL uploads and repeated disposal in a running battle view. */
+/** Real button, sibling asset sync, EDT capture, GL uploads and repeated disposal in a running battle view. */
 @Tag("on-demand")
 class GpuAssetReloadSmokeTest {
     @TempDir
@@ -49,6 +49,8 @@ class GpuAssetReloadSmokeTest {
         File data = Configuration.dataDir();
         File images = Configuration.imagesDir();
         File fonts = Configuration.fontsDir();
+        Path authoring = Files.createDirectories(directory.resolve("mm-data/data"));
+        directory = Files.createDirectories(directory.resolve("repository/megamek/data"));
         Path models = data.toPath().resolve("models");
         try (var paths = Files.walk(models)) {
             for (Path path : paths.toList()) {
@@ -153,7 +155,9 @@ class GpuAssetReloadSmokeTest {
                             Files.writeString(shaders.resolve("light-model.glsl"),
                                   GpuShaderSource.read("light-model.glsl") + "\n#define ASSET_RELOAD_INCLUDE\n");
                             Path textures = directory.resolve("models/board/textures");
-                            GpuAssetReloadTest.png(textures.resolve("terrain/classic/rock_albedo.png"), 0xff0000ff);
+                            Path authoredRock = authoring.resolve("models/board/textures/terrain/classic/rock_albedo.png");
+                            Files.createDirectories(authoredRock.getParent());
+                            GpuAssetReloadTest.png(authoredRock, 0xff0000ff);
                             // A finished export changes every map, wider than its catalogued 512 pixels: at the same
                             // texel density one repeat now covers 1.25 times the ground. Deliberately distinct
                             // height/AO values expose accidental sRGB conversion of numerical data.
@@ -189,7 +193,10 @@ class GpuAssetReloadSmokeTest {
                             assertEquals(asphaltCoverage, assets().roadCoverage("roads/asphalt"),
                                   "Edits wait for the actual Reload action");
                             assertSame(originalEmission, assets().lavaEmission(), "Edits wait for the actual Reload action");
-                            scaleMesh(directory.resolve("models/board/vegetation/tree.glb"));
+                            Path authoredTree = authoring.resolve("models/board/vegetation/tree.glb");
+                            Files.createDirectories(authoredTree.getParent());
+                            Files.copy(directory.resolve("models/board/vegetation/tree.glb"), authoredTree);
+                            scaleMesh(authoredTree);
                             scaleMesh(directory.resolve("models/board/rocks/block-0.glb"));
                             scaleMesh(directory.resolve("models/board/scatter/bush-0.glb"));
                             scaleMesh(glb.directory.resolve("mesh.glb"));
@@ -200,6 +207,11 @@ class GpuAssetReloadSmokeTest {
                             assertTrue(button.isDisabled());
                             step = 1;
                         } else if (step == 1 && !button.isDisabled()) {
+                            assertEquals("OK", status.getText().toString());
+                            assertEquals(-1, Files.mismatch(
+                                  authoring.resolve("models/board/textures/terrain/classic/rock_albedo.png"),
+                                  directory.resolve("models/board/textures/terrain/classic/rock_albedo.png")),
+                                  "Reload must stage the sibling checkout's texture before uploading it");
                             Map<String, ShaderProgram> reloaded = programs();
                             assertEquals(originalPrograms.keySet(), reloaded.keySet());
                             originalPrograms.forEach((name, shader) -> assertNotSame(shader, reloaded.get(name), name));
@@ -322,7 +334,7 @@ class GpuAssetReloadSmokeTest {
                                 originalRoughness = assets().finishArrays(surfaces(sculptLayers), sculptLayers.size()).maps();
                                 originalMagma = assets().magma(true);
                                 originalEmission = assets().lavaEmission();
-                                copyNativeBatch(Path.of(nativePlan), directory);
+                                copyNativeBatch(Path.of(nativePlan), authoring);
                                 Files.delete(shaders.resolve("atmosphere-composite.frag"));
                                 Files.delete(shaders.resolve("unit-material.frag"));
                                 Files.delete(shaders.resolve("light-model.glsl"));

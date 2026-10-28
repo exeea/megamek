@@ -709,7 +709,8 @@ final class GpuBoardTuning {
         reloadAssets.setName("tuning-reload-assets");
         reloadAssets.setDisabled(source == null);
         reloadAssets.setProgrammaticChangeEvents(false);
-        reloadAssets.addListener(new TextTooltip("Reload textures, GLB meshes, model descriptors, tilesets and shaders from disk. "
+        reloadAssets.addListener(new TextTooltip("Copy changed assets from a sibling mm-data checkout, when available, then reload "
+              + "textures, GLB meshes, model descriptors, tilesets and shaders from disk. "
               + "Save your edited files first. The board rebuilds with your current camera and tuning settings.", skin, "menu"));
         assetReloadStatus = new Label("", skin, "small");
         assetReloadStatus.setName("tuning-reload-status");

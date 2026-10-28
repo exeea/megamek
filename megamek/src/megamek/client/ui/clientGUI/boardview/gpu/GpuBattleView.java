@@ -63,6 +63,7 @@ import megamek.client.ui.gdx.UiCursorCapture;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
@@ -583,13 +584,28 @@ class GpuBattleView extends ApplicationAdapter {
         }
     }
 
-    /** The EDT rereads artwork first; only its completion hands GPU disposal back to the render thread. */
+    /** File sync runs in the background, then EDT artwork capture hands GPU disposal back to the render thread. */
     private void reloadAssets() {
         pause();
         reloadingAssets = true;
         waitingForAssetCapture = true;
         assetReloadFailed = false;
         var application = Gdx.app;
+        var data = Configuration.dataDir().toPath();
+        Thread.ofVirtual().name("gpu-asset-sync").start(() -> {
+            try {
+                var result = GpuAssetSync.sync(data);
+                if (result.source() != null) {
+                    LOGGER.info("Asset reload copied {} changed files from {} to {}", result.copied(), result.source(), data);
+                }
+                captureReloadedAssets(application);
+            } catch (java.io.IOException | RuntimeException failure) {
+                assetReloadFailed(application, failure);
+            }
+        });
+    }
+
+    private void captureReloadedAssets(Application application) {
         SwingUtilities.invokeLater(() -> {
             try {
                 source.reloadAssets();
@@ -623,10 +639,14 @@ class GpuBattleView extends ApplicationAdapter {
                     }
                 }));
             } catch (java.io.IOException | RuntimeException failure) {
-                application.postRunnable(() -> {
-                    if (!disposed && !source.isClosed()) { assetReloadFailed(failure); }
-                });
+                assetReloadFailed(application, failure);
             }
+        });
+    }
+
+    private void assetReloadFailed(Application application, Exception failure) {
+        application.postRunnable(() -> {
+            if (!disposed && !source.isClosed()) { assetReloadFailed(failure); }
         });
     }
 
