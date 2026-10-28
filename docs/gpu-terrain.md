@@ -44,7 +44,8 @@ manufactured ends onto banks. `BoardTunnel` supplies cosmetic cliff portals.
 [natural bridges](gpu-natural-bridges.md) describe the connection contracts.
 
 For buildings, `GpuAssets` finds a custom kit or legacy model selected by the
-tileset. `GpuBuilding` assembles seeded floor/roof recipes to the game's height;
+tileset. `GpuBuilding` assembles seeded floor/roof recipes to the game's height, with the connection pieces the
+hex's exits pick (`ConnectedKit`);
 `GpuBuildingInterior` derives slabs and supports from the occupied footprint.
 Use [modular buildings](gpu-modular-buildings.md) for kit assembly and
 [asset proportions](board-asset-proportions.md) for legacy models and bridge assets.

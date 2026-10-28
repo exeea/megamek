@@ -143,11 +143,17 @@ public final class TilesetScenery {
         return result;
     }
 
-    /** New kits use family/name paths; the selected legacy asset keeps its tileset provenance for fallback. */
+    /**
+     * New kits use family/name paths; the selected legacy asset keeps its tileset provenance for fallback. A kit named
+     * for the design alone stands for every exit value of its per-combination keys ({@code ..._NN}): its connection
+     * pieces follow the hex's exits.
+     */
     public static File customBuildingFile(String asset) {
         String relative = asset.substring("buildings/".length());
         if (relative.startsWith("saxarba/")) { relative = relative.substring("saxarba/".length()); }
-        return new File(Configuration.dataDir(), "models/buildings/" + relative + ".glb");
+        File exact = new File(Configuration.dataDir(), "models/buildings/" + relative + ".glb");
+        File design = new File(Configuration.dataDir(), "models/buildings/" + relative.replaceFirst("_[0-9]{2}$", "") + ".glb");
+        return exact.isFile() || !design.isFile() ? exact : design;
     }
 
     /**

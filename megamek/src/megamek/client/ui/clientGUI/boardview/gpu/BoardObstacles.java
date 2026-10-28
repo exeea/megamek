@@ -23,7 +23,7 @@ final class BoardObstacles {
     private final List<Footprint> footprints = new ArrayList<>();
     private final boolean plants;
 
-    private record Geometry(Map<String, BoardShape> shapes, Map<String, String> modules, BoundingBox bounds) { }
+    private record Geometry(Map<String, BoardShape> shapes, BoundingBox bounds) { }
 
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
     static void reload() { MODELS.clear(); BoardWall.reload(); }
@@ -136,13 +136,13 @@ final class BoardObstacles {
             boolean assembled = BoardIndustrial.supports(feature) || wall;
             boolean custom = object == null && !assembled && feature.asset().startsWith("buildings/")
                   && TilesetScenery.customBuildingFile(feature.asset()).isFile();
-            File root = new File(Configuration.dataDir(), custom ? "models/buildings" : "models/board");
+            File root = new File(Configuration.dataDir(), "models/board");
             // A tree's winter form has the shape of its bare file's geometry.
             File file = custom ? TilesetScenery.customBuildingFile(feature.asset())
                   : RigidGlb.source(root, feature.asset()).file();
             // Unresolved native references draw a renderer-owned placeholder and must remain editable.
             if (object != null && !file.isFile()) { continue; }
-            var geometry = assembled ? null : geometry(root, file, custom);
+            var geometry = assembled || custom ? null : geometry(root, file);
             List<Vector3> points = new ArrayList<>();
             if (wall) {
                 // Ground cover grows up to a military wall's body; other dressing also keeps clear of its buttresses.
@@ -150,14 +150,16 @@ final class BoardObstacles {
             } else if (assembled) {
                 points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
             } else if (custom) {
-                var modules = GpuBuilding.select(geometry.modules(), Math.max(1, Math.round(feature.height())),
-                      GpuBuilding.seed(tile, feature));
-                for (String module : modules.stream().distinct().toList()) {
-                    var shape = geometry.shapes().get(geometry.modules().get(module));
-                    // Use the same selected roof underside that defines the rendered building's occupied interior.
-                    var triangles = triangles(shape);
-                    if (module.startsWith("roof")) { triangles = GpuBuildingInterior.plane(triangles, 0, false); }
-                    points.addAll(triangles);
+                // The drawn kit's pieces for this hex's connections (GpuBuilding), with the selected roof's underside
+                // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole.
+                var kit = GpuBuilding.kit(file);
+                int levels = Math.max(1, Math.round(feature.height()));
+                for (var piece : ConnectedKit.placements(kit, 0, levels, ConnectedKit.reach(scene, tile, levels), 0,
+                      GpuBuilding.seed(tile, feature))) {
+                    var triangles = ConnectedKit.triangles(kit, 0, piece);
+                    var underside = !piece.role().startsWith("roof") ? List.<Vector3>of()
+                          : GpuBuildingInterior.plane(triangles, piece.level() * GpuBuilding.LEVEL_HEIGHT, false);
+                    points.addAll(underside.isEmpty() ? triangles : underside);
                 }
             } else {
                 // A model's hidden numbered parts, as an empty slot's fighting hole, are no footprint.
@@ -231,15 +233,15 @@ final class BoardObstacles {
     }
 
     /** A model's finest authored level, read once per file for every hex and worker. */
-    private static Geometry geometry(File root, File file, boolean custom) {
+    private static Geometry geometry(File root, File file) {
         return MODELS.computeIfAbsent(file.getAbsoluteFile(), key -> new BoardKit<>(() -> {
             var data = RigidGlb.loadLods(new FileHandle(key), root.toPath()).getFirst();
-            var shapes = BoardShape.shapes(data, custom);
+            var shapes = BoardShape.shapes(data);
             BoundingBox bounds = new BoundingBox().inf();
             shapes.values().forEach(shape -> shape.polygons().forEach(polygon -> {
                 for (Vector3 point : polygon.points()) { bounds.ext(point); }
             }));
-            return new Geometry(shapes, custom ? GpuBuilding.parts(data) : Map.of(), bounds);
+            return new Geometry(shapes, bounds);
         })).get();
     }
 
@@ -269,7 +271,7 @@ final class BoardObstacles {
         File root = new File(Configuration.dataDir(), "models/board");
         File file = RigidGlb.source(root, feature.asset()).file();
         if (!file.isFile()) { return null; }
-        BoundingBox bounds = geometry(root, file, false).bounds();
+        BoundingBox bounds = geometry(root, file).bounds();
         var transform = BoardFeatures.decorationTransform(owner, feature, 0);
         List<Vector3> corners = new ArrayList<>(8);
         for (int i = 0; i < 8; i++) {

@@ -33,9 +33,10 @@ class BoardObstaclesTest {
 
     @Test
     void floatingNativeObjectsUseTheirAbsoluteHeightAndUniformScaleForClearance() {
-        var object = new megamek.common.board.BoardDecoration("floating", "prop", TANK, null,
+        String model = "scenery/construction/bulldozer";
+        var object = new megamek.common.board.BoardDecoration("floating", "prop", model, null,
               0, 0, 0, false, .5, megamek.common.board.BoardDecoration.Placement.absolute(8), 0);
-        var feature = new BoardScene.Feature(TANK, 0, 0, 0, .5f, 1, 0, BoardScene.FeatureKind.PROP, 0, false, object);
+        var feature = new BoardScene.Feature(model, 0, 0, 0, .5f, 1, 0, BoardScene.FeatureKind.PROP, 0, false, object);
         var scene = scene(CENTER, feature, 2);
         var obstacles = new BoardObstacles(scene, scene.tile(CENTER));
         int occupied = 0;
@@ -232,7 +233,7 @@ class BoardObstaclesTest {
     @Test
     void modularClearancePreservesAuthoredXyOffsetsAndDiscardsVerticalPlacement() {
         var data = RigidGlb.loadLods(GpuBuildingTest.file()).getFirst();
-        var original = BoardShape.shapes(data, true);
+        var original = clearance(ConnectedKit.load(List.of(data)));
         // Both baked geometry and node transforms determine XY placement; only Z is normalized.
         for (var mesh : data.meshes) {
             for (int i = 0; i < mesh.vertices.length; i += RigidGlb.STRIDE) {
@@ -242,18 +243,21 @@ class BoardObstaclesTest {
             }
         }
         for (var node : data.nodes) { node.translation.add(900, -400, -257); }
-        var moved = BoardShape.shapes(data, true);
-        for (String name : original.keySet()) {
-            var a = original.get(name);
-            var b = moved.get(name);
-            assertEquals(a.height(), b.height(), .0001f);
-            for (int i = 0; i < a.polygons().size(); i++) {
-                for (int j = 0; j < 3; j++) {
-                    Vector3 expected = new Vector3(a.polygons().get(i).points()[j]).add(971, -423, 0);
-                    assertTrue(expected.epsilonEquals(b.polygons().get(i).points()[j], .0001f));
-                }
-            }
+        var moved = clearance(ConnectedKit.load(List.of(data)));
+        assertEquals(original.size(), moved.size());
+        for (int i = 0; i < original.size(); i++) {
+            Vector3 expected = new Vector3(original.get(i)).add(971, -423, 0);
+            assertTrue(expected.epsilonEquals(moved.get(i), .0001f), expected + " " + moved.get(i));
         }
+    }
+
+    /** A three-level assembly's clearance triangles, as BoardObstacles takes them from a custom kit. */
+    private static List<Vector3> clearance(ConnectedKit.Kit kit) {
+        List<Vector3> result = new ArrayList<>();
+        for (var piece : ConnectedKit.placements(kit, 0, 3, new int[6], 0, 7)) {
+            result.addAll(ConnectedKit.triangles(kit, 0, piece));
+        }
+        return result;
     }
 
     @Test
@@ -360,7 +364,8 @@ class BoardObstaclesTest {
 
     @Test
     void everyGeyserClearsGrassFromItsBasinAndKeepsSurroundingMeadow() {
-        for (String state : List.of("water-dormant", "water-erupting", "magma")) {
+        for (String state : List.of("water-dormant", "water-erupting", "magma", "water-dormant-b", "water-erupting-b",
+              "magma-b")) {
             var feature = new BoardScene.Feature("scenery/geysers/" + state,
                   7, -3, 27, .8f, 0, 0, BoardScene.FeatureKind.SCENERY);
             BoardScene scene = scene(CENTER, feature, 0, BoardScene.Surface.GRASS);
@@ -370,7 +375,9 @@ class BoardObstaclesTest {
             assertTrue(roots.size / 4 > 1500, "The surrounding meadow must remain planted: " + state);
             float scale = BoardGeometry.hexScale();
             float x = BoardGeometry.centerX(CENTER) + 7 * scale, y = BoardGeometry.centerY(CENTER) - 3 * scale;
-            float basin = 18 * .8f * scale;
+            // Every look's solid sinter or spatter reaches at least 10.6 model units from its vent (magma-b's, the
+            // smallest); each outline follows its photograph, so grass meets it unevenly beyond.
+            float basin = 10 * .8f * scale;
             int outside = 0;
             for (int i = 0; i < roots.size; i += 4) {
                 float dx = roots.get(i) - x, dy = roots.get(i + 1) - y;

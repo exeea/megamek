@@ -35,7 +35,7 @@ final class GpuSkyVisibility implements Disposable {
      */
     static final float STRENGTH = 1;
     /** The cells' horizontal size in metres, coarser where the board would need more than MAX_CELLS along a side. */
-    private static final float CELL_METRES = 4;
+    static final float CELL_METRES = 4;
     private static final int MAX_CELLS = 256;
     private static final int MAX_LAYERS = 64;
     /** Azimuths searched for the horizon; each search walks outwards in steps growing by STEP_GROWTH up to REACH. */
@@ -44,7 +44,7 @@ final class GpuSkyVisibility implements Disposable {
     private static final float STEP_GROWTH = 1.25f;
 
     /** The board's heights and the volume's frame, all in world units; heights are NaN off the board. */
-    private record Field(int width, int height, int layers, float x, float y, float z, float cell, float layer,
+    record Field(int width, int height, int layers, float x, float y, float z, float cell, float layer,
           float[] heights) { }
 
     /** The neutral volume until the first board's, owned; made when first bound, on the render thread. */
@@ -89,6 +89,9 @@ final class GpuSkyVisibility implements Disposable {
         if (pending == null && waiting != null) { startSearch(waiting); }
     }
 
+    /** Whether the volume of the heights the last update saw is in place: no search runs or waits. */
+    boolean current() { return pending == null && waiting == null; }
+
     /** Installs the volume of the latest heights at once, waiting for its search: reviews that capture the next frame. */
     void finish() {
         if (pending != null) { install(); }
@@ -126,9 +129,11 @@ final class GpuSkyVisibility implements Disposable {
 
     private void install() {
         Field field = pendingField;
-        byte[] values = pending.join();
+        CompletableFuture<byte[]> search = pending;
+        // Cleared first: a failed search throws once and leaves the last volume in place.
         pending = null;
         pendingField = null;
+        byte[] values = search.join();
         if (texture != null) { texture.dispose(); }
         texture = upload(field.width(), field.height(), field.layers(), values);
         originX = field.x() - field.cell() / 2;
@@ -179,11 +184,26 @@ final class GpuSkyVisibility implements Disposable {
      * south-east), for the shader to weigh by the quarters a surface faces: a wall must not count the sky that it hides
      * itself. Over its DIRECTIONS / 4 azimuths, a quarter keeps the mean cos² of the horizon's elevation
      * (1 / (1 + tan²)), the share of a uniform sky's light that reaches a level receiver past the relief. A cell inside
-     * the ground takes the surface's values above it, so filtering towards the surface never reads rock. Worker thread.
+     * the ground searches from the lowest top around it, its own or a neighbour's: inside a plateau or a plain it holds
+     * the surface's values, so filtering towards the surface never reads rock, and behind a wall's foot it holds the
+     * foot's shade rather than the open sky on top. Worker thread.
      */
-    private static byte[] search(Field field) {
+    static byte[] search(Field field) {
         int width = field.width(), height = field.height(), layers = field.layers();
         float[] heights = field.heights();
+        float[] lowest = new float[width * height];
+        for (int j = 0; j < height; j++) {
+            for (int i = 0; i < width; i++) {
+                float low = heights[j * width + i];
+                for (int y = Math.max(0, j - 1); y <= Math.min(height - 1, j + 1); y++) {
+                    for (int x = Math.max(0, i - 1); x <= Math.min(width - 1, i + 1); x++) {
+                        // NaN, off the board, never wins a comparison.
+                        if (heights[y * width + x] < low) { low = heights[y * width + x]; }
+                    }
+                }
+                lowest[j * width + i] = low;
+            }
+        }
         byte[] values = new byte[width * height * layers * 4];
         float reach = BoardRelief.metres(REACH_METRES) / field.cell();
         float[] cos = new float[DIRECTIONS], sin = new float[DIRECTIONS];
@@ -196,7 +216,7 @@ final class GpuSkyVisibility implements Disposable {
         IntStream.range(0, height * layers).parallel().forEach(row -> {
             int j = row % height, k = row / height;
             for (int i = 0; i < width; i++) {
-                float ground = heights[j * width + i];
+                float ground = lowest[j * width + i];
                 float z = field.z() + k * field.layer();
                 if (!Float.isNaN(ground)) { z = Math.max(z, ground); }
                 int at = ((k * height + j) * width + i) * 4;

@@ -313,7 +313,7 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
         }
         if (part.material.has(GpuMagmaShader.TYPE)) { return "magma-" + field(part.material.get(GpuMagmaShader.TYPE), "mode"); }
         for (String marker : List.of("boardImpostor", "boardFoliage", "boardBiomeVegetation", "boardVegetationWind",
-              "boardBankTurf", "boardPit", "boardGround", "boardBridgeDeck", "boardModelSurface", "boardBuildingCutaway")) {
+              "boardPit", "boardGround", "boardBridgeDeck", "boardModelSurface", "boardBuildingCutaway")) {
             long type = Attribute.getAttributeType(marker);
             if (type != 0 && part.material.has(type)) { return marker; }
         }
@@ -439,7 +439,7 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
         List<?> chunks = (List<?>) field(terrain, "chunks");
         for (int index = 0; index < chunks.size(); index++) {
             Object chunk = chunks.get(index);
-            for (String category : List.of("opaque", "scatter", "overlays", "water", "tactical")) {
+            for (String category : List.of("opaque", "scatter", "overlays", "water")) {
                 for (Object value : (List<?>) field(chunk, category)) {
                     for (Mesh mesh : ((ModelInstance) value).model.meshes) { addOrigin(mesh, category, index); }
                 }

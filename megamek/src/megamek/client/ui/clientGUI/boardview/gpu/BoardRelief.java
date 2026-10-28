@@ -2240,9 +2240,11 @@ final class BoardRelief {
         if (!wall && !upper.liquid() && !lower.liquid() && upper.family() == GRASS
               && upper.level() - lower.level() == 2) {
             // Two earth faces share a shallow grassy shoulder. Keep the canonical rim/foot and a monotone
-            // profile: corners, support, picking and grass roots all follow this same finished surface.
+            // profile: corners, support, picking and grass roots all follow this same finished surface. The faces
+            // stay under about 75 degrees, nearer how soil stands: near-vertical ones cast the rim's shadow far down
+            // the bank. A weaker shoulder would let them lean back further but grows too little grass.
             float height = Math.clamp((z - bottom) / (top - bottom), 0, 1);
-            float bench = .35f + .5f * shoulder;
+            float bench = .2f + .35f * shoulder;
             t = 1 - 2 * (height + bench * (float) Math.sin(4 * Math.PI * height) / (4 * (float) Math.PI));
         }
         return wall && lower.liquid() || !lower.liquid() && kept(lower) ? room / 2 * (t - 1)

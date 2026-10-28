@@ -122,6 +122,7 @@ final class GpuBoardTuning {
     private float uiScaleSaved;
     private final SelectBox<String> antiAliasing;
     private final CheckBox specularAntialiasing;
+    private final CheckBox tessellation;
     private final CheckBox ambientOcclusion;
     private final CheckBox depthCues;
     /** The graphics card rows; null on computers without two cards to choose from. */
@@ -306,6 +307,22 @@ final class GpuBoardTuning {
             public void changed(ChangeEvent event, Actor actor) {
                 boolean enabled = terrainParallax.isChecked();
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardTerrainParallax(enabled));
+            }
+        });
+        tessellation = checkbox(skin, "Tessellation", "tuning-tessellation");
+        // The saved choice (off until one is saved); like anti-aliasing, Defaults leaves it alone.
+        tessellation.setChecked(GUIPreferences.getInstance().getBoardTessellation());
+        // OpenGL 4.0 and later: every Mac's 4.1, current Windows and Linux drivers' 4.6.
+        tessellation.setDisabled(!GpuTessellation.available());
+        tessellation.addListener(new TextTooltip("Rounds the sculpted banks and cliffs between their mesh points, so"
+              + " their outlines and the shadows they cast curve as the ground does. Up close it costs an integrated"
+              + " graphics chip a few milliseconds a frame. Needs OpenGL 4.0. Switching it rebuilds the board. The"
+              + " choice is saved for the next session.", skin, "menu"));
+        tessellation.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = tessellation.isChecked();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardTessellation(enabled));
             }
         });
         ambientOcclusion = checkbox(skin, "Ambient occlusion", "tuning-ambient-occlusion");
@@ -1088,6 +1105,11 @@ final class GpuBoardTuning {
     /** SMAA on the window's 3D scene. */
     boolean antiAliasing() {
         return antiAliasing.getSelectedIndex() == 1;
+    }
+
+    /** Tessellated sculpted relief (GpuTessellation), where the context offers it. */
+    boolean tessellation() {
+        return tessellation.isChecked();
     }
 
     /** Screen-space ambient occlusion on the opaque scene (GpuAmbientOcclusion). */

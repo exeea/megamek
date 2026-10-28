@@ -71,12 +71,12 @@ class BoardPaintCoverTest {
     }
 
     @Test
-    void bankTurfReedsAndCropsLoseTheirRootsUnderOpaquePaint() {
+    void bankRimsReedsAndCropsLoseTheirRootsUnderOpaquePaint() {
         var bank = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 5 ? 2 : 0, -1, 0));
         var tile = bank.tile(AT);
         var paint = BoardDecals.Opacity.of(tile, stamp(COVER));
-        assertTrue(GpuBankTurf.plant(bank, tile, support(bank), null).size > 0, "The bank grows turf");
-        assertNull(GpuBankTurf.plant(bank, tile, support(bank), paint));
+        assertTrue(GpuGroundCover.plantRim(bank, tile, support(bank), null).size > 0, "The bank's rim grows blades");
+        assertNull(GpuGroundCover.plantRim(bank, tile, support(bank), paint));
         for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
             var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, kind, 0));
             // Crops stand only in a field of wheat or maize.

@@ -276,7 +276,7 @@ class GpuTerrainLoadBenchmarkTest {
                 floats(out, plants.maize());
                 floats(out, plants.reeds());
                 floats(out, plants.grass());
-                floats(out, plants.turf());
+                floats(out, plants.rim());
             }
             var roads = prepared.roads().get(coords);
             if (roads != null) {

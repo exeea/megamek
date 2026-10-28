@@ -168,7 +168,9 @@ class BoardEditorBlueprintPaletteTest {
             for (int weight = 1; weight <= 4; weight++) {
                 for (int exits = 0; exits < 64; exits++) {
                     String model = BLUEPRINT.variant(look).model(new Hex(0, "building:" + weight + ":" + exits, ""));
-                    assertTrue(new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile(), look + ": " + model);
+                    // A legacy per-combination model, or the design's kit that stands for all of them.
+                    assertTrue(new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
+                          || TilesetScenery.customBuildingFile(model).isFile(), look + ": " + model);
                 }
             }
         }

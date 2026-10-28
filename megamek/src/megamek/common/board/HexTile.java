@@ -23,8 +23,6 @@ public final class HexTile {
      * bit-identically; every edge midpoint lies within 0.005 of {@code HEIGHT / 2} from the centre.
      */
     public static final float MODEL_WIDTH = 83.125f;
-    /** Narrows the older structure models, authored {@link #WIDTH} wide like the 2D hex, onto the 3D board's hex. */
-    public static final float IMAGE_TO_MODEL_X = MODEL_WIDTH / WIDTH;
     /** One level in authored board models, in board model units. */
     public static final int LEVEL_HEIGHT = 18;
     /** Half the ordinary two-lane road's width in authored model units, shared by roads and their rail corridors. */

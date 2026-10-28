@@ -40,12 +40,16 @@ class BoardBridgeFootingTest {
     void airportTerminalFollowsTheWholeRailProfileAtItsRearJoin() throws Exception {
         var scene = GpuRoadSourceTest.scene("unofficial/Derv_Maps/25x25 Airport 3000.board");
         var bridge = scene.tile(new Coords(15, 11));
-        // Inner rear corner of the reported cap: the rail approaches from negative forward.
-        var rear = new Vector3(945.55707f, -870.40546f, 0);
+        // Inner rear corner of the reported cap: the rail approaches from negative forward. The wider roads moved the
+        // terminal 8.6 px forward and 4.9 px out from where the report found it, and the junction beyond now keeps its
+        // level, so the rail no longer falls here: the cap's lip and its cover of the rail's outer edge above ground
+        // still hold.
+        var rear = new Vector3(935.6337f, -870.3864f, 0);
         var forward = new Vector3(-.868243f, -.496139f, 0).nor();
         var outward = new Vector3(-.50077f, .86558f, 0).nor();
         for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
-            var footing = BoardBridgeFooting.build(scene, bridge, lod, new HashMap<>());
+            var surfaces = new HashMap<Coords, BoardSurface>();
+            var footing = BoardBridgeFooting.build(scene, bridge, lod, surfaces);
             for (float across : new float[] { .4f, 1.5f, 2.8f }) {
                 var railTop = new Vector3(rear).mulAdd(forward, -.02f).mulAdd(outward, across);
                 railTop.z = 100;
@@ -53,7 +57,7 @@ class BoardBridgeFootingTest {
                 float railHeight = 100 - (float) Math.sqrt(footing.shape().hit(new Ray(railTop, new Vector3(0, 0, -1))));
                 float capHeight = 100 - (float) Math.sqrt(footing.shape().hit(new Ray(capTop, new Vector3(0, 0, -1))));
                 assertEquals(.28f, capHeight - railHeight, .1f,
-                      lod + " retains the authored cap lip across the falling rail, without a raised wedge");
+                      lod + " retains the authored cap lip across the rail, without a raised wedge");
             }
             var rail = new Vector3(rear).mulAdd(forward, -.02f).mulAdd(outward, 2.8f);
             rail.z = -100;
@@ -61,7 +65,11 @@ class BoardBridgeFootingTest {
             assertTrue(Float.isFinite(bottom), "Sample the actual underside of the rail before its cap");
             for (float along : new float[] { .05f, .2f }) {
                 var outside = new Vector3(rear).mulAdd(forward, along).mulAdd(outward, 5.5f);
-                outside.z = bottom + .1f;
+                // A rail edge below the ground beside it is buried: nothing protrudes there.
+                double ground = surfaces.values().stream()
+                      .mapToDouble(s -> BoardSurface.sampleHeight(s.foundation(), outside.x, outside.y, Float.NaN))
+                      .filter(Double::isFinite).max().orElse(Double.NEGATIVE_INFINITY);
+                outside.z = (float) Math.max(bottom, ground) + .1f;
                 var ray = new Ray(outside, new Vector3(outward).scl(-1));
                 assertTrue(footing.shape().hit(ray) < 1.2f * 1.2f,
                       lod + " the cap covers the lower outer rail edge instead of leaving a protruding wedge");
@@ -109,8 +117,13 @@ class BoardBridgeFootingTest {
                     for (var face : footing.shape().facets()) {
                         if (face.part() != BoardBridge.Part.TOP) { continue; }
                         var point = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
-                        assertFalse(Float.isFinite(BoardSurface.sampleHeight(bank.foundation(), point.x, point.y, Float.NaN)),
-                              context + " must not bury a second painted landing inside the existing graded bank");
+                        float ground = BoardSurface.sampleHeight(bank.foundation(), point.x, point.y, Float.NaN);
+                        if (!Float.isFinite(ground)) { continue; }
+                        // A junction keeps its crossing level: a level landing lies flush on its pavement. A graded
+                        // bank owns its road surface, and a second slab would intersect the grade.
+                        assertEquals(0, bank.ramps, context + " must not bury a second painted landing inside a graded bank");
+                        assertEquals(ground + GpuRoads.SURFACE_LIFT * scale, point.z, .002f * scale,
+                              context + " lays its level landing flush on the junction's pavement");
                     }
                 }
             }

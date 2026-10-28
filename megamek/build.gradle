@@ -1208,6 +1208,19 @@ tasks.register('printAiMatchClasspath') {
     }
 }
 
+tasks.register('prepareBlenderPreview') {
+    dependsOn classes
+    description = 'Build the engine bridge used by the Blender asset test panel'
+    group = 'utility'
+    doLast {
+        def launcher = javaToolchains.launcherFor(java.toolchain).get()
+        def target = layout.buildDirectory.file('blender-preview.json').get().asFile
+        target.text = groovy.json.JsonOutput.toJson([
+              java: launcher.executablePath.asFile.absolutePath,
+              classpath: sourceSets.main.runtimeClasspath.asPath])
+    }
+}
+
 tasks.register('roundTripSaveUnitsTest', Test) {
     useJUnitPlatform {
         includeTags 'on-demand'

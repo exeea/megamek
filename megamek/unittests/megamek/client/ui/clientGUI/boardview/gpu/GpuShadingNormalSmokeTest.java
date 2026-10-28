@@ -128,9 +128,7 @@ class GpuShadingNormalSmokeTest {
         source = source.substring(0, end) + """
               #ifdef lightingFlag
                   float reviewRole = .25;
-              #ifdef bankTurfFlag
-                  reviewRole = .5;
-              #elif defined(biomeVegetationFlag)
+              #ifdef biomeVegetationFlag
                   reviewRole = .75;
               #endif
                   int reviewChannel = u_grazingReview % 10;
@@ -158,8 +156,8 @@ class GpuShadingNormalSmokeTest {
             camera.setIsometric(true);
             for (String kind : new String[] { "grass", "bank", "crop", "reed" }) {
                 boolean bank = kind.equals("bank"), grass = kind.equals("grass");
-                // A field's plants are blades of the grass program, as the grass is.
-                boolean blades = grass || kind.equals("crop");
+                // A field's plants and a bank rim's are blades of the grass program, as the grass is.
+                boolean blades = grass || bank || kind.equals("crop");
                 BoardScene scene;
                 camera.camera.zoom = BoardGeometry.width() * dpi / 560;
                 camera.center(BoardGeometry.center(new megamek.common.board.Coords(4, 4), 0));
@@ -200,7 +198,7 @@ class GpuShadingNormalSmokeTest {
                 for (ProxyFrame probe : new ProxyFrame[] { pigment, incoming, original }) {
                     org.junit.jupiter.api.Assertions.assertArrayEquals(full.depth(), probe.depth(), "Field probes preserve depth");
                 }
-                float role = blades ? .25f : bank ? .5f : .75f;
+                float role = blades ? .25f : .75f;
                 int covered = 0;
                 float low = 1, high = 0;
                 for (int pixel = 0; pixel < full.depth().length; pixel++) {
@@ -996,7 +994,7 @@ class GpuShadingNormalSmokeTest {
 
 
 
-    /** Four real submitted clump views; no flags fabricated on grass or alternate plant templates. */
+    /** Two real submitted reed clump views; no flags fabricated on grass or alternate plant templates. */
     private static void clumpFrames(GpuShaderManager manager) throws Exception {
         assertTrue(proxyFrames(GpuShaderSource.readDisk("terrain-foliage.frag")),
               "Clump follow-up requires installed represented frames");
@@ -1007,18 +1005,11 @@ class GpuShadingNormalSmokeTest {
         int end = source.lastIndexOf('}');
         // Appended after the existing diagnostic modes: these two observations tag only actual flagged clumps.
         source = source.substring(0, end) + """
-              #if defined(lightingFlag) && (defined(biomeVegetationFlag) || defined(bankTurfFlag))
+              #if defined(lightingFlag) && defined(biomeVegetationFlag)
               if(u_grazingReview==11) fragColor=vec4(dot(normal,-viewDirection()),
                     dot(reflect(viewDirection(),normal),reviewFrame),
                     dot(reflect(viewDirection(),normal),reviewGeometry),.375);
-              if(u_grazingReview==12) {
-              #ifdef bankTurfFlag
-                  float role=2.0;
-              #else
-                  float role=1.0;
-              #endif
-                  fragColor=vec4(dot(reviewFrame,-viewDirection()),role,float(gl_FrontFacing),.375);
-              }
+              if(u_grazingReview==12) fragColor=vec4(dot(reviewFrame,-viewDirection()),1.0,float(gl_FrontFacing),.375);
               #endif
               """ + source.substring(end);
         applySources(manager, Map.of("terrain-vegetation.frag", source), "actual-clump-diagnostics");
@@ -1040,36 +1031,17 @@ class GpuShadingNormalSmokeTest {
             var camera = new BoardCamera(); camera.resize(Math.round(128 / dpi), Math.round(128 / dpi));
             camera.camera.viewportWidth = 128 / dpi; camera.camera.viewportHeight = 128 / dpi;
             camera.setIsometric(true);
-            for (int specimen = 0; specimen < 4; specimen++) {
-                boolean bank = specimen >= 2;
-                boolean near = specimen % 2 == 0;
-                BoardScene scene;
-                String id;
-                Vector3 focus;
-                float pixels = bank || near ? 560 : 48;
+            for (int specimen = 0; specimen < 2; specimen++) {
+                boolean near = specimen == 0;
+                float pixels = near ? 560 : 48;
                 camera.camera.zoom = BoardGeometry.width() * dpi / pixels;
-                if (!bank) {
-                    // Exact real MARSH construction used by GpuBiomeLodSmokeTest.
-                    scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
-                          c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
-                                ? BoardScene.Biome.MARSH : BoardScene.Biome.MUD, 0));
-                    focus = BoardGeometry.center(new megamek.common.board.Coords(4, 4), 0);
-                    camera.center(focus);
-                    id = "MARSH-tier" + (near ? 0 : 2);
-                } else {
-                    // The same two-level, finished grass bank used by the elevation native fixture.
-                    scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
-                          BoardScene.Surface.GRASS, c.getX() < 4 ? 3 : 1, -1, 0));
-                    var high = new megamek.common.board.Coords(3, 4);
-                    var center = BoardGeometry.center(high, 3);
-                    var outward = BoardGeometry.center(new megamek.common.board.Coords(4, 4), 3).sub(center).nor();
-                    focus = center.cpy().mulAdd(outward, BoardGeometry.width() * .38f);
-                    focus.z -= BoardGeometry.level();
-                    // Opposite flanks of the visible bank, not its ground-occluded reverse side.
-                    camera.camera.position.set(focus).mulAdd(outward.rotate(Vector3.Z, near ? -50 : 50), 650).add(0, 0, 350);
-                    camera.camera.up.set(Vector3.Z); camera.camera.lookAt(focus); camera.camera.update();
-                    id = "bank-" + (near ? "left" : "right");
-                }
+                // Exact real MARSH construction used by GpuBiomeLodSmokeTest.
+                BoardScene scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                      c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
+                            ? BoardScene.Biome.MARSH : BoardScene.Biome.MUD, 0));
+                Vector3 focus = BoardGeometry.center(new megamek.common.board.Coords(4, 4), 0);
+                camera.center(focus);
+                String id = "MARSH-tier" + (near ? 0 : 2);
                 float projected = BoardGeometry.width() * 128 / (camera.camera.viewportHeight * camera.camera.zoom);
                 assertEquals(projected, BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera.camera, focus), .001f,
                       "Actual FBO footprint and production LOD selection agree");
@@ -1080,18 +1052,13 @@ class GpuShadingNormalSmokeTest {
                 Runnable draw = () -> terrain.render(camera.camera);
                 setProxyMode(batch, 0);
                 specimenFrame(output, terrain, camera.camera, draw); // Resolve actual lazy resources/programs first.
-                if (bank) {
-                    var planted = terrain.planted(new megamek.common.board.Coords(3, 4));
-                    assertTrue(planted != null && planted.turf() != null, "Real finished bank must own planted turf");
-                } else {
-                    boolean drawn = false;
-                    for (Object plantBatch : GpuBiomeSmokeTest.batches(plants)) {
-                        var lod = plantBatch.getClass().getDeclaredField("lod"); lod.setAccessible(true);
-                        var current = plantBatch.getClass().getDeclaredField("current"); current.setAccessible(true);
-                        drawn |= lod.getInt(plantBatch) == (near ? 0 : 2) && !((java.util.List<?>) current.get(plantBatch)).isEmpty();
-                    }
-                    assertTrue(drawn, "Actual expected reed tier is submitted: " + id);
+                boolean drawn = false;
+                for (Object plantBatch : GpuBiomeSmokeTest.batches(plants)) {
+                    var lod = plantBatch.getClass().getDeclaredField("lod"); lod.setAccessible(true);
+                    var current = plantBatch.getClass().getDeclaredField("current"); current.setAccessible(true);
+                    drawn |= lod.getInt(plantBatch) == (near ? 0 : 2) && !((java.util.List<?>) current.get(plantBatch)).isEmpty();
                 }
+                assertTrue(drawn, "Actual expected reed tier is submitted: " + id);
                 ProxyFrame full = specimenFrame(output, terrain, camera.camera, draw);
                 ProxyFrame repeat = specimenFrame(output, terrain, camera.camera, draw);
                 org.junit.jupiter.api.Assertions.assertArrayEquals(full.rgba(), repeat.rgba(), "Frozen actual clump radiance");
@@ -1113,7 +1080,7 @@ class GpuShadingNormalSmokeTest {
                     assertEquals(support.rgba()[at + 3], roles.rgba()[at + 3], 0, "Only diagnostic output changes");
                     if (roles.rgba()[at + 3] != .375f) { continue; }
                     assertTrue(full.depth()[pixel] < 1, "Tagged actual clump owns depth");
-                    assertEquals(bank ? 2 : 1, roles.rgba()[at + 1], 0, "Actual shader role matches the requested specimen");
+                    assertEquals(1, roles.rgba()[at + 1], 0, "Actual shader role matches the requested specimen");
                     assertTrue(roles.rgba()[at] >= -.001 && roles.rgba()[at] <= 1.001, "Visible independent aggregate frame");
                     assertTrue(support.rgba()[at] >= -.001 && support.rgba()[at + 1] >= -.003,
                           "Actual clump reflection stays above its independent virtual frame: " + id + " pixel=" + pixel);
@@ -1133,7 +1100,7 @@ class GpuShadingNormalSmokeTest {
                 new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
                       .writeValue(path.resolve("review.json").toFile(), Map.of("renderer", Gdx.gl.glGetString(GL20.GL_RENDERER), "rows", rows));
             }
-            assertEquals(4, rows.size());
+            assertEquals(2, rows.size());
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             try { terrain.dispose(); }
@@ -1288,7 +1255,7 @@ class GpuShadingNormalSmokeTest {
         String marker = tuft ? "    vec3 albedo = v_color.rgb" : "    vec3 view = -viewDirection();";
         int at = source.indexOf(marker); assertTrue(at >= 0 && source.indexOf(marker, at + 1) < 0);
         String virtual = !virtualFrames ? "" : tuft ? ""
-              + "#if defined(biomeVegetationFlag) || defined(bankTurfFlag)\n"
+              + "#ifdef biomeVegetationFlag\n"
               + "reviewProxy=true; reviewFrame=normal;\n#endif\n"
               : "#ifdef impostorFlag\nreviewProxy=true;\n#else\nreviewProxy=u_foliageProxy>.5;\n#endif\n"
               + "if(reviewProxy) reviewFrame=normalize(v_normal);\n";

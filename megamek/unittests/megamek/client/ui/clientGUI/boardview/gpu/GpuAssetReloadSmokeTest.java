@@ -465,11 +465,6 @@ class GpuAssetReloadSmokeTest {
             var definition = GodotMaterial.read(textures.resolve(material + ".tres").toFile(), textures.toFile());
             assertEquals(catalogued(catalog, material, definition), assets.sculpt(name).tile(), .000001f, name);
         }
-        for (String name : List.of("bank-turf")) {
-            Texture image = assets.material("vegetation/" + name);
-            assertEquals(1024, image.getWidth(), name);
-            assertEquals(1024, image.getHeight(), name);
-        }
         // The earlier edit uses energy 4 and small heat maps. The official batch must restore the current
         // authored pair together and refresh the same emission owner used by spill lights.
         var molten = GodotMaterial.read(textures.resolve("terrain/lava/lava-flow.tres").toFile(), textures.toFile());

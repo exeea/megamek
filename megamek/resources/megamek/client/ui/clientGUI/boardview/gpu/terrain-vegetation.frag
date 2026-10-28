@@ -13,7 +13,7 @@ in vec2 v_diffuseUV;
 uniform sampler2D u_diffuseTexture;
 #endif
 
-#if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
+#ifndef biomeVegetationFlag
 // The meadow's grass material: its place in the finish arrays (finish-arrays.glsl), and the metres and world units
 // one repeat spans.
 uniform vec3 u_meadowFinish;
@@ -33,13 +33,8 @@ void main() {
     // Before the coverage discards below, like the face above.
     surfaceVariance = normalVariance(dFdx(normal), dFdy(normal));
 #endif
-#ifdef bankTurfFlag
-    vec4 plant = texture(u_diffuseTexture, v_diffuseUV, -.65);
-    vec2 turfUv = v_cloudPosition.xy * vec2(1.0, -1.0) / u_metre;
-    mat2 turfGradient = mat2(dFdx(turfUv), dFdy(turfUv));
-#endif
     Finish finish = Finish(.86, 0.0, 0.0, vec3(0.0));
-#if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
+#ifndef biomeVegetationFlag
     // A meadow's blades are its grass: they take its material's finish where they root, filtered over the blade's own
     // screen footprint, so every fragment of a blade reads the same texel at the level its size needs. A field's
     // plants (v_coverData.x, one per draw instance, so whole quads branch alike) keep a dry leaf's.
@@ -59,26 +54,15 @@ void main() {
     if (coverage < v_coverFade.x || coverage >= v_coverFade.y) discard;
 #endif
     vec3 albedo = v_color.rgb;
-#if (defined(biomeVegetationFlag) || defined(bankTurfFlag)) && defined(diffuseTextureFlag)
+#if defined(biomeVegetationFlag) && defined(diffuseTextureFlag)
     // Opaque depth ownership avoids ordering halos between intersecting clumps; mipmaps filter distant leaves.
-#ifdef bankTurfFlag
-    plant.a *= 1.0 - scorchedGrass(v_cloudPosition.xy);
-#endif
     if (plant.a < .32) discard;
-#ifdef bankTurfFlag
-    albedo *= turfColor(plant.rgb, turfGradient, finish);
-#else
     albedo *= plant.rgb;
-#endif
 #endif
     albedo = wetAlbedo(albedo, u_wetness * .25);
     albedo = materialReflectance(albedo);
-#ifdef bankTurfFlag
-    // The draped turf follows its supporting bank's continuous height after artwork/vertex pigment gains.
-    albedo = levelGrade(albedo, v_cloudPosition.z / u_levelHeight);
-#endif
 #ifdef lightingFlag
-#if defined(biomeVegetationFlag) || defined(bankTurfFlag)
+#ifdef biomeVegetationFlag
     // The cutout contains a whole clump. Its existing aggregate normal is the represented material frame.
     // Unflagged, individually curved grass blades retain their real triangle frame.
     if (dot(normal, -viewDirection()) < 0.0) normal = -normal;
@@ -94,7 +78,7 @@ void main() {
     // Thin leaves transmit part of their diffuse budget instead of adding another light source.
     blade.front = vec3(.85);
     blade.back = vec3(.15);
-#if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
+#ifndef biomeVegetationFlag
     // Root shelter reduces diffuse sky visibility, not authored pigment or direct light.
     blade.occlusion = mix(.80, 1.0, clamp(v_coverData.y, 0.0, 1.0));
 #endif

@@ -384,7 +384,8 @@ class GpuForceOverviewSmokeTest {
                 assertTrue(press(hud, KeyCommandBind.UNIT_OVERVIEW, Input.Keys.U));
                 show(hud, frame, overview);
                 assertTrue(shown(overview), "the overview's key opens it");
-                assertEquals(new Rectangle(20, 70, 1880, 920), GpuHudTestStage.bounds(overview),
+                assertEquals(new Rectangle(GpuBoardHud.GAP, 70, 1920 - 2 * GpuBoardHud.GAP, 920),
+                      GpuHudTestStage.bounds(overview),
                       "left and right gap, top 90, bottom 70");
                 // What it covers is hidden (the prototype blurs it, shot 12).
                 for (String covered : List.of("unit-card", "command-dock", "hint-line", "forces-panel", "minimap",

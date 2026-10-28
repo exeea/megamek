@@ -166,7 +166,8 @@ class GpuLiquidBlendSmokeTest {
         Probe(GpuBiomeSurface mask) {
             this.mask = mask;
             shader = GpuGlsl.compile("liquid coverage probe", "in vec3 a_position; void main(){gl_Position=vec4(a_position,1);}",
-                  "uniform float u_metre, u_levelHeight; uniform vec3 u_point; layout(location = 0) out vec4 result;\n"
+                  "#define biomeMaskFlag\nuniform float u_metre, u_levelHeight; uniform vec3 u_point;\n"
+                        + "layout(location = 0) out vec4 result;\n"
                         + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl")
                         + "\nvoid main(){result=liquidCoverage(u_point,0.0);}");
             assertTrue(shader.isCompiled(), shader.getLog());

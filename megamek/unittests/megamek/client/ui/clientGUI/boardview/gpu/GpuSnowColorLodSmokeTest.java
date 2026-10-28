@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
@@ -30,7 +31,7 @@ class GpuSnowColorLodSmokeTest {
     @Test
     void snowPigmentRetainsItsAuthoredColorAcrossNormalDetail() throws Exception {
         String baselinePath = System.getProperty("megamek.gpu.snowBaseline");
-        assertTrue(baselinePath != null, "This paired review needs the saved predecessor terrain-sculpt.frag");
+        assumeTrue(baselinePath != null, "This paired review needs the saved predecessor terrain-sculpt.frag");
         String baseline = Files.readString(Path.of(baselinePath));
         String candidate = GpuShaderSource.readDisk("terrain-sculpt.frag");
         assertTrue(!baseline.equals(candidate), "Compare the saved predecessor with the actual candidate");

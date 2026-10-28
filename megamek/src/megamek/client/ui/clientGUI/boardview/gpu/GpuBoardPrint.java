@@ -55,6 +55,8 @@ final class GpuBoardPrint implements Disposable {
     private final BoardCamera camera = new BoardCamera();
     private GpuTerrain terrain;
     private GpuAtmosphere atmosphere;
+    /** The relief's sky occlusion, lighting as on the board; the print's terrain borrows it. */
+    private final GpuSkyVisibility skyVisibility = new GpuSkyVisibility();
     private GpuHexText text;
     private GpuHexGrid grid;
     private SpriteBatch batch;
@@ -106,6 +108,9 @@ final class GpuBoardPrint implements Disposable {
                 progress = new Progress(Messages.getString("GpuBoard.print.preparing"), built < 0 ? 1 : built / 100f);
                 return false;
             }
+            // Its volume is searched on a worker; the first tile waits for it.
+            skyVisibility.update(terrain.environment(), request.scene(), 1);
+            if (!skyVisibility.current()) { return false; }
             if (finishedBand != null) {
                 if (encoding != null) {
                     if (!encoding.isDone()) { return false; }
@@ -167,6 +172,7 @@ final class GpuBoardPrint implements Disposable {
         terrain = new GpuTerrain(lender);
         // The live view's 3D Graphics (it is ready, so they are installed); a print keeps the fluff of the 3D view.
         terrain.setColumns(lender.columns());
+        terrain.setTessellation(lender.tessellation());
         terrain.setGravity(lighting.gravity());
         terrain.setVacuum(vacuum);
         atmosphere = new GpuAtmosphere();
@@ -294,6 +300,7 @@ final class GpuBoardPrint implements Disposable {
     /** The lender must outlive this job, including a cancelled build. */
     @Override public void dispose() {
         if (terrain != null) { terrain.dispose(); terrain = null; }
+        skyVisibility.dispose();
         if (atmosphere != null) { atmosphere.dispose(); atmosphere = null; }
         if (text != null) { text.dispose(); text = null; }
         if (grid != null) { grid.dispose(); grid = null; }

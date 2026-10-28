@@ -14,19 +14,18 @@ density and mesh rules.
 | Owner | Responsibility |
 | --- | --- |
 | `BoardVegetation`, `BoardBiome` | Terrain eligibility, deterministic placement inputs and shared growth fields. |
-| `BoardPlants` | What each terrain detail level plants; grass and bank turf on medium and full detail. |
-| `GpuGroundCover` | Root planting for terrain workers, projected density, blade templates and per-chunk submission. |
-| `GpuBankTurf` | Six curved turf-edge cutouts, fitted to finished bank contours and retained with the grass chunk. |
-| `terrain-grass.glsl` | Blade shape, root-fixed bending and per-root detail selection. |
+| `BoardPlants` | What each terrain detail level plants; grass and its banks' rim blades on medium and full detail. |
+| `GpuGroundCover` | Root planting for terrain workers (meadow and bank rims), projected density, blade templates and per-chunk submission. |
+| `terrain-grass.glsl` | Blade shape, root-fixed bending, a rim blade's hang and per-root detail selection. |
 | `terrain-meadow.glsl` | Growth variation shared by ground color and grass shape. |
 | `terrain-vegetation-wind.glsl` | World-space gust used by grass, crops and marsh plants. |
 | `terrain-vegetation.frag` | Plant surface lighting, root darkening and wetness. |
-| `terrain-ground-color.glsl`, `terrain-bank-color.glsl` | Terrain pigment and elevation grading shared with the turf; the atlas contributes neutral blade detail. |
+| `terrain-materials.glsl` | The ground under the blades, including a bank's turf lip and the root mat below it. |
 | `GpuTerrain` | Wind phase integration, finished support surfaces and pass ordering. |
 
-The **Grass blades** control under Tuning → Terrain hides the grass and bank turf;
-the crops' plants stand either way. Planted roots remain available when it is
-re-enabled.
+The **Grass blades** control under Tuning → Terrain hides the grass and its rim
+blades; the crops' plants stand either way. Planted roots remain available when it
+is re-enabled.
 Ground shading, crops, marsh plants and trees have separate controls/owners.
 
 ## Roots and drawing
@@ -68,7 +67,7 @@ No cover grows through paint. `BoardPlants` builds `BoardDecals.Opacity` once
 per hex from the decals painting its ground (each image's alpha at the decal's
 drawn transform, so a round emblem leaves no square bald patch) and from its
 legacy paint overlay, and every planter multiplies its coverage by one minus that
-opacity before its usual threshold: blades, bank turf, reeds and crops alike, in
+opacity before its usual threshold: blades, rim blades, reeds and crops alike, in
 every 3D view. Cover vanishes where paint is more than about 45 % opaque and thins
 under soft paint such as the rubble path; each paint keeps the one-model-px margin
 a road's shoulder keeps. A candidate's place and chance are drawn before any
@@ -80,7 +79,7 @@ dressing baked into the solid terrain (`BoardScatter` pebbles, tufts and bushes,
 the workers too (the pending scatter consolidation); see
 [3D board editor](3d-board-editor.md) for the decal-side limitations.
 
-Nothing grows through stationary map content either. Blades, bank turf, reeds,
+Nothing grows through stationary map content either. Blades, rim blades, reeds,
 crops and the baked dressing reject a root that `BoardObstacles` reports for its
 hex: structures (for plants a military wall by its body alone, a civilian wall not
 at all), placed objects, bridge pier footings, and each bridge deck's passage from
@@ -94,37 +93,51 @@ terrain profile. Its grass density follows the same smooth slope fade, using the
 finished triangles as support and picking. Its ground material remains visible when
 blade density fades at a distance, so both earth faces still read from above.
 
-At visible grass scales, `GpuBankTurf` adds dense crowns and hanging fringes to both
-contours. Its six authored silhouettes occupy a 3-by-2 transparent atlas at
-`mm-data/data/models/board/textures/vegetation/bank-turf_albedo.png`. This atlas is the
-authoring input; there is no verified regeneration command.
-Its current Git blob is `3b49c883552538a9190d09d7dfdbab1d7866be39`, recorded in
-mm-data commit `3d469cb44960722c8530fe25bc7066982f79fdb6`. Stable placement varies
-the silhouette, mirroring, width, length and gaps, without repeating the immediately
-previous variant. Curved crowns are visible overhead as well as from the side.
+Along both contours of such a bank, its upper lip and its middle shoulder's, the grass
+leans out and hangs over the edge. `GpuGroundCover.plantRim` plants these rim roots on
+the same finished triangles: 48 candidates per metre of each contour, half of them
+behind the lip, up to two metres back on the top and one on the narrower shoulder,
+thinning into the meadow there, and half dropped on the contour a tenth of a metre to
+two metres under its top, most where it rounds over. Each leans out along the local
+slope, so the rim follows rounded corners rather than the hex edge, and as far as the
+ground falls away under its free end, a metre to two out: standing behind the lip,
+arching over it, hanging down the face, so the meadow's upright blades turn into the
+hanging fringe without a gap. A root whose ground rises ahead, as at a junction with a
+higher neighbour, does not grow. Hexes whose drop is not exactly two levels to dry
+ground, and edges with a cliff-top exit, grow no rim. Paint, a road's verge, obstacles
+and the cover threshold reject rim roots as they do meadow roots. Every candidate
+draws its place and chance before any rejection, and ranks spread over the hex's
+4,096, so density selects a prefix as for the meadow. A rank's fraction packs twelve
+bits, the root's contour, its lean in eight steps and its heading in 256, so the
+instances keep the meadow's four floats. A rim root follows its contour on whichever
+ground is installed, so unlike a meadow root it can shift slightly when a chunk's full
+detail replaces its medium detail.
 
-The terrain worker finds each contour on the installed triangles and fits the crown
-to that carrier. Unsupported crowns and abrupt cliff-junction height changes reject
-the entire clump, preventing stretched curtains. These are cosmetic foliage surfaces;
-support and picking still use the underlying canonical terrain. Each grass chunk owns
-one extra opaque cutout mesh, rebuilt only when its source geometry changes, with one
-shared mipmapped atlas. The free ends use the existing vegetation wind. Turf receives
-scene shadows but has no separate per-strand shadow pass.
+Rim blades are grass blades of the same program, template part 9: the meadow's
+height, width, colour (in its darker half: they hang under the sward), finish,
+lighting, wind and scorch, fanned within some 40° of their heading. A hanging blade
+arches out over the lip, its free end .15 to .6 of its height below the root. On the
+middle shoulder they grow only where its ground draws turf, by the material's own
+patch field (`cliffMaterial`). They stand up between 100 and 140 projected pixels per
+hex, a little before the meadow's first blades; below 400, fewer stand, by rank, and
+each widens by as much, so the rim keeps its fringe.
 
-The atlas's original olive color is not a fixed tint. Each clump carries the local
-`BoardSurfaceBlend` proportions, samples the corresponding ground materials, and uses
-the same world color fields and elevation grade as terrain. Atlas RGB supplies
-linear-luminance detail in the .62–1.08 range, and alpha supplies the silhouette.
-It is therefore a detail/coverage atlas, not authoritative turf
-albedo: changing its hue does not recolor the crown independently of the ground.
-Seeded per-clump vertex tone (.86–1 in authored display units) adds cosmetic
-variation; the existing vegetation height gain is .995 for these crowns.
-These pigment controls are separate from normals, wetness and lighting. Ground
-matching avoids pale halos on raised tiles or green strips across authored
-grass-to-sand gradients. The Grass blades control also hides these crowns.
+Under the turf lip the ground material darkens the soil into a root mat: half a metre
+to a metre of dark topsoil before the paler subsoil of the face (`rootMat` in
+`terrain-materials.glsl`), from the same rim distance and world fields as the lip.
+It carries the edge where the blades are too small to draw.
+
+Measured on an Iris Xe against the cutout crowns these replaced, two rounds each
+(2026-10-28): Grassland 2 and 3's bank views (`GpuBankRimSmokeTest` with
+`megamek.gpu.bankRimFrames`, 1600x1000, at 140 to 830 px/hex) changed by -0.8 to
++2.4 ms in median frame time, within the -0.9 to +1.6 ms between two runs of the same
+code. In `GpuTerrainBenchmarkSmokeTest`, whose board has few two-level banks, the
+opaque terrain stage took 0.1 to 0.8 ms less in its medium views (a draw and a program
+fewer) and 0.2 to 0.3 ms more in its close views, with the same geometry.
 
 The blade templates, coarse and fine, hold three or seven triangles for grass, five
-or nine for a wheat stalk and 23 or 49 for a maize plant. The vertex shader
+or eleven for a rim blade, five or nine for a wheat stalk and 23 or 49 for a maize
+plant. The vertex shader
 derives curvature, orientation, color variation and wind from the root; the
 fragment shader adds lighting and wetness. The grass color pass has no draws
 below its visible scale, one at a uniform orthographic scale, and at most two in

@@ -74,6 +74,8 @@ class GpuMarsCoralSmokeTest {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    // Loading must see the same shader flags as the frame that follows.
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     terrain.animate(.5f, List.of());
                     var ray = new Ray(BoardGeometry.center(new Coords(3, 3), 0).add(0, 0, 1000),

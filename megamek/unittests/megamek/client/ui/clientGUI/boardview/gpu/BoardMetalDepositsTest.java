@@ -5,12 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
@@ -50,13 +48,10 @@ class BoardMetalDepositsTest {
                     }
                 }
                 assertEquals(Set.of("mineral-quartz", "mineral-ore", "mineral-matrix"), names);
-                assertEquals(8, data.images.size(), "Both LODs share each authored texture inside this GLB");
-                var imageBytes = new HashSet<ByteBuffer>();
+                // Minerals share the board's scenery textures and their maps, never embedded copies.
                 for (var image : data.images.values()) {
-                    assertNull(image.file(), "The mineral GLB has no external texture dependency");
-                    assertNotNull(image.encoded());
-                    assertTrue(image.encoded().length > 0);
-                    assertTrue(imageBytes.add(ByteBuffer.wrap(image.encoded())), "Identical image bytes must not be duplicated");
+                    assertTrue(image.file() != null && new File(image.file()).isFile(),
+                          "Every texture is a shared board file");
                 }
                 var bounds = new BoundingBox().inf();
                 int faces = 0;

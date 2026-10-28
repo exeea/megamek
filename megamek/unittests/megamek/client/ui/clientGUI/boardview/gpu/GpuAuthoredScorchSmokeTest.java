@@ -167,8 +167,8 @@ class GpuAuthoredScorchSmokeTest {
                     }
                 }
                 var planted = terrain.planted(bank);
-                assertTrue(planted != null && planted.turf() != null && !planted.turf().isEmpty(),
-                      "The focused two-level bank must exercise actual turf geometry");
+                assertTrue(planted != null && planted.rim() != null && !planted.rim().isEmpty(),
+                      "The focused two-level bank must exercise actual rim blades");
                 terrain.setGrass(true);
                 frame.render(terrain, camera, scene);
                 int[] withGrass = pixels();

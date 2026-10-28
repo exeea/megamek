@@ -22,7 +22,6 @@ in vec4 v_color;       // r: occlusion (mud-draining shell: local drop / 8 m). g
                             // and bed its water's palette and that height packed (GpuTerrain.shoreTint).
                             // Panels use alpha for a fixed texture azimuth, independent of the lighting normal.
 // Aligned colour/height and normal/AO arrays; semantic IDs are mapped by the sampling helpers.
-#define TERRAIN_LAYERS_DECLARED
 uniform sampler2DArray u_terrainLayers;
 uniform sampler2DArray u_terrainData;
 // The finish layers follow its normal/AO layers (finish-arrays.glsl).
@@ -32,6 +31,10 @@ uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
 uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per repeat
 uniform vec2 u_scorchedMaterial; // colour/height layer and metres per repeat; data packs normal XY, roughness, AO
 uniform float u_metre;      // world units per metre
+// How deep the ground's visible grain (its height map) stands, in metres, for the shadow lookup (sculptShadow).
+const float RELIEF_METRES = .2;
+// How far, in metres, what grows and lies along a natural shadow's edge frays it (sculptShadow).
+const float FRAY_METRES = .25;
 uniform float u_normalMaps;
 uniform float u_terrainParallax; // the GPU tuning panel's Terrain Parallax switch (terrain-materials.glsl)
 uniform float u_groundResponse;
@@ -89,9 +92,6 @@ float greySand() {
 
 // Meadows and snowfields lie on a mantle (earth, snow) that buries low steps and caps high rock cliffs.
 bool mantled() { return family(0.0) || family(5.0) || family(TROPICAL_FAMILY); }
-
-// 0 for a step of up to two levels (a bank of the mantle), 1 from three levels (a rock cliff).
-float rockiness(float levels) { return smoothstep(2.15, 2.9, levels); }
 
 // A meadow worn through to its soil: the bare earth shows between the tussocks first.
 vec3 worn(vec3 turf, float height, float amount) {
@@ -720,8 +720,18 @@ void main() {
     // incident sidedness: a triangle cutoff exposes their tessellation at the light horizon. Planar panels and
     // other geometry retain triangle support; normal-map detail cannot move this incident hemisphere.
     // Where distance flattens natural relief, its share of the sun comes off here, so far zoom keeps its tone.
+    // The shadow is looked up on the visible relief, about RELIEF_METRES deep, not the smooth mesh, so raised grains
+    // catch the light at a shadow's edge. Hollows stay on the mesh: pushed into it they would shade themselves under
+    // any sun. Where the sun grazes the ground its hollows (the cavity) fall into shade first.
+    float lift = max(materialHeight - .5, 0.0) * RELIEF_METRES * u_metre;
+    float hollows = clamp(max(dot(normal, light), 0.0) + 2.0 * cavity * cavity - 1.0, 0.0, 1.0);
+    // The grass, clods and stones along a natural edge fray its shadow, up to a quarter metre either way, in tufts of
+    // 0.1 to 0.3 m. The noise's mipmaps take the fray out with distance, where it would only shimmer.
+    vec2 tufts = world.xy + world.z * vec2(.6, -.4);
+    vec2 fray = (texture(u_rainNoise, tufts / 19.2 + .31).gb - .5 + .5 * (texture(u_rainNoise, tufts / 6.4 + .67).rg - .5))
+          * (2.0 * FRAY_METRES / 1.5);
     Surface surface = opaqueSurface(albedo, normal, cliff && !panel ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light) * sunOnRelief(relief, dot(face, light)));
+          sculptShadow(receiver, light, u_metre, lift, fray) * sunOnRelief(relief, dot(face, light)) * hollows);
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.
     metallicShare(surface, clamp(finish.metallic, 0.0, 1.0));
     surface.scatter = clamp(finish.scatter, 0.0, 1.0);

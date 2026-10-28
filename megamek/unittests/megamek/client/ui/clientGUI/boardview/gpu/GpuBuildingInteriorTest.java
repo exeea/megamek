@@ -15,12 +15,9 @@ class GpuBuildingInteriorTest {
     void lightBuildingWallsEncloseItsCentreWithoutTheRoofBorder() {
         var file = new com.badlogic.gdx.files.FileHandle(megamek.common.board.TilesetScenery
               .customBuildingFile("buildings/saxarba/building_light/building_light_00"));
-        var shapes = BoardShape.shapes(RigidGlb.loadLods(file).getFirst(), true);
-        for (var entry : shapes.entrySet()) {
-            List<Vector3> geometry = new ArrayList<>();
-            for (var polygon : entry.getValue().polygons()) { geometry.addAll(List.of(polygon.points())); }
-            var area = entry.getKey().contains("roof") ? GpuBuildingInterior.area(geometry)
-                  : GpuBuildingInterior.walls(geometry, 9);
+        for (var entry : grounded(ConnectedKit.load(RigidGlb.loadLods(file))).entrySet()) {
+            var area = entry.getKey().contains("roof") ? GpuBuildingInterior.area(entry.getValue())
+                  : GpuBuildingInterior.walls(entry.getValue(), 9);
             assertTrue(area.contains(0, 0), entry.getKey());
         }
     }
@@ -34,19 +31,27 @@ class GpuBuildingInteriorTest {
             }
         }
         for (var node : data.nodes) { node.translation.add(900, -400, 257); }
-        var shapes = BoardShape.shapes(data, true);
         java.awt.geom.Area volume = null;
-        for (var entry : shapes.entrySet()) {
-            List<Vector3> geometry = new ArrayList<>();
-            for (var polygon : entry.getValue().polygons()) { geometry.addAll(List.of(polygon.points())); }
-            var area = entry.getKey().contains("roof") ? GpuBuildingInterior.area(geometry)
-                  : GpuBuildingInterior.walls(geometry, 9);
-            // A module keeps its authored XY (GpuBuilding.moduleOffset): its centre moved with both offsets.
+        for (var entry : grounded(ConnectedKit.load(List.of(data))).entrySet()) {
+            var area = entry.getKey().contains("roof") ? GpuBuildingInterior.area(entry.getValue())
+                  : GpuBuildingInterior.walls(entry.getValue(), 9);
+            // A module keeps its authored XY (ConnectedKit#placements): its centre moved with both offsets.
             assertTrue(area.contains(900 + 71, -400 - 23), "The wall outline must enclose usable volume");
             if (volume == null) { volume = area; } else { volume.intersect(area); }
         }
         var footprint = GpuBuildingInterior.triangles(volume);
         assertTrue(footprint.size() < 300, "The footprint must not inherit facade tessellation");
+    }
+
+    /** Each piece of the kit's first level of detail, by node, standing on zero as an assembly's base does. */
+    private static java.util.Map<String, List<Vector3>> grounded(ConnectedKit.Kit kit) {
+        java.util.Map<String, List<Vector3>> result = new java.util.HashMap<>();
+        for (var piece : kit.pieces()) {
+            var lift = new com.badlogic.gdx.math.Matrix4().setToTranslation(0, 0, -kit.grounds().getFirst().get(piece.role()));
+            result.put(piece.node(), ConnectedKit.triangles(kit, 0,
+                  new ConnectedKit.Placement(piece.node(), piece.role(), 0, lift, "")));
+        }
+        return result;
     }
 
     @Test

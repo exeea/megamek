@@ -728,6 +728,7 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
+        terrain.setTessellation(tuning.tessellation());
         atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
         // Lighting, not an option: the sky light the board's relief hides from canyons and the feet of its walls.
         skyVisibility.update(terrain.environment(), scene, 1);
@@ -744,7 +745,9 @@ class GpuBattleView extends ApplicationAdapter {
         if (!terrain.ready(scene)) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             createLoadingStage();
-            loadingLabel.setText(Messages.getString("GpuBoard.loadingOverall", Math.max(0, terrain.buildProgress())));
+            // A finished build (-1) still installs behind the stage: it shows as complete, not 0.
+            int built = terrain.buildProgress();
+            loadingLabel.setText(Messages.getString("GpuBoard.loadingOverall", built < 0 ? 100 : built));
             var sections = terrain.buildSections();
             loadingGrid.update(sections);
             loadingWaiting.setText(Messages.getString("GpuBoard.loadingLegend.waiting",

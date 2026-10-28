@@ -75,13 +75,17 @@ Dry grassy two-level transitions have two earthen faces separated by a shallow s
 at the intermediate level. `BoardRelief.band` shapes it within the existing transition
 width and preserves the rim, foot and game elevations. Canonical corner evaluation,
 surface support and grass planting see the same shoulder. Its strength varies in
-world space, while the height profile stays monotone. Single-level slopes, water
+world space, while the height profile stays monotone and the faces stay under about 75°, nearer how soil stands (at
+up to 85° they cast the rim's shadow far down the bank); the shoulder still grows grass at every detail level.
+Single-level slopes, water
 contacts and explicitly marked cliff faces retain their own profiles. The grass material
 uses the existing rim/foot heights and world-space variation to add an irregular turf
-lip and patches on the shoulder, including overhead views with grass blades hidden.
-At grass detail scales, fitted cutout crowns add the hanging fringe; see
-[grass rendering](gpu-grass-rendering.md). Their pigment follows the terrain's material
-weights and shared elevation grade, rather than the generated atlas's original color.
+lip and patches on the shoulder, including overhead views with grass blades hidden,
+and darkens the soil under the lip into a root mat, half a metre to a metre of dark topsoil
+before the paler subsoil of the face. From 100 projected pixels per hex the grass
+engine's rim blades hang over both contours; see [grass rendering](gpu-grass-rendering.md).
+A meadow dries towards any convex rim only in patches (`groundToneFor`), never as a
+yellow band tracing every edge.
 
 Poured tops use six triangles and a rectangular cast wall panel uses two. A road cut,
 water contact or junction can require additional boundary vertices. Concrete keeps
@@ -131,7 +135,12 @@ cover erosion participates in layer blending, then pigment wear applies before
 lighting. Both run at full strength (`GpuTerrain.DEFAULT_TERRAIN_WEAR`); clay
 mode turns them off.
 It includes the broad pale exposed-rock patches on desert hardpan, the related
-mineral exposure in other families, rim abrasion and worn organic cover. Slope
+mineral exposure in other families, rim abrasion and worn organic cover. The rock
+of cliff walls outside the desert, lunar, Martian and fungal families also weathers
+by its height on the wall: a bleached rim, upright water streaks on its steep faces
+(about .6 by 6 m, in the rock maps' side projections, mipmapped) running down from
+the top, and a
+darker lower part towards the foot. Earth banks keep their own colour. Slope
 geology, the source textures and loose sand's tile-cover behaviour remain intact.
 The strength is a shader uniform, so it needs no terrain rebuild. It does not depend
 on combat history.
@@ -388,11 +397,11 @@ scorch; Classic does not borrow this material.
 Painted glass is always cold. Only nuclear severity heats the low-height fissures,
 using the existing cooling clock; distant mip levels suppress these small details.
 A later nuke still restarts that shared clock. Any authored or nuclear scorch
-clears grass blades and bank turf, including the fading fringe. Both also remove
+clears grass blades, a bank's rim blades included. Both also remove
 decorative grass and shrub scatter through the existing chunk rebuild. Affected
 presentation tiles also set the existing barren bit so independently generated
 field bushes cannot replace removed scatter; authoritative terrain is unchanged. Baked
-scatter is removed across each touched hex; blades and turf follow the precise
+scatter is removed across each touched hex; blades follow the precise
 mask. Rocks remain. Woods and jungle follow authoritative terrain conversion;
 biome crops and reeds retain their existing behavior.
 There is one appended material layer and one uniform, with no new sampler or
@@ -809,9 +818,9 @@ covering a boulder also blend its roughness. No new geometry, texture lookup,
 sampler, material batch or shadow pass is introduced. This adds fragment shading
 work, so it is not a performance optimization.
 
-Grass blades and bank turf use that same dry/wet dielectric response at a dry
-roughness of 0.86. Bark and snow-covered plants also reflect light, using rough
-0.90/0.95 estimates; leaf maps retain their authored roughness, and separately
+Grass blades, a bank's rim blades included, use that same dry/wet dielectric
+response at a dry roughness of 0.86. Bark and snow-covered plants also reflect light,
+using rough 0.90/0.95 estimates; leaf maps retain their authored roughness, and separately
 marked snow surfaces do not gain a rain film. Distant cards retain their combined
 leaf/body approximation. These plant responses add no sampler, geometry or pass.
 `GpuVegetationLightingSmokeTest` checks dry and wet plant reflection in both camera

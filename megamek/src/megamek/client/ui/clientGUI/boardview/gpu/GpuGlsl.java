@@ -37,6 +37,7 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30;
+import org.lwjgl.opengl.GL40;
 import org.lwjgl.opengl.GLCapabilities;
 import org.lwjgl.opengl.KHRParallelShaderCompile;
 import org.lwjgl.system.MemoryStack;
@@ -166,10 +167,20 @@ final class GpuGlsl {
         return compilePrepared(name, source(prefix, vertex, version), source(prefix, fragment, version));
     }
 
-    /** Resource stages declare their editor baseline; the runtime supplies the selected version and material flags. */
+    /**
+     * Resource stages declare their editor baseline; the runtime supplies the selected version and material flags. A
+     * vertex source that carries tessellation stages (GpuTessellation) gives each of them the same header.
+     */
     static String source(String prefix, String source, int glsl) {
-        return "#version " + glsl + " core\n" + prefix + VERSION.matcher(source).replaceFirst("");
+        String[] stages = GpuTessellation.stages(source);
+        String header = "#version " + glsl + " core\n" + prefix;
+        if (stages.length == 1) { return header + VERSION.matcher(source).replaceFirst(""); }
+        return header + VERSION.matcher(stages[0]).replaceFirst("") + "\n" + GpuTessellation.CONTROL + "\n" + header
+              + stages[1] + "\n" + GpuTessellation.EVALUATION + "\n" + header + VERSION.matcher(stages[2]).replaceFirst("");
     }
+
+    /** The shading language every board shader compiles as, from {@link #MINIMUM} to {@link #MAXIMUM}. */
+    static int glsl() { return version; }
 
     /** Adapt upstream GLSL once, before inserting any board code. libGDX remains the owner of its lighting code. */
     static String libGdx(String source, boolean vertex) {
@@ -411,6 +422,7 @@ final class GpuGlsl {
                           case "glShaderSource": GL20C.glShaderSource((int) args[0], (String) args[1]); break;
                           case "glCompileShader": GL20C.glCompileShader((int) args[0]); break;
                           case "glAttachShader": GL20C.glAttachShader((int) args[0], (int) args[1]); break;
+                          case "glDetachShader": GL20C.glDetachShader((int) args[0], (int) args[1]); break;
                           case "glLinkProgram": GL20C.glLinkProgram((int) args[0]); break;
                           case "glGetShaderiv": GL20C.glGetShaderiv((int) args[0], (int) args[1], (IntBuffer) args[2]); break;
                           case "glGetProgramiv": GL20C.glGetProgramiv((int) args[0], (int) args[1], (IntBuffer) args[2]); break;
@@ -426,6 +438,8 @@ final class GpuGlsl {
 
     private static final class Linked implements Disposable {
         private int vertex, fragment, program;
+        /** The tessellation stages, when the vertex source carries them (GpuTessellation); else 0. */
+        private int control, evaluation;
         private final java.nio.IntBuffer status = BufferUtils.newIntBuffer(1);
         private final String timingId;
         private final long requestedAt;
@@ -457,6 +471,13 @@ final class GpuGlsl {
                 vertex = gl.glCreateShader(GL20.GL_VERTEX_SHADER);
                 fragment = gl.glCreateShader(GL20.GL_FRAGMENT_SHADER);
                 program = gl.glCreateProgram();
+                if (GpuTessellation.stages(source.vertex()).length == 3) {
+                    control = gl.glCreateShader(GL40.GL_TESS_CONTROL_SHADER);
+                    evaluation = gl.glCreateShader(GL40.GL_TESS_EVALUATION_SHADER);
+                    if (control == 0 || evaluation == 0) {
+                        throw new GdxRuntimeException(source.name() + ": cannot create tessellation stages");
+                    }
+                }
                 if (vertex == 0 || fragment == 0 || program == 0) {
                     throw new GdxRuntimeException(source.name() + ": cannot create shader program");
                 }
@@ -480,8 +501,13 @@ final class GpuGlsl {
                 timing(offscreenRequest ? "after-loading-offscreen" : "after-loading");
             }
             timing("source-upload-start");
-            gl.glShaderSource(vertex, source.vertex());
+            String[] stages = GpuTessellation.stages(source.vertex());
+            gl.glShaderSource(vertex, stages[0]);
             gl.glShaderSource(fragment, source.fragment());
+            if (control != 0) {
+                gl.glShaderSource(control, stages[1]);
+                gl.glShaderSource(evaluation, stages[2]);
+            }
             timing("source-uploaded");
             gl.glCompileShader(vertex);
             timing("vertex-submitted");
@@ -489,6 +515,12 @@ final class GpuGlsl {
             timing("fragment-submitted");
             gl.glAttachShader(program, vertex);
             gl.glAttachShader(program, fragment);
+            if (control != 0) {
+                gl.glCompileShader(control);
+                gl.glCompileShader(evaluation);
+                gl.glAttachShader(program, control);
+                gl.glAttachShader(program, evaluation);
+            }
             if (cache != null) { GpuProgramCache.retrievable(program); }
             gl.glLinkProgram(program);
             timing("link-submitted");
@@ -505,10 +537,13 @@ final class GpuGlsl {
             // Resolve the link even when a stage failed before disposing its owned handles.
             gl.glGetProgramiv(program, GL20.GL_LINK_STATUS, status);
             boolean linked = status.get(0) != 0;
-            for (int shader : binary ? new int[0] : new int[] { vertex, fragment }) {
+            int[] shaders = binary ? new int[0] : control == 0 ? new int[] { vertex, fragment }
+                  : new int[] { vertex, control, evaluation, fragment };
+            for (int shader : shaders) {
                 gl.glGetShaderiv(shader, GL20.GL_COMPILE_STATUS, status);
                 if (status.get(0) == 0) {
-                    String error = source.name() + (shader == vertex ? " vertex: " : " fragment: ")
+                    String error = source.name() + (shader == vertex ? " vertex: " : shader == control
+                          ? " tessellation control: " : shader == evaluation ? " tessellation evaluation: " : " fragment: ")
                           + gl.glGetShaderInfoLog(shader);
                     clearFailedLink(gl);
                     throw new GdxRuntimeException(error);
@@ -545,6 +580,10 @@ final class GpuGlsl {
         private void clearFailedLink(GL20 gl) {
             String vendor = GL11.glGetString(GL11.GL_VENDOR);
             if (vendor == null || !vendor.toLowerCase(Locale.ROOT).contains("intel")) { return; }
+            if (control != 0) {
+                gl.glDetachShader(program, control);
+                gl.glDetachShader(program, evaluation);
+            }
             gl.glShaderSource(vertex, "#version 330 core\nvoid main(){gl_Position=vec4(0.0);}");
             gl.glShaderSource(fragment, "#version 330 core\nout vec4 color; void main(){color=vec4(0.0);}");
             gl.glCompileShader(vertex);
@@ -595,11 +634,14 @@ final class GpuGlsl {
         @Override
         public void dispose() { dispose(Gdx.gl20); }
 
+        /** After an adoption libGDX owns the vertex and fragment stages; the tessellation stages are still this one's. */
         private void dispose(GL20 gl) {
             if (vertex != 0) { gl.glDeleteShader(vertex); }
             if (fragment != 0) { gl.glDeleteShader(fragment); }
+            if (control != 0) { gl.glDeleteShader(control); }
+            if (evaluation != 0) { gl.glDeleteShader(evaluation); }
             if (program != 0) { gl.glDeleteProgram(program); }
-            vertex = fragment = program = 0;
+            vertex = fragment = control = evaluation = program = 0;
         }
     }
 

@@ -385,6 +385,13 @@ final class BoardSurface {
     private BoardRoadBank bank;
 
     final BoardRelief relief;
+    /**
+     * What the cliff pass asks of a neighbour's relief, settled as the relief is made: each corner's shore shift and
+     * whether each edge's cliff stands into this hex's water. That pass runs every hex on its own thread, and the
+     * relief's caches are its own hex's.
+     */
+    private final float[][] shoreShifts = new float[6][];
+    private final boolean[] wetCliffs = new boolean[6];
     private final TerrainLod lod;
     private final boolean columns;
     private final List<Face> edgeTopography = new ArrayList<>();
@@ -461,6 +468,7 @@ final class BoardSurface {
         center = BoardGeometry.center(tile.coords(), tile.elevation());
         for (int edge = 0; edge < 6; edge++) { corners[edge] = BoardGeometry.corner(tile.coords(), tile.elevation(), edge); }
         relief = new BoardRelief(scene, tile, ramps, lod);
+        settleRelief();
         faces.addAll(geometry.faces());
         rough.addAll(geometry.rough());
         roughModels = geometry.roughModels();
@@ -520,6 +528,7 @@ final class BoardSurface {
         ramps = ramps(scene, tile);
         // The relief first: a water hex lays out its waterline round the steps the relief puts beside it.
         relief = new BoardRelief(scene, tile, ramps, lod);
+        settleRelief();
         if (columns) {
             if (tile.liquid().present()) {
                 if (!tile.frozen()) {
@@ -2804,11 +2813,19 @@ final class BoardSurface {
         }
     }
 
+    /** See {@link #shoreShifts}. */
+    private void settleRelief() {
+        if (columns) { return; }
+        for (int k = 0; k < 6; k++) {
+            shoreShifts[k] = tile.backdrop().present() ? new float[2] : relief.shoreShift(k);
+            wetCliffs[k] = relief.wetCliff(k);
+        }
+    }
+
     /** Corner k as the shore moves it (see {@link BoardRelief#shoreShift}). */
     private Vector3 moved(int k) {
-        if (columns || tile.backdrop().present()) { return new Vector3(corners[k]); }
-        float[] shift = relief.shoreShift(k);
-        return new Vector3(corners[k]).add(shift[0], shift[1], 0);
+        if (columns) { return new Vector3(corners[k]); }
+        return new Vector3(corners[k]).add(shoreShifts[k][0], shoreShifts[k][1], 0);
     }
 
     /** Road profiles and graded banks precede relief; flat concrete and other ground already include the fit. */
@@ -2871,7 +2888,7 @@ final class BoardSurface {
             }
             // The basin owns the submerged cliff. The upper column stops at its rim instead of drawing
             // another wall over the same concrete quay or drowned cliff down to the seabed.
-            boolean basin = !columns && adjacent != null && adjacent.relief.wetCliff((edge + 3) % 6);
+            boolean basin = !columns && adjacent != null && adjacent.wetCliffs[(edge + 3) % 6];
             // Compare both profiles at the same edge parameter, in each profile's own coordinate space.
             // Sampling a road at the shifted shore instead samples inside its ramp and leaves its wall short.
             Vector3 roofA = topographyCorner(edge), roofB = topographyCorner(edge + 1);

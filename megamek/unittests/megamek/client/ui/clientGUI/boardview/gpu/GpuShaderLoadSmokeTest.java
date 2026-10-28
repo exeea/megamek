@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
 
@@ -22,6 +23,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -29,6 +31,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.Array;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.BoardEditorBlueprint;
@@ -51,7 +54,8 @@ import org.junit.jupiter.api.Test;
  * same board opens every Assets category and reveals each of its sections, searches, and paints lava, water, ice, a
  * car and scorch. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
  * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
- * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back.
+ * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back. With the
+ * Tessellation switch on, a zoom from the fitted board to full-detail banks links nothing either.
  * {@code -Dmegamek.gpu.shaderTiming=true} logs every link: "after-loading" ones held a frame, "after-loading-deferred"
  * ones linked off the render thread while their draws waited.
  */
@@ -179,6 +183,75 @@ class GpuShaderLoadSmokeTest {
             SwingUtilities.invokeAndWait(fixture.view::close);
         }
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
+        watch.check();
+    }
+
+    /**
+     * With the Tuning panel's Tessellation switch on, Grassland 2 loads fitted, where no chunk has full detail, then
+     * zooms to its banks, where chunks refine to full detail and their curving relief tessellates: its programs linked
+     * behind the loading stage, so the zoom links none.
+     */
+    @Test
+    void tessellatedGameCompilesNothingWhenZoomingIn() throws Exception {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<Boolean> available = new AtomicReference<>(true);
+        Watch watch = new Watch("tessellated game");
+        var fixture = GpuBoardFixture.create(BoardFile.loadSheet(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"),
+              false, true));
+        boolean saved = GUIPreferences.getInstance().getBoardTessellation();
+        GUIPreferences.getInstance().setBoardTessellation(true);
+        try {
+            new Lwjgl3Application(new GpuBattleView(fixture.source) {
+                int step;
+
+                @Override
+                public void render() {
+                    try {
+                        if (!GpuTessellation.available()) {
+                            available.set(false);
+                            Gdx.app.exit();
+                            return;
+                        }
+                        watch.before(GpuBoardTestUi.loading(this));
+                        super.render();
+                        if (!watch.frame(GpuBoardTestUi.loading(this))) { return; }
+                        BoardScene scene = fixture.source.takeFrame().scene();
+                        if (step == 0) {
+                            boardCamera.setIsometric(true);
+                            boardCamera.fit(scene);
+                            step++;
+                        } else if (step == 1 && watch.seconds() > 3) {
+                            Coords bank = new Coords(12, 8);
+                            boardCamera.setIsometric(false);
+                            boardCamera.orbit(15, 55);
+                            boardCamera.camera.zoom = .09f;
+                            boardCamera.center(BoardGeometry.center(bank, scene.tile(bank).elevation()));
+                            step++;
+                        } else if (step == 2 && watch.seconds() > 15) {
+                            var terrain = (GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain");
+                            boolean curved = false;
+                            for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+                                for (Object instance : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "opaque")) {
+                                    for (var material : ((ModelInstance) instance).materials) {
+                                        curved |= GpuTessellation.curved(material);
+                                    }
+                                }
+                            }
+                            assertTrue(curved, "The close view's full-detail chunks draw curving relief");
+                            Gdx.app.exit();
+                        }
+                    } catch (Throwable error) {
+                        failure.set(error);
+                        Gdx.app.exit();
+                    }
+                }
+            }, window());
+        } finally {
+            GUIPreferences.getInstance().setBoardTessellation(saved);
+            SwingUtilities.invokeAndWait(fixture.view::close);
+        }
+        if (failure.get() != null) { throw new AssertionError(failure.get()); }
+        assumeTrue(available.get(), "No tessellation stages before OpenGL 4.0");
         watch.check();
     }
 

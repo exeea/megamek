@@ -129,7 +129,7 @@ class GpuAmbientOcclusionSmokeTest {
     }
 
     /** The view settled with the frame's setting (a switch rebuilds the programs), drawn, saved and read back. */
-    private static byte[] draw(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
+    static byte[] draw(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
           File file) throws InterruptedException {
         GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
         frame.render(terrain, camera, scene, BoardCamera.renderScale);

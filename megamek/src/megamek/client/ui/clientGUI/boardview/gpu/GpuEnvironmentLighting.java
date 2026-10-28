@@ -200,8 +200,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     @Override public Attribute copy() {
         var copy = new GpuEnvironmentLighting(); copy.sky.set(sky); copy.horizon.set(horizon);
         copy.image = image; copy.imageGain = imageGain; copy.shadowStrength = shadowStrength;
-        // Borrowed by the copy, which disposes nothing of it.
-        copy.skyVisibility = skyVisibility();
+        // The board's volume, borrowed; without one the copy makes and disposes its own neutral volume.
+        copy.skyVisibility = skyVisibility;
         return copy;
     }
     @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }

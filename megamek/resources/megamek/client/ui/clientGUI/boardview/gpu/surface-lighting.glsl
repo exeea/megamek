@@ -47,18 +47,34 @@ vec3 environmentGround(vec3 groundAlbedo) {
     return groundAlbedo * (surfaceAmbient(vec3(0.0, 0.0, 1.0)) + ground);
 }
 
+// The board's relief and buildings hide part of the sky in canyons, streets and at the feet of walls
+// (sky-visibility.glsl). What hides it is not black: seen from shade, the faces hiding the sky mostly turn away from the
+// sun, so the hidden share takes ground lit by the sky alone (sunlit ground, about as bright as the sky, erased the
+// occlusion). Along direction the sky is the share (1 + direction.z) / 2; the ground below keeps its own bounce. Never
+// above open, the light there unoccluded: a dim lighting image or snow's bounce must not turn occlusion into a lift.
+vec3 hiddenSky(vec3 direction, vec3 ground, vec3 groundAlbedo, vec3 open) {
+    float upper = .5 + .5 * direction.z;
+    return min((1.0 - upper) * ground + upper * groundAlbedo * surfaceAmbient(vec3(0.0, 0.0, 1.0)), open);
+}
+
 vec3 skyLight(vec3 normal, vec3 groundAlbedo) {
     // At roughness one the normalized GGX prefilter is the cosine convolution: irradiance divided by pi.
-    vec3 sky = surfaceAmbient(vec3(0.0, 0.0, 1.0));
     vec3 ground = environmentGround(groundAlbedo);
-    vec3 open = environmentRadiance(normal, 1.0, ground, sky);
-    // The board's relief and buildings hide part of the sky in canyons, streets and at the feet of walls
-    // (sky-visibility.glsl). What hides it is not black: seen from shade, the faces hiding the sky mostly turn away
-    // from the sun, so the hidden share takes ground lit by the sky alone (sunlit ground, about as bright as the sky,
-    // erased the occlusion). Of a face's light, the sky is the share (1 + normal.z) / 2; the ground below keeps its
-    // own bounce.
-    float upper = .5 + .5 * normal.z;
-    return mix((1.0 - upper) * ground + upper * groundAlbedo * sky, open, skyVisibility(v_cloudPosition, normal));
+    vec3 open = environmentRadiance(normal, 1.0, ground, surfaceAmbient(vec3(0.0, 0.0, 1.0)));
+    return mix(hiddenSky(normal, ground, groundAlbedo, open), open, skyVisibility(v_cloudPosition, normal));
+}
+
+// The environment's reflection, as environmentSpecular: the relief hides the reflected sky as it hides the sky, seen
+// along the reflection, and the hidden share takes the light of what hides it.
+vec3 skyReflection(vec3 normal, vec3 view, float roughness, vec3 f0, vec3 groundAlbedo, vec3 ground,
+      vec3 fallbackSky) {
+    if (dot(normal, view) <= 0.0) return vec3(0.0);
+    roughness = clamp(roughness, MIN_ROUGHNESS, 1.0);
+    vec3 reflected = reflect(-view, normal);
+    vec3 radiance = environmentRadiance(reflected, roughness, ground, fallbackSky);
+    float visible = skyVisibility(v_cloudPosition, reflected);
+    if (visible < 1.0) radiance = mix(hiddenSky(reflected, ground, groundAlbedo, radiance), radiance, visible);
+    return radiance * specularAlbedo(dot(normal, view), roughness, f0);
 }
 
 float surfaceVisibility() {
@@ -77,14 +93,20 @@ in float v_impostorLift;
 #endif
 
 // The sculpted terrain and its trees filter the shadow map more finely than the 4-tap surfaceVisibility().
-float sculptShadow(vec3 normal, vec3 light) {
+// The sun's disc, about half a degree across: a penumbra is this share of the distance from what casts it.
+const float SUN_DIAMETER = .0093;
+
+// metre: world units per metre. lift: how far the visible surface stands out along normal from the mesh, its relief
+// (terrain parallax): raised grains catch the light at a shadow's edge and hollows fall into it first. fray: a shift
+// of the lookup across the light, in metres: the grass, clods and stones that fray a natural shadow's edge.
+float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) {
 #ifdef shadowMapFlag
     // Normal offset: the lookup moves out along the surface normal by half a shadow texel, and by up to two where the
     // light skims the surface, so a flat face lit at a grazing angle never shadows itself.
     vec3 row = vec3(u_shadowMapProjViewTrans[0][0], u_shadowMapProjViewTrans[1][0], u_shadowMapProjViewTrans[2][0]);
     float texel = 4.0 * u_shadowPCFOffset / max(length(row), 1e-6);
     float skim = 1.0 - abs(dot(normal, light));
-    vec3 receiver = v_cloudPosition + normal * texel * (.5 + 1.5 * skim);
+    vec3 receiver = v_cloudPosition + normal * (texel * (.5 + 1.5 * skim) + lift);
 #ifdef impostorFlag
     // An impostor card stands in the middle of its crown, whose leaves face the light about a crown radius nearer:
     // looked up there, the card's own cards and crown cannot shade it, while other trees and buildings still do.
@@ -102,12 +124,37 @@ float sculptShadow(vec3 normal, vec3 light) {
     taps[9] = vec2(.896, .412); taps[10] = vec2(-.322, -.933); taps[11] = vec2(-.792, -.598);
     float angle = fract(sin(dot(floor(v_cloudPosition.xy * 3.0), vec2(12.9898, 78.233))) * 43758.5453) * 6.2832;
     mat2 rotation = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
-    float radius = u_shadowPCFOffset * 3.0;
     // Receiver-plane depth: each tap compares against this surface's own depth at the tap, not at the pixel centre,
     // so walls and grazing ground do not shadow themselves across the filter disk.
     vec3 du = dFdx(shadowUv), dv = dFdy(shadowUv);
     float det = du.x * dv.y - du.y * dv.x;
     vec2 slope = abs(det) > 1e-14 ? vec2(dv.y * du.z - du.y * dv.z, du.x * dv.z - dv.x * du.z) / det : vec2(0.0);
+    // After the receiver plane: the fray moves where the edge falls, not the surface's own depth.
+    shadowUv.xy += fray * metre * .5 * length(row);
+    // Contact hardening: a bank's rim casts a crisp edge and a tower a soft one. What casts the shadow is found by
+    // comparisons alone, without a second sampler: four taps over the widest disk, and where any is shadowed, the same
+    // taps again with the receiver 3 m and 15 m nearer the sun; a blocker still found there stands farther away.
+    float widest = u_shadowPCFOffset * 6.0;
+    float blocked = 0.0;
+    for (int i = 0; i < 4; i++) {
+        vec2 offset = rotation * taps[i * 3] * widest;
+        blocked += 1.0 - texture(u_shadowTexture,
+              vec3(shadowUv.xy + offset, shadowUv.z + clamp(dot(offset, slope), -.002, .002)));
+    }
+    // Fully lit at the widest disk: no tap of a narrower one is shadowed either.
+    if (blocked <= 0.0) return 1.0;
+    float depthPerUnit = .5 * length(vec3(u_shadowMapProjViewTrans[0][2], u_shadowMapProjViewTrans[1][2],
+          u_shadowMapProjViewTrans[2][2]));
+    float beyondNear = 0.0, beyondFar = 0.0;
+    for (int i = 0; i < 4; i++) {
+        vec2 offset = rotation * taps[i * 3] * widest;
+        float depth = shadowUv.z + clamp(dot(offset, slope), -.002, .002);
+        beyondNear += 1.0 - texture(u_shadowTexture, vec3(shadowUv.xy + offset, depth - 3.0 * metre * depthPerUnit));
+        beyondFar += 1.0 - texture(u_shadowTexture, vec3(shadowUv.xy + offset, depth - 15.0 * metre * depthPerUnit));
+    }
+    float caster = (1.5 + 5.5 * beyondNear / blocked + 23.0 * beyondFar / blocked) * metre;
+    // Half the penumbra, from half a texel (the map resolves no finer) to the widest disk.
+    float radius = clamp(.5 * SUN_DIAMETER * caster / texel, .5, 3.0) * 2.0 * u_shadowPCFOffset;
     float lit = 0.0;
     for (int i = 0; i < 12; i++) {
         vec2 offset = rotation * taps[i] * radius;
@@ -142,10 +189,8 @@ float dielectricBudget(vec3 normal, vec3 view, float film, float roughness) {
 }
 
 vec3 surfaceEnvironment(vec3 normal, float film, float roughness, vec3 groundAlbedo) {
-    // The relief hides the reflected sky as it hides the sky (sky-visibility.glsl), seen along the reflection.
-    return environmentSpecular(normal, -viewDirection(), dielectricRoughness(film, roughness), dielectricF0(film),
-          environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)))
-          * skyVisibility(v_cloudPosition, reflect(viewDirection(), normal));
+    return skyReflection(normal, -viewDirection(), dielectricRoughness(film, roughness), dielectricF0(film),
+          groundAlbedo, environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)));
 }
 
 // Irradiance for scattering volumes and optical coats, before their own reflection/transmission split. Without local,

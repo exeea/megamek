@@ -346,6 +346,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_AMBIENT_OCCLUSION = "BoardAmbientOcclusion";
     /** Whether the 3D board separates nearer surfaces from farther ones by a haze behind the view's focus. */
     public static final String BOARD_DEPTH_CUES = "BoardDepthCues";
+    /** Whether the 3D board tessellates its sculpted relief, where the graphics card offers it (OpenGL 4.0). */
+    public static final String BOARD_TESSELLATION = "BoardTessellation";
     /** The 3D board's UI scale, a choice of its Tuning panel: the share (0.5 to 1) of the scale the window sets. */
     public static final String BOARD_UI_SCALE = "BoardUiScale";
     /** The 3D board's render resolution, a choice of its Tuning panel: the share (0.5 to 1) of the window's pixels. */
@@ -926,6 +928,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_TERRAIN_PARALLAX, true);
         store.setDefault(BOARD_AMBIENT_OCCLUSION, false);
         store.setDefault(BOARD_DEPTH_CUES, false);
+        store.setDefault(BOARD_TESSELLATION, false);
         store.setDefault(BOARD_UI_SCALE, 1f);
         store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
@@ -2046,6 +2049,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardDepthCues(boolean enabled) {
         store.setValue(BOARD_DEPTH_CUES, enabled);
+    }
+
+    /** Whether the 3D board's sculpted relief is tessellated. */
+    public boolean getBoardTessellation() {
+        return store.getBoolean(BOARD_TESSELLATION);
+    }
+
+    public void setBoardTessellation(boolean enabled) {
+        store.setValue(BOARD_TESSELLATION, enabled);
     }
 
     /** The 3D board's UI scale: the share of the scale its window takes from the display and the window size. */

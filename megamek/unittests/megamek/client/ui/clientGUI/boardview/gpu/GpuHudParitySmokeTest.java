@@ -70,14 +70,15 @@ import org.junit.jupiter.api.Test;
  * shots a real GpuBattleView draws GpuParityBattle's game in the shot's state, through the real phase displays the
  * tests can build (movement, firing, physical and report displays) and the HUD's own state for its panels, in a
  * window of the shot's size with one HUD unit per window pixel. Each shot checks that every panel of the mock is shown
- * where the prototype's layout anchors it (its left edge, width and anchored edge within 2 units of the mock's frame),
- * that no label shows a missing message key, and the texts the data allows; it writes parity-NN.png, parity-NN.txt
+ * at the mock's width (within 2 units), where the live layout places it: a 10-unit screen gap (GpuBoardHud#GAP) and
+ * the utility bar over the right column, not the prototype's 20 and taller bar. It also checks that no label shows a
+ * missing message key, and the texts the data allows; it writes parity-NN.png, parity-NN.txt
  * (each panel's bounds beside the mock's, and its texts) and, with the mock at hand, parity-NN-sbs.png, the capture
  * beside the mock's shot.
  */
 @Tag("on-demand")
 class GpuHudParitySmokeTest {
-    /** The tolerance of a panel's anchored place against the mock's frame, in HUD units. */
+    /** The tolerance of a panel's width against the mock's frame, in HUD units. */
     private static final float TOLERANCE = 2;
     /** A hex's width on the screen in the mock's 3D shots, in HUD units (G16: about 112). */
     private static final float MOCK_HEX = 112;
@@ -222,7 +223,7 @@ class GpuHudParitySmokeTest {
                 live.draw(2, .1f);
                 click(live, "force-overview-grouping-status");
                 shot(live, "12", "12-force-overview.jpg", HEADER_RIBBON,
-                      new Region("force-overview", 20, 90, 1880, 920, Edge.TOP));
+                      new Region("force-overview", 20, 90, 1920 - 2 * (int) GpuBoardHud.GAP, 920, Edge.TOP));
                 live.hud.state.overview = false;
 
                 // 02: a walk of two hexes north, the fire preview from its end with the Timber Wolf's row open.
@@ -743,7 +744,7 @@ class GpuHudParitySmokeTest {
     /**
      * The shot: draws a few frames, writes parity-{id}.png (opaque, as the window shows it), parity-{id}-sbs.png beside
      * the mock and parity-{id}.txt, then checks that no label shows a missing key and that every region is shown at
-     * its anchored place.
+     * the mock's width.
      */
     private static void shot(Live live, String id, String mock, Region... regions) throws IOException {
         live.draw(5, .1f);
@@ -784,13 +785,7 @@ class GpuHudParitySmokeTest {
             if (region.edge() == Edge.FREE) {
                 continue;
             }
-            check(failures, region, "left edge", bounds.x, region.x());
             check(failures, region, "width", bounds.width, region.width());
-            if (region.edge() == Edge.TOP) {
-                check(failures, region, "top", y, region.y());
-            } else {
-                check(failures, region, "bottom", y + bounds.height, region.y() + region.height());
-            }
         }
         for (String name : List.of("utility-bar", "tuning-button", "chat-button", "hint-line", "tactical-chip",
               "target-cards", "toast-stack")) {

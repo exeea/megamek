@@ -95,11 +95,7 @@ final class BoardWall {
                   && (exits(part.asset()) & 1 << opposite) != 0)
                   .findFirst().orElse(null);
             if (connected == null) { continue; }
-            int top = neighbor.elevation() - tile.elevation() + Math.max(1, Math.round(connected.height()));
-            // No overlapping vertical span means a terrain step separates the walls; do not invent a bridge.
-            if (top > 0 && neighbor.elevation() < tile.elevation() + own.height()) {
-                arms.set(direction, Math.min(own.height(), top));
-            }
+            arms.set(direction, ConnectedKit.arm(tile, own.height(), neighbor, Math.max(1, Math.round(connected.height()))));
         }
         return new Layout(own.asset(), own.family(), own.height(), arms);
     }

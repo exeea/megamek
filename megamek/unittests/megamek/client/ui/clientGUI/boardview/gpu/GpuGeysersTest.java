@@ -16,24 +16,28 @@ class GpuGeysersTest {
     @Test
     void followsInstalledAssetStateAndItsGroundTransform() {
         Matrix4 transform = new Matrix4().setToTranslation(120, -90, 18).scale(2, 2, 2);
-        var active = GpuGeysers.emitter("scenery/geysers/water-erupting", transform);
+        var active = GpuGeysers.emitter("scenery/geysers/water-erupting", transform, .84f);
         assertNotNull(active);
         assertTrue(active.active());
         assertFalse(active.magma());
         assertEquals(new Vector3(120, -90, 19.68f), active.origin());
         assertEquals(2, active.scale());
-        var dormant = GpuGeysers.emitter("scenery/geysers/water-dormant", transform);
+        var dormant = GpuGeysers.emitter("scenery/geysers/water-dormant", transform, .84f);
         assertFalse(dormant.active());
         assertEquals(active.origin(), dormant.origin());
-        var magma = GpuGeysers.emitter("scenery/geysers/magma", transform);
+        var magma = GpuGeysers.emitter("scenery/geysers/magma", transform, 1.85f);
         assertTrue(magma.magma());
         assertFalse(magma.active());
-        assertNull(GpuGeysers.emitter("scenery/fluff/pool", transform));
+        assertTrue(magma.origin().epsilonEquals(120, -90, 21.7f, 1e-4f), "The vent height places it");
+        // Each geyser has a second look, the same state.
+        assertTrue(GpuGeysers.emitter("scenery/geysers/water-erupting-b", transform, .84f).active());
+        assertTrue(GpuGeysers.emitter("scenery/geysers/magma-b", transform, 1.85f).magma());
+        assertNull(GpuGeysers.emitter("scenery/fluff/pool", transform, 0));
     }
 
     @Test
     void dropletsAdvanceOnTheSharedClockAndStayWithinTheCullingEnvelope() {
-        var source = GpuGeysers.emitter("scenery/geysers/water-erupting", new Matrix4());
+        var source = GpuGeysers.emitter("scenery/geysers/water-erupting", new Matrix4(), .84f);
         Vector3 first = GpuGeysers.droplet(source, 4, .5f, 9.8f, Vector3.Zero, new Vector3());
         assertEquals(first, GpuGeysers.droplet(source, 4, .5f, 9.8f, Vector3.Zero, new Vector3()));
         assertNotEquals(first, GpuGeysers.droplet(source, 4, .9f, 9.8f, Vector3.Zero, new Vector3()));

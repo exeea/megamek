@@ -54,6 +54,7 @@ coverageIn float v_alphaTest;
 #endif
 #endif
 uniform float u_foliage; // 0 solid, 1 canopy, 2 snow, 3 fungal fruiting body, 4 cyan mycelium
+uniform float u_metre; // world units per metre
 uniform float u_clay;
 uniform float u_foliageProxy; // Exact authored branch-card roles, not all thin tissue.
 // How far a crown's leaf normals spread about its envelope normal, as the GGX alpha^2 it adds (twice the projected
@@ -114,7 +115,7 @@ void main() {
 #endif
     vec3 light = sunDirection();
     // Use the crown's smooth normal for stable shadow offsets; the detail normal is only leaf relief.
-    float visibility = sculptShadow(crownNormal, light);
+    float visibility = sculptShadow(crownNormal, light, u_metre, 0.0, vec2(0.0));
 #if defined(impostorFlag) && !defined(impostorMaterialFlag)
     // The card's baked crown self-shadow follows the shadow strength, as the shadow map does.
     visibility *= shadowVisibility(sunlit);

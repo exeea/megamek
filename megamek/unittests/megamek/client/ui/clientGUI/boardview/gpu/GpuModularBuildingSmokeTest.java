@@ -61,9 +61,9 @@ class GpuModularBuildingSmokeTest {
     private static void checkKit() {
         var textures = new HashMap<String, Texture>();
         var authoredBounds = new java.util.ArrayList<Map<String, BoundingBox>>();
-        var file = GpuBuildingTest.file();
-        GpuBuilding kit = new GpuBuilding(file, file.parent().file().toPath(), data -> {
-            // Preserve both baked and node XY offsets, including the modules' asymmetric details.
+        var lods = RigidGlb.loadLods(GpuBuildingTest.file());
+        // Preserve both baked and node XY offsets, including the modules' asymmetric details.
+        for (var data : lods.stream().distinct().toList()) {
             for (var mesh : data.meshes) {
                 for (int i = 0; i < mesh.vertices.length; i += RigidGlb.STRIDE) {
                     mesh.vertices[i] += 71;
@@ -72,27 +72,30 @@ class GpuModularBuildingSmokeTest {
                 }
             }
             for (var node : data.nodes) { node.translation.add(900, -400, 257); }
+        }
+        GpuBuilding kit = new GpuBuilding(ConnectedKit.load(lods), data -> {
             Model model = ModelTextures.create(data, textures,
                   (path, color) -> { throw new AssertionError("Expected embedded textures"); });
             Map<String, BoundingBox> bounds = new HashMap<>();
-            GpuBuilding.parts(data).forEach((role, name) ->
-                  bounds.put(role, model.getNode(name).calculateBoundingBox(new BoundingBox())));
+            ConnectedKit.parts(data).forEach(piece ->
+                  bounds.put(piece.role(), model.getNode(piece.node()).calculateBoundingBox(new BoundingBox())));
             authoredBounds.add(bounds);
             return model;
         });
+        int[] alone = new int[6];
         try {
-            var five = kit.assemble(5, 7);
-            assertSame(five, kit.assemble(5, 7), "Repeated loads/edits reuse compact recipes");
-            var cover = kit.assemble(5, 7, false);
+            var five = kit.assemble(5, alone, 7, true);
+            assertSame(five, kit.assemble(5, alone, 7, true), "Repeated loads/edits reuse compact recipes");
+            var cover = kit.assemble(5, alone, 7, false);
             assertNull(cover.interior(), "Industrial use of the same kit must not borrow a building's interior");
-            assertEquals(five.modules(), cover.modules());
+            assertEquals(five.recipe().modules(), cover.recipe().modules());
             assertSame(five.model(0), cover.model(0), "Different terrain semantics still share native geometry");
-            assertSame(cover, kit.assemble(5, 7, false));
-            var another = kit.assemble(5, 19);
+            assertSame(cover, kit.assemble(5, alone, 7, false));
+            var another = kit.assemble(5, alone, 19, true);
             assertSame(five.interior(), another.interior(), "Variants share the same volume's interior");
             for (int count : new int[] { 1, 5, 10 }) {
-                var assembly = kit.assemble(count, 7);
-                assertEquals(count + 1, assembly.modules().length(), "Only module indices are cached, with implicit offsets");
+                var assembly = kit.assemble(count, alone, 7, true);
+                assertEquals(count + 1, assembly.recipe().modules().size(), "Only module choices are cached");
                 for (int lod = 0; lod < assembly.lodCount(); lod++) {
                     ModelInstance instance = assembly.instance(lod);
                     assertSame(assembly.model(lod), instance.model, "No expanded model per combination");
@@ -100,7 +103,8 @@ class GpuModularBuildingSmokeTest {
                     for (int level = 0; level <= count; level++) {
                         var node = instance.nodes.get(level);
                         var bounds = node.calculateBoundingBox(new BoundingBox());
-                        var authored = authoredBounds.get(lod).get(node.id.substring(0, node.id.indexOf("-at-")));
+                        var authored = authoredBounds.get(lod).get(node.id.substring(node.id.indexOf('/') + 1,
+                              node.id.indexOf("-at-")));
                         assertEquals(level * 18, bounds.min.z, .001f, "Saved vertical offsets must be discarded");
                         assertEquals(authored.min.x, bounds.min.x, .001f);
                         assertEquals(authored.max.x, bounds.max.x, .001f);
@@ -133,11 +137,11 @@ class GpuModularBuildingSmokeTest {
             kit.retain(Set.of(five));
             assertEquals(1, kit.assemblyCount());
             assertEquals(1, kit.interiorCount());
-            assertSame(mesh, kit.assemble(10, 3).model(0).meshes.first(), "Every height shares module buffers");
+            assertSame(mesh, kit.assemble(10, alone, 3, true).model(0).meshes.first(), "Every height shares module buffers");
             kit.retain(Set.of());
             assertEquals(0, kit.assemblyCount());
             assertEquals(0, kit.interiorCount());
-            assertSame(mesh, kit.assemble(1, 9).model(0).meshes.first(), "An edit reuses the loaded kit");
+            assertSame(mesh, kit.assemble(1, alone, 9, true).model(0).meshes.first(), "An edit reuses the loaded kit");
         } finally {
             kit.dispose();
             textures.values().forEach(Texture::dispose);
@@ -147,7 +151,7 @@ class GpuModularBuildingSmokeTest {
     private static void checkLightBuilding() {
         var assets = new GpuAssets();
         try {
-            var building = assets.building("buildings/saxarba/building_light/building_light_00", 5, 0);
+            var building = assets.building("buildings/saxarba/building_light/building_light_00", 5, new int[6], 0, true);
             assertNotNull(building);
             var floors = new ModelInstance(building.interior(), "floors").calculateBoundingBox(new BoundingBox());
             assertEquals(26, floors.getWidth(), .01f, "Floors stop at the external walls, before the roof border");
@@ -180,7 +184,7 @@ class GpuModularBuildingSmokeTest {
         String fallback = "buildings/saxarba/building_light/building_light_42";
         GpuAssets assets = new GpuAssets();
         try {
-            assertNull(assets.building(fallback, 5, 4));
+            assertNull(assets.building(fallback, 5, new int[6], 4, true));
             assertNotNull(assets.model(fallback), "Legacy fallback still loads");
             assertNotNull(assets.model(GpuBuildingTest.ASSET), "The custom kit must win even when a board model exists");
         } finally { assets.dispose(); }

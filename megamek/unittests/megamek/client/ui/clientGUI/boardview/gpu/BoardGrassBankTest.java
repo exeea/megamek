@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -18,14 +19,13 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.Configuration;
-import megamek.common.Hex;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-/** The same finished shoulder supports turf, blade roots and surface queries at both planted detail levels. */
+/** The same finished shoulder supports rim blades, blade roots and surface queries at both planted detail levels. */
 class BoardGrassBankTest {
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
@@ -221,11 +221,32 @@ class BoardGrassBankTest {
         var surface = new BoardSurface(scene, tile, lod);
         var finished = BoardTacticalGeometry.Surface.of(surface, scene, BoardGeometry.floor(scene));
         var roots = GpuGroundCover.plant(scene, tile, finished, null);
-        var turf = GpuBankTurf.plant(scene, tile, finished, null);
-        assertNotNull(turf, "Both contour bands need attached turf geometry");
-        assertEquals(turf, GpuBankTurf.plant(scene, tile, finished, null), "Rebuilding the same bank keeps the same variants");
-        assertTrue(checkTurf(turf) > 10, "The visible bank has multiple distinct clumps");
-        float level = BoardGeometry.level();
+        var rim = GpuGroundCover.plantRim(scene, tile, finished, null);
+        assertNotNull(rim, "The bank's rims grow blades");
+        assertEquals(rim, GpuGroundCover.plantRim(scene, tile, finished, null), "Rebuilding the same bank keeps the same roots");
+        checkRim(rim);
+        float level = BoardGeometry.level(), m = BoardRelief.metres(1);
+        List<BoardSurface.Face> ground = new ArrayList<>(finished.top());
+        ground.addAll(finished.walls());
+        int lip = 0, shoulder = 0, standing = 0, off = 0;
+        for (int i = 0; i < rim.size; i += 4) {
+            float x = rim.get(i), y = rim.get(i + 1), z = rim.get(i + 2);
+            if (z > 1.5f * level) { lip++; } else if (z > .5f * level) { shoulder++; }
+            // The rank's fraction packs what the blade shader reads: the contour, the lean and the heading.
+            int code = Math.round((rim.get(i + 3) - (float) Math.floor(rim.get(i + 3))) * 4096);
+            assertEquals(z < 1.5f * level, code >= 2048, "The packed contour is the root's");
+            if ((code >> 8 & 7) < 7) { standing++; continue; }
+            // A hanging blade leans down a bank that falls away under it.
+            double heading = 2 * Math.PI * (code & 255) / 256;
+            float below = BoardSurface.sampleHeight(ground, x + (float) Math.cos(heading) * m,
+                  y + (float) Math.sin(heading) * m, Float.NaN);
+            // The packed heading is 1.4 degrees coarse: at a corner of the hex's triangles it can step off them.
+            if (Float.isNaN(below)) { off++; continue; }
+            assertTrue(below < z - .3f * m, "A hanging rim blade hangs over a falling bank: " + (z - below) / m + " m");
+        }
+        assertTrue(off * 50 < rim.size / 4, lod + " hanging blades off their support: " + off + " of " + rim.size / 4);
+        assertTrue(lip > 10 && shoulder > 10, lod + " must grow rim blades on both contours: " + lip + ", " + shoulder);
+        assertTrue(standing > 10 && standing < rim.size / 4 - 10, lod + " rims lean from standing to hanging: " + standing);
         int middle = 0;
         for (int i = 0; i < roots.size; i += 4) {
             float z = roots.get(i + 2);
@@ -242,78 +263,36 @@ class BoardGrassBankTest {
     }
 
     @Test
-    void variedCrownsAreLimitedToDryTwoLevelGrassBanks() {
+    void rimBladesAreLimitedToDryTwoLevelGrassBanks() {
         for (var family : new BoardScene.Surface[] { BoardScene.Surface.GRASS, BoardScene.Surface.DIRT, BoardScene.Surface.SAND }) {
             for (int levels : new int[] { 1, 2, 4 }) {
                 var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family, c.getX() < 4 ? levels : 0, -1, 0));
-                // A hex's clumps draw their silhouettes at random: along the bank, over three hexes, all six take part.
-                var variants = new HashSet<Integer>();
-                for (int row = 3; row <= 5; row++) {
-                    var tile = scene.tile(new Coords(3, row));
-                    var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-                    var turf = GpuBankTurf.plant(scene, tile, surface, null);
-                    if (family != BoardScene.Surface.GRASS || levels != 2) { assertNull(turf); continue; }
-                    assertNotNull(turf);
-                    for (int clump = 0; clump < turf.size; clump += 48 * GpuBankTurf.STRIDE) {
-                        float u = 1, v = 1;
-                        for (int at = clump; at < clump + 48 * GpuBankTurf.STRIDE; at += GpuBankTurf.STRIDE) {
-                            u = Math.min(u, turf.get(at + 7)); v = Math.min(v, turf.get(at + 8));
-                        }
-                        variants.add(Math.round(u * 3) + 3 * Math.round(v * 2));
-                    }
-                }
-                if (family == BoardScene.Surface.GRASS && levels == 2) {
-                    assertEquals(6, variants.size(), "All six atlas silhouettes participate");
-                }
+                var tile = scene.tile(new Coords(3, 4));
+                var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
+                var rim = GpuGroundCover.plantRim(scene, tile, surface, null);
+                assertEquals(family == BoardScene.Surface.GRASS && levels == 2, rim != null, family + " " + levels);
             }
         }
         var wet = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
               c.getX() < 4 ? 2 : 0, c.getX() < 4 ? -1 : 1, 0));
         var tile = wet.tile(new Coords(3, 4));
-        assertNull(GpuBankTurf.plant(wet, tile,
+        assertNull(GpuGroundCover.plantRim(wet, tile,
               BoardTacticalGeometry.Surface.of(new BoardSurface(wet, tile), wet, BoardGeometry.floor(wet)), null));
     }
 
-    @Test
-    void turfKeepsAuthoredTerrainColorsInsteadOfAnAtlasTint() {
-        for (int family : new int[] { 1, 3, 4, 5 }) {
-            var cover = BoardSurfaceBlend.capture(new Hex(0, "ground_fluff:" + family + ":1", "grass"));
-            var scene = BoardSurfaceBlendTest.scene(c -> {
-                var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 4 ? 2 : 0, -1, 0);
-                return new BoardScene.Tile(c, tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-                      tile.surface(), tile.decals(), tile.decalsWithoutLimbs(),
-                      tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(),
-                      tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare(), cover);
-            });
-            var tile = scene.tile(new Coords(3, 4));
-            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-            var turf = GpuBankTurf.plant(scene, tile, surface, null);
-            assertNotNull(turf);
-            for (int at = 0; at < turf.size; at += GpuBankTurf.STRIDE) {
-                for (int material = 0; material < BoardScene.Surface.values().length; material++) {
-                    assertEquals(cover.weight(material), turf.get(at + 9 + material), .001f,
-                          "Authored material proportion for family " + material);
-                }
-            }
+    /**
+     * A hex's rim roots as the blade engine draws them: finite, in rank order for its prefix selection, every rank
+     * within the hex's candidates. Returns their number.
+     */
+    static int checkRim(FloatArray rim) {
+        assertEquals(0, rim.size % 4);
+        float previous = -1;
+        for (int at = 0; at < rim.size; at += 4) {
+            for (int axis = 0; axis < 3; axis++) { assertTrue(Float.isFinite(rim.get(at + axis))); }
+            float rank = rim.get(at + 3);
+            assertTrue(rank > previous && rank < GpuGroundCover.ROOTS_PER_HEX, "Rim roots in rank order: " + rank);
+            previous = rank;
         }
-    }
-
-    /** A small crown may hang off its carrier, but may never stretch a full level at a neighbouring cliff. */
-    static int checkTurf(FloatArray turf) {
-        int clumpSize = 48 * GpuBankTurf.STRIDE;
-        assertEquals(0, turf.size % clumpSize);
-        for (int clump = 0; clump < turf.size; clump += clumpSize) {
-            float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
-            for (int at = clump; at < clump + clumpSize; at += GpuBankTurf.STRIDE) {
-                for (int axis = 0; axis < 6; axis++) { assertTrue(Float.isFinite(turf.get(at + axis))); }
-                float z = turf.get(at + 2);
-                low = Math.min(low, z); high = Math.max(high, z);
-                float weight = 0;
-                for (int family = 0; family < BoardScene.Surface.values().length; family++) { weight += turf.get(at + 9 + family); }
-                assertEquals(1, weight, .001f, "Turf inherits the installed material proportions");
-            }
-            assertTrue(high - low < BoardRelief.metres(3.5f), "No stretched curtain: " + (high - low));
-        }
-        return turf.size / clumpSize;
+        return rim.size / 4;
     }
 }

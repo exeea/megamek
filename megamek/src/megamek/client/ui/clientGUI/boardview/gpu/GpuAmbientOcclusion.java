@@ -41,10 +41,12 @@ import com.badlogic.gdx.utils.Disposable;
 final class GpuAmbientOcclusion extends Attribute implements Disposable {
     static final long TYPE = register("boardAmbientOcclusion");
     /**
-     * The world radius in metres, about a level and a quarter: wide enough to show the foot of a cliff at hex scale, while
-     * the occlusion near a contact (a trunk's foot, a rock) still darkens most.
+     * The world radius in metres. The board's sky visibility (GpuSkyVisibility) already hides the sky behind relief a
+     * cell or more away, the feet of cliffs and canyon floors, and both darken the same sky light: this keeps to the
+     * occluders nearer than its cells (a trunk's foot, a rock, a bank's crease); its cells grow past this on boards over
+     * about 1 km across.
      */
-    static final float RADIUS_METRES = 8;
+    static final float RADIUS_METRES = GpuSkyVisibility.CELL_METRES;
     /** The largest screen radius in scene pixels: a close view searches a smaller world radius instead of more pixels. */
     static final float MAX_RADIUS_PIXELS = 160;
     /** Contact shadows march this far toward the sun, and take an occluder this deep behind its surface (metres). */

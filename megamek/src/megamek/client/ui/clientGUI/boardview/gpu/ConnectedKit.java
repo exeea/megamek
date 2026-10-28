@@ -33,9 +33,10 @@ import megamek.common.board.HexTile;
 
 /**
  * Connected structure kits ({@code models/buildings/README.md}): one GLB whose module nodes may carry tags for the
- * hexsides the structure connects across. {@link #parts} reads the node names of every building kit; {@link #model}
- * merges the pieces that hold for a hex's connections into one model, the single source of drawing, picking and
- * ground-cover clearance. A symmetric kit authors only the north (and north-east) pieces; the others are those turned.
+ * hexsides the structure connects across. Every building kit is one: {@link #placements} chooses, turns and stacks the
+ * pieces that hold for a hex's connections, the single source of drawing (merged into one model by {@link #model} for
+ * walls, placed from the kit's shared meshes by {@link GpuBuilding}), picking and ground-cover clearance. A symmetric
+ * kit authors only the north (and north-east) pieces; the others are those turned.
  */
 final class ConnectedKit {
     /** Tag directions in MegaMek's order, clockwise from north. */
@@ -116,12 +117,16 @@ final class ConnectedKit {
         }
         Map<String, String> roles = new LinkedHashMap<>();
         pieces.forEach(piece -> roles.putIfAbsent(piece.role(), piece.node()));
-        Set<Long> identities = new HashSet<>();
-        pieces.stream().filter(piece -> !piece.core()).forEach(piece -> identities.add(piece.tags()));
         boolean cores = pieces.stream().anyMatch(Piece::core);
+        // A module type's variants are interchangeable, so they carry the same tagged pieces. A type may carry none:
+        // a fuel tank's ground pipes run in its base only.
+        Map<String, Set<Long>> typeTags = new HashMap<>();
         for (String role : roles.keySet()) {
-            require(pieces.stream().filter(piece -> piece.role().equals(role) && !piece.core()).map(Piece::tags)
-                  .collect(Collectors.toSet()).equals(identities), "Every module needs the same tagged pieces: " + role);
+            String type = role.replaceFirst("[0-9]+$", "");
+            Set<Long> tags = pieces.stream().filter(piece -> piece.role().equals(role) && !piece.core()).map(Piece::tags)
+                  .collect(Collectors.toSet());
+            require(typeTags.computeIfAbsent(type, ignored -> tags).equals(tags),
+                  "Every " + type + " variant needs the same tagged pieces: " + role);
             require(!cores || pieces.stream().anyMatch(piece -> piece.role().equals(role) && piece.core()),
                   "Every module needs its core piece when any has one: " + role);
         }
@@ -184,20 +189,31 @@ final class ConnectedKit {
     }
 
     private static BoundingBox bounds(RigidGlb.Data data, ModelNode node, Matrix4 view) {
+        var result = new BoundingBox().inf();
+        triangles(data, node, view).forEach(result::ext);
+        require(result.isValid(), "Empty building module: " + node.id);
+        return result;
+    }
+
+    /** A placed piece's triangles in assembly space (model units): the clearance geometry of every building kit. */
+    static List<Vector3> triangles(Kit kit, int lod, Placement piece) {
+        var data = kit.lods().get(lod);
+        return triangles(data, node(data, piece.node()), piece.matrix());
+    }
+
+    private static List<Vector3> triangles(RigidGlb.Data data, ModelNode node, Matrix4 view) {
         Matrix4 placement = new Matrix4(view).mul(new Matrix4(node.translation, node.rotation, node.scale));
         var mesh = data.meshes.first();
         Set<String> parts = new HashSet<>();
         for (var part : node.parts) { parts.add(part.meshPartId); }
-        var result = new BoundingBox().inf();
-        var point = new Vector3();
+        List<Vector3> result = new ArrayList<>();
         for (var part : mesh.parts) {
             if (!parts.contains(part.id)) { continue; }
             for (short index : part.indices) {
                 int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
-                result.ext(point.set(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2]).mul(placement));
+                result.add(new Vector3(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2]).mul(placement));
             }
         }
-        require(result.isValid(), "Empty building module: " + node.id);
         return result;
     }
 
@@ -215,6 +231,36 @@ final class ConnectedKit {
     }
 
     /**
+     * How many levels from its ground the structure of {@code tile}, {@code height} levels high, connects towards each
+     * board direction: 0 without an exit there ({@link BoardScene.Cover#exits}), else its whole height, lowered by a
+     * neighbour of the same structure terrain (building or fuel tank) that connects back ({@link #arm}).
+     */
+    static int[] reach(BoardScene scene, BoardScene.Tile tile, int height) {
+        int[] result = new int[6];
+        var cover = tile.cover();
+        for (int direction = 0; direction < 6; direction++) {
+            if ((cover.exits() & 1 << direction) == 0) { continue; }
+            var neighbor = scene.neighbor(tile, direction);
+            var other = neighbor == null ? BoardScene.Cover.NONE : neighbor.cover();
+            boolean back = other.structure() != 0
+                  && (other.structure() == BoardScene.Cover.FUEL_TANK) == (cover.structure() == BoardScene.Cover.FUEL_TANK)
+                  && (other.exits() & 1 << (direction + 3) % 6) != 0;
+            result[direction] = back ? arm(tile, height, neighbor, Math.max(1, other.height())) : height;
+        }
+        return result;
+    }
+
+    /**
+     * A connection's height in levels towards a neighbour that connects back, {@code neighborHeight} levels high: up to
+     * the lower top where their vertical spans overlap, else the whole {@code height}.
+     */
+    static int arm(BoardScene.Tile tile, int height, BoardScene.Tile neighbor, int neighborHeight) {
+        int top = neighbor.elevation() - tile.elevation() + neighborHeight;
+        // No overlapping vertical span means a terrain step separates the structures; do not invent a bridge.
+        return top > 0 && neighbor.elevation() < tile.elevation() + height ? Math.min(height, top) : height;
+    }
+
+    /**
      * The kit assembled for one hex: {@code reach[d]} is how many levels from the ground the hex connects towards board
      * direction {@code d} (0 where it does not), and the whole assembly turns clockwise by {@code steps} sixths. Each
      * piece stacks through the levels where its tags hold: a base on the ground or a floor where it starts higher, and
@@ -223,17 +269,6 @@ final class ConnectedKit {
      */
     static RigidGlb.Data model(Kit kit, int lod, int height, int[] reach, int steps, long seed, String id) {
         var source = kit.lods().get(lod);
-        var ground = kit.grounds().get(lod);
-        List<String> selected = GpuBuilding.select(kit.roles(), height, seed);
-        Map<String, Map<Long, Piece>> byRole = new HashMap<>();
-        for (var piece : parts(source)) { byRole.computeIfAbsent(piece.role(), ignored -> new HashMap<>()).put(piece.tags(), piece); }
-        int[] connected = new int[height];
-        for (int level = 0; level < height; level++) {
-            for (int direction = 0; direction < 6; direction++) {
-                // Kit direction k lies along board direction k + steps.
-                if (level < reach[(direction + steps) % 6]) { connected[level] |= 1 << direction; }
-            }
-        }
         var result = new RigidGlb.Data();
         result.id = id;
         result.images.putAll(source.images);
@@ -249,6 +284,37 @@ final class ConnectedKit {
         }
         result.surfaces.putAll(source.surfaces);
         result.alphaTests.putAll(source.alphaTests);
+        for (var placement : placements(kit, lod, height, reach, steps, seed)) {
+            append(result, source, node(source, placement.node()), placement.matrix(), placement.prefix());
+        }
+        return result;
+    }
+
+    /**
+     * Shared assembly result for runtime geometry and authoring previews: a piece of module {@code role} standing on
+     * {@code level}; matrix precedes the authored node frame.
+     */
+    record Placement(String node, String role, int level, Matrix4 matrix, String prefix) { }
+
+    static List<Placement> placements(Kit kit, int lod, int height, int[] reach, int steps, long seed) {
+        return placements(kit, lod, GpuBuilding.select(kit.roles(), height, seed), reach, steps);
+    }
+
+    /** {@code selected}: the base, the floors and the roof chosen for the levels ({@link GpuBuilding#select}). */
+    static List<Placement> placements(Kit kit, int lod, List<String> selected, int[] reach, int steps) {
+        var source = kit.lods().get(lod);
+        var ground = kit.grounds().get(lod);
+        int height = selected.size() - 1;
+        Map<String, Map<Long, Piece>> byRole = new HashMap<>();
+        for (var piece : parts(source)) { byRole.computeIfAbsent(piece.role(), ignored -> new HashMap<>()).put(piece.tags(), piece); }
+        int[] connected = new int[height];
+        for (int level = 0; level < height; level++) {
+            for (int direction = 0; direction < 6; direction++) {
+                // Kit direction k lies along board direction k + steps.
+                if (level < reach[(direction + steps) % 6]) { connected[level] |= 1 << direction; }
+            }
+        }
+        List<Placement> result = new ArrayList<>();
         Set<Long> identities = new HashSet<>();
         byRole.values().forEach(pieces -> identities.addAll(pieces.keySet()));
         for (long tags : identities.stream().sorted().toList()) {
@@ -263,29 +329,32 @@ final class ConnectedKit {
                     String role = holds ? selected.get(level) : before ? selected.getLast() : null;
                     Piece piece = role == null ? null : byRole.get(role).get(tags);
                     if (piece != null) {
-                        append(result, source, node(source, piece.node()), level * GpuBuilding.LEVEL_HEIGHT
-                              - ground.get(role), turn + steps, piece.node() + "@" + turn + "/" + role + "-at-" + level + "/");
+                        result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
+                              - ground.get(role), turn + steps), piece.node() + "@" + turn + "/" + role + "-at-" + level + "/"));
                     }
                     before = holds;
                 }
             }
         }
-        return result;
+        return List.copyOf(result);
     }
 
     private static final float[] COS = { 1, .5f, -.5f, -1, -.5f, .5f };
     private static final float[] SIN = { 0, (float) -Math.sqrt(.75), (float) -Math.sqrt(.75), 0, (float) Math.sqrt(.75),
           (float) Math.sqrt(.75) };
 
-    private static void append(RigidGlb.Data result, RigidGlb.Data source, ModelNode node, float lift, int steps,
-          String prefix) {
+    private static Matrix4 placement(float lift, int steps) {
         // Clockwise sixths of a turn about the up axis: exact, so every turned copy meets its edge like the north one.
         int turn = Math.floorMod(steps, 6);
         Matrix4 placement = new Matrix4();
         placement.val[Matrix4.M00] = COS[turn]; placement.val[Matrix4.M01] = -SIN[turn];
         placement.val[Matrix4.M10] = SIN[turn]; placement.val[Matrix4.M11] = COS[turn];
         placement.val[Matrix4.M23] = lift;
-        placement.mul(new Matrix4(node.translation, node.rotation, node.scale));
+        return placement;
+    }
+
+    private static void append(RigidGlb.Data result, RigidGlb.Data source, ModelNode node, Matrix4 frame, String prefix) {
+        Matrix4 placement = new Matrix4(frame).mul(new Matrix4(node.translation, node.rotation, node.scale));
         Matrix3 normals = new Matrix3().set(placement).inv().transpose();
         var point = new Vector3();
         var mesh = source.meshes.first();

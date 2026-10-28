@@ -81,7 +81,9 @@ class GpuLoadingSmokeTest {
                                   .filter(state -> state == TerrainLoadProgress.SectionState.READY).count();
                             assertTrue(ready >= completedSections, "Finished sections must stay ready until a new build");
                             completedSections = ready;
-                            assertEquals(terrain.buildProgress(), 100 * ready / sections.states().size());
+                            // A finished build (-1) may still be installing behind the stage, which shows it complete.
+                            int built = terrain.buildProgress();
+                            assertEquals(built < 0 ? 100 : built, 100 * ready / sections.states().size());
                             concurrent |= statuses.size() > 1;
                             int previousSection = 0;
                             for (var status : statuses) {
@@ -117,9 +119,10 @@ class GpuLoadingSmokeTest {
                             // hold a frame for seconds: those sections prepare on the workers meanwhile.
                             assertTrue(restarted || started > 0 || shaders.total() == 0,
                                   "Terrain programs must not link before the first sections start: " + shaders);
-                            assertEquals(shaders.linked() < shaders.total(),
-                                  loading.getRoot().findActor("board-loading-shaders").isVisible(),
-                                  "The shader bar shows exactly while programs are left to link");
+                            // Programs link in parallel: one may finish after the frame set the bar, never the reverse.
+                            assertTrue(loading.getRoot().findActor("board-loading-shaders").isVisible()
+                                  || shaders.linked() == shaders.total(),
+                                  "The shader bar shows while programs are left to link");
                             assertTrue(overall.getText().toString().contains("%"));
                             assertFalse(details.getText().toString().contains("GpuBoard.loading"));
                             Group content = (Group) loading.getRoot().getChildren().first();

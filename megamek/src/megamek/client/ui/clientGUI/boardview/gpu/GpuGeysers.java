@@ -7,13 +7,17 @@ import java.util.List;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 
 /** Cosmetic water and steam from the installed geyser assets. The server alone changes eruption state. */
 final class GpuGeysers implements Disposable {
+    static final String GEYSERS = "scenery/geysers/";
     private static final int CAPACITY = 4096;
     private static final int MAX_PER_SOURCE = 96;
     private final GpuEffectBatch spray = new GpuEffectBatch(CAPACITY, "geyser-spray");
@@ -23,14 +27,28 @@ final class GpuGeysers implements Disposable {
     /** Chunk-owned positions, replaced atomically with the scenery that owns them. */
     record Emitter(Vector3 origin, float scale, float phase, boolean active, boolean magma) { }
 
-    static Emitter emitter(String asset, Matrix4 transform) {
-        if (!asset.equals("scenery/geysers/water-dormant")
-              && !asset.equals("scenery/geysers/water-erupting")
-              && !asset.equals("scenery/geysers/magma")) { return null; }
-        boolean magma = asset.endsWith("magma");
-        Vector3 origin = new Vector3(0, 0, magma ? 1.85f : .84f).mul(transform);
+    /**
+     * A geyser asset's emitter at its vent, {@code vent} model units up ({@link #vent}). Each geyser comes in two looks,
+     * {@code <state>} and {@code <state>-b} ({@link BoardFeatures#geyserLook}).
+     */
+    static Emitter emitter(String asset, Matrix4 transform, float vent) {
+        if (!asset.startsWith(GEYSERS)) { return null; }
+        String state = asset.substring(GEYSERS.length()).replaceFirst("-b$", "");
+        if (!state.equals("water-dormant") && !state.equals("water-erupting") && !state.equals("magma")) { return null; }
+        boolean magma = state.equals("magma");
+        Vector3 origin = new Vector3(0, 0, vent).mul(transform);
         float scale = transform.getScale(new Vector3()).x;
-        return new Emitter(origin, scale, noise(origin.x * .17f + origin.y * .31f), asset.endsWith("-erupting"), magma);
+        return new Emitter(origin, scale, noise(origin.x * .17f + origin.y * .31f), state.endsWith("-erupting"), magma);
+    }
+
+    /** The top of a geyser model's water or lava, where it vents: the steam and the eruption start there. */
+    static float vent(Model model) {
+        for (MeshPart part : model.meshParts) {
+            if (part.id.equals("geyser-water") || part.id.equals("geyser-lava")) {
+                return part.mesh.calculateBoundingBox(new BoundingBox(), part.offset, part.size).max.z;
+            }
+        }
+        return 0;
     }
 
     void begin() { visible.clear(); }

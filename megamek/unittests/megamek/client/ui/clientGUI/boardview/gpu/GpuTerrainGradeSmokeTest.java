@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -24,10 +23,7 @@ import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
-import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
-import megamek.common.Hex;
-import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -132,7 +128,6 @@ class GpuTerrainGradeSmokeTest {
               + "max_difference\n");
         var sources = new LinkedHashMap<String, String>();
         sources.put("terrain-sculpt.frag", sculptProbe(GpuShaderSource.readDisk("terrain-sculpt.frag")));
-        sources.put("terrain-vegetation.frag", bankProbe(GpuShaderSource.readDisk("terrain-vegetation.frag")));
         var installed = manager.apply(sources);
         assertTrue(installed.success(), installed.message());
         var terrain = new GpuTerrain();
@@ -147,7 +142,7 @@ class GpuTerrainGradeSmokeTest {
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
             terrain.setTerrainWear(1);
-            terrain.setGrass(false); // These 25 shelves measure ground; the separate bank cases enable real turf.
+            terrain.setGrass(false); // These 25 shelves measure ground.
             boolean first = true;
             for (String material : MATERIALS) {
                 for (int level : LEVELS) {
@@ -165,7 +160,6 @@ class GpuTerrainGradeSmokeTest {
                     Files.writeString(outputPath.resolve("pigment.csv"), rows);
                 }
             }
-            reviewBanks(terrain, output, camera, rows, outputPath);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             terrain.dispose();
@@ -196,59 +190,10 @@ class GpuTerrainGradeSmokeTest {
         return output.linearPixels();
     }
 
-    private static void reviewBanks(GpuTerrain terrain, GpuSceneTestOutput output, OrthographicCamera camera,
-          StringBuilder rows, Path outputPath) throws Exception {
-        // BoardCamera's orthographic LOD convention is a logical-pixel viewport and world-units-per-pixel zoom.
-        // Preserve the existing close projection footprint while making turf selection use that same scale.
-        camera.zoom = camera.viewportHeight / Gdx.graphics.getHeight();
-        camera.viewportWidth /= camera.zoom;
-        camera.viewportHeight = Gdx.graphics.getHeight();
-        // The supported authored grass/desert transition exercises the real turf mixture and atlas detail.
-        var cover = BoardSurfaceBlend.capture(new Hex(0, "ground_fluff:1:1", "grass"));
-        for (int upper : new int[] { 3, -1 }) {
-            var scene = BoardSurfaceBlendTest.scene(coords -> {
-                var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS,
-                      coords.getX() < 4 ? upper : upper - 2, -1, 0);
-                return new BoardScene.Tile(coords, tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-                      tile.surface(), tile.decals(), tile.decalsWithoutLimbs(),
-                      tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(),
-                      tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare(), cover);
-            });
-            var high = new Coords(3, 4);
-            var center = BoardGeometry.center(high, upper);
-            var outward = BoardGeometry.center(new Coords(4, 4), upper).sub(center).nor();
-            var target = center.cpy().mulAdd(outward, BoardGeometry.width() * .38f);
-            target.z -= BoardGeometry.level();
-            camera.up.set(Vector3.Z);
-            camera.position.set(target).mulAdd(outward, 650).add(0, 0, 350);
-            camera.lookAt(target);
-            camera.update();
-            float hexPixels = BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, target);
-            float projectedHexPixels = BoardGeometry.width() * output.scene().getHeight()
-                  / (camera.viewportHeight * camera.zoom);
-            assertEquals(projectedHexPixels, hexPixels, .001f,
-                  "Bank projection and production detail selection must agree on physical pixel scale");
-            assertTrue(GpuGroundCover.visibleAtScale(camera, true, false), "The bank probe requires visible ground cover");
-            System.out.println("Elevation bank camera level=" + upper + " zoom=" + camera.zoom
-                  + " hexPixels=" + hexPixels + " target=" + target);
-            terrain.setGrass(true);
-            terrain.update(scene);
-            terrain.animate(0, List.of());
-            output.draw(terrain, camera, false);
-            var planted = terrain.planted(high);
-            assertNotNull(planted);
-            assertNotNull(planted.turf(), "The actual finished two-level bank must carry draped turf");
-            float[][] channels = toggleFrames(terrain, output, camera);
-            check("bank", upper, .5f, channels, rows);
-            Files.writeString(outputPath.resolve("pigment.csv"), rows);
-        }
-    }
-
     private static void check(String material, int level, float tag, float[][] values, StringBuilder rows) {
         int covered = 0, mixed = 0, cool = 0, changed = 0, bright = 0;
         double preLuma = 0, postLuma = 0, preSum = 0, postSum = 0, preSquare = 0, postSquare = 0;
         double brightPreSum = 0, brightPostSum = 0, brightPreSquare = 0, brightPostSquare = 0, maximumDifference = 0;
-        double lowest = Double.POSITIVE_INFINITY, highest = Double.NEGATIVE_INFINITY;
         String label = material + " level=" + level;
         for (int pixel = 0; pixel < values[0].length; pixel += 4) {
             for (float[] frame : values) {
@@ -261,14 +206,8 @@ class GpuTerrainGradeSmokeTest {
             }
             if (values[0][pixel + 3] != tag) { continue; }
             covered++;
-            float mixture = values[2][pixel + (material.equals("bank") ? 0 : 1)];
+            float mixture = values[2][pixel + 1];
             if (mixture > .1f && mixture < .9f) { mixed++; }
-            double actualLevel = values[2][pixel + 2] * 32 - 16;
-            lowest = Math.min(lowest, actualLevel); highest = Math.max(highest, actualLevel);
-            if (material.equals("bank")) {
-                assertTrue(level > 0 ? actualLevel > 0 : actualLevel < 0,
-                      "Bank pixels must exercise the intended side of the actual continuous elevation field");
-            }
             if (values[0][pixel + 2] > values[0][pixel] + .002f) { cool++; }
             double peakBefore = 0, peakAfter = 0;
             boolean altered = false;
@@ -306,7 +245,7 @@ class GpuTerrainGradeSmokeTest {
                 }
             }
         }
-        assertTrue(covered > (material.equals("bank") ? 100 : 1000),
+        assertTrue(covered > 1000,
               label + " must sample the intended real material: covered=" + covered + ", mixed=" + mixed);
         double preVariance = variance(preSum, preSquare, covered), postVariance = variance(postSum, postSquare, covered);
         double preBrightVariance = variance(brightPreSum, brightPreSquare, bright);
@@ -317,11 +256,8 @@ class GpuTerrainGradeSmokeTest {
         rows.append(row).append('\n');
         System.out.println("Elevation pigment " + row);
         assertTrue(preVariance > 1e-7, label + " includes sampled texture variation");
-        if (material.equals("mixed") || material.equals("bank")) {
+        if (material.equals("mixed")) {
             assertTrue(mixed > 100, label + " contains an actual authored material mixture");
-        }
-        if (material.equals("bank")) {
-            assertTrue(highest - lowest > .1, "Draped turf spans actual elevations, not a fixed root-level substitute");
         }
         if (material.equals("snow")) { assertTrue(cool > 100, label + " includes authored cool snow"); }
         if (level != 0) {
@@ -376,25 +312,6 @@ class GpuTerrainGradeSmokeTest {
                   review = vec3(snow, fungus, (level + 16.0) / 32.0);
               }
               fragColor = vec4(review, ground ? .25 : 1.0);
-              """);
-    }
-
-    private static String bankProbe(String source) {
-        source = replace(source, "void main() {", "#ifdef bankTurfFlag\nuniform int u_elevationReview;\n#endif\n"
-              + "void main() {\n#ifdef bankTurfFlag\nvec3 reviewBefore, reviewAfter;\n#endif\n");
-        source = replace(source, "    albedo = materialReflectance(albedo);",
-              "    albedo = materialReflectance(albedo);\n#ifdef bankTurfFlag\n    reviewBefore = albedo;\n#endif");
-        String lighting = "#ifdef lightingFlag\n#if defined(biomeVegetationFlag) || defined(bankTurfFlag)";
-        source = replace(source, lighting, "#ifdef bankTurfFlag\n    reviewAfter = albedo;\n#endif\n" + lighting);
-        return replace(source, "fragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);", """
-              #ifdef bankTurfFlag
-                  vec3 review = u_elevationReview == 0 ? reviewBefore : reviewAfter;
-                  if (u_elevationReview == 2) review = vec3(v_turfArid.x, 0.0,
-                        (v_cloudPosition.z / u_levelHeight + 16.0) / 32.0);
-                  fragColor = vec4(review, .5);
-              #else
-                  fragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);
-              #endif
               """);
     }
 

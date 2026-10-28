@@ -139,8 +139,10 @@ class BoardOrchardTest {
                     if (cutout) {
                         assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id), .0001f);
                     }
-                    // Crowns carry albedo, normal and surface maps; bark and fruit use their source atlases.
-                    assertEquals(cutout ? 3 : 1, material.textures.size, name + " LOD" + lod + ": " + material.id);
+                    // Crowns carry albedo, normal and surface maps; bark and fruit their atlas with its normal and height;
+                    // the impostor card its own atlas.
+                    assertEquals(material.id.equals("impostor") ? 1 : 3, material.textures.size,
+                          name + " LOD" + lod + ": " + material.id);
                     for (var texture : material.textures) {
                         var image = ((RigidGlb.Data) data).images.get(texture.fileName);
                         assertTrue(image != null && image.file() != null && new File(image.file()).isFile(),

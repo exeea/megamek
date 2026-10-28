@@ -8,6 +8,7 @@ layout(location = 14) in vec4 a_coverRoot;
 uniform float u_coverPixels;
 uniform float u_coverHexWidth;
 uniform float u_levelHeight;
+uniform float u_metre;
 // 1 for a field's plant, 0 for grass; and how far up its sward a point stands.
 out vec2 v_coverData;
 out vec2 v_coverRoot;
@@ -27,25 +28,36 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     vec3 root = a_coverRoot.xyz;
     // A template's vertices carry their part in z (GpuGroundCover): 0 grass; 1 a wheat stalk of a field's stand
     // (GpuBiomeVegetation.plantStalks), upright and stiff, its ear between WHEAT_EAR and the awns closing it; 2 a maize
-    // plant's stalk and tassel and 3 to 8 its leaves.
+    // plant's stalk and tassel and 3 to 8 its leaves; 9 a bank rim's blade (GpuGroundCover.plantRim), whose rank's
+    // fraction packs twelve bits: its contour (the middle shoulder's), its lean in eight steps and its heading in 256.
     int part = int(samplePoint.z + .5);
-    bool wheat = part == 1, crop = part >= 1;
+    bool rim = part == 9, wheat = part == 1, crop = part >= 1 && !rim;
     float pixels = u_coverPixels / max(.001, abs((u_projViewTrans * vec4(root, 1.0)).w));
     // A field's plants thin out as they shrink, each survivor widening by as much, until they fade into the ground's
-    // crop colour (terrain-crops.glsl); grass only thins out, over the ground's own grass.
-    float share = crop ? cropShare(!wheat, pixels) : 1.0;
-    float density = (crop ? share * cropPlants(pixels)
+    // crop colour (terrain-crops.glsl); so does a rim's fringe once it has stood up. Grass only thins out, over the
+    // ground's own grass.
+    float share = crop ? cropShare(!wheat, pixels) : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0) : 1.0;
+    float density = (crop ? share * cropPlants(pixels) : rim ? share * smoothstep(GRASS_RIM_START, GRASS_RIM_STAND, pixels)
           : smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)) * GRASS_ROOTS_PER_HEX;
     if (density <= a_coverRoot.w) { return false; }
     uint seed = floatBitsToUint(root.x) ^ (floatBitsToUint(root.y) * 1664525u) ^ uint(a_coverRoot.w);
     // Reject the whole rooted blade, not fragments of a swaying tip. Buffers remain unchanged after an impact.
     float scar = max(groundScarCover(groundDamageAt(root.xy)), scorchedGrass(root.xy));
     if (scar > grassRandom(seed + 83u)) { return false; }
-    float angle = grassRandom(seed) * 6.2831853;
+    int rimCode = int(fract(a_coverRoot.w) * 4096.0 + .5);
+    if (rim && rimCode >= 2048) {
+        // The middle shoulder grows only the broken turf its ground draws (terrain-materials.glsl, cliffMaterial).
+        vec3 metres = root / u_metre;
+        float pockets = textureLod(u_rainNoise, (metres.xy + metres.z * vec2(.43, .27)) / 92.0 + .57, 0.0).g;
+        float fine = textureLod(u_rainNoise, metres.xy / 160.0 + .41, 0.0).b;
+        if (smoothstep(.22, .55, pockets * .7 + fine * .3) < grassRandom(seed + 97u)) { return false; }
+    }
+    // A rim's blades fan out within some 40 degrees of their heading down the bank.
+    float angle = (rim ? float(rimCode & 255) / 256.0 + (grassRandom(seed) - .5) * .22 : grassRandom(seed)) * 6.2831853;
     float variation = grassRandom(seed + 23u);
     vec2 direction = vec2(cos(angle), sin(angle));
     vec3 side = vec3(-direction.y, direction.x, 0.0);
-    if (part >= 2) {
+    if (crop && !wheat) {
         // Maize, as tall as the stand its slab shows further away (GpuBiomeVegetation): a stalk swaying a little with
         // its tassel above .9, and six leaves alternating up it, arching out from their nodes, widest midway and
         // drooping at their tips, which flutter in the wind. A plant this size grows in over its last 512 ranks,
@@ -92,22 +104,34 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / share;
     float gust = vegetationGust(root.xy);
-    vec3 rest = vec3(direction * (wheat ? mix(.02, .10, grassRandom(seed + 51u)) : mix(.25, .65, grassRandom(seed + 51u))),
-          1.0);
-    float alongWind = dot(rest.xy, u_wind.xy);
-    vec3 acrossWind = rest - vec3(u_wind.xy * alongWind, 0.0);
-    float acrossLength = length(acrossWind);
-    // Equal strength steps turn the blade through equal angles, retaining its length and both endpoint poses.
-    // Scaling displacement before normalizing used up most of the visible bend near zero strength.
-    float windAngle = mix(atan(alongWind, acrossLength), atan(alongWind + 12.5 + 9.0 * gust, acrossLength),
-          u_wind.z * (wheat ? .5 : 1.0));
-    vec3 tip = height * (acrossWind * (cos(windAngle) / acrossLength) + vec3(u_wind.xy * sin(windAngle), 0.0));
-    vec3 control = vec3(0.0, 0.0, height * (wheat ? .5 : .65));
+    vec3 tip, control;
+    if (rim) {
+        // Behind the lip a blade stands, leaning out; past it nothing holds a blade up: it arches out over the edge and
+        // its free end hangs under its own weight, as far as the bank falls away below it (GpuGroundCover.lean),
+        // swinging with the gusts.
+        float lean = float(rimCode >> 8 & 7) / 7.0, hang = mix(.2, .8, grassRandom(seed + 51u));
+        control = height * mix(vec3(direction * .1, .65), vec3(direction * .3, mix(.35, .6, grassRandom(seed + 59u))), lean);
+        tip = height * (mix(vec3(direction * .5, .85), vec3(direction * (.85 - .3 * hang), -.75 * hang), lean)
+              + vec3(u_wind.xy * u_wind.z * (.15 + .1 * gust), 0.0));
+    } else {
+        vec3 rest = vec3(direction * (wheat ? mix(.02, .10, grassRandom(seed + 51u)) : mix(.25, .65, grassRandom(seed + 51u))),
+              1.0);
+        float alongWind = dot(rest.xy, u_wind.xy);
+        vec3 acrossWind = rest - vec3(u_wind.xy * alongWind, 0.0);
+        float acrossLength = length(acrossWind);
+        // Equal strength steps turn the blade through equal angles, retaining its length and both endpoint poses.
+        // Scaling displacement before normalizing used up most of the visible bend near zero strength.
+        float windAngle = mix(atan(alongWind, acrossLength), atan(alongWind + 12.5 + 9.0 * gust, acrossLength),
+              u_wind.z * (wheat ? .5 : 1.0));
+        tip = height * (acrossWind * (cos(windAngle) / acrossLength) + vec3(u_wind.xy * sin(windAngle), 0.0));
+        control = vec3(0.0, 0.0, height * (wheat ? .5 : .65));
+    }
     vec3 curve = 2.0 * (1.0 - t) * t * control + t * t * tip;
     vec3 tangent = 2.0 * (1.0 - t) * control + 2.0 * t * (tip - control);
     position = root + curve + side * samplePoint.x * width * growth;
     normal = normalize(cross(side, tangent));
-    float tone = grassRandom(seed + 71u);
+    // A rim's blades hang half under the sward above them, in the meadow's darker tones.
+    float tone = grassRandom(seed + 71u) * (rim ? .6 : 1.0);
     color = vec4(wheat ? (t > WHEAT_EAR.x ? cropHead(false, tone) : cropStalk(false, tone))
           : mix(toLinear(vec3(.24, .30, .10)), toLinear(vec3(.44, .48, .21)), tone), 1.0);
     color.rgb = mix(color.rgb, toLinear(vec3(.18, .14, .08)), scar * .75);

@@ -53,7 +53,7 @@ final class GpuAssets implements Disposable {
     /** How many mesh levels each placed model's file holds, read from its JSON once. */
     private final Map<String, Integer> fileLevels = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
-    private final Map<String, GpuBuilding> buildings = new HashMap<>();
+    private final Map<File, GpuBuilding> buildings = new HashMap<>();
     private final Map<BoardIndustrial.Layout, Model> industrial = new HashMap<>();
     private final Map<BoardRail.Layout, Model> routes = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
@@ -788,20 +788,16 @@ final class GpuAssets implements Disposable {
         }
     }
 
-    /** Custom kits override the exact tileset path for buildings, fuel tanks and industrial structures. */
-    GpuBuilding.Assembly building(String asset, int levels, long seed) {
-        return building(asset, levels, seed, true);
-    }
-
-    GpuBuilding.Assembly building(String asset, int levels, long seed, boolean withInterior) {
+    /**
+     * Custom kits override the tileset path for buildings, fuel tanks and industrial structures; every key that resolves
+     * to one kit file (TilesetScenery#customBuildingFile) shares its meshes. {@code reach}: {@link ConnectedKit#reach}.
+     */
+    GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed, boolean withInterior) {
         if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
-        if (!buildings.containsKey(asset)) {
-            File customRoot = new File(Configuration.dataDir(), "models/buildings");
-            FileHandle file = new FileHandle(TilesetScenery.customBuildingFile(asset));
-            buildings.put(asset, file.file().isFile() ? new GpuBuilding(file, customRoot.toPath(), this::createModel) : null);
-        }
-        GpuBuilding building = buildings.get(asset);
-        return building == null ? null : building.assemble(levels, seed, withInterior);
+        File file = TilesetScenery.customBuildingFile(asset);
+        if (!file.isFile()) { return null; }
+        return buildings.computeIfAbsent(file, key -> new GpuBuilding(GpuBuilding.kit(key), this::createModel))
+              .assemble(levels, reach, seed, withInterior);
     }
 
     /**
@@ -823,7 +819,7 @@ final class GpuAssets implements Disposable {
         java.util.Set<GpuBuilding.Assembly> liveBuildings = new java.util.HashSet<>();
         java.util.Set<Model> liveModels = new java.util.HashSet<>();
         for (Live live : users.values()) { liveBuildings.addAll(live.buildings()); liveModels.addAll(live.models()); }
-        this.buildings.values().stream().filter(java.util.Objects::nonNull).forEach(building -> building.retain(liveBuildings));
+        this.buildings.values().forEach(building -> building.retain(liveBuildings));
         retain(this.industrial, liveModels);
         retain(this.routes, liveModels);
     }
@@ -1268,7 +1264,7 @@ final class GpuAssets implements Disposable {
         routes.clear();
         industrial.values().forEach(Model::dispose);
         industrial.clear();
-        buildings.values().stream().filter(java.util.Objects::nonNull).forEach(GpuBuilding::dispose);
+        buildings.values().forEach(GpuBuilding::dispose);
         buildings.clear();
         interiors.values().forEach(Model::dispose);
         interiors.clear();

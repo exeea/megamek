@@ -203,8 +203,6 @@ final class GpuTerrain implements Disposable {
               GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(GpuShaderSource.read("terrain-vegetation.frag"))));
         private final DefaultShader.Config biomeVegetationShader = new DefaultShader.Config(
               GpuBiomeVegetation.vertex(config.vertexShader), vegetationShader.fragmentShader);
-        private final DefaultShader.Config bankTurfShader = new DefaultShader.Config(
-              GpuBankTurf.vertex(config.vertexShader), vegetationShader.fragmentShader);
         private final DefaultShader.Config waterShader = new DefaultShader.Config(GpuWaterWaves.vertex(config.vertexShader),
               litFragment("water-surface.frag"));
         private final DefaultShader.Config waterDepthShader = new DefaultShader.Config(waterShader.vertexShader,
@@ -246,7 +244,6 @@ final class GpuTerrain implements Disposable {
                   : renderable.material.has(GpuBackdrop.TYPE) ? backdropShader
                   : magma != null && !renderable.material.has(Sculpt.TYPE)
                         ? flowingMagma ? flowingMagmaShader : solidMagmaShader
-                  : renderable.material.has(GpuBankTurf.Turf.TYPE) ? bankTurfShader
                   : renderable.material.has(GpuBiomeVegetation.Kind.TYPE) ? biomeVegetationShader
                   : renderable.material.has(GpuGroundCover.Wind.TYPE) ? vegetationShader
                   : renderable.material.has(Sculpt.TYPE) ? sculptShader
@@ -270,7 +267,6 @@ final class GpuTerrain implements Disposable {
                         || renderable.material.has(GpuBiomeVegetation.Kind.TYPE)
                         || renderable.material.has(Impostor.TYPE)
                         || renderable.material.has(GpuRoads.Coats.TYPE) ? "#define vertexDataFlag\n" : "")
-                  + "#define SURFACE_FAMILIES " + BoardScene.Surface.values().length + "\n"
                   + "#define LUNAR_FAMILY " + BoardScene.Surface.LUNAR.ordinal() + ".0\n"
                   + "#define FUNGUS_FAMILY " + BoardScene.Surface.FUNGUS.ordinal() + ".0\n"
                   + "#define DESERT_FAMILY " + BoardScene.Surface.DESERT.ordinal() + ".0\n"
@@ -282,7 +278,6 @@ final class GpuTerrain implements Disposable {
                   + "#define FOOT_METRES " + BoardSurfaceBlend.FOOT_METRES + "\n"
                   + GpuIceShader.prefix(renderable.material)
                   + (renderable.material.has(GpuBiomeVegetation.Kind.TYPE) ? "#define biomeVegetationFlag\n" : "")
-                  + (renderable.material.has(GpuBankTurf.Turf.TYPE) ? "#define bankTurfFlag\n" : "")
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? "#define terrainBlendFlag\n" : "")
                   + (ordinaryFamily != -1 ? "#define VOLCANIC_ORDINARY_FAMILY " + ordinaryFamily + "\n" : "")
                   + (renderable.material.has(GpuMagmaShader.TYPE) ? "#define volcanicFlag\n" : "")
@@ -328,11 +323,14 @@ final class GpuTerrain implements Disposable {
                       : depthFragment;
                 shaderName += " depth twin";
             }
+            // Sculpted relief draws tessellated where the context offers it (GpuTessellation), and its twin alike.
+            boolean tessellated = tessellates(renderable);
+            if (tessellated) { shaderName += " tessellated"; }
             // The pre-pass draws twin by twin (renderPrepass): a twin sorts with no program.
             Shader group = depthOnly ? null : familyGroup(renderable, shaders);
             DefaultShader result = new DefaultShader(renderable, chosen,
                   GpuGlsl.compile(shaderName, prefix + GpuFamilyPrograms.defines(renderable.material, Sculpt.TYPE),
-                        chosen.vertexShader, fragment)) {
+                        tessellated ? GpuTessellation.vertex(chosen.vertexShader) : chosen.vertexShader, fragment)) {
                 private final float[] families = GpuFamilyPrograms.constants(renderable.material, Sculpt.TYPE);
                 private final int baseAliases = families == null ? 0 : GpuFamilyPrograms.baseAliases(renderable.material);
                 private final int normalMapsUniform = register("u_normalMaps");
@@ -435,6 +433,7 @@ final class GpuTerrain implements Disposable {
                                 flowingMagma)
                           // A shadow map changes the compiled samplers without changing the environment's mask.
                           && shadowMap == (other.environment != null && other.environment.shadowMap != null)
+                          && tessellates(other) == tessellated
                           && instances == instanceMask(other) && drawsLayout(other);
                 }
 
@@ -664,7 +663,8 @@ final class GpuTerrain implements Disposable {
                         detailPosition.set(part.meshPart.center).mul(part.worldTransform);
                         setDetailUniforms();
                     }
-                    super.render(part, attributes);
+                    if (tessellated) { GpuTessellation.render(part, () -> super.render(part, attributes)); }
+                    else { super.render(part, attributes); }
                 }
 
                 @Override
@@ -711,6 +711,10 @@ final class GpuTerrain implements Disposable {
             }
             GpuLavaLighting.register(result);
             GpuAmbientOcclusion.register(result);
+            if (tessellated) {
+                GpuTessellation.tessellated(result.program);
+                GpuTessellation.register(result);
+            }
             GpuModelMaterial.register(result);
             GpuModelLight.register(result, () -> clock);
             GpuBuildingCutaway.register(result);
@@ -859,20 +863,7 @@ final class GpuTerrain implements Disposable {
                     @Override
                     public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                         SculptLayers layers = attributes.get(SculptLayers.class, SculptLayers.TYPE);
-                        var maps = layers != null ? layers.texture
-                              : attributes.has(GpuBankTurf.Turf.TYPE) ? terrainLayers() : null;
-                        if (maps != null) { target.set(id, color ? maps.color() : maps.data()); }
-                    }
-                });
-            }
-            for (var family : BoardScene.Surface.values()) {
-                String name = SCULPT_MATERIALS[family.ordinal()][0];
-                result.register("u_turfMaterials[" + family.ordinal() + "]", new BaseShader.LocalSetter() {
-                    @Override
-                    public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                        if (attributes.has(GpuBankTurf.Turf.TYPE)) {
-                            target.set(id, 2f * SCULPT_LAYERS.indexOf(name), assets.sculptTile(name));
-                        }
+                        if (layers != null) { target.set(id, color ? layers.texture.color() : layers.texture.data()); }
                     }
                 });
             }
@@ -904,7 +895,8 @@ final class GpuTerrain implements Disposable {
     }
 
     private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
-          GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")))),
+          GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")),
+                GpuTerrain::tessellates)),
           new GpuOpaqueSorter());
 
     void shadersChanged() { refreshShadows(); }
@@ -912,7 +904,7 @@ final class GpuTerrain implements Disposable {
     /** What selects a sculpt material's generic program besides its families; the family marker is left out. */
     private static Object familyVariant(Material material) {
         return List.of(material.getMask() & ~GpuFamilyPrograms.Constants.TYPE, GpuIceShader.mode(material),
-              linearDiffuse(material), GpuSurfaceBlend.ordinaryFamily(material));
+              linearDiffuse(material), GpuSurfaceBlend.ordinaryFamily(material), GpuTessellation.curved(material));
     }
 
     /**
@@ -974,8 +966,7 @@ final class GpuTerrain implements Disposable {
         // The relief's fragment stages never discard; these materials' stages do, or are not relief.
         if (blend != null || material.has(FloatAttribute.AlphaTest) || material.has(GpuWaterShader.TYPE)
               || material.has(GpuLiquidShader.Frame.TYPE) || material.has(GpuGroundCover.Wind.TYPE)
-              || material.has(GpuBiomeVegetation.Kind.TYPE) || material.has(GpuBankTurf.Turf.TYPE)
-              || material.has(GpuRoads.Mask.TYPE)) { return null; }
+              || material.has(GpuBiomeVegetation.Kind.TYPE) || material.has(GpuRoads.Mask.TYPE)) { return null; }
         Ground ground = material.get(Ground.class, Ground.TYPE);
         if (ground != null && ground.cliffs) { return Prepass.CLIFFS; }
         return ground != null || material.has(Sculpt.TYPE) || material.has(Pit.TYPE)
@@ -1051,7 +1042,8 @@ final class GpuTerrain implements Disposable {
     record RoadPatch(GpuRoads.Patch patch, GpuRoads.MaskData mask,
           List<BoardTacticalGeometry.Triangle> triangles, boolean flat, BoardScene.Tile source) { }
     /** {@code columns}: the Classic graphics' build ({@link #setColumns}). */
-    private record Request(long generation, BoardScene scene, TerrainSettings settings, boolean columns) { }
+    private record Request(long generation, BoardScene scene, TerrainSettings settings, boolean columns,
+          boolean tessellated) { }
     private record UpdatePlan(float floor, BoardConcrete coast, Map<Coords, BoardFlow.Current> currents,
           boolean all, Set<Coords> changed, Set<Coords> changedTiles, Set<Coords> paintOnly, Map<GroundSlot, BoardScene.Pixels> colors,
           Map<DecalSlot, BoardScene.Pixels> decals,
@@ -1183,6 +1175,15 @@ final class GpuTerrain implements Disposable {
     /** Whether the installed chunks are the Classic columns; set when a build commits. */
     private boolean installedColumns;
     /**
+     * The Tuning panel's Tessellation switch: the next build puts the relief that curves in parts of its own, which
+     * tessellate ({@link #sculptedTriangles}); a switch rebuilds every chunk, as the 3D Graphics do.
+     */
+    private boolean tessellation;
+    /** The switch the installed chunks were built for; set when a build commits. */
+    private boolean installedTessellation;
+    /** Curving copies of installed sculpted materials, kept so their family programs build with the others. */
+    private final List<Material> curvedFamilies = new ArrayList<>();
+    /**
      * The graphics the ground and decal atlases are packed for, set when a build packs them: a switch reversed after
      * that has to rebuild every chunk, as a switch does.
      */
@@ -1287,6 +1288,18 @@ final class GpuTerrain implements Disposable {
     private static boolean linearDiffuse(Material material) {
         var diffuse = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
         return diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture);
+    }
+
+    /** Whether a sculpted material has a curving copy where its chunk is built for tessellation (sculptedTriangles). */
+    private static boolean curvable(Material material) {
+        return GpuTessellation.available() && material.has(Sculpt.TYPE) && !material.has(GpuMagmaShader.TYPE)
+              && !GpuTessellation.curved(material);
+    }
+
+    /** Sculpted relief built as curving (GpuTessellation#curved) draws tessellated: colour, twin and shadow alike. */
+    private static boolean tessellates(Renderable renderable) {
+        return GpuTessellation.available() && GpuTessellation.curved(renderable.material)
+              && !GpuTreeInstances.instanced(renderable);
     }
 
     /**
@@ -1656,7 +1669,7 @@ final class GpuTerrain implements Disposable {
      */
     private static boolean instancedShader(Material material) {
         long mask = material.getMask();
-        if ((mask & (Pit.TYPE | GpuBackdrop.TYPE | GpuBankTurf.Turf.TYPE | GpuBiomeVegetation.Kind.TYPE | GpuGroundCover.Wind.TYPE)) != 0
+        if ((mask & (Pit.TYPE | GpuBackdrop.TYPE | GpuBiomeVegetation.Kind.TYPE | GpuGroundCover.Wind.TYPE)) != 0
               || (mask & GpuMagmaShader.TYPE) != 0 && (mask & Sculpt.TYPE) == 0) { return false; }
         return (mask & Foliage.TYPE) != 0
               || (mask & (Sculpt.TYPE | Ground.TYPE | GpuWaterShader.TYPE | GpuLiquidShader.Frame.TYPE)) == 0;
@@ -1793,6 +1806,8 @@ final class GpuTerrain implements Disposable {
         TerrainLod lod;
         /** A Classic chunk: its opaque layer holds the tileset columns, its tiles' support is their column. */
         boolean columns;
+        /** Built with the Tessellation switch on: at full detail its relief that curves tessellates (sculpt). */
+        boolean tessellated;
         boolean paintOnlyUpdate;
         final Map<Coords, TileMesh> tileMeshes = new HashMap<>();
         final List<ModelInstance> opaque = new ArrayList<>();
@@ -2363,18 +2378,23 @@ final class GpuTerrain implements Disposable {
         BoardScene target = requested == null ? coverScene : requested.scene();
         TerrainSettings targetSettings = requested == null ? installedSettings : requested.settings();
         boolean targetColumns = requested == null ? installedColumns : requested.columns();
+        boolean targetTessellated = requested == null ? installedTessellation : requested.tessellated();
         if (target == null || !sameBoard(target, scene) || !sameTerrain(target.tiles(), scene.tiles(), columns)
               || !sameSettings(targetSettings, settings) || targetColumns != columns
+              || targetTessellated != tessellation
               || targetSettings.geometry().unitScale() != settings.geometry().unitScale()
                     && scene.tiles().stream().anyMatch(GpuTerrain::hasLimb)) {
             // Coalesce continuous painting into one latest snapshot without starving the build already underway.
             // Board/geometry-setting and graphics changes still cancel work whose result no longer applies.
             if (requested == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
-                  || targetColumns != columns) { meshGeneration++; }
+                  || targetColumns != columns || targetTessellated != tessellation) { meshGeneration++; }
             // These show the loading stage: their family programs build behind it. Edits keep the built ones.
             if (target == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
-                  || targetColumns != columns) { startFamilySession(); }
-            requested = new Request(meshGeneration, scene, settings, columns);
+                  || targetColumns != columns || targetTessellated != tessellation) {
+                startFamilySession();
+                curvedFamilies.clear();
+            }
+            requested = new Request(meshGeneration, scene, settings, columns, tessellation);
             // Before anything prepares for it: whether its programs compile the biome stage.
             GpuBiomeSurface.mark(environment, editable || GpuBiomeSurface.active(scene));
             retiredChunks.addAll(detailCache.values());
@@ -2425,7 +2445,8 @@ final class GpuTerrain implements Disposable {
      */
     boolean ready(BoardScene scene) {
         return (materialsReady() || !familySession && sameMaterialConfiguration()) && coverScene != null
-              && sameBoard(coverScene, scene) && installedColumns == columns && atlasColumns == columns && !familiesPending();
+              && sameBoard(coverScene, scene) && installedColumns == columns && atlasColumns == columns
+              && installedTessellation == tessellation && !familiesPending();
     }
 
     int buildProgress() {
@@ -2628,6 +2649,8 @@ final class GpuTerrain implements Disposable {
                     if (shore || !same && (before.frozen() != tile.frozen() || before.biome() != tile.biome()
                           || !before.groundCover().equals(tile.groundCover())
                           || BoardWall.family(before) != BoardWall.family(tile)
+                          // A structure's exits pick its own and its neighbours' connection pieces (ConnectedKit#reach).
+                          || before.cover().exits() != tile.cover().exits()
                           || !solidFeatures(before).equals(solidFeatures(tile)))) {
                         int reach = shore ? editReach(beforeScene, scene, at) : 2;
                         for (int x = at.getX() - reach; x <= at.getX() + reach; x++) {
@@ -2976,9 +2999,12 @@ final class GpuTerrain implements Disposable {
                 try (TerrainSettings.Scope ignored = TerrainSettings.use(job.settings())) {
                     if (job.build() == null) {
                         int rows = (job.scene().height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+                        // A rebuild's chunks are for its request's switch; camera refinement keeps the installed one.
+                        boolean tessellated = job.rebuilding() && rebuild != null ? rebuild.request.tessellated()
+                              : installedTessellation;
                         ChunkBuild build = new ChunkBuild(job.scene(), job.index() / rows * CHUNK_SIZE,
-                              job.index() % rows * CHUNK_SIZE, job.floor(), job.lod(), job.columns(), job.surfaces().join(),
-                              job.source(), job.progress());
+                              job.index() % rows * CHUNK_SIZE, job.floor(), job.lod(), job.columns(), tessellated,
+                              job.surfaces().join(), job.source(), job.progress());
                         detailJob = new DetailJob(job.generation(), job.index(), job.source(), job.lod(), job.scene(),
                               job.settings(), job.floor(), job.rebuilding(), job.columns(), null, build, null, job.progress());
                     } else if (job.meshes() == null) {
@@ -3093,7 +3119,8 @@ final class GpuTerrain implements Disposable {
         BoardScene.Pixels incline = assets.inclineMask(), highIncline = assets.highInclineMask();
         // A graphics switch rebuilds every chunk, as a new board does; so does one reversed after its atlases.
         boolean changedTuning = installedSettings == null || !sameSettings(installedSettings, request.settings())
-              || installedColumns != request.columns() || atlasColumns != request.columns();
+              || installedColumns != request.columns() || atlasColumns != request.columns()
+              || installedTessellation != request.tessellated();
         boolean changedLimbScale = installedSettings != null
               && installedSettings.geometry().unitScale() != request.settings().geometry().unitScale();
         TerrainLoadProgress progress = new TerrainLoadProgress();
@@ -3333,6 +3360,7 @@ final class GpuTerrain implements Disposable {
             biomeVegetation.dispose();
         }
         installedColumns = rebuild.request.columns();
+        installedTessellation = rebuild.request.tessellated();
         floor = plan.floor();
         coast = plan.coast();
         currents = plan.currents();
@@ -3411,9 +3439,15 @@ final class GpuTerrain implements Disposable {
     }
 
     private void prepareTerrainMaterial(Material material, VertexAttributes attributes, VertexAttributes instances) {
+        // Built for tessellation, a sculpted material's curving copy draws once a chunk refines to full detail: its
+        // programs link now, behind the loading stage, so a zoom never links one (GpuTessellation.curvedCopy).
+        if (tessellation && curvable(material)) {
+            prepareTerrainMaterial(GpuTessellation.curvedCopy(material), attributes, instances);
+        }
         for (Renderable sample : terrainMaterialSamples) {
             // A cliff chunk's relief takes its own sample, which links the program's depth twin too.
             if (sample.material.getMask() == material.getMask() && prepass(sample.material) == prepass(material)
+                  && GpuTessellation.curved(sample.material) == GpuTessellation.curved(material)
                   && sameMaterialVariant(material, GpuIceShader.mode(sample.material), linearDiffuse(sample.material),
                         GpuSurfaceBlend.ordinaryFamily(sample.material), waterMode(sample.material),
                         flowingMagma(sample.material))
@@ -3480,7 +3514,9 @@ final class GpuTerrain implements Disposable {
         int programs = 0, linked = 0;
         for (Renderable sample : terrainMaterialSamples) {
             boolean twinned = prepasses(prepass(sample.material));
-            programs += (twinned ? 2 : 1) + (editable ? 1 : 0);
+            // The editor's shadows link with the rest; a curving material's tessellated shadow program does everywhere.
+            boolean casts = editable || GpuTessellation.curved(sample.material);
+            programs += (twinned ? 2 : 1) + (casts ? 1 : 0);
             // Beside interactive frames (an edit, the editor's samples) the rest wait once a frame spent its budget.
             if (GpuGlsl.overBudget()) { continue; }
             long start = System.nanoTime();
@@ -3489,7 +3525,7 @@ final class GpuTerrain implements Disposable {
             // Its depth twin links here too, after it, behind the loading stage, never at a first draw.
             boolean twin = colour && twinned && terrainMaterialPreparation.run(() ->
                   prepassTwins.put(shaderGroup(sample.shader), GpuShaderProvider.unwrap(twinOf(sample))));
-            boolean cast = editable && terrainMaterialPreparation.run(() -> {
+            boolean cast = casts && terrainMaterialPreparation.run(() -> {
                 Shader colourShader = sample.shader;
                 sample.shader = null;
                 try { depthBatch.getShaderProvider().getShader(sample); }
@@ -4263,7 +4299,8 @@ final class GpuTerrain implements Disposable {
             boolean wallBuilding = BoardWall.building(tile.cover(), feature);
             var wallLayout = BoardWall.supports(feature.asset()) ? BoardWall.layout(scene, tile, feature) : null;
             GpuBuilding.Assembly building = generatedIndustrial || feature.decoration() != null ? null : assets.building(feature.asset(), Math.round(feature.height()),
-                  GpuBuilding.seed(tile, feature), feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding);
+                  ConnectedKit.reach(scene, tile, Math.round(feature.height())), GpuBuilding.seed(tile, feature),
+                  feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding);
             // A placed object draws the same way in every view: one shared mesh per model and level (GpuAssets#slotted),
             // its colours passed per placement, its parts instanced (Chunk#cacheDecorations). Rail and maglev routes keep
             // their own route caching. What a rail owns (its buffer stops) is drawn as an object but never edited as one.
@@ -4296,10 +4333,7 @@ final class GpuTerrain implements Disposable {
                       || material.id.startsWith("fortified-")) {
                     // Terrain scenery shares the ground's lighting and weather response.
                     material.set(new Ground(.15f));
-                    if (material.id.equals("geyser-rock")) {
-                        material.set(TextureAttribute.createNormal(assets.materialNormal(feature.asset().endsWith("magma")
-                              ? "terrain/surfaces/volcano-cliff" : "terrain/surfaces/rock-ground")));
-                    } else if (material.id.equals("geyser-lava")) {
+                    if (material.id.equals("geyser-lava")) {
                         Material lava = GpuMagmaShader.material(assets, GpuMagmaShader.LAVA, null);
                         if (lava != null) { for (Attribute attribute : lava) { material.set(attribute.copy()); } }
                     }
@@ -4398,7 +4432,8 @@ final class GpuTerrain implements Disposable {
             }
             bounds.mul(instance.transform);
             if (metal && !BoardMetalDeposits.accepts(scene, tile, surface, feature)) { continue; }
-            GpuGeysers.Emitter geyser = GpuGeysers.emitter(feature.asset(), instance.transform);
+            GpuGeysers.Emitter geyser = GpuGeysers.emitter(feature.asset(), instance.transform,
+                  GpuGeysers.vent(instance.model));
             if (geyser != null) {
                 chunk.geysers.add(geyser);
                 geyserBounds(bounds, geyser);
@@ -4768,8 +4803,8 @@ final class GpuTerrain implements Disposable {
         boolean cliffs;
         int collected, uploadLayer, uploadBuffer;
 
-        ChunkBuild(BoardScene scene, int x, int y, float floor, TerrainLod lod, boolean columns, Prepared prepared,
-              Chunk source, TerrainLoadProgress progress) {
+        ChunkBuild(BoardScene scene, int x, int y, float floor, TerrainLod lod, boolean columns, boolean tessellated,
+              Prepared prepared, Chunk source, TerrainLoadProgress progress) {
             this.scene = scene;
             this.source = source;
             this.x = x;
@@ -4781,6 +4816,7 @@ final class GpuTerrain implements Disposable {
             height = Math.min(CHUNK_SIZE, scene.height() - y);
             chunk.lod = lod;
             chunk.columns = columns;
+            chunk.tessellated = tessellated;
             chunk.paintOnlyUpdate = prepared.paintOnly();
             if (chunk.paintOnlyUpdate) { progress.begin("paint", width * height); return; }
             Map<BoardScene.Pixels, BoardScene.Pixels> masks = new HashMap<>();
@@ -4953,7 +4989,7 @@ final class GpuTerrain implements Disposable {
                 chunk.beyondRenderables.add(copy);
             }
             // Ground, water and magma draw these materials as they are. An editor also retains the other actual parts,
-            // including grass and bank turf: palette cards may draw any of them after the loading stage.
+            // including grass: palette cards may draw any of them after the loading stage.
             for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.scatterRenderables, chunk.waterRenderables,
                   chunk.beyondRenderables)) {
                 for (Renderable part : layer) {
@@ -4968,6 +5004,14 @@ final class GpuTerrain implements Disposable {
             // The ground switches to family programs as they become ready; scatter and water keep generic ones.
             for (Renderable part : chunk.terrainRenderables) {
                 familyPrograms.request(part.material, part.meshPart.size, part.meshPart.mesh.getVertexAttributes());
+                // Built for tessellation, the curving copy draws once its chunk refines to full detail: its family
+                // program builds in the loading stage's session too, from a copy kept for it, as its other programs
+                // link then (prepareTerrainMaterial).
+                if (familySession && chunk.tessellated && curvable(part.material)) {
+                    Material copy = GpuTessellation.curvedCopy(part.material);
+                    curvedFamilies.add(copy);
+                    familyPrograms.request(copy, part.meshPart.size, part.meshPart.mesh.getVertexAttributes());
+                }
             }
             chunk.depthTerrain = new GpuTerrainDepth(chunk.opaque);
             if (chunk.waterField != null) { chunk.waterField.finish(); }
@@ -5149,8 +5193,7 @@ final class GpuTerrain implements Disposable {
      */
     private static boolean drawsScars(Material material) {
         long mask = material.getMask();
-        return (mask & (Foliage.TYPE | Pit.TYPE | GpuBackdrop.TYPE | GpuBankTurf.Turf.TYPE | GpuBiomeVegetation.Kind.TYPE
-              | GpuGroundCover.Wind.TYPE)) == 0
+        return (mask & (Foliage.TYPE | Pit.TYPE | GpuBackdrop.TYPE | GpuBiomeVegetation.Kind.TYPE | GpuGroundCover.Wind.TYPE)) == 0
               && ((mask & Sculpt.TYPE) != 0 || (mask & (Ground.TYPE | GpuWaterShader.TYPE | GpuMagmaShader.TYPE)) == 0);
     }
 
@@ -5308,7 +5351,10 @@ final class GpuTerrain implements Disposable {
         List<BoardSurface.Face> bed = plan.bed();
         // A water hex's ground carries its water's palette, so the shader wets it and tints it below the waterline.
         float shore = tile.liquid().present() ? GpuWaterShader.palette(tile.liquid()) : Float.NaN;
-        blended(solid, plan.blended(), scene, tile, chunk.lavaField);
+        // Built for tessellation, a full-detail chunk's triangles that curve take a material of their own
+        // (sculptedTriangles).
+        boolean split = chunk.tessellated && chunk.lod == TerrainLod.FULL && GpuTessellation.available();
+        blended(solid, plan.blended(), scene, tile, chunk.lavaField, split);
         for (var group : byFamily(surface, formed).entrySet()) {
             Material formedMaterial = magma != null ? magma : sculptMaterial(group.getKey());
             // A frozen lake's banks below frozen land carry that land's ice, so one sheet spans the shore.
@@ -5317,13 +5363,12 @@ final class GpuTerrain implements Disposable {
                   .filter(face -> frozenLake && frozenLand(scene, tile, face)).toList();
             List<BoardSurface.Face> plain = iced.isEmpty() ? group.getValue()
                   : group.getValue().stream().filter(face -> !frozenLand(scene, tile, face)).toList();
-            if (!plain.isEmpty()) {
-                solid.addTriangles(tile.liquid().present() ? formedMaterial : GpuIceShader.ground(formedMaterial, scene, tile),
-                      mesh -> sculptedFaces(mesh, surface, plain, shore, scene, surfaces));
-            }
+            boolean curves = split && magma == null;
+            sculptedTriangles(solid, tile.liquid().present() ? formedMaterial
+                  : GpuIceShader.ground(formedMaterial, scene, tile), curves, surface, plain, shore, scene, surfaces);
             if (!iced.isEmpty()) {
-                solid.addTriangles(GpuIceShader.land(formedMaterial),
-                      mesh -> sculptedFaces(mesh, surface, iced, shore, scene, surfaces));
+                sculptedTriangles(solid, GpuIceShader.land(formedMaterial), curves, surface, iced, shore, scene,
+                      surfaces);
             }
         }
         for (var group : byFamily(surface, bed).entrySet()) {
@@ -5336,13 +5381,42 @@ final class GpuTerrain implements Disposable {
                 solid.addTriangles(magma, mesh -> sculptedFaces(mesh, surface, ground, shore, scene, surfaces));
             } else {
                 for (var group : byFamily(surface, ground).entrySet()) {
-                    solid.addTriangles(sculptMaterial(group.getKey()),
-                          mesh -> sculptedFaces(mesh, surface, group.getValue(), shore, scene, surfaces));
+                    sculptedTriangles(solid, sculptMaterial(group.getKey()), split, surface, group.getValue(), shore,
+                          scene, surfaces);
                 }
             }
         }
         for (BoardSurface.Face face : surface.faces) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
         for (BoardSurface.Face face : walls) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
+    }
+
+    /**
+     * Sculpted faces in {@code material}; with {@code split}, those that curve in a copy of their own
+     * (GpuTessellation#curved), so only they pass through the tessellation stages, and flat ground draws as without.
+     */
+    private static void sculptedTriangles(Layer solid, Material material, boolean split, BoardSurface surface,
+          List<BoardSurface.Face> faces, float shore, BoardScene scene, Map<Coords, BoardSurface> surfaces) {
+        List<BoardSurface.Face> curved = new ArrayList<>(), plain = split ? new ArrayList<>() : faces;
+        if (split) {
+            for (var face : faces) {
+                boolean curves = GpuTessellation.curves(face.a(), shadeNormal(surface, face.a()), face.b(),
+                      shadeNormal(surface, face.b()), face.c(), shadeNormal(surface, face.c()));
+                (curves ? curved : plain).add(face);
+            }
+        }
+        if (!plain.isEmpty()) {
+            solid.addTriangles(material, mesh -> sculptedFaces(mesh, surface, plain, shore, scene, surfaces));
+        }
+        if (!curved.isEmpty()) {
+            solid.addTriangles(GpuTessellation.curvedCopy(material),
+                  mesh -> sculptedFaces(mesh, surface, curved, shore, scene, surfaces));
+        }
+    }
+
+    /** The normal {@link #sculptVertex} gives a point. */
+    private static Vector3 shadeNormal(BoardSurface surface, Vector3 point) {
+        BoardRelief.Shade shade = surface.relief.shade(point);
+        return shade == null ? Vector3.Z : shade.normal();
     }
 
     /**
@@ -5484,6 +5558,12 @@ final class GpuTerrain implements Disposable {
     /** {@code lava} is the chunk's lava field: cooled banks, the lava's own and those of land beside it, glow at it. */
     private void blended(Layer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
           BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava) {
+        blended(solid, groups, scene, tile, lava, false);
+    }
+
+    /** With {@code split}, the triangles that curve (magma's aside) take a material of their own: sculptedTriangles. */
+    private void blended(Layer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
+          BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava, boolean split) {
         for (var group : groups.entrySet()) {
             var palette = group.getKey();
             boolean boundary = palette.first() != palette.base() || palette.second() != palette.base() || palette.third() != palette.base();
@@ -5494,14 +5574,35 @@ final class GpuTerrain implements Disposable {
                 material.set(magma.withField(lava));
             }
             if (tile != null && !tile.liquid().present()) { material = GpuIceShader.ground(material, scene, tile); }
-            solid.addTriangles(material, meshes -> {
+            List<GpuSurfaceBlend.Triangle> curved = new ArrayList<>();
+            List<GpuSurfaceBlend.Triangle> plain = split && magma == null ? new ArrayList<>() : group.getValue();
+            if (split && magma == null) {
                 for (var triangle : group.getValue()) {
-                    MeshPartBuilder mesh = meshes.get();
-                    if (boundary) { triangle.write(mesh, palette); }
-                    else { mesh.triangle(triangle.a().vertex(), triangle.b().vertex(), triangle.c().vertex()); }
+                    var a = triangle.a().vertex();
+                    var b = triangle.b().vertex();
+                    var c = triangle.c().vertex();
+                    boolean curves = GpuTessellation.curves(a.position, a.normal, b.position, b.normal, c.position,
+                          c.normal);
+                    (curves ? curved : plain).add(triangle);
                 }
-            });
+            }
+            blendedTriangles(solid, material, palette, boundary, plain);
+            if (!curved.isEmpty()) {
+                blendedTriangles(solid, GpuTessellation.curvedCopy(material), palette, boundary, curved);
+            }
         }
+    }
+
+    private static void blendedTriangles(Layer solid, Material material, GpuSurfaceBlend.Palette palette,
+          boolean boundary, List<GpuSurfaceBlend.Triangle> triangles) {
+        if (triangles.isEmpty()) { return; }
+        solid.addTriangles(material, meshes -> {
+            for (var triangle : triangles) {
+                MeshPartBuilder mesh = meshes.get();
+                if (boundary) { triangle.write(mesh, palette); }
+                else { mesh.triangle(triangle.a().vertex(), triangle.b().vertex(), triangle.c().vertex()); }
+            }
+        });
     }
 
     private void roads(Layer overlay, List<RoadPatch> prepared, BoardSurface surface,
@@ -6663,7 +6764,8 @@ final class GpuTerrain implements Disposable {
                         preview = copy(prop.instance);
                         placeDecoration(preview, coords, next, z + next.elevation() * BoardGeometry.level());
                     }
-                    var oldGeyser = GpuGeysers.emitter(prop.decorationFeature.asset(), prop.instance().transform);
+                    var oldGeyser = GpuGeysers.emitter(prop.decorationFeature.asset(), prop.instance().transform,
+                          GpuGeysers.vent(prop.instance().model));
                     prop.previewFeature = next;
                     prop.previewCoords = coords;
                     prop.previewInstance = preview;
@@ -6671,7 +6773,8 @@ final class GpuTerrain implements Disposable {
                     prop.previewAnchorZ = z;
                     if (oldGeyser != null) {
                         chunk.geysers.remove(oldGeyser);
-                        var geyser = GpuGeysers.emitter(next.asset(), prop.instance().transform);
+                        var geyser = GpuGeysers.emitter(next.asset(), prop.instance().transform,
+                              GpuGeysers.vent(prop.instance().model));
                         chunk.geysers.add(geyser);
                         if (preview != null) { geyserBounds(prop.previewBounds, geyser); }
                     }
@@ -7235,7 +7338,8 @@ final class GpuTerrain implements Disposable {
         var infrastructure = side.infrastructure();
         var prepared = new Prepared(side.surfaces(), null, null, Map.of(), Map.of(), Map.of(), Map.of(),
               infrastructure.roads(), infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(), Set.of(), Map.of(), false);
-        var build = new ChunkBuild(side.scene(), 0, 0, floor, lod, columns(), prepared, null, new TerrainLoadProgress());
+        var build = new ChunkBuild(side.scene(), 0, 0, floor, lod, columns(), false, prepared, null,
+              new TerrainLoadProgress());
         build.preview = owner;
         owner.carriers.add(build.chunk);
         Map<Coords, List<ModelInstance>> result = new HashMap<>();
@@ -7724,6 +7828,11 @@ final class GpuTerrain implements Disposable {
      */
     void setColumns(boolean columns) { this.columns = columns; }
 
+    void setTessellation(boolean tessellation) { this.tessellation = tessellation; }
+
+    /** The switch, which the installed chunks follow once the terrain is ready (unlike {@link #columns()}). */
+    boolean tessellation() { return tessellation; }
+
     /** Whether the installed chunks are the Classic columns. */
     boolean columns() { return installedColumns; }
 
@@ -8118,8 +8227,8 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Live grass visibility (the Grass blades option): the meadows' grass and bank turf, not the fields' plants. Hidden
-     * grass skips its buffers and drawing without rebuilding the terrain.
+     * Live grass visibility (the Grass blades option): the meadows' grass and their banks' rims, not the fields' plants.
+     * Hidden grass skips its buffers and drawing without rebuilding the terrain.
      */
     void setGrass(boolean enabled) {
         grass = enabled;

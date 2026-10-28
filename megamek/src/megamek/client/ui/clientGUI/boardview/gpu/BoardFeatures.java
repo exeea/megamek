@@ -232,16 +232,12 @@ final class BoardFeatures {
                 case Terrains.FUEL_TANK -> Terrains.FUEL_TANK_ELEV;
                 default -> Terrains.INDUSTRIAL;
             };
-            var feature = new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
+            result.add(new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
                   Math.max(1, hex.terrainLevel(heightTerrain)), 0, switch (structure.getKey()) {
                       case Terrains.BUILDING -> BoardScene.FeatureKind.BUILDING;
                       case Terrains.INDUSTRIAL -> BoardScene.FeatureKind.INDUSTRIAL;
                       default -> BoardScene.FeatureKind.PROP;
-                  });
-            // A hex-filling model authored on the 2D art's wider hex is narrowed to meet its neighbours at the edges.
-            result.add(BoardWall.supports(feature.asset()) || BoardIndustrial.supports(feature) ? feature
-                  : new BoardScene.Feature(feature.asset(), 0, 0, 0, 1, feature.height(), 0, feature.kind(), 0, false, null,
-                        new BoardDecoration.Stretch(HexTile.IMAGE_TO_MODEL_X, 1, 1), BoardDecoration.Colours.NONE));
+                  }));
         }
         addBridge(hex, result);
         result.addAll(BoardMetalDeposits.capture(hex, coords));
@@ -631,9 +627,9 @@ final class BoardFeatures {
      */
     static List<BoardScene.Feature> features(BoardSceneryLayouts.Layout layout, Coords coords, Hex hex) {
         List<BoardScene.Feature> result = new ArrayList<>(layout.components().stream().filter(row -> !row.decal())
-              .map(row -> new BoardScene.Feature(onGround(row.asset(), hex), row.x(), row.y(), row.rotation(),
-                    row.scale(), 1, row.z() / BoardGeometry.MODEL_LEVEL_HEIGHT, BoardScene.FeatureKind.SCENERY, 0, true, null,
-                    row.stretch(), row.colours())).toList());
+              .map(row -> new BoardScene.Feature(geyserLook(onGround(row.asset(), hex), coords), row.x(), row.y(),
+                    row.rotation(), row.scale(), 1, row.z() / BoardGeometry.MODEL_LEVEL_HEIGHT,
+                    BoardScene.FeatureKind.SCENERY, 0, true, null, row.stretch(), row.colours())).toList());
         if (layout.components().stream().anyMatch(BoardSceneryLayouts.Component::decal)) {
             // Each row's id names its hex and asset: unique on the board, as a stored object's id is.
             String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":";
@@ -652,6 +648,13 @@ final class BoardFeatures {
      * cannot be dug, its sandbag emplacement ({@link #onGround}).
      */
     static final String FORTIFICATION = "scenery/military/fortification", SANDBAGS = "scenery/military/sandbags";
+
+    /** A geyser's look on its hex: each geyser asset has a second look, {@code <asset>-b}, one or the other per hex. */
+    static String geyserLook(String asset, Coords coords) {
+        if (!asset.startsWith(GpuGeysers.GEYSERS)) { return asset; }
+        Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0x67657973L);
+        return random.nextBoolean() ? asset + "-b" : asset;
+    }
 
     /** {@code asset} as built on {@code hex}'s ground: a strongpoint on pavement is sandbagged, not dug. */
     private static String onGround(String asset, Hex hex) {

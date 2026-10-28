@@ -153,10 +153,8 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     albedo += sheen;
     // The hot share is matte, matching the dedicated crust and lava programs.
     albedo += localSpecular * multiscatter * s.cavity * (1.0 - s.heat);
-    // The relief hides the reflected sky as it hides the sky (sky-visibility.glsl), seen along the reflection.
-    albedo += environmentSpecular(normal, view, roughness, f0, environmentGround(s.bounce),
-          surfaceAmbient(vec3(0.0, 0.0, 1.0))) * multiscatter * s.specularOcclusion * s.cavity * (1.0 - s.heat)
-          * skyVisibility(v_cloudPosition, reflect(-view, normal));
+    albedo += skyReflection(normal, view, roughness, f0, s.bounce, environmentGround(s.bounce),
+          surfaceAmbient(vec3(0.0, 0.0, 1.0))) * multiscatter * s.specularOcclusion * s.cavity * (1.0 - s.heat);
     if (submerged > 0.0) {
         vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) * occlusion + sunOnGround() * (1.0 + caustic);
         albedo = submergedLight(albedo, s.albedo, scattered, submerged);

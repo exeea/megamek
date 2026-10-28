@@ -22,6 +22,13 @@ class GpuBuildingTest {
         return new FileHandle(TilesetScenery.customBuildingFile(ASSET));
     }
 
+    /** The kit's module roles, each with its core node ({@link ConnectedKit#parts}). */
+    private static Map<String, String> roles(ModelData data) {
+        Map<String, String> result = new java.util.HashMap<>();
+        ConnectedKit.parts(data).forEach(piece -> result.put(piece.role(), piece.node()));
+        return result;
+    }
+
     private static ModelData modules(String... names) {
         ModelData data = new ModelData();
         for (String name : names) {
@@ -35,7 +42,7 @@ class GpuBuildingTest {
 
     @Test
     void aFiveLevelBuildingHasOneBaseFourFloorsAndOneRoof() {
-        var parts = GpuBuilding.parts(modules("kit-base0", "kit-floor0", "kit-roof0"));
+        var parts = roles(modules("kit-base0", "kit-floor0", "kit-roof0"));
         assertEquals(List.of("base0", "floor0", "floor0", "floor0", "floor0", "roof0"),
               GpuBuilding.select(parts, 5, 41));
         assertEquals(List.of("base0", "roof0"), GpuBuilding.select(parts, 1, 41));
@@ -44,14 +51,14 @@ class GpuBuildingTest {
 
     @Test
     void variantNumbersDoNotNeedToStartAtZero() {
-        var parts = GpuBuilding.parts(modules("kit-base4", "kit-floor7", "kit-roof3"));
+        var parts = roles(modules("kit-base4", "kit-floor7", "kit-roof3"));
         assertEquals(List.of("base4", "floor7", "roof3"), GpuBuilding.select(parts, 2, 41));
     }
 
     @Test
     void randomVariantsAreStableAcrossCameraLodAndHeightChanges() {
-        var parts = GpuBuilding.parts(modules("kit-base0", "kit-base4", "kit-floor0", "kit-floor7", "kit-roof0", "kit-roof3"));
-        var reordered = GpuBuilding.parts(modules("far-roof3", "far-floor7", "far-base4", "far-floor0", "far-roof0", "far-base0"));
+        var parts = roles(modules("kit-base0", "kit-base4", "kit-floor0", "kit-floor7", "kit-roof0", "kit-roof3"));
+        var reordered = roles(modules("far-roof3", "far-floor7", "far-base4", "far-floor0", "far-roof0", "far-base0"));
         Set<String> seen = new java.util.HashSet<>();
         for (long seed = 0; seed < 80; seed++) {
             var one = GpuBuilding.select(parts, 1, seed);
@@ -77,7 +84,7 @@ class GpuBuildingTest {
               { "kit-base0", "kit-floor0", "other-floor0", "kit-roof0" },
               { "kit-base0", "kit-floor0", "kit-roof0", "other-roof0" },
               { "kit-base0", "kit-floor0", "kit-roof0", "kit-extra" } }) {
-            assertThrows(IllegalArgumentException.class, () -> GpuBuilding.parts(modules(names)));
+            assertThrows(IllegalArgumentException.class, () -> ConnectedKit.parts(modules(names)));
         }
     }
 
@@ -110,7 +117,7 @@ class GpuBuildingTest {
         var lods = RigidGlb.loadLods(file()).stream().distinct().toList();
         assertEquals(2, lods.size());
         for (int lod = 0; lod < lods.size(); lod++) {
-            Map<String, String> names = GpuBuilding.parts(lods.get(lod));
+            Map<String, String> names = roles(lods.get(lod));
             assertEquals(Set.of("base0", "floor0", "floor1", "roof0"), names.keySet());
             int current = lod;
             IntStream.range(0, lods.get(lod).nodes.size).forEach(index -> {
@@ -126,10 +133,28 @@ class GpuBuildingTest {
     }
 
     @Test
-    void shippedLightBuildingHasOneLodWithSeparateBaseAndFloor() {
+    void shippedLightBuildingHasCentredVariantsInBothLods() {
         var file = new FileHandle(TilesetScenery.customBuildingFile("buildings/saxarba/building_light/building_light_00"));
         var lods = GpuBuilding.lods(RigidGlb.loadLods(file));
-        assertEquals(1, lods.size());
-        assertEquals(Set.of("base0", "floor0", "roof0"), GpuBuilding.parts(lods.getFirst()).keySet());
+        assertEquals(2, lods.size());
+        for (var lod : lods) {
+            assertEquals(Set.of("base0", "base1", "floor0", "floor1", "roof0"), roles(lod).keySet());
+            for (var node : lod.nodes) {
+                var bounds = new com.badlogic.gdx.math.collision.BoundingBox().inf();
+                var mesh = lod.meshes.first();
+                for (var nodePart : node.parts) {
+                    for (var part : mesh.parts) {
+                        if (!part.id.equals(nodePart.meshPartId)) { continue; }
+                        for (short index : part.indices) {
+                            int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                            bounds.ext(mesh.vertices[at] + node.translation.x, mesh.vertices[at + 1] + node.translation.y, 0);
+                        }
+                    }
+                }
+                // Variants replace each other on one hex: every module stands on the shared origin.
+                assertEquals(0, bounds.getCenterX(), .01f, node.id);
+                assertEquals(0, bounds.getCenterY(), .01f, node.id);
+            }
+        }
     }
 }

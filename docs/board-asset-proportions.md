@@ -16,9 +16,9 @@ contract. Board units are defined by `BoardGeometry`.
 
 The 3D board's hex is regular: 72 across its flats and 83.125 across its corners (the
 regular 83.138 to a 32nd, so lattice coordinates stay exact floats), every edge midpoint
-36 from the centre within 0.005. Legacy building GLBs use the 2D art's 84-by-72 hex
-footprint; placement narrows them along X by 83.125/84 so neighbours meet at the
-edges. Their ground is at local Z=0 and roof at Z=18 in the renderer's Z-up
+36 from the centre within 0.005. Legacy building GLBs fill that hex too, so
+neighbours meet at the edges; every structure model draws as authored, without an X
+stretch. Their ground is at local Z=0 and roof at Z=18 in the renderer's Z-up
 convention. Files use glTF Y-up. This is one default terrain level and also applies
 to fuel tanks and industrial structures.
 

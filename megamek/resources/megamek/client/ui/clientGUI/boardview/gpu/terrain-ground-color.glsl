@@ -66,8 +66,9 @@ vec3 groundToneFor(float f, vec3 albedo, vec3 world, float broad, float fine, fl
         gain *= mix(vec3(1.0), vec3(.92, .82, .77), smoothstep(.55, .8, region * .6 + fine * .4) * .3);
     }
     if (abs(f) < .5) {
-        // Thin, dry turf on convex rims and in sunny patches; lush, dark grass where water gathers below cliffs.
-        float dry = max(smoothstep(.55, .85, broad * .7 + fine * .3) * .5, rim * .6);
+        // Thin, dry turf in sunny patches and in patches along convex rims, not as a band tracing every edge; lush,
+        // dark grass where water gathers below cliffs.
+        float dry = max(smoothstep(.55, .85, broad * .7 + fine * .3) * .5, rim * .45 * smoothstep(.3, .75, fine));
         gain *= mix(vec3(1.0), vec3(1.25, 1.12, .7), dry);
         gain *= mix(vec3(1.0), vec3(.78, .95, .82), max(foot * .6, (1.0 - smoothstep(.2, .45, broad)) * .4));
     }

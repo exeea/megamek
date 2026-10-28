@@ -57,7 +57,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardGroundCut` | Digs authored scenery's `cut` group into a hex's Enhanced top as DUG ground, places its `stands` for resting troops and parked transports, fits earthworks to the hex's top, and tints their earth to its ground (a dug-in platoon's holes, a fortified hex's strongpoint). |
 | `BoardElevator` | A Solaris elevator's platform (diamond-plate top in a hazard-striped band) and, raised, its open lift (deck, scissor table and its cylinders, machinery pit), which the terrain draws in place of the hex's top and walls, and at each height while the platform moves. |
 | `BoardScatter`, `GpuScatter` | Choose stable small-prop positions, then bake their textured drawing data into chunk batches. |
-| `GpuBuilding` | Loads modular kits, validates module roles, stores assembly recipes and exposes module picking data. |
+| `GpuBuilding` | Uploads a building kit's meshes, stores assembly recipes (modules and connection heights) and exposes per-piece picking data. |
+| `ConnectedKit` | Reads and checks a kit's tagged pieces and places them for a hex's exits; one source for drawing, picking and clearance of buildings, fuel tanks and walls. |
 | `GpuBuildingInterior` | Builds floor sheets and columns clipped to the roof's actual occupied footprint. |
 
 ## Surface fields and vegetation
@@ -100,6 +101,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `GpuAtmosphere` | Owns scene color/depth targets, fog/shafts, grading, glare and final composition. |
 | `GpuDepthCues` | Measures and eases the distance the view centres on, behind which the composite hazes the scene. |
 | `GpuSkyVisibility` | Searches the board's horizons into a sky-visibility volume that scales every lit surface's sky light. |
+| `GpuTessellation` | Generates the Phong tessellation stages of sculpted relief's programs where the context offers them. |
 | `GpuClouds` | Generates and advects the common cloud-transmission atlas. |
 | `GpuCloudShadow` | Shares the cloud atlas and its coordinates with every lit material. |
 | `GpuWeatherParticles` | Maintains the bounded precipitation pool and supplies weather-specific particle programs. |

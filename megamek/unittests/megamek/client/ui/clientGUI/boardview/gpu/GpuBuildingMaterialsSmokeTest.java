@@ -167,9 +167,10 @@ class GpuBuildingMaterialsSmokeTest {
                 for (var feature : tile.features()) {
                     if (!feature.asset().startsWith("buildings/")) { continue; }
                     assertTrue(tile.detailedGround(), "Structures must not replace the native ground: " + tile.coords());
+                    // A kit (the fuel tanks') carries its own shared materials; the facades dress the legacy models.
+                    if (megamek.common.board.TilesetScenery.customBuildingFile(feature.asset()).isFile()) { continue; }
                     assertEquals(BoardScene.Surface.GRASS, tile.surface());
-                    String family = tile.coords().getY() == 6
-                          ? tile.coords().getX() == 5 ? "industrial" : "tank"
+                    String family = tile.coords().getY() == 6 ? "industrial"
                           : tile.coords().getY() == 4 ? "fortress" : tile.coords().getY() == 2 ? "hangar"
                           : List.of("light", "medium", "heavy", "hard").get((tile.coords().getX() - 1) / 2);
                     String role = family.equals("fortress") || family.equals("hangar") ? "shell" : "wall";
@@ -205,8 +206,15 @@ class GpuBuildingMaterialsSmokeTest {
                 if (!feature.asset().startsWith("buildings/")) { continue; }
                 BoundingBox placed = terrain.roofBounds(tile.coords());
                 assertNotNull(placed, feature.asset());
-                assertEquals(feature.height() * BoardGeometry.level(), placed.getDepth(), .001f,
-                      "Authored height must not multiply the game's building/tank/industrial level count");
+                float storeys = feature.height() * BoardGeometry.level();
+                if (megamek.common.board.TilesetScenery.customBuildingFile(feature.asset()).isFile()) {
+                    // A kit's storeys stand at the rules height and its roof is a cap above them.
+                    assertTrue(placed.getDepth() >= storeys - .001f && placed.getDepth() < storeys + BoardGeometry.level(),
+                          feature.asset() + " " + placed.getDepth());
+                } else {
+                    assertEquals(storeys, placed.getDepth(), .001f,
+                          "Authored height must not multiply the game's building/tank/industrial level count");
+                }
             }
         }
         Coords coords = new Coords(4, 8);

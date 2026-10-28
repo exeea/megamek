@@ -2,9 +2,11 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -65,7 +67,8 @@ class GpuMeasurementSmokeTest {
                             verifyModifiers(InputEvent.ALT_DOWN_MASK);
                             gesture(InputEvent.CTRL_DOWN_MASK);
                         } else if (tick == 5 || tick == 9) {
-                            verifyModifiers(InputEvent.CTRL_DOWN_MASK);
+                            // Ctrl no longer measures: the board editor took it (2026-10-07).
+                            verify(source, never()).measure(eq(start), eq(InputEvent.CTRL_DOWN_MASK), anyFloat());
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                             GpuBoardTestUi.capture(new File(output,
@@ -83,7 +86,7 @@ class GpuMeasurementSmokeTest {
                 }
 
                 private void verifyModifiers(int modifiers) {
-                    // The HUD hands a Ctrl or Alt click to MegaMek's measurement tools, at the height the pointer
+                    // The HUD hands an Alt click to MegaMek's measurement tools, at the height the pointer
                     // shows: the measured hex's ground (the user's decision of 2026-10-03).
                     ArgumentCaptor<Float> pointed = ArgumentCaptor.forClass(Float.class);
                     verify(source).measure(eq(start), eq(modifiers), pointed.capture());

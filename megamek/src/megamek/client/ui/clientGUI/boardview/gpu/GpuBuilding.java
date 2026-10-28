@@ -2,84 +2,67 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.geom.Area;
-import java.nio.file.Path;
+import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.function.Function;
 
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.common.Configuration;
 
-/** One shared GLB kit and compact assembly recipes. Only the kit and generated interiors own GPU resources. */
+/**
+ * One shared GLB kit ({@link ConnectedKit}) and compact assembly recipes: the selected modules and the hex's connection
+ * heights. Only the kit's meshes and generated interiors own GPU resources.
+ */
 final class GpuBuilding implements Disposable {
     static final float LEVEL_HEIGHT = BoardGeometry.MODEL_LEVEL_HEIGHT;
+    private final ConnectedKit.Kit kit;
     private final List<Model> models = new ArrayList<>();
-    private final List<Map<String, String>> names;
     private final Map<Recipe, Assembly> assemblies = new HashMap<>();
-    private final List<String> roles;
-    private final Map<String, Area> footprints = new HashMap<>();
+    // Per piece in its authored frame: near for picking and roof outlines, far for wall sections.
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
+    private final Map<String, List<Vector3>> farTriangles = new HashMap<>();
     private final Map<String, BoundingBox> bounds = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
 
     private record Interior(List<Vector3> footprint, int levels) { }
-    private record Recipe(String modules, boolean withInterior) { }
+    record Recipe(List<String> modules, List<Integer> reach, boolean withInterior) { }
 
-    // One module index per character; offsets are implicit (index * LEVEL_HEIGHT). No expanded Model is cached.
-    record Assembly(String modules, Model interior, GpuBuilding kit) {
+    /** No expanded Model is cached: each level of detail places the shared kit's nodes ({@link #instance}). */
+    record Assembly(Recipe recipe, List<ConnectedKit.Placement> near, Model interior, GpuBuilding kit) {
         int lodCount() { return kit.models.size(); }
         Model model(int lod) { return kit.models.get(lod); }
-        ModelInstance instance(int lod) { return kit.instance(modules, lod); }
-        boolean hit(Ray ray, Vector3 result) { return kit.hit(modules, ray, result); }
+        ModelInstance instance(int lod) { return kit.instance(recipe, lod); }
+        boolean hit(Ray ray, Vector3 result) { return kit.hit(near, ray, result); }
     }
 
-    GpuBuilding(FileHandle file, Path textureRoot, Function<ModelData, Model> upload) {
-        var data = lods(RigidGlb.loadLods(file, textureRoot));
-        names = data.stream().map(GpuBuilding::parts).toList();
-        roles = names.getFirst().keySet().stream().sorted().toList();
-        require(roles.size() <= Character.MAX_VALUE + 1, "Too many building modules");
-        for (var level : names) {
-            require(level.keySet().equals(names.getFirst().keySet()), "Building variants must match across LODs");
-        }
+    GpuBuilding(ConnectedKit.Kit kit, Function<ModelData, Model> upload) {
+        this.kit = kit;
+        var data = lods(kit.lods());
         try {
             for (int lod = 0; lod < data.size(); lod++) {
                 int previous = data.indexOf(data.get(lod));
                 models.add(previous < lod ? models.get(previous) : upload.apply(data.get(lod)));
             }
-            for (int lod = 0; lod < models.size(); lod++) {
-                if (models.indexOf(models.get(lod)) < lod) { continue; }
-                for (var entry : names.get(lod).entrySet()) {
-                    Node node = models.get(lod).getNode(entry.getValue());
-                    BoundingBox bounds = node.calculateBoundingBox(new BoundingBox());
-                    require(bounds.isValid(), "Empty building module: " + entry.getValue());
-                    if (!entry.getKey().startsWith("roof")) {
-                        require(Math.abs(bounds.getDepth() - LEVEL_HEIGHT) < .001f,
-                              entry.getValue() + " must be exactly one level (18 units) high");
-                    }
-                    // Preserve the authored XY origin; only ground the piece vertically for assembly.
-                    node.translation.add(moduleOffset(bounds));
-                }
-                models.get(lod).calculateTransforms();
-            }
             // Every kit shares its picking geometry; only enterable buildings need wall/roof footprints.
-            for (var entry : names.getFirst().entrySet()) {
-                var node = models.getFirst().getNode(entry.getValue());
-                List<Vector3> geometry = GpuTerrain.triangles(node);
-                triangles.put(entry.getKey(), geometry);
-                bounds.put(entry.getKey(), node.calculateBoundingBox(new BoundingBox()));
+            for (var piece : kit.pieces()) {
+                Node node = models.getFirst().getNode(piece.node());
+                triangles.put(piece.node(), GpuTerrain.triangles(node));
+                bounds.put(piece.node(), node.calculateBoundingBox(new BoundingBox()));
             }
         } catch (RuntimeException | Error error) {
             dispose();
@@ -87,32 +70,25 @@ final class GpuBuilding implements Disposable {
         }
     }
 
+    /**
+     * A custom kit file ({@link megamek.common.board.TilesetScenery#customBuildingFile}), read once for every user. Its
+     * textures may be the board's shared materials, as the walls' are.
+     */
+    static ConnectedKit.Kit kit(File file) {
+        return ConnectedKit.kit(file, new File(Configuration.dataDir(), "models").toPath());
+    }
+
     /** Trim trailing fallbacks, retaining authored level numbers and any gaps filled by the generic reader. */
-    static List<ModelData> lods(List<ModelData> loaded) {
+    static <T extends ModelData> List<T> lods(List<T> loaded) {
         require(MeshLod.level(loaded.getFirst().id) == 0, "Building requires -lod0");
         int last = loaded.size() - 1;
         while (last > 0 && loaded.get(last) == loaded.get(last - 1)) { last--; }
         return List.copyOf(loaded.subList(0, last + 1));
     }
 
-    /** Validate module roles before allocating GPU resources. Sparse variant numbers are supported. */
-    static Map<String, String> parts(ModelData data) {
-        Map<String, String> result = new LinkedHashMap<>();
-        for (var piece : ConnectedKit.parts(data)) {
-            require(piece.core(), "A kit with connection tags is assembled as a connected kit: " + piece.node());
-            result.put(piece.role(), piece.node());
-        }
-        return Map.copyOf(result);
-    }
-
     /** A stable per-placement seed, independent of camera, height, LOD, frame order and JVM hash randomization. */
     static long seed(BoardScene.Tile tile, BoardScene.Feature feature) {
         return tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L ^ feature.asset().hashCode();
-    }
-
-    /** Keep authored XY coordinates for rendering and clearance; discard only the module's vertical placement. */
-    static Vector3 moduleOffset(BoundingBox bounds) {
-        return new Vector3(0, 0, -bounds.min.z);
     }
 
     /** A stable per-placement seed, independent of camera, height, LOD, frame order and JVM hash randomization. */
@@ -131,52 +107,75 @@ final class GpuBuilding implements Disposable {
         return List.copyOf(result);
     }
 
-    Assembly assemble(int levels, long seed) {
-        return assemble(levels, seed, true);
-    }
-
-    /** Industrial terrain and fuel tanks borrow the same modules without allocating occupiable interiors. */
-    Assembly assemble(int levels, long seed, boolean withInterior) {
-        List<String> selected = select(names.getFirst(), levels, seed);
-        char[] modules = new char[selected.size()];
-        for (int i = 0; i < modules.length; i++) { modules[i] = (char) roles.indexOf(selected.get(i)); }
-        return assemblies.computeIfAbsent(new Recipe(new String(modules), withInterior), key -> {
-            if (!withInterior) { return new Assembly(key.modules(), null, this); }
-            Area volume = new Area(footprint(selected.getLast()));
-            for (String floor : selected.subList(0, selected.size() - 1).stream().distinct().toList()) {
-                volume.intersect(footprint(floor));
-            }
-            var footprint = GpuBuildingInterior.triangles(volume);
+    /**
+     * {@code reach}: how many levels the hex connects towards each direction ({@link ConnectedKit#reach}). Industrial
+     * terrain and fuel tanks borrow the same modules without allocating occupiable interiors.
+     */
+    Assembly assemble(int levels, int[] reach, long seed, boolean withInterior) {
+        var recipe = new Recipe(select(kit.roles(), levels, seed), Arrays.stream(reach).boxed().toList(), withInterior);
+        return assemblies.computeIfAbsent(recipe, key -> {
+            var near = placements(key, 0);
+            if (!withInterior) { return new Assembly(key, near, null, this); }
+            var footprint = GpuBuildingInterior.triangles(volume(key));
             Model interior = interiors.computeIfAbsent(new Interior(footprint, levels),
                   ignored -> GpuBuildingInterior.build(footprint, levels * LEVEL_HEIGHT, levels));
-            return new Assembly(key.modules(), interior, this);
+            return new Assembly(key, near, interior, this);
         });
     }
 
-    private Area footprint(String role) {
-        return footprints.computeIfAbsent(role, key -> {
-            boolean roof = key.startsWith("roof");
-            // The full roof projection preserves notches; the simplest wall LOD excludes facade seams and ledges.
-            Area area = roof ? GpuBuildingInterior.area(triangles.get(key))
-                  : GpuBuildingInterior.walls(GpuTerrain.triangles(models.getLast().getNode(names.getLast().get(key))),
-                        LEVEL_HEIGHT * .5f);
-            require(!area.isEmpty(), names.getFirst().get(key) + (roof ? " requires a roof footprint"
-                  : " requires a closed mid-storey wall outline"));
-            return area;
-        });
+    private List<ConnectedKit.Placement> placements(Recipe recipe, int lod) {
+        return ConnectedKit.placements(kit, lod, recipe.modules(),
+              recipe.reach().stream().mapToInt(Integer::intValue).toArray(), 0);
+    }
+
+    /**
+     * The occupied volume: the full roof projection, which preserves notches, within every storey's closed mid-storey
+     * wall outline from the simplest level of detail, which excludes facade seams and ledges. Connection pieces count
+     * on the storeys they stand on.
+     */
+    private Area volume(Recipe recipe) {
+        Area result = new Area();
+        for (var piece : placements(recipe, 0)) {
+            if (piece.role().startsWith("roof")) {
+                result.add(GpuBuildingInterior.area(placed(piece, triangles.get(piece.node()))));
+            }
+        }
+        require(!result.isEmpty(), kit.lods().getFirst().id + " requires a roof footprint");
+        int far = models.size() - 1;
+        List<Area> storeys = new ArrayList<>();
+        for (int level = 1; level < recipe.modules().size(); level++) { storeys.add(new Area()); }
+        for (var piece : placements(recipe, far)) {
+            if (piece.role().startsWith("roof")) { continue; }
+            var shape = farTriangles.computeIfAbsent(piece.node(),
+                  node -> GpuTerrain.triangles(models.get(far).getNode(node)));
+            storeys.get(piece.level()).add(GpuBuildingInterior.walls(placed(piece, shape),
+                  (piece.level() + .5f) * LEVEL_HEIGHT));
+        }
+        for (Area storey : storeys) {
+            require(!storey.isEmpty(), kit.lods().getFirst().id + " requires a closed mid-storey wall outline");
+            result.intersect(storey);
+        }
+        return result;
+    }
+
+    private static List<Vector3> placed(ConnectedKit.Placement piece, List<Vector3> triangles) {
+        return triangles.stream().map(point -> new Vector3(point).mul(piece.matrix())).toList();
     }
 
     /** Create only the scene instance, at load/edit or a LOD transition; mesh buffers stay in the shared kit. */
-    private ModelInstance instance(String modules, int lod) {
+    private ModelInstance instance(Recipe recipe, int lod) {
         Model source = models.get(lod);
         ModelInstance instance = new ModelInstance(source, new String[0]);
         // Placement materials are needed for cutaway opacity; their textures remain shared.
         for (var material : source.materials) { instance.materials.add(material.copy()); }
-        for (int level = 0; level < modules.length(); level++) {
-            String role = roles.get(modules.charAt(level));
-            Node node = source.getNode(names.get(lod).get(role)).copy();
-            node.id = role + "-at-" + level;
-            node.translation.z += level * LEVEL_HEIGHT;
+        for (var piece : placements(recipe, lod)) {
+            Node node = source.getNode(piece.node()).copy();
+            node.id = piece.prefix();
+            // The placement turns and lifts the authored node frame.
+            Matrix4 frame = new Matrix4(piece.matrix()).mul(new Matrix4(node.translation, node.rotation, node.scale));
+            frame.getTranslation(node.translation);
+            frame.getRotation(node.rotation, true);
+            frame.getScale(node.scale);
             for (var part : node.parts) { part.material = instance.getMaterial(part.material.id); }
             instance.nodes.add(node);
         }
@@ -196,19 +195,19 @@ final class GpuBuilding implements Disposable {
         });
     }
 
-    /** Picking borrows one triangle set per module, never expands every floor of every random combination. */
-    private boolean hit(String modules, Ray ray, Vector3 result) {
+    /** Picking borrows one triangle set per piece, never expands every floor of every random combination. */
+    private boolean hit(List<ConnectedKit.Placement> pieces, Ray ray, Vector3 result) {
         float nearest = Float.POSITIVE_INFINITY;
         Vector3 point = new Vector3();
         Ray local = new Ray();
-        for (int level = 0; level < modules.length(); level++) {
-            String module = roles.get(modules.charAt(level));
-            float height = level * LEVEL_HEIGHT;
-            local.set(ray.origin, ray.direction);
-            local.origin.z -= height;
-            if (Intersector.intersectRayBoundsFast(local, bounds.get(module))
-                  && Intersector.intersectRayTriangles(local, triangles.get(module), point)) {
-                point.z += height;
+        Matrix4 inverse = new Matrix4();
+        for (var piece : pieces) {
+            inverse.set(piece.matrix()).inv();
+            local.origin.set(ray.origin).mul(inverse);
+            local.direction.set(ray.direction).rot(inverse);
+            if (Intersector.intersectRayBoundsFast(local, bounds.get(piece.node()))
+                  && Intersector.intersectRayTriangles(local, triangles.get(piece.node()), point)) {
+                point.mul(piece.matrix());
                 float distance = point.dst2(ray.origin);
                 if (distance < nearest) { nearest = distance; result.set(point); }
             }
@@ -226,8 +225,8 @@ final class GpuBuilding implements Disposable {
         models.stream().distinct().forEach(Model::dispose);
         models.clear();
         assemblies.clear();
-        footprints.clear();
         triangles.clear();
+        farTriangles.clear();
         bounds.clear();
     }
 

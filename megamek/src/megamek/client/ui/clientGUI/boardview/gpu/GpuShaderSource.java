@@ -195,16 +195,15 @@ final class GpuShaderSource {
         } else if (source.contains("roadCoatFlag")) {
             functions += "\n#if defined(roadCoatFlag) || defined(roadMapsFlag)\n" + read("finish-arrays.glsl") + "\n#endif\n";
         }
-        if (source.contains("bankTurfFlag")) {
-            // Turf and meadow blades take their ground's finish; crops and sedge their own.
-            functions += "\n#ifndef biomeVegetationFlag\n" + read("finish-arrays.glsl") + "\n#endif\n"
-                  + "\n#ifdef bankTurfFlag\n" + read("terrain-ground-color.glsl")
-                  + read("terrain-bank-color.glsl") + "\n#endif\n";
+        if (source.contains("u_meadowFinish")) {
+            // Meadow blades take their ground's finish; crops and sedge their own.
+            functions += "\n#ifndef biomeVegetationFlag\n" + read("finish-arrays.glsl") + "\n#endif\n";
         }
         if (source.contains("// sculpt-material-functions") || source.contains("// biome-water-functions")) {
             functions += read("terrain-biome-mask.glsl");
         }
         if (source.contains("// sculpt-material-functions")) {
+            functions += read("terrain-rockiness.glsl");
             functions += read("terrain-concrete.glsl");
             functions += "\n#ifdef volcanicFlag\n" + magma(false) + "\n#endif\n";
             functions += read("terrain-materials.glsl");

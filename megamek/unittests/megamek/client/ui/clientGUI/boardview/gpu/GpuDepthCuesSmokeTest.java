@@ -3,11 +3,15 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -101,6 +105,12 @@ class GpuDepthCuesSmokeTest {
                         }
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    // The canyon from above darkened 3.6% at full strength: the volume reaches the image.
+                    if (GpuSkyVisibility.STRENGTH > 0) {
+                        double open = brightness(new File(output, "top-off.png"));
+                        assertTrue(brightness(new File(output, "top-sky.png")) < open * (1 - .02 * GpuSkyVisibility.STRENGTH),
+                              "The relief's sky occlusion darkens the canyon");
+                    }
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -172,6 +182,19 @@ class GpuDepthCuesSmokeTest {
     private static void show(GpuReviewFrame frame, Look look) {
         frame.atmosphere().setDepthCues(look.haze());
         frame.setSkyVisibility(look.sky());
+    }
+
+    /** A saved capture's mean of its colour channels. */
+    private static double brightness(File file) throws IOException {
+        BufferedImage image = ImageIO.read(file);
+        long sum = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y);
+                sum += (rgb >> 16 & 255) + (rgb >> 8 & 255) + (rgb & 255);
+            }
+        }
+        return sum / (3.0 * image.getWidth() * image.getHeight());
     }
 
     private static File output() throws Exception {

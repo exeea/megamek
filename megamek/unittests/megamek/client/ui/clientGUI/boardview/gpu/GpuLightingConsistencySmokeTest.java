@@ -312,7 +312,8 @@ class GpuLightingConsistencySmokeTest {
     private static void checkModelThumbnailGain(com.badlogic.gdx.graphics.g3d.model.data.ModelData data)
           throws ReflectiveOperationException {
         var render = GpuEditorModelPreviews.class.getDeclaredMethod("render",
-              com.badlogic.gdx.graphics.g3d.model.data.ModelData.class, boolean.class, Image.class);
+              com.badlogic.gdx.graphics.g3d.Model.class, boolean.class, Image.class);
+        var model = new com.badlogic.gdx.graphics.g3d.Model(data);
         render.setAccessible(true);
         var previews = new GpuEditorModelPreviews();
         var probeScene = GpuHeatGlow.buffer(128, 96, true);
@@ -324,7 +325,7 @@ class GpuLightingConsistencySmokeTest {
             for (int pass = 0; pass < 2; pass++) {
                 // Each thumbnail has its own target, just as a palette page does; previews owns both images.
                 var target = new Image();
-                render.invoke(previews, data, false, target);
+                render.invoke(previews, model, false, target);
                 assertEquals("Ready", target.getUserObject());
                 var display = (GpuSceneDisplay) previewField(previews, "display");
                 var image = (FrameBuffer) ((java.util.Map<?, ?>) previewField(previews, "images")).get(target);
@@ -349,6 +350,7 @@ class GpuLightingConsistencySmokeTest {
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             previews.dispose();
+            model.dispose();
             probeScene.dispose();
             probeDisplay.dispose();
         }

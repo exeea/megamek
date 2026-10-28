@@ -58,6 +58,7 @@ class GpuRoofHoverSmokeTest {
         set(view, "terrain", terrain);
         set(view, "ui", mock(GpuBoardHud.class));
         set(view, "markers", mock(GpuMarkers.class));
+        set(view, "tuning", mock(GpuBoardTuning.class));
         try {
             terrain.update(scene);
             var camera = view.boardCamera;

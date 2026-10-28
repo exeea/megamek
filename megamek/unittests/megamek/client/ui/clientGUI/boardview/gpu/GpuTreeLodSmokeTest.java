@@ -595,7 +595,7 @@ class GpuTreeLodSmokeTest {
                             }
                             File directory = new File(System.getProperty("megamek.gpu.screenshots"));
                             assertTrue(directory.isDirectory() || directory.mkdirs());
-                            ImageIO.write(comparison, "png", new File(directory, "tree-detail-" + name + ".png"));
+                            ImageIO.write(comparison, "png", new File(directory, "tree-detail-" + name.replace('/', '-') + ".png"));
                         }
                     }
                 }
@@ -693,7 +693,7 @@ class GpuTreeLodSmokeTest {
                 assertTrue(normalChanges > (name.startsWith("vegetation/cactus") ? 100 : 0),
                       "Normal detail must affect real plant lighting: " + name
                       + " changed=" + normalChanges);
-                ImageIO.write(detail, "png", new File(System.getProperty("megamek.gpu.screenshots"), "plant-material-" + name + ".png"));
+                ImageIO.write(detail, "png", new File(System.getProperty("megamek.gpu.screenshots"), "plant-material-" + name.replace('/', '-') + ".png"));
             }
         } finally {
             graphics.dispose();

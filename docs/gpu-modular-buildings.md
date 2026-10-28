@@ -6,18 +6,26 @@
 
 | Owner | Responsibility |
 | --- | --- |
-| `BoardArtwork.customBuildingFile` | Map selected tileset artwork to the custom building catalog. |
+| `TilesetScenery.customBuildingFile` | Map selected tileset artwork to the custom building catalog. |
 | `GpuAssets.building` | Choose custom kit or legacy fallback and own shared loaded assets. |
-| `GpuBuilding` | Validate named modules, choose stable base/floor/roof recipes, assemble them and expose picking geometry. |
+| `ConnectedKit` | Read and check a kit's pieces; place base, floors, roof and connection pieces for a hex's exits. |
+| `GpuBuilding` | Upload a kit, choose stable base/floor/roof recipes, instance their placed pieces and expose picking geometry. |
 | `GpuBuildingInterior` | Generate shared floor sheets and supports from the roof's occupied footprint. |
 | `BoardIndustrial` | Generate deterministic machinery with independent equipment heights and neighbor pipe joints. |
 | `BoardWall` | Choose a wall family from pristine map CF and assemble its layered components for drawing, picking and clearance. |
 | `GpuTreeInstances / GpuTerrain` | Instance module ranges; install chunks and retire unused recipes/interior buffers. |
 
-The board's tileset still chooses building artwork. `BoardArtwork.customBuildingFile` maps the selected legacy
+The board's tileset still chooses building artwork. `TilesetScenery.customBuildingFile` maps the selected legacy
 asset to `data/models/buildings/<family>/<name>.glb`, removing the `saxarba/` provenance directory. For example,
 `buildings/saxarba/fortress_light/fortress_light_a_52` selects
-`data/models/buildings/fortress_light/fortress_light_a_52.glb`.
+`data/models/buildings/fortress_light/fortress_light_a_52.glb`. Without that exact file, a kit named for the design
+alone stands for all of its per-combination keys: `buildings/saxarba/fuel_tanks/fuel_tank_light_05` selects
+`data/models/buildings/fuel_tanks/fuel_tank_light.glb`.
+
+Every kit may carry connection pieces (`data/models/buildings/README.md`). The hex's own exits pick them
+(`ConnectedKit.reach`): a connected side runs the structure's whole height, lowered to the top of a neighbour of the
+same structure terrain (building or fuel tank) that connects back where their vertical spans overlap. An exit edit
+rebuilds the hexes within two of it. The fuel tanks connect by ground pipes, which stand in their base module only.
 
 `GpuAssets.building` tries that file first for building, fuel-tank and industrial terrain. Missing kits keep the existing
 `data/models/board/buildings/...` GLB/G3DJ loader, height fitting and wall textures.
@@ -74,7 +82,7 @@ Author the modules as a readable stack: this kit's base0, floor0, floor1 and roo
 Both LODs share the same XY origin and are superimposed; hide one LOD when inspecting the other in a viewer.
 
 The loader preserves each module's authored XY coordinates, including node transforms and baked vertex offsets.
-It removes only the transformed geometry's minimum Z so pieces can be stacked vertically. Author all modules and
+It removes only the module's minimum Z, over its core and connection pieces, so modules can be stacked vertically. Author all modules and
 LODs relative to the same horizontal origin; do not offset them sideways for display. Asymmetric protrusions do
 not recenter a piece or shift its alignment with the other modules. Group transforms remain identity, as required
 by the rigid importer. Rendering, picking, interiors and obstacle clearance use the same authored placement.
@@ -96,7 +104,7 @@ and do not require closed wall outlines. Wall footprints are computed lazily whe
 
 The full roof projection preserves notches, courtyards and disconnected wings; its lowest underside alone may
 be only a border around an inset panel. The generated interior is clipped against closed mid-storey wall
-sections of the selected base and floor modules, using the external wall boundary so wall thickness remains included.
+sections of the pieces placed on each storey, using the external wall boundary so wall thickness remains included.
 Sections come from the simplest authored wall LOD (all LODs must share the same envelope), independently of
 camera distance. This keeps detailed window recesses and facade seams out of the floor geometry.
 Roof overhangs, sidewalks and horizontal decorative ledges do not enlarge those wall sections. The common
@@ -110,8 +118,8 @@ fade walls and upper slabs while the occupied/lower floors and struts remain opa
 interior floor and fade its walls; the top storey's cutaway also fades the entire roof cap and trim. Hovering the roof
 itself does not start a cutaway.
 
-Picking keeps one triangle set per LOD0 module and offsets the ray for each story. It does not retain expanded
-triangles for every possible building combination. Picking is independent of the displayed LOD.
+Picking keeps one triangle set per LOD0 piece and moves the ray into each placed piece's frame. It does not retain
+expanded triangles for every possible building combination. Picking is independent of the displayed LOD.
 
 Industrial pointer selection passes through equipment to the underlying terrain in both camera presentations,
 as it does for foliage. Physical effects still hit the equipment's authored triangles. Industrial shells never
@@ -156,13 +164,12 @@ generator supersedes them for these four terrain identifiers. Ordinary buildings
 
 ## Cache and ownership
 
-- A kit owns its shared module models and one normalized triangle set per module. Textures use the existing
-  `ModelTextures`/`GpuAssets` cache. Concrete trim and wall tints use vertex colors, sharing one embedded concrete
-  image; the roof uses the second image, and LOD1 exteriors use the padded facade atlas.
-- An assembly cache contains a compact string of module indices, its kit reference and shared interior reference.
-  Its key also includes whether an interior was requested; the same kit can serve both terrain semantics safely.
-  Offsets are implicit. There is no cached expanded Model per combination. The common four-module kit needs six
-  index bytes for a five-level recipe on the JVM's compact-string representation, plus object/map overhead.
+- A kit owns its shared module models and one triangle set per piece. Every key resolving to one kit file shares
+  them. Textures use the existing `ModelTextures`/`GpuAssets` cache. Concrete trim and wall tints use vertex colors,
+  sharing one embedded concrete image; the roof uses the second image, and LOD1 exteriors use the padded facade atlas.
+- An assembly cache holds the selected modules and connection heights, its kit reference and shared interior
+  reference. Its key also includes whether an interior was requested; the same kit can serve both terrain semantics
+  safely. Placements are derived per LOD when an instance is made. There is no cached expanded Model per combination.
 - Live scene instances are constructed during terrain preparation/load/edit. LOD transitions replace lightweight
   node/material instances while borrowing the same GPU buffers. A single-LOD kit never switches models.
 - Floors and struts are shared by roof footprint and level count. Scene commits discard recipes and interior

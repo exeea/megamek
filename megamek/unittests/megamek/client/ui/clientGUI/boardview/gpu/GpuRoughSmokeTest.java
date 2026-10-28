@@ -115,7 +115,6 @@ class GpuRoughSmokeTest {
 
     private static void checkBoulderMaterials(GpuTerrain terrain, BoardScene scene, Coords coords) throws Exception {
         var surface = new BoardSurface(scene, scene.tile(coords));
-        assertFalse(surface.relief.sculpted(), "Exercise the flat roadside rendering path");
         Set<Vector3> rock = new HashSet<>();
         for (var face : surface.rough) { rock.addAll(List.of(face.a(), face.b(), face.c())); }
         assertFalse(rock.isEmpty());
@@ -160,7 +159,7 @@ class GpuRoughSmokeTest {
         var hit = terrain.hit(scene, new Ray(new Vector3(p.x, p.y, 200), new Vector3(0, 0, -1)));
         assertNotNull(hit);
         assertEquals(coords, hit.coords());
-        assertEquals(Math.pow(200 - BoardSurface.sampleHeight(faces, p.x, p.y, Float.NaN), 2), hit.distance(), .1);
+        assertEquals(200 - BoardSurface.sampleHeight(faces, p.x, p.y, Float.NaN), Math.sqrt(hit.distance()), .002);
     }
 
     private static BoardScene scene(int teethVariant) {

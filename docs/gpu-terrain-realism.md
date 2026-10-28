@@ -130,7 +130,7 @@ materials and turns wear and grading off.
 Elevation grading leaves level zero unchanged. Uphill, one scalar exposure curve
 keeps RGB ratios and bright texture variation; valleys darken and warm, and fungus
 has a stronger cue down to level -6. It applies to the completed material colour of
-ground, grass, bank turf and Classic column artwork before lighting; magma keeps its
+ground, grass and Classic column artwork before lighting; magma keeps its
 own shading. It is presentation styling, not a physical claim about altitude.
 
 ## Open work

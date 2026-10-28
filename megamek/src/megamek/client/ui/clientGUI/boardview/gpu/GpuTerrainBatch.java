@@ -156,7 +156,7 @@ final class GpuTerrainBatch implements RenderableSorter {
                 Renderable next = parts.get(i);
                 if (materials.get(bound) == materials.get(i) && details.get(bound).equals(details.get(i))
                       && parts.get(bound).environment == next.environment) {
-                    next.meshPart.render(shader.program);
+                    GpuTessellation.render(next.meshPart, shader.program);
                     borrowed = true;
                 } else {
                     // Direct mesh draws unbind their VAO. Restore the mesh BaseShader still believes is bound

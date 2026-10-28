@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -39,6 +40,7 @@ class GpuFoliageSmokeTest {
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     camera.setIsometric(true);
                     camera.orbit(-45, 0);
+                    var shared = new java.util.HashMap<String, Texture>();
                     for (boolean snow : new boolean[] { false, true }) {
                         BoardScene scene = treeScene(snow);
                         for (BoardScene.Tile tile : scene.tiles()) {
@@ -67,11 +69,13 @@ class GpuFoliageSmokeTest {
                                     assertSame(assets.material("vegetation/cactus-skin"), map.textureDescription.texture);
                                     continue;
                                 }
-                                assertEquals(64, map.textureDescription.texture.getWidth());
-                                assertEquals(64, map.textureDescription.texture.getHeight());
+                                // Board maps stay within 512 px (only multi-hex terrain takes 1024).
+                                assertTrue(map.textureDescription.texture.getWidth() <= 512
+                                      && map.textureDescription.texture.getHeight() <= 512, material.id);
                                 assertEquals(Texture.TextureWrap.Repeat, map.textureDescription.texture.getVWrap());
-                                assertSame(assets.material("vegetation/" + material.id), map.textureDescription.texture,
-                                      "Tree variants share the small texture maps");
+                                // Foliage shares its textures: every variant's material of one id uses the same one.
+                                assertSame(shared.computeIfAbsent(material.id, id -> map.textureDescription.texture),
+                                      map.textureDescription.texture, "Tree variants share the small texture maps");
                             }
                         }
                         terrain.update(scene);

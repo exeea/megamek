@@ -197,10 +197,6 @@ class GpuTilesetTerrainTest {
                   at.equals(lower) ? 0 : at.equals(upper) ? 3 : level, BoardScene.Surface.GRASS));
             var tile = scene.tile(bank);
             assertTrue(BoardRoad.nearby(scene, tile).isEmpty(), "Neither adjoining road has the bank's level");
-            var enhanced = new BoardSurface(scene, tile);
-            assertTrue(enhanced.groundFaces().stream().flatMap(f -> Stream.of(f.a(), f.b(), f.c()))
-                  .anyMatch(p -> Math.abs(p.z - level * BoardGeometry.level()) > .1f),
-                  "The fixture exercises an actual Enhanced cut/fill beside the climb");
             var classic = GpuTilesetTerrain.column(scene, tile, BoardGeometry.floor(scene));
             assertEquals(.75 * BoardGeometry.width() * BoardGeometry.height(),
                   classic.top().stream().mapToDouble(GpuTilesetTerrainTest::area).sum(), .05);

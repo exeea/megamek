@@ -107,7 +107,8 @@ class GpuSceneryPlacementSmokeTest {
                         assertEquals(support, placed.min.z, .002f, sample.name() + " must touch the first solid surface");
                         if (sample.fluff().startsWith("geyser:")) {
                             var source = geyser(terrain);
-                            assertEquals(instance.transform.getTranslation(new Vector3()).z + .84f * BoardGeometry.hexScale(),
+                            // The steam starts at the model's own vent, wherever the installed transform puts it.
+                            assertEquals(new Vector3(0, 0, GpuGeysers.vent(instance.model)).mul(instance.transform).z,
                                   source.origin().z, .002f, "Effects must stay attached to the submerged model");
                             assertTrue(source.origin().z < BoardGeometry.waterZ(scene.tile(CENTER)));
                         }

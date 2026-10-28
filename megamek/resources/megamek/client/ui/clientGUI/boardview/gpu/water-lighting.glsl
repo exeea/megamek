@@ -95,6 +95,14 @@ vec3 waterEnvironmentReflection(vec3 normal, vec3 view, float roughness, WaterLi
         }
     }
 #endif
+#ifdef lightingFlag
+    // The relief hides the reflected sky as it hides the sky (skyReflection): a pool in a canyon or a street mirrors
+    // the walls' shade there, not the open sky.
+    float visible = skyVisibility(v_cloudPosition, reflected);
+    if (visible < 1.0) {
+        radiance = mix(hiddenSky(reflected, illumination.ground, GROUND_ALBEDO, radiance), radiance, visible);
+    }
+#endif
     return radiance * specularAlbedo(max(0.0, dot(normal, view)), roughness, vec3(.02037));
 }
 

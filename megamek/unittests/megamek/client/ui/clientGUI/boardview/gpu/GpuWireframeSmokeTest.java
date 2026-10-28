@@ -5,7 +5,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.fiel
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.renderReady;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -93,8 +93,8 @@ class GpuWireframeSmokeTest {
         Mix shaded = render(view, "wireframe-off.png");
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Shaded frames");
         assertTrue(shaded.other > .6, "The shaded board is neither dark nor line green: " + shaded);
-        assertNull(field(((GpuWireframe) field(view, "wireframe")).units, "batch"),
-              "Normal startup must not create the thermal batch or compile its shaders");
+        assertNotNull(field(((GpuWireframe) field(view, "wireframe")).units, "batch"),
+              "Loading warms the thermal batch up, so turning the view on compiles nothing");
 
         toggle("utility-wireframe");
         assertTrue(tuning.wireframe());

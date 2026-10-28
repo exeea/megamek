@@ -62,6 +62,8 @@ class GpuVolcanoFoliageSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    // Loading must see the same shader flags as the frame that follows.
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     terrain.animate(.5f, List.of());
                     var ray = new Ray(BoardGeometry.center(new Coords(3, 3), 0).add(0, 0, 1000), new Vector3(0, 0, -1));

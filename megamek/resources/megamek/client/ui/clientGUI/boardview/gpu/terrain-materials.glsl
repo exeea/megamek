@@ -371,6 +371,14 @@ Finish wallFinish(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side) {
     return mixFinish(finishTexel(layer, y, dy), finishTexel(layer, x, dx), side);
 }
 
+// The root mat a meadow's turf lip leaves on its two-level bank, lipDepth metres deep: a band of dark organic topsoil,
+// half a metre to a metre, where the turf ends and before the paler subsoil of the face. Its share at belowRim metres.
+const vec3 ROOT_MAT = vec3(.45, .41, .37);
+float rootMat(float belowRim, float lipDepth, float fray) {
+    float edge = .52 * lipDepth, depth = u_levelHeight / u_metre * mix(.08, .16, fray);
+    return 1.0 - smoothstep(edge + .4 * depth, edge + depth, belowRim);
+}
+
 #ifdef volcanicFlag
 // Height blending often discards a present layer entirely. Its normal/cavity cannot affect the result then.
 // Defer those texture reads until the colour/height samples have determined the final weights.
@@ -458,6 +466,7 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
     float cover = smoothstep(.4, .96, coverUp + (variation - .5) * .55);
     float soil = 0.0;
     float dust = 0.0;
+    float sod = 0.0;
     bool desert = abs(familyId - DESERT_FAMILY) < .5;
     bool arid = desert || abs(familyId - MARS_FAMILY) < .5 || abs(familyId - VOLCANO_FAMILY) < .5;
     bool plates = desert || abs(familyId - VOLCANO_FAMILY) < .5;
@@ -482,6 +491,7 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
         float shoulder = 1.0 - smoothstep(width * .25, width, middle);
         shoulder *= smoothstep(.35, .73, up) * smoothstep(.22, .55, pockets * .7 + fine * .3);
         cover = max(cover, max(lip, shoulder) * twoLevels * (1.0 - exposure));
+        sod = rootMat(belowRim, lipDepth, fray) * twoLevels * (1.0 - exposure) * (1.0 - smoothstep(.85, .97, up));
         float wornCover = cover * aged * .48;
         cover -= wornCover;
         soil = (1.0 - cover) * ((1.0 - exposure) * .9 + rim * .5 * smoothstep(.25, .7, variation));
@@ -576,6 +586,7 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
           world, broad, fine, region, true, sand, familyId, vec2(rim, foot));
     vec4 b = sampleMaterial(layers.w, tiles.w, capAmount, pb,
           world, mantleVariation, fine, region, false, plates, familyId, vec2(0.0));
+    b.rgb *= mix(vec3(1.0), ROOT_MAT, sod);
     vec4 c = sampleMaterial(layers.y, tiles.y, roles.z * candidates.z, pc,
           world, fine, fine, region, false, false, familyId, vec2(0.0));
     vec4 d = sampleMaterial(layers.z, tiles.z, rockAmount, pd,
@@ -1147,6 +1158,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         float lip = mix(.5, 2.2, fine * .4 + pockets * .6);
         cover = max(cover, (1.0 - smoothstep(lip * .4, lip, belowRim)) * (1.0 - exposure));
     }
+    float sod = 0.0;
     if (kind.z > 0.0) {
         // A meadow's two-level bank keeps a ragged turf lip and broken turf on its intermediate shoulder.
         float levelMetres = u_levelHeight / u_metre;
@@ -1159,6 +1171,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         float turf = (1.0 - smoothstep(width * .25, width, middle)) * smoothstep(.35, .73, up)
               * smoothstep(.22, .55, pockets * .7 + fine * .3);
         cover = max(cover, max(lip, turf) * twoLevels * (1.0 - exposure));
+        sod = rootMat(belowRim, lipDepth, fray) * twoLevels * (1.0 - exposure) * (1.0 - smoothstep(.85, .97, up));
         deposit *= mix(.25, 1.0, rock);
     }
     // Organic weathering opens a meadow's level cover onto its soil and thins fungal crust.
@@ -1295,9 +1308,16 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         float faceHeight = max(aboveFoot + belowRim, 1.0);
         float low = (1.0 - smoothstep(0.0, .45, max(aboveFoot, 0.0) / faceHeight)) * (.6 + .4 * variation);
         float bleach = (1.0 - smoothstep(.3, 3.0 + 3.0 * broad, belowRim)) * (1.0 - .5 * up);
-        vec2 along = vec2(-face.y, face.x) / max(length(face.xy), .001);
-        float streak = textureLod(u_rainNoise, vec2(dot(world.xy, along) / 5.0, world.z / 200.0) + .41, 0.0).r;
-        float streaks = smoothstep(.5, .8, streak) * (1.0 - smoothstep(0.0, .6 * faceHeight + 4.0, max(belowRim, 0.0)));
+        // The streaks are upright stripes about .6 m wide and 6 m long in the side projections' frames, blended as the
+        // rock's own maps are (p.side), with explicit gradients: they hold still on curved faces and fade with distance.
+        vec2 stretch = vec2(1.0 / 40.0, 1.0 / 400.0);
+        float streak = mix(
+              textureGrad(u_rainNoise, p.y * stretch + .41, p.yGradient[0] * stretch, p.yGradient[1] * stretch).r,
+              textureGrad(u_rainNoise, p.x * stretch + .41, p.xGradient[0] * stretch, p.xGradient[1] * stretch).r,
+              p.side);
+        // Upright faces only: a sloping shoulder would stretch them sideways.
+        float streaks = smoothstep(.5, .8, streak) * (1.0 - smoothstep(0.0, .6 * faceHeight + 4.0, max(belowRim, 0.0)))
+              * (1.0 - smoothstep(.3, .7, up));
         vec3 weathering = mix(vec3(1.0), vec3(1.10, 1.10, 1.09), bleach) * mix(vec3(1.0), vec3(.84, .84, .86), streaks)
               * mix(vec3(1.0), vec3(.84, .85, .88), low);
         result.color *= mix(vec3(1.0), authoredPigmentGain(mix(vec3(1.0), weathering, u_terrainWear)), roleShare.w);
@@ -1310,6 +1330,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         result.color = mix(result.color, groundToneFor(familyId, result.color, world, broad, fine, region, rim, foot),
               roleShare.x);
     }
+    result.color *= mix(vec3(1.0), ROOT_MAT, sod * (1.0 - roleShare.x));
     result.normal = normalize(mix(na.rgb, nb.rgb, share));
     result.cavity = mix(na.a, nb.a, share);
     result.relief = mix(length(na.rgb), length(nb.rgb), share);

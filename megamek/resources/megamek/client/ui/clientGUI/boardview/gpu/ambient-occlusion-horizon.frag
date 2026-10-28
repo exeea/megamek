@@ -132,5 +132,8 @@ void main() {
     float pixelSize = 2.0 * w / (u_projectionScale.y * float(last.y + 1));
     ivec2 phase = ivec2(gl_FragCoord.xy) & 3;
     float contact = contactShadow(position, normal, pixelSize, (PATTERN[phase.y * 4 + phase.x] + .5) / 16.0);
+    // Where the sun grazes the surface the march skims it and meets the relief's own facets, which grew blots along
+    // its light's edge: the shading and the shadow map draw that edge, and the contact shadows fade out.
+    contact = mix(1.0, contact, smoothstep(.1, .35, dot(normal, u_contact.xyz)));
     fragColor = vec4(visibility, min(range - u_rangeOrigin, FARTHEST), contact, 0.0);
 }

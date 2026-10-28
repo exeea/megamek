@@ -14,6 +14,12 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
+import megamek.common.Hex;
+import megamek.common.board.Board;
+import megamek.common.board.Coords;
+import megamek.common.units.Entity;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class ConnectedKitTest {
@@ -78,6 +84,41 @@ class ConnectedKitTest {
     }
 
     @Test
+    void groundPiecesStandInTheBaseAloneUnderATallStructure() {
+        // A fuel tank's pipes: only the base carries tagged pieces.
+        var kit = ConnectedKit.load(List.of(kit(symmetric().stream()
+              .filter(box -> box.node().startsWith("kit-lod0-base0") || !box.node().contains("-n")).toList())));
+        var model = ConnectedKit.model(kit, 0, 3, new int[] { 3, 0, 0, 0, 0, 0 }, 0, 0, "pipes");
+        assertEquals(36, farthest(model, 0), 1e-4);
+        float[] arm = heights(model, (x, y) -> Math.abs(x) <= 2.01f && y > 20);
+        assertEquals(0, arm[0], 1e-4);
+        assertEquals(18, arm[1], 1e-4, "No floor or roof piece follows the arm up the connected side");
+    }
+
+    @Test
+    void theHexsExitsConnectAndOnlyAStructureOfItsKindThatConnectsBackLowersThem() {
+        Hex[] hexes = new Hex[7 * 7];
+        for (int i = 0; i < hexes.length; i++) { hexes[i] = new Hex(0); }
+        Coords tall = new Coords(3, 3);
+        // Exits north to a lower tank, north-east to open ground, south to a building that connects back.
+        structure(hexes, tall, Terrains.FUEL_TANK, (1 << 0) | (1 << 1) | (1 << 3), 3);
+        structure(hexes, tall.translated(0), Terrains.FUEL_TANK, 1 << 3, 1);
+        structure(hexes, tall.translated(3), Terrains.BUILDING, 1, 1);
+        var scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        assertArrayEquals(new int[] { 1, 3, 0, 3, 0, 0 }, ConnectedKit.reach(scene, scene.tile(tall), 3));
+    }
+
+    private static void structure(Hex[] hexes, Coords coords, int terrain, int exits, int height) {
+        Hex hex = hexes[coords.getY() * 7 + coords.getX()];
+        hex.addTerrain(new Terrain(terrain, 1, true, exits));
+        boolean tank = terrain == Terrains.FUEL_TANK;
+        hex.addTerrain(new Terrain(tank ? Terrains.FUEL_TANK_ELEV : Terrains.BLDG_ELEV, height));
+        hex.addTerrain(new Terrain(tank ? Terrains.FUEL_TANK_CF : Terrains.BLDG_CF, 40));
+        if (tank) { hex.addTerrain(new Terrain(Terrains.FUEL_TANK_MAGN, 10)); }
+    }
+
+    @Test
     void rejectsAmbiguousOrIncompleteKits() {
         List<List<Box>> kits = new ArrayList<>();
         kits.add(renamed(symmetric(), "kit-lod0-base0", "kit-lod0-base0.001"));
@@ -91,8 +132,11 @@ class ConnectedKitTest {
         // An arm that makes its module taller than one level.
         kits.add(symmetric().stream().map(box -> box.node().equals("kit-lod0-floor0-link-n")
               ? new Box(box.node(), -2, 5, 0, 2, 36, 20) : box).toList());
-        // A module missing a tagged piece the others have, or the core piece the others have.
-        kits.add(symmetric().stream().filter(box -> !box.node().equals("kit-lod0-floor0-end-n")).toList());
+        // A variant missing a tagged piece another variant of its type has, or a module missing the core the others have.
+        var variants = new ArrayList<>(symmetric());
+        variants.add(new Box("kit-lod0-floor1", -5, -5, 0, 5, 5, 18));
+        variants.add(new Box("kit-lod0-floor1-link-n", -2, 5, 0, 2, 36, 18));
+        kits.add(variants);
         kits.add(symmetric().stream().filter(box -> !box.node().equals("kit-lod0-floor0")).toList());
         // A corner piece without its other three states.
         var corner = new ArrayList<>(symmetric());

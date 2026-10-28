@@ -13,7 +13,6 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Matrix3;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Configuration;
 import megamek.common.board.BoardDecoration;
 
@@ -46,11 +45,6 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
     }
 
     static Map<String, BoardShape> shapes(ModelData data) {
-        return shapes(data, false);
-    }
-
-    /** Ground modular structures vertically, even below Z=0, while preserving their authored XY coordinates. */
-    static Map<String, BoardShape> shapes(ModelData data, boolean modular) {
         var mesh = data.meshes.first();
         Map<String, short[]> indices = new HashMap<>();
         for (var part : mesh.parts) { indices.put(part.id, part.indices); }
@@ -85,13 +79,6 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
                     color.b *= mesh.vertices[offset + 5];
                     polygons.add(new Polygon(points, normal, color, part.materialId));
                 }
-            }
-            if (modular && !polygons.isEmpty()) {
-                BoundingBox bounds = new BoundingBox().inf();
-                corners.values().forEach(bounds::ext);
-                Vector3 offset = GpuBuilding.moduleOffset(bounds);
-                corners.values().forEach(point -> point.add(offset));
-                height = bounds.getDepth();
             }
             if (polygons.isEmpty() || height <= 0) { throw new IllegalArgumentException("Empty kit shape: " + node.id); }
             if (result.put(node.id, new BoardShape(List.copyOf(polygons), height)) != null) {

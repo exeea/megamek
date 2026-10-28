@@ -29,6 +29,7 @@ inserted into a larger program, so editing a helper can affect several materials
 | `effects.vert`, `particles.frag`, `particles-smoke.glsl`, `particles-fire.glsl`, `particles-jet.glsl` | Batched combat/terrain effects; `GpuEffectBatch` selects and assembles each appearance. |
 | `terrain-effects.vert`, `terrain-effects.frag`, `terrain-effects-composite.frag` | Persistent terrain fire/smoke volumes and their reduced-resolution composite; `GpuTerrainEffects`. |
 | `shadow-depth.frag` | Shadow depth/cutout behavior; `GpuTerrain` configures the provider and `GpuTreeInstances` supplies instanced transforms. |
+| `tessellation-control.glsl`, `tessellation-evaluation.glsl`, `tessellation-shape.glsl` | Sculpted relief's Phong tessellation (`GpuTessellation`): each edge's split, each point and normal of the patch, and how far each kind of vertex rounds. |
 
 Unit materials are configured by `GpuUnitShader`: libGDX's vertex stage with linear colours, our
 `model.frag` fragment stage, normal maps and per-unit material inputs. Imported model materials fill a
@@ -199,10 +200,13 @@ Ambient occlusion (`GpuAmbientOcclusion`; the Display page's Ambient occlusion, 
 strength) darkens the sky light where the relief and the trees hide the sky. It runs between the depth pre-pass, which
 also draws the relief while it is on, and the opaque colour draws: ground-truth ambient occlusion (Jimenez et al. 2016,
 `ambient-occlusion-horizon.frag`) at half resolution from the pre-pass depth, with normals from that depth, two
-directions of four steps on each side within 8 m (at most 160 scene pixels on screen), then two depth-aware blur
+directions of four steps on each side within 4 m, a cell of the board's sky visibility, which covers the farther
+relief (its cells grow on boards over about 1 km across; at most 160 scene pixels on screen), then
+two depth-aware blur
 passes (`ambient-occlusion-blur.frag`) that remove its 4 by 4 rotation pattern. The same pass
 marches contact shadows: eight jittered steps toward the sun or moon over 2 m of the pre-pass depth, an occluder taken
-as 1 m deep, for the small occluders the shadow map is too coarse for; none without a direct light. Lit programs read
+as 1 m deep, for the small occluders the shadow map is too coarse for; none without a direct light, and they fade out
+where the sun grazes the surface, whose own facets the march would meet. Lit programs read
 both with `screenOcclusion()` (`ambient-occlusion.glsl`; `shadeSurface` multiplies the sky's occlusion by the first and
 the sun's visibility by the second), which upsamples them against the fragment's own depth: surfaces the pre-pass does
 not draw (units; buildings and props unless the pre-pass's objects category is on)
@@ -214,6 +218,45 @@ its sampler would be the program's 17th texture unit (`GpuSamplerBudgetSmokeTest
 the one a crust patch in deep shade would visibly lack.
 Its two RGBA16F targets (visibility, camera distance, contact visibility) follow the scene's size; in an orthographic view the distance is stored less the orbit pivot's depth (`GpuAmbientOcclusion.rangeOrigin`), since that camera stands about 10,000 units back, and the sky is clamped to 60,000. `GpuAmbientOcclusionSmokeTest` checks it and, with
 `-Dmegamek.gpu.measureAmbientOcclusion=true`, times it.
+
+Sun shadows on sculpted ground and trees (`sculptShadow`, `surface-lighting.glsl`) widen with the distance to what
+casts them, as the sun's half-degree disc does: four comparison taps over a three-texel disk find a shadow at all
+(a pixel they find lit is done), the same taps 3 m and 15 m nearer the sun tell how far its caster stands, and the
+twelve-tap disk then spans half the penumbra, from half a texel to three. No second sampler reads raw depth. On
+sculpted ground the lookup rises with the visible grain (its height map, `RELIEF_METRES` deep), so raised grains break
+a shadow's edge, and the cavity shades hollows first where the sun grazes. Its lookup also shifts across the light by
+up to `FRAY_METRES` (a quarter metre) in 0.1 to 0.3 m tufts of the rain-noise texture, as grass, clods and stones fray
+a natural shadow's edge; the noise's mipmaps take the shift out with distance.
+
+Sculpted relief can be tessellated where the context offers it (`GpuTessellation`; OpenGL 4.0 and later, so every Mac's
+4.1 and current Windows and Linux drivers' 4.6), by the Tuning panel's Tessellation switch (`GpuTerrain.setTessellation`,
+off by default). The switch is part of the build, as the 3D Graphics are: a switch rebuilds every chunk behind the
+loading stage, and with it off the meshes and programs are the untessellated ones. Its triangles span 1 to 2 m on banks
+and cliffs; the smooth normals of its shading hid them, while its silhouettes and the shadow map showed them. Each
+triangle becomes a Phong patch (Boubekeur and Alexa 2008) through those normals, rounded by the kind its vertex colour
+gives (`tessellation-shape.glsl`): soil and turf fully, as creep rounds them; a cliff by its height, a bank of up to two
+levels as soil and from three as rock (`terrain-rockiness.glsl`, as its shading decides), which barely rounds, so its
+faces stay planes and only its corners soften (fully rounded, a mesa and a pillar bulged like cushions); built panels
+and plants not at all. The colour alone decides, so the shadow pass rounds alike.
+
+Only what shows passes through the stages. Built with the switch on, a full-detail chunk (the detail levels below it
+draw a facet a few pixels across) puts its sculpted triangles that curve, those with an edge whose Phong curve bulges
+more than nine tenths of `GpuTessellation.BULGE_METRES` (3 cm) from it at its middle (`GpuTessellation.curves`), in a
+copy of their material (`GpuTessellation.curvedCopy`, id suffix `#curved`). The control stage
+(`tessellation-control.glsl`) gives an edge that bulges less one segment, straight, so those triangles meet the others
+without a crack. Otherwise it splits the edge into the fewest whole segments (equal spacing, so no sliver triangles) that
+keep the curve within half a pixel of the pass's target (shadow-map texels in the shadow pass), the bulge as that pass
+sees it over the segments squared, at most 8, from the edge's two vertices alone, so neighbouring patches split it alike;
+the inside takes the edges' mean. A zoom changes the segments every frame without a rebuild. The evaluation stage
+(`tessellation-evaluation.glsl`) places the point and runs the original vertex stage on it, its inputs interpolated, so
+every output the fragment stage reads stays the same. The stages are generated from the vertex source and travel in it,
+apart at `#pragma stage(...)` lines that `GpuGlsl` splits when it links; the program cache keys on the whole. The colour
+programs, their depth-pre-pass twins and the shadow-depth programs of sculpted relief tessellate alike; the wireframe
+view keeps the triangles. While the switch is on, every sculpted material's curving copy links its programs, its shadow
+program included, and requests its family program behind the loading stage (`GpuTerrain.prepareTerrainMaterial`,
+`curvedFamilies`), so a zoom into full detail links nothing (`GpuShaderLoadSmokeTest`). On the Iris Xe it costs the
+opaque terrain 0.7 to 3.6 ms a frame in `GpuTerrainBenchmarkSmokeTest` (whole frames 1.3 to 4.3 ms; most close up,
+2026-10-28); drawing every relief triangle tessellated had cost 8 to 13 ms.
 
 ## Uniforms, inputs and previews
 

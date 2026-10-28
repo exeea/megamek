@@ -873,7 +873,7 @@ class GpuHexTextSmokeTest {
             mesh.getVertices(vertices);
             for (int vertex = 0; vertex < vertices.length; vertex += 9) {
                 actual.addAll(vertices, vertex, 5);
-                assertEquals(0, vertices[vertex + 5], "These authored pink glyphs and rings must retain their color");
+                assertEquals(0, vertices[vertex + 5], 0, "These authored pink glyphs and rings must retain their color");
                 for (int component = 6; component < 9; component++) {
                     assertEquals(vertices[vertex / 36 * 36 + component], vertices[vertex + component],
                           "Every glyph corner retains the same owning tile, independent of its position");

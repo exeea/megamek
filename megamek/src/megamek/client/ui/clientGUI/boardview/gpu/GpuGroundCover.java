@@ -13,7 +13,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -47,6 +46,15 @@ final class GpuGroundCover implements Disposable {
     /** Projected pixels per hex over which grass blades grow in. */
     static final float START_PIXELS = 120, FULL_PIXELS = 500;
     /**
+     * Projected pixels per hex over which a bank rim's blades stand up, a little before the meadow's first blades, and
+     * below which fewer of them stand, each widening by as much, so that the rim keeps its fringe (terrain-grass.glsl).
+     */
+    static final float RIM_START_PIXELS = 100, RIM_STAND_PIXELS = 140, RIM_KEEP_PIXELS = 400;
+    /** Rim blade candidates per metre of each contour, before filtering: half behind its lip, half down it. */
+    private static final float RIM_PER_METRE = 48;
+    /** Metres out from a rim root at which the ground under its blade is sampled ({@link #lean}). */
+    private static final float[] RIM_REACH = { .5f, 1, 1.5f, 2 };
+    /**
      * The blade templates, coarse and fine: each a list of ribbons, each its part (terrain-grass.glsl) and its vertex
      * pairs as fractions of its length, its tip closing it. Grass is one blade at two or four segments; wheat a stalk
      * with its ear between vertices at .80 and .96 (terrain-crops.glsl's WHEAT_EAR falls just inside them) and the awns
@@ -54,6 +62,8 @@ final class GpuGroundCover implements Disposable {
      * segment in the coarse template, so a plant keeps its leaves across the switch.
      */
     private static final float[][][] GRASS = { { { 0, 0, .5f } }, { { 0, 0, .25f, .5f, .75f } } };
+    /** A bank rim's blade (part 9): grass that arches out over the lip and hangs, at three or six segments. */
+    private static final float[][][] RIM = { { { 9, 0, .35f, .7f } }, { { 9, 0, .18f, .36f, .54f, .72f, .88f } } };
     private static final float[][][] WHEAT = { { { 1, 0, .8f, .96f } }, { { 1, 0, .45f, .8f, .83f, .96f } } };
     private static final float[][][] MAIZE = {
           { { 2, 0, .55f, .9f }, { 3, 0, .5f }, { 4, 0, .5f }, { 5, 0, .5f }, { 6, 0, .5f }, { 7, 0, .5f }, { 8, 0, .5f } },
@@ -261,6 +271,148 @@ final class GpuGroundCover implements Disposable {
         return growth;
     }
 
+    /**
+     * Blades along a grassy bank's rims, where the hex drops two levels to dry ground: roots on its upper lip and its
+     * middle shoulder's, from a couple of metres behind the lip, thinning into the meadow there, down the rounded lip.
+     * Each leans out as far as the ground falls away under its reach ({@link #lean}): standing behind the lip, arching
+     * over it, hanging down the face, never into the ground or into a higher neighbour at a junction. Like the meadow's,
+     * every candidate draws its place and chance before any rejection, its rank spread over {@link #ROOTS_PER_HEX} so
+     * that density selects a prefix; the rank's fraction packs the root's contour, lean and outward heading in twelve
+     * bits (terrain-grass.glsl). Null when the hex has no such rim.
+     */
+    static FloatArray plantRim(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
+          BoardDecals.Opacity paint) {
+        if (!BoardGeometry.tuning().stepsBetweenTops() || !BoardSurfaceBlend.natural(tile)
+              || tile.surface() != BoardScene.Surface.GRASS || BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return null; }
+        var center = BoardGeometry.center(tile.coords(), tile.elevation());
+        // Each rim's edge corners and its outward direction.
+        List<Vector3[]> rims = new ArrayList<>();
+        for (int edge = 0; edge < 6; edge++) {
+            int direction = BoardGeometry.edgeDirection(edge);
+            var lower = scene.tile(tile.coords().translated(direction));
+            if (lower == null || lower.liquid().present() || tile.elevation() - lower.elevation() != 2
+                  || (tile.cliffTopExits() & (1 << direction)) != 0) { continue; }
+            var a = BoardGeometry.corner(tile.coords(), 0, edge);
+            var b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
+            var along = b.cpy().sub(a).nor();
+            var outward = new Vector3(along.y, -along.x, 0);
+            if (outward.dot(a.cpy().sub(center)) < 0) { outward.scl(-1); }
+            rims.add(new Vector3[] { a, b, outward });
+        }
+        if (rims.isEmpty()) { return null; }
+        List<BoardSurface.Face> faces = new ArrayList<>(surface.top());
+        faces.addAll(surface.walls());
+        faces.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face));
+        var support = new GpuBiomeVegetation.Support(faces);
+        var obstacles = new BoardObstacles(scene, tile, true);
+        // Rim blades grow up to a ground rail's ballast (BoardObstacles); only a road keeps its verge bare.
+        var road = BoardRoad.rendered(tile) ? BoardRoad.way(scene, tile) : null;
+        boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
+        var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
+        float m = BoardRelief.metres(1), level = BoardGeometry.level(), sink = BoardGeometry.width() * .001f;
+        Vector3[] first = rims.getFirst();
+        int candidates = Math.min(ROOTS_PER_HEX, Math.round(rims.size() * 2 * first[0].dst(first[1]) / m * RIM_PER_METRE));
+        var random = new Random(tile.coords().getX() * 0x9E3779B97F4A7C15L ^ tile.coords().getY() * 0xC2B2AE3D27D4EB4FL
+              ^ 0x6A09E667F3BCC909L);
+        var roots = new FloatArray();
+        for (int candidate = 0; candidate < candidates; candidate++) {
+            Vector3[] rim = rims.get(random.nextInt(rims.size()));
+            // The lip, or the middle shoulder's a level lower.
+            int shoulder = random.nextInt(2);
+            var point = rim[0].cpy().lerp(rim[1], random.nextFloat());
+            // Below 0 behind the lip, up to two metres on the top and one on the narrower shoulder; above 0 from just
+            // under its top down the rounded lip, most where it rounds over, whose turf the blades cover.
+            float place = random.nextFloat() * 2 - 1, chance = random.nextFloat(), down = Math.max(place, 0);
+            float z = center.z - (shoulder + .02f + .26f * down * down
+                  + .03f * BoardRelief.gradient(point.x / (4 * m), point.y / (4 * m))) * level;
+            var root = contour(support, point, rim[2], z);
+            if (root == null) { continue; }
+            // Lean down the local slope, through rounded corners, rather than square to the hex edge.
+            float dx = support.height(root.x - m, root.y) - support.height(root.x + m, root.y);
+            float dy = support.height(root.x, root.y - m) - support.height(root.x, root.y + m);
+            var facing = new Vector3(dx, dy, 0);
+            if (!Float.isFinite(dx + dy) || facing.len2() < .001f || facing.dot(rim[2]) <= 0) { facing.set(rim[2]); }
+            facing.nor();
+            if (place < 0) {
+                root.mulAdd(facing, place * (2 - shoulder) * m);
+                var face = support.face(root.x, root.y);
+                if (face == null) { continue; }
+                root.z = face.height(root.x, root.y);
+            }
+            float lean = lean(support, root, facing, m);
+            if (Float.isNaN(lean) || obstacles.obstructs(root, 2 * m, MAX_HEIGHT_FRACTION * BoardGeometry.width())) {
+                continue;
+            }
+            if (road != null && road.distance((root.x - center.x) / BoardGeometry.hexScale(),
+                  (root.y - center.y) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 2) { continue; }
+            var cover = boundary ? sampler.sampleCliff(root.x, root.y, root.z)
+                  : BoardSurfaceBlend.solid(BoardScene.Surface.GRASS);
+            float grass = cover.grass();
+            if (paint != null && grass > 0) { grass *= 1 - paint.at(root.x, root.y); }
+            // Behind the lip the rim's blades thin into the meadow's.
+            if (chance > grass * BoardRelief.smooth((grass - .55f) / .35f) * (1 + Math.min(place, 0))) { continue; }
+            float heading = (float) (Math.atan2(facing.y, facing.x) / (2 * Math.PI));
+            heading -= (float) Math.floor(heading);
+            // The contour, eight lean steps and 256 headings: twelve bits, which a rank below 4096 keeps exactly.
+            int code = shoulder << 11 | Math.round(lean * 7) << 8 | Math.min((int) (heading * 256), 255);
+            roots.addAll(root.x, root.y, root.z - sink,
+                  (int) ((long) candidate * ROOTS_PER_HEX / candidates) + code / 4096f);
+        }
+        if (roots.isEmpty()) { return null; }
+        roots.shrink();
+        return roots;
+    }
+
+    /** Intersect a horizontal cross-section with the actual finished triangles, in the outward direction. */
+    private static Vector3 contour(GpuBiomeVegetation.Support support, Vector3 point, Vector3 outward, float z) {
+        float reach = BoardGeometry.width() * .45f;
+        float previous = Float.NaN, from = -reach;
+        for (int step = 0; step <= 48; step++) {
+            float at = -reach + 2 * reach * step / 48;
+            var sample = point.cpy().mulAdd(outward, at);
+            var face = support.face(sample.x, sample.y);
+            float height = face == null ? Float.NaN : face.height(sample.x, sample.y);
+            if (previous >= z && height < z) {
+                float to = at;
+                for (int iteration = 0; iteration < 12; iteration++) {
+                    float middle = (from + to) * .5f;
+                    sample.set(point).mulAdd(outward, middle);
+                    face = support.face(sample.x, sample.y);
+                    if (face == null) { return null; }
+                    if (face.height(sample.x, sample.y) >= z) { from = middle; } else { to = middle; }
+                }
+                sample.set(point).mulAdd(outward, (from + to) * .5f);
+                sample.z = z;
+                return sample;
+            }
+            previous = height;
+            from = at;
+        }
+        return null;
+    }
+
+    /**
+     * How far a rim blade from {@code root} may lean out along {@code facing}, from 0, standing, to 1, hanging: the
+     * least fall of the ground under its free end, a metre to two out, as a share of .45 of the distance. NaN where the
+     * ground rises ahead, as at a junction with a higher neighbour, or the root's own support ends within a metre;
+     * farther out, beyond its hex's triangles, the ground is taken to fall away.
+     */
+    private static float lean(GpuBiomeVegetation.Support support, Vector3 root, Vector3 facing, float m) {
+        float lean = 1;
+        for (float metres : RIM_REACH) {
+            float x = root.x + facing.x * metres * m, y = root.y + facing.y * metres * m;
+            var face = support.face(x, y);
+            if (face == null) {
+                if (metres <= 1) { return Float.NaN; }
+                continue;
+            }
+            float fall = root.z - face.height(x, y);
+            if (fall < -.1f * m) { return Float.NaN; }
+            if (metres >= 1) { lean = Math.min(lean, fall / (.45f * metres * m)); }
+        }
+        return Math.max(lean, 0);
+    }
+
     /** One blade template's instanced draw for a chunk. Its buffer persists while the chunk's roots are unchanged. */
     private static final class Batch implements Disposable {
         final float[][] ribbons;
@@ -409,12 +561,12 @@ final class GpuGroundCover implements Disposable {
         public void dispose() { for (Batch batch : batches) { batch.dispose(); } }
     }
 
-    /** One terrain chunk's grass and its fields' wheat and maize. */
+    /** One terrain chunk's grass, its banks' rims and its fields' wheat and maize. */
     private static final class Chunk implements Disposable {
         final Layer grass = new Layer(GRASS, START_PIXELS);
+        final Layer rim = new Layer(RIM, RIM_START_PIXELS);
         final Layer wheat = new Layer(WHEAT, GpuBiomeVegetation.CROP_FADE[0]);
         final Layer maize = new Layer(MAIZE, GpuBiomeVegetation.CROP_FADE[0]);
-        final GpuBankTurf turf = new GpuBankTurf();
         float nearPixels;
         long frame;
         // Blades place themselves from their roots; the transform only orders chunks nearest first for early depth.
@@ -425,18 +577,17 @@ final class GpuGroundCover implements Disposable {
                   chunk.getY() * TerrainLod.CHUNK_SIZE + TerrainLod.CHUNK_SIZE / 2), 0);
         }
 
-        void begin(long next) { frame = next; grass.begin(); wheat.begin(); maize.begin(); turf.begin(); nearPixels = 0; }
+        void begin(long next) { frame = next; grass.begin(); rim.begin(); wheat.begin(); maize.begin(); nearPixels = 0; }
 
         @Override
-        public void dispose() { grass.dispose(); wheat.dispose(); maize.dispose(); turf.dispose(); }
+        public void dispose() { grass.dispose(); rim.dispose(); wheat.dispose(); maize.dispose(); }
     }
 
     private final Map<Coords, Chunk> chunks = new HashMap<>();
-    // Whether the meadows' grass and bank turf draw (the Grass blades option); the fields' plants always do.
+    // Whether the meadows' grass and their banks' rims draw (the Grass blades option); the fields' plants always do.
     private boolean grass = true;
     private long frame, uploads;
     private int revision = -1, boardId = -1;
-    private Texture turfTexture;
     /** Render-owned submission snapshot; installed roots still invalidate a stationary view. */
     private record View(float[] projectionView, float viewportPixels, List<BoardScene.Tile> candidates,
           Map<Coords, BoardPlants> sources, List<ModelInstance> instances) { }
@@ -452,6 +603,8 @@ final class GpuGroundCover implements Disposable {
               + GpuShaderSource.read("terrain-meadow.glsl");
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
+              + "\n#define GRASS_RIM_START " + RIM_START_PIXELS + "\n#define GRASS_RIM_STAND " + RIM_STAND_PIXELS
+              + "\n#define GRASS_RIM_KEEP " + RIM_KEEP_PIXELS
               + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX
               + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n" + GpuBiomeVegetation.cropSource()
               + GpuGroundDamage.shaderSource() + GpuShaderSource.read("terrain-grass.glsl");
@@ -467,18 +620,25 @@ final class GpuGroundCover implements Disposable {
         return t * t * (3 - 2 * t);
     }
 
+    /** The share of a bank rim's blades standing at this projected size (terrain-grass.glsl). */
+    private static float rimDensity(float pixels) {
+        return Math.clamp(pixels / RIM_KEEP_PIXELS, 0, 1)
+              * BoardRelief.smooth((pixels - RIM_START_PIXELS) / (RIM_STAND_PIXELS - RIM_START_PIXELS));
+    }
+
     /**
-     * Whether, with {@code grass}, grass or, with {@code crops}, a field's plants can stand at this scale. Orthographic
-     * detail has one scale everywhere; perspective detail still depends on each tile's depth.
+     * Whether, with {@code grass}, grass or its banks' rims or, with {@code crops}, a field's plants can stand at this
+     * scale. Orthographic detail has one scale everywhere; perspective detail still depends on each tile's depth.
      */
     static boolean visibleAtScale(Camera camera, boolean grass, boolean crops) {
         float pixels = BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, camera.position);
         boolean perspective = camera.projection.val[Matrix4.M33] == 0;
-        return grass && (perspective || density(pixels) > 0)
+        // A rim's blades stand before the meadow's.
+        return grass && (perspective || rimDensity(pixels) > 0)
               || crops && (perspective || GpuBiomeVegetation.cropDensity(BoardFields.Crop.MAIZE, pixels) > 0);
     }
 
-    /** The Grass blades option: the meadows' grass and bank turf; a field's plants stand either way. */
+    /** The Grass blades option: the meadows' grass and their banks' rims; a field's plants stand either way. */
     void showGrass(boolean shown) {
         if (grass != shown) { grass = shown; view = null; }
     }
@@ -529,14 +689,15 @@ final class GpuGroundCover implements Disposable {
                 sources.put(tile.coords(), planted);
             }
             if (!roots) { continue; }
-            if (meadow) { chunk.turf.add(planted.turf()); }
             // Enough roots for the hex's nearest edge; the shader evaluates density again at each actual root.
             nearest.set(center).mulAdd(camera.direction, -radius);
             float pixels = inView ? BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, nearest) : 0;
             Long arrived = arrivals.get(tile.coords());
             float growth = arrived == null ? 1 : BoardRelief.smooth((now - arrived) / (float) GROWTH_NANOS);
-            if (meadow) { chunk.grass.add(planted.grass(), (int) Math.ceil(ROOTS_PER_HEX * density(pixels) * growth)); }
-            else {
+            if (meadow) {
+                chunk.grass.add(planted.grass(), (int) Math.ceil(ROOTS_PER_HEX * density(pixels) * growth));
+                chunk.rim.add(planted.rim(), (int) Math.ceil(ROOTS_PER_HEX * rimDensity(pixels) * growth));
+            } else {
                 chunk.wheat.add(planted.wheat(), (int) Math.ceil(ROOTS_PER_HEX
                       * GpuBiomeVegetation.cropDensity(BoardFields.Crop.WHEAT, pixels) * growth));
                 chunk.maize.add(planted.maize(), (int) Math.ceil(ROOTS_PER_HEX
@@ -553,16 +714,7 @@ final class GpuGroundCover implements Disposable {
                 continue;
             }
             int detail = chunk.nearPixels >= 280 ? 1 : 0;
-            if (chunk.nearPixels > START_PIXELS) {
-                if (turfTexture == null && !chunk.turf.isEmpty()) {
-                    turfTexture = GpuColorTexture.create(() -> GpuMaterialMaps.color("vegetation/bank-turf"), true, true);
-                    turfTexture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-                    turfTexture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
-                }
-                ModelInstance turf = chunk.turf.upload(turfTexture);
-                if (turf != null) { result.add(turf); }
-            }
-            for (Layer layer : new Layer[] { chunk.grass, chunk.wheat, chunk.maize }) {
+            for (Layer layer : new Layer[] { chunk.grass, chunk.rim, chunk.wheat, chunk.maize }) {
                 for (int i = 0; i < layer.batches.length; i++) {
                     Batch batch = layer.batches[i];
                     // The idle template keeps its buffer for a return to its scale.
@@ -594,7 +746,6 @@ final class GpuGroundCover implements Disposable {
     public void dispose() {
         for (Chunk chunk : chunks.values()) { chunk.dispose(); }
         chunks.clear();
-        if (turfTexture != null) { turfTexture.dispose(); turfTexture = null; }
         view = null;
     }
 }
