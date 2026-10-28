@@ -15,7 +15,7 @@ share, and the editor's terrain annotations.
 | `GpuMapSource` | Capture editor state, dispatch picks/wheel actions and reject input from older board generations. |
 | `BoardArtwork` | Resolve native artwork and whole-board printable output independently of the viewport. |
 | `BoardTacticalGeometry / BoardEditorTerrain` | Place brush/deployment/terrain annotations using shared marker geometry. |
-| `GpuBoardWindow` | Own the native window and its startup. |
+| `GpuBoardWindow` | Run the editor as a scene of the one native window (`GpuHost`). |
 
 ## Markers and overlay placement
 
