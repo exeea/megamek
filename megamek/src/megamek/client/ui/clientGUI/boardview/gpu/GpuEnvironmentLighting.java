@@ -104,7 +104,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
 
     /** The atlas, made with the sky visibility's volume when a program is built, before its setters bind textures. */
     Texture texture() {
-        if (GpuSkyVisibility.ENABLED) { skyVisibility().texture(); }
+        if (GpuSkyVisibility.STRENGTH > 0) { skyVisibility().texture(); }
         if (texture == null) {
             texture = GpuColorTexture.linear(pixels(GpuLightingEnvironment.ATLAS_SIZE, GpuLightingEnvironment.ATLAS_SIZE),
                   GpuLightingEnvironment.ATLAS_SIZE, GpuLightingEnvironment.ATLAS_SIZE, false);

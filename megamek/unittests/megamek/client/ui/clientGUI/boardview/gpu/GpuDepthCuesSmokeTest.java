@@ -145,12 +145,12 @@ class GpuDepthCuesSmokeTest {
                             GpuBoardTestUi.present(view);
                             var sky = (GpuSkyVisibility) GpuCamouflageReview.field(view, "skyVisibility");
                             assertEquals(GpuDepthCues.STRENGTH, GpuCamouflageReview.field(atmosphere, "depthCueStrength"));
-                            assertEquals(GpuSkyVisibility.ENABLED ? 1f : 0f, GpuCamouflageReview.field(sky, "strength"));
+                            assertEquals(GpuSkyVisibility.STRENGTH, GpuCamouflageReview.field(sky, "strength"));
                             GpuBoardTestUi.capture(new File(output, "battle-view-on.png"));
                             GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-depth-cues"));
                             GpuBoardTestUi.present(view);
                             assertEquals(0f, GpuCamouflageReview.field(atmosphere, "depthCueStrength"));
-                            assertEquals(GpuSkyVisibility.ENABLED ? 1f : 0f, GpuCamouflageReview.field(sky, "strength"),
+                            assertEquals(GpuSkyVisibility.STRENGTH, GpuCamouflageReview.field(sky, "strength"),
                                   "Sky occlusion is lighting");
                             GpuBoardTestUi.capture(new File(output, "battle-view-off.png"));
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

@@ -29,8 +29,11 @@ import com.badlogic.gdx.utils.Disposable;
  * does. Render state, never game state.
  */
 final class GpuSkyVisibility implements Disposable {
-    /** The board's sky occlusion; false leaves it out of every program and searches nothing. */
-    static final boolean ENABLED = true;
+    /**
+     * How strongly the board's relief and buildings hide the sky, 0 to 1: 1 their full darkening, .5 half of it. 0 leaves
+     * it out of every program and searches nothing.
+     */
+    static final float STRENGTH = 1;
     /** The cells' horizontal size in metres, coarser where the board would need more than MAX_CELLS along a side. */
     private static final float CELL_METRES = 4;
     private static final int MAX_CELLS = 256;
@@ -64,13 +67,13 @@ final class GpuSkyVisibility implements Disposable {
 
     /**
      * Puts this on the lighting of the board's {@code environment} with the sky occlusion at {@code strength} (0 to 1,
-     * 0 off), and its volume on the {@code scene}'s terrain: when the hexes' surface heights change a search starts, one
+     * 0 off) times {@link #STRENGTH}, and its volume on the {@code scene}'s terrain: when the hexes' surface heights change a search starts, one
      * at a time, and its volume replaces the last one when done. A new tile list with the same heights (weather settling
      * on the hexes, say) searches nothing. Render thread.
      */
     void update(Environment environment, BoardScene scene, float strength) {
-        if (!ENABLED) { return; }
-        this.strength = MathUtils.clamp(strength, 0, 1);
+        if (STRENGTH <= 0) { return; }
+        this.strength = MathUtils.clamp(strength, 0, 1) * STRENGTH;
         texture();
         var lighting = environment.get(GpuEnvironmentLighting.class, GpuEnvironmentLighting.TYPE);
         if (lighting != null) { lighting.setSkyVisibility(this); }
@@ -244,7 +247,7 @@ final class GpuSkyVisibility implements Disposable {
      * stage (GpuSamplerBudgetSmokeTest). Other volcanic crust keeps it and leaves out ambient occlusion instead.
      */
     static String prefix(Renderable renderable) {
-        return ENABLED && renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
+        return STRENGTH > 0 && renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
               && !(renderable.material.has(GpuMagmaShader.TYPE) && GpuIceShader.mode(renderable.material) != 0)
               ? "#define skyVisibilityFlag\n" : "";
     }

@@ -209,8 +209,9 @@ not draw (units; buildings and props unless the pre-pass's objects category is o
 read 1, as does every draw after the units (water, transparent effects). Its environment attribute compiles
 `ambientOcclusionFlag` into the lit programs, so a switch rebuilds them behind the loading stage; without it the accessor
 is the constant 1 and the frames are bit-identical to those without the feature. Sculpted ground with volcanic crust
-draws without it: beside the board's always-on sky visibility its sampler would be the program's 17th texture unit
-(`GpuSamplerBudgetSmokeTest`), and the board-wide sky occlusion is the one a crust patch in deep shade would visibly lack.
+draws without it while the board's sky visibility is compiled in (`GpuSkyVisibility.STRENGTH` above 0), and always with ice:
+its sampler would be the program's 17th texture unit (`GpuSamplerBudgetSmokeTest`), and the board-wide sky occlusion is
+the one a crust patch in deep shade would visibly lack.
 Its two RGBA16F targets (visibility, camera distance, contact visibility) follow the scene's size; in an orthographic view the distance is stored less the orbit pivot's depth (`GpuAmbientOcclusion.rangeOrigin`), since that camera stands about 10,000 units back, and the sky is clamped to 60,000. `GpuAmbientOcclusionSmokeTest` checks it and, with
 `-Dmegamek.gpu.measureAmbientOcclusion=true`, times it.
 

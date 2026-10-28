@@ -131,7 +131,9 @@ void iceOptics(vec3 normal, vec3 geometric, float roughness, vec3 f0, out vec3 l
 #ifdef lightingFlag
     ground = environmentGround(GROUND_ALBEDO);
 #endif
-    reflection = environmentSpecular(normal, view, roughness, f0, ground, ambient);
+    // The relief hides the reflected sky as it hides the sky (sky-visibility.glsl), seen along the reflection.
+    reflection = environmentSpecular(normal, view, roughness, f0, ground, ambient)
+          * skyVisibility(v_cloudPosition, reflect(-view, normal));
     fresnel = specularAlbedo(max(0.0, dot(view, normal)), roughness, f0).r;
 }
 

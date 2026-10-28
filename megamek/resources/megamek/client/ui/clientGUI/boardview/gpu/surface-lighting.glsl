@@ -142,8 +142,10 @@ float dielectricBudget(vec3 normal, vec3 view, float film, float roughness) {
 }
 
 vec3 surfaceEnvironment(vec3 normal, float film, float roughness, vec3 groundAlbedo) {
+    // The relief hides the reflected sky as it hides the sky (sky-visibility.glsl), seen along the reflection.
     return environmentSpecular(normal, -viewDirection(), dielectricRoughness(film, roughness), dielectricF0(film),
-          environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)));
+          environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)))
+          * skyVisibility(v_cloudPosition, reflect(viewDirection(), normal));
 }
 
 // Irradiance for scattering volumes and optical coats, before their own reflection/transmission split. Without local,
