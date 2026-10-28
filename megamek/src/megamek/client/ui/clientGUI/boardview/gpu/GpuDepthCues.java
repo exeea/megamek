@@ -22,7 +22,7 @@ import com.badlogic.gdx.utils.Disposable;
  */
 final class GpuDepthCues implements Disposable {
     /** The Tuning panel's Depth cues: the haze's strength, from Crystalline Canyon reviews (GpuDepthCuesSmokeTest). */
-    static final float STRENGTH = .06f;
+    static final float STRENGTH = .08f;
     /** The depth behind the focus over which the haze approaches its strength, as a share of the depth the view spans. */
     private static final float SPAN = 1;
     /** Seconds over which the focus moves about 63% of the way to a new distance. */
@@ -59,10 +59,10 @@ final class GpuDepthCues implements Disposable {
         // Distances from the orbit pivot: the view's centre stays near zero as the camera zooms or orbits, so the eased
         // focus does not drift with the camera's own distance.
         rangeOrigin = camera.pivotDepth;
-        // The depth that the view's height spans over level ground, tan(tilt) of that height; from straight above, the
-        // floor leaves the relief's own depth to recede.
+        // The depth that the view's height spans over level ground, tan(tilt) of that height, and at least twice that
+        // height: from straight above the only depth is the relief's, and a drop of a few levels hazes little.
         float down = MathUtils.clamp(-camera.direction.z, .05f, 1);
-        viewDepth = camera.viewportHeight * camera.zoom * Math.max(.25f, (float) Math.sqrt(1 - down * down) / down);
+        viewDepth = camera.viewportHeight * camera.zoom * Math.max(2, (float) Math.sqrt(1 - down * down) / down);
         GpuAtmosphere.screenState();
         focusWrite.begin();
         focus.bind();
