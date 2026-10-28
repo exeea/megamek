@@ -21,6 +21,7 @@ final class BoardObstacles {
     /** How thick an earthwork's spoil lies, in metres, where grass and plants still grow through it. */
     private static final float EARTHWORK_THIN = .2f;
     private final List<Footprint> footprints = new ArrayList<>();
+    private final boolean plants;
 
     private record Geometry(Map<String, BoardShape> shapes, Map<String, String> modules, BoundingBox bounds) { }
 
@@ -82,7 +83,11 @@ final class BoardObstacles {
         }
     }
 
-    BoardObstacles(BoardScene scene, BoardScene.Tile tile) {
+    BoardObstacles(BoardScene scene, BoardScene.Tile tile) { this(scene, tile, false); }
+
+    /** {@code plants}: what obstructs ground cover (grass, crops, reeds, turf), which grows through a civilian wall's net. */
+    BoardObstacles(BoardScene scene, BoardScene.Tile tile, boolean plants) {
+        this.plants = plants;
         add(scene, tile);
         // Rim rocks can overhang their hex; a neighbour's structure can do the same.
         for (int direction = 0; direction < 6; direction++) {
@@ -125,6 +130,9 @@ final class BoardObstacles {
                   && feature.kind() != BoardScene.FeatureKind.SCENERY
                   || feature.asset().equals("bridge") || feature.asset().equals("vegetation/field")) { continue; }
             boolean wall = BoardWall.supports(feature.asset());
+            var layout = wall ? BoardWall.layout(scene, tile, feature) : null;
+            // A civilian wall stands on posts with open fencing and no base: ground cover grows everywhere beneath it.
+            if (plants && wall && layout.family() == BoardWall.Family.CIVILIAN) { continue; }
             boolean assembled = BoardIndustrial.supports(feature) || wall;
             boolean custom = object == null && !assembled && feature.asset().startsWith("buildings/")
                   && TilesetScenery.customBuildingFile(feature.asset()).isFile();
@@ -136,9 +144,11 @@ final class BoardObstacles {
             if (object != null && !file.isFile()) { continue; }
             var geometry = assembled ? null : geometry(root, file, custom);
             List<Vector3> points = new ArrayList<>();
-            if (assembled) {
-                points.addAll(wall ? BoardWall.triangles(BoardWall.layout(scene, tile, feature))
-                      : BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
+            if (wall) {
+                // Ground cover grows up to a military wall's body; other dressing also keeps clear of its buttresses.
+                points.addAll(plants ? BoardWall.footprint(layout) : BoardWall.triangles(layout));
+            } else if (assembled) {
+                points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
             } else if (custom) {
                 var modules = GpuBuilding.select(geometry.modules(), Math.max(1, Math.round(feature.height())),
                       GpuBuilding.seed(tile, feature));
@@ -199,15 +209,15 @@ final class BoardObstacles {
                   ? scale * (float) feature.stretch().z()
                   : custom || wall ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
-            // Scenery grounds its lowest authored vertex, including models with an offset origin.
+            // Scenery grounds its lowest authored vertex, including models with an offset origin. A wall's kit and
+            // footprint stand on their zero.
             float low = ground + feature.elevation() * BoardGeometry.level()
-                  + (feature.kind() == BoardScene.FeatureKind.SCENERY ? 0 : bounds.min.z * verticalScale);
-            float height = custom ? feature.height() * BoardGeometry.level() : bounds.getDepth() * verticalScale;
+                  + (feature.kind() == BoardScene.FeatureKind.SCENERY || wall ? 0 : bounds.min.z * verticalScale);
+            float height = custom ? feature.height() * BoardGeometry.level()
+                  : (wall ? bounds.max.z : bounds.getDepth()) * verticalScale;
             if (wall) {
                 // The tall pier must not reserve empty space over its shorter connecting arms.
-                for (Vector3 point : points) {
-                    point.z = low + (point.z - bounds.min.z) * verticalScale + upperGround - ground;
-                }
+                for (Vector3 point : points) { point.z = low + point.z * verticalScale + upperGround - ground; }
             }
             if (object == null && BoardGroundCut.digs(feature.asset())) {
                 // An earthwork stands on its hex's ground at its model's own zero.

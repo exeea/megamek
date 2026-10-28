@@ -48,10 +48,17 @@ vec3 environmentGround(vec3 groundAlbedo) {
 }
 
 vec3 skyLight(vec3 normal, vec3 groundAlbedo) {
-    // At roughness one the normalized GGX prefilter is the cosine convolution: irradiance divided by pi. The board's
-    // relief hides part of the sky in canyons and at the feet of walls (sky-visibility.glsl).
-    return environmentRadiance(normal, 1.0, environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)))
-          * skyVisibility(v_cloudPosition, normal);
+    // At roughness one the normalized GGX prefilter is the cosine convolution: irradiance divided by pi.
+    vec3 sky = surfaceAmbient(vec3(0.0, 0.0, 1.0));
+    vec3 ground = environmentGround(groundAlbedo);
+    vec3 open = environmentRadiance(normal, 1.0, ground, sky);
+    // The board's relief and buildings hide part of the sky in canyons, streets and at the feet of walls
+    // (sky-visibility.glsl). What hides it is not black: seen from shade, the faces hiding the sky mostly turn away
+    // from the sun, so the hidden share takes ground lit by the sky alone (sunlit ground, about as bright as the sky,
+    // erased the occlusion). Of a face's light, the sky is the share (1 + normal.z) / 2; the ground below keeps its
+    // own bounce.
+    float upper = .5 + .5 * normal.z;
+    return mix((1.0 - upper) * ground + upper * groundAlbedo * sky, open, skyVisibility(v_cloudPosition, normal));
 }
 
 float surfaceVisibility() {

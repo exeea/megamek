@@ -623,10 +623,21 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return waterDepth >= 0;
         }
 
-        /** Whether a captured structure stands here; its ground then keeps the slab rather than natural cover. */
+        /** Whether a captured structure, a wall included, stands here. */
         boolean building() {
             for (Feature feature : features) {
                 if (feature.kind() == FeatureKind.BUILDING) { return true; }
+            }
+            return false;
+        }
+
+        /**
+         * Whether a structure whose ground keeps the slab rather than natural cover stands here. A generated wall stands
+         * on the natural ground, whose cover grows up to its footprint ({@link BoardObstacles}).
+         */
+        boolean slab() {
+            for (Feature feature : features) {
+                if (feature.kind() == FeatureKind.BUILDING && !BoardWall.supports(feature.asset())) { return true; }
             }
             return false;
         }

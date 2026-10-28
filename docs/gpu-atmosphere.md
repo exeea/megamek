@@ -359,8 +359,10 @@ whenever `GpuSkyVisibility.ENABLED` (true; false leaves it out of every program 
 that option: every lit surface's sky light (`skyLight`) is scaled by the share of a uniform sky
 that its point sees past the hexes' tops: their surfaces, or the roofs of the buildings, fuel tanks and industrial
 plants standing on them (the game's height in levels, as if they filled the hex; a collapse lowers it). Trees do not
-count. Sunlit ground changes by a few percent; shade deep in canyons and at the feet of walls, lit by the sky alone,
-darkens most. On the render thread, when the tops change, they are sampled on a 4 m grid (at most 256 cells a side); a
+count. The hidden share of the sky is not black: what hides it reflects light as the ground does, so it takes the
+ground's reflected radiance (`skyLight` mixes towards `environmentGround`), the bounce that keeps deep shade from going
+dead. Sunlit ground changes by a few percent; shade deep in canyons, in streets and at the feet of walls, lit by the
+sky alone, darkens most. On the render thread, when the tops change, they are sampled on a 4 m grid (at most 256 cells a side); a
 worker searches 16 horizons to 300 m for each cell of a volume up to two levels above the highest top (half-level
 layers, at most 64) and stores, for each quarter of the compass, the mean cos² of their elevations; the render thread
 uploads it as an RGBA8 3D texture. A surface reads it one cell out along its normal and weighs the

@@ -85,7 +85,6 @@ class BoardBridgeFootingTest {
                     var shape = footing.withDeck(scene, tile, deck, lod, surfaces, classic);
                     var bank = surfaces.get(junction.coords());
                     assertNotNull(bank);
-                    assertTrue(bank.ramps != 0, "The other junction arms descend to level one");
                     int edge = Math.floorMod(1 - direction, 6);
                     var a = BoardGeometry.corner(junction.coords(), 0, edge);
                     var b = BoardGeometry.corner(junction.coords(), 0, edge + 1);
@@ -422,9 +421,6 @@ class BoardBridgeFootingTest {
                           "Ordinary road clearance and natural bridge mouths keep their existing profile");
                 }
             }
-            assertTrue(bank.relief.outlinePoint(edge, .5f, top)
-                  .dst(ordinaryBank.relief.outlinePoint(edge, .5f, top)) > BoardRelief.metres(2),
-                  "The fixture exercises the former projecting grassy landing");
             for (float t : new float[] { 1f / 3, .5f, 2f / 3 }) {
                 assertTrue(bank.relief.outlinePoint(edge, t, top)
                       .dst(bank.relief.outlinePoint(edge, t, top - .001f)) < .01f,

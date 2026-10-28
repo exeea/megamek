@@ -13,7 +13,7 @@ final class BoardBiome {
 
     static BoardScene.Biome kind(BoardScene.Tile tile) {
         return tile != null && tile.detailedGround() && !tile.frozen() && !tile.liquid().present()
-              && !tile.building()
+              && !tile.slab()
               ? tile.biome() : BoardScene.Biome.NONE;
     }
 
@@ -23,7 +23,7 @@ final class BoardBiome {
         if (own != BoardScene.Biome.NONE) { return own; }
         if (tile == null || !tile.detailedGround() || tile.frozen() || tile.liquid().volcanic()
               || tile.surface() == BoardScene.Surface.CONCRETE
-              || tile.building()) {
+              || tile.slab()) {
             return BoardScene.Biome.NONE;
         }
         for (int direction = 0; direction < 6; direction++) {

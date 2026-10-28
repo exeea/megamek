@@ -130,7 +130,8 @@ class BoardObstaclesTest {
                     suspended.z = -BoardGeometry.level();
                     assertFalse(obstacles.obstructs(suspended, scale, 2 * scale),
                           "The solid reservation begins at the inset, not at the span centre");
-                    var beside = new Vector3(center).lerp(bank, .8f).mulAdd(across, 20 * scale);
+                    // Beyond the widest reserved passage: a corridor's, with its landing lip.
+                    var beside = new Vector3(center).lerp(bank, .8f).mulAdd(across, 30 * scale);
                     assertFalse(obstacles.obstructs(beside, scale, 2 * scale), "Free ground beside the ramp remains available");
                 }
             }

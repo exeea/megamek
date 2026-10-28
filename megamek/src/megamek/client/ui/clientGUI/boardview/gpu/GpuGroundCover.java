@@ -109,7 +109,7 @@ final class GpuGroundCover implements Disposable {
     static boolean shallowShore(BoardScene.Tile tile) {
         return tile != null && tile.waterDepth() == 0 && tile.liquid().present() && !tile.liquid().volcanic()
               && !tile.frozen() && !tile.ultraSublevel() && !tile.backdrop().present() && tile.detailedGround()
-              && !tile.building() && (tile.roadExits() == 0 || BoardRoad.rendered(tile));
+              && !tile.slab() && (tile.roadExits() == 0 || BoardRoad.rendered(tile));
     }
 
     /**
@@ -174,7 +174,7 @@ final class GpuGroundCover implements Disposable {
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
         float shoreReach = BoardRelief.metres(SHORE_FADE_METRES);
-        var obstacles = new BoardObstacles(scene, tile);
+        var obstacles = new BoardObstacles(scene, tile, true);
         List<BoardScene.Feature> minerals = vegetation == null ? List.of() : vegetation.minerals();
         var cover = new BoardSurfaceBlend.Sampler(scene, tile);
         var root = new Vector3();

@@ -8,9 +8,13 @@ import java.util.List;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Configuration;
+import megamek.common.board.HexTile;
 import megamek.common.enums.BuildingType;
 
-/** Authored fortress kits assembled identically for drawing, picking and ground-cover clearance. */
+/**
+ * Authored fortress kits assembled identically for drawing, picking and dressing clearance. Ground cover grows up to a
+ * military wall's body ({@link #footprint}) and everywhere under a civilian wall's net.
+ */
 final class BoardWall {
     static final int LODS = 2;
     private static final String PREFIX = "buildings/wall-";
@@ -125,13 +129,49 @@ final class BoardWall {
         for (int direction = 0; direction < 6; direction++) {
             reach[direction] = (exits & 1 << direction) == 0 ? 0 : layout.arms().get(direction);
         }
-        int opposite = (first + 3) % 6;
-        String piece = Integer.bitCount(exits) <= 1 ? "terminal"
-              : exits == (1 << first | 1 << opposite) && reach[first] == layout.height()
-                    && reach[opposite] == layout.height() ? "straight" : "pier";
+        String piece = piece(layout);
         int steps = exits == 0 ? 3 : piece.equals("pier") ? 0 : first;
         return ConnectedKit.model(kit(layout.family(), piece), lod, layout.height(), reach, steps, 0,
               layout + "-lod" + lod);
+    }
+
+    private static String piece(Layout layout) {
+        int exits = exits(layout.asset());
+        int first = Integer.numberOfTrailingZeros(exits), opposite = (first + 3) % 6;
+        return Integer.bitCount(exits) <= 1 ? "terminal"
+              : exits == (1 << first | 1 << opposite) && layout.arms().get(first) == layout.height()
+                    && layout.arms().get(opposite) == layout.height() ? "straight" : "pier";
+    }
+
+    /**
+     * The ground a military wall's body stands on, as triangles at the top of each part (model units, ground at zero):
+     * every military family's deck is a road wide and its junction 52 units across flats (walls/README.md), which a
+     * straight section does not have. Their buttresses and armour stand on the ground cover they hide.
+     */
+    static List<Vector3> footprint(Layout layout) {
+        List<Vector3> result = new ArrayList<>();
+        if (!piece(layout).equals("straight")) {
+            float top = layout.height() * GpuBuilding.LEVEL_HEIGHT, radius = 26 / (float) Math.cos(Math.PI / 6);
+            for (int corner = 0; corner < 6; corner++) {
+                double a = Math.PI / 3 * corner, b = Math.PI / 3 * (corner + 1);
+                result.add(new Vector3(0, 0, top));
+                result.add(new Vector3(radius * (float) Math.cos(a), radius * (float) Math.sin(a), top));
+                result.add(new Vector3(radius * (float) Math.cos(b), radius * (float) Math.sin(b), top));
+            }
+        }
+        int exits = exits(layout.asset());
+        for (int direction = 0; direction < 6; direction++) {
+            if ((exits & 1 << direction) == 0) { continue; }
+            // Each arm runs from the centre to its edge midpoint, as ConnectedKit#reach checks.
+            double angle = Math.toRadians(90 - 60 * direction);
+            var along = new Vector3((float) Math.cos(angle), (float) Math.sin(angle), 0).scl(HexTile.HEIGHT / 2f);
+            var across = new Vector3(-along.y, along.x, 0).nor().scl(HexTile.ROAD_HALF_WIDTH);
+            float top = layout.arms().get(direction) * GpuBuilding.LEVEL_HEIGHT;
+            Vector3 a = new Vector3(across).add(0, 0, top), b = new Vector3(across).scl(-1).add(0, 0, top);
+            Vector3 c = new Vector3(b).add(along), d = new Vector3(a).add(along);
+            result.addAll(List.of(a, b, c, new Vector3(a), new Vector3(c), d));
+        }
+        return result;
     }
 
     /** Exact near-level triangles, copied so obstacle/world transforms never mutate the source kit. */

@@ -103,7 +103,9 @@ them and reports unknown terrain names or malformed numeric fields with the
 hex and token. Empty `""` terrain remains clear ground.
 
 Enhanced draws `building:5` as solid modular walls joined by the stored building
-exits. Wall geometry is shared by rendering, picking and vegetation clearance.
+exits. Wall geometry is shared by rendering, picking and dressing clearance. Grass, crops, reeds and
+turf grow up to a military wall's body (`BoardWall.footprint`: the 30-unit deck and 52-unit junction every
+military family shares) and everywhere under a civilian wall's open net.
 The layered GLBs in `data/models/buildings/walls/<family>/` supply straight sections,
 piers and terminals; their arms are connected-kit pieces (`data/models/buildings/README.md`). The game and editor select the family from pristine
 map CF (`BLDG_CF`): civilian 1–10, light 11–15, medium 16–40, heavy 41–90,

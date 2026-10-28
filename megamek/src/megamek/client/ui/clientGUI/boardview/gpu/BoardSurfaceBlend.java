@@ -198,14 +198,14 @@ public final class BoardSurfaceBlend {
         return tile != null && !tile.ultraSublevel() && !tile.backdrop().present() && tile.detailedGround()
               && !tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen()
               && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && tile.surface() != BoardScene.Surface.CONCRETE
-              && !tile.building();
+              && !tile.slab();
     }
 
     /** Land ice is a coat over its ground (GpuIceShader), so that ground blends like any other. */
     private static boolean blendable(BoardScene.Tile tile) {
         return tile != null && !tile.ultraSublevel() && !tile.backdrop().present() && tile.detailedGround()
               && (!tile.liquid().present() || tile.liquid().volcanic() && !tile.frozen())
-              && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && !tile.building();
+              && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && !tile.slab();
     }
 
     /** Uniform interiors retain the ordinary family material and incur no extra maps or vertex attributes. */

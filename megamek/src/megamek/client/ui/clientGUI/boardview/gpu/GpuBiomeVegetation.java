@@ -201,7 +201,7 @@ final class GpuBiomeVegetation implements Disposable {
         }
         var ground = new Support(faces);
         var roads = BoardRoad.nearbyRoads(scene, tile);
-        var obstacles = new BoardObstacles(scene, tile);
+        var obstacles = new BoardObstacles(scene, tile, true);
         float levelZ = BoardGeometry.groundZ(tile);
         var kind = BoardBiome.plantKind(scene, tile);
         boolean uniform = BoardVegetation.key(scene, tile).sites().stream()
@@ -290,7 +290,7 @@ final class GpuBiomeVegetation implements Disposable {
             uniform = key.sites().stream().allMatch(site -> site != null && site.biome() == kind
                   && site.elevation() == tile.elevation());
             roads = BoardRoad.nearbyRoads(scene, tile);
-            var nearby = new BoardObstacles(scene, tile);
+            var nearby = new BoardObstacles(scene, tile, true);
             obstacles = nearby.isEmpty() ? null : nearby;
             across = BoardBiome.ROW_METRES;
             along = 1.15f;

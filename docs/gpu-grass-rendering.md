@@ -82,8 +82,9 @@ the workers too (the pending scatter consolidation); see
 
 Nothing grows through stationary map content either. Blades, bank turf, reeds,
 crops and the baked dressing reject a root that `BoardObstacles` reports for its
-hex: structures, placed objects, bridge pier footings, and each bridge deck's
-passage from the slab's underside to its top. Cover tall enough to reach a deck
+hex: structures (for plants a military wall by its body alone, a civilian wall not
+at all), placed objects, bridge pier footings, and each bridge deck's passage from
+the slab's underside to its top. Cover tall enough to reach a deck
 at or near the ground is left out there, while the ground under a raised deck
 keeps its grass. This is decided when the hex is built, never per frame: units
 and meeples stand in the grass and never clear or bend it.

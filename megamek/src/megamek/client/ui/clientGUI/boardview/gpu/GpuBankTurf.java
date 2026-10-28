@@ -55,7 +55,7 @@ final class GpuBankTurf implements Disposable {
         faces.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face));
         var support = new GpuBiomeVegetation.Support(faces);
         var center = BoardGeometry.center(tile.coords(), tile.elevation());
-        var obstacles = new BoardObstacles(scene, tile);
+        var obstacles = new BoardObstacles(scene, tile, true);
         float m = BoardRelief.metres(1), level = BoardGeometry.level();
         // Turf grows up to a ground rail's ballast (BoardObstacles); only a road keeps its verge bare.
         var road = BoardRoad.rendered(tile) ? BoardRoad.way(scene, tile) : null;
