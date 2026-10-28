@@ -834,6 +834,10 @@ owns that interaction on the EDT and publishes an immutable prompt; replies are 
 and board. `BoardEditorSession` still loads/saves boards and updates Recent Boards. Other Swing workflows below
 are unchanged.
 
+Save opens the in-scene picker for an unnamed or imported board; subsequent Save/Ctrl+S writes its current file.
+Save As always opens the picker with the current filename and the remembered board folder. Selecting another file
+confirms replacement in-scene, and a successful Save As becomes the destination for later saves.
+
 `UiFileDialog` is shared by the Tuning lighting-environment picker and can be used by any desktop Scene2D scene:
 
 ```java
@@ -874,6 +878,10 @@ real HUD integrations. `GpuHudInputTest` and `GpuChatToastModalSmokeTest` check 
 including a prompt arriving underneath another modal. Desktop execution is verified on Windows only; Linux and
 macOS runs remain required for platform verification. The Windows run skips symlink creation when the account lacks
 that privilege.
+
+`GpuFileDialogSmokeTest` also drives the editor's Save and Save As buttons in fullscreen, reloads the written
+boards, checks overwrite cancellation, remembered folders and dirty state, and verifies Ctrl+S after Save As.
+The save test isolates folder preferences and Recent Boards from the player's settings.
 
 While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replaces the battle view's Swing surfaces.
 

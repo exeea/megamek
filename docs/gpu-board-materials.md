@@ -272,7 +272,7 @@ these values safely).
 ### Constrained (106)
 
 - `scenery/`: `demolition-materials`, `geyser-travertine`, `pool-water`, `rubble-brick`, `rubble-debris-concrete`, `rubble-debris-masonry`, `rubble-debris-timber`, `rubble-fines`, `rubble-slab`, `rubble-steel`, `rubble-timber`, `timber-bark`, `timber-endgrain`, `tunnel-concrete`
-- `structures/common/`: `chrome`, `corrugated`, `diamond-plate`, `hazard-stripes`, `iron`, `rusted-steel`, `safety-yellow`, `steel`, `vent-slots`, `weathered-paint`
+- `structures/common/`: `chrome`, `corrugated`, `corrugated-painted`, `diamond-plate`, `hazard-stripes`, `iron`, `rusted-steel`, `safety-yellow`, `steel`, `vent-slots`, `weathered-paint`
 - `structures/facades/`: `facade-fortress`, `facade-hangar`, `facade-hard`, `facade-heavy`, `facade-industrial`, `facade-light`, `facade-medium`
 - `structures/industrial/`: `fan`
 - `structures/turret/`: `turret-dark`, `turret-edge`, `turret-paint`
