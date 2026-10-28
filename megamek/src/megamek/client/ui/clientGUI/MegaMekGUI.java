@@ -393,12 +393,10 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         // delete PilotToolTip cache
         PilotToolTip.deleteImageCache();
         client = getClient(gameType, playerName, serverAddress, port);
-        handOffStartBounds();
         IClientGUI gui = getClientGUI(gameType, client, controller);
         controller.clientGUI = gui;
         frame.setCursor(new Cursor(Cursor.WAIT_CURSOR));
         gui.initialize();
-        AbstractClientGUI.setOpenMaximized(false);
         frame.setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
         if (!client.connect()) {
             LOGGER.errorDialog(Messages.getString("MegaMek.LoadGameAlert.title"),
@@ -416,22 +414,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         MekSummaryCache.dispose();
 
         launch(gui.getFrame());
-    }
-
-    /**
-     * Opens the next client window where the start screen was, so going from the start screen to the lobby doesn't
-     * move or resize the window under the player.
-     */
-    private static void handOffStartBounds() {
-        Rectangle bounds = GpuStartWindow.lastSwingBounds();
-        if (bounds != null) {
-            GUIPreferences guip = GUIPreferences.getInstance();
-            guip.setWindowPosX(bounds.x);
-            guip.setWindowPosY(bounds.y);
-            guip.setWindowSizeWidth(bounds.width);
-            guip.setWindowSizeHeight(bounds.height);
-        }
-        AbstractClientGUI.setOpenMaximized(GpuStartWindow.lastMaximized());
     }
 
     /** Hosts the saved game the start screen's Load game page describes, as the player it names. */
@@ -624,11 +606,9 @@ public class MegaMekGUI implements IPreferenceChangeListener {
               port,
               bcd.getBehaviorSettings());
         client.getGame().addGameListener(new BotGUI(frame, (BotClient) client));
-        handOffStartBounds();
         ClientGUI gui = new ClientGUI((Client) client, controller);
         controller.clientGUI = gui;
         gui.initialize();
-        AbstractClientGUI.setOpenMaximized(false);
         if (!client.connect()) {
             JOptionPane.showMessageDialog(frame,
                   Messages.getFormattedString("MegaMek.ServerConnectionError", serverAddress, port),
@@ -714,8 +694,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
                 unlaunch();
             }
         });
-        // close the start screen; it reopens when the launched window closes
-        GpuStartWindow.closeThen(() -> { });
     }
 
     /**

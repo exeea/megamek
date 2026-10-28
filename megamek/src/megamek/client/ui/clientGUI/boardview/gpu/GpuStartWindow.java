@@ -34,33 +34,24 @@ import javax.swing.Timer;
 import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
-import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
+import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.util.ScreenFit;
 import megamek.common.game.IGame;
 import megamek.common.scenario.Scenario;
 import megamek.logging.MMLogger;
-import org.lwjgl.glfw.GLFW;
 
 /**
- * MegaMek's start screen in its own native (libGDX) window: the greeting, the art and the main menu. The Swing main
- * frame stays hidden and owns the forms the menu opens, which this window adopts natively so they stay above it. Only
- * one native window may run at a time (GLFW is process-wide), so the start window closes before a board, the map
- * editor or the lobby opens, and reopens, without the greeting, when they close. There is no Swing fallback: if
- * OpenGL cannot start, MegaMek says so and exits.
+ * MegaMek's start screen, the first scene of the one native (libGDX) window ({@link GpuHost}): the greeting, the art
+ * and the main menu. The Swing main frame stays hidden and owns the forms the menu opens, which the window adopts
+ * natively so they stay above it. A board, the map editor or the UI library takes the window's place when it opens
+ * and the start screen comes back, without the greeting, when they close; the game lobby shows over the dimmed start
+ * screen. There is no Swing fallback: if OpenGL cannot start, MegaMek says so and exits.
  */
 public final class GpuStartWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuStartWindow.class);
-    /** Frames between reads of the window's bounds; a few times a second is plenty to follow a move or resize. */
-    private static final int BOUNDS_POLL_FRAMES = 15;
     private static final int OWN_DIALOG_POLL_MS = 50;
     private static final int OWN_DIALOG_TRIES = 100;
 
@@ -160,32 +151,64 @@ public final class GpuStartWindow {
     private static Consumer<ScenarioRequest> scenarios;
 
     private final boolean greet;
-    private final GpuWindowBounds startBounds;
     private final Set<Dialog> modalDialogs = new LinkedHashSet<>();
     private final Map<Dialog, Boolean> dialogOnTop = new HashMap<>();
     private final AWTEventListener dialogListener = this::dialogEvent;
     /** Whether a modal form is open; the GPU thread reads it to send clicks on the window to that form. */
     private volatile boolean modalOpen;
-    private volatile Lwjgl3Application application;
+    /** Whether the screen's listener exists: from its creation until it is disposed. */
+    private volatile boolean live;
     private volatile GpuNativeDialogOwner nativeOwner;
     private volatile boolean closeRequested;
-    /** Set once the native window exists; a failure before then means OpenGL itself could not start. */
-    private volatile boolean windowCreated;
-    private volatile GpuWindowBounds normalBounds;
-    private volatile GpuWindowBounds publishedBounds;
-    /** The window's bounds now, maximized or not, in GLFW screen coordinates; dialogs centre over them. */
-    private volatile Rectangle currentBounds;
     private Runnable afterClose;
     /** EDT: what to run once the intro finishes, and whether it has. */
     private Runnable onSettled;
     private boolean settled;
-    private GpuStartScreen screen;
-    private int framesSinceBounds;
+    /** EDT: whether the scene has started and not ended, so the lobby can show over it. */
+    private boolean backdrop;
+    private volatile GpuStartScreen screen;
+    private final GpuHost.Scene scene = new GpuHost.Scene() {
+        @Override
+        public ApplicationListener listener() {
+            screen = new GpuStartScreen(GpuStartWindow.this, greet, GUIPreferences.getInstance());
+            return screen;
+        }
+
+        @Override
+        public String title() {
+            return Messages.getString("StartScreen.title");
+        }
+
+        @Override
+        public void started(long windowHandle) {
+            nativeOwner = GpuNativeDialogOwner.forGlfwWindow(windowHandle);
+            SwingUtilities.invokeLater(GpuStartWindow.this::shown);
+        }
+
+        @Override
+        public void closeRequested() {
+            if (modalOpen) {
+                SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
+            } else if (!GpuLobbyOverlay.requestClose()) {
+                dispatch(Action.QUIT);
+            }
+        }
+
+        @Override
+        public void focusGained() {
+            if (modalOpen) {
+                SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
+            }
+        }
+
+        @Override
+        public void ended(Throwable failure) {
+            SwingUtilities.invokeLater(() -> finished(failure));
+        }
+    };
 
     private GpuStartWindow(boolean greet) {
         this.greet = greet;
-        startBounds = GpuWindowBounds.loadStart(GUIPreferences.getInstance());
-        normalBounds = startBounds;
     }
 
     /**
@@ -202,6 +225,10 @@ public final class GpuStartWindow {
         connects = connectHandler;
         loads = loadHandler;
         scenarios = scenarioHandler;
+        // MegaMek's own window lives from the greeting to Quit; scenes come and go in it, and the start screen shows
+        // whenever none does
+        GpuHost.keepOpen(true);
+        GpuHost.whenIdle(GpuStartWindow::reopen);
     }
 
     /** EDT: opens the start window, with the greeting when {@code greet}, or brings the open one to the front. */
@@ -213,24 +240,24 @@ public final class GpuStartWindow {
         if (anchor == null) {
             throw new IllegalStateException("Install the start window's owner before opening it");
         }
-        if (open != null) {
-            if (open.closeRequested) {
-                closeThen(() -> open(greet));
-            } else {
-                open.focus();
-            }
+        if (GpuBoardWindow.isShowingAny() || GpuUiLibraryWindow.isShowing()) {
+            // The scene holding the window stays; the start screen comes back when it ends (GpuHost.whenIdle)
             return;
         }
-        if (!GpuNativeWindow.claim(anchor, () -> open(greet))) {
+        if (open != null) {
+            if (open.closeRequested || !GpuHost.isShowing(open.scene)) {
+                // Another scene has taken the window; the screen comes back once this one has finished
+                closeThen(() -> open(greet));
+            } else {
+                GpuHost.focus();
+            }
             return;
         }
         GpuStartWindow window = new GpuStartWindow(greet);
         open = window;
         Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
               AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK);
-        Thread thread = new Thread(window::run, "MegaMek-start-screen");
-        thread.setDaemon(true);
-        thread.start();
+        GpuHost.show(window.scene);
     }
 
     /** EDT: reopens the start screen, without the greeting, after a game, an editor or a tool closes. */
@@ -246,9 +273,8 @@ public final class GpuStartWindow {
     }
 
     /**
-     * EDT: closes the start window and runs {@code then} on the EDT once its native window is gone, so another native
-     * window can take GLFW. Returns false, and runs nothing, when it is not open. Runs every {@code then} asked for
-     * while it closes, in order: a game's board window waits on it as the game's launch closes it too.
+     * EDT: ends the start screen and runs {@code then} on the EDT once it is gone. Returns false, and runs nothing,
+     * when it is not open. Runs every {@code then} asked for while it closes, in order.
      */
     public static boolean closeThen(Runnable then) {
         if (open == null) {
@@ -275,28 +301,18 @@ public final class GpuStartWindow {
     /** EDT: lays the open screen out again, as after the GUI scale changes. */
     public static void refresh() {
         GpuStartWindow window = open;
-        Lwjgl3Application app = window == null ? null : window.application;
-        if (app != null) {
-            app.postRunnable(() -> {
-                if (window.screen != null) {
-                    window.screen.rescale();
-                }
-            });
+        if (window != null) {
+            window.post(() -> window.screen.rescale());
         }
     }
 
-    /**
-     * EDT: the start window's last normal bounds in Swing screen coordinates, for a window that replaces it to open in
-     * the same place, or null when it was never placed (it opened centred).
-     */
-    public static Rectangle lastSwingBounds() {
-        GpuWindowBounds bounds = GpuWindowBounds.loadStart(GUIPreferences.getInstance());
-        return bounds.centred() ? null : toSwing(bounds.rectangle());
-    }
-
-    /** EDT: true when the start window was last maximized. */
-    public static boolean lastMaximized() {
-        return GUIPreferences.getInstance().getStartWindowMaximized();
+    /** Any thread: runs {@code work} on the GPU thread while the screen's listener exists, else nothing. */
+    private void post(Runnable work) {
+        GpuHost.post(() -> {
+            if (live) {
+                work.run();
+            }
+        });
     }
 
     /**
@@ -348,66 +364,6 @@ public final class GpuStartWindow {
               (int) Math.round(glfw.width / scale), (int) Math.round(glfw.height / scale));
     }
 
-    private void run() {
-        Throwable failure = null;
-        try {
-            Lwjgl3ApplicationConfiguration configuration = GpuBoardWindow.configuration(true);
-            configuration.setTitle(Messages.getString("StartScreen.title"));
-            configuration.setWindowedMode(startBounds.width(), startBounds.height());
-            if (!startBounds.centred()) {
-                configuration.setWindowPosition(startBounds.x(), startBounds.y());
-            }
-            configuration.setMaximized(startBounds.maximized());
-            // The hex reveal draws through a stencil mask
-            configuration.setBackBufferConfig(8, 8, 8, 8, 24, 8, 4);
-            configuration.setWindowListener(new Lwjgl3WindowAdapter() {
-                @Override
-                public void created(Lwjgl3Window window) {
-                    windowCreated = true;
-                    GpuGlsl.detect();
-                    GpuNativeDialogOwner.Win32.useWindowIconsForClass(window.getWindowHandle());
-                    fitOnScreen(window);
-                    nativeOwner = GpuNativeDialogOwner.forGlfwWindow(window.getWindowHandle());
-                    // Forms raised while the window was opening floated on top; they can belong to it now
-                    SwingUtilities.invokeLater(GpuStartWindow.this::adoptFloating);
-                }
-
-                @Override
-                public void focusGained() {
-                    if (modalOpen) {
-                        SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
-                    }
-                }
-
-                @Override
-                public boolean closeRequested() {
-                    if (modalOpen) {
-                        SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
-                    } else {
-                        dispatch(Action.QUIT);
-                    }
-                    return false;
-                }
-            });
-            screen = new GpuStartScreen(this, greet, GUIPreferences.getInstance());
-            new Lwjgl3Application(screen, configuration);
-        } catch (RuntimeException | LinkageError error) {
-            failure = error;
-            try {
-                String detail = GpuGlsl.glfwError();
-                if (!detail.isEmpty()) {
-                    failure = new com.badlogic.gdx.utils.GdxRuntimeException(detail, error);
-                }
-            } catch (RuntimeException | LinkageError diagnosticFailure) {
-                error.addSuppressed(diagnosticFailure);
-            }
-        } finally {
-            application = null;
-            Throwable ended = failure;
-            SwingUtilities.invokeLater(() -> finished(ended));
-        }
-    }
-
     private void finished(Throwable failure) {
         Toolkit.getDefaultToolkit().removeAWTEventListener(dialogListener);
         modalDialogs.clear();
@@ -417,10 +373,14 @@ public final class GpuStartWindow {
         if (open == this) {
             open = null;
         }
+        if (backdrop) {
+            backdrop = false;
+            GpuLobbyOverlay.backdropChanged();
+        }
         if (failure != null && !closeRequested) {
             LOGGER.error(failure, "The start screen's native window failed");
             String title = Messages.getString("StartScreen.title");
-            if (!windowCreated) {
+            if (!GpuHost.everOpened()) {
                 JOptionPane.showMessageDialog(null, Messages.getString("StartScreen.glFailure", String.valueOf(failure)),
                       title, JOptionPane.ERROR_MESSAGE);
                 System.exit(1);
@@ -445,28 +405,14 @@ public final class GpuStartWindow {
 
     private void requestClose() {
         closeRequested = true;
-        Lwjgl3Application app = application;
-        if (app != null) {
-            app.postRunnable(app::exit);
-        }
+        GpuHost.end(scene);
     }
 
-    private void focus() {
-        Lwjgl3Application app = application;
-        if (app != null) {
-            app.postRunnable(() -> {
-                var window = ((Lwjgl3Graphics) app.getGraphics()).getWindow();
-                window.restoreWindow();
-                window.focusWindow();
-            });
-        }
-    }
-
-    /** GPU thread: the screen's first frame. */
+    /** GPU thread: the screen's listener is being created. */
     void started() {
-        application = (Lwjgl3Application) Gdx.app;
+        live = true;
         if (closeRequested) {
-            Gdx.app.exit();
+            GpuHost.end(scene);
         }
     }
 
@@ -528,9 +474,8 @@ public final class GpuStartWindow {
         NativeFileChooser.open(directory, filter, file -> SwingUtilities.invokeLater(() -> {
             showing.set(false);
             setStartEnabled(true);
-            Lwjgl3Application app = application;
-            if (file != null && app != null) {
-                app.postRunnable(() -> chosen.accept(file));
+            if (file != null) {
+                post(() -> chosen.accept(file));
             }
         }), () -> SwingUtilities.invokeLater(() -> {
             showing.set(false);
@@ -567,10 +512,7 @@ public final class GpuStartWindow {
             return;
         }
         File file = chooser.getSelectedFile();
-        Lwjgl3Application app = application;
-        if (app != null) {
-            app.postRunnable(() -> chosen.accept(file));
-        }
+        post(() -> chosen.accept(file));
     }
 
     /**
@@ -580,10 +522,7 @@ public final class GpuStartWindow {
     <T> void onSwing(Function<JFrame, T> work, Consumer<T> done) {
         SwingUtilities.invokeLater(() -> {
             T result = work.apply(anchor);
-            Lwjgl3Application app = application;
-            if (app != null) {
-                app.postRunnable(() -> done.accept(result));
-            }
+            post(() -> done.accept(result));
         });
     }
 
@@ -593,13 +532,8 @@ public final class GpuStartWindow {
      */
     public static void startFailed(boolean gameUsed) {
         GpuStartWindow window = open;
-        Lwjgl3Application app = window == null ? null : window.application;
-        if (app != null) {
-            app.postRunnable(() -> {
-                if (window.screen != null) {
-                    window.screen.startFailed(gameUsed);
-                }
-            });
+        if (window != null) {
+            window.post(() -> window.screen.startFailed(gameUsed));
         }
     }
 
@@ -633,69 +567,12 @@ public final class GpuStartWindow {
         });
     }
 
-    /** GPU thread, every frame: follows the window as the user moves, resizes or maximizes it. */
-    void frame() {
-        if (++framesSinceBounds >= BOUNDS_POLL_FRAMES) {
-            framesSinceBounds = 0;
-            trackBounds();
-        }
-    }
-
-    /** GPU thread, before the window is destroyed: returns every adopted form to its Swing owner. */
+    /** GPU thread, as the screen's listener is disposed: returns every adopted form to its Swing owner. */
     void disposing() {
+        live = false;
         GpuNativeDialogOwner owner = nativeOwner;
         if (owner != null) {
             owner.releaseAll();
-        }
-    }
-
-    /** A window saved on a monitor that has since gone, or partly off screen, is moved into a work area. */
-    private void fitOnScreen(Lwjgl3Window window) {
-        if (startBounds.centred()) {
-            return;
-        }
-        var fitted = ScreenFit.fit(startBounds.rectangle(), GpuWindowBounds.workAreas());
-        if (fitted.equals(startBounds.rectangle())) {
-            return;
-        }
-        long handle = window.getWindowHandle();
-        boolean maximized = startBounds.maximized();
-        if (maximized) {
-            window.restoreWindow();
-        }
-        GLFW.glfwSetWindowSize(handle, fitted.width, fitted.height);
-        window.setPosition(fitted.x, fitted.y);
-        if (maximized) {
-            window.maximizeWindow();
-        }
-        normalBounds = new GpuWindowBounds(fitted.x, fitted.y, fitted.width, fitted.height, maximized);
-    }
-
-    /** As the board window's: the normal bounds update only while the window is neither maximized nor minimized. */
-    private void trackBounds() {
-        if (!(Gdx.graphics instanceof Lwjgl3Graphics graphics)) {
-            return;
-        }
-        Lwjgl3Window window = graphics.getWindow();
-        if (window == null || window.isIconified() || graphics.isFullscreen()) {
-            return;
-        }
-        long handle = window.getWindowHandle();
-        int[] width = new int[1];
-        int[] height = new int[1];
-        GLFW.glfwGetWindowSize(handle, width, height);
-        currentBounds = new Rectangle(window.getPositionX(), window.getPositionY(), width[0], height[0]);
-        boolean maximized = GLFW.glfwGetWindowAttrib(handle, GLFW.GLFW_MAXIMIZED) == GLFW.GLFW_TRUE;
-        GpuWindowBounds normal = normalBounds;
-        if (!maximized) {
-            normal = new GpuWindowBounds(window.getPositionX(), window.getPositionY(), width[0], height[0], false);
-            normalBounds = normal;
-        }
-        GpuWindowBounds current = new GpuWindowBounds(normal.x(), normal.y(), normal.width(), normal.height(),
-              maximized);
-        if (!current.equals(publishedBounds)) {
-            publishedBounds = current;
-            SwingUtilities.invokeLater(() -> current.saveStart(GUIPreferences.getInstance()));
         }
     }
 
@@ -747,7 +624,7 @@ public final class GpuStartWindow {
 
     /** Centres a form of the hidden frame over the start window; the hidden frame would centre it on the screen. */
     private void centre(Dialog dialog) {
-        Rectangle bounds = currentBounds;
+        Rectangle bounds = GpuHost.clientBounds();
         if (bounds == null || dialog.getOwner() instanceof Dialog) {
             return;
         }
@@ -779,11 +656,31 @@ public final class GpuStartWindow {
         dialog.toFront();
     }
 
-    /** EDT, once the native window exists: owns the forms that floated while it opened. */
-    private void adoptFloating() {
-        if (open != this) {
+    /** EDT, once the scene has started: the lobby may show over it, and the forms that floated meanwhile are owned. */
+    private void shown() {
+        if (open != this || closeRequested) {
             return;
         }
+        backdrop = true;
+        GpuLobbyOverlay.backdropChanged();
+        adoptFloating();
+    }
+
+    /**
+     * EDT: whether the start screen shows in the window, so the game lobby can show inset over it; false while
+     * another scene (a board, an editor, a map preview or the UI library) holds the window.
+     */
+    public static boolean isBackdrop() {
+        return open != null && open.backdrop;
+    }
+
+    /** EDT: the native owner of the forms over the start screen while it is the backdrop, else null. */
+    static GpuNativeDialogOwner backdropOwner() {
+        return isBackdrop() ? open.nativeOwner : null;
+    }
+
+    /** EDT: owns the forms that floated while the scene started. */
+    private void adoptFloating() {
         for (Dialog dialog : new HashSet<>(dialogOnTop.keySet())) {
             if (dialog.isShowing()) {
                 centre(dialog);
@@ -818,11 +715,6 @@ public final class GpuStartWindow {
      */
     private void setStartEnabled(boolean enabled) {
         modalOpen = !enabled;
-        Lwjgl3Application app = application;
-        GpuStartScreen startScreen = screen;
-        if (app == null || startScreen == null) {
-            return;
-        }
-        app.postRunnable(() -> startScreen.setInputBlocked(!enabled));
+        post(() -> screen.setInputBlocked(!enabled));
     }
 }

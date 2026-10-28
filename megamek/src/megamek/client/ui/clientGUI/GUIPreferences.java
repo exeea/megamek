@@ -332,7 +332,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String FOV_SPOTTING_MODE = "FovSpottingMode";
     public static final String SHOW_OBJECTIVE_OVERLAYS = "ShowObjectiveOverlays";
     public static final String GUI_SCALE = "GUIScale";
-    public static final String BOARD_VIEW_3D = "BoardView3D";
     public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
     /** The 3D board's anti-aliasing, a choice of its Tuning panel: OFF or SMAA. */
     public static final String BOARD_ANTI_ALIASING = "BoardAntiAliasing";
@@ -493,12 +492,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GPU_BOARD_SIZE_WIDTH = "GpuBoardSizeWidth";
     public static final String GPU_BOARD_SIZE_HEIGHT = "GpuBoardSizeHeight";
     public static final String GPU_BOARD_MAXIMIZED = "GpuBoardMaximized";
-    /** Where the libGDX start window sits, in GLFW screen coordinates, as the GPU board keys are. */
-    public static final String START_WINDOW_POS_X = "StartWindowPosX";
-    public static final String START_WINDOW_POS_Y = "StartWindowPosY";
-    public static final String START_WINDOW_SIZE_WIDTH = "StartWindowSizeWidth";
-    public static final String START_WINDOW_SIZE_HEIGHT = "StartWindowSizeHeight";
-    public static final String START_WINDOW_MAXIMIZED = "StartWindowMaximized";
     /** Width of the GPU board's report panel, as last dragged. */
     public static final String GPU_REPORT_PANEL_WIDTH = "GpuReportPanelWidth";
     public static final String PLANETARY_CONDITIONS_POS_X = "PlanetaryConditionsPosX";
@@ -920,7 +913,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(FIRING_SOLUTIONS, true);
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
-        store.setDefault(BOARD_VIEW_3D, true);
         store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "DISCRETE");
         store.setDefault(BOARD_ANTI_ALIASING, "OFF");
         store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
@@ -1089,11 +1081,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(GPU_BOARD_SIZE_WIDTH, 1280);
         store.setDefault(GPU_BOARD_SIZE_HEIGHT, 800);
         store.setDefault(GPU_BOARD_MAXIMIZED, true);
-        store.setDefault(START_WINDOW_POS_X, -1);
-        store.setDefault(START_WINDOW_POS_Y, -1);
-        store.setDefault(START_WINDOW_SIZE_WIDTH, 1280);
-        store.setDefault(START_WINDOW_SIZE_HEIGHT, 800);
-        store.setDefault(START_WINDOW_MAXIMIZED, true);
         store.setDefault(GPU_REPORT_PANEL_WIDTH, 362);
         store.setDefault(PLANETARY_CONDITIONS_POS_X, -1);
         store.setDefault(PLANETARY_CONDITIONS_POS_Y, -1);
@@ -1981,14 +1968,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getFloat(GUI_SCALE);
     }
 
-    public boolean getUse3DBoard() {
-        return store.getBoolean(BOARD_VIEW_3D);
-    }
-
-    public void setUse3DBoard(boolean use3D) {
-        store.setValue(BOARD_VIEW_3D, use3D);
-    }
-
     /** The graphics card the 3D board asks for on computers with two: INTEGRATED or DISCRETE. */
     public String getBoardGraphicsCard() {
         return store.getString(BOARD_VIEW_3D_GRAPHICS_CARD);
@@ -2137,26 +2116,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getGpuBoardMaximized() {
         return store.getBoolean(GPU_BOARD_MAXIMIZED);
-    }
-
-    public int getStartWindowPosX() {
-        return store.getInt(START_WINDOW_POS_X);
-    }
-
-    public int getStartWindowPosY() {
-        return store.getInt(START_WINDOW_POS_Y);
-    }
-
-    public int getStartWindowSizeWidth() {
-        return store.getInt(START_WINDOW_SIZE_WIDTH);
-    }
-
-    public int getStartWindowSizeHeight() {
-        return store.getInt(START_WINDOW_SIZE_HEIGHT);
-    }
-
-    public boolean getStartWindowMaximized() {
-        return store.getBoolean(START_WINDOW_MAXIMIZED);
     }
 
     public int getGpuReportPanelWidth() {
@@ -3224,26 +3183,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setGpuBoardMaximized(boolean maximized) {
         store.setValue(GPU_BOARD_MAXIMIZED, maximized);
-    }
-
-    public void setStartWindowPosX(int x) {
-        store.setValue(START_WINDOW_POS_X, x);
-    }
-
-    public void setStartWindowPosY(int y) {
-        store.setValue(START_WINDOW_POS_Y, y);
-    }
-
-    public void setStartWindowSizeWidth(int width) {
-        store.setValue(START_WINDOW_SIZE_WIDTH, width);
-    }
-
-    public void setStartWindowSizeHeight(int height) {
-        store.setValue(START_WINDOW_SIZE_HEIGHT, height);
-    }
-
-    public void setStartWindowMaximized(boolean maximized) {
-        store.setValue(START_WINDOW_MAXIMIZED, maximized);
     }
 
     public void setGpuReportPanelWidth(int width) {

@@ -2156,7 +2156,6 @@ final class GpuStartScreen extends ApplicationAdapter {
         stage.act(dt);
         hud.update(Set.of());
         stage.draw();
-        window.frame();
         if (probe != null && probe.shot() != null && !shotSaved && clock() >= probe.shotAt()) {
             saveShot();
         }

@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.lwjgl.system.MemoryStack.stackPush;
 
 import java.awt.Component;
-import java.awt.Dialog;
 import java.awt.Window;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
@@ -39,7 +38,8 @@ import org.lwjgl.system.windows.User32;
 /**
  * Makes Swing dialogs native owned windows of the GPU board window, the way a dialog belongs to its frame: it stays
  * above the board without being topmost over other applications, follows it when it is minimized and has no taskbar
- * button of its own. Each platform has its own relationship:
+ * button of its own. The game lobby's frame, shown inset over the start screen, is adopted the same way. Each
+ * platform has its own relationship:
  * <ul>
  *     <li>Windows: the board window becomes the dialog's owner window. The board window stays enabled while a modal
  *     Swing dialog is open, so Windows activates it again as the dialog hides; the board ignores its own input
@@ -64,7 +64,7 @@ abstract class GpuNativeDialogOwner {
 
     private final long ownerHandle;
     /** Guarded by itself, as is {@link #released}. */
-    private final Map<Dialog, Adoption> adopted = new IdentityHashMap<>();
+    private final Map<Window, Adoption> adopted = new IdentityHashMap<>();
     private boolean released;
 
     GpuNativeDialogOwner(long ownerHandle) {
@@ -115,7 +115,7 @@ abstract class GpuNativeDialogOwner {
     }
 
     /** Swing thread: owns a showing dialog by the board window. False when it could not, so it must float instead. */
-    final boolean adopt(Dialog dialog) {
+    final boolean adopt(Window dialog) {
         if (!dialog.isDisplayable()) {
             return false;
         }
@@ -133,7 +133,7 @@ abstract class GpuNativeDialogOwner {
     }
 
     /** Swing thread: a dialog was hidden. Platforms whose hidden owned windows misbehave let it go until shown. */
-    final void hidden(Dialog dialog) {
+    final void hidden(Window dialog) {
         if (!releasesHiddenDialogs()) {
             return;
         }
@@ -145,21 +145,30 @@ abstract class GpuNativeDialogOwner {
         }
     }
 
+    /** Swing thread: returns one adopted window to the owner it had, as the game lobby does when it steps back. */
+    final void release(Window window) {
+        synchronized (adopted) {
+            Adoption adoption = adopted.remove(window);
+            if (adoption != null) {
+                detach(adoption, false);
+            }
+        }
+    }
     /** Swing thread: drops a disposed dialog, whose native window is already gone. */
-    final void forget(Dialog dialog) {
+    final void forget(Window dialog) {
         synchronized (adopted) {
             adopted.remove(dialog);
         }
     }
 
-    final boolean owns(Dialog dialog) {
+    final boolean owns(Window dialog) {
         synchronized (adopted) {
             return adopted.containsKey(dialog);
         }
     }
 
     /** The adopted dialog's native window, or 0. */
-    final long adoptedHandle(Dialog dialog) {
+    final long adoptedHandle(Window dialog) {
         synchronized (adopted) {
             Adoption adoption = adopted.get(dialog);
             return adoption == null ? 0 : adoption.handle();
@@ -184,7 +193,7 @@ abstract class GpuNativeDialogOwner {
      *
      * @return the adoption to remember, or {@code null} when the dialog could not be owned
      */
-    abstract Adoption attach(Dialog dialog, Adoption previous);
+    abstract Adoption attach(Window dialog, Adoption previous);
 
     /** Under the adoption lock: returns an adopted window to its previous owner; final before the owner goes. */
     abstract void detach(Adoption adoption, boolean ownerClosing);
@@ -221,7 +230,7 @@ abstract class GpuNativeDialogOwner {
             }
         }
 
-        static long handle(Dialog dialog) {
+        static long handle(Window dialog) {
             return dialog.isDisplayable() ? FlatNativeWindowsLibrary.getHWND(dialog) : 0;
         }
 
@@ -260,7 +269,7 @@ abstract class GpuNativeDialogOwner {
         }
 
         @Override
-        Adoption attach(Dialog dialog, Adoption previous) {
+        Adoption attach(Window dialog, Adoption previous) {
             long handle = handle(dialog);
             if (handle == 0) {
                 return null;
@@ -341,7 +350,7 @@ abstract class GpuNativeDialogOwner {
         }
 
         @Override
-        Adoption attach(Dialog dialog, Adoption previous) {
+        Adoption attach(Window dialog, Adoption previous) {
             long window = Jawt.withPlatformInfo(dialog, Cocoa::windowOfSurfaceLayers);
             if (window == 0) {
                 return null;
@@ -428,7 +437,7 @@ abstract class GpuNativeDialogOwner {
         }
 
         @Override
-        Adoption attach(Dialog dialog, Adoption previous) {
+        Adoption attach(Window dialog, Adoption previous) {
             long owner = ownerHandle();
             long window = Jawt.withPlatformInfo(dialog, platformInfo -> {
                 // The surface lock holds AWT's lock, so AWT's display connection is safe to use here.

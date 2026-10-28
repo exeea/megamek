@@ -108,8 +108,7 @@ class GpuSwingCutSmokeTest {
     void aScriptedBattleShowsNoSwingWindowOverTheNativeWindowAndTheLegacy2DBoardGetsThemBack() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         Map<String, String> saved = new LinkedHashMap<>();
-        for (String key : Stream.of(WINDOWS, SHOWN, List.of(GUIPreferences.BOT_COMMANDS_LOCATION,
-              GUIPreferences.BOARD_VIEW_3D)).flatMap(List::stream).toList()) {
+        for (String key : Stream.of(WINDOWS, SHOWN, List.of(GUIPreferences.BOT_COMMANDS_LOCATION)).flatMap(List::stream).toList()) {
             saved.put(key, preferences.getString(key));
         }
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {

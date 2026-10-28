@@ -57,6 +57,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyOverlay;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.BoardViewSpriteHandler;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.minimap.MinimapDialog;
@@ -170,16 +171,6 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
         frame.dispose();
     }
 
-    private static volatile boolean openMaximized;
-
-    /**
-     * Asks the next client window to open maximized, so the lobby keeps the start screen's maximized state. The caller
-     * clears it once the window is initialized.
-     */
-    public static void setOpenMaximized(boolean maximized) {
-        openMaximized = maximized;
-    }
-
     protected void initializeFrame() {
         if (GUIP.getWindowSizeHeight() != 0) {
             frame.setLocation(GUIP.getWindowPosX(), GUIP.getWindowPosY());
@@ -189,9 +180,6 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
         }
         frame.setMinimumSize(new Dimension(640, 480));
         UIUtil.updateWindowBounds(frame);
-        if (openMaximized) {
-            frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
-        }
 
         List<Image> iconList = new ArrayList<>();
         iconList.add(frame.getToolkit()
@@ -211,6 +199,10 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
      * should be called.
      */
     void saveSettings() {
+        if (GpuLobbyOverlay.manages(frame)) {
+            // The lobby's place over the start screen follows MegaMek's window; it is not the frame's own to keep
+            return;
+        }
         GUIP.setWindowPosX(frame.getLocation().x);
         GUIP.setWindowPosY(frame.getLocation().y);
         GUIP.setWindowSizeWidth(frame.getSize().width);

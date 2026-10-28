@@ -350,15 +350,12 @@ class ClientGUIBoardLifecycleTest {
         });
     }
 
-    private record Session(Game game, ClientGUI gui, boolean use3D, Set<CloseClientListener> closeListeners) implements AutoCloseable {
+    private record Session(Game game, ClientGUI gui, Set<CloseClientListener> closeListeners) implements AutoCloseable {
         static Session create() throws Exception {
             return create(GamePhase.LOUNGE);
         }
 
         static Session create(GamePhase phase) throws Exception {
-            GUIPreferences preferences = GUIPreferences.getInstance();
-            boolean previous = preferences.getUse3DBoard();
-            preferences.setUse3DBoard(true);
             Game game = new Game();
             game.setPhase(phase);
             Player player = new Player(0, "Native lifecycle");
@@ -380,7 +377,7 @@ class ClientGUIBoardLifecycleTest {
             var listener = ClientGUI.class.getDeclaredField("gameListener");
             listener.setAccessible(true);
             game.addGameListener((GameListener) listener.get(gui));
-            return new Session(game, gui, previous, closeListeners);
+            return new Session(game, gui, closeListeners);
         }
 
         @Override
@@ -388,7 +385,6 @@ class ClientGUIBoardLifecycleTest {
             if (gui.getFrame().isDisplayable() || !gui.boardStates().isEmpty()) {
                 gui.die();
             }
-            GUIPreferences.getInstance().setUse3DBoard(use3D);
         }
     }
 
