@@ -21,6 +21,7 @@ import java.awt.event.AWTEventListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -354,6 +355,56 @@ class GpuTuningPanelSmokeTest {
                     assertEquals(listeners, hud.hud.stage.getRoot().getCaptureListeners().size,
                           "Removing a slider removes its stage listener too");
                 } finally { Gdx.input = original; }
+            }
+        });
+    }
+
+    @Test
+    void assetReloadProgressStaysLiveWithoutNewBoardSnapshots() {
+        GpuHudTestStage.run(harness -> {
+            try (Hud hud = new Hud(harness)) {
+                for (int[] size : SIZES) {
+                    harness.size(size[0], size[1]);
+                    hud.resize();
+                    hud.show();
+                    if (!hud.find("tuning-panel").isVisible()) { hud.click("tuning-button"); }
+                    hud.click("tuning-reload-assets");
+                    assertTrue(hud.tuning.takeAssetReloadRequest());
+                    assertFalse(hud.tuning.takeAssetReloadRequest());
+                    assertTrue(hud.<UiButton>find("tuning-reload-assets").isDisabled());
+                    assertTrue(hud.find("tuning-reload-progress").isVisible());
+                    assertEquals(-1, hud.tuning.assetReloadFraction());
+
+                    Path file = Path.of("models/board/textures/terrain/surfaces/grassland-ground_albedo.png");
+                    hud.tuning.assetSyncProgress(new GpuAssetSync.Progress("Checking assets", 50, 100, 3, file));
+                    // During sync GpuBattleView only draws the HUD; there is no fresh ui.update(frame, ...).
+                    hud.hud.draw();
+                    assertEquals("50 / 100 files · 3 copied", hud.<Label>find("tuning-reload-count").getText().toString());
+                    assertEquals(file.toString(), hud.<Label>find("tuning-reload-file").getText().toString());
+                    assertEquals(.5f, hud.tuning.assetReloadFraction());
+                    hud.capture("tuning-asset-progress-" + size[0] + "x" + size[1]);
+                    GpuBoardTestUi.assertHorizontalBounds(hud.find("tuning-frame"), hud.find("tuning-frame"));
+
+                    hud.tuning.assetReloadStage("Reloading artwork");
+                    hud.hud.draw();
+                    assertEquals(-1, hud.tuning.assetReloadFraction(), "An unknown stage must not claim 100%");
+                    assertEquals("", hud.<Label>find("tuning-reload-file").getText().toString());
+                    hud.tuning.assetReloadFinished(false);
+                    hud.hud.draw();
+                    assertNull(hud.hud.stage.getRoot().findActor("tuning-reload-progress"));
+                    assertFalse(hud.<UiButton>find("tuning-reload-assets").isDisabled());
+
+                    hud.click("tuning-reload-assets");
+                    assertTrue(hud.tuning.takeAssetReloadRequest(), "Failure allows a retry");
+                    hud.tuning.assetSyncProgress(new GpuAssetSync.Progress("Checking assets", 0, 0, 0, null));
+                    hud.hud.draw();
+                    assertEquals("0 / 0 files · 0 copied", hud.<Label>find("tuning-reload-count").getText().toString());
+                    assertTrue(Float.isFinite(hud.tuning.assetReloadFraction()));
+                    hud.tuning.assetReloadFinished(true);
+                    hud.hud.draw();
+                    assertNull(hud.hud.stage.getRoot().findActor("tuning-reload-progress"));
+                    assertEquals("OK", hud.tuning.assetReloadStatus().getText().toString());
+                }
             }
         });
     }

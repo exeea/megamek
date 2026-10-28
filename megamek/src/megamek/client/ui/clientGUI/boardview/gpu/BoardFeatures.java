@@ -235,8 +235,8 @@ final class BoardFeatures {
             result.add(new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
                   Math.max(1, hex.terrainLevel(heightTerrain)), 0, switch (structure.getKey()) {
                       case Terrains.BUILDING -> BoardScene.FeatureKind.BUILDING;
-                      case Terrains.INDUSTRIAL -> BoardScene.FeatureKind.INDUSTRIAL;
-                      default -> BoardScene.FeatureKind.PROP;
+                      case Terrains.FUEL_TANK -> BoardScene.FeatureKind.FUEL_TANK;
+                      default -> BoardScene.FeatureKind.INDUSTRIAL;
                   }));
         }
         addBridge(hex, result);
@@ -803,12 +803,6 @@ final class BoardFeatures {
         return snowForm(hex, object.asset(), object.bare());
     }
 
-    /** A fuel tank: the only structure model drawn as a plain prop rather than a building or an industrial plant. */
-    static boolean fuelTank(BoardScene.Feature feature) {
-        return feature.decoration() == null && feature.kind() == BoardScene.FeatureKind.PROP
-              && feature.asset().startsWith("buildings/");
-    }
-
     /**
      * The receiving surface a drawn structure offers placed objects (see {@link
      * megamek.common.board.BoardDecoration.Receiver}): a building's roof, an industrial top or a fuel tank's top, or
@@ -818,7 +812,7 @@ final class BoardFeatures {
         return feature.decoration() != null ? null
               : feature.kind() == BoardScene.FeatureKind.BUILDING ? "building"
               : feature.kind() == BoardScene.FeatureKind.INDUSTRIAL ? "industrial"
-              : fuelTank(feature) ? "fuelTank" : null;
+              : feature.kind() == BoardScene.FeatureKind.FUEL_TANK ? "fuelTank" : null;
     }
 
     /**

@@ -12,9 +12,9 @@ import java.util.regex.Pattern;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
-import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
@@ -26,12 +26,13 @@ import org.lwjgl.opengl.GL40;
 /**
  * Tessellation of the sculpted relief where the context offers it (OpenGL 4.0 and later: every Mac's 4.1, current
  * Windows and Linux drivers' 4.6). The relief's facets, 1 to 2 m on a bank or cliff, become Phong-tessellated patches
- * (Boubekeur and Alexa 2008) that follow the smooth normals its shading already uses, so its silhouettes and the outlines
- * of the shadows it casts round as its shading does. A program's vertex stage becomes three: a vertex stage that passes
- * the mesh's inputs on, a control stage that splits each edge from the pass's own camera, and an evaluation stage that
- * runs the original vertex stage on every point of the patch, so every output the fragment stage reads stays the same.
- * The stages travel in one vertex source, apart at {@link #CONTROL} and {@link #EVALUATION} lines (GpuGlsl splits them).
- * Every pass that draws the relief (colour, depth pre-pass, shadows) tessellates it alike. The Tuning panel's
+ * (Boubekeur and Alexa 2008) that follow the smooth normals its shading already uses, so its rims and silhouettes round
+ * as its shading does. A program's vertex stage becomes three: a vertex stage that passes the mesh's inputs on, a
+ * control stage that splits each edge from the camera, and an evaluation stage that runs the original vertex stage on
+ * every point of the patch, so every output the fragment stage reads stays the same. The stages travel in one vertex
+ * source, apart at {@link #CONTROL} and {@link #EVALUATION} lines (GpuGlsl splits them). The colour pass and its depth
+ * pre-pass twin tessellate the relief alike; the shadow map draws its flat triangles, which the curve only ever rises
+ * above, so nothing shades itself. The Tuning panel's
  * Tessellation switch (GpuTerrain#setTessellation, off by default) rebuilds the board; built with it on, only the
  * full-detail triangles that curve ({@link #curves}) go in patches. Render thread.
  */
@@ -72,8 +73,8 @@ final class GpuTessellation {
     static boolean curved(Material material) { return material.id.endsWith(CURVED); }
 
     /**
-     * Whether a triangle with these corners and vertex normals curves: one of its edges bulges more than nine tenths of
-     * {@link #BULGE_METRES}. Every other edge keeps one segment, straight (tessellation-control.glsl), so the triangles
+     * Whether a triangle with these corners and vertex normals curves: one of its edges bulges outward more than nine
+     * tenths of {@link #BULGE_METRES}. Every other edge keeps one segment, straight (tessellation-control.glsl), so the triangles
      * that do not curve meet those that do without a crack; the margin keeps the stage's own test, whose shape only
      * lessens the bulge, from splitting an edge built as straight.
      */
@@ -82,14 +83,19 @@ final class GpuTessellation {
         return bulge(a, na, b, nb) > least || bulge(b, nb, c, nc) > least || bulge(c, nc, a, na) > least;
     }
 
-    /** How far the Phong curve of the edge from a to b stands from it at its middle (tessellation-control.glsl). */
+    /**
+     * How far the Phong curve of the edge from a to b rises from it at its middle (tessellation-control.glsl); 0 where it
+     * would sink, which the evaluation stage keeps flat.
+     */
     private static float bulge(Vector3 a, Vector3 na, Vector3 b, Vector3 nb) {
         float la = na.len(), lb = nb.len();
         if (la == 0 || lb == 0) { return 0; }
         float hx = (b.x - a.x) / 2, hy = (b.y - a.y) / 2, hz = (b.z - a.z) / 2;
         float da = (hx * na.x + hy * na.y + hz * na.z) / (la * la), db = (hx * nb.x + hy * nb.y + hz * nb.z) / (lb * lb);
+        // The bulge is half of minus this, outward where it leans along the two normals.
         float x = da * na.x - db * nb.x, y = da * na.y - db * nb.y, z = da * na.z - db * nb.z;
-        return .5f * (float) Math.sqrt(x * x + y * y + z * z);
+        float along = x * (na.x / la + nb.x / lb) + y * (na.y / la + nb.y / lb) + z * (na.z / la + nb.z / lb);
+        return along < 0 ? .5f * (float) Math.sqrt(x * x + y * y + z * z) : 0;
     }
 
     /**
@@ -232,8 +238,8 @@ final class GpuTessellation {
     }
 
     /**
-     * The control stage's inputs: the pass's own camera (the view, or the light for the shadow map) with the part's
-     * placement, and the target's size in pixels or shadow-map texels, so each pass splits by what it resolves.
+     * The control stage's inputs: the pass's camera with the part's placement, and its target's size in pixels, so the
+     * colour pass and its depth twin split by what the view resolves.
      */
     static void register(BaseShader shader) {
         shader.register("u_tessView", new BaseShader.LocalSetter() {

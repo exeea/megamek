@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -253,6 +254,8 @@ class GpuBattleView extends ApplicationAdapter {
     private long hoverCameraRevision;
     private int cameraTerrainRevision = -1;
     private boolean reloadingAssets;
+    // Coalesce file-worker updates; at most one immutable snapshot is applied per rendered frame.
+    private final AtomicReference<GpuAssetSync.Progress> assetSyncProgress = new AtomicReference<>();
     private boolean waitingForAssetCapture;
     private boolean assetReloadFailed;
     private boolean disposed;
@@ -555,6 +558,7 @@ class GpuBattleView extends ApplicationAdapter {
     private void renderBoard() {
         if (!waitingForAssetCapture && shaderEdits.update() && terrain != null) { terrain.shadersChanged(); }
         if (tuning != null && tuning.takeAssetReloadRequest()) { reloadAssets(); }
+        showAssetSyncProgress();
         if (waitingForAssetCapture || assetReloadFailed) {
             if (source.isClosed()) { Gdx.app.exit(); return; }
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
@@ -590,19 +594,30 @@ class GpuBattleView extends ApplicationAdapter {
         reloadingAssets = true;
         waitingForAssetCapture = true;
         assetReloadFailed = false;
+        assetSyncProgress.set(null);
         var application = Gdx.app;
         var data = Configuration.dataDir().toPath();
         Thread.ofVirtual().name("gpu-asset-sync").start(() -> {
             try {
-                var result = GpuAssetSync.sync(data);
+                var result = GpuAssetSync.sync(data, assetSyncProgress::set);
                 if (result.source() != null) {
                     LOGGER.info("Asset reload copied {} changed files from {} to {}", result.copied(), result.source(), data);
                 }
+                application.postRunnable(() -> {
+                    if (disposed || source.isClosed()) { return; }
+                    showAssetSyncProgress();
+                    tuning.assetReloadStage("Reloading artwork");
+                });
                 captureReloadedAssets(application);
             } catch (java.io.IOException | RuntimeException failure) {
                 assetReloadFailed(application, failure);
             }
         });
+    }
+
+    private void showAssetSyncProgress() {
+        var progress = assetSyncProgress.getAndSet(null);
+        if (progress != null) { tuning.assetSyncProgress(progress); }
     }
 
     private void captureReloadedAssets(Application application) {
@@ -612,6 +627,7 @@ class GpuBattleView extends ApplicationAdapter {
                 application.postRunnable(() -> shaderEdits.run(() -> {
                     if (disposed || source.isClosed()) { return; }
                     waitingForAssetCapture = false;
+                    tuning.assetReloadStage("Rebuilding board assets");
                     try {
                         disposeSceneRenderers();
                         clearUnitInstances();
@@ -658,6 +674,7 @@ class GpuBattleView extends ApplicationAdapter {
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
         reloadingAssets = false;
         waitingForAssetCapture = false;
+        assetSyncProgress.set(null);
         assetReloadFailed = true;
         tuning.assetReloadFinished(false);
     }

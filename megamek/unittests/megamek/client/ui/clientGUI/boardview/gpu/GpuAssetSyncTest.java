@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,54 @@ import org.junit.jupiter.params.provider.ValueSource;
 class GpuAssetSyncTest {
     @TempDir
     Path directory;
+
+    @Test
+    void reportsInventoryAndCompletedFileProgressIncludingUnchangedFiles() throws Exception {
+        Path source = directory.resolve("mm-data/data"), target = directory.resolve("installation/data");
+        write(source.resolve("models/unchanged.glb"), "same");
+        write(target.resolve("models/unchanged.glb"), "same");
+        write(source.resolve("models/changed.glb"), "new mesh");
+        write(target.resolve("models/changed.glb"), "old mesh");
+        write(source.resolve("images/new.png"), "new image");
+        write(source.resolve("images/Thumbs.db"), "ignored");
+        write(source.resolve("mekfiles/unit.mtf"), "ignored");
+        List<GpuAssetSync.Progress> updates = new ArrayList<>();
+
+        var result = GpuAssetSync.sync(target, updates::add);
+
+        assertEquals(2, result.copied());
+        assertEquals(-1, updates.getFirst().total(), "Discovery has no invented percentage");
+        assertEquals(List.of(1, 2, 3), updates.stream().filter(p -> p.phase().equals("Listing mm-data"))
+              .map(GpuAssetSync.Progress::completed).toList());
+        int completed = 0;
+        for (var progress : updates) {
+            if (progress.file() != null) { assertFalse(progress.file().isAbsolute()); }
+            if (progress.total() < 0) { continue; }
+            assertEquals(3, progress.total(), "Only eligible assets enter the total");
+            assertTrue(progress.completed() >= completed && progress.completed() <= 3);
+            assertTrue(progress.copied() <= progress.completed(), "In-flight copies are not counted as done");
+            completed = progress.completed();
+        }
+        assertEquals(3, updates.getLast().completed());
+        assertEquals(2, updates.getLast().copied());
+        assertEquals(2, updates.stream().filter(p -> p.phase().equals("Copying assets")).count());
+        assertEquals("new mesh", Files.readString(target.resolve("models/changed.glb")));
+        assertEquals("new image", Files.readString(target.resolve("images/new.png")));
+    }
+
+    @Test
+    void failedComparisonDoesNotReportTheFileAsComplete() throws Exception {
+        Path target = directory.resolve("installation/data");
+        write(directory.resolve("mm-data/data/models/wall.glb"), "mesh");
+        Files.createDirectories(target.resolve("models/wall.glb"));
+        List<GpuAssetSync.Progress> updates = new ArrayList<>();
+
+        assertThrows(IOException.class, () -> GpuAssetSync.sync(target, updates::add));
+
+        assertEquals(1, updates.getLast().total());
+        assertEquals(0, updates.getLast().completed());
+        assertEquals(0, updates.getLast().copied());
+    }
 
     @ParameterizedTest
     @ValueSource(strings = { "installation/data", "repository/megamek/data" })

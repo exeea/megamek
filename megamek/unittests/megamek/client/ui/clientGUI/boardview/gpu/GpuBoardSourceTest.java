@@ -432,7 +432,7 @@ class GpuBoardSourceTest {
                 assertTrue(tile.features().stream().anyMatch(feature -> buildingSources.contains(feature.asset())
                       && feature.height() == 4 && feature.kind() == BoardScene.FeatureKind.BUILDING));
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/fuel_tanks/fuel_tank_medium_")
-                      && feature.height() == 2 && feature.kind() == BoardScene.FeatureKind.PROP));
+                      && feature.height() == 2 && feature.kind() == BoardScene.FeatureKind.FUEL_TANK));
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/misc/heavy_industrial_")
                       && feature.height() == 3 && feature.kind() == BoardScene.FeatureKind.INDUSTRIAL));
             });

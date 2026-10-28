@@ -920,7 +920,11 @@ A developer and tester tool, to be removed before release.
   Fit board accounts for the current panel clearances. The gameplay right column starts one gap below the utility
   row and fills the available height; the phase header moves below that row when both cannot fit across the window. Tuning opens
   at the same top, 360 wide and ending at least 70 above the bottom, with the pages Display, Board, Atmosphere, Terrain
-  and Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor). The
+  and Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor).
+  During Reload assets, an area above the footer shows discovery, checking/copying progress, the checked/total
+  file count, copied count and current relative filename (hover for the full path). Discovery and later artwork
+  reload stages pulse without a percentage; file progress uses the actual inventory total. The display keeps
+  updating while board snapshots are paused, and disappears when the reload succeeds or fails. The
   Terrain page opens the Material palette (`GpuMaterialPalette`): a Swing window with every board material on a flat
   tile, a cube or a sphere, drawn by the model shader with its whole finish (`GpuMaterialSwatches`,
   `GpuAssets.finish`) under the default daylight. It orders them by folder, similarity (a chain of nearest looks:

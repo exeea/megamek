@@ -54,7 +54,8 @@ class GpuSceneryPlacementSmokeTest {
             var control = capture(sample, false);
             if (!sample.structure().isEmpty()) {
                 assertTrue(control.tile(CENTER).features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.BUILDING
-                      || f.kind() == BoardScene.FeatureKind.INDUSTRIAL || f.kind() == BoardScene.FeatureKind.PROP),
+                      || f.kind() == BoardScene.FeatureKind.INDUSTRIAL || f.kind() == BoardScene.FeatureKind.FUEL_TANK
+                      || f.kind() == BoardScene.FeatureKind.PROP),
                       sample.name() + " must include an actual solid model");
             }
             controls.add(control);

@@ -263,8 +263,11 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    /** {@code SHAFT}: a Solaris elevator's shaft, which no model draws: the terrain builds its hex's walls as steel. */
-    enum FeatureKind { PROP, BUILDING, INDUSTRIAL, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY, METAL, SHAFT }
+    /**
+     * {@code FUEL_TANK}: a fuel tank, a structure without the floors, interior and cutaways of a {@code BUILDING}.
+     * {@code SHAFT}: a Solaris elevator's shaft, which no model draws: the terrain builds its hex's walls as steel.
+     */
+    enum FeatureKind { PROP, BUILDING, INDUSTRIAL, FUEL_TANK, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY, METAL, SHAFT }
 
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
     enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD, TUNDRA }

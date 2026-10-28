@@ -129,8 +129,9 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) 
     vec3 du = dFdx(shadowUv), dv = dFdy(shadowUv);
     float det = du.x * dv.y - du.y * dv.x;
     vec2 slope = abs(det) > 1e-14 ? vec2(dv.y * du.z - du.y * dv.z, du.x * dv.z - dv.x * du.z) / det : vec2(0.0);
-    // After the receiver plane: the fray moves where the edge falls, not the surface's own depth.
-    shadowUv.xy += fray * metre * .5 * length(row);
+    // After the receiver plane: the fray moves where the edge falls, along the surface as the taps do, never into it.
+    vec2 frayUv = fray * metre * .5 * length(row);
+    shadowUv += vec3(frayUv, clamp(dot(frayUv, slope), -.002, .002));
     // Contact hardening: a bank's rim casts a crisp edge and a tower a soft one. What casts the shadow is found by
     // comparisons alone, without a second sampler: four taps over the widest disk, and where any is shadowed, the same
     // taps again with the receiver 3 m and 15 m nearer the sun; a blocker still found there stands farther away.

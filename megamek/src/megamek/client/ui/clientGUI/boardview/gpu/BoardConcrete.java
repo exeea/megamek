@@ -160,7 +160,7 @@ final class BoardConcrete {
      */
     static boolean fitFeature(BoardScene.Feature feature) {
         return feature.kind() == BoardScene.FeatureKind.BUILDING || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
-              || feature.kind() == BoardScene.FeatureKind.PROP;
+              || feature.kind() == BoardScene.FeatureKind.FUEL_TANK || feature.kind() == BoardScene.FeatureKind.PROP;
     }
 
     /**

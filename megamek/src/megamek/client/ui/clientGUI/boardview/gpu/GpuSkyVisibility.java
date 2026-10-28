@@ -17,13 +17,14 @@ import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.glutils.CustomTexture3DData;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
  * How much of the sky each point above the board sees past the board's own relief, for the sky light of every lit
  * surface (sky-visibility.glsl): a canyon's floor and the feet of its walls see a strip of sky, a plateau all of it.
- * A volume over the board from the hexes' tops, their surfaces or the roofs of the structures standing on them: sampled
- * on the render thread when they change, its horizons searched on a worker, uploaded on the render thread. It rides on
+ * A volume over the board from its tops, the hexes' surfaces and the bodies of the structures standing on them: sampled
+ * and its horizons searched on a worker when they change, uploaded on the render thread. It rides on
  * the environment's lighting (GpuEnvironmentLighting), which every lit program with that lighting compiles it for, with
  * a neutral volume until the first arrives: libGDX has no attribute type to spare, and no program changes when a volume
  * does. Render state, never game state.
@@ -62,8 +63,10 @@ final class GpuSkyVisibility implements Disposable {
     private long heights;
     /** The scene whose heights changed since the search under way began; null when none waits. */
     private BoardScene waiting;
-    private Field pendingField;
-    private CompletableFuture<byte[]> pending;
+    private CompletableFuture<Volume> pending;
+
+    /** A searched volume: its frame and its values. */
+    private record Volume(Field field, byte[] values) { }
 
     /**
      * Puts this on the lighting of the board's {@code environment} with the sky occlusion at {@code strength} (0 to 1,
@@ -103,39 +106,35 @@ final class GpuSkyVisibility implements Disposable {
 
     private void startSearch(BoardScene scene) {
         waiting = null;
-        Field field = field(scene);
-        pendingField = field;
-        pending = CompletableFuture.supplyAsync(() -> search(field));
+        // On the worker: the structures' footprints may read their kits from disk.
+        pending = CompletableFuture.supplyAsync(() -> {
+            Field field = field(scene);
+            return new Volume(field, search(field));
+        });
     }
 
     /**
-     * What hides the sky over a hex: its surface, or the roof of the structure standing on it (a building, fuel tank or
-     * industrial plant, the game's height in levels), as if it filled the hex. A collapse lowers it.
+     * The hexes' surfaces and what stands on their structures (a building, fuel tank or industrial plant: its kit, height
+     * and connections follow its features; a collapse changes them), and the board geometry that places them.
      */
-    private static float top(BoardScene.Tile tile) {
-        var cover = tile.cover();
-        return BoardGeometry.surfaceZ(tile) + (cover.structure() != 0 ? cover.height() * BoardGeometry.level() : 0);
-    }
-
-    /** The hexes' tops, and the board geometry that places them. */
     private static long signature(BoardScene scene) {
         long result = Float.floatToIntBits(BoardGeometry.level()) * 31L + Float.floatToIntBits(BoardGeometry.width());
         for (BoardScene.Tile tile : scene.tiles()) {
             result = result * 31 + tile.coords().hashCode();
-            result = result * 31 + Float.floatToIntBits(top(tile));
+            result = result * 31 + Float.floatToIntBits(BoardGeometry.surfaceZ(tile));
+            if (tile.cover().structure() != 0) { result = result * 31 + tile.features().hashCode(); }
         }
         return result;
     }
 
     private void install() {
-        Field field = pendingField;
-        CompletableFuture<byte[]> search = pending;
+        CompletableFuture<Volume> search = pending;
         // Cleared first: a failed search throws once and leaves the last volume in place.
         pending = null;
-        pendingField = null;
-        byte[] values = search.join();
+        Volume volume = search.join();
+        Field field = volume.field();
         if (texture != null) { texture.dispose(); }
-        texture = upload(field.width(), field.height(), field.layers(), values);
+        texture = upload(field.width(), field.height(), field.layers(), volume.values());
         originX = field.x() - field.cell() / 2;
         originY = field.y() - field.cell() / 2;
         originZ = field.z() - field.layer() / 2;
@@ -145,7 +144,11 @@ final class GpuSkyVisibility implements Disposable {
         cell = field.cell();
     }
 
-    /** The hexes' tops at the cells' centres, and the layers that span them. Render thread. */
+    /**
+     * The board's tops at the cells' centres, and the layers that span them: the hexes' surfaces, raised to the top of a
+     * structure's body (BoardObstacles#structures) where it reaches within half a cell of the centre, so a wall thinner
+     * than a cell still counts and the ground between a building and its hex's edge stays ground. Worker thread.
+     */
     private static Field field(BoardScene scene) {
         float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
         float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
@@ -160,17 +163,40 @@ final class GpuSkyVisibility implements Disposable {
         int width = Math.max(1, (int) Math.ceil((maxX - minX) / cell));
         int height = Math.max(1, (int) Math.ceil((maxY - minY) / cell));
         float[] heights = new float[width * height];
-        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
         for (int j = 0; j < height; j++) {
             for (int i = 0; i < width; i++) {
                 BoardScene.Tile tile = BoardGeometry.tile(scene, minX + (i + .5f) * cell, minY + (j + .5f) * cell);
-                float z = tile == null ? Float.NaN : top(tile);
-                heights[j * width + i] = z;
-                if (tile != null) {
-                    low = Math.min(low, z);
-                    high = Math.max(high, z);
+                heights[j * width + i] = tile == null ? Float.NaN : BoardGeometry.surfaceZ(tile);
+            }
+        }
+        for (BoardScene.Tile tile : scene.tiles()) {
+            if (tile.cover().structure() == 0) { continue; }
+            for (var body : BoardObstacles.structures(scene, tile)) {
+                var points = body.triangles();
+                for (int n = 0; n < points.size(); n += 3) {
+                    Vector3 a = points.get(n), b = points.get(n + 1), c = points.get(n + 2);
+                    // The cells whose centres lie within half a cell of the triangle's bounds.
+                    int i0 = Math.max(0, (int) Math.ceil((Math.min(a.x, Math.min(b.x, c.x)) - minX) / cell - 1));
+                    int i1 = Math.min(width - 1, (int) Math.floor((Math.max(a.x, Math.max(b.x, c.x)) - minX) / cell));
+                    int j0 = Math.max(0, (int) Math.ceil((Math.min(a.y, Math.min(b.y, c.y)) - minY) / cell - 1));
+                    int j1 = Math.min(height - 1, (int) Math.floor((Math.max(a.y, Math.max(b.y, c.y)) - minY) / cell));
+                    for (int j = j0; j <= j1; j++) {
+                        for (int i = i0; i <= i1; i++) {
+                            // NaN, off the board, stays off it.
+                            if (heights[j * width + i] < body.high() && BoardObstacles.Footprint.near(a, b, c,
+                                  minX + (i + .5f) * cell, minY + (j + .5f) * cell, cell / 2)) {
+                                heights[j * width + i] = body.high();
+                            }
+                        }
+                    }
                 }
             }
+        }
+        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+        for (float z : heights) {
+            // NaN, off the board, never wins a comparison.
+            if (z < low) { low = z; }
+            if (z > high) { high = z; }
         }
         // From a level under the lowest surface to two above the highest, where the whole sky shows.
         float bottom = low - BoardGeometry.level(), top = high + 2 * BoardGeometry.level();
@@ -318,6 +344,5 @@ final class GpuSkyVisibility implements Disposable {
         tiles = null;
         waiting = null;
         pending = null;
-        pendingField = null;
     }
 }

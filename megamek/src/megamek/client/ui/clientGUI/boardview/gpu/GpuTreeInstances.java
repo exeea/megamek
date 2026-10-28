@@ -11,13 +11,11 @@ import java.util.WeakHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attribute;
-import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.Renderable;
@@ -460,10 +458,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
      * A depth pass that also draws instanced trees: each of its shaders renders either instanced renderables or the
      * others, never both. Instanced trees use the plain configuration with the instanced vertex shader.
      */
-    static DepthShaderProvider depthProvider(DepthShader.Config plain) { return depthProvider(plain, renderable -> false); }
-
-    /** {@code tessellated}: the draws whose depth follows their colour pass's tessellation (GpuTessellation). */
-    static DepthShaderProvider depthProvider(DepthShader.Config plain, Predicate<Renderable> tessellated) {
+    static DepthShaderProvider depthProvider(DepthShader.Config plain) {
         DepthShader.Config trees = new DepthShader.Config(depthVertex(plain.vertexShader != null ? plain.vertexShader
               : GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true)), plain.fragmentShader);
         trees.defaultCullFace = plain.defaultCullFace;
@@ -482,27 +477,16 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                     vertex = GpuBuildingCutaway.depthVertex(vertex, instanced);
                     fragment = "in float v_buildingHeight;\n" + GpuBuildingCutaway.depthFragment(fragment, "v_buildingHeight");
                 }
-                boolean tessellate = tessellated.test(renderable);
-                DepthShader result = new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth"
-                      + (tessellate ? " tessellated" : ""), DepthShader.createPrefix(renderable, chosen),
-                      tessellate ? GpuTessellation.vertex(vertex) : vertex, fragment)) {
+                DepthShader result = new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
+                      DepthShader.createPrefix(renderable, chosen),
+                      vertex, fragment)) {
                     @Override
                     public boolean canRender(Renderable other) {
                         return instanced(other) == instanced && other.material.has(GpuBuildingCutaway.TYPE) == cutaway
-                              && tessellated.test(other) == tessellate && super.canRender(other);
-                    }
-
-                    @Override
-                    public void render(Renderable part, Attributes attributes) {
-                        if (tessellate) { GpuTessellation.render(part, () -> super.render(part, attributes)); }
-                        else { super.render(part, attributes); }
+                              && super.canRender(other);
                     }
                 };
                 GpuBuildingCutaway.register(result);
-                if (tessellate) {
-                    GpuTessellation.tessellated(result.program);
-                    GpuTessellation.register(result);
-                }
                 return result;
             }
         };

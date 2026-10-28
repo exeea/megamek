@@ -50,14 +50,18 @@ final class BoardObstacles {
             for (int i = 0; i < triangles.size(); i += 3) {
                 Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
                 if (localHeight && base.z > Math.max(a.z, Math.max(b.z, c.z))) { continue; }
-                float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-                if (Math.abs(area) > .00001f
-                      && Intersector.isPointInTriangle(base.x, base.y, a.x, a.y, b.x, b.y, c.x, c.y)
-                      || BoardRelief.distance(base.x, base.y, a.x, a.y, b.x, b.y) <= radius
-                      || BoardRelief.distance(base.x, base.y, b.x, b.y, c.x, c.y) <= radius
-                      || BoardRelief.distance(base.x, base.y, c.x, c.y, a.x, a.y) <= radius) { return true; }
+                if (near(a, b, c, base.x, base.y, radius)) { return true; }
             }
             return false;
+        }
+
+        /** Whether the board point (x, y) lies on the triangle abc seen from above, or within {@code radius} of it. */
+        static boolean near(Vector3 a, Vector3 b, Vector3 c, float x, float y, float radius) {
+            float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            return Math.abs(area) > .00001f && Intersector.isPointInTriangle(x, y, a.x, a.y, b.x, b.y, c.x, c.y)
+                  || BoardRelief.distance(x, y, a.x, a.y, b.x, b.y) <= radius
+                  || BoardRelief.distance(x, y, b.x, b.y, c.x, c.y) <= radius
+                  || BoardRelief.distance(x, y, c.x, c.y, a.x, a.y) <= radius;
         }
 
         /**
@@ -88,12 +92,25 @@ final class BoardObstacles {
     /** {@code plants}: what obstructs ground cover (grass, crops, reeds, turf), which grows through a civilian wall's net. */
     BoardObstacles(BoardScene scene, BoardScene.Tile tile, boolean plants) {
         this.plants = plants;
-        add(scene, tile);
+        add(scene, tile, false);
         // Rim rocks can overhang their hex; a neighbour's structure can do the same.
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = scene.tile(tile.coords().translated(direction));
-            if (neighbor != null) { add(scene, neighbor); }
+            if (neighbor != null) { add(scene, neighbor, false); }
         }
+    }
+
+    private BoardObstacles() { plants = true; }
+
+    /**
+     * The solid bodies of the structures standing on {@code tile} as placed on the board (buildings, fuel tanks,
+     * industry, a military wall's body; a civilian wall's open fencing is none): what of them hides the sky
+     * (GpuSkyVisibility).
+     */
+    static List<Footprint> structures(BoardScene scene, BoardScene.Tile tile) {
+        var result = new BoardObstacles();
+        result.add(scene, tile, true);
+        return result.footprints;
     }
 
     boolean isEmpty() { return footprints.isEmpty(); }
@@ -102,8 +119,11 @@ final class BoardObstacles {
         return footprints.stream().anyMatch(footprint -> footprint.obstructs(base, radius, height));
     }
 
-    private void add(BoardScene scene, BoardScene.Tile tile) {
+    private void add(BoardScene scene, BoardScene.Tile tile, boolean structures) {
         for (var captured : tile.features()) {
+            if (structures && captured.kind() != BoardScene.FeatureKind.BUILDING
+                  && captured.kind() != BoardScene.FeatureKind.INDUSTRIAL
+                  && captured.kind() != BoardScene.FeatureKind.FUEL_TANK) { continue; }
             var feature = BoardGroundCut.fitted(scene, tile, captured);
             var object = feature.decoration();
             if (feature.asset().equals("bridge") && object == null) {
@@ -126,7 +146,7 @@ final class BoardObstacles {
             }
             // Bridges already have height-aware passage/approach clearance. Fields are ground cover, not solids.
             if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
-                  && feature.kind() != BoardScene.FeatureKind.PROP
+                  && feature.kind() != BoardScene.FeatureKind.FUEL_TANK && feature.kind() != BoardScene.FeatureKind.PROP
                   && feature.kind() != BoardScene.FeatureKind.SCENERY
                   || feature.asset().equals("bridge") || feature.asset().equals("vegetation/field")) { continue; }
             boolean wall = BoardWall.supports(feature.asset());

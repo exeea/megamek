@@ -895,8 +895,7 @@ final class GpuTerrain implements Disposable {
     }
 
     private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
-          GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")),
-                GpuTerrain::tessellates)),
+          GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")))),
           new GpuOpaqueSorter());
 
     void shadersChanged() { refreshShadows(); }
@@ -1296,7 +1295,10 @@ final class GpuTerrain implements Disposable {
               && !GpuTessellation.curved(material);
     }
 
-    /** Sculpted relief built as curving (GpuTessellation#curved) draws tessellated: colour, twin and shadow alike. */
+    /**
+     * Sculpted relief built as curving (GpuTessellation#curved) draws tessellated, colour and depth twin alike; shadows
+     * draw its flat triangles, which the curve only ever rises above (tessellation-evaluation.glsl).
+     */
     private static boolean tessellates(Renderable renderable) {
         return GpuTessellation.available() && GpuTessellation.curved(renderable.material)
               && !GpuTreeInstances.instanced(renderable);
@@ -3514,9 +3516,7 @@ final class GpuTerrain implements Disposable {
         int programs = 0, linked = 0;
         for (Renderable sample : terrainMaterialSamples) {
             boolean twinned = prepasses(prepass(sample.material));
-            // The editor's shadows link with the rest; a curving material's tessellated shadow program does everywhere.
-            boolean casts = editable || GpuTessellation.curved(sample.material);
-            programs += (twinned ? 2 : 1) + (casts ? 1 : 0);
+            programs += (twinned ? 2 : 1) + (editable ? 1 : 0);
             // Beside interactive frames (an edit, the editor's samples) the rest wait once a frame spent its budget.
             if (GpuGlsl.overBudget()) { continue; }
             long start = System.nanoTime();
@@ -3525,7 +3525,7 @@ final class GpuTerrain implements Disposable {
             // Its depth twin links here too, after it, behind the loading stage, never at a first draw.
             boolean twin = colour && twinned && terrainMaterialPreparation.run(() ->
                   prepassTwins.put(shaderGroup(sample.shader), GpuShaderProvider.unwrap(twinOf(sample))));
-            boolean cast = casts && terrainMaterialPreparation.run(() -> {
+            boolean cast = editable && terrainMaterialPreparation.run(() -> {
                 Shader colourShader = sample.shader;
                 sample.shader = null;
                 try { depthBatch.getShaderProvider().getShader(sample); }
@@ -4479,7 +4479,7 @@ final class GpuTerrain implements Disposable {
             prop.receiver = BoardFeatures.receiver(feature);
             chunk.props.add(prop);
             if (feature.decoration() == null && (feature.kind() == BoardScene.FeatureKind.BUILDING
-                  || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
+                  || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL || feature.kind() == BoardScene.FeatureKind.FUEL_TANK
                   || feature.kind() == BoardScene.FeatureKind.PROP && !feature.asset().equals("vegetation/field"))) {
                 supports.add(prop);
             }

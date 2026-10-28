@@ -175,7 +175,7 @@ class BoardObstaclesTest {
         Coords neighbor = CENTER.translated(0);
         float x = (BoardGeometry.centerX(CENTER) - BoardGeometry.centerX(neighbor)) / BoardGeometry.hexScale();
         float y = (BoardGeometry.centerY(CENTER) - BoardGeometry.centerY(neighbor)) / BoardGeometry.hexScale();
-        var feature = new BoardScene.Feature(TANK, x, y, 27, 1, 2, 0, BoardScene.FeatureKind.PROP);
+        var feature = new BoardScene.Feature(TANK, x, y, 27, 1, 2, 0, BoardScene.FeatureKind.FUEL_TANK);
         BoardScene scene = scene(neighbor, feature, 0);
         var obstacles = new BoardObstacles(scene, scene.tile(CENTER));
         assertFalse(obstacles.isEmpty());
@@ -195,8 +195,8 @@ class BoardObstaclesTest {
 
     @Test
     void rimRocksCannotIntrudeIntoAnAuthoredStructure() {
-        var small = new BoardScene.Feature(TANK, 18, 0, 0, 1, 2, 0, BoardScene.FeatureKind.PROP);
-        var clear = new BoardScene.Feature(TANK, 300, 0, 0, 1, 2, 0, BoardScene.FeatureKind.PROP);
+        var small = new BoardScene.Feature(TANK, 18, 0, 0, 1, 2, 0, BoardScene.FeatureKind.FUEL_TANK);
+        var clear = new BoardScene.Feature(TANK, 300, 0, 0, 1, 2, 0, BoardScene.FeatureKind.FUEL_TANK);
         BoardScene original = scene(CENTER, clear, 3), occupied = scene(CENTER, small, 3);
         var baseline = new BoardSurface(original, original.tile(CENTER)).faces.stream()
               .filter(face -> face.finish() == BoardSurface.Finish.OUTCROP).toList();
@@ -265,10 +265,10 @@ class BoardObstaclesTest {
         Coords neighbor = CENTER.translated(0);
         float x = (BoardGeometry.centerX(CENTER) - BoardGeometry.centerX(neighbor)) / BoardGeometry.hexScale();
         float y = (BoardGeometry.centerY(CENTER) - BoardGeometry.centerY(neighbor)) / BoardGeometry.hexScale();
-        var feature = new BoardScene.Feature(TANK, x, y, 0, 1, 2, 0, BoardScene.FeatureKind.PROP);
+        var feature = new BoardScene.Feature(TANK, x, y, 0, 1, 2, 0, BoardScene.FeatureKind.FUEL_TANK);
         BoardScene scene = scene(neighbor, feature, 0);
         BoardScene clear = scene(neighbor, new BoardScene.Feature(TANK, 300, 0, 0, 1, 2, 0,
-              BoardScene.FeatureKind.PROP), 0);
+              BoardScene.FeatureKind.FUEL_TANK), 0);
         var surface = new BoardSurface(scene, scene.tile(CENTER));
         var freeSurface = new BoardSurface(clear, clear.tile(CENTER));
         var obstacles = new BoardObstacles(scene, scene.tile(CENTER));

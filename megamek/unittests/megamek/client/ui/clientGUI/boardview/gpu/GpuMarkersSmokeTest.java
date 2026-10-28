@@ -387,7 +387,7 @@ class GpuMarkersSmokeTest {
     }
 
     private static void checkAllKinds(GpuMarkers markers, GpuTerrain terrain, GpuAtmosphere atmosphere,
-          GpuUnitVisibility visibility, ModelBatch batch, List<Pixmap> captures) {
+          GpuUnitVisibility visibility, ModelBatch batch, List<Pixmap> captures) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 15; x++) {
             for (int y = 0; y < 12; y++) {

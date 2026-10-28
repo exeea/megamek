@@ -178,6 +178,9 @@ final class GpuBoardTuning {
     private boolean syncing;
     private final TextButton reloadAssets;
     private final Label assetReloadStatus;
+    private String assetReloadPhase = "";
+    private String assetReloadFile = "";
+    private float assetReloadFraction = -1;
     private final TextButton editShaders;
     private boolean assetReloadRequested;
 
@@ -490,7 +493,7 @@ final class GpuBoardTuning {
               new Knob("Shadows", 0, 100, 1, "%.0f%%",
                     "Cast-shadow strength: 0 removes geometry shadows; 100 keeps full occlusion. Independent of moon contrast."),
               new Knob("Ambient light", 0, 100, 1, "%.0f%%",
-                    "Ambient/direct balance: 20 is the default daylight balance, 0 is direct only, 100 is ambient only."),
+                    "Ambient/direct balance: 22 is the default daylight balance, 0 is direct only, 100 is ambient only."),
               new Knob("Sky contribution", 0, 200, 1, "%.0f%%",
                     "Scales sky illumination and reflections. 100 is the default; 0 removes them. The visible sky is unchanged.")),
               this::applyRendering, 0);
@@ -764,8 +767,10 @@ final class GpuBoardTuning {
 
     /** Reload assets (its button, the material palette's): the board reloads them on its next frame. Render thread. */
     private void requestAssetReload() {
+        if (reloadAssets.isDisabled()) { return; }
         reloadAssets.setDisabled(true);
-        assetReloadStatus.setText("Reloading...");
+        assetReloadStage("Finding mm-data");
+        assetReloadStatus.setText("Looking for authoring assets...");
         assetReloadRequested = true;
     }
 
@@ -777,8 +782,32 @@ final class GpuBoardTuning {
 
     void assetReloadFinished(boolean success) {
         reloadAssets.setDisabled(false);
+        assetReloadPhase = "";
+        assetReloadFile = "";
         assetReloadStatus.setText(success ? "OK" : "FAIL (logs)");
     }
+
+    /** The render thread applies the latest worker snapshot; widgets are never touched by the file worker. */
+    void assetSyncProgress(GpuAssetSync.Progress progress) {
+        assetReloadPhase = progress.phase();
+        assetReloadFraction = progress.total() < 0 ? -1
+              : progress.total() == 0 ? 1 : progress.completed() / (float) progress.total();
+        assetReloadFile = progress.file() == null ? "" : progress.file().toString();
+        assetReloadStatus.setText(progress.total() < 0
+              ? String.format(Locale.ROOT, "Found %,d files", progress.completed())
+              : String.format(Locale.ROOT, "%,d / %,d files · %,d copied",
+                    progress.completed(), progress.total(), progress.copied()));
+    }
+
+    void assetReloadStage(String phase) {
+        assetReloadPhase = phase;
+        assetReloadFraction = -1;
+        assetReloadFile = "";
+    }
+
+    String assetReloadPhase() { return assetReloadPhase; }
+    String assetReloadFile() { return assetReloadFile; }
+    float assetReloadFraction() { return assetReloadFraction; }
 
     private Table section(Skin skin, String title) {
         float spacing = rows.hasChildren() ? 8 : 0;

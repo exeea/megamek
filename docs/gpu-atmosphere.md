@@ -47,7 +47,7 @@ fog banks and lightning still animate.
 | --- | --- |
 | Time, moonlight, exposure, moon shadow contrast | `BoardAtmosphere.lighting()` determines the light; the composite applies user exposure. |
 | Shadows | Geometry shadow strength, 0–100%, independent of moon contrast and cloud shadows; default 100%. |
-| Ambient light | Ambient/direct balance, default 20% (the existing clear-noon 1:4 balance); 0 selects direct only, 100 ambient only. |
+| Ambient light | Ambient/direct balance, default 22%; 0 selects direct only, 100 ambient only. |
 | Sky contribution | Scales environment diffuse illumination and reflections, 0–200%, default 100%; leaves the visible sky unchanged. |
 | Lighting environment | Optional 2:1 panoramic PNG/JPEG or Radiance HDR, up to 8192×4096. Used only for lighting/reflections; clearing it restores generated sky lighting. |
 | Fixed sun/moon | Uses the camera basis for a stable screen direction; terrain, units, clouds and shafts must receive that same direction. |
@@ -357,11 +357,14 @@ that 0.3 s.
 
 The sky occlusion by the board's relief (`GpuSkyVisibility`, `sky-visibility.glsl`) is lighting, on in the board at
 `GpuSkyVisibility.STRENGTH` (0 to 1: 1 the full darkening, .5 half of it; 0 leaves it out of every program and searches
-nothing), independent of that option. It counts the hexes' tops: their surfaces, or the roofs of the buildings, fuel tanks and industrial plants
-standing on them (the game's height in levels, as if they filled the hex; a collapse lowers it). Trees do not count.
+nothing), independent of that option. It counts the board's tops: the hexes' surfaces, raised to the tops of the
+buildings, fuel tanks, industrial plants and military walls standing on them where their drawn bodies stand
+(`BoardObstacles.structures`, the footprints ground cover grows to; a civilian wall's open fencing does not count). Trees
+do not count.
 
-- The volume: on the render thread, when the tops change, they are sampled on a 4 m grid (at most 256 cells a side);
-  a worker searches 16 horizons to 300 m for each cell of a volume up to two levels above the highest top (half-level
+- The volume: on a worker, when the tops change, they are sampled on a 4 m grid (at most 256 cells a side; a cell takes
+  a structure's top where its body comes within half a cell of the centre, so a thin wall still counts) and the worker
+  searches 16 horizons to 300 m for each cell of a volume up to two levels above the highest top (half-level
   layers, at most 64) and stores, for each quarter of the compass, a level receiver's share of that quarter's sky, the
   mean cos² of the horizon's elevation; the render thread uploads it as an RGBA8 3D texture. A cell inside the ground
   searches from the lowest top around it, so behind a wall's foot it holds the foot's shade and filtering there does

@@ -240,22 +240,23 @@ faces stay planes and only its corners soften (fully rounded, a mesa and a pilla
 and plants not at all. The colour alone decides, so the shadow pass rounds alike.
 
 Only what shows passes through the stages. Built with the switch on, a full-detail chunk (the detail levels below it
-draw a facet a few pixels across) puts its sculpted triangles that curve, those with an edge whose Phong curve bulges
+draw a facet a few pixels across) puts its sculpted triangles that curve, those with an edge whose Phong curve rises
 more than nine tenths of `GpuTessellation.BULGE_METRES` (3 cm) from it at its middle (`GpuTessellation.curves`), in a
-copy of their material (`GpuTessellation.curvedCopy`, id suffix `#curved`). The control stage
-(`tessellation-control.glsl`) gives an edge that bulges less one segment, straight, so those triangles meet the others
-without a crack. Otherwise it splits the edge into the fewest whole segments (equal spacing, so no sliver triangles) that
-keep the curve within half a pixel of the pass's target (shadow-map texels in the shadow pass), the bulge as that pass
-sees it over the segments squared, at most 8, from the edge's two vertices alone, so neighbouring patches split it alike;
-the inside takes the edges' mean. A zoom changes the segments every frame without a rebuild. The evaluation stage
-(`tessellation-evaluation.glsl`) places the point and runs the original vertex stage on it, its inputs interpolated, so
-every output the fragment stage reads stays the same. The stages are generated from the vertex source and travel in it,
-apart at `#pragma stage(...)` lines that `GpuGlsl` splits when it links; the program cache keys on the whole. The colour
-programs, their depth-pre-pass twins and the shadow-depth programs of sculpted relief tessellate alike; the wireframe
-view keeps the triangles. While the switch is on, every sculpted material's curving copy links its programs, its shadow
-program included, and requests its family program behind the loading stage (`GpuTerrain.prepareTerrainMaterial`,
+copy of their material (`GpuTessellation.curvedCopy`, id suffix `#curved`). The curve only rises: the evaluation stage
+(`tessellation-evaluation.glsl`) keeps the outward part of the Phong offset, along the point's normal, so a rim rounds
+and a slope's foot keeps its plane. The shadow map draws the flat triangles, which the drawn surface so never sinks
+below: nothing shades itself. The control stage (`tessellation-control.glsl`) gives an edge that rises less, or would
+sink, one segment, straight, so those triangles meet the others without a crack. Otherwise it splits the edge into the
+fewest whole segments (equal spacing, so no sliver triangles) that keep the curve within half a pixel of them as the
+camera sees it (the bulge over the segments squared), at most 8, from the edge's two vertices alone, so neighbouring
+patches split it alike; the inside takes the edges' mean. The evaluation stage places the point and runs the original
+vertex stage on it, its inputs interpolated, so every output the fragment stage reads stays the same. The stages are
+generated from the vertex source and travel in it, apart at `#pragma stage(...)` lines that `GpuGlsl` splits when it
+links; the program cache keys on the whole. The colour programs and their depth-pre-pass twins tessellate alike, from
+the same camera; the wireframe view keeps the triangles. While the switch is on, every sculpted material's curving copy
+links its programs and requests its family program behind the loading stage (`GpuTerrain.prepareTerrainMaterial`,
 `curvedFamilies`), so a zoom into full detail links nothing (`GpuShaderLoadSmokeTest`). On the Iris Xe it costs the
-opaque terrain 0.7 to 3.6 ms a frame in `GpuTerrainBenchmarkSmokeTest` (whole frames 1.3 to 4.3 ms; most close up,
+opaque terrain 1.1 to 2.3 ms a frame in `GpuTerrainBenchmarkSmokeTest` (medians of four runs, most close up,
 2026-10-28); drawing every relief triangle tessellated had cost 8 to 13 ms.
 
 ## Uniforms, inputs and previews

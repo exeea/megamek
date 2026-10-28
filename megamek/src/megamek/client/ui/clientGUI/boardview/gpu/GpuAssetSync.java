@@ -10,7 +10,9 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /** Overlays authoring assets from a sibling mm-data checkout before the existing asset reload. */
 final class GpuAssetSync {
@@ -18,10 +20,18 @@ final class GpuAssetSync {
 
     record Result(Path source, int copied) { }
 
+    /** Immutable worker snapshot; total is -1 until the file inventory is complete. */
+    record Progress(String phase, int completed, int total, int copied, Path file) { }
+
     private GpuAssetSync() { }
 
     /** Copies new or byte-different assets; never removes files that only exist in the running data directory. */
     static Result sync(Path data) throws IOException {
+        return sync(data, progress -> { });
+    }
+
+    static Result sync(Path data, Consumer<Progress> progress) throws IOException {
+        progress.accept(new Progress("Finding mm-data", 0, -1, 0, null));
         Path target = data.toAbsolutePath().normalize();
         Path source = findSource(target);
         if (source == null) { return new Result(null, 0); }
@@ -31,7 +41,7 @@ final class GpuAssetSync {
         if (source.startsWith(targetRoot) || targetRoot.startsWith(source)) {
             throw new IOException("Asset source and staged data directories overlap: " + source + ", " + targetRoot);
         }
-        int[] copied = { 0 };
+        List<Path> files = new ArrayList<>();
         for (String name : ASSET_DIRECTORIES) {
             Path directory = source.resolve(name);
             if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) { continue; }
@@ -50,17 +60,27 @@ final class GpuAssetSync {
                     if (!attributes.isRegularFile() || filename.equals(".DS_Store") || filename.equals("Thumbs.db")) {
                         return FileVisitResult.CONTINUE;
                     }
-                    Path destination = target.resolve(source.relativize(file));
-                    checkDestination(destination, targetRoot);
-                    if (!Files.exists(destination) || Files.mismatch(file, destination) != -1) {
-                        copy(file, destination);
-                        copied[0]++;
-                    }
+                    files.add(file);
+                    progress.accept(new Progress("Listing mm-data", files.size(), -1, 0, source.relativize(file)));
                     return FileVisitResult.CONTINUE;
                 }
             });
         }
-        return new Result(source, copied[0]);
+        int completed = 0, copied = 0;
+        progress.accept(new Progress("Checking assets", 0, files.size(), 0, null));
+        for (Path file : files) {
+            Path relative = source.relativize(file), destination = target.resolve(relative);
+            progress.accept(new Progress("Checking assets", completed, files.size(), copied, relative));
+            checkDestination(destination.getParent(), targetRoot);
+            checkDestination(destination, targetRoot);
+            if (!Files.exists(destination) || Files.mismatch(file, destination) != -1) {
+                progress.accept(new Progress("Copying assets", completed, files.size(), copied, relative));
+                copy(file, destination);
+                copied++;
+            }
+            progress.accept(new Progress("Checking assets", ++completed, files.size(), copied, relative));
+        }
+        return new Result(source, copied);
     }
 
     /** Supports both an installation's data/ and Gradle's repository/megamek/data/. */

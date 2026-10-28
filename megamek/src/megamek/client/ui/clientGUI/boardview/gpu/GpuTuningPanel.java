@@ -63,7 +63,14 @@ final class GpuTuningPanel implements GpuHud.Component {
     private final BoardCamera camera;
     private final GpuBoardTuning tuning;
     /** The window-sized root that places the panel; presses beside the panel reach the board. */
-    private final Table root = new Table();
+    private final Table root = new Table() {
+        @Override
+        public void act(float delta) {
+            // Asset sync pauses board snapshots, but the HUD still draws and must show live progress.
+            if (isVisible()) { shows.forEach(Runnable::run); }
+            super.act(delta);
+        }
+    };
     private final UiButton button;
     /** Each copies the model's state into one shown widget; they run every frame while the panel is open. */
     private final List<Runnable> shows = new ArrayList<>();
@@ -128,7 +135,6 @@ final class GpuTuningPanel implements GpuHud.Component {
                   .maxHeight(metrics.height() - top - BOTTOM);
             root.invalidate();
         }
-        shows.forEach(Runnable::run);
     }
 
     /** The panel: the header with its close button, the tabs, the chosen tab's page, and the footer with Defaults. */
@@ -157,6 +163,8 @@ final class GpuTuningPanel implements GpuHud.Component {
         UiKit.Segmented tabs = ui.segmented("hud-tab", false, text("GpuBoard.hud.tuning.display"),
               text("GpuBoard.hud.tuning.board"), text("GpuBoard.hud.tuning.atmosphere"),
               text("GpuBoard.hud.tuning.terrain"), text("GpuBoard.hud.tuning.camera"));
+        // Five tabs need a smaller gap than the toolkit's general-purpose tab row in this 360-unit panel.
+        for (int i = 1; i < tabs.buttons.size(); i++) { tabs.getCell(tabs.buttons.get(i)).padLeft(14); }
         tabs.left().pad(2, 14, 0, 14);
         frame.add(tabs).growX().row();
         List<ScrollPane> pages = List.of(page("tuning-display", mirror(tuning.displayRows())),
@@ -176,13 +184,45 @@ final class GpuTuningPanel implements GpuHud.Component {
             });
         }
         tabs.select(0);
+        Table reload = new Table();
+        reload.setName("tuning-reload-progress");
+        UiKit.Meter progress = ui.meter("", false);
+        Label count = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        count.setName("tuning-reload-count");
+        count.setEllipsis(true);
+        Label file = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        file.setName("tuning-reload-file");
+        file.setEllipsis(true);
+        var fileTip = ui.tip(file);
+        reload.add(progress).growX().row();
+        reload.add(count).minWidth(0).growX().left().padTop(5).row();
+        reload.add(file).minWidth(0).growX().left().padTop(3);
+        Cell<Table> reloadCell = frame.add((Table) null).growX();
+        frame.row();
+        shows.add(() -> {
+            boolean active = !tuning.assetReloadPhase().isEmpty();
+            if (active != (reloadCell.getActor() != null)) {
+                reloadCell.setActor(active ? reload : null).pad(active ? 8 : 0, active ? 14 : 0,
+                      active ? 8 : 0, active ? 14 : 0);
+                frame.invalidateHierarchy();
+            }
+            if (!active) { return; }
+            float fraction = tuning.assetReloadFraction();
+            // Unknown totals pulse without inventing a percentage, including discovery and artwork capture.
+            float filled = fraction < 0 ? .5f + .3f * (float) Math.sin(System.nanoTime() / 300_000_000.0) : fraction;
+            progress.caption(tuning.assetReloadPhase()).set(fraction < 0 ? "…" : (int) (fraction * 100) + "%",
+                  filled, UiTheme.MINT);
+            count.setText(tuning.assetReloadStatus().getText());
+            file.setText(tuning.assetReloadFile());
+            fileTip.getActor().setText(tuning.assetReloadFile());
+        });
         // The model's footer buttons: Defaults, Reload assets with its outcome, and the shader editor (M1 rows 8, 9).
         Table foot = ui.footer(frame);
         foot.add(button(tuning.defaults(), "hud-mini")).left();
         foot.add(button(tuning.reloadAssets(), "hud-mini")).padLeft(6);
         Label reloaded = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
         reloaded.setEllipsis(true);
-        shows.add(() -> reloaded.setText(tuning.assetReloadStatus().getText()));
+        shows.add(() -> reloaded.setText(tuning.assetReloadPhase().isEmpty() ? tuning.assetReloadStatus().getText() : ""));
         foot.add(reloaded).minWidth(0).growX().left().padLeft(6);
         foot.add(button(tuning.editShaders(), "hud-mini")).right();
         panelCell = root.add(frame);
