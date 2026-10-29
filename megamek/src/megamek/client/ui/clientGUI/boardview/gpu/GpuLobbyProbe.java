@@ -95,6 +95,13 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+requisition}: opens the Requisition view; with {@code +atlas} it searches for "Atlas", with
  *     {@code +filters} it opens the Filters drawer and with {@code +pick} it picks the first result, showing its
  *     dossier.</li>
+ *     <li>{@code lobby+clickcompact}: clicks the forces' compact rows toggle through the stage, as a pointer would,
+ *     {@value GpuLobbyScreen#PROBE_CLICK_AT} s in; with {@code +formations} it does so in the formations view.</li>
+ *     <li>{@code lobby+requisition+clickfilters}: clicks the Requisition's Filters button through the stage at the same
+ *     time, opening the drawer; {@code +closefilters} clicks it again a second later, shutting it.</li>
+ *     <li>{@code lobby+requisition+hoverrow}: half a second before the shot, puts the pointer on the second result row
+ *     at its right end, beside the scroll bar, and logs where the rows and their values end against the bar;
+ *     {@code +hoverbar} puts it on the bar instead.</li>
  *     <li>{@code lobby+dialog=name}: opens a Swing dialog as the lobby's control would once the shot's time comes, and
  *     saves a photograph of the window and its dialogs, taken from the screen only when the dialog is in front,
  *     instead of the frame buffer, which has no Swing dialogs; the

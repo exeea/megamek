@@ -23,6 +23,7 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
@@ -42,6 +43,7 @@ import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiVirtualList;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.loaders.MekSummary;
 import megamek.logging.MMLogger;
@@ -63,6 +65,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     static final String REQUISITION = "requisition";
     /** How many catalogue sprites the Requisition keeps as textures; the least recently shown go first. */
     private static final int REQUISITION_SPRITES = 200;
+    /** When the developer switch's clicks run, in seconds after the lobby shows. */
+    static final double PROBE_CLICK_AT = 1.5;
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -94,6 +98,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean railPending;
     private boolean menuPending;
     private boolean unitMenuPending;
+    /** The developer switch's clicks and pointer, run through the stage once their time comes. */
+    private boolean clickCompactPending;
+    private int filterClicksPending;
+    private String hoverPending;
     /** The units' sprites by their window's key, and each shown unit's. */
     private final Map<String, Texture> spriteTextures = new HashMap<>();
     private final Map<Integer, Drawable> spriteDrawables = new HashMap<>();
@@ -152,6 +160,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         railPending = probe.options().contains("rail");
         menuPending = probe.options().contains("menu");
         unitMenuPending = probe.options().contains("unitmenu");
+        clickCompactPending = probe.options().contains("clickcompact");
+        filterClicksPending = probe.options().contains("closefilters") ? 2 : probe.options().contains("clickfilters")
+              ? 1 : 0;
+        hoverPending = probe.options().contains("hoverbar") ? "bar" : probe.options().contains("hoverrow") ? "row"
+              : null;
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -599,9 +612,50 @@ final class GpuLobbyScreen extends ApplicationAdapter {
               && forces.openFirstUnitMenu()) {
             unitMenuPending = false;
         }
+        probeInput();
         hud.update(Set.of());
         stage.draw();
         takeShot();
+    }
+
+    /**
+     * The developer switch's clicks, through the stage as the Commander's would go: the compact rows toggle and the
+     * Filters button {@value #PROBE_CLICK_AT} s in, Filters again a second later to shut the drawer, and half a second
+     * before the shot the pointer on the second result row beside the scroll bar, or on the bar.
+     */
+    private void probeInput() {
+        GpuLobbyProbe probe = window.probe();
+        if (probe == null) {
+            return;
+        }
+        double elapsed = (System.nanoTime() - start) / 1e9;
+        if (clickCompactPending && elapsed > PROBE_CLICK_AT) {
+            clickCompactPending = false;
+            GpuLobbyProbeInput.click(stage, forces.compactToggle());
+            LOGGER.info("The lobby probe's compact click: compact rows {}", forces.compact() ? "on" : "off");
+        }
+        if (filterClicksPending > 0 && REQUISITION.equals(centre.showing())
+              && elapsed > PROBE_CLICK_AT + (filterClicksPending == 1 && probe.options().contains("closefilters")
+              ? 1 : 0)) {
+            filterClicksPending--;
+            GpuLobbyProbeInput.click(stage, requisition.filtersToggle());
+            LOGGER.info("The lobby probe's Filters click: the drawer is {}", requisition.drawerOpen() ? "open"
+                  : "shut");
+        }
+        if (hoverPending != null && elapsed > probe.shotAt() - .5 && !requisition.resultsList().items().isEmpty()) {
+            ScrollPane pane = requisition.resultsPane();
+            UiVirtualList<?> list = requisition.resultsList();
+            float rowHeight = list.getPrefHeight() / list.items().size();
+            int[] at = "bar".equals(hoverPending)
+                  ? GpuLobbyProbeInput.hover(stage, pane, pane.getWidth() - pane.getScrollBarWidth() / 2,
+                  pane.getHeight() / 2)
+                  : GpuLobbyProbeInput.hover(stage, list, list.getWidth() - 1,
+                  list.getHeight() - pane.getScrollY() - rowHeight * 1.5f);
+            LOGGER.info("The lobby probe's pointer is on the results' {} at {}", hoverPending,
+                  at == null ? "nothing" : at[0] + "," + at[1]);
+            hoverPending = null;
+            requisition.probeMeasure();
+        }
     }
 
     /** Saves the developer switch's PNG once its time has come, then quits when it asks to. */
