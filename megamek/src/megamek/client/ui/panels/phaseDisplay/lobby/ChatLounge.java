@@ -42,7 +42,6 @@ import static megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility.extractSu
 import static megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility.haveSingleOwner;
 import static megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility.invalidBoardTip;
 import static megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility.isBoardFile;
-import static megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility.isValidStartPos;
 import static megamek.client.ui.util.UIUtil.scaleForGUI;
 import static megamek.client.ui.util.UIUtil.setHighQualityRendering;
 import static megamek.client.ui.util.UIUtil.uiGray;
@@ -96,7 +95,6 @@ import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.MegaMek;
 import megamek.SuiteConstants;
-import megamek.client.AbstractClient;
 import megamek.client.Client;
 import megamek.client.bot.BotClient;
 import megamek.client.bot.BotFactory;
@@ -105,6 +103,7 @@ import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.generator.RandomCallsignGenerator;
 import megamek.client.generator.RandomNameGenerator;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.DialogButton;
 import megamek.client.ui.buttons.MMToggleButton;
@@ -149,7 +148,6 @@ import megamek.common.board.BoardFile;
 import megamek.common.board.postprocess.TWBoardTransformer;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.NeuralInterfaceMode;
-import megamek.common.equipment.BombLoadout;
 import megamek.common.event.GameCFREvent;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.GameSettingsChangeEvent;
@@ -176,8 +174,6 @@ import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
-import megamek.common.units.FighterSquadron;
-import megamek.common.units.IBomber;
 import megamek.common.util.BoardUtilities;
 import megamek.common.util.CollectionUtil;
 import megamek.common.util.CrewSkillSummaryUtil;
@@ -379,7 +375,8 @@ public class ChatLounge extends AbstractPhaseDisplay
 
     private final transient MapListMouseAdapter mapListMouseListener = new MapListMouseAdapter();
 
-    transient LobbyActions lobbyActions = new LobbyActions(this);
+    transient LobbyCommands lobbyCommands = new LobbyCommands(this::client, new SwingLobbyPrompts(this));
+    transient LobbyActions lobbyActions = new LobbyActions(lobbyCommands);
 
     private final Map<String, String> boardTags = new HashMap<>();
 
@@ -400,9 +397,6 @@ public class ChatLounge extends AbstractPhaseDisplay
     private static final String CL_ACTION_COMMAND_CONFIGURE = "CONFIGURE";
     private static final String CL_ACTION_COMMAND_AUTO_RESOLVE = "AUTORESOLVE";
     private static final String CL_ACTION_COMMAND_CAMO = "camo";
-
-    /** The chat command that takes or gives up the gamemaster role. */
-    private static final String GAME_MASTER_COMMAND = "/gm";
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
     private static final ClientPreferences CLIENT_PREFERENCES = PreferenceManager.getClientPreferences();
@@ -575,9 +569,8 @@ public class ChatLounge extends AbstractPhaseDisplay
             }
 
             // Update the player from the camo selection
-            player.setCamouflage(ccd.getSelectedItem());
+            lobbyCommands.changePlayerCamo(getSelectedClient(), ccd.getSelectedItem());
             butCamo.setIcon(player.getCamouflage().getImageIcon());
-            getSelectedClient().sendPlayerInfo();
         } finally {
             ccd.dispose();
         }
@@ -1844,72 +1837,11 @@ public class ChatLounge extends AbstractPhaseDisplay
     }
 
     /**
-     * Embarks the given carried Entity onto the carrier given as carrierId.
-     */
-    void loadOnto(Entity carried, int carrierId, int bayNumber) {
-        Entity carrier = game().getEntity(carrierId);
-        if (carrier == null || !isLoadable(carried, carrier)) {
-            return;
-        }
-
-        // We need to make sure our current bomb choices fit onto the new fighter
-        if (carrier instanceof FighterSquadron fSquad) {
-            // We can't use Aero.getBombPoints() because the bombs haven't been loaded yet, only selected, so we have
-            // to count the choices
-            BombLoadout bombChoices = fSquad.getBombChoices();
-            // We can't load all the squadrons bombs
-            if (bombChoices.getTotalBombCost() > ((IBomber) carried).getMaxBombPoints()) {
-                JOptionPane.showMessageDialog(clientgui.getFrame(),
-                      Messages.getString("FighterSquadron.bomberror"),
-                      Messages.getString("FighterSquadron.bomberror"),
-                      JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-        }
-
-        getLocalClient(carried).sendLoadEntity(carried.getId(), carrierId, bayNumber);
-        // TODO: it would probably be a good idea to disable some settings for loaded units in customMekDialog
-    }
-
-    /**
-     * Have the given entity disembark if it is carried by another unit. Entities that are modified and need an update
-     * to be sent to the server are added to the given updateCandidates.
-     */
-    void disembark(Entity entity, Collection<Entity> updateCandidates) {
-        if (entity.getTransportId() == Entity.NONE) {
-            return;
-        }
-        Entity carrier = game().getEntity(entity.getTransportId());
-        if (carrier != null) {
-            carrier.unload(entity);
-            entity.setTransportId(Entity.NONE);
-            updateCandidates.add(entity);
-            updateCandidates.add(carrier);
-        }
-    }
-
-    /**
      * Have the given entities detach from their tractors if it's a trailer. Entities that are modified and need an
      * update to be sent to the server are added to the given updateCandidates.
      */
     void detachFromTractors(Set<Entity> trailers, Collection<Entity> updateCandidates) {
-        for (Entity trailer : trailers) {
-            detachFromTractor(trailer, updateCandidates);
-        }
-    }
-
-    /**
-     * Have the given entity detach from its tractor if it's a trailer. Entities that are modified and need an update to
-     * be sent to the server are added to the given updateCandidates.
-     */
-    void detachFromTractor(Entity trailer, Collection<Entity> updateCandidates) {
-        if (trailer.getTowedBy() == Entity.NONE) {
-            return;
-        }
-        // Detaching mid-train affects the whole train, so work from the tractor heading it rather than from the
-        // trailer immediately in front, which would leave the rest of the train out of the update.
-        Entity tractor = game().getEntity(trailer.getTractor());
-        disconnectTrain(tractor, trailer, updateCandidates);
+        lobbyCommands.detachFromTractors(trailers, updateCandidates);
     }
 
     /**
@@ -1917,79 +1849,15 @@ public class ChatLounge extends AbstractPhaseDisplay
      * the server are added to the given updateCandidates.
      */
     void detachTrailers(Set<Entity> tractors, Collection<Entity> updateCandidates) {
-        for (Entity tractor : tractors) {
-            detachTrailer(tractor, updateCandidates);
-        }
+        lobbyCommands.detachTrailers(tractors, updateCandidates);
     }
 
     /**
-     * Have the given entity detach a towed trailer. Entities that are modified and need an update to be sent to the
-     * server are added to the given updateCandidates.
-     */
-    void detachTrailer(Entity tractor, Collection<Entity> updateCandidates) {
-        if (tractor.getTowing() == Entity.NONE) {
-            return;
-        }
-        Entity trailer = game().getEntity(tractor.getTowing());
-        disconnectTrain(tractor, trailer, updateCandidates);
-    }
-
-    private void disconnectTrain(Entity tractor, Entity trailer, Collection<Entity> updateCandidates) {
-        if (tractor != null && trailer != null) {
-            // An off board train stays hooked up. There is no board position to drop a trailer at, and the train is
-            // the only thing holding the trailer's place off the map edge.
-            if (tractor.isOffBoard() || trailer.isOffBoard()) {
-                LobbyErrors.showNoDetachOffBoard(clientgui.getFrame());
-                return;
-            }
-            // Copy the ids: disconnectUnit drops the detached trailers from this list as it works, and walking
-            // the live view afterwards fails with a ConcurrentModificationException.
-            List<Integer> otherTowedUnitIds = new ArrayList<>(tractor.getAllTowedUnits());
-            tractor.disconnectUnit(trailer.getId());
-            updateCandidates.add(trailer);
-            updateCandidates.add(tractor);
-            for (int otherTowedUnitId : otherTowedUnitIds) {
-                Entity otherTowedUnit = game().getEntity(otherTowedUnitId);
-                if (otherTowedUnit != null) {
-                    updateCandidates.add(otherTowedUnit);
-                }
-            }
-        }
-    }
-
-    /**
-     * Have the given entities offload all the units they are carrying. Returns a set of entities that need to be sent
-     * to the server.
+     * Have the given entities offload all the units they are carrying. Entities that are modified are added to the
+     * given updateCandidates.
      */
     void offloadAll(Collection<Entity> entities, Collection<Entity> updateCandidates) {
-        for (Entity carrier : editableEntities(entities)) {
-            offloadFrom(carrier, updateCandidates);
-        }
-    }
-
-    /**
-     * Have the given entity offload all the units it is carrying. Returns a set of entities that need to be sent to the
-     * server.
-     */
-    void offloadFrom(Entity entity, Collection<Entity> updateCandidates) {
-        if (isEditable(entity)) {
-            for (Entity carriedUnit : entity.getLoadedUnits()) {
-                disembark(carriedUnit, updateCandidates);
-            }
-        }
-    }
-
-    /**
-     * Set the provided trailer to be towed by the tractor.
-     */
-    void towBy(Entity trailer, int tractorId) {
-        Entity tractor = game().getEntity(tractorId);
-        if (tractor == null || !tractor.canTow(trailer.getId())) {
-            return;
-        }
-
-        getLocalClient(trailer).sendTowEntity(trailer.getId(), tractor.getId());
-        // TODO: it would probably be a good idea to disable some settings for loaded units in customMekDialog
+        lobbyCommands.offloadAll(entities, updateCandidates);
     }
 
     /**
@@ -1997,69 +1865,26 @@ public class ChatLounge extends AbstractPhaseDisplay
      * own or his bots' units.
      */
     void sendUpdate(Collection<Entity> updateCandidates) {
-        for (Entity e : editableEntities(updateCandidates)) {
-            getLocalClient(e).sendUpdateEntity(e);
-        }
+        lobbyCommands.sendUpdate(updateCandidates);
     }
 
     void sendProxyUpdates(Collection<Entity> updateCandidates, Player player) {
-        getLocalClient(player).sendUpdateEntity(updateCandidates);
+        lobbyCommands.sendProxyUpdates(updateCandidates, player);
     }
 
     /**
      * Disembarks all given entities from any transports they are in.
      */
     void disembarkAll(Collection<Entity> entities) {
-        Set<Entity> updateCandidates = new HashSet<>();
-        entities.stream().filter(this::isEditable).forEach(e -> disembark(e, updateCandidates));
-        sendUpdate(updateCandidates);
+        lobbyCommands.disembarkAll(entities);
     }
 
     /**
      * Returns true when the given entity may be configured by the local player, i.e. if it is his own unit or one of
-     * his bot's units.
-     * <p>
-     * Note that this is more restrictive than the Server is. The Server accepts entity changes also for teammates so
-     * that entity updates that signal transporting a teammate's unit don't get rejected. I feel that configuration
-     * other than transporting units should be limited to one's own units (and bots) though.
+     * his bot's units, or he is the Game Master.
      */
     boolean isEditable(Entity entity) {
-        boolean localGM = clientgui.getClient().getLocalPlayer().isGameMaster();
-        return localGM ||
-              (clientgui.getLocalBots().containsKey(entity.getOwner().getName()) ||
-                    (entity.getOwnerId() == localPlayer().getId()));
-    }
-
-    /**
-     * Returns true when the given entity may NOT be configured by the local player, i.e. if it is not own unit or one
-     * of his bot's units.
-     *
-     * @see #isEditable(Entity)
-     */
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    boolean isNotEditable(Entity entity) {
-        return !isEditable(entity);
-    }
-
-    /**
-     * Returns the Client associated with a given entity that may be configured by the local player (his own unit or one
-     * of his bot's units). For a unit that cannot be configured (owned by a remote player) the client of the local
-     * player is returned.
-     */
-    Client getLocalClient(Entity entity) {
-        if (clientgui.getLocalBots().containsKey(entity.getOwner().getName())) {
-            return (Client) clientgui.getLocalBots().get(entity.getOwner().getName());
-        } else {
-            return clientgui.getClient();
-        }
-    }
-
-    Client getLocalClient(Player player) {
-        if (clientgui.getLocalBots().containsKey(player.getName())) {
-            return (Client) clientgui.getLocalBots().get(player.getName());
-        } else {
-            return clientgui.getClient();
-        }
+        return lobbyCommands.isDirectlyEditable(entity);
     }
 
     public void configPlayer() {
@@ -2126,32 +1951,23 @@ public class ChatLounge extends AbstractPhaseDisplay
 
     /** Changes only this sheet's session settings; source board files are never written. */
     void changeMapTheme(int index, String theme) {
-        mapSettings.setBoardTheme(index, theme);
-        sendMapOverrides();
+        lobbyCommands.changeBoardTheme(mapSettings, index, theme);
+        refreshMapOverrides();
     }
 
     void changeMapLevelOffset(int index, int offset) {
-        mapSettings.setBoardLevelOffset(index, offset);
-        sendMapOverrides();
+        lobbyCommands.changeBoardLevelOffset(mapSettings, index, offset);
+        refreshMapOverrides();
     }
 
-    private void sendMapOverrides() {
-        clientgui.getClient().sendMapSettings(mapSettings);
+    private void refreshMapOverrides() {
         refreshMapButtons();
         refreshBoardPreviews();
     }
 
     void changeMapDnD(String board, MapPreviewButton button) {
-        if (board.contains("\n")) {
-            board = MapSettings.BOARD_SURPRISE + board;
-        }
-        int indexOfButton = mapButtons.indexOf(button);
-        mapSettings.getBoardsSelectedVector().set(indexOfButton, board);
-        clientgui.getClient().sendMapSettings(mapSettings);
+        lobbyCommands.changeBoard(mapSettings, mapButtons.indexOf(button), board);
         refreshBoardPreviews();
-
-        String msg = clientgui.getClient().getLocalPlayer() + " changed map to: " + board;
-        clientgui.getClient().sendServerChat(Player.PLAYER_NONE, msg);
     }
 
     /**
@@ -2389,39 +2205,29 @@ public class ChatLounge extends AbstractPhaseDisplay
                     refreshMapUI();
                 } else if (comMapSizes.getSelectedItem() != null) {
                     BoardDimensions size = (BoardDimensions) comMapSizes.getSelectedItem();
-                    mapSettings.setBoardSize(size.width(), size.height());
                     resetAvailBoardSelection = true;
                     resetSelectedBoards = true;
-                    clientgui.getClient().sendMapSettings(mapSettings);
+                    lobbyCommands.resizeBoards(mapSettings, size.width(), size.height());
                 }
 
             } else if (ev.getSource() == butGroundMap) {
-                mapSettings.setMedium(MapSettings.MEDIUM_GROUND);
+                lobbyCommands.changeMedium(mapSettings, MapSettings.MEDIUM_GROUND);
                 refreshMapUI();
-                clientgui.getClient().sendMapSettings(mapSettings);
 
             } else if (ev.getSource() == butSpaceMap) {
-                mapSettings.setMedium(MapSettings.MEDIUM_SPACE);
-                mapSettings.setBoardSize(50, 50);
-                mapSettings.setMapSize(1, 1);
+                lobbyCommands.changeMedium(mapSettings, MapSettings.MEDIUM_SPACE);
                 refreshMapUI();
-                clientgui.getClient().sendMapDimensions(mapSettings);
 
             } else if (ev.getSource() == butLowAtmosphereMap) {
-                mapSettings.setMedium(MapSettings.MEDIUM_ATMOSPHERE);
+                lobbyCommands.changeMedium(mapSettings, MapSettings.MEDIUM_ATMOSPHERE);
                 refreshMapUI();
-                clientgui.getClient().sendMapSettings(mapSettings);
 
             } else if ((ev.getSource() == butAddX) || (ev.getSource() == butMapGrowW)) {
-                int newMapWidth = mapSettings.getMapWidth() + 1;
-                mapSettings.setMapSize(newMapWidth, mapSettings.getMapHeight());
-                clientgui.getClient().sendMapDimensions(mapSettings);
+                lobbyCommands.resizeMap(mapSettings, mapSettings.getMapWidth() + 1, mapSettings.getMapHeight());
                 nagAboutNonTileableBoards();
 
             } else if ((ev.getSource() == butAddY) || (ev.getSource() == butMapGrowH)) {
-                int newMapHeight = mapSettings.getMapHeight() + 1;
-                mapSettings.setMapSize(mapSettings.getMapWidth(), newMapHeight);
-                clientgui.getClient().sendMapDimensions(mapSettings);
+                lobbyCommands.resizeMap(mapSettings, mapSettings.getMapWidth(), mapSettings.getMapHeight() + 1);
 
             } else if (ev.getSource() == butSaveMapSetup) {
                 saveMapSetup();
@@ -2442,18 +2248,10 @@ public class ChatLounge extends AbstractPhaseDisplay
                 setManualBoardHeight();
 
             } else if (ev.getSource() == butMapShrinkW) {
-                if (mapSettings.getMapWidth() > 1) {
-                    int newMapWidth = mapSettings.getMapWidth() - 1;
-                    mapSettings.setMapSize(newMapWidth, mapSettings.getMapHeight());
-                    clientgui.getClient().sendMapDimensions(mapSettings);
-                }
+                lobbyCommands.shrinkMapWidth(mapSettings);
 
             } else if (ev.getSource() == butMapShrinkH) {
-                if (mapSettings.getMapHeight() > 1) {
-                    int newMapHeight = mapSettings.getMapHeight() - 1;
-                    mapSettings.setMapSize(mapSettings.getMapWidth(), newMapHeight);
-                    clientgui.getClient().sendMapDimensions(mapSettings);
-                }
+                lobbyCommands.shrinkMapHeight(mapSettings);
 
             } else if (ev.getSource() == butRunAutoResolve) {
                 var simulationRuns = (int) spnSimulationRuns.getValue();
@@ -2553,17 +2351,9 @@ public class ChatLounge extends AbstractPhaseDisplay
                     if (size != null) {
                         String boardName = megamek.common.board.BoardFile.selectionName(path);
                         boardName = boardName.replace("\\", "/");
-                        mapSettings.getBoardsSelectedVector().clear();
-                        mapSettings.setMapSize(1, 1);
-                        mapSettings.setBoardSize(size.width(), size.height());
-                        clientgui.getClient().sendMapDimensions(mapSettings);
-                        mapSettings.getBoardsSelectedVector().set(0, boardName);
+                        lobbyCommands.selectSingleBoard(mapSettings, boardName, size);
                         refreshMapUI();
-                        clientgui.getClient().sendMapSettings(mapSettings);
                         refreshBoardPreviews();
-
-                        String msg = clientgui.getClient().getLocalPlayer() + " changed map to: " + boardName;
-                        clientgui.getClient().sendServerChat(Player.PLAYER_NONE, msg);
                     }
                 }
 
@@ -2696,10 +2486,8 @@ public class ChatLounge extends AbstractPhaseDisplay
         }
         try (InputStream os = new FileInputStream(fc.getSelectedFile())) {
             MapSetup setup = MapSetup.load(os);
-            mapSettings.setMapSize(setup.getMapWidth(), setup.getMapHeight());
-            mapSettings.setBoardSize(setup.getBoardWidth(), setup.getBoardHeight());
-            mapSettings.setBoardsSelectedVector(setup.getBoards());
-            clientgui.getClient().sendMapSettings(mapSettings);
+            lobbyCommands.applyMapSetup(mapSettings, setup.getMapWidth(), setup.getMapHeight(),
+                  setup.getBoardWidth(), setup.getBoardHeight(), setup.getBoards());
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(clientgui.getFrame(),
                   Messages.getString("ChatLounge.map.problemLoadMapSetup"),
@@ -2736,16 +2524,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     }
 
     private void removeBot() {
-        Client c = getSelectedClient();
-        if (!client().getBots().containsValue(c)) {
-            LobbyErrors.showOnlyOwnBot(clientgui.getFrame());
-            return;
-        }
-        // Delete units first, which safely disembarks and offloads them
-        // Don't delete the bot's forces, as that could also delete other players'
-        // entities
-        c.die();
-        clientgui.getLocalBots().remove(c.getName());
+        lobbyCommands.removeBot(getSelectedClient());
     }
 
     private void doBotSettings() {
@@ -2780,9 +2559,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     private void setManualMapWidth() {
         try {
             int newMapWidth = Integer.parseInt(fldMapWidth.getText());
-            if (newMapWidth >= 1 && newMapWidth <= 20) {
-                mapSettings.setMapSize(newMapWidth, mapSettings.getMapHeight());
-                clientgui.getClient().sendMapDimensions(mapSettings);
+            if (lobbyCommands.changeMapWidth(mapSettings, newMapWidth)) {
                 nagAboutNonTileableBoards();
             }
         } catch (NumberFormatException e) {
@@ -2793,10 +2570,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     private void setManualMapHeight() {
         try {
             int newMapHeight = Integer.parseInt(fldMapHeight.getText());
-            if (newMapHeight >= 1 && newMapHeight <= 20) {
-                mapSettings.setMapSize(mapSettings.getMapWidth(), newMapHeight);
-                clientgui.getClient().sendMapDimensions(mapSettings);
-            }
+            lobbyCommands.changeMapHeight(mapSettings, newMapHeight);
         } catch (NumberFormatException e) {
             // no number, no new map height
         }
@@ -2805,9 +2579,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     private void setManualBoardWidth() {
         try {
             int newBoardWidth = Integer.parseInt(fldSpaceBoardWidth.getText());
-            if (newBoardWidth >= 5 && newBoardWidth <= 200) {
-                mapSettings.setBoardSize(newBoardWidth, mapSettings.getBoardHeight());
-                clientgui.getClient().sendMapSettings(mapSettings);
+            if (lobbyCommands.changeBoardWidth(mapSettings, newBoardWidth)) {
                 nagAboutNonTileableBoards();
             }
         } catch (NumberFormatException e) {
@@ -2818,10 +2590,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     private void setManualBoardHeight() {
         try {
             int newBoardHeight = Integer.parseInt(fldSpaceBoardHeight.getText());
-            if (newBoardHeight >= 5 && newBoardHeight <= 200) {
-                mapSettings.setBoardSize(mapSettings.getBoardWidth(), newBoardHeight);
-                clientgui.getClient().sendMapSettings(mapSettings);
-            }
+            lobbyCommands.changeBoardHeight(mapSettings, newBoardHeight);
         } catch (NumberFormatException e) {
             // no number, no new board height
         }
@@ -2893,41 +2662,8 @@ public class ChatLounge extends AbstractPhaseDisplay
     public void ready() {
         final Client client = clientgui.getClient();
         final Game game = client.getGame();
-        final var gOpts = game.getOptions();
-
-        // enforce exclusive deployment zones in double blind
-        for (Player player : client.getGame().getPlayersList()) {
-            if (!isValidStartPos(game, player)) {
-                clientgui.doAlertDialog(Messages.getString("ChatLounge.OverlapDeploy.title"),
-                      Messages.getString("ChatLounge.OverlapDeploy.msg"));
-                return;
-            }
-        }
-
-        // Make sure player has a commander if Commander killed victory is on
-        if (gOpts.booleanOption(OptionsConstants.VICTORY_COMMANDER_KILLED)) {
-            java.util.List<String> players = new ArrayList<>();
-            if ((game.getLiveCommandersOwnedBy(localPlayer()) < 1) && (game.getEntitiesOwnedBy(localPlayer()) > 0)) {
-                players.add(client.getLocalPlayer().getName());
-            }
-
-            for (AbstractClient bc : clientgui.getLocalBots().values()) {
-                if ((game.getLiveCommandersOwnedBy(bc.getLocalPlayer()) < 1) &&
-                      (game.getEntitiesOwnedBy(bc.getLocalPlayer()) > 0)) {
-                    players.add(bc.getLocalPlayer().getName());
-                }
-            }
-
-            if (!players.isEmpty()) {
-                StringBuilder msg = new StringBuilder(Messages.getString("ChatLounge.noCmdr.msg"));
-
-                for (String player : players) {
-                    msg.append(player).append("\n");
-                }
-
-                clientgui.doAlertDialog(Messages.getString("ChatLounge.noCmdr.title"), msg.toString());
-                return;
-            }
+        if (!lobbyCommands.checkReady()) {
+            return;
         }
 
         if (psd != null) {
@@ -2953,11 +2689,8 @@ public class ChatLounge extends AbstractPhaseDisplay
             lobbySavePerformed = true;
         }
 
-        client.sendDone(done);
+        lobbyCommands.sendDone(done);
         refreshDoneButton(done);
-        for (AbstractClient botClient : clientgui.getLocalBots().values()) {
-            botClient.sendDone(done);
-        }
     }
 
     /**
@@ -3278,19 +3011,7 @@ public class ChatLounge extends AbstractPhaseDisplay
                 break;
             case PlayerTablePopup.PTP_DEPLOY:
                 int startPos = Integer.parseInt(st.nextToken());
-
-                for (Player player : getSelectedPlayers()) {
-                    if (lobbyActions.isSelfOrLocalBot(player)) {
-                        if (client().isLocalBot(player)) {
-                            // must use the bot's own player object:
-                            client().getBotClient(player).getLocalPlayer().setStartingPos(startPos);
-                            client().getBotClient(player).sendPlayerInfo();
-                        } else {
-                            player.setStartingPos(startPos);
-                            client().sendPlayerInfo();
-                        }
-                    }
-                }
+                lobbyCommands.changeStartingPosition(getSelectedPlayers(), startPos);
                 break;
             case PlayerTablePopup.PTP_REPLACE:
                 Player player = playerModel.getPlayerAt(tablePlayers.getSelectedRow());
@@ -3804,28 +3525,6 @@ public class ChatLounge extends AbstractPhaseDisplay
         }
     }
 
-    /**
-     * Returns a Collection that contains only those of the given entities that the local player can affect, i.e. his
-     * units or those of his bots. The returned Collection is a new Collection and can be safely altered. (The entities
-     * are not copies of course.)
-     * <p>
-     * See also {@link #isEditable(Entity)}
-     */
-    private Set<Entity> editableEntities(Collection<Entity> entities) {
-        return entities.stream().filter(this::isEditable).collect(Collectors.toSet());
-    }
-
-    /**
-     * Returns true if the given carrier and carried can be edited to have the carrier transport the given carried
-     * entity. That is the case when they are teammates and one of the entities can be edited by the local player. Note:
-     * this method does NOT check if the loading is rules-valid.
-     * <p>
-     * See also {@link #isEditable(Entity)}
-     */
-    private boolean isLoadable(Entity carried, Entity carrier) {
-        return !carrier.getOwner().isEnemyOf(carried.getOwner()) && (isEditable(carrier) || isEditable(carried));
-    }
-
     @Override
     public void preferenceChange(PreferenceChangeEvent e) {
         switch (e.getName()) {
@@ -3887,7 +3586,7 @@ public class ChatLounge extends AbstractPhaseDisplay
      * holds the role.
      */
     private void toggleGameMaster() {
-        client().sendChat(GAME_MASTER_COMMAND);
+        lobbyCommands.toggleGameMaster();
         // the button follows the server's answer, not the click, so it is put back until that answer arrives
         refreshGameMasterButton();
     }
