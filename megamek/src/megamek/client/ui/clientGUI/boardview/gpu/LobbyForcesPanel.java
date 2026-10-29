@@ -47,7 +47,7 @@ import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
- * The lobby's centre column at rest: the forces. Its header holds Random army, "+ Add unit" and a ⋮ menu of the force
+ * The lobby's centre column at rest: the forces. Its header holds Random army, Add unit and a ⋮ menu of the force
  * commands; a view row switches between the units by owner and the formations (MegaMek's forces) as a tree, makes the
  * rows compact, collapses or expands every formation, and, for the units, picks their order from the Swing unit table's
  * orders. Each unit's card shows its sprite, name and problems, tonnage, weight class, role and start, the pilot and
@@ -142,7 +142,7 @@ final class LobbyForcesPanel {
               Messages.getString("Lobby.forces.randomArmy"), null);
         kit.tip(randomArmy, true).getActor().setText(Messages.getString("Lobby.forces.randomArmyTip"));
         UiKit.onChange(randomArmy, () -> actions.command(Command.RANDOM_ARMY));
-        UiButton addUnit = kit.button("button-primary" + UiTheme.COMPACT, null,
+        UiButton addUnit = kit.button("button-primary" + UiTheme.COMPACT, "add",
               Messages.getString("Lobby.forces.addUnit"), null);
         kit.tip(addUnit, true).getActor().setText(Messages.getString("Lobby.forces.addUnitTip"));
         UiKit.onChange(addUnit, () -> actions.command(Command.ADD_UNIT));
@@ -321,7 +321,7 @@ final class LobbyForcesPanel {
         UiButton army = kit.button("button-secondary" + UiTheme.COMPACT, null,
               Messages.getString("Lobby.forces.randomArmy"), null);
         UiKit.onChange(army, () -> actions.command(Command.RANDOM_ARMY));
-        UiButton add = kit.button("button-primary" + UiTheme.COMPACT, null, Messages.getString("Lobby.forces.addUnit"),
+        UiButton add = kit.button("button-primary" + UiTheme.COMPACT, "add", Messages.getString("Lobby.forces.addUnit"),
               null);
         UiKit.onChange(add, () -> actions.command(Command.ADD_UNIT));
         buttons.add(army).padRight(space("sm"));
@@ -471,7 +471,8 @@ final class LobbyForcesPanel {
             card.pad(space("xs"), space("sm"), space("xs"), space("xs"));
         }
         card.add(kit.solid(bar)).width(size("selection.width")).growY().padRight(space("sm"));
-        float spriteSize = compact ? size("icon.md") : size("icon.lg") * 1.5f;
+        // The reference's 58 px card sprite and 26 px compact one, in tokens
+        float spriteSize = compact ? size("control.sm") : size("control.lg") + space("lg");
         Cell<Actor> spriteCell = card.add(sprite(unit, spriteSize)).size(spriteSize).padRight(space("sm"));
         if (!compact) {
             spriteCell.top();

@@ -626,19 +626,51 @@ public final class GpuLobbyWindow {
             if (icon == null || icon.getWidth(null) <= 0 || icon.getHeight(null) <= 0) {
                 return null;
             }
-            if (icon instanceof BufferedImage buffered) {
-                return buffered;
-            }
             BufferedImage copy = new BufferedImage(icon.getWidth(null), icon.getHeight(null),
                   BufferedImage.TYPE_INT_ARGB);
             Graphics2D graphics = copy.createGraphics();
             graphics.drawImage(icon, 0, 0, null);
             graphics.dispose();
-            return copy;
+            return trimmed(copy);
         } catch (RuntimeException failure) {
             LOGGER.warn(failure, "The lobby could not draw the sprite of {}", entity.getShortName());
             return null;
         }
+    }
+
+    /**
+     * The sprite cut to its visible pixels and a pixel of margin: the hex tile leaves wide clear edges round the unit,
+     * which would shrink it in the card's box.
+     */
+    static BufferedImage trimmed(BufferedImage image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int left = width;
+        int top = height;
+        int right = -1;
+        int bottom = -1;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if ((image.getRGB(x, y) >>> 24) != 0) {
+                    left = Math.min(left, x);
+                    right = Math.max(right, x);
+                    top = Math.min(top, y);
+                    bottom = Math.max(bottom, y);
+                }
+            }
+        }
+        if (right < 0) {
+            return image;
+        }
+        left = Math.max(0, left - 1);
+        top = Math.max(0, top - 1);
+        right = Math.min(width - 1, right + 1);
+        bottom = Math.min(height - 1, bottom + 1);
+        BufferedImage cut = new BufferedImage(right - left + 1, bottom - top + 1, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = cut.createGraphics();
+        graphics.drawImage(image, -left, -top, null);
+        graphics.dispose();
+        return cut;
     }
 
     /** The Swing dialogs of the player actions, owned by the client's hidden frame, which this scene adopts. */

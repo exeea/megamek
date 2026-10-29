@@ -305,7 +305,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         images.forEach((key, image) -> {
-            Texture old = spriteTextures.put(key, GpuStartScreen.texture(image, false));
+            // Mipmapped and linear, as the cards draw the sprites smaller than the tiles
+            Texture texture = GpuStartScreen.texture(image, true);
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            Texture old = spriteTextures.put(key, texture);
             if (old != null) {
                 old.dispose();
             }

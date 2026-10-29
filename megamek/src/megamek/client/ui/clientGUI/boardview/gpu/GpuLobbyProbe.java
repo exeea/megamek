@@ -243,18 +243,18 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     }
 
     /**
-     * With {@code lobby+formations}, puts the player's first two units in a formation and, once it exists, their next
-     * two in a sub-formation of it; returns the step reached.
+     * With {@code lobby+formations}, puts the player's first unit in a formation and, once it exists, up to two more in
+     * a sub-formation of it, so the nesting shows near the top even with three units; returns the step reached.
      */
     private static int form(Client client, Player local, int step) {
         List<Entity> mine = client.getGame().getEntitiesVector().stream()
               .filter(entity -> entity.getOwnerId() == local.getId()).toList();
         if (step == 0) {
-            if (mine.size() < 2) {
+            if (mine.isEmpty()) {
                 return 0;
             }
             client.sendAddForce(Force.createToplevelForce(Messages.getString("Lobby.probeFormation"), local),
-                  new ArrayList<>(mine.subList(0, 2)));
+                  new ArrayList<>(mine.subList(0, 1)));
             return 1;
         }
         Force top = client.getGame().getForces().getTopLevelForces().stream()
@@ -263,9 +263,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             return 1;
         }
         List<Entity> free = mine.stream().filter(entity -> entity.getForceId() == Force.NO_FORCE).toList();
-        if (free.size() >= 2) {
+        if (!free.isEmpty()) {
             client.sendAddForce(Force.createSubforce(Messages.getString("Lobby.probeSubFormation"), top),
-                  new ArrayList<>(free.subList(0, 2)));
+                  new ArrayList<>(free.subList(0, Math.min(2, free.size()))));
         }
         return FORMED;
     }
