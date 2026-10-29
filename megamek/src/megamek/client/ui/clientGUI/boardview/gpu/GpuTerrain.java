@@ -96,6 +96,11 @@ final class GpuTerrain implements Disposable {
     static final float DECK_MUD_RIM_KIND = 140 / 255f;
     // Extra texels pay for the camera guard band without reducing the former 2048-map's world-space detail.
     static final int SHADOW_RESOLUTION = 2304;
+    /** Texels on a side of the tiles in which moved units' shadows are restored from the cached terrain map. */
+    private static final int SHADOW_TILE = 64;
+    private static final int SHADOW_TILES = SHADOW_RESOLUTION / SHADOW_TILE;
+    /** Copies per restore before one copy of the whole map is the cheaper (an estimate, not measured). */
+    private static final int SHADOW_RUNS = 32;
     private static final float SHADOW_GUARD_SCALE = 1.1f;
     private static final float SHADOW_MAX_SCALE = SHADOW_RESOLUTION / 2048f;
     static final float DEFAULT_BUILDING_OPACITY = 0.5f;
@@ -1121,6 +1126,8 @@ final class GpuTerrain implements Disposable {
     private final List<Model> shadowModels = new ArrayList<>();
     private final List<Matrix4> shadowTransforms = new ArrayList<>();
     private final com.badlogic.gdx.utils.IntArray shadowPoses = new com.badlogic.gdx.utils.IntArray();
+    /** Each drawn unit's footprint in the light's map ({@link #shadowTexels}), as shadowModels. */
+    private final List<int[]> shadowRects = new ArrayList<>();
     // Pure CPU geometry may follow model lifetime; native meshes always have explicit render-thread owners.
     private final Map<Model, List<Vector3>> featureTriangles = new java.util.WeakHashMap<>();
     private final BoundingBox shadowBounds = new BoundingBox();
@@ -1140,6 +1147,8 @@ final class GpuTerrain implements Disposable {
     /** Allocated only for gameplay casters. Reuses the unchanged terrain depth when units move. */
     private FrameBuffer staticShadow;
     private boolean staticShadowValid;
+    /** The cache whose terrain the light's map holds under its units; null after a render no cache holds. */
+    private FrameBuffer shadowBase;
     // The fit that covers the whole board (views crossing the horizon or below the highest terrain) is the same
     // every time a tilt returns to it and the costliest to draw: its terrain shadow is kept and copied back.
     private FrameBuffer boardShadow;
@@ -8586,6 +8595,7 @@ final class GpuTerrain implements Disposable {
             if (!shadowEmpty) {
                 shadow.begin();
                 shadow.end();
+                shadowBase = null;
                 shadowEmpty = true;
                 shadowProjectionValid = false;
                 staticShadowValid = false;
@@ -8595,11 +8605,16 @@ final class GpuTerrain implements Disposable {
             return;
         }
         shadowEmpty = false;
+        // A unit changed since the map last drew it: new, moved or posed anew.
+        int[] poses = new int[units.size()];
+        boolean[] moved = new boolean[units.size()];
         boolean changed = shadowDirty || !shadowProjectionValid || units.size() != shadowModels.size();
-        for (int index = 0; !changed && index < units.size(); index++) {
-            changed = units.get(index).model != shadowModels.get(index)
-                  || !Arrays.equals(units.get(index).transform.val, shadowTransforms.get(index).val)
-                  || shadowPose(units.get(index)) != shadowPoses.get(index);
+        for (int index = 0; index < units.size(); index++) {
+            ModelInstance unit = units.get(index);
+            poses[index] = shadowPose(unit);
+            moved[index] = index >= shadowModels.size() || unit.model != shadowModels.get(index)
+                  || !Arrays.equals(unit.transform.val, shadowTransforms.get(index).val) || poses[index] != shadowPoses.get(index);
+            changed |= moved[index];
         }
         boolean viewChanged = (view != null) != shadowViewPresent
               || (view != null && !Arrays.equals(view.combined.val, shadowView.val));
@@ -8633,15 +8648,27 @@ final class GpuTerrain implements Disposable {
             lightCamera.far = shadowFit.far;
             snapShadowCamera(lightCamera);
         }
+        // The tiles the changed units' shadows covered and now cover: within an unchanged projection, only these differ
+        // from the cached terrain map under the units (restoreTiles).
+        int[][] rects = new int[units.size()][];
+        for (int index = 0; index < units.size(); index++) { rects[index] = shadowTexels(lightCamera, unitBounds(units.get(index))); }
+        boolean[] stale = new boolean[SHADOW_TILES * SHADOW_TILES];
+        for (int index = 0; index < Math.max(units.size(), shadowRects.size()); index++) {
+            if (index < units.size() && !moved[index]) { continue; }
+            if (index < shadowRects.size()) { markTiles(stale, shadowRects.get(index)); }
+            if (index < units.size()) { markTiles(stale, rects[index]); }
+        }
         shadowModels.clear();
         shadowPoses.clear();
+        shadowRects.clear();
         while (shadowTransforms.size() > units.size()) { shadowTransforms.removeLast(); }
         for (int index = 0; index < units.size(); index++) {
             ModelInstance unit = units.get(index);
             shadowModels.add(unit.model);
             if (index == shadowTransforms.size()) { shadowTransforms.add(new Matrix4()); }
             shadowTransforms.get(index).set(unit.transform);
-            shadowPoses.add(shadowPose(unit));
+            shadowPoses.add(poses[index]);
+            shadowRects.add(rects[index]);
         }
         // Screen passes disable depth writes; both a fresh map and units over cached depth must write again.
         Gdx.gl.glDepthMask(true);
@@ -8657,11 +8684,13 @@ final class GpuTerrain implements Disposable {
                 // A tilt that crosses the horizon or drops below the highest terrain returns to the board-wide fit
                 // every time; drawing every chunk and tree again took 220-530 ms on an Intel Iris Xe, a copy a few.
                 boardShadow.transfer(shadow.getFrameBuffer(), buffers);
+                shadowBase = boardShadow;
                 renderUnitShadows(lightCamera, units);
             } else {
                 shadow.begin();
                 try { renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true, true); }
                 finally { shadow.end(); }
+                shadowBase = null;
                 if (boardWide) {
                     if (boardShadow == null) {
                         boardShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
@@ -8669,12 +8698,13 @@ final class GpuTerrain implements Disposable {
                     shadow.getFrameBuffer().transfer(boardShadow, buffers);
                     remember(boardShadowFit, lightCamera);
                     boardShadowValid = true;
+                    shadowBase = boardShadow;
                     renderUnitShadows(lightCamera, units);
                 }
             }
         } else {
             if (boardShadowCurrent) {
-                boardShadow.transfer(shadow.getFrameBuffer(), buffers);
+                restoreTiles(boardShadow, stale);
             } else {
                 if (staticShadow == null) {
                     staticShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
@@ -8685,16 +8715,70 @@ final class GpuTerrain implements Disposable {
                     finally { shadow.end(); }
                     shadow.getFrameBuffer().transfer(staticShadow, buffers);
                     staticShadowValid = true;
+                    shadowBase = staticShadow;
                 } else {
                     // The one depth attachment is both the sampled shadow and the depth test: moved units erase
                     // their old shadows and remain occluded by the cached terrain.
-                    staticShadow.transfer(shadow.getFrameBuffer(), buffers);
+                    restoreTiles(staticShadow, stale);
                 }
             }
             renderUnitShadows(lightCamera, units);
         }
         shadowProjectionValid = true;
         shadowDirty = false;
+    }
+
+    /** A unit's footprint in the light's map, in texels from x0, y0 to x1, y1, a texel wider each side. */
+    private static int[] shadowTexels(Camera lightCamera, BoundingBox bounds) {
+        float x0 = Float.POSITIVE_INFINITY, y0 = Float.POSITIVE_INFINITY, x1 = Float.NEGATIVE_INFINITY, y1 = x1;
+        Vector3 corner = new Vector3();
+        for (int i = 0; i < 8; i++) {
+            corner.set((i & 1) == 0 ? bounds.min.x : bounds.max.x, (i & 2) == 0 ? bounds.min.y : bounds.max.y,
+                  (i & 4) == 0 ? bounds.min.z : bounds.max.z).prj(lightCamera.combined);
+            x0 = Math.min(x0, corner.x);
+            y0 = Math.min(y0, corner.y);
+            x1 = Math.max(x1, corner.x);
+            y1 = Math.max(y1, corner.y);
+        }
+        float half = SHADOW_RESOLUTION / 2f;
+        return new int[] { Math.clamp((int) Math.floor((x0 + 1) * half) - 1, 0, SHADOW_RESOLUTION),
+              Math.clamp((int) Math.floor((y0 + 1) * half) - 1, 0, SHADOW_RESOLUTION),
+              Math.clamp((int) Math.ceil((x1 + 1) * half) + 1, 0, SHADOW_RESOLUTION),
+              Math.clamp((int) Math.ceil((y1 + 1) * half) + 1, 0, SHADOW_RESOLUTION) };
+    }
+
+    private static void markTiles(boolean[] tiles, int[] texels) {
+        int top = Math.min(SHADOW_TILES, (texels[3] + SHADOW_TILE - 1) / SHADOW_TILE);
+        int right = Math.min(SHADOW_TILES, (texels[2] + SHADOW_TILE - 1) / SHADOW_TILE);
+        for (int y = texels[1] / SHADOW_TILE; y < top; y++) {
+            for (int x = texels[0] / SHADOW_TILE; x < right; x++) { tiles[y * SHADOW_TILES + x] = true; }
+        }
+    }
+
+    /**
+     * The cached terrain map back over the stale tiles, a run of them in a row per copy, instead of the whole map (2304
+     * by 2304 depth texels) whenever a unit moves. The whole map in one copy where the map holds another cache's terrain
+     * (the two may hold different levels of detail), past half the map, or past SHADOW_RUNS copies.
+     */
+    private void restoreTiles(FrameBuffer cache, boolean[] stale) {
+        var runs = new com.badlogic.gdx.utils.IntArray();
+        int marked = 0;
+        for (int y = 0; y < SHADOW_TILES; y++) {
+            for (int x = 0; x < SHADOW_TILES; x++) {
+                if (!stale[y * SHADOW_TILES + x]) { continue; }
+                int end = x;
+                while (end + 1 < SHADOW_TILES && stale[y * SHADOW_TILES + end + 1]) { end++; }
+                runs.addAll(x * SHADOW_TILE, y * SHADOW_TILE, (end + 1) * SHADOW_TILE, (y + 1) * SHADOW_TILE);
+                marked += end + 1 - x;
+                x = end;
+            }
+        }
+        if (cache != shadowBase || marked * 2 > stale.length || runs.size / 4 > SHADOW_RUNS) {
+            cache.transfer(shadow.getFrameBuffer(), GL20.GL_DEPTH_BUFFER_BIT);
+        } else if (!runs.isEmpty()) {
+            GpuShadowLight.copyDepth(cache, shadow.getFrameBuffer(), runs);
+        }
+        shadowBase = cache;
     }
 
     /** The units' shadows over a terrain shadow already in the light's framebuffer. */

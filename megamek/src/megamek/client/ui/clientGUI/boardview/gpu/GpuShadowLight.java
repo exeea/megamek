@@ -9,6 +9,7 @@ import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLFrameBuffer;
 import com.badlogic.gdx.utils.BufferUtils;
+import com.badlogic.gdx.utils.IntArray;
 
 /** One hardware depth map for terrain, models and fog, through libGDX's existing shadow texture binding. */
 final class GpuShadowLight extends DirectionalShadowLight {
@@ -36,9 +37,28 @@ final class GpuShadowLight extends DirectionalShadowLight {
         super.begin();
     }
 
+    /**
+     * Copies depth inside each rectangle of runs (x0, y0, x1, y1 texels, four values each) between two maps of one
+     * size, as GLFrameBuffer#transfer copies the whole map.
+     */
+    static void copyDepth(FrameBuffer from, FrameBuffer to, IntArray runs) {
+        DepthBuffer.copy(from, to, runs);
+    }
+
     /** libGDX 1.14.2 otherwise attaches a lone texture as COLOR_ATTACHMENT0, even for a depth specification. */
     private static final class DepthBuffer extends FrameBuffer {
         DepthBuffer(GLFrameBuffer.FrameBufferBuilder builder) { super(builder); }
+
+        static void copy(FrameBuffer from, FrameBuffer to, IntArray runs) {
+            Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, from.getFramebufferHandle());
+            Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, to.getFramebufferHandle());
+            for (int i = 0; i < runs.size; i += 4) {
+                int x0 = runs.get(i), y0 = runs.get(i + 1), x1 = runs.get(i + 2), y1 = runs.get(i + 3);
+                Gdx.gl30.glBlitFramebuffer(x0, y0, x1, y1, x0, y0, x1, y1, GL20.GL_DEPTH_BUFFER_BIT, GL20.GL_NEAREST);
+            }
+            Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, defaultFramebufferHandle);
+            Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, defaultFramebufferHandle);
+        }
 
         @Override
         protected Texture createTexture(FrameBufferTextureAttachmentSpec specification) {
