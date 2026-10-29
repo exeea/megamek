@@ -172,14 +172,20 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
     }
 
     protected void initializeFrame() {
-        if (GUIP.getWindowSizeHeight() != 0) {
-            frame.setLocation(GUIP.getWindowPosX(), GUIP.getWindowPosY());
-            frame.setSize(GUIP.getWindowSizeWidth(), GUIP.getWindowSizeHeight());
-        } else {
-            frame.setSize(800, 600);
+        // The lobby shown over MegaMek's window takes its place from the window, not from its saved size and place
+        boolean overWindow = GpuLobbyOverlay.placeOverWindow(frame);
+        if (!overWindow) {
+            if (GUIP.getWindowSizeHeight() != 0) {
+                frame.setLocation(GUIP.getWindowPosX(), GUIP.getWindowPosY());
+                frame.setSize(GUIP.getWindowSizeWidth(), GUIP.getWindowSizeHeight());
+            } else {
+                frame.setSize(800, 600);
+            }
         }
         frame.setMinimumSize(new Dimension(640, 480));
-        UIUtil.updateWindowBounds(frame);
+        if (!overWindow) {
+            UIUtil.updateWindowBounds(frame);
+        }
 
         List<Image> iconList = new ArrayList<>();
         iconList.add(frame.getToolkit()

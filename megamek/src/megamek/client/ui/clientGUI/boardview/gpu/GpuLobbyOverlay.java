@@ -166,14 +166,35 @@ public final class GpuLobbyOverlay {
         }
     }
 
+    /**
+     * EDT, before the lobby first shows: gives it its place over the window now, so it does not show at a size of its
+     * own first and then jump into place. Returns false, leaving the frame alone, when it is not the lobby or the
+     * window's place is not known yet.
+     */
+    public static boolean placeOverWindow(JFrame frame) {
+        Rectangle client = GpuHost.clientBounds();
+        if (frame == null || frame != lobby || client == null) {
+            return false;
+        }
+        frame.setBounds(lobbyBounds(client));
+        return true;
+    }
+
     /** EDT: places the lobby over the window's client area, given in GLFW screen coordinates. */
     private static void place(Rectangle client) {
         JFrame frame = lobby;
         if (frame == null || !inFront) {
             return;
         }
-        frame.setBounds(inset(GpuStartWindow.toSwing(client), UIUtil.scaleForGUI(MARGIN),
-              UIUtil.scaleForGUI(INSET_MIN_WIDTH), UIUtil.scaleForGUI(INSET_MIN_HEIGHT)));
+        Rectangle bounds = lobbyBounds(client);
+        if (!bounds.equals(frame.getBounds())) {
+            frame.setBounds(bounds);
+        }
+    }
+
+    private static Rectangle lobbyBounds(Rectangle client) {
+        return inset(GpuStartWindow.toSwing(client), UIUtil.scaleForGUI(MARGIN), UIUtil.scaleForGUI(INSET_MIN_WIDTH),
+              UIUtil.scaleForGUI(INSET_MIN_HEIGHT));
     }
 
     /**
