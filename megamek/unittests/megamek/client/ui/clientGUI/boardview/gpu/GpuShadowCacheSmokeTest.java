@@ -69,7 +69,7 @@ class GpuShadowCacheSmokeTest {
             var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
             terrain.setAtmosphere(lighting);
             terrain.renderShadows(camera.camera, List.of());
-            assertNull(field(terrain, "staticShadow"), "Map-only views keep one shadow framebuffer");
+            assertNull(field(field(terrain, "shadowMap"), "staticShadow"), "Map-only views keep one shadow framebuffer");
             camera.zoom(.6f);
             // The zoom changes tree levels, which the map picks up at its next redraw: start from that redraw.
             terrain.refreshShadows();
@@ -151,10 +151,10 @@ class GpuShadowCacheSmokeTest {
         }
     }
 
-    private static Object field(GpuTerrain terrain, String name) throws ReflectiveOperationException {
-        var field = GpuTerrain.class.getDeclaredField(name);
+    private static Object field(Object target, String name) throws ReflectiveOperationException {
+        var field = target.getClass().getDeclaredField(name);
         field.setAccessible(true);
-        return field.get(terrain);
+        return field.get(target);
     }
 
     private static void fullPass(GpuTerrain terrain, List<ModelInstance> units) throws ReflectiveOperationException {

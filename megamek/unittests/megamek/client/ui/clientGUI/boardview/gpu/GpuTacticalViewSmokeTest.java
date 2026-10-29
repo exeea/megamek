@@ -432,7 +432,7 @@ class GpuTacticalViewSmokeTest {
         var lighting = ((GpuAtmosphere) field(view, "atmosphere")).lighting();
         assertEquals(BoardAtmosphere.TACTICAL.direction(), lighting.direction(), "The fixed north-west light");
         assertEquals(BoardAtmosphere.TACTICAL.skySource(), lighting.skySource(), "and its sky");
-        assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty(), "The meeples cast shadows");
+        assertFalse(((List<?>) field(field(terrain, "shadowMap"), "shadowModels")).isEmpty(), "The meeples cast shadows");
         assertFalse(terrain.columns(), "T leaves the terrain to the graphics setting");
         assertTrue(terrain.fluffHidden(), "The Tactical View's draw rule");
         verifyFluffHidden(view, terrain, scene);

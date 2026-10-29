@@ -30,13 +30,13 @@ class BoardShadowTest {
         OrthographicCamera target = new OrthographicCamera();
         for (boolean isometric : new boolean[] { false, true }) {
             view.setIsometric(isometric);
-            GpuTerrain.fitShadowCamera(view.camera, target, small, direction);
+            GpuTerrainShadows.fitShadowCamera(view.camera, target, small, direction);
             float width = target.viewportWidth;
             float height = target.viewportHeight;
-            GpuTerrain.fitShadowCamera(view.camera, target, large, direction);
+            GpuTerrainShadows.fitShadowCamera(view.camera, target, large, direction);
             assertEquals(width, target.viewportWidth, 0.01f);
             assertEquals(height, target.viewportHeight, 0.01f);
-            assertTrue(Math.max(width, height) / GpuTerrain.SHADOW_RESOLUTION < 0.5f,
+            assertTrue(Math.max(width, height) / GpuTerrainShadows.SHADOW_RESOLUTION < 0.5f,
                   "Closeups must retain sub-world-unit shadow texels even on a huge board");
             Vector3 right = new Vector3(view.camera.direction).crs(view.camera.up).nor();
             for (float x : new float[] { -0.49f, 0, 0.49f }) {
@@ -64,7 +64,7 @@ class BoardShadowTest {
         for (Vector3 direction : new Vector3[] { new Vector3(0, 0, -1), new Vector3(2, 1, -1).nor() }) {
             for (Vector3 focus : new Vector3[] { new Vector3(5000, -5000, 0), new Vector3(13000, -15000, 0) }) {
                 view.center(focus);
-                GpuTerrain.fitShadowCamera(view.camera, target, bounds, direction);
+                GpuTerrainShadows.fitShadowCamera(view.camera, target, bounds, direction);
                 assertInside(target, focus);
                 assertTrue(target.viewportWidth < 1000 && target.viewportHeight < 1000);
                 assertEquals(1, target.up.len(), 0.0001f);
@@ -85,7 +85,7 @@ class BoardShadowTest {
         Vector3 direction = new Vector3(2, 1, -1).nor();
         BoundingBox bounds = new BoundingBox(new Vector3(-20000, -20000, 0), new Vector3(20000, 20000, 120));
         OrthographicCamera target = new OrthographicCamera();
-        GpuTerrain.fitShadowCamera(view, target, bounds, direction);
+        GpuTerrainShadows.fitShadowCamera(view, target, bounds, direction);
         assertTrue(target.viewportWidth < 1500 && target.viewportHeight < 1500,
               "A perspective closeup must not spread shadow texels over the whole board");
         for (float height : new float[] { 0, 120 }) {
@@ -116,8 +116,8 @@ class BoardShadowTest {
         Vector3 direction = new Vector3(2, 1, -1).nor();
         OrthographicCamera target = new OrthographicCamera();
         OrthographicCamera wholeBoard = new OrthographicCamera();
-        GpuTerrain.fitShadowCamera(null, wholeBoard, bounds, direction);
-        GpuTerrain.fitShadowCamera(view, target, bounds, direction);
+        GpuTerrainShadows.fitShadowCamera(null, wholeBoard, bounds, direction);
+        GpuTerrainShadows.fitShadowCamera(view, target, bounds, direction);
         assertEquals(wholeBoard.viewportWidth, target.viewportWidth, .001f);
         assertEquals(wholeBoard.viewportHeight, target.viewportHeight, .001f);
         for (int corner = 0; corner < 8; corner++) {
@@ -134,22 +134,22 @@ class BoardShadowTest {
         BoundingBox bounds = new BoundingBox(new Vector3(-20000, -20000, -30), new Vector3(20000, 20000, 120));
         Vector3 sun = new Vector3(2, 1, -1).nor();
         OrthographicCamera cached = new OrthographicCamera(), required = new OrthographicCamera();
-        GpuTerrain.fitShadowCamera(view.camera, cached, bounds, sun);
+        GpuTerrainShadows.fitShadowCamera(view.camera, cached, bounds, sun);
         cached.viewportWidth *= 1.1f;
         cached.viewportHeight *= 1.1f;
         cached.update();
         view.pan(2, 1);
-        GpuTerrain.fitShadowCamera(view.camera, required, bounds, sun);
-        assertTrue(GpuTerrain.canReuseShadowCamera(cached, required), "A small pan stays within the existing coverage");
-        assertTrue(cached.viewportWidth / GpuTerrain.SHADOW_RESOLUTION <= required.viewportWidth / 2048);
-        assertTrue(cached.viewportHeight / GpuTerrain.SHADOW_RESOLUTION <= required.viewportHeight / 2048);
+        GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
+        assertTrue(GpuTerrainShadows.canReuseShadowCamera(cached, required), "A small pan stays within the existing coverage");
+        assertTrue(cached.viewportWidth / GpuTerrainShadows.SHADOW_RESOLUTION <= required.viewportWidth / 2048);
+        assertTrue(cached.viewportHeight / GpuTerrainShadows.SHADOW_RESOLUTION <= required.viewportHeight / 2048);
 
         view.zoom(.5f);
-        GpuTerrain.fitShadowCamera(view.camera, required, bounds, sun);
-        assertFalse(GpuTerrain.canReuseShadowCamera(cached, required), "Zooming in must recover shadow detail");
+        GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
+        assertFalse(GpuTerrainShadows.canReuseShadowCamera(cached, required), "Zooming in must recover shadow detail");
         view.pan(2000, 1000);
-        GpuTerrain.fitShadowCamera(view.camera, required, bounds, sun);
-        assertFalse(GpuTerrain.canReuseShadowCamera(cached, required), "New receivers cannot borrow stale coverage");
+        GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
+        assertFalse(GpuTerrainShadows.canReuseShadowCamera(cached, required), "New receivers cannot borrow stale coverage");
     }
 
     @Test
@@ -159,17 +159,17 @@ class BoardShadowTest {
         BoundingBox bounds = new BoundingBox(new Vector3(-1000, -1000, -30), new Vector3(1000, 1000, 120));
         OrthographicCamera cached = new OrthographicCamera(), required = new OrthographicCamera();
         Vector3 sun = new Vector3(0, 0, -1);
-        GpuTerrain.fitShadowCamera(view.camera, cached, bounds, sun);
+        GpuTerrainShadows.fitShadowCamera(view.camera, cached, bounds, sun);
         cached.viewportWidth *= 1.1f;
         cached.viewportHeight *= 1.1f;
         cached.update();
-        GpuTerrain.fitShadowCamera(view.camera, required, bounds, sun);
-        assertTrue(GpuTerrain.canReuseShadowCamera(cached, required));
+        GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
+        assertTrue(GpuTerrainShadows.canReuseShadowCamera(cached, required));
         bounds.ext(0, 0, 300);
-        GpuTerrain.fitShadowCamera(view.camera, required, bounds, sun);
-        assertFalse(GpuTerrain.canReuseShadowCamera(cached, required), "A new high caster needs a fresh depth range");
-        GpuTerrain.fitShadowCamera(view.camera, required, bounds, new Vector3(1, 1, -1));
-        assertFalse(GpuTerrain.canReuseShadowCamera(cached, required), "Light direction is part of the cached projection");
+        GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
+        assertFalse(GpuTerrainShadows.canReuseShadowCamera(cached, required), "A new high caster needs a fresh depth range");
+        GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, new Vector3(1, 1, -1));
+        assertFalse(GpuTerrainShadows.canReuseShadowCamera(cached, required), "Light direction is part of the cached projection");
     }
 
     @Test
@@ -183,14 +183,14 @@ class BoardShadowTest {
             view.setIsometric(false);
             view.setPerspective(perspective);
             OrthographicCamera cached = new OrthographicCamera(), required = new OrthographicCamera();
-            GpuTerrain.fitShadowCamera(view.camera, cached, bounds, sun);
+            GpuTerrainShadows.fitShadowCamera(view.camera, cached, bounds, sun);
             cached.viewportWidth *= 1.1f;
             cached.viewportHeight *= 1.1f;
             cached.update();
             for (int pan = 0; pan < 5; pan++) {
                 view.pan(1, 1);
-                GpuTerrain.fitShadowCamera(view.camera, required, bounds, sun);
-                assertTrue(GpuTerrain.canReuseShadowCamera(cached, required));
+                GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
+                assertTrue(GpuTerrainShadows.canReuseShadowCamera(cached, required));
                 for (Vector3 corner : required.frustum.planePoints) { assertInside(cached, corner); }
             }
         }

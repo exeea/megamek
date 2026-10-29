@@ -32,7 +32,6 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.Mesh;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
@@ -68,7 +67,6 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
@@ -95,14 +93,6 @@ final class GpuTerrain implements Disposable {
     /** Muddy rock shell; its occlusion byte carries depth below the local top edge for the shader's draining fade. */
     static final float DECK_MUD_RIM_KIND = 140 / 255f;
     // Extra texels pay for the camera guard band without reducing the former 2048-map's world-space detail.
-    static final int SHADOW_RESOLUTION = 2304;
-    /** Texels on a side of the tiles in which moved units' shadows are restored from the cached terrain map. */
-    private static final int SHADOW_TILE = 64;
-    private static final int SHADOW_TILES = SHADOW_RESOLUTION / SHADOW_TILE;
-    /** Copies per restore before one copy of the whole map is the cheaper (an estimate, not measured). */
-    private static final int SHADOW_RUNS = 32;
-    private static final float SHADOW_GUARD_SCALE = 1.1f;
-    private static final float SHADOW_MAX_SCALE = SHADOW_RESOLUTION / 2048f;
     static final float DEFAULT_BUILDING_OPACITY = 0.5f;
     private static final long ATTRIBUTES = VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
           | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.ColorPacked;
@@ -908,6 +898,21 @@ final class GpuTerrain implements Disposable {
     private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
           GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")))),
           new GpuOpaqueSorter());
+    /** The sun's shadow map and its caches; the terrain's depth pass and the units cast into it. */
+    private final GpuTerrainShadows shadowMap = new GpuTerrainShadows(new GpuTerrainShadows.Casters() {
+        @Override
+        public void terrain(Camera light, List<ModelInstance> units) { renderDepth(light, units, depthBatch, true, true); }
+
+        @Override
+        public void units(Camera light, List<ModelInstance> units) {
+            depthBatch.begin(light);
+            try { renderDepthUnits(light, units, depthBatch); }
+            finally { depthBatch.end(); }
+        }
+
+        @Override
+        public BoundingBox bounds(ModelInstance unit) { return unitBounds(unit); }
+    });
 
     void shadersChanged() { refreshShadows(); }
 
@@ -1008,7 +1013,7 @@ final class GpuTerrain implements Disposable {
      * level changes do not: the map keeps the previous level's silhouette, which differs by about a texel, until
      * the camera movement that changed the level refits the shadow.
      */
-    void refreshShadows() { staticShadowValid = false; shadowDirty = true; }
+    void refreshShadows() { shadowMap.invalidate(); }
 
     record ShadingDetail(float ripple, float rain) { }
 
@@ -1123,41 +1128,15 @@ final class GpuTerrain implements Disposable {
     private long scatterScorchRevision = -1;
     private int scatterBoardId;
     private final Vector3 wind = new Vector3();
-    private final List<Model> shadowModels = new ArrayList<>();
-    private final List<Matrix4> shadowTransforms = new ArrayList<>();
-    private final com.badlogic.gdx.utils.IntArray shadowPoses = new com.badlogic.gdx.utils.IntArray();
-    /** Each drawn unit's footprint in the light's map ({@link #shadowTexels}), as shadowModels. */
-    private final List<int[]> shadowRects = new ArrayList<>();
     // Pure CPU geometry may follow model lifetime; native meshes always have explicit render-thread owners.
     private final Map<Model, List<Vector3>> featureTriangles = new java.util.WeakHashMap<>();
     private final BoundingBox shadowBounds = new BoundingBox();
-    private final Matrix4 shadowView = new Matrix4();
-    private boolean shadowProjectionValid;
-    /** The retained map is clear while its directional source is zero; cleared once per such interval. */
-    private boolean shadowEmpty;
-    private final OrthographicCamera shadowFit = new OrthographicCamera();
     private final UnitBounds.Frame frameBounds;
-    private boolean shadowViewPresent;
     private List<BoardScene.Tile> tiles;
     private Map<Coords, BoardFlow.Current> currents = Map.of();
     private BoardConcrete coast;
     private BoardScene.Light light;
     private BoardAtmosphere.Lighting atmosphere;
-    private GpuShadowLight shadow;
-    /** Allocated only for gameplay casters. Reuses the unchanged terrain depth when units move. */
-    private FrameBuffer staticShadow;
-    private boolean staticShadowValid;
-    /** The cache whose terrain the light's map holds under its units; null after a render no cache holds. */
-    private FrameBuffer shadowBase;
-    // The fit that covers the whole board (views crossing the horizon or below the highest terrain) is the same
-    // every time a tilt returns to it and the costliest to draw: its terrain shadow is kept and copied back.
-    private FrameBuffer boardShadow;
-    private boolean boardShadowValid;
-    private final OrthographicCamera boardShadowFit = new OrthographicCamera();
-    private boolean shadowBoardWide;
-    private boolean shadowDirty;
-    // Frames since a camera refinement last replaced a chunk the cached shadow has not redrawn; -1 when none.
-    private int refinedShadowFrames = -1;
     private float clock;
     private long shadingPass;
     private float vegetationPhase;
@@ -3595,8 +3574,8 @@ final class GpuTerrain implements Disposable {
         pickingSurfaces.clear();
         detailPixelsPerUnit = Float.NaN;
         // A refined chunk casts its terrain at finer detail. The cached shadow serves until refinement settles
-        // (renderShadows): drawing every chunk and tree again for each one cost 3-6 ms a time on an Iris Xe.
-        refinedShadowFrames = 0;
+        // (GpuTerrainShadows.render): drawing every chunk and tree again for each one cost 3-6 ms a time on an Iris Xe.
+        shadowMap.refined();
         fitShadowBounds();
     }
 
@@ -7942,7 +7921,7 @@ final class GpuTerrain implements Disposable {
     void setFluffHidden(boolean hidden) {
         if (fluffHidden == hidden) { return; }
         fluffHidden = hidden;
-        shadowDirty = true;
+        shadowMap.invalidate();
     }
 
     boolean fluffHidden() { return fluffHidden; }
@@ -8293,7 +8272,7 @@ final class GpuTerrain implements Disposable {
 
     private void updateLight(BoardScene.Light next) {
         light = next;
-        shadowDirty = true;
+        shadowMap.invalidate();
         fitShadowBounds();
         applyLight();
     }
@@ -8306,7 +8285,9 @@ final class GpuTerrain implements Disposable {
     void setAtmosphere(BoardAtmosphere.Lighting next) {
         // Color and fog cannot change a shadow's geometry. The light is applied every time: it is cheap, and Color
         // equality rounds to 8 bits, too coarse for night light and wrong above 1.
-        shadowDirty |= atmosphere == null || next == null || !atmosphere.direction().equals(next.direction());
+        if (atmosphere == null || next == null || !atmosphere.direction().equals(next.direction())) {
+            shadowMap.invalidate();
+        }
         atmosphere = next;
         applyLight();
     }
@@ -8337,7 +8318,7 @@ final class GpuTerrain implements Disposable {
         if (smallObjects == enabled) { return; }
         smallObjects = enabled;
         detailPixelsPerUnit = Float.NaN;
-        shadowDirty = true;
+        shadowMap.invalidate();
     }
 
     /** The editor objects that draw and pick at every zoom; derived from the editor's published selection and hover. */
@@ -8457,14 +8438,7 @@ final class GpuTerrain implements Disposable {
               : BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
         environmentLighting.set(lighting);
         if (light == null && atmosphere == null) {
-            if (shadow != null) {
-                environment.remove(shadow);
-                shadow.dispose();
-                shadow = null;
-                shadowEmpty = false;
-                staticShadowValid = false;
-            }
-            environment.shadowMap = null;
+            shadowMap.release(environment);
             // Linear light: 0.7 shows albedo as 0.85 would in display space.
             var ambient = ColorAttribute.createAmbientLight(0.7f, 0.7f, 0.7f, 1);
             environment.set(ambient);
@@ -8474,14 +8448,7 @@ final class GpuTerrain implements Disposable {
         // A zero-color source retains the same shader inputs in moonless/pitch-black presets. Removing the light
         // or shadow binding would rebuild every generic/family surface program despite changing no material.
         // Without an atmosphere, the scene's light direction takes the default atmosphere's light.
-        if (shadow == null) {
-            shadow = new GpuShadowLight(SHADOW_RESOLUTION, SHADOW_RESOLUTION, 1, 1, 1, 2);
-            shadowProjectionValid = false;
-        }
-        if (environment.shadowMap != shadow) {
-            environment.add(shadow);
-            environment.shadowMap = shadow;
-        }
+        GpuShadowLight shadow = shadowMap.bind(environment);
         if (atmosphere == null) {
             shadow.set(lighting.direct(), light.x() * BoardGeometry.hexScale(), light.y() * BoardGeometry.hexScale(),
                   -BoardGeometry.level());
@@ -8538,7 +8505,7 @@ final class GpuTerrain implements Disposable {
             // A shadow map whose texel spans half a metre or more cannot resolve leaves: its trees cast the shadow of
             // their second decimated level at most. Alpha-tested foliage drawn into such a map at the near level was
             // fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
-            int coarsest = shadows && camera.viewportWidth / SHADOW_RESOLUTION >= BoardRelief.metres(.5f) ? 2 : 0;
+            int coarsest = shadows && camera.viewportWidth / GpuTerrainShadows.SHADOW_RESOLUTION >= BoardRelief.metres(.5f) ? 2 : 0;
             for (Chunk chunk : chunks) {
                 boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
                 boolean scatterVisible = includeScatter && fluff && visible && chunk.scatterVisible;
@@ -8578,239 +8545,15 @@ final class GpuTerrain implements Disposable {
 
     void renderShadows(Camera view, List<ModelInstance> units) {
         if (view != null) { updateDetail(view); }
-        if (shadow == null || environment.shadowMap == null) {
-            return;
-        }
-        // Refinement has settled: the refined chunks cast their own shadow (replaceDetail).
-        if (refinedShadowFrames >= 0 && ++refinedShadowFrames > GpuMeshPage.SETTLE_FRAMES) {
-            refinedShadowFrames = -1;
-            shadowDirty = true;
-        }
         if (lifts != null) {
             // Moving lifts cast like units, over the cached terrain's shadow, which leaves them out.
             units = new ArrayList<>(units);
             units.addAll(lifts.models);
         }
-        if (atmosphere != null && !atmosphere.hasDirectLight()) {
-            if (!shadowEmpty) {
-                shadow.begin();
-                shadow.end();
-                shadowBase = null;
-                shadowEmpty = true;
-                shadowProjectionValid = false;
-                staticShadowValid = false;
-                boardShadowValid = false;
-                shadowDirty = true;
-            }
-            return;
-        }
-        shadowEmpty = false;
-        // A unit changed since the map last drew it: new, moved or posed anew.
-        int[] poses = new int[units.size()];
-        boolean[] moved = new boolean[units.size()];
-        boolean changed = shadowDirty || !shadowProjectionValid || units.size() != shadowModels.size();
-        for (int index = 0; index < units.size(); index++) {
-            ModelInstance unit = units.get(index);
-            poses[index] = shadowPose(unit);
-            moved[index] = index >= shadowModels.size() || unit.model != shadowModels.get(index)
-                  || !Arrays.equals(unit.transform.val, shadowTransforms.get(index).val) || poses[index] != shadowPoses.get(index);
-            changed |= moved[index];
-        }
-        boolean viewChanged = (view != null) != shadowViewPresent
-              || (view != null && !Arrays.equals(view.combined.val, shadowView.val));
-        if (!changed && !viewChanged) {
-            return;
-        }
-        BoundingBox bounds = new BoundingBox(shadowBounds);
-        for (ModelInstance unit : units) { bounds.ext(unitBounds(unit)); }
-        BoundingBox receivers = view == null ? bounds : BoardCamera.viewportBounds(view, bounds);
-        // A view that crosses the horizon or sits below the highest terrain needs most of the board, and a tilt
-        // there changes the required fit every frame; each refit redrew every chunk and tree (200-430 ms on an
-        // Intel Iris Xe on MesaCity 1). Views needing most of the board share the board-wide fit, whose map is
-        // cached, and keep it until they need well under half of it, so a tilt cannot alternate between fits.
-        float share = receivers.getWidth() * receivers.getHeight() / Math.max(1e-6f, bounds.getWidth() * bounds.getHeight());
-        boolean boardWide = share > (shadowBoardWide ? .4f : .7f);
-        shadowBoardWide = boardWide;
-        fitShadowToReceivers(boardWide ? bounds : receivers, shadowFit, bounds, shadow.direction);
-        shadowViewPresent = view != null;
-        if (view != null) { shadowView.set(view.combined); }
-        Camera lightCamera = shadow.getCamera();
-        boolean projectionChanged = !shadowProjectionValid || !canReuseShadowCamera(lightCamera, shadowFit);
-        if (!changed && !projectionChanged) { return; }
-        shadowProjectionValid = false;
-        if (projectionChanged) {
-            lightCamera.position.set(shadowFit.position);
-            lightCamera.direction.set(shadowFit.direction);
-            lightCamera.up.set(shadowFit.up);
-            lightCamera.viewportWidth = shadowFit.viewportWidth * SHADOW_GUARD_SCALE;
-            lightCamera.viewportHeight = shadowFit.viewportHeight * SHADOW_GUARD_SCALE;
-            lightCamera.near = shadowFit.near;
-            lightCamera.far = shadowFit.far;
-            snapShadowCamera(lightCamera);
-        }
-        // The tiles the changed units' shadows covered and now cover: within an unchanged projection, only these differ
-        // from the cached terrain map under the units (restoreTiles).
-        int[][] rects = new int[units.size()][];
-        for (int index = 0; index < units.size(); index++) { rects[index] = shadowTexels(lightCamera, unitBounds(units.get(index))); }
-        boolean[] stale = new boolean[SHADOW_TILES * SHADOW_TILES];
-        for (int index = 0; index < Math.max(units.size(), shadowRects.size()); index++) {
-            if (index < units.size() && !moved[index]) { continue; }
-            if (index < shadowRects.size()) { markTiles(stale, shadowRects.get(index)); }
-            if (index < units.size()) { markTiles(stale, rects[index]); }
-        }
-        shadowModels.clear();
-        shadowPoses.clear();
-        shadowRects.clear();
-        while (shadowTransforms.size() > units.size()) { shadowTransforms.removeLast(); }
-        for (int index = 0; index < units.size(); index++) {
-            ModelInstance unit = units.get(index);
-            shadowModels.add(unit.model);
-            if (index == shadowTransforms.size()) { shadowTransforms.add(new Matrix4()); }
-            shadowTransforms.get(index).set(unit.transform);
-            shadowPoses.add(poses[index]);
-            shadowRects.add(rects[index]);
-        }
-        // Screen passes disable depth writes; both a fresh map and units over cached depth must write again.
-        Gdx.gl.glDepthMask(true);
-        int buffers = GL20.GL_DEPTH_BUFFER_BIT;
-        if (shadowDirty) { boardShadowValid = false; }
-        boolean boardShadowCurrent = boardWide && boardShadowValid && sameFit(boardShadowFit, lightCamera);
-        if (shadowDirty || projectionChanged || units.isEmpty() && !staticShadowValid) {
-            // Coverage and terrain/light changes pay only the full pass. Populate the cache lazily when
-            // units move in a stable view, rather than copying an invalidated cache on every camera frame.
-            // Preview/editor maps retain just the original framebuffer, with no copy or extra allocation.
-            staticShadowValid = false;
-            if (boardShadowCurrent) {
-                // A tilt that crosses the horizon or drops below the highest terrain returns to the board-wide fit
-                // every time; drawing every chunk and tree again took 220-530 ms on an Intel Iris Xe, a copy a few.
-                boardShadow.transfer(shadow.getFrameBuffer(), buffers);
-                shadowBase = boardShadow;
-                renderUnitShadows(lightCamera, units);
-            } else {
-                shadow.begin();
-                try { renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true, true); }
-                finally { shadow.end(); }
-                shadowBase = null;
-                if (boardWide) {
-                    if (boardShadow == null) {
-                        boardShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
-                    }
-                    shadow.getFrameBuffer().transfer(boardShadow, buffers);
-                    remember(boardShadowFit, lightCamera);
-                    boardShadowValid = true;
-                    shadowBase = boardShadow;
-                    renderUnitShadows(lightCamera, units);
-                }
-            }
-        } else {
-            if (boardShadowCurrent) {
-                restoreTiles(boardShadow, stale);
-            } else {
-                if (staticShadow == null) {
-                    staticShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
-                }
-                if (!staticShadowValid) {
-                    shadow.begin();
-                    try { renderDepth(lightCamera, List.of(), depthBatch, true, true); }
-                    finally { shadow.end(); }
-                    shadow.getFrameBuffer().transfer(staticShadow, buffers);
-                    staticShadowValid = true;
-                    shadowBase = staticShadow;
-                } else {
-                    // The one depth attachment is both the sampled shadow and the depth test: moved units erase
-                    // their old shadows and remain occluded by the cached terrain.
-                    restoreTiles(staticShadow, stale);
-                }
-            }
-            renderUnitShadows(lightCamera, units);
-        }
-        shadowProjectionValid = true;
-        shadowDirty = false;
+        shadowMap.render(view, units, shadowBounds, environment.shadowMap != null,
+              atmosphere == null || atmosphere.hasDirectLight());
     }
 
-    /** A unit's footprint in the light's map, in texels from x0, y0 to x1, y1, a texel wider each side. */
-    private static int[] shadowTexels(Camera lightCamera, BoundingBox bounds) {
-        float x0 = Float.POSITIVE_INFINITY, y0 = Float.POSITIVE_INFINITY, x1 = Float.NEGATIVE_INFINITY, y1 = x1;
-        Vector3 corner = new Vector3();
-        for (int i = 0; i < 8; i++) {
-            corner.set((i & 1) == 0 ? bounds.min.x : bounds.max.x, (i & 2) == 0 ? bounds.min.y : bounds.max.y,
-                  (i & 4) == 0 ? bounds.min.z : bounds.max.z).prj(lightCamera.combined);
-            x0 = Math.min(x0, corner.x);
-            y0 = Math.min(y0, corner.y);
-            x1 = Math.max(x1, corner.x);
-            y1 = Math.max(y1, corner.y);
-        }
-        float half = SHADOW_RESOLUTION / 2f;
-        return new int[] { Math.clamp((int) Math.floor((x0 + 1) * half) - 1, 0, SHADOW_RESOLUTION),
-              Math.clamp((int) Math.floor((y0 + 1) * half) - 1, 0, SHADOW_RESOLUTION),
-              Math.clamp((int) Math.ceil((x1 + 1) * half) + 1, 0, SHADOW_RESOLUTION),
-              Math.clamp((int) Math.ceil((y1 + 1) * half) + 1, 0, SHADOW_RESOLUTION) };
-    }
-
-    private static void markTiles(boolean[] tiles, int[] texels) {
-        int top = Math.min(SHADOW_TILES, (texels[3] + SHADOW_TILE - 1) / SHADOW_TILE);
-        int right = Math.min(SHADOW_TILES, (texels[2] + SHADOW_TILE - 1) / SHADOW_TILE);
-        for (int y = texels[1] / SHADOW_TILE; y < top; y++) {
-            for (int x = texels[0] / SHADOW_TILE; x < right; x++) { tiles[y * SHADOW_TILES + x] = true; }
-        }
-    }
-
-    /**
-     * The cached terrain map back over the stale tiles, a run of them in a row per copy, instead of the whole map (2304
-     * by 2304 depth texels) whenever a unit moves. The whole map in one copy where the map holds another cache's terrain
-     * (the two may hold different levels of detail), past half the map, or past SHADOW_RUNS copies.
-     */
-    private void restoreTiles(FrameBuffer cache, boolean[] stale) {
-        var runs = new com.badlogic.gdx.utils.IntArray();
-        int marked = 0;
-        for (int y = 0; y < SHADOW_TILES; y++) {
-            for (int x = 0; x < SHADOW_TILES; x++) {
-                if (!stale[y * SHADOW_TILES + x]) { continue; }
-                int end = x;
-                while (end + 1 < SHADOW_TILES && stale[y * SHADOW_TILES + end + 1]) { end++; }
-                runs.addAll(x * SHADOW_TILE, y * SHADOW_TILE, (end + 1) * SHADOW_TILE, (y + 1) * SHADOW_TILE);
-                marked += end + 1 - x;
-                x = end;
-            }
-        }
-        if (cache != shadowBase || marked * 2 > stale.length || runs.size / 4 > SHADOW_RUNS) {
-            cache.transfer(shadow.getFrameBuffer(), GL20.GL_DEPTH_BUFFER_BIT);
-        } else if (!runs.isEmpty()) {
-            GpuShadowLight.copyDepth(cache, shadow.getFrameBuffer(), runs);
-        }
-        shadowBase = cache;
-    }
-
-    /** The units' shadows over a terrain shadow already in the light's framebuffer. */
-    private void renderUnitShadows(Camera lightCamera, List<ModelInstance> units) {
-        if (units.isEmpty()) { return; }
-        shadow.getFrameBuffer().begin();
-        try {
-            Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
-            Gdx.gl.glScissor(1, 1, SHADOW_RESOLUTION - 2, SHADOW_RESOLUTION - 2);
-            depthBatch.begin(lightCamera);
-            try { renderDepthUnits(lightCamera, units, depthBatch); }
-            finally { depthBatch.end(); }
-        } finally {
-            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
-            shadow.getFrameBuffer().end();
-        }
-    }
-
-    private static boolean sameFit(Camera a, Camera b) {
-        return a.position.equals(b.position) && a.direction.equals(b.direction) && a.up.equals(b.up)
-              && a.viewportWidth == b.viewportWidth && a.viewportHeight == b.viewportHeight && a.near == b.near && a.far == b.far;
-    }
-
-    private static void remember(Camera target, Camera source) {
-        target.position.set(source.position);
-        target.direction.set(source.direction);
-        target.up.set(source.up);
-        target.viewportWidth = source.viewportWidth;
-        target.viewportHeight = source.viewportHeight;
-        target.near = source.near;
-        target.far = source.far;
-    }
 
     /** All passes use the viewing camera's detail selection; scatter culling never rebuilds a mesh. */
     private void updateDetail(Camera camera) {
@@ -8860,83 +8603,6 @@ final class GpuTerrain implements Disposable {
             // chunk and tree again, 220-530 ms per change on an Intel Iris Xe on MesaCity 1 while orbiting.
             chunk.treeLod = TreeLod.level(chunk.treeDiameter * pixelsPerUnit, chunk.treeLod);
         }
-    }
-
-    private static int poseHash(Iterable<Node> nodes) {
-        int result = 1;
-        for (Node node : nodes) {
-            result = 31 * result + Arrays.hashCode(node.globalTransform.val);
-            for (var part : node.parts) {
-                result = 31 * result + (part.enabled ? 1 : 0);
-            }
-            result = 31 * result + poseHash(node.getChildren());
-        }
-        return result;
-    }
-
-    private static int shadowPose(ModelInstance instance) {
-        return 31 * poseHash(instance.nodes) + (instance instanceof GpuUnitInstance unit ? unit.detailRevision() : 0);
-    }
-
-    /** Focus texels on visible receivers, retaining the full light depth for offscreen shadow casters. */
-    static void fitShadowCamera(Camera view, Camera target, BoundingBox bounds, Vector3 direction) {
-        fitShadowToReceivers(view == null ? bounds : BoardCamera.viewportBounds(view, bounds), target, bounds, direction);
-    }
-
-    /** Focus texels on these receivers, retaining the full light depth for offscreen shadow casters. */
-    static void fitShadowToReceivers(BoundingBox receivers, Camera target, BoundingBox bounds, Vector3 direction) {
-        target.direction.set(direction).nor();
-        Vector3 right = new Vector3(target.direction)
-              .crs(Math.abs(target.direction.z) > 0.99f ? Vector3.Y : Vector3.Z).nor();
-        target.up.set(right).crs(target.direction).nor();
-        BoundingBox lightSpace = new BoundingBox().inf();
-        float near = Float.POSITIVE_INFINITY;
-        float far = Float.NEGATIVE_INFINITY;
-        for (int corner = 0; corner < 8; corner++) {
-            Vector3 point = new Vector3((corner & 1) == 0 ? receivers.min.x : receivers.max.x,
-                  (corner & 2) == 0 ? receivers.min.y : receivers.max.y,
-                  (corner & 4) == 0 ? receivers.min.z : receivers.max.z);
-            lightSpace.ext(point.dot(right), point.dot(target.up), 0);
-            point.set((corner & 1) == 0 ? bounds.min.x : bounds.max.x,
-                  (corner & 2) == 0 ? bounds.min.y : bounds.max.y,
-                  (corner & 4) == 0 ? bounds.min.z : bounds.max.z);
-            float depth = point.dot(target.direction);
-            near = Math.min(near, depth);
-            far = Math.max(far, depth);
-        }
-        // Leave a filtering border, and align the light grid to texels to avoid crawling edges while panning.
-        float border = 1 + 4f / SHADOW_RESOLUTION;
-        target.viewportWidth = Math.max(1, lightSpace.getWidth()) * border;
-        target.viewportHeight = Math.max(1, lightSpace.getHeight()) * border;
-        Vector3 center = lightSpace.getCenter(new Vector3());
-        target.position.set(right).scl(center.x).mulAdd(target.up, center.y).mulAdd(target.direction, near - 1);
-        target.near = 1;
-        target.far = far - near + 2;
-        snapShadowCamera(target);
-    }
-
-    private static void snapShadowCamera(Camera target) {
-        Vector3 right = new Vector3(target.direction).crs(target.up).nor();
-        float x = target.position.dot(right), y = target.position.dot(target.up);
-        float texelX = target.viewportWidth / SHADOW_RESOLUTION;
-        float texelY = target.viewportHeight / SHADOW_RESOLUTION;
-        target.position.mulAdd(right, Math.round(x / texelX) * texelX - x)
-              .mulAdd(target.up, Math.round(y / texelY) * texelY - y);
-        target.update();
-    }
-
-    /** Keep the existing projection only while it covers all receivers/caster depths at the required detail. */
-    static boolean canReuseShadowCamera(Camera cached, Camera required) {
-        if (!cached.direction.equals(required.direction) || !cached.up.equals(required.up)
-              || cached.viewportWidth > required.viewportWidth * SHADOW_MAX_SCALE
-              || cached.viewportHeight > required.viewportHeight * SHADOW_MAX_SCALE) { return false; }
-        Vector3 point = new Vector3();
-        for (Vector3 corner : required.frustum.planePoints) {
-            point.set(corner).prj(cached.combined);
-            // The required fit already includes the PCF border. Allow only floating-point depth roundoff.
-            if (Math.abs(point.x) > 1 || Math.abs(point.y) > 1 || Math.abs(point.z) > 1.00001f) { return false; }
-        }
-        return true;
     }
 
     /**
@@ -9005,11 +8671,7 @@ final class GpuTerrain implements Disposable {
         environmentLighting.dispose();
         lavaLighting.dispose();
         depthBatch.dispose();
-        if (staticShadow != null) { staticShadow.dispose(); }
-        if (boardShadow != null) { boardShadow.dispose(); }
-        if (shadow != null) {
-            shadow.dispose();
-        }
+        shadowMap.dispose();
         if (borrowedAssets) { assets.release(this); } else { assets.dispose(); }
         rainNoise.dispose();
         waterDetail.dispose();
