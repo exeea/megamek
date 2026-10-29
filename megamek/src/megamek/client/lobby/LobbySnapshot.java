@@ -41,10 +41,11 @@ import megamek.common.units.FighterSquadron;
  * @param mapSummary          one line on the map: its boards and their size
  * @param server              where the game runs: a local game's port, or the server's address and port
  * @param forces              the units and formations the local player may see
+ * @param battlefield         the map, conditions, rules, victory and auto-resolve as the battlefield column sums them up
  */
 public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean localReady,
       boolean gameMasterAvailable, List<TeamGroup> teams, List<ChatLine> chat, List<Integer> customZones,
-      String mapSummary, String server, LobbyForces forces) {
+      String mapSummary, String server, LobbyForces forces, LobbyBattlefield battlefield) {
 
     /** The most chat lines a snapshot carries. */
     public static final int CHAT_LINES = 200;
@@ -54,7 +55,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
 
     /** An empty lobby, as shown before the client has its game. */
     public static final LobbySnapshot EMPTY = new LobbySnapshot(Player.PLAYER_NONE, false, false, false, List.of(),
-          List.of(), List.of(), "", "", LobbyForces.EMPTY);
+          List.of(), List.of(), "", "", LobbyForces.EMPTY, LobbyBattlefield.EMPTY);
 
     public LobbySnapshot {
         teams = List.copyOf(teams);
@@ -63,6 +64,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         Objects.requireNonNull(mapSummary);
         Objects.requireNonNull(server);
         Objects.requireNonNull(forces);
+        Objects.requireNonNull(battlefield);
     }
 
     /** How a player or team stands to the local player. */
@@ -273,6 +275,19 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
      */
     public static LobbySnapshot of(LobbySession session, List<String> chat, Collection<Integer> customZones,
           LobbyForces.Order order) {
+        return of(session, chat, customZones, order, LobbyBattlefield.AutoResolve.DEFAULT);
+    }
+
+    /**
+     * Reads the lobby from {@code session}'s game. Call it on the thread that changes the game (the Swing thread).
+     *
+     * @param chat        the chat lines to show; only the last {@link #CHAT_LINES} are kept
+     * @param customZones the map's custom deployment zones, which take the map's boards to know
+     * @param order       the order the forces list the units in, and the orders to choose from
+     * @param autoResolve the Swing lobby's auto-resolve settings
+     */
+    public static LobbySnapshot of(LobbySession session, List<String> chat, Collection<Integer> customZones,
+          LobbyForces.Order order, LobbyBattlefield.AutoResolve autoResolve) {
         Client client = session.client();
         Game game = session.game();
         Player local = session.localPlayer();
@@ -323,7 +338,8 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
               local != null && local.isGameMaster(), local != null && local.isDone(),
               gameMasterAvailable(game, local), teams, lines, new ArrayList<>(new TreeSet<>(customZones)),
               mapSummary(client.getMapSettings()), server(client.getHost(), client.getPort()),
-              LobbyForces.of(session, order));
+              LobbyForces.of(session, order), LobbyBattlefield.of(game.getOptions(), game.getPlanetaryConditions(),
+              client.getMapSettings(), autoResolve));
     }
 
     /** Where a team goes in the list: the local player's team first, the players on no team last. */

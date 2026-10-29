@@ -103,6 +103,7 @@ import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.generator.RandomCallsignGenerator;
 import megamek.client.generator.RandomNameGenerator;
+import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.DialogButton;
@@ -372,6 +373,8 @@ public class ChatLounge extends AbstractPhaseDisplay
     private final transient Map<String, Image> baseImages = new HashMap<>();
     /** An editor save needs a preview reload even when the server has no generated board to invalidate. EDT. */
     private boolean boardEditorRefreshPending;
+    /** The map tab's own window, while another view of this lobby shows the tab there. */
+    private JDialog mapSetupDialog;
 
     private final transient MapListMouseAdapter mapListMouseListener = new MapListMouseAdapter();
 
@@ -4331,11 +4334,108 @@ public class ChatLounge extends AbstractPhaseDisplay
         }
     }
 
+    /** The battlefield column's commands that another view of this lobby (the native lobby) can run. */
+    public enum BattlefieldCommand {
+        CONDITIONS, GAME_OPTIONS, VICTORY, RANDOM_MAP, LOAD_MAP_SETUP, SAVE_MAP_SETUP, GENERATE, PREVIEW_3D
+    }
+
+    /**
+     * EDT: runs one of the battlefield column's commands as its button here does, with the button's checks: a button
+     * this lobby disables, such as the planetary conditions in space, does nothing.
+     */
+    public void battlefieldCommand(BattlefieldCommand command) {
+        JButton button = switch (command) {
+            case CONDITIONS -> butConditions;
+            case GAME_OPTIONS -> butOptions;
+            case VICTORY -> butVictory;
+            case RANDOM_MAP -> butRandomMap;
+            case LOAD_MAP_SETUP -> butLoadMapSetup;
+            case SAVE_MAP_SETUP -> butSaveMapSetup;
+            case GENERATE -> butGenerateBattlefield;
+            case PREVIEW_3D -> butBoardPreview3D;
+        };
+        button.doClick(0);
+    }
+
+    /**
+     * EDT: the auto-resolve settings: whether the chances are shown before the battle is resolved, the number of runs
+     * they are worked out from, and how many run at once, with their upper bound. Whether they are shown is left to
+     * {@link LobbyBattlefield}.
+     */
+    public LobbyBattlefield.AutoResolve autoResolveSettings() {
+        return new LobbyBattlefield.AutoResolve(false, chkAutoResolve.isSelected(),
+              (int) spnSimulationRuns.getValue(), (int) spnThreadNumber.getValue(),
+              (Integer) ((SpinnerNumberModel) spnThreadNumber.getModel()).getMaximum());
+    }
+
+    /** EDT: sets the auto-resolve settings as their controls here do; values out of bounds are brought within. */
+    public void setAutoResolveSettings(boolean chances, int runs, int threads) {
+        if (chkAutoResolve.isSelected() != chances) {
+            chkAutoResolve.doClick(0);
+        }
+        spnSimulationRuns.setValue(bounded((SpinnerNumberModel) spnSimulationRuns.getModel(), runs));
+        spnThreadNumber.setValue(bounded((SpinnerNumberModel) spnThreadNumber.getModel(), threads));
+    }
+
+    private static int bounded(SpinnerNumberModel model, int value) {
+        return Math.clamp(value, (Integer) model.getMinimum(), (Integer) model.getMaximum());
+    }
+
+    /** EDT: runs auto-resolve as its button here does, with the chances first when they are asked for. */
+    public void runAutoResolve() {
+        butRunAutoResolve.doClick(0);
+    }
+
+    /**
+     * EDT: shows this lobby's map tab (map size, boards, medium and the map settings) in a window of its own, for
+     * another view of this lobby; closing that window puts the tab back.
+     */
+    public void openMapSetup() {
+        if (mapSetupDialog != null) {
+            mapSetupDialog.toFront();
+            return;
+        }
+        int index = panTabs.indexOfComponent(panMap);
+        String title = Messages.getString("ChatLounge.name.SelectMap");
+        if (index >= 0) {
+            panTabs.remove(index);
+        }
+        JDialog dialog = new JDialog(clientgui.getFrame(), title, false);
+        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        dialog.getContentPane().add(panMap, BorderLayout.CENTER);
+        dialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent event) {
+                if (mapSetupDialog != dialog) {
+                    return;
+                }
+                mapSetupDialog = null;
+                dialog.getContentPane().remove(panMap);
+                panTabs.insertTab(title, null, panMap, null,
+                      index < 0 ? panTabs.getTabCount() : Math.min(index, panTabs.getTabCount()));
+            }
+        });
+        Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        dialog.setSize(Math.min(1280, screen.width * 9 / 10), Math.min(860, screen.height * 9 / 10));
+        dialog.setLocationRelativeTo(null);
+        mapSetupDialog = dialog;
+        refreshMapUI();
+        dialog.setVisible(true);
+    }
+
+    /** EDT: closes the map tab's own window, if it is open, putting the tab back. */
+    public void closeMapSetup() {
+        if (mapSetupDialog != null) {
+            mapSetupDialog.dispose();
+        }
+    }
+
     // endregion
 
     /** The lobby ends: its 2D and 3D previews close. */
     public void killPreviewBV() {
         close2DPreview();
+        closeMapSetup();
         GpuBoardWindow.closePreview(clientgui.getFrame());
     }
 
