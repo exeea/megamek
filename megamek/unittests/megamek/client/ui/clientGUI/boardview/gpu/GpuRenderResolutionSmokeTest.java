@@ -29,9 +29,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The window's render resolution and SMAA through the real composite: the bilinear scale-up of the scene, the hardware
+ * The window's render resolution and SMAA through the real composite: FSR 1's scale-up of the scene, the hardware
  * depth that overlays test against, SMAA confined to jagged edges, and a resize; then a real board at each setting,
- * and, as a benchmark, the GPU time of the composite with and without SMAA.
+ * and, as a benchmark, the GPU time of the composite, SMAA and FSR.
  */
 @Tag("on-demand")
 class GpuRenderResolutionSmokeTest {
@@ -55,7 +55,7 @@ class GpuRenderResolutionSmokeTest {
                     if (between(half, dark, bright, x, row)) { halfBlends++; }
                     if (between(oneToOne, dark, bright, x, row)) { oneToOneBlends++; }
                 }
-                assertTrue(halfBlends > 0, "50% upscales bilinearly across the step");
+                assertTrue(halfBlends > 0, "50% upscales across the step");
                 assertEquals(0, oneToOneBlends, "100% reads the scene 1:1, as before: the step stays hard");
                 for (float scale : new float[] { .5f, 1 }) {
                     for (boolean smaa : new boolean[] { false, true }) {
@@ -164,7 +164,7 @@ class GpuRenderResolutionSmokeTest {
     }
 
     /**
-     * GPU timestamps of the composite stage, which includes SMAA's three passes, on the real board's fitted overview:
+     * GPU timestamps of the composite stage, which includes SMAA's and FSR's passes, on the real board's fitted overview:
      * each render resolution with and without SMAA, alternated in one process (forward then backward rounds). Knobs:
      * megamek.gpu.renderResolutionWidth and megamek.gpu.renderResolutionHeight (1920 x 1080) and
      * megamek.gpu.renderResolutionPercents (50,100).

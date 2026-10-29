@@ -21,9 +21,10 @@ import com.badlogic.gdx.utils.ScreenUtils;
 /**
  * SMAA 1x over the display-encoded composite, before overlays and the HUD: luma edge detection, blending weights with
  * the reference area and search tables, then neighbourhood blending into the window's framebuffer, which also receives
- * the scene's hardware depth for overlay occlusion. The smaa-*.frag shaders port SMAA.hlsl (Jimenez et al., MIT; the
- * notice is in each); smaa-area.bin and smaa-search.bin are the bytes of its AreaTex.h and SearchTex.h. Borrows the
- * screen quad; owns its programs, the two tables and three display-sized targets.
+ * the scene's hardware depth for overlay occlusion, or, at a render resolution below 1, into GpuFsr's input. The
+ * smaa-*.frag shaders port SMAA.hlsl (Jimenez et al., MIT; the notice is in each); smaa-area.bin and smaa-search.bin
+ * are the bytes of its AreaTex.h and SearchTex.h. Borrows the screen quad; owns its programs, the two tables and three
+ * composite-sized targets.
  */
 final class GpuSmaa implements Disposable {
     private final Mesh quad;
@@ -32,7 +33,7 @@ final class GpuSmaa implements Disposable {
     private ShaderProgram blend;
     private Texture area;
     private Texture search;
-    /** The composite's display-format output, its edges and the blending weights, made at the first display size. */
+    /** The composite's display-format output, its edges and the blending weights, made at the composite's size. */
     private FrameBuffer input;
     private FrameBuffer edgeTarget;
     private FrameBuffer weightTarget;
@@ -75,7 +76,8 @@ final class GpuSmaa implements Disposable {
         return result;
     }
 
-    private static FrameBuffer target(int width, int height, int internalFormat, int format) {
+    /** A color-only target, filtered linearly and clamped; GpuFsr's targets too. */
+    static FrameBuffer target(int width, int height, int internalFormat, int format) {
         var builder = new GLFrameBuffer.FrameBufferBuilder(width, height);
         builder.addColorTextureAttachment(internalFormat, format, GL20.GL_UNSIGNED_BYTE);
         FrameBuffer result = builder.build();
@@ -84,7 +86,7 @@ final class GpuSmaa implements Disposable {
         return result;
     }
 
-    /** Binds the display-sized target the composite draws into, with a viewport covering it. */
+    /** Binds the composite-sized target the composite draws into, with a viewport covering it. */
     void begin(int width, int height) {
         if (input == null || input.getWidth() != width || input.getHeight() != height) {
             disposeTargets();
@@ -101,10 +103,10 @@ final class GpuSmaa implements Disposable {
     }
 
     /**
-     * The three passes after the composite. The last writes the window at {@code bottom}, as the composite would have:
-     * the anti-aliased color and the scene's hardware depth.
+     * The three passes after the composite. The last writes the anti-aliased color into {@code destination}, GpuFsr's
+     * input; without one, into the window at {@code bottom} with the scene's hardware depth, as the composite would.
      */
-    void end(Texture sceneDepth, Camera camera, int bottom) {
+    void end(FrameBuffer destination, Texture sceneDepth, Camera camera, int bottom) {
         int width = input.getWidth(), height = input.getHeight();
         GpuAtmosphere.screenState();
         // Edge detection discards edgeless pixels, so its target starts cleared; the weights pass writes every pixel.
@@ -125,8 +127,12 @@ final class GpuSmaa implements Disposable {
         weights.setUniformi("u_search", 3);
         weights.setUniformf("u_metrics", 1f / width, 1f / height, width, height);
         quad.render(weights, GL20.GL_TRIANGLES);
-        FrameBuffer.unbind();
-        HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
+        if (destination != null) { destination.begin(); }
+        else {
+            FrameBuffer.unbind();
+            HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
+        }
+        // A destination without depth attachment ignores the depth write.
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthFunc(GL20.GL_ALWAYS);
         Gdx.gl.glDepthMask(true);
@@ -142,7 +148,7 @@ final class GpuSmaa implements Disposable {
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
     }
 
-    /** Releases the display-sized targets; the programs and tables stay for the next time SMAA is on. */
+    /** Releases the composite-sized targets; the programs and tables stay for the next time SMAA is on. */
     void disposeTargets() {
         if (input != null) { input.dispose(); input = null; }
         if (edgeTarget != null) { edgeTarget.dispose(); edgeTarget = null; }

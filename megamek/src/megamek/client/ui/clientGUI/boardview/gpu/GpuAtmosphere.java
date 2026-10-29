@@ -152,13 +152,15 @@ final class GpuAtmosphere implements Disposable {
     private final float contrastDark;
     private final float contrastLight;
     private Texture sceneDepth;
-    /** The composite's physical output size; the scene is smaller only at a window's render resolution below 1. */
+    /** The window's physical size; the scene is smaller only at a window's render resolution below 1 (resampled). */
     private int displayWidth = 1;
     private int displayHeight = 1;
     private boolean resampled;
     /** The window's SMAA after the composite, made while enabled; offscreen targets never use it. */
     private boolean antiAliasing;
     private GpuSmaa smaa;
+    /** Scales a resampled window's composite up to its pixels. */
+    private GpuFsr fsr;
     private FrameBuffer fog;
     private FrameBuffer weatherLayer;
     private boolean weatherDrawn;
@@ -488,8 +490,8 @@ final class GpuAtmosphere implements Disposable {
     }
 
     /**
-     * A render resolution {@code scale} below 1 renders the scene and its scene-sized targets at that share of the
-     * window's pixels; the composite scales it up bilinearly. At 1 the composite reads the scene 1:1, as ever.
+     * A render resolution {@code scale} below 1 renders the scene, its scene-sized targets, the composite and SMAA at
+     * that share of the window's pixels; FSR 1 then scales them up to the window (GpuFsr).
      */
     void begin(int width, int height, float scale, float delta) {
         int pixelsWide = Math.max(1, HdpiUtils.toBackBufferX(width)), pixelsHigh = Math.max(1, HdpiUtils.toBackBufferY(height));
@@ -608,8 +610,11 @@ final class GpuAtmosphere implements Disposable {
           GpuFieldOfView fieldOfView, boolean glareEnabled, FrameBuffer target) {
         boolean fovActive = fieldOfView != null && fieldOfView.active();
         boolean antiAliased = target == null && antiAliasing;
+        boolean upscaled = target == null && resampled;
         // Before any texture binding below: its lookup tables bind the active unit while they upload.
         if (antiAliased && smaa == null) { smaa = new GpuSmaa(quad); }
+        if (upscaled && fsr == null) { fsr = new GpuFsr(quad); }
+        else if (!upscaled && target == null && fsr != null) { fsr.disposeTargets(); }
         sceneColor.end();
         if (hasScattering()) {
             renderFog(camera, terrain, board);
@@ -629,8 +634,11 @@ final class GpuAtmosphere implements Disposable {
         } else if (depthCues != null) {
             depthCues.forget();
         }
+        // The window's composite and SMAA run at the scene's size, which only FSR's upscale leaves.
+        FrameBuffer upscale = upscaled ? fsr.input(sceneColor.getWidth(), sceneColor.getHeight()) : null;
         if (target != null) { target.begin(); }
-        else if (antiAliased) { smaa.begin(displayWidth, displayHeight); }
+        else if (antiAliased) { smaa.begin(sceneColor.getWidth(), sceneColor.getHeight()); }
+        else if (upscale != null) { upscale.begin(); }
         else { HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight); }
         screenState();
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -657,7 +665,6 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_flashCentre", ahead ? flashScreen.x / camera.viewportWidth : -10,
               ahead ? flashScreen.y / camera.viewportHeight : -10, camera.viewportWidth / camera.viewportHeight);
         compositeShader.setUniformi("u_depth", 1);
-        compositeShader.setUniformf("u_sceneScaled", resampled ? 1 : 0);
         if (water != null) { water.bind(6); }
         compositeShader.setUniformi("u_waterDepth", water == null ? 1 : 6);
         if (cued != null) {
@@ -710,6 +717,8 @@ final class GpuAtmosphere implements Disposable {
         // Zero drift or density constants can optimize these uniforms out of an edited shader.
         compositeShader.setUniformf(compositeShader.fetchUniformLocation("u_spaceTime", false), (float) spaceTime);
         compositeShader.setUniformMatrix(compositeShader.fetchUniformLocation("u_spaceView", false), camera.view);
+        compositeShader.setUniformf(compositeShader.fetchUniformLocation("u_windowPixels", false),
+              upscale == null ? 1 : displayWidth / (float) sceneColor.getWidth());
         Color direct = lighting.direct();
         float lightPeak = Math.max(direct.r, Math.max(direct.g, direct.b));
         // Lighting.direction is photon travel. The visible source is in the opposite direction, without sky drift.
@@ -730,7 +739,8 @@ final class GpuAtmosphere implements Disposable {
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
         if (target != null) { target.end(); }
-        else if (antiAliased) { smaa.end(sceneDepth, camera, bottom); }
+        else if (antiAliased) { smaa.end(upscale, sceneDepth, camera, bottom); }
+        if (upscale != null) { fsr.end(sceneDepth, camera, bottom, displayWidth, displayHeight); }
     }
 
     /** A distant light follows the viewing angle and perspective FOV, independently of camera position. */
@@ -1080,10 +1090,12 @@ final class GpuAtmosphere implements Disposable {
     }
 
     /**
-     * Links the weather and heat programs now (GpuBattleView's warm-up), not at the first rain or lava shown, and the
-     * depth cues' program while they are on; switched on later, it links at their first frame.
+     * Links the FSR, weather and heat programs now (GpuBattleView's warm-up), not at the first render resolution below
+     * 1, rain or lava shown, and the depth cues' program while they are on; switched on later, it links at their first
+     * frame.
      */
     void prepare() {
+        if (fsr == null) { fsr = new GpuFsr(quad); }
         if (particles == null) { particles = new GpuWeatherParticles(); }
         if (heatGlow == null) { heatGlow = new GpuHeatGlow(quad); }
         if (depthCueStrength > 0 && depthCues == null) { depthCues = new GpuDepthCues(quad); }
@@ -1095,6 +1107,7 @@ final class GpuAtmosphere implements Disposable {
         GpuShaderManager.dispose(contrastShader);
         disposeBuffers();
         if (smaa != null) { smaa.dispose(); }
+        if (fsr != null) { fsr.dispose(); }
         if (particles != null) {
             particles.dispose();
         }

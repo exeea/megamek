@@ -57,6 +57,11 @@ vec3 spaceDust(vec3 direction) {
     return sqrt(color) * .5 * min(SPACE_DENSITY, 1.0);
 }
 
+// A star's light, in proportion: its profile's integral over the plane, over pi.
+float spaceStarArea(float radius, float soft) {
+    return radius * radius + radius * soft + .3 * soft * soft;
+}
+
 vec3 spaceStars(vec2 sky, float scale, float density, float strength) {
     vec2 p = sky * vec2(scale * 2.0, scale), cell = floor(p);
     cell.x = mod(cell.x, scale * 2.0);
@@ -70,9 +75,12 @@ vec3 spaceStars(vec2 sky, float scale, float density, float strength) {
     vec2 offset = fract(p) - at;
     vec2 pixel = vec2(dy.y * offset.x - dy.x * offset.y, dx.x * offset.y - dx.y * offset.x)
           / (abs(determinant) > 1e-8 ? determinant : 1e-8);
-    float distance = length(pixel), brightness = spaceHash(cell + 29.1);
-    float radius = mix(.3, .85, pow(brightness, 4.0));
-    float star = 1.0 - smoothstep(radius, radius + .7, distance);
+    // Sizes in window pixels. Below 100% render resolution the soft edge widens with the composite's pixels so that no
+    // star falls between samples, dimmed by the area it gains so that each keeps its light.
+    float distance = length(pixel) * u_windowPixels, brightness = spaceHash(cell + 29.1);
+    float radius = mix(.3, .85, pow(brightness, 4.0)), soft = .7 * u_windowPixels;
+    float star = (1.0 - smoothstep(radius, radius + soft, distance))
+          * (spaceStarArea(radius, .7) / spaceStarArea(radius, soft));
     star += step(.985, brightness) * .12 * exp(-distance * distance * .35);
     star *= step(1.0 - density, seed);
     vec3 tint = mix(vec3(.58, .73, 1.0), vec3(1.0, .87, .68), spaceHash(cell + 37.4));

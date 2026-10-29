@@ -50,9 +50,9 @@ import org.junit.jupiter.api.Test;
 /**
  * No shader compile holds a frame once the loading stage has gone. A game on Grassland 3 shows its overview, a close
  * view, a pan, a volley of a laser, an autocannon and missiles and the Tactical View; then a tank and an infantry
- * platoon that were not on the board deploy, and SMAA and the thermal view are switched on and off. The 3D editor on the
- * same board opens every Assets category and reveals each of its sections, searches, and paints lava, water, ice, a
- * car and scorch. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
+ * platoon that were not on the board deploy, and SMAA, a 75% render resolution and the thermal view are switched on and
+ * off. The 3D editor on the same board opens every Assets category and reveals each of its sections, searches, and
+ * paints lava, water, ice, a car and scorch. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
  * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
  * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back. With the
  * Tessellation switch on, a zoom from the fitted board to full-detail banks links nothing either.
@@ -105,6 +105,8 @@ class GpuShaderLoadSmokeTest {
             }).when(source).takeFrame();
             // The spy holds a copy of the source's fields; the captures happen on the source.
             doAnswer(ignored -> fixture.source.reserveUnits()).when(source).reserveUnits();
+            // The game loads at 100%, so the switch to 75% below finds FSR linked by the warm-up alone.
+            GUIPreferences.getInstance().setBoardRenderResolution(1);
             new Lwjgl3Application(new GpuBattleView(source) {
                 int step, links, programs;
 
@@ -148,6 +150,7 @@ class GpuShaderLoadSmokeTest {
                             step++;
                         } else if (step == 6 && seconds > 36) {
                             ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(1);
+                            BoardCamera.renderScale = .75f;
                             step++;
                         } else if (step == 7 && seconds > 39) {
                             tuning.setWireframe(true);
@@ -155,6 +158,7 @@ class GpuShaderLoadSmokeTest {
                         } else if (step == 8 && seconds > 43) {
                             tuning.setWireframe(false);
                             ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(0);
+                            BoardCamera.renderScale = 1;
                             step++;
                         } else if (step == 9 && seconds > 45) {
                             // Hits on walls: their scar patches draw with the walls' own programs.
@@ -179,6 +183,7 @@ class GpuShaderLoadSmokeTest {
                 }
             }, window());
         } finally {
+            BoardCamera.renderScale = 1;
             // The view closed the spied source, which shares the fixture's state.
             SwingUtilities.invokeAndWait(fixture.view::close);
         }

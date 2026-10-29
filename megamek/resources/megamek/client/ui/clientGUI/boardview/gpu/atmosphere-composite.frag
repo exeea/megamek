@@ -36,7 +36,7 @@ uniform float u_spaceTime;
 uniform mat4 u_spaceView;
 uniform vec4 u_spaceLight; // Actual source direction and strength; never rotates with the decorative background.
 uniform vec3 u_spaceLightColor;
-uniform float u_sceneScaled; // 1 at a render resolution below 100%: scale the scene up; 0 reads it 1:1.
+uniform float u_windowPixels; // the window's pixels per composite pixel: above 1 only at a render resolution below 100%
 uniform vec4 u_flash; // a nuclear flash (GpuAtmosphere.setFlash): display-linear RGB; a, its glare's falloff
 uniform vec3 u_flashCentre; // the fireball on screen (uv, far off-screen when behind the camera), the view's aspect
 uniform sampler2D u_depthFocus; // GpuDepthCues: R the eased distance the view centres on, less the origin
@@ -68,28 +68,13 @@ float atmosphereDepthAt(vec2 uv) {
     return min(depthAt(uv), texture(u_waterDepth, uv).r);
 }
 
-// A linear scene-sized target at this display pixel: bilinear when the render resolution scales the scene up, which
-// the targets' own nearest filtering would not do. Depth stays the nearest texel.
-vec4 sceneSample(sampler2D source, vec2 uv) {
-    if (u_sceneScaled < 0.5) return texture(source, uv);
-    ivec2 last = textureSize(source, 0) - 1;
-    vec2 texel = uv * vec2(last + 1) - 0.5;
-    ivec2 base = ivec2(floor(texel));
-    vec2 f = texel - floor(texel);
-    vec4 below = mix(texelFetch(source, clamp(base, ivec2(0), last), 0),
-          texelFetch(source, clamp(base + ivec2(1, 0), ivec2(0), last), 0), f.x);
-    vec4 above = mix(texelFetch(source, clamp(base + ivec2(0, 1), ivec2(0), last), 0),
-          texelFetch(source, clamp(base + ivec2(1, 1), ivec2(0), last), 0), f.x);
-    return mix(below, above, f.y);
-}
-
 // ATMOSPHERE_GLARE
 // SPACE_SKY
 
 void main() {
     float depth = depthAt(v_uv);
     float surfaceDepth = u_fogEnabled > 0.5 || u_sand.x > 0.0 ? atmosphereDepthAt(v_uv) : depth;
-    vec4 scene = sceneSample(u_scene, v_uv);
+    vec4 scene = texture(u_scene, v_uv);
     scene.rgb = loadScene(scene.rgb);
     if (u_depthCues.x > 0.0 && depth < 1.0) {
         // Depth cues: what lies behind the view's focus hazes with its depth there; the focus and all in front of it
@@ -192,7 +177,7 @@ void main() {
     // Weather keeps its opaque-depth test, but foreground flakes/drops do not inherit the background's fog column.
     // Its separate target stores premultiplied linear RGB; all color still reaches the same grade/display boundary.
     if (u_weatherEnabled > 0.5) {
-        vec4 weather = sceneSample(u_weather, v_uv);
+        vec4 weather = texture(u_weather, v_uv);
         weather.rgb = loadScene(weather.rgb);
         float behind = 1.0 - weather.a;
         linear = linear * behind + weather.rgb;
