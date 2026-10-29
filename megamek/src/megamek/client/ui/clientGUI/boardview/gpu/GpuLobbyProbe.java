@@ -48,6 +48,8 @@ import megamek.logging.MMLogger;
  *     without it makes the window {@value #NARROW_WIDTH} by {@value #NARROW_HEIGHT}, which folds the battlefield into
  *     its rail. Either keeps the window's saved size as it was.</li>
  *     <li>{@code lobby+rail}: opens the folded battlefield from its rail.</li>
+ *     <li>{@code lobby+menu}: opens the first bot's player menu (the first player's without bots) before the shot.</li>
+ *     <li>{@code lobby+chat}: has the player and each bot say a line in the chat as they join.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
@@ -177,6 +179,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 local.setTeam(PLAYER_TEAM);
                 client.sendPlayerInfo();
                 loadUnits(client, local);
+                chat(client);
                 addBots(gui, waiting);
             }
             waiting.removeIf(bot -> {
@@ -187,6 +190,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 player.setTeam(BOT_TEAM);
                 bot.sendPlayerInfo();
                 loadUnits(bot, player);
+                chat(bot);
                 return true;
             });
             double elapsed = (System.nanoTime() - start) / 1e9;
@@ -216,6 +220,13 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 LOGGER.error("The lobby probe's bot {} failed to connect", name);
                 bot.die();
             }
+        }
+    }
+
+    /** With {@code lobby+chat}, has {@code client} say a line, so the chat shows players' lines. */
+    private void chat(AbstractClient client) {
+        if (options.contains("chat")) {
+            client.sendChat(Messages.getString("Lobby.probeChat"));
         }
     }
 

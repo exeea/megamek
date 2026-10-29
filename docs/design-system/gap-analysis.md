@@ -473,7 +473,22 @@ work for Swing, and item 11 is under investigation.
        their steps come: each owner's units and BV in the forces, the map's size in the battlefield
        (`LobbyTopBar`, `LobbyColumns`, `LobbyLayout`, `LobbyCentre` and the column panels). The start screen's art
        is not behind it: dimmed enough to read over, almost nothing of it showed, so it only cost loading time.
-     - L3 Players and chat: the team sections, player cards and their menus, adding bots, and the chat dock.
+     - L3 ~~Players and chat~~. The players column now lists each team under a header: an edge bar (the accent for
+       your team, danger for the others), the team's name and its BV, tonnage and units, or "hidden" where blind
+       drop hides them. Each player is a card with a color swatch, the name with YOU, BOT, GM or Observer chips (and
+       Disconnected for a ghost), the start position (with a warning when it is invalid), the forces line, the ready
+       state (a toggle on your own card) and a menu button. The menu, also on right-click, holds what ChatLounge's
+       player menu offers: settings, camo, team and deployment submenus, game master, bot settings, remove bot, and
+       replace a disconnected player with a bot. ChatLounge has no separate "kick bot" action, so neither does this
+       menu. The deployment submenu shows no check, because the snapshot carries only the start position's name. Under
+       each team "Add ally" or "Add opponent", and "Add on a new team" at the end, open `BotConfigDialog` and put the
+       bot on that team once it joins. The actions run on the EDT through `LobbyPlayerController`, which checks
+       permissions and calls ChatLounge's `LobbyCommands` (new `joinTeam` and `localBotClient`). Settings, camo and
+       bot setup are still the Swing dialogs, owned by the native window. The chat dock colors each sender by side
+       (`ChatLine`), shows server lines muted, keeps to the newest line, sends on Enter (so `/who` and the other
+       commands work) and recalls sent lines with Up and Down (`ChatHistory`). Escape closes a menu first, then
+       leaves the chat field. Not yet checked live: the Swing dialogs opening from the native window, the bot's team
+       move after it joins, and the submenus as drawn (the probe opens only the root menu, `lobby+menu`).
      - L4 Forces: unit cards, compact rows, owner sections, formations with drag and drop, sorting and the right-
        click menus.
      - L5 The battlefield: the map card (ideally a live 3D view of the board with the deployment zones), conditions,
