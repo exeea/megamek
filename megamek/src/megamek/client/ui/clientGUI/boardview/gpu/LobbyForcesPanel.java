@@ -251,6 +251,29 @@ final class LobbyForcesPanel {
         fill();
     }
 
+    /**
+     * Selects unit {@code id} alone and scrolls its card into view, showing the units rather than the formations, as
+     * when a warning in the top bar points at it; nothing when it is not shown.
+     */
+    void reveal(int id) {
+        if (shown.unit(id) == null) {
+            return;
+        }
+        if (formationsView()) {
+            views.select(UNITS);
+            viewChanged();
+        }
+        Table card = unitCards.get(id);
+        if (card == null) {
+            return;
+        }
+        select(true, id, false, false);
+        list.layout();
+        scroll.layout();
+        Vector2 at = card.localToAscendantCoordinates(list, new Vector2());
+        scroll.scrollTo(at.x, at.y, card.getWidth(), card.getHeight(), false, true);
+    }
+
     private boolean formationsView() {
         return views.getSelectedIndex() == FORMATIONS;
     }

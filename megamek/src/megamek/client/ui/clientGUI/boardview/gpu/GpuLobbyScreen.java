@@ -25,6 +25,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.LobbyMenuEntry;
+import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -33,6 +34,7 @@ import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.logging.MMLogger;
 
 /**
@@ -154,7 +156,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     private void build() {
         boolean motion = !preferences.getReduceMotion();
-        topBar = new LobbyTopBar(kit, window::leave, window::ready);
+        topBar = new LobbyTopBar(kit, window::leave, window::ready, this::goTo);
+        topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
         battlefield = new LobbyBattlefieldPanel(kit, battlefieldActions());
@@ -182,14 +185,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         players.attach(stage.getRoot());
         forces.attach(stage.getRoot());
         battlefield.attach(stage.getRoot());
+        topBar.attach(stage.getRoot());
         stage.addListener(new InputListener() {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
                 if (keycode != Keys.ESCAPE) {
-                    return false;
+                    return readyKey(keycode);
                 }
                 // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys
-                if (players.back() || forces.back() || battlefield.back()) {
+                if (topBar.back() || players.back() || forces.back() || battlefield.back()) {
                     return true;
                 }
                 if (stage.getKeyboardFocus() instanceof TextField) {
@@ -203,6 +207,49 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 return false;
             }
         });
+    }
+
+    /** The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, unless a text field has the keys. */
+    private boolean readyKey(int keycode) {
+        if (stage.getKeyboardFocus() instanceof TextField) {
+            return false;
+        }
+        KeyCommandBind bind = KeyCommandBind.DONE;
+        if (GpuBattleView.awtKey(keycode) != bind.key || GpuBattleView.modifiers() != bind.modifiers) {
+            return false;
+        }
+        window.ready();
+        return true;
+    }
+
+    /**
+     * Goes to a warning's cause: its first player's card, its first unit's card in the forces, or the map setup; a
+     * folded window first brings the forces back to the centre for a unit.
+     */
+    private void goTo(LobbyReadiness.Warning warning) {
+        switch (warning.kind().target()) {
+            case PLAYER -> {
+                if (!warning.players().isEmpty()) {
+                    players.reveal(warning.players().get(0));
+                }
+            }
+            case UNIT -> {
+                if (!warning.units().isEmpty()) {
+                    if (centre.showing() != null) {
+                        centre.back();
+                    }
+                    forces.reveal(warning.units().get(0));
+                }
+            }
+            case MAP -> window.battlefieldCommand(LobbyBattlefieldController.Command.MAP_SETUP);
+        }
+    }
+
+    /** GPU thread: lights the red warnings, as Ready was pressed while they stand. */
+    void pulseWarnings() {
+        if (topBar != null) {
+            topBar.pulse();
+        }
     }
 
     /** The player column's actions, which the window runs on the Swing thread. */
@@ -384,6 +431,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         folded = fold;
+        topBar.narrow(fold);
         if (!fold && BATTLEFIELD.equals(centre.showing())) {
             centre.back();
         }

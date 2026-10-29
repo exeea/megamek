@@ -425,9 +425,10 @@ work for Swing, and item 11 is under investigation.
      `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`). `MM_START_PAGE=lobby` hosts a local game at once
      with the Host page's saved name ("Probe Player" when none is saved) on the first free port from the saved one,
      so the lobby scene shows; `MM_LOBBY_BOTS=n` adds n Princess bots on team 2, `MM_LOBBY_UNITS` loads `.mul`
-     files for the player, and `lobby+ready` presses Ready once the bots have joined. `MM_LOBBY_SIZE=WIDTHxHEIGHT`
-     sizes the window (without saving the size), `lobby+narrow` makes it 1100 by 800 so the battlefield folds into
-     its rail, and `lobby+rail` opens the folded battlefield. The same `MM_START_SHOT*`
+     files for the player, `lobby+ready` readies the player alone before the shot and `lobby+start` presses Ready once
+     the bots have joined. `MM_LOBBY_SIZE=WIDTHxHEIGHT` sizes the window (without saving the size), `lobby+narrow`
+     makes it 1100 by 800 so the battlefield folds into its rail, and `lobby+rail` opens the folded battlefield. The
+     same `MM_START_SHOT*`
      switches take the lobby's shot, which also logs the open windows (libGDX windows, GPU threads and showing
      Swing windows) to `logs\unified_log.log` (`GpuLobbyProbe`).
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
@@ -531,8 +532,30 @@ work for Swing, and item 11 is under investigation.
        `lobby+autoresolve` turns on the auto-resolve setting for the run and opens it. Not yet checked live: the
        Swing dialogs from the column, the map setup window, and the preview and editor round trip; MekHQ may flash
        its start screen between the preview and the lobby.
-     - L6 Ready: the ready count, the BV chips, Ready and its warning chips.
-     - L7 The unit selector: the Requisition view, with categories, search, weight chips, the Filters drawer and the
+     - L6 ~~Ready~~. The top bar's middle shows "n / m ready", counting only the players the server waits for
+       (no ghosts or observers, bots included), success-toned once all are; its tooltip names whom the table waits
+       for. Then a Battle Value chip per side in the reference's order: your own team or yourself first (accent
+       edge), then the other teams (danger), then the other loners (neutral). Only a real blind drop hides the
+       others' BV ("BV ?"), as ChatLounge's team overview does, and the Game Master sees all. Above four sides they
+       fold into "Teams: n", which opens a popover listing them. Before Leave and Ready come the warning chips with
+       icons, as acting status chips (`UiKit.actingChip`): red for `ReadyCheck`'s blockers (deployment zones that
+       overlap under exclusive double-blind deployment, forces without a commander when killing the commander
+       wins) and amber for no units, units with problems or needing setup (from the force cards' tags), an
+       unfinished map or odd-width boards. They cover the local player, their bots and their units only, as a blind
+       drop may hide the others. Each tooltip names who or what; a click shows the first player's card, selects the
+       first unit in the forces, or opens the map setup. Past three warnings the rest fold into "+n more", and a
+       narrow window folds them all into "Warnings: n"; both open a list. Ready, a primary button, turns green
+       with a check once you are ready (`UiTheme.DONE_BUTTON`), as the reference; a click stands down, never
+       blocked. Ready while a red warning stands lights the red chips for 700 ms instead of ChatLounge's blocked
+       dialog; otherwise it runs `ChatLounge.ready()`, with its GIF question and lobby save. The card and the bar
+       show the new state at once and follow the server's echo (or give up after 3 s). The DONE key binding
+       (Ctrl+Enter) presses Ready outside text fields, and the tooltips name it. "Unbalanced sides" was left out,
+       as the reference has none. `LobbySnapshot` gained `readiness` (`LobbyReadiness`: the sides and the
+       warnings), `readyTotal`, `waitingFor` and `withLocalReady`; ChatLounge no longer checks readiness when
+       standing down. Probes: `lobby+ready` now readies the player alone a second before the shot, `lobby+start`
+       presses Ready as before, `lobby+blocked` turns on the commander victory, `lobby+overlap` exclusive double
+       blind deployment, and `lobby+blind` the real blind drop. Not yet checked live: the pulse, the popovers,
+       the warning clicks and the key, which the probe does not press.     - L7 The unit selector: the Requisition view, with categories, search, weight chips, the Filters drawer and the
        dossier, then step 7.4 and 7.5's adding strip, skills, BV and sources. MekHQ, MegaMekLab and the main menu's
        unit browser keep `AbstractUnitSelectorDialog`.
      - L8 Dialogs. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load

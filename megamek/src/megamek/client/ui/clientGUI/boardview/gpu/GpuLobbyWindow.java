@@ -90,8 +90,9 @@ import megamek.server.ServerBoardHelper;
  * ({@link GpuLobbyScreen}) as a {@link LobbySnapshot}, and runs the screen's actions on the Swing thread, where the
  * game is.
  *
- * <p>Ready runs the Swing lobby's own ready step ({@code ChatLounge.ready()}), whose checks ask through
- * {@code SwingLobbyPrompts}: Swing dialogs owned by the hidden client frame. This scene owns them natively, as the board
+ * <p>Ready runs the Swing lobby's own ready step ({@code ChatLounge.ready()}), whose questions ask through
+ * {@code SwingLobbyPrompts}: Swing dialogs owned by the hidden client frame. While a red warning blocks readying, the
+ * top bar lights its warnings instead of that step's blocked dialog. This scene owns the dialogs natively, as the board
  * and the start screen own theirs, so they stay in front of the window, and a modal one blocks the screen's input.
  * Leave and the window's close box run the client's own exit ({@link ClientGUI#handleExit}), with its save question.
  * </p>
@@ -106,6 +107,8 @@ public final class GpuLobbyWindow {
     private static final int BOT_JOIN_WAIT_MS = 10_000;
     /** How long the map waits for changes to settle before it is drawn again. */
     private static final int MAP_DELAY_MS = 150;
+    /** How long a sent ready state shows before the server's echo, at most. */
+    private static final long PENDING_READY_NANOS = 3_000_000_000L;
 
     /** EDT: the lobby holding the window or about to. */
     private static GpuLobbyWindow active;
@@ -216,6 +219,9 @@ public final class GpuLobbyWindow {
     private volatile GpuLobbyScreen screen;
     /** The newest snapshot, which a screen shows as it is created. */
     private volatile LobbySnapshot snapshot = LobbySnapshot.EMPTY;
+    /** EDT: the ready state just sent, shown until the server echoes it or {@link #PENDING_READY_NANOS} pass. */
+    private Boolean pendingReady;
+    private long pendingSince;
     private volatile GpuLobbyProbe probe;
     private boolean exitRequested;
     /** EDT: the map settings whose custom deployment zones {@link #customZones} holds. */
@@ -369,12 +375,20 @@ public final class GpuLobbyWindow {
             LOGGER.error(failure, "The lobby could not read the game");
             return;
         }
+        if (pendingReady != null) {
+            if (read.localReady() == pendingReady || System.nanoTime() - pendingSince > PENDING_READY_NANOS) {
+                pendingReady = null;
+            } else {
+                read = read.withLocalReady(pendingReady);
+            }
+        }
         snapshot = read;
-        sendSprites(read);
+        LobbySnapshot shownRead = read;
+        sendSprites(shownRead);
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
             if (shown != null) {
-                shown.show(read);
+                shown.show(shownRead);
             }
         });
     }
@@ -387,8 +401,30 @@ public final class GpuLobbyWindow {
             if (closing) {
                 return;
             }
-            if (gui.chatlounge != null) {
-                gui.chatlounge.ready();
+            if (gui.chatlounge == null) {
+                return;
+            }
+            Player local = gui.getClient().getLocalPlayer();
+            boolean readying = local != null && !local.isDone();
+            // A red warning blocks readying: the bar lights them, and their tooltips say why, instead of a dialog
+            if (readying && !gui.chatlounge.lobbyCommands().readyBlockers().isEmpty()) {
+                GpuHost.post(() -> {
+                    GpuLobbyScreen shown = screen;
+                    if (shown != null) {
+                        shown.pulseWarnings();
+                    }
+                });
+                return;
+            }
+            gui.chatlounge.ready();
+            if (local != null && local.isDone() != readying) {
+                // The server echoes the state a moment later; until then the bar and the card show it at once
+                pendingReady = readying;
+                pendingSince = System.nanoTime();
+                // Read again once the server has had its time, in case its echo never comes
+                Timer expiry = new Timer((int) (PENDING_READY_NANOS / 1_000_000L) + 1, event -> queueRefresh());
+                expiry.setRepeats(false);
+                expiry.start();
             }
             queueRefresh();
         });

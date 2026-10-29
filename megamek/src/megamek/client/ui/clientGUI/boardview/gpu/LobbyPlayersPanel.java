@@ -57,6 +57,8 @@ final class LobbyPlayersPanel {
     private static final float FOLLOW = 4;
     /** For how many frames the chat stays at its end after its lines change. */
     private static final int END_FRAMES = 3;
+    /** How long a revealed card stays lit, in seconds: the reference's pulse. */
+    static final float REVEAL_SECONDS = 0.7f;
 
     /** What the panel's controls do; each takes effect when the window next reads the lobby. */
     interface Actions {
@@ -88,6 +90,7 @@ final class LobbyPlayersPanel {
     private final Table panel;
     private final Label playerCount;
     private final Table playerList = new Table();
+    private final ScrollPane roster;
     private final Table chatList = new Table();
     private final ScrollPane chatScroll;
     private final UiTextField input;
@@ -114,7 +117,7 @@ final class LobbyPlayersPanel {
         playerCount = header.findActor(UiKit.HEADER_COUNT);
         panel.add(header).growX().row();
         playerList.top();
-        ScrollPane roster = kit.scrollList(playerList, true, false);
+        roster = kit.scrollList(playerList, true, false);
         // The cards end beside the scroll bar, which lies over the list, rather than under it
         playerList.padRight(barWidth(roster));
         panel.add(roster).grow().row();
@@ -213,6 +216,25 @@ final class LobbyPlayersPanel {
     }
 
     // ---- The roster ----
+
+    /**
+     * Scrolls the roster to player {@code id}'s card and lights it for a moment, as when a warning in the top bar
+     * points at them; nothing when they are not shown.
+     */
+    void reveal(int id) {
+        Actor found = playerList.findActor("lobby-player-" + id);
+        if (!(found instanceof Table card)) {
+            return;
+        }
+        roster.layout();
+        Vector2 at = card.localToAscendantCoordinates(playerList, new Vector2());
+        roster.scrollTo(at.x, at.y, card.getWidth(), card.getHeight(), false, true);
+        card.clearActions();
+        card.setBackground(kit.skin.getDrawable("token-card-selected"));
+        card.addAction(com.badlogic.gdx.scenes.scene2d.actions.Actions.sequence(
+              com.badlogic.gdx.scenes.scene2d.actions.Actions.delay(REVEAL_SECONDS),
+              com.badlogic.gdx.scenes.scene2d.actions.Actions.run(() -> card.setBackground(kit.skin.getDrawable("token-card")))));
+    }
 
     private void fillPlayers(LobbySnapshot snapshot) {
         playerList.clearChildren();
@@ -378,6 +400,11 @@ final class LobbyPlayersPanel {
         String icon = player.ready() ? "check-circle" : player.self() ? "radio-unchecked" : "hourglass";
         if (player.self()) {
             UiButton toggle = kit.button("button-icon" + UiTheme.COMPACT, icon, null, null);
+            if (player.ready()) {
+                // The check keeps the success color it has on the other cards rather than the label's
+                Actor check = toggle.icons.removeFirst();
+                toggle.iconColors.put(check, UiTheme.tokenColor("status.success"));
+            }
             kit.tip(toggle, true).getActor().setText(Messages.getString("Lobby.readyToggle"));
             UiKit.onChange(toggle, actions::ready);
             return toggle;

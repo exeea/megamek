@@ -29,7 +29,10 @@ import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.force.Force;
 import megamek.common.loaders.MULParser;
+import megamek.common.options.BasicOption;
 import megamek.common.options.GameOptions;
+import megamek.common.options.IBasicOption;
+import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
@@ -42,8 +45,15 @@ import megamek.logging.MMLogger;
  *     <li>{@code MM_LOBBY_BOTS}: how many Princess bots to add, on team 2 with the player on team 1 (0 to 8).</li>
  *     <li>{@code MM_LOBBY_UNITS}: unit list files ({@code .mul}), separated by the path separator ({@code ;} on
  *     Windows), loaded for the player and for each bot.</li>
- *     <li>{@code lobby+ready}: presses Ready once the bots have joined (and after the shot), to watch the game
- *     start.</li>
+ *     <li>{@code lobby+ready}: readies the player alone, without their bots, a second before the shot (or once the
+ *     bots have joined without one), so the shot shows the ready state while the table waits for the bots.</li>
+ *     <li>{@code lobby+start}: presses Ready as the lobby does, for the player and their bots, once the bots have
+ *     joined (and after the shot), to watch the game start.</li>
+ *     <li>{@code lobby+blocked}: turns on the victory condition of killing the commander, so forces without one
+ *     raise a red warning that blocks Ready.</li>
+ *     <li>{@code lobby+overlap}: turns on double blind with exclusive deployment, so every player left on any edge
+ *     overlaps and Ready is blocked.</li>
+ *     <li>{@code lobby+blind}: turns on the real blind drop, so the other sides' Battle Value hides.</li>
  *     <li>{@code MM_START_SHOT}: a PNG file the lobby saves from its frame buffer, {@code MM_START_SHOT_AT} seconds
  *     after it shows (by default {@value #SHOT_AT}, once the bots and units have arrived).</li>
  *     <li>{@code MM_START_QUIT}: {@code true} to quit MegaMek once the shot is saved.</li>
@@ -185,8 +195,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         Client client = gui.getClient();
         List<BotClient> waiting = new ArrayList<>();
         boolean[] joined = { false };
-        double readyAt = (shot == null ? 0 : shotAt) + READY_AFTER;
-        boolean[] readied = { !options.contains("ready") };
+        boolean starts = options.contains("start");
+        double readyAt = shot == null ? READY_AFTER : starts ? shotAt + READY_AFTER : Math.max(0, shotAt - READY_AFTER);
+        boolean[] readied = { !starts && !options.contains("ready") };
         int[] formed = { options.contains("formations") ? 0 : FORMED };
         Timer timer = new Timer(POLL_MS, null);
         timer.addActionListener(event -> {
@@ -199,6 +210,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                     local.setStartingPos(Board.START_W);
                 }
                 client.sendPlayerInfo();
+                sendOptions(client);
                 loadUnits(client, local);
                 chat(client);
                 addBots(gui, waiting);
@@ -223,8 +235,13 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             }
             if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt && gui.chatlounge != null) {
                 readied[0] = true;
-                LOGGER.info("The lobby probe presses Ready");
-                gui.chatlounge.ready();
+                if (starts) {
+                    LOGGER.info("The lobby probe presses Ready");
+                    gui.chatlounge.ready();
+                } else {
+                    LOGGER.info("The lobby probe readies the player");
+                    client.sendDone(true);
+                }
             }
             if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED) {
                 timer.stop();
@@ -247,6 +264,24 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 LOGGER.error("The lobby probe's bot {} failed to connect", name);
                 bot.die();
             }
+        }
+    }
+
+    /** Sends the game options {@code lobby+blocked}, {@code lobby+overlap} and {@code lobby+blind} ask for. */
+    private void sendOptions(Client client) {
+        Vector<IBasicOption> changed = new Vector<>();
+        if (options.contains("blocked")) {
+            changed.add(new BasicOption(OptionsConstants.VICTORY_COMMANDER_KILLED, true));
+        }
+        if (options.contains("overlap")) {
+            changed.add(new BasicOption(OptionsConstants.ADVANCED_DOUBLE_BLIND, true));
+            changed.add(new BasicOption(OptionsConstants.BASE_EXCLUSIVE_DB_DEPLOYMENT, true));
+        }
+        if (options.contains("blind")) {
+            changed.add(new BasicOption(OptionsConstants.BASE_REAL_BLIND_DROP, true));
+        }
+        if (!changed.isEmpty()) {
+            client.sendGameOptions("", changed);
         }
     }
 
