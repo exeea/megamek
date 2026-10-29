@@ -220,4 +220,38 @@ class LobbySnapshotTest {
         assertFalse(snapshot.localReady());
         assertEquals("Local", snapshot.players().get(0).name());
     }
+
+    private static LobbySnapshot.PlayerRow row(int id, String name, int team, boolean self, boolean observer,
+          boolean hidden, int bv) {
+        return new LobbySnapshot.PlayerRow(id, name, team, false, self, self, false, observer, false, hidden, 1, bv);
+    }
+
+    @Test
+    void sumsUpTheSidesWithTheLocalPlayersFirst() {
+        List<LobbySnapshot.TeamGroup> teams = List.of(
+              new LobbySnapshot.TeamGroup(Player.TEAM_NONE, "No team",
+                    List.of(row(4, "Loner", Player.TEAM_NONE, false, false, false, 700),
+                          row(5, "Watcher", Player.TEAM_NONE, false, true, false, 0))),
+              new LobbySnapshot.TeamGroup(1, "Team 1", List.of(row(2, "Foe", 1, false, false, true, 0),
+                    row(3, "Foe 2", 1, false, false, false, 400))),
+              new LobbySnapshot.TeamGroup(2, "Team 2", List.of(row(1, "Me", 2, true, false, false, 1000),
+                    row(6, "Ally", 2, false, false, false, 500))));
+        LobbySnapshot snapshot = new LobbySnapshot(1, false, false, teams, List.of(), "", "");
+
+        assertEquals(List.of(new LobbySnapshot.Side("Team 2", true, false, 1500),
+              new LobbySnapshot.Side("Team 1", false, true, 400),
+              new LobbySnapshot.Side("Loner", false, false, 700)), snapshot.sides());
+    }
+
+    @Test
+    void aLocalPlayerOnNoTeamIsTheirOwnSide() {
+        List<LobbySnapshot.TeamGroup> teams = List.of(
+              new LobbySnapshot.TeamGroup(Player.TEAM_NONE, "No team",
+                    List.of(row(2, "Other", Player.TEAM_NONE, false, false, false, 300),
+                          row(1, "Me", Player.TEAM_NONE, true, false, false, 200))));
+        LobbySnapshot snapshot = new LobbySnapshot(1, false, false, teams, List.of(), "", "");
+
+        assertEquals(List.of(new LobbySnapshot.Side("Me", true, false, 200),
+              new LobbySnapshot.Side("Other", false, false, 300)), snapshot.sides());
+    }
 }

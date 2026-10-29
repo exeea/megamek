@@ -74,6 +74,60 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
     public record PlayerRow(int id, String name, int team, boolean bot, boolean self, boolean local,
           boolean gameMaster, boolean observer, boolean ready, boolean hidden, int units, int bv) { }
 
+    /**
+     * One side of the battle as the top bar sums it up: a team, or a player on no team.
+     *
+     * @param name     the team's or the player's name
+     * @param friendly whether it is the local player's side
+     * @param hidden   whether a blind drop hides any of its players' forces from the local player
+     * @param bv       the Battle Value of the side's players whose forces are not hidden
+     */
+    public record Side(String name, boolean friendly, boolean hidden, int bv) { }
+
+    /**
+     * @return the sides that field forces: the local player's first, then the other teams in team order, then each
+     *       other player on no team; observers field none
+     */
+    public List<Side> sides() {
+        int localTeam = Player.TEAM_NONE;
+        for (PlayerRow player : players()) {
+            if (player.self()) {
+                localTeam = player.team();
+            }
+        }
+        List<Side> own = new ArrayList<>();
+        List<Side> teamSides = new ArrayList<>();
+        List<Side> loners = new ArrayList<>();
+        for (TeamGroup team : teams) {
+            if (team.id() <= Player.TEAM_NONE) {
+                for (PlayerRow player : team.players()) {
+                    if (!player.observer()) {
+                        Side side = new Side(player.name(), player.self(), player.hidden(), player.bv());
+                        (player.self() ? own : loners).add(side);
+                    }
+                }
+                continue;
+            }
+            boolean fields = false;
+            boolean hidden = false;
+            int bv = 0;
+            for (PlayerRow player : team.players()) {
+                if (!player.observer()) {
+                    fields = true;
+                    hidden |= player.hidden();
+                    bv += player.bv();
+                }
+            }
+            if (fields) {
+                boolean friendly = team.id() == localTeam;
+                (friendly ? own : teamSides).add(new Side(team.name(), friendly, hidden, bv));
+            }
+        }
+        own.addAll(teamSides);
+        own.addAll(loners);
+        return own;
+    }
+
     /** @return how many players are ready */
     public int readyCount() {
         return (int) players().stream().filter(PlayerRow::ready).count();
