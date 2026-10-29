@@ -64,7 +64,7 @@ class GpuVegetationLightingSmokeTest {
             // Trees and grass take their sun reflection from shadeSurface (surface-shading.glsl).
             String lighting = GpuShaderSource.read("surface-shading.glsl");
             String disabled = lighting.replace(
-                  "sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * multiscatter * s.cavity;",
+                  "sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * multiscatter * hollows;",
                   "sheen = vec3(0.0);");
             assertTrue(!lighting.equals(disabled));
             var missing = new ArrayList<String>();

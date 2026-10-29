@@ -725,16 +725,15 @@ void main() {
     // Where distance flattens natural relief, its share of the sun comes off here, so far zoom keeps its tone.
     // The shadow is looked up on the visible relief, about RELIEF_METRES deep, not the smooth mesh, so raised grains
     // catch the light at a shadow's edge. Hollows stay on the mesh: pushed into it they would shade themselves under
-    // any sun. Where the sun grazes the ground its hollows (the cavity) fall into shade first.
+    // any sun; shadeSurface shades them by the cavity (micro-shadowing).
     float lift = max(materialHeight - .5, 0.0) * RELIEF_METRES * u_metre;
-    float hollows = clamp(max(dot(normal, light), 0.0) + 2.0 * cavity * cavity - 1.0, 0.0, 1.0);
     // The grass, clods and stones along a natural edge fray its shadow, up to a quarter metre either way, in tufts of
     // 0.1 to 0.3 m. The noise's mipmaps take the fray out with distance, where it would only shimmer.
     vec2 tufts = world.xy + world.z * vec2(.6, -.4);
     vec2 fray = (texture(u_rainNoise, tufts / 19.2 + .31).gb - .5 + .5 * (texture(u_rainNoise, tufts / 6.4 + .67).rg - .5))
           * (2.0 * FRAY_METRES / 1.5);
     Surface surface = opaqueSurface(albedo, normal, smoothSupport ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light, u_metre, lift, fray) * sunOnRelief(relief, dot(face, light)) * hollows
+          sculptShadow(receiver, light, u_metre, lift, fray) * sunOnRelief(relief, dot(face, light))
                 * (smoothSupport && finish.scatter <= 0.0 ? terminatorShadow(face, normal, light) : 1.0));
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.
     metallicShare(surface, clamp(finish.metallic, 0.0, 1.0));

@@ -34,7 +34,7 @@ struct Surface {
     float metallic;          // share of the surface that is metal; the rest is a dielectric (f0 .04, or water's)
     float occlusion;         // ambient occlusion of the diffuse sky
     float specularOcclusion; // occlusion of the reflected environment
-    float cavity;            // micro-occlusion of every light: sky, local lights, reflections and half the sun
+    float cavity;            // micro-occlusion: of the sky, local lights and reflections, and the sun's micro-shadow
     float visibility;        // of the sun: the shadow map and any self-shadowing, looked up by the caller
     vec3 front;              // diffuse share of light on the visible side; 1 for opaque surfaces
     vec3 back;               // share passed from the far side, relative to albedo (thinTransmission); 0 when opaque
@@ -145,10 +145,13 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
               ? diffuseReflectance(-normal, light, -view, roughness, f0) : vec3(0.0);
         incident += through * s.back;
     }
-    vec3 direct = sun * incident * mix(1.0, s.cavity, .5) * (1.0 + caustic);
+    // Micro-shadowing (Naughty Dog's, as Unity HDRP's): the cavity hides the sun from its hollows, most where it grazes
+    // either face; a cavity under .7 keeps some shade even overhead. The sun's only cavity term, on both its lobes.
+    float hollows = clamp(abs(dot(normal, light)) + 2.0 * s.cavity * s.cavity - 1.0, 0.0, 1.0);
+    vec3 direct = sun * incident * hollows * (1.0 + caustic);
     vec3 sheen = vec3(0.0);
     if (s.heat < 1.0 && lit && any(greaterThan(incidence, vec3(0.0)))) {
-        sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * multiscatter * s.cavity;
+        sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * multiscatter * hollows;
     }
     if (s.heat > 0.0) {
         // The material response and spill light are identical on both sides of the blend. Only the sky bounce,
