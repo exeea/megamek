@@ -54,14 +54,12 @@ import com.badlogic.gdx.graphics.g3d.attributes.DirectionalLightsAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
-import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider;
-import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
@@ -76,10 +74,8 @@ import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
-import com.badlogic.gdx.utils.FloatArray;
-import com.badlogic.gdx.utils.ShortArray;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuTerrainLayer.MeshBatch;
 import megamek.common.board.Coords;
-import megamek.common.board.HexTile;
 import megamek.logging.MMLogger;
 
 /** Chunked solid hex columns, flat decals and authored features; owns all GL resources it creates. */
@@ -94,8 +90,6 @@ final class GpuTerrain implements Disposable {
     static final float DECK_MUD_RIM_KIND = 140 / 255f;
     // Extra texels pay for the camera guard band without reducing the former 2048-map's world-space detail.
     static final float DEFAULT_BUILDING_OPACITY = 0.5f;
-    private static final long ATTRIBUTES = VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
-          | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.ColorPacked;
     private final GpuAssets assets;
     /** Whether {@link #assets} belong to another terrain ({@link #GpuTerrain(GpuTerrain)}). */
     private final boolean borrowedAssets;
@@ -989,7 +983,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /** Relief that a cliff chunk measures and marks (Ground.cliffs): all but the pits' and bare magma's. */
-    private static boolean cliffRelief(Attributes material) {
+    static boolean cliffRelief(Attributes material) {
         return prepass(material) == Prepass.RELIEF && material.has(Ground.TYPE);
     }
 
@@ -1673,7 +1667,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /** Canonically sculpted tops and cliffs of one surface family; per-vertex data carries the rest. */
-    private static final class Sculpt extends FloatAttribute {
+    static final class Sculpt extends FloatAttribute {
         static final long TYPE = register("boardSculpt");
 
         Sculpt(float family) { super(TYPE, family); }
@@ -1777,12 +1771,12 @@ final class GpuTerrain implements Disposable {
 
     /** Index ranges borrow the chunk's meshes; no duplicate geometry or construction-time scene is retained. */
     /** {@code lift}: a Solaris elevator's lift, which a moving platform draws at its own height (Lifts). */
-    private record TileRange(int layer, Mesh mesh, Material material, int offset, int count, boolean route, boolean lift) { }
+    record TileRange(int layer, Mesh mesh, Material material, int offset, int count, boolean route, boolean lift) { }
     private record PaintedDecal(BoardDecals.Stamp stamp, List<BoardSurface.Face> faces, float lift) { }
 
     private record InteriorStruts(Coords coords, ModelInstance instance) { }
 
-    private static final class TileMesh {
+    static final class TileMesh {
         // The finished support, kept while the chunk is, as engines keep a loaded chunk's collision: picking, draping,
         // placement and replanting read it, and no query rebuilds an installed hex.
         BoardTacticalGeometry.Surface support;
@@ -2059,278 +2053,6 @@ final class GpuTerrain implements Disposable {
             if (waterField != null) { waterField.dispose(); }
             if (lavaField != null) { lavaField.dispose(); }
             roadMasks.dispose();
-        }
-    }
-
-    /** Collect by material before opening a mesh part: ModelBuilder has only one active part at a time. */
-    private static final class Layer {
-        private record Shape(Coords owner, Material material, boolean route, boolean lift, Consumer<MeshBatch> emit) { }
-        final Map<Material, List<Shape>> geometry = new LinkedHashMap<>();
-        Coords owner;
-        boolean route;
-        boolean lift;
-
-        void add(Material material, Consumer<MeshPartBuilder> shape) {
-            // Bounded legacy shapes retain the headroom previously reserved at 48,000 vertices.
-            geometry.computeIfAbsent(material, key -> new ArrayList<>())
-                  .add(new Shape(owner, material, route, lift, batch -> shape.accept(batch.reserve(65536 - 48001))));
-        }
-
-        /** Request a mesh before each triangle; a new mesh also requires fresh shared vertex indices. */
-        void addTriangles(Material material, Consumer<Supplier<MeshPartBuilder>> shape) {
-            geometry.computeIfAbsent(GpuRoads.batchMaterial(material), key -> new ArrayList<>())
-                  .add(new Shape(owner, material, route, lift, batch -> shape.accept(() -> batch.reserve(3))));
-        }
-
-        /** Snapshot CPU mesh buffers while the GL thread still owns the source chunk. */
-        void reuse(TileRange range, Material material) {
-            FloatArray points = new FloatArray();
-            ShortArray indices = new ShortArray();
-            GpuPropBatch.copyVertices(range.mesh(), range.offset(), range.count(), points, indices);
-            float[] vertices = points.toArray();
-            var mask = material.get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
-            if (mask != null) { GpuRoads.relocate(vertices, mask, range.mesh().getVertexAttributes()); }
-            short[] elements = indices.toArray();
-            int count = vertices.length / (range.mesh().getVertexSize() / Float.BYTES);
-            geometry.computeIfAbsent(GpuRoads.batchMaterial(material), key -> new ArrayList<>()).add(new Shape(owner, material, range.route(), range.lift(), batch -> {
-                MeshPartBuilder mesh = batch.reserve(count);
-                int base = mesh.lastIndex() + 1;
-                // MeshBuilder.addMesh uses a static remapping table, so it cannot run on multiple workers.
-                // This range is already indexed: append its vertices and adjust indices directly.
-                mesh.vertex(vertices);
-                for (int i = 0; i < elements.length; i += 3) {
-                    mesh.index((short) (base + Short.toUnsignedInt(elements[i])),
-                          (short) (base + Short.toUnsignedInt(elements[i + 1])),
-                          (short) (base + Short.toUnsignedInt(elements[i + 2])));
-                }
-            }));
-        }
-
-        void finish(List<ModelInstance> destination) {
-            prepare().upload(destination);
-        }
-
-        MeshBatch prepare() { return prepare(() -> { }, () -> { }); }
-
-        MeshBatch prepare(Runnable check, Runnable completed) {
-            MeshBatch batch = new MeshBatch();
-            int shapes = 0;
-            for (var entry : roadGroups(paintGroups()).entrySet()) {
-                check.run();
-                batch.part(entry.getKey());
-                var ordered = entry.getValue();
-                if (entry.getKey().has(GpuRoads.Coats.TYPE)) {
-                    // One draw blends its triangles in index order: base coats first, wear and paint over them.
-                    ordered = ordered.stream().sorted(Comparator.comparingDouble(shape -> GpuRoads.layer(shape.material()))).toList();
-                }
-                for (var shape : ordered) {
-                    if ((shapes++ & 63) == 0) { check.run(); }
-                    batch.owner(shape.owner(), shape.material(), shape.route(), shape.lift());
-                    shape.emit().accept(batch);
-                    completed.run();
-                }
-            }
-            batch.endRange();
-            return batch;
-        }
-
-        /**
-         * One atlas page can blend all road coats in index order. With multiple pages, each coat needs its own sort
-         * layer: drawing a whole gravel/markings page before or after a whole asphalt page cannot preserve both.
-         */
-        private Map<Material, List<Shape>> roadGroups(Map<Material, List<Shape>> groups) {
-            if (groups.keySet().stream().filter(material -> material.has(GpuRoads.Coats.TYPE)).limit(2).count() < 2) {
-                return groups;
-            }
-            Map<Material, List<Shape>> result = new LinkedHashMap<>();
-            for (var entry : groups.entrySet()) {
-                if (!entry.getKey().has(GpuRoads.Coats.TYPE)) { result.put(entry.getKey(), entry.getValue()); continue; }
-                for (var shape : entry.getValue()) {
-                    result.computeIfAbsent(GpuRoads.lifted(entry.getKey(), shape.material()), ignored -> new ArrayList<>())
-                          .add(shape);
-                }
-            }
-            return result;
-        }
-
-        /**
-         * Authored decals in painter order, one draw per run of the same material: a decal joins the latest draw of
-         * its texture unless a decal drawn after that one shares a hex with it. One draw blends in index order. The
-         * draws are numbered layers ({@link GpuDecalOrder#layer}), so other chunks' equal draws can share a page.
-         */
-        private Map<Material, List<Shape>> paintGroups() {
-            var paint = geometry.entrySet().stream().filter(entry -> entry.getKey().has(GpuDecalOrder.TYPE))
-                  .sorted(Comparator.comparing(entry -> entry.getKey().get(GpuDecalOrder.TYPE))).toList();
-            if (paint.isEmpty()) { return geometry; }
-            record Group(Material material, Set<Coords> hexes, List<Shape> shapes) { }
-            List<Group> groups = new ArrayList<>();
-            for (var entry : paint) {
-                Material material = new Material(entry.getKey());
-                material.remove(GpuDecalOrder.TYPE);
-                Set<Coords> hexes = new HashSet<>();
-                entry.getValue().forEach(shape -> hexes.add(shape.owner()));
-                Group target = null;
-                for (int i = groups.size() - 1; i >= 0 && target == null; i--) {
-                    if (groups.get(i).material().equals(material)) { target = groups.get(i); }
-                    else if (!Collections.disjoint(groups.get(i).hexes(), hexes)) { break; }
-                }
-                if (target == null) {
-                    target = new Group(material, new HashSet<>(), new ArrayList<>());
-                    groups.add(target);
-                }
-                target.hexes().addAll(hexes);
-                target.shapes().addAll(entry.getValue());
-            }
-            Map<Material, List<Shape>> result = new LinkedHashMap<>();
-            geometry.forEach((key, shapes) -> { if (!key.has(GpuDecalOrder.TYPE)) { result.put(key, shapes); } });
-            for (int layer = 0; layer < groups.size(); layer++) {
-                Material key = new Material(groups.get(layer).material());
-                key.set(GpuDecalOrder.layer(layer));
-                result.put(key, groups.get(layer).shapes());
-            }
-            return result;
-        }
-    }
-
-    /** Splits even a single sculpted hex across meshes without exceeding unsigned 16-bit vertex indices. */
-    private static final class MeshBatch {
-        private record Part(MeshPart mesh, Material material) { }
-        private record Range(Coords owner, Material material, int offset, int count, boolean route, boolean lift) { }
-        private static final class Buffer {
-            final Builder builder = new Builder();
-            final List<Part> parts = new ArrayList<>();
-            final List<Range> ranges = new ArrayList<>();
-            Buffer(VertexAttributes attributes) { builder.begin(attributes); }
-        }
-        /** Lends its own vertex and index arrays to wallArea, on the worker that fills it, without copying them. */
-        private static final class Builder extends MeshBuilder {
-            float[] vertexArray() { return getVertices(); }
-            short[] indexArray() { return getIndices(); }
-        }
-        private static final VertexAttributes STANDARD = MeshBuilder.createAttributes(ATTRIBUTES);
-        private final List<Buffer> buffers = new ArrayList<>();
-        private final Map<VertexAttributes, Buffer> active = new HashMap<>();
-        private Buffer current;
-        private Material material;
-        private Material rangeMaterial;
-        private Coords owner;
-        private boolean route;
-        private boolean lift;
-        private int rangeStart;
-        private int index;
-
-        void part(Material next) {
-            endRange();
-            material = next;
-            VertexAttributes attributes = material.has(GpuSurfaceBlend.TYPE) ? GpuSurfaceBlend.VERTICES
-                  : material.has(GpuRoads.Mask.TYPE) ? GpuTessellation.curved(material)
-                        ? GpuRoads.TESSELLATED_VERTICES : GpuRoads.VERTICES : STANDARD;
-            if (material.has(Sculpt.TYPE) && GpuTessellation.curved(material)) {
-                attributes = GpuTessellation.contacts(attributes);
-            }
-            current = active.computeIfAbsent(attributes, key -> {
-                Buffer buffer = new Buffer(key);
-                buffers.add(buffer);
-                return buffer;
-            });
-            current.parts.add(new Part(current.builder.part("surface-" + index++, GL20.GL_TRIANGLES), material));
-            rangeStart = current.builder.getNumIndices();
-        }
-
-        void owner(Coords next, Material source, boolean infrastructure, boolean machine) {
-            if (!Objects.equals(owner, next) || rangeMaterial != source || route != infrastructure || lift != machine) {
-                endRange(); owner = next; rangeMaterial = source; route = infrastructure; lift = machine;
-            }
-        }
-
-        void endRange() {
-            if (current == null) { return; }
-            int end = current.builder.getNumIndices();
-            if (owner != null && end > rangeStart) {
-                current.ranges.add(new Range(owner, rangeMaterial, rangeStart, end - rangeStart, route, lift));
-            }
-            rangeStart = end;
-        }
-
-        MeshPartBuilder reserve(int vertices) {
-            if (current.builder.lastIndex() + 1 + vertices > 65536) {
-                active.remove(current.builder.getAttributes());
-                part(material.has(GpuRoads.Coats.TYPE) ? GpuRoads.lifted(material, rangeMaterial)
-                      : material.has(GpuDecalOrder.TYPE) ? continued(material) : material);
-            }
-            return current.builder;
-        }
-
-        /**
-         * The walls' area among the ranges whose source material a cliff chunk marks (cliffRelief): each triangle's area
-         * as seen from beside it, none for level ground and all of it for a vertical face. The board's sides, which face
-         * past its {@code columns} by {@code rows} hexes, hide nothing and do not count.
-         */
-        float wallArea(int columns, int rows) {
-            float width = BoardGeometry.width(), height = BoardGeometry.height(), step = width / 4;
-            double area = 0;
-            for (Buffer buffer : buffers) {
-                float[] vertices = buffer.builder.vertexArray();
-                short[] indices = buffer.builder.indexArray();
-                int stride = buffer.builder.getFloatsPerVertex();
-                int position = buffer.builder.getAttributes().getOffset(VertexAttributes.Usage.Position);
-                for (Range range : buffer.ranges) {
-                    if (!cliffRelief(range.material())) { continue; }
-                    for (int i = range.offset(); i < range.offset() + range.count(); i += 3) {
-                        int a = Short.toUnsignedInt(indices[i]) * stride + position;
-                        int b = Short.toUnsignedInt(indices[i + 1]) * stride + position;
-                        int c = Short.toUnsignedInt(indices[i + 2]) * stride + position;
-                        float ux = vertices[b] - vertices[a], uy = vertices[b + 1] - vertices[a + 1];
-                        float uz = vertices[b + 2] - vertices[a + 2], vx = vertices[c] - vertices[a];
-                        float vy = vertices[c + 1] - vertices[a + 1], vz = vertices[c + 2] - vertices[a + 2];
-                        // The cross product's horizontal part: twice the triangle's area projected on a vertical plane.
-                        float x = uy * vz - uz * vy, y = uz * vx - ux * vz, side = (float) Math.sqrt(x * x + y * y);
-                        if (side == 0) { continue; }
-                        // A quarter of a hex from its middle toward where it faces: a board's side faces no hex.
-                        float px = (vertices[a] + vertices[b] + vertices[c]) / 3 + x / side * step;
-                        float py = (vertices[a + 1] + vertices[b + 1] + vertices[c + 1]) / 3 + y / side * step;
-                        if (HexTile.at(px, py, width, height, columns, rows) >= 0) { area += side / 2; }
-                    }
-                }
-            }
-            return (float) area;
-        }
-
-        /** A paint layer continued in another mesh draws after its first part. */
-        private static Material continued(Material layer) {
-            Material continued = new Material(layer);
-            continued.set(layer.get(GpuDecalOrder.class, GpuDecalOrder.TYPE).continued());
-            return continued;
-        }
-
-        /** Geometry emission above is CPU-only. Only this final ownership transfer allocates GL meshes. */
-        void upload(List<ModelInstance> destination) {
-            for (Buffer buffer : buffers) { upload(buffer, destination); }
-        }
-
-        void upload(Buffer buffer, List<ModelInstance> destination) {
-            upload(buffer, destination, null, 0);
-        }
-
-        void upload(Buffer buffer, List<ModelInstance> destination, Map<Coords, TileMesh> tiles, int layer) {
-            ModelBuilder model = new ModelBuilder();
-            model.begin();
-            var mesh = buffer.builder.end();
-            model.manage(mesh);
-            for (Part part : buffer.parts) { model.part(part.mesh(), part.material()); }
-            destination.add(new ModelInstance(model.end()));
-            if (tiles != null) {
-                for (Range range : buffer.ranges) {
-                    tiles.get(range.owner()).ranges.add(new TileRange(layer, mesh, range.material(), range.offset(), range.count(),
-                          range.route(), range.lift()));
-                }
-            }
-            // MeshBuilder.end() only fills CPU buffers. Bind now so uploads share the refinement budget instead
-            // of all landing on the first shadow draw after publication. No shader attributes are needed yet.
-            int[] locations = new int[mesh.getVertexAttributes().size()];
-            Arrays.fill(locations, -1);
-            mesh.bind(null, locations, null);
-            mesh.unbind(null, locations, null);
         }
     }
 
@@ -3880,7 +3602,7 @@ final class GpuTerrain implements Disposable {
         Chunk chunk = build.chunk;
         float floor = build.floor;
         TerrainLod lod = chunk.lod;
-        Layer solid = build.layers.get(0), scatter = build.layers.get(1), overlay = build.layers.get(2),
+        GpuTerrainLayer solid = build.layers.get(0), scatter = build.layers.get(1), overlay = build.layers.get(2),
               liquid = build.layers.get(3);
         Map<String, LiquidSurface> animations = build.animations;
         BoardSurface surface = surfaces.get(tile.coords());
@@ -4055,7 +3777,7 @@ final class GpuTerrain implements Disposable {
             // Magma maps itself in world space; its sheet keeps texture coordinates that span the hex like artwork.
             TextureRegion waterArt = new TextureRegion(waterTexture == null ? rainNoise : waterTexture.textureDescription.texture);
             // Molten material writes opaque depth; water and hazardous pools reveal their beds and units.
-            Layer destination = tile.liquid().molten() ? solid : liquid;
+            GpuTerrainLayer destination = tile.liquid().molten() ? solid : liquid;
             List<BoardSurface.Face> waterFaces = proceduralWater && !tile.liquid().molten()
                   ? GpuWaterWaves.faces(surface.waterFaces, lod) : surface.waterFaces;
             Map<Vector3, Vector3> waterNormals = wallNormals(waterFaces);
@@ -4238,7 +3960,7 @@ final class GpuTerrain implements Disposable {
         Map<Coords, BoardSurface> surfaces = prepared.surfaces();
         Chunk chunk = build.chunk;
         TerrainLod lod = chunk.lod;
-        Layer solid = build.layers.get(0), scatter = build.layers.get(1);
+        GpuTerrainLayer solid = build.layers.get(0), scatter = build.layers.get(1);
         var features = BoardFeatures.fittedControls(scene, tile);
         if (features.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY || f.authoredPlacement() || f.decoration() != null)) {
             // Install solid supports first, regardless of the captured artwork layer order.
@@ -4795,7 +4517,9 @@ final class GpuTerrain implements Disposable {
         final TerrainLoadProgress progress;
         final int x, y, width, height;
         final float floor;
-        final List<Layer> layers = List.of(new Layer(), new Layer(), new Layer(), new Layer(), new Layer(), new Layer(), new Layer());
+        final List<GpuTerrainLayer> layers = List.of(new GpuTerrainLayer(), new GpuTerrainLayer(),
+              new GpuTerrainLayer(), new GpuTerrainLayer(), new GpuTerrainLayer(), new GpuTerrainLayer(),
+              new GpuTerrainLayer());
         Material scatterMaterial;
         // Derived once per model while preparing a chunk; no extra model data survives construction.
         final Map<Model, Float> coralRootRadii = new IdentityHashMap<>();
@@ -5401,8 +5125,9 @@ final class GpuTerrain implements Disposable {
         };
     }
 
-    private void sculpt(Layer solid, Layer overlay, Chunk chunk, BoardScene scene, BoardScene.Tile tile,
-          BoardSurface surface, Map<Coords, BoardSurface> surfaces, SculptPlan plan, Material magma) {
+    private void sculpt(GpuTerrainLayer solid, GpuTerrainLayer overlay, Chunk chunk, BoardScene scene,
+          BoardScene.Tile tile, BoardSurface surface, Map<Coords, BoardSurface> surfaces, SculptPlan plan,
+          Material magma) {
         List<BoardSurface.Face> walls = plan.walls(), ground = plan.ground(), formed = plan.formed();
         List<BoardSurface.Face> bed = plan.bed();
         // A water hex's ground carries its water's palette, so the shader wets it and tints it below the waterline.
@@ -5450,7 +5175,7 @@ final class GpuTerrain implements Disposable {
      * Sculpted faces in {@code material}; with {@code split}, those that curve in a copy of their own
      * (GpuTessellation#curved), so only they pass through the tessellation stages, and flat ground draws as without.
      */
-    private static void sculptedTriangles(Layer solid, Material material, boolean split, BoardSurface surface,
+    private static void sculptedTriangles(GpuTerrainLayer solid, Material material, boolean split, BoardSurface surface,
           List<BoardSurface.Face> faces, float shore, BoardScene scene, Map<Coords, BoardSurface> surfaces) {
         List<BoardSurface.Face> curved = new ArrayList<>(), plain = split ? new ArrayList<>() : faces;
         if (split) {
@@ -5479,7 +5204,7 @@ final class GpuTerrain implements Disposable {
      * Use the ordinary terrain materials and chunk batches; the shell has no per-bridge GPU resource. A muddy deck's
      * ({@code mud}) top carries {@link #DECK_MUD_KIND}; mud drains over its rim and down the adjacent rock shell.
      */
-    private void naturalBridge(Layer solid, BoardBridge.Shape shape, boolean mud, boolean artTop) {
+    private void naturalBridge(GpuTerrainLayer solid, BoardBridge.Shape shape, boolean mud, boolean artTop) {
         float metre = BoardRelief.metres(1);
         var mudDepth = mud ? naturalMudDepth(shape) : Map.<Vector3, Float>of();
         var normals = wallNormals(shape.facets().stream().map(face ->
@@ -5545,7 +5270,7 @@ final class GpuTerrain implements Disposable {
      * Generate GPU batches from the same prepared bridge facets used for placement and picking. A deck road over every
      * exit paints the whole top, which then takes its material; any other top is bare concrete.
      */
-    private void builtBridge(Layer solid, BoardBridge.Shape shape, BoardBridge.Deck bridge,
+    private void builtBridge(GpuTerrainLayer solid, BoardBridge.Shape shape, BoardBridge.Deck bridge,
           BoardScene scene, BoardScene.Tile tile) {
         Material concrete = material(assets.material("terrain/surfaces/concrete-ground"), false);
         if (BoardBridge.guideway(tile)) {
@@ -5570,7 +5295,8 @@ final class GpuTerrain implements Disposable {
      * A built deck's terrain facets: its top in the road material, a truss's steel ({@code steel}, null for
      * the standard kit and piers) in its facets' recoloured colour, everything else in the structure's concrete.
      */
-    private void bridgeFooting(Layer solid, BoardBridge.Shape shape, Material deck, Material structure, Material steel) {
+    private void bridgeFooting(GpuTerrainLayer solid, BoardBridge.Shape shape, Material deck, Material structure,
+          Material steel) {
         float coverage = assets.coverage("terrain/surfaces/concrete-ground");
         for (var part : List.of(BoardBridge.Part.TOP, BoardBridge.Part.STRUCTURE, BoardBridge.Part.STEEL)) {
             if (part == BoardBridge.Part.STEEL && (steel == null || shape.facets().stream().noneMatch(f -> f.part() == part))) {
@@ -5612,13 +5338,13 @@ final class GpuTerrain implements Disposable {
     }
 
     /** {@code lava} is the chunk's lava field: cooled banks, the lava's own and those of land beside it, glow at it. */
-    private void blended(Layer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
+    private void blended(GpuTerrainLayer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
           BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava) {
         blended(solid, groups, scene, tile, lava, false, null);
     }
 
     /** With {@code split}, the triangles that curve (magma's aside) take a material of their own: sculptedTriangles. */
-    private void blended(Layer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
+    private void blended(GpuTerrainLayer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
           BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava, boolean split, BoardSurface surface) {
         for (var group : groups.entrySet()) {
             var palette = group.getKey();
@@ -5649,7 +5375,7 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    private static void blendedTriangles(Layer solid, Material material, GpuSurfaceBlend.Palette palette,
+    private static void blendedTriangles(GpuTerrainLayer solid, Material material, GpuSurfaceBlend.Palette palette,
           boolean boundary, List<GpuSurfaceBlend.Triangle> triangles, BoardSurface surface) {
         if (triangles.isEmpty()) { return; }
         solid.addTriangles(material, meshes -> {
@@ -5666,7 +5392,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /** {@code supports}: the ground's final triangles where its coats curve with it (coatSupports), else null. */
-    private void roads(Layer overlay, List<RoadPatch> prepared, BoardSurface surface,
+    private void roads(GpuTerrainLayer overlay, List<RoadPatch> prepared, BoardSurface surface,
           GpuTextures<BoardScene.Pixels> masks, BoardScene scene, BoardScene.Tile tile,
           Function<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports) {
         var roadMaps = assets.roadArray();
@@ -6073,7 +5799,7 @@ final class GpuTerrain implements Disposable {
      * A Solaris elevator's platform and lift in the shared finishes; its paint, steel and iron darken with grime where
      * wear gathers.
      */
-    private void addLift(Layer solid, BoardElevator.Lift lift) {
+    private void addLift(GpuTerrainLayer solid, BoardElevator.Lift lift) {
         for (var part : lift.parts().entrySet()) {
             if (part.getValue().isEmpty()) { continue; }
             var faces = part.getValue();
@@ -6789,7 +6515,7 @@ final class GpuTerrain implements Disposable {
             }
             if (!moved) { return; }
             disposeModels();
-            Layer layer = new Layer();
+            GpuTerrainLayer layer = new GpuTerrainLayer();
             installedSettings.run(() -> {
                 for (var change : transition.changes()) {
                     addLift(layer, BoardElevator.build(coverScene, change.coords(), heights.get(change.coords()),
@@ -7112,7 +6838,7 @@ final class GpuTerrain implements Disposable {
 
     /** The committed road triangles and coverage masks, with ordinary UVs for the shared ghost shader. */
     private void previewRoads(ChunkBuild build, BoardScene.Tile tile, List<ModelInstance> ghosts) {
-        var layer = new Layer();
+        var layer = new GpuTerrainLayer();
         for (RoadPatch patch : build.prepared.roads().getOrDefault(tile.coords(), List.of())) {
             if (!routeCoat(patch)) { continue; }
             Texture mask = build.preview.mask(patch.mask().pixels());
