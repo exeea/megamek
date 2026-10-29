@@ -1263,17 +1263,21 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     float share = 0.0;
     float layerB = layerA, tileB = tileA, variationB = variationA;
     bool translatedB = translatedA;
-    if ((!single || bankBlend > 0.0) && (second > .02 || dust > 0.0)) {
+    // Height blend (materialWeights): where both are wanted, the layer whose relief stands higher shows.
+    float wa = first + a.a * .38 * 4.0 * first * (1.0 - first);
+    float width = materialBlendWidth();
+    // The second role shows only where its weight at full relief (b.a 1) comes within the blend's width of the first's;
+    // elsewhere its share stays 0 and its reads change nothing, unless the bank fade or the dust film set the share. The
+    // 1e-4 margin covers rounding.
+    bool reaches = bankBlend > 0.0 || dust > 0.0 || second + .38 * 4.0 * second * (1.0 - second) > wa - width - 1e-4;
+    if ((!single || bankBlend > 0.0) && (second > .02 || dust > 0.0) && reaches) {
         layerB = dot(isSecond, vec4(layers.x, layers.w, layers.y, layers.z)) * .5;
         tileB = dot(isSecond, vec4(tiles.x, tiles.w, tiles.y, tiles.z));
         variationB = dot(isSecond, variations);
         translatedB = dot(isSecond, translated) > .5;
         pb = relievedProjection(layerB, tileB, p, sides, variationB, translatedB);
         b = rockTexel(layerB, tileB, pb, sides, variationB, translatedB, surfaceB);
-        // Height blend (materialWeights): where both are wanted, the layer whose relief stands higher shows.
-        float wa = first + a.a * .38 * 4.0 * first * (1.0 - first);
         float wb = second + b.a * .38 * 4.0 * second * (1.0 - second);
-        float width = materialBlendWidth();
         float ka = max(wa - max(wa, wb) + width, 0.0), kb = max(wb - max(wa, wb) + width, 0.0);
         share = kb / max(ka + kb, .00001);
         // The dry bank needs a visible fade, including blended-cover draws that normally pick one role.
