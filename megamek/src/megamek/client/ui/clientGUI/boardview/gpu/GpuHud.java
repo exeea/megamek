@@ -203,6 +203,7 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> solutionSlot;
     private final Container<Actor> logSlot;
     private final Container<Actor> dockSlot;
+    private final Container<Actor> drawerSlot;
     private final Container<Actor> chatButtonSlot;
     private final Container<Actor> chatSlot;
     private final Container<Actor> overviewSlot;
@@ -338,6 +339,8 @@ final class GpuHud implements GpuBoardHud {
         // Where the window has no room for the hint line, a pick's chip stands on the dock with Done and Cancel.
         pickSlot = panel(panels, hint.chip());
         dockSlot = panel(panels, dock.actor()).bottom().fillX();
+        // The dock's More panel slides out of the dock's right side, over the board beside it.
+        drawerSlot = panel(panels, dock.drawer().actor()).fill();
         chatButtonSlot = panel(panels, chat.button()).bottom().right();
         chatSlot = panel(chatLayer, chat.actor()).fill();
         overviewSlot = panel(overviewLayer, overview.actor()).fill();
@@ -656,7 +659,7 @@ final class GpuHud implements GpuBoardHud {
         if (focus != null && !inDialog && !focus.isDescendantOf(contextMenu.actor())
               && !focus.isDescendantOf(recordSheet.overlay())) {
             stage.setKeyboardFocus(null);
-        } else if (contextMenu.back()) {
+        } else if (contextMenu.back() || dock.drawer().close()) {
             return true;
         } else if (state.dialog != GpuHudState.Dialog.NONE) {
             state.dialog = GpuHudState.Dialog.NONE;
@@ -1155,6 +1158,28 @@ final class GpuHud implements GpuBoardHud {
         float pickHeight = height(pickSlot);
         place(pickSlot, centred(pickWidth, bandLeft, bandRight), dockTop - STACK - pickHeight,
               pickWidth, pickHeight);
+        // The More panel, sized to its commands: right of the dock, up to the chat button, or up to the right column
+        // while one of its panels reaches down beside the dock. It takes the columns that room holds, no more than the
+        // dock's height needs, and grows upward from the dock's bottom when they need more rows. Without room for one
+        // column there, it lies above the dock at the dock's height, at most the dock's width, over the hint line.
+        GpuMoreDrawer drawer = dock.drawer();
+        drawerSlot.setVisible(shown(dockSlot));
+        boolean rightColumn = shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) || shown(solutionSlot);
+        float drawerX = dockSlot.getX() + dockSlot.getWidth() + STACK;
+        float drawerRight = rightColumn ? bandRight + gap : width - gap - chatWidth - STACK;
+        int besideColumns = GpuMoreDrawer.columnsIn(drawerRight - drawerX);
+        drawer.above(besideColumns == 0);
+        if (besideColumns > 0) {
+            int columns = Math.min(besideColumns, drawer.columnsAt(dockHeight));
+            float drawerHeight = Math.min(Math.max(dockHeight, drawer.height(columns)), dockTop + dockHeight - gap);
+            place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, GpuMoreDrawer.width(columns),
+                  drawerHeight);
+        } else {
+            float aboveHeight = Math.max(0, Math.min(dockHeight, dockTop - STACK - gap));
+            int columns = Math.max(1, Math.min(GpuMoreDrawer.columnsIn(dockWidth), drawer.columnsAt(aboveHeight)));
+            place(drawerSlot, dockSlot.getX(), dockTop - STACK - aboveHeight, GpuMoreDrawer.width(columns),
+                  aboveHeight);
+        }
 
         // Top row: the conditions card beside the left column (the sheet's width while it is open), the tactical chip
         // centred in the room that is left.

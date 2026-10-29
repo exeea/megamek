@@ -137,6 +137,8 @@ final class GpuCommandDock implements GpuHud.Component {
     private final UiButton main;
     private final UiButton secondary;
     private final UiButton more;
+    /** The More panel that slides out beside the dock, or above it where the window has no room beside it. */
+    private final GpuMoreDrawer drawer;
     // Movement plan.
     private final List<UiButton> modes = new ArrayList<>();
     private final TextButton.TextButtonStyle plainStyle;
@@ -226,6 +228,7 @@ final class GpuCommandDock implements GpuHud.Component {
         more = button("hud", "more", null, null, "dock-more");
         more.pad(0, 8, 0, 8);
         onChange(more, this::openMore);
+        drawer = new GpuMoreDrawer(ui);
 
         // Movement: .b.mode buttons at 14 units with their MP, the tall squares and the undo square.
         plainStyle = ui.skin.get("hud", TextButton.TextButtonStyle.class);
@@ -441,6 +444,7 @@ final class GpuCommandDock implements GpuHud.Component {
         if (root.getWidth() > 0) {
             root.validate();
         }
+        drawer.update(drawer.isOpen() ? more() : null);
     }
 
     /** The variant of the phase and turn (plan C.2). */
@@ -1053,12 +1057,20 @@ final class GpuCommandDock implements GpuHud.Component {
 
     // ------------------------------------------------------------------ More
 
-    /** The More button: G12's popover above it, with the shown variant's More (A.7 G14). */
+    /** The More button: the shown variant's More (A.7 G14) in the panel that slides out of the dock. */
     private void openMore() {
         More content = more();
-        if (content != null) {
-            menu.more(content, more);
+        if (content == null) {
+            drawer.close();
+        } else {
+            menu.cancel();
+            drawer.toggle(content);
         }
+    }
+
+    /** The More panel, which the HUD places beside or above the dock. */
+    GpuMoreDrawer drawer() {
+        return drawer;
     }
 
     /**
