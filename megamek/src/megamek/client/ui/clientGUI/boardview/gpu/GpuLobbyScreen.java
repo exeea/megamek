@@ -1,8 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -45,10 +43,6 @@ import megamek.logging.MMLogger;
  */
 final class GpuLobbyScreen extends ApplicationAdapter {
     private static final MMLogger LOGGER = MMLogger.create(GpuLobbyScreen.class);
-    /** How much of the art the surface covers. */
-    private static final float ART_DIM = 0.85f;
-    /** How far the art is shrunk before it is stretched back, which blurs it. */
-    private static final int ART_BLUR = 12;
     private static final int FRAMES_PER_SECOND = 30;
     /** The centre view that shows the folded battlefield. */
     static final String BATTLEFIELD = "battlefield";
@@ -246,30 +240,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         rebuildBackdrop();
     }
 
-    /** The start screen's art, cover-fitted, blurred and mostly covered by the surface, drawn once per size. */
+    /** The start screen's art behind the lobby ({@link LobbyBackdrop}), painted once per size. */
     private void rebuildBackdrop() {
-        BufferedImage image = new BufferedImage(bw, bh, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = image.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.setColor(base);
-        g.fillRect(0, 0, bw, bh);
-        if (art != null) {
-            double cover = Math.max((double) bw / art.getWidth(), (double) bh / art.getHeight());
-            int smallWidth = Math.max(1, (int) Math.round(art.getWidth() * cover / ART_BLUR));
-            int smallHeight = Math.max(1, (int) Math.round(art.getHeight() * cover / ART_BLUR));
-            BufferedImage small = new BufferedImage(smallWidth, smallHeight, BufferedImage.TYPE_INT_RGB);
-            Graphics2D s = small.createGraphics();
-            s.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            s.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            s.drawImage(art, 0, 0, smallWidth, smallHeight, null);
-            s.dispose();
-            int coverWidth = smallWidth * ART_BLUR;
-            int coverHeight = smallHeight * ART_BLUR;
-            g.drawImage(small, (bw - coverWidth) / 2, (bh - coverHeight) / 2, coverWidth, coverHeight, null);
-        }
-        g.setColor(new java.awt.Color(base.getRed(), base.getGreen(), base.getBlue(), Math.round(255 * ART_DIM)));
-        g.fillRect(0, 0, bw, bh);
-        g.dispose();
+        BufferedImage image = LobbyBackdrop.paint(art, bw, bh, base.getRGB() & 0xFFFFFF);
         if (backdrop != null) {
             backdrop.dispose();
         }
