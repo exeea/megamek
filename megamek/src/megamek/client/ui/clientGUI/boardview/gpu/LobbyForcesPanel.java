@@ -157,10 +157,8 @@ final class LobbyForcesPanel {
         UiKit.onChange(views, this::viewChanged);
         compactToggle = kit.button("button-toggle" + UiTheme.COMPACT, "list", null, null);
         kit.tip(compactToggle, true).getActor().setText(Messages.getString("Lobby.forces.compact"));
-        UiKit.onChange(compactToggle, () -> {
-            compact = compactToggle.isChecked();
-            fill();
-        });
+        // A UiButton never toggles itself, so the click flips the panel's own state and shows it on the button
+        UiKit.onChange(compactToggle, () -> compact(!compact));
         collapseAll = kit.button("button-icon" + UiTheme.COMPACT, "unfold-less", null, null);
         kit.tip(collapseAll, true).getActor().setText(Messages.getString("Lobby.forces.collapse"));
         UiKit.onChange(collapseAll, () -> {
@@ -185,8 +183,6 @@ final class LobbyForcesPanel {
 
         list.top();
         scroll = kit.scrollList(list, true, false);
-        Drawable bar = scroll.getStyle().vScrollKnob;
-        list.padRight(bar == null ? 0 : bar.getMinWidth() + space("xs"));
         panel.add(scroll).grow().row();
 
         dropStrip = new Table();
@@ -220,11 +216,20 @@ final class LobbyForcesPanel {
         return menus.getFirst().back();
     }
 
-    /** For the developer switch: shows compact rows. */
+    /** Shows compact rows, or the full cards; the choice holds through later snapshots. */
     void compact(boolean on) {
-        compactToggle.setChecked(on);
         compact = on;
+        compactToggle.setChecked(on);
         fill();
+    }
+
+    boolean compact() {
+        return compact;
+    }
+
+    /** The compact rows toggle, for the developer switch's clicks. */
+    UiButton compactToggle() {
+        return compactToggle;
     }
 
     /** For the developer switch: shows the formations. */

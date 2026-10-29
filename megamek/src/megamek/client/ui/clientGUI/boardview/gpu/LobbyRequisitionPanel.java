@@ -13,6 +13,7 @@ import java.util.function.Function;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Interpolation;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
@@ -25,6 +26,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
@@ -77,6 +79,8 @@ final class LobbyRequisitionPanel {
     static final float SEARCH_DELAY = .15f;
     /** How long Add reads "Added ✓". */
     private static final float ADDED_FOR = 1.2f;
+    /** How long the Filters drawer takes to slide open or shut (motion's medium). */
+    private static final float SLIDE_SECONDS = DesignTokens.shipped().duration("medium") / 1000f;
 
     /** What the Requisition view asks of the screen and window. */
     interface Actions {
@@ -111,7 +115,17 @@ final class LobbyRequisitionPanel {
     private final UiTextField search;
     private final List<UiFilterChip> weightChips = new ArrayList<>();
     private final UiButton filtersButton;
-    private final Container<Actor> drawerHolder = new Container<>();
+    private final Container<Actor> drawerHolder = new Container<>() {
+        @Override
+        public float getPrefHeight() {
+            return slid(super.getPrefHeight());
+        }
+
+        @Override
+        public float getMinHeight() {
+            return slid(super.getMinHeight());
+        }
+    };
     private final Label count;
     private final UiSegmented valueToggle;
     private final UiVirtualList<RequisitionRow> list;
@@ -140,6 +154,10 @@ final class LobbyRequisitionPanel {
     private RequisitionSearch.Result result;
     private List<String> sources = List.of();
     private boolean drawerOpen;
+    /** The drawer's slide: the height it set out from, its seconds so far (negative: none) and whether it shuts. */
+    private float slideFrom;
+    private float slideAt = -1;
+    private boolean slideCloses;
     private boolean dossierOpen;
     private @Nullable MekSummary picked;
     private boolean showPv;
@@ -196,14 +214,17 @@ final class LobbyRequisitionPanel {
               Messages.getString("Lobby.requisition.filters"), null);
         filtersButton.setProgrammaticChangeEvents(false);
         kit.tip(filtersButton, true).getActor().setText(Messages.getString("Lobby.requisition.filtersTip"));
-        UiKit.onChange(filtersButton, () -> drawer(filtersButton.isChecked()));
+        // A UiButton never toggles itself (isChecked() is the shown state), so the click flips the drawer's own state
+        UiKit.onChange(filtersButton, () -> drawer(!drawerOpen));
         Table toolbar = new Table();
         toolbar.add(searchBox).growX().minWidth(0);
         toolbar.add(weights).padLeft(space("sm"));
         toolbar.add(filtersButton).padLeft(space("sm"));
         body.add(toolbar).growX().minWidth(0).pad(0, space("md"), 0, space("md")).row();
         body.add(drawerHolder).growX().minWidth(0).pad(space("sm"), space("md"), 0, space("md")).row();
-        drawerHolder.fill();
+        // The drawer keeps its own height and the holder clips it, so it slides rather than squashes
+        drawerHolder.fillX().top().minHeight(Value.prefHeight);
+        drawerHolder.setClip(true);
 
         count = kit.typeLabel("", "small", "text.secondary");
         valueToggle = kit.tokenSegmented(true, Messages.getString("Lobby.requisition.bv"),
@@ -368,6 +389,43 @@ final class LobbyRequisitionPanel {
         drawer(true);
     }
 
+    /** The Filters button, for the developer switch's clicks. */
+    UiButton filtersToggle() {
+        return filtersButton;
+    }
+
+    /** Whether the Filters drawer is open. */
+    boolean drawerOpen() {
+        return drawerOpen;
+    }
+
+    /** The results list, for the developer switch's pointer. */
+    UiVirtualList<RequisitionRow> resultsList() {
+        return list;
+    }
+
+    /** The results' scroll pane, for the developer switch's pointer. */
+    ScrollPane resultsPane() {
+        return results;
+    }
+
+    /** For the developer switch: logs, in stage units, where the rows and their values end against the scroll bar. */
+    void probeMeasure() {
+        float listRight = list.localToStageCoordinates(new Vector2(list.getWidth(), 0)).x;
+        float paneRight = results.localToStageCoordinates(new Vector2(results.getWidth(), 0)).x;
+        float valueRight = 0;
+        for (Actor child : list.getChildren()) {
+            if (child.isVisible() && child instanceof ResultRow row) {
+                valueRight = Math.max(valueRight,
+                      row.value.localToStageCoordinates(new Vector2(row.value.getPrefWidth(), 0)).x);
+            }
+        }
+        float strip = results.getScrollBarWidth();
+        LOGGER.info("Requisition probe: values end at {}, rows at {}; the bar's strip runs {} to {} and draws its bar"
+              + " from {}", valueRight, listRight, paneRight - strip, paneRight,
+              paneRight - (space("sm") + 2 * space("xxs")));
+    }
+
     /** For the developer switch: picks the first result once there are results. */
     void probePick() {
         pickFirst = true;
@@ -484,6 +542,7 @@ final class LobbyRequisitionPanel {
 
     private void tick(float delta) {
         clock += delta;
+        slide(delta);
         if (searchDue >= 0 && clock >= searchDue) {
             runSearch();
         }
@@ -536,8 +595,46 @@ final class LobbyRequisitionPanel {
     }
 
     private void drawer(boolean open) {
+        boolean changed = open != drawerOpen;
+        float from = drawerHolder.getHeight();
         drawerOpen = open;
+        if (changed && motion) {
+            slideFrom = from;
+            slideAt = 0;
+            slideCloses = !open;
+        }
         refreshFilters();
+    }
+
+    /**
+     * The drawer's height {@code elapsed} seconds into a slide of {@code duration} from {@code from} to {@code to}:
+     * quick at first, then easing in; {@code to} once the slide is over.
+     */
+    static float slideHeight(float from, float to, float elapsed, float duration) {
+        if (duration <= 0 || elapsed >= duration) {
+            return to;
+        }
+        return from + (to - from) * Interpolation.pow2Out.apply(Math.max(0, elapsed) / duration);
+    }
+
+    /** The holder's height for the drawer's own {@code natural} one, while it slides open or shut. */
+    private float slid(float natural) {
+        return slideAt < 0 ? natural : slideHeight(slideFrom, slideCloses ? 0 : natural, slideAt, SLIDE_SECONDS);
+    }
+
+    private void slide(float delta) {
+        if (slideAt < 0) {
+            return;
+        }
+        slideAt += delta;
+        if (slideAt >= SLIDE_SECONDS) {
+            slideAt = -1;
+            if (slideCloses) {
+                slideCloses = false;
+                refreshFilters();
+            }
+        }
+        drawerHolder.invalidateHierarchy();
     }
 
     /** Shows the filters: the weight chips, the button's count, and the drawer or the tags of those at work. */
@@ -555,6 +652,9 @@ final class LobbyRequisitionPanel {
         filtersButton.setChecked(drawerOpen);
         if (drawerOpen) {
             fillDrawer();
+        } else if (slideCloses) {
+            // The drawer stays in the holder while it slides shut; the slide's end shows the tags
+            return;
         } else if (at > 0) {
             drawerHolder.setActor(tags());
         } else {
