@@ -184,6 +184,16 @@ public final class GpuHost {
         }
     }
 
+    /** GPU thread: the shown scene's listener, or null between scenes; {@code Gdx.app}'s listener is the host's. */
+    static ApplicationListener sceneListener() {
+        return listener;
+    }
+
+    /** GPU thread: the scene's own input processor when {@code processor} is the host's guard in front of it. */
+    static InputProcessor unguarded(InputProcessor processor) {
+        return processor == Root.GUARD ? Root.sceneInput : processor;
+    }
+
     /** Whether a window ever opened in this run. */
     static boolean everOpened() {
         return everOpened;
@@ -454,9 +464,9 @@ public final class GpuHost {
         private ShapeRenderer shapes;
         /** The dim layer's strength, from 0 (none) to 1. */
         private float dim;
-        /** The scene's own input, which {@link #guard} passes events to unless the scene is dimmed. */
-        private InputProcessor sceneInput;
-        private final InputProcessor guard = new Guard();
+        /** The scene's own input, which {@link #GUARD} passes events to unless the scene is dimmed. */
+        private static InputProcessor sceneInput;
+        private static final InputProcessor GUARD = new Guard();
 
         @Override
         public void create() {
@@ -582,9 +592,9 @@ public final class GpuHost {
         /** Keeps the scene's input behind the guard, whichever processor the scene set last. */
         private void guardInput() {
             InputProcessor input = Gdx.input.getInputProcessor();
-            if (input != guard) {
+            if (input != GUARD) {
                 sceneInput = input;
-                Gdx.input.setInputProcessor(guard);
+                Gdx.input.setInputProcessor(GUARD);
             }
         }
 
@@ -611,7 +621,7 @@ public final class GpuHost {
         }
 
         /** Passes input to the scene unless it is dimmed; a click on the dimmed scene goes to the window over it. */
-        private final class Guard extends InputAdapter {
+        private static final class Guard extends InputAdapter {
             private InputProcessor target() {
                 return dimmed ? null : sceneInput;
             }

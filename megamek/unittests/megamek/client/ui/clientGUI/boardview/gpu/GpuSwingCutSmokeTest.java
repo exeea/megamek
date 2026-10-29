@@ -124,7 +124,7 @@ class GpuSwingCutSmokeTest {
                 });
                 await(() -> Gdx.app != null && Gdx.app != previous);
                 await(() -> onSwing(() -> GpuBoardWindow.drawsDialogsFor(gui)));
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > 5));
+                await(() -> onGl(() -> frames() > 5));
 
                 // Default preferences: the minimap stays on through the report phases (the Legacy 2D board's phase rule
                 // would hide it there).
@@ -347,9 +347,14 @@ class GpuSwingCutSmokeTest {
     /** Lets the EDT and the native window catch up: posted Swing events, then a few frames. */
     private static void settle() throws Exception {
         onSwing(() -> null);
-        long frames = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames());
-        await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > frames + 3));
+        long before = onGl(() -> frames());
+        await(() -> onGl(() -> frames() > before + 3));
         onSwing(() -> null);
+    }
+
+    /** GL thread: the shown board's frame count, or -1 until the host has started the board's scene. */
+    private static long frames() {
+        return GpuHost.sceneListener() instanceof GpuBattleView battle ? battle.frames() : -1;
     }
 
     private static <T> T onGl(Callable<T> action) throws Exception {
