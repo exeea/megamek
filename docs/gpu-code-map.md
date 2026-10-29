@@ -13,6 +13,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | --- | --- |
 | `GpuHost` | Owns the one native application and window for the whole run and switches its scenes (start screen, lobby, board, editor, preview, UI library). |
 | `GpuLobbyWindow`, `GpuLobbyScreen`, `GpuLobbyProbe` | The lobby scene: the Swing-thread controller that turns game events into `LobbySnapshot`s and runs actions through `LobbyCommands`, the libGDX screen that draws the snapshot, and the `MM_START_PAGE=lobby` probe. |
+| `LobbyTopBar`, `LobbyColumns`, `LobbyLayout`, `LobbyCentre`, `LobbyPlayersPanel`, `LobbyForcesPanel`, `LobbyBattlefieldPanel` | The lobby screen's parts: the top bar, the three columns and their widths (the battlefield folding into a rail in a narrow window), the centre column that swaps the forces for a view with Back, and the columns' panels. |
 | `GpuBoardWindow` | Runs a game board, editor or map preview as a `GpuHost` scene; coordinates preview reuse and the preview's Legacy 2D window. |
 | `GpuBattleView` | Orchestrates each frame: consumes snapshots, advances playback, places units and submits scene/UI passes. |
 | `BoardSource` | Defines captured frame data and the input callbacks crossing between the Swing and GL threads. |

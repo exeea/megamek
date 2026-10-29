@@ -86,8 +86,17 @@ public final class GpuHost {
     private static GpuWindowBounds normalBounds;
     private static GpuWindowBounds publishedBounds;
     private static int framesSinceSave;
+    private static volatile boolean boundsKept;
 
     private GpuHost() {
+    }
+
+    /**
+     * Any time: stops saving the window's bounds for the rest of the run, so a developer probe that sizes the window
+     * leaves the size saved for the next start as it was.
+     */
+    static void keepSavedBounds() {
+        boundsKept = true;
     }
 
     /**
@@ -403,7 +412,7 @@ public final class GpuHost {
         clientBounds = client;
 
         // Fullscreen keeps the windowed bounds it returns to, which are also what the next start opens.
-        if (graphics.isFullscreen() || ++framesSinceSave < BOUNDS_SAVE_FRAMES) {
+        if (boundsKept || graphics.isFullscreen() || ++framesSinceSave < BOUNDS_SAVE_FRAMES) {
             return;
         }
         framesSinceSave = 0;

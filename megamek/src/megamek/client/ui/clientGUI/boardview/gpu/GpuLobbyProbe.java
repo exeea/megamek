@@ -44,9 +44,14 @@ import megamek.logging.MMLogger;
  *     <li>{@code MM_START_SHOT}: a PNG file the lobby saves from its frame buffer, {@code MM_START_SHOT_AT} seconds
  *     after it shows (by default {@value #SHOT_AT}, once the bots and units have arrived).</li>
  *     <li>{@code MM_START_QUIT}: {@code true} to quit MegaMek once the shot is saved.</li>
+ *     <li>{@code MM_LOBBY_SIZE}: the window's size as the lobby shows, such as {@code 1600x900}; {@code lobby+narrow}
+ *     without it makes the window {@value #NARROW_WIDTH} by {@value #NARROW_HEIGHT}, which folds the battlefield into
+ *     its rail. Either keeps the window's saved size as it was.</li>
+ *     <li>{@code lobby+rail}: opens the folded battlefield from its rail.</li>
  * </ul>
  */
-record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit) {
+record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
+      int width, int height) {
     private static final MMLogger LOGGER = MMLogger.create(GpuLobbyProbe.class);
 
     /** The shot's default time: the bots have joined and every unit has arrived. */
@@ -57,6 +62,8 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final double READY_AFTER = 1;
     private static final int PLAYER_TEAM = 1;
     private static final int BOT_TEAM = 2;
+    static final int NARROW_WIDTH = 1100;
+    static final int NARROW_HEIGHT = 800;
 
     private static boolean taken;
 
@@ -104,8 +111,36 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             }
         }
         boolean quit = shotValue != null && Boolean.parseBoolean(value(environment, "MM_START_QUIT"));
+        int[] size = size(value(environment, "MM_LOBBY_SIZE"));
+        if (size == null && options.contains("narrow")) {
+            size = new int[] { NARROW_WIDTH, NARROW_HEIGHT };
+        }
         return new GpuLobbyProbe(Set.copyOf(options), List.copyOf(units), bots,
-              shotValue == null ? null : new File(shotValue), shotAt, quit);
+              shotValue == null ? null : new File(shotValue), shotAt, quit, size == null ? 0 : size[0],
+              size == null ? 0 : size[1]);
+    }
+
+    /** A {@code WIDTHxHEIGHT} size, or null when {@code value} is missing or not one. */
+    private static int[] size(String value) {
+        if (value == null) {
+            return null;
+        }
+        String[] parts = value.toLowerCase(Locale.ROOT).split("x");
+        if (parts.length != 2) {
+            return null;
+        }
+        try {
+            int width = Integer.parseInt(parts[0].trim());
+            int height = Integer.parseInt(parts[1].trim());
+            return width > 0 && height > 0 ? new int[] { width, height } : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    /** Whether the probe sizes the window. */
+    boolean sized() {
+        return width > 0 && height > 0;
     }
 
     private static String value(Map<String, String> environment, String name) {

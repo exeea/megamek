@@ -2,9 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Graphics2D;
-import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
-import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -14,47 +12,46 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input.Keys;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Matrix4;
-import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.Value;
-import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.lobby.LobbySnapshot;
-import megamek.client.lobby.LobbySnapshot.PlayerRow;
-import megamek.client.lobby.LobbySnapshot.TeamGroup;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
-import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
-import megamek.client.ui.gdx.UiKit.Tone;
-import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Configuration;
 import megamek.logging.MMLogger;
 
 /**
- * The native lobby's screen ({@link GpuLobbyWindow}), in the game presentation over the start screen's battle art,
- * dimmed: a top bar with the title, where the game runs, the map, how many players are ready, Ready and Leave; the
- * players by team on the left and the chat on the right. It draws only the {@link LobbySnapshot}s its window sends and
- * hands every action back to the window; it never reads the game.
+ * The native lobby's screen ({@link GpuLobbyWindow}), the briefing room in the game presentation over the start
+ * screen's battle art, blurred and dimmed: the top bar ({@link LobbyTopBar}) over three columns ({@link LobbyColumns}),
+ * the players with the chat docked under them on the left, the forces in the centre and the battlefield on the right.
+ * In a narrow window the battlefield folds into a rail that opens it in the centre, in the forces' place, as a view with
+ * Back ({@link LobbyCentre}). It draws only the {@link LobbySnapshot}s its window sends and hands every action back to
+ * the window; it never reads the game.
  */
 final class GpuLobbyScreen extends ApplicationAdapter {
     private static final MMLogger LOGGER = MMLogger.create(GpuLobbyScreen.class);
-    /** How much of the window's width the players' panel takes. */
-    private static final float PLAYERS_SHARE = 0.42f;
-    /** How dark the art is under the lobby's panels. */
-    private static final float ART_DIM = 0.78f;
+    /** How much of the art the surface covers. */
+    private static final float ART_DIM = 0.85f;
+    /** How far the art is shrunk before it is stretched back, which blurs it. */
+    private static final int ART_BLUR = 12;
     private static final int FRAMES_PER_SECOND = 30;
+    /** The centre view that shows the folded battlefield. */
+    static final String BATTLEFIELD = "battlefield";
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -72,16 +69,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private float scale = 1;
     private int bw;
     private int bh;
-    private boolean inputBlocked;
 
-    private Label serverLine;
-    private Label readyCount;
-    private UiButton readyButton;
-    private Table playerList;
-    private Label playerCount;
-    private Label chatLog;
-    private ScrollPane chatScroll;
-    private UiTextField chatInput;
+    private LobbyTopBar topBar;
+    private LobbyPlayersPanel players;
+    private LobbyForcesPanel forces;
+    private LobbyBattlefieldPanel battlefield;
+    private LobbyCentre centre;
+    private LobbyColumns columns;
+    private Button rail;
+    private boolean folded;
+    private boolean railPending;
     private LobbySnapshot shown;
     private long start;
     private boolean shotSaved;
@@ -101,7 +98,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     /** GPU thread: ignores the mouse and keyboard while a modal Swing dialog is open, as a disabled window would. */
     void setInputBlocked(boolean blocked) {
-        inputBlocked = blocked;
         if (stage == null) {
             return;
         }
@@ -125,6 +121,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         Gdx.graphics.setForegroundFPS(FRAMES_PER_SECOND);
         show(window.snapshot());
         start = System.nanoTime();
+        // Sizing the window draws a frame at once on some platforms
+        sizeForProbe();
     }
 
     private static BufferedImage readArt() {
@@ -137,72 +135,83 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
+    /** Gives the window the developer switch's size, keeping the saved size as it was. */
+    private void sizeForProbe() {
+        GpuLobbyProbe probe = window.probe();
+        if (probe == null) {
+            return;
+        }
+        railPending = probe.options().contains("rail");
+        if (!probe.sized()) {
+            return;
+        }
+        GpuHost.keepSavedBounds();
+        if (Gdx.graphics instanceof Lwjgl3Graphics graphics && graphics.getWindow() != null) {
+            graphics.getWindow().restoreWindow();
+        }
+        Gdx.graphics.setWindowedMode(probe.width(), probe.height());
+    }
+
     // ---- Layout ----
 
     private void build() {
-        Table root = new Table();
-        root.setFillParent(true);
-        root.top().pad(space("xl"));
-        stage.addActor(root);
-        root.add(topBar()).growX().row();
-        Table body = new Table();
-        body.add(playersPanel()).width(Value.percentWidth(PLAYERS_SHARE, body)).growY().padRight(space("lg"));
-        body.add(chatPanel()).grow();
-        root.add(body).grow().padTop(space("lg"));
-    }
-
-    private Table topBar() {
-        Table bar = kit.panel(true);
-        Table titles = new Table();
-        titles.left();
-        titles.add(kit.roleTypeLabel("display", Messages.getString("Lobby.title"), "text.primary")).left().row();
-        serverLine = kit.typeLabel("", "body", "text.secondary");
-        titles.add(serverLine).left().padTop(space("xs"));
-        bar.add(titles).left().growX().minWidth(0);
-        readyCount = kit.typeLabel("", "title", "text.primary");
-        bar.add(readyCount).padRight(space("lg"));
-        readyButton = kit.button("button-primary", null, Messages.getString("Lobby.ready"), null);
-        UiKit.onChange(readyButton, window::ready);
-        bar.add(readyButton).padRight(space("sm"));
-        UiButton leave = kit.button("button-secondary", null, Messages.getString("Lobby.leave"), null);
-        UiKit.onChange(leave, window::leave);
-        bar.add(leave);
-        return bar;
-    }
-
-    private Table playersPanel() {
-        Table panel = kit.panel(true);
-        Table header = kit.header(Messages.getString("Lobby.players"), "", true);
-        playerCount = header.findActor(UiKit.HEADER_COUNT);
-        panel.add(header).growX().row();
-        playerList = new Table();
-        playerList.top();
-        panel.add(kit.scrollList(playerList, true)).grow();
-        return panel;
-    }
-
-    private Table chatPanel() {
-        Table panel = kit.panel(true);
-        panel.add(kit.header(Messages.getString("Lobby.chat"), null, true)).growX().row();
-        chatLog = kit.typeLabel("", "body", "text.secondary");
-        chatLog.setWrap(true);
-        chatLog.setAlignment(Align.topLeft);
-        Table holder = new Table();
-        holder.top().left();
-        holder.add(chatLog).growX().top().left();
-        chatScroll = kit.scrollList(holder, true);
-        panel.add(chatScroll).grow().row();
-        chatInput = kit.input("", false);
-        chatInput.setMessageText(Messages.getString("Lobby.chatHint"));
-        chatInput.setTextFieldListener((field, typed) -> {
-            if (typed == '\r' || typed == '\n') {
-                String text = field.getText();
-                field.setText("");
-                window.chat(text);
+        boolean motion = !preferences.getReduceMotion();
+        topBar = new LobbyTopBar(kit, window::leave, window::ready);
+        players = new LobbyPlayersPanel(kit, boardSkin.skin, window::chat);
+        forces = new LobbyForcesPanel(kit);
+        battlefield = new LobbyBattlefieldPanel(kit, boardSkin.skin);
+        centre = new LobbyCentre(kit, forces.panel(), motion);
+        rail = kit.rail(Messages.getString("Lobby.battlefield"), "map");
+        rail.setProgrammaticChangeEvents(false);
+        kit.tip(rail, true).getActor().setText(Messages.getString("Lobby.railTip"));
+        UiKit.onChange(rail, () -> {
+            if (rail.isChecked()) {
+                centre.show(BATTLEFIELD, Messages.getString("Lobby.battlefield"), battlefield.body());
+            } else {
+                centre.back();
             }
         });
-        panel.add(chatInput).growX().padTop(space("md"));
-        return panel;
+        centre.onChange(this::centreChanged);
+        columns = new LobbyColumns(players.panel(), centre, battlefield.panel(), rail, space("lg"));
+
+        Table root = new Table();
+        root.setFillParent(true);
+        root.top();
+        stage.addActor(root);
+        root.add(topBar).growX().pad(space("md"), space("lg"), space("md"), space("lg")).row();
+        root.add(columns).grow().pad(0, space("lg"), space("lg"), space("lg"));
+        stage.addListener(new InputListener() {
+            @Override
+            public boolean keyDown(InputEvent event, int keycode) {
+                if (keycode == Keys.ESCAPE && centre.showing() != null) {
+                    centre.back();
+                    return true;
+                }
+                return false;
+            }
+        });
+    }
+
+    /** The battlefield's body goes back to its column whenever another view, or the forces, take the centre. */
+    private void centreChanged(String showing) {
+        boolean battlefieldShown = BATTLEFIELD.equals(showing);
+        rail.setChecked(battlefieldShown);
+        if (!battlefieldShown && battlefield.body().getParent() != battlefield.panel()) {
+            battlefield.dock();
+        }
+    }
+
+    /** Folds the battlefield into its rail below the fold width, and unfolds it, closing its centre view, above. */
+    private void applyFold() {
+        boolean fold = LobbyLayout.folds(stage.getWidth());
+        if (fold == folded) {
+            return;
+        }
+        folded = fold;
+        if (!fold && BATTLEFIELD.equals(centre.showing())) {
+            centre.back();
+        }
+        columns.fold(fold);
     }
 
     /** GPU thread: shows {@code snapshot}, the lobby as its window last read it. */
@@ -212,73 +221,12 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
         LobbySnapshot before = shown;
         shown = snapshot;
-        String server = snapshot.server();
-        if (!snapshot.mapSummary().isBlank()) {
-            server += "  \u00b7  " + snapshot.mapSummary();
-        }
-        serverLine.setText(server);
-        readyCount.setText(Messages.getString("Lobby.readyCount", snapshot.readyCount(), snapshot.playerCount()));
-        readyButton.setText(kit.cased("button",
-              Messages.getString(snapshot.localReady() ? "Lobby.cancelReady" : "Lobby.ready")));
-        if (playerCount != null) {
-            playerCount.setText(String.valueOf(snapshot.playerCount()));
-        }
+        topBar.show(snapshot);
+        players.show(snapshot, before);
         if (before == null || !before.teams().equals(snapshot.teams())) {
-            fillPlayers(snapshot);
+            forces.show(snapshot);
         }
-        if (before == null || !before.chat().equals(snapshot.chat())) {
-            chatLog.setText(String.join("\n", snapshot.chat()));
-            chatScroll.layout();
-            chatScroll.setScrollPercentY(1);
-            chatScroll.updateVisualScroll();
-        }
-    }
-
-    private void fillPlayers(LobbySnapshot snapshot) {
-        playerList.clearChildren();
-        boolean first = true;
-        for (TeamGroup team : snapshot.teams()) {
-            playerList.add(kit.caption(team.name(), true)).left().growX()
-                  .padTop(first ? 0 : space("lg")).padBottom(space("xs")).row();
-            first = false;
-            for (PlayerRow player : team.players()) {
-                playerList.add(playerRow(player)).growX().padTop(space("xs")).row();
-            }
-        }
-    }
-
-    private Table playerRow(PlayerRow player) {
-        Table row = new Table();
-        Table name = new Table();
-        name.left();
-        Label label = kit.roleTypeLabel("name", player.name(), player.self() ? "accent.primary" : "text.primary");
-        label.setEllipsis(true);
-        name.add(label).left().minWidth(0);
-        if (player.self()) {
-            name.add(mark("Lobby.you")).padLeft(space("xs"));
-        }
-        if (player.bot()) {
-            name.add(mark("Lobby.bot")).padLeft(space("xs"));
-        }
-        if (player.gameMaster()) {
-            name.add(mark("Lobby.gameMaster")).padLeft(space("xs"));
-        }
-        if (player.observer()) {
-            name.add(mark("Lobby.observer")).padLeft(space("xs"));
-        }
-        row.add(name).left().growX().minWidth(0).row();
-        Table details = new Table();
-        String forces = player.hidden() ? Messages.getString("Lobby.hidden")
-              : Messages.getString("Lobby.forces", player.units(), player.bv());
-        details.add(kit.typeLabel(forces, "small", "text.secondary")).left().growX();
-        details.add(kit.chip(Messages.getString(player.ready() ? "Lobby.isReady" : "Lobby.notReady"),
-              player.ready() ? Tone.OK : Tone.NORMAL, true));
-        row.add(details).growX().padTop(space("xs"));
-        return row;
-    }
-
-    private Actor mark(String key) {
-        return kit.chip(Messages.getString(key), Tone.NORMAL, true);
+        battlefield.show(snapshot);
     }
 
     // ---- Size and scale ----
@@ -294,37 +242,38 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         bw = Gdx.graphics.getBackBufferWidth();
         bh = Gdx.graphics.getBackBufferHeight();
         pixels.setToOrtho2D(0, 0, bw, bh);
+        applyFold();
         rebuildBackdrop();
     }
 
-    /** The start screen's art, cover-fitted and dimmed under the panels, drawn once at the window's size. */
+    /** The start screen's art, cover-fitted, blurred and mostly covered by the surface, drawn once per size. */
     private void rebuildBackdrop() {
         BufferedImage image = new BufferedImage(bw, bh, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = image.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g.setColor(base);
         g.fillRect(0, 0, bw, bh);
         if (art != null) {
-            double cover = Math.max((double) bw / art.getWidth(), (double) bh / art.getHeight()) * 1.04;
-            int drawnWidth = (int) (art.getWidth() * cover);
-            int drawnHeight = (int) (art.getHeight() * cover);
-            g.drawImage(art, (bw - drawnWidth) / 2, (bh - drawnHeight) / 2, drawnWidth, drawnHeight, null);
+            double cover = Math.max((double) bw / art.getWidth(), (double) bh / art.getHeight());
+            int smallWidth = Math.max(1, (int) Math.round(art.getWidth() * cover / ART_BLUR));
+            int smallHeight = Math.max(1, (int) Math.round(art.getHeight() * cover / ART_BLUR));
+            BufferedImage small = new BufferedImage(smallWidth, smallHeight, BufferedImage.TYPE_INT_RGB);
+            Graphics2D s = small.createGraphics();
+            s.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            s.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            s.drawImage(art, 0, 0, smallWidth, smallHeight, null);
+            s.dispose();
+            int coverWidth = smallWidth * ART_BLUR;
+            int coverHeight = smallHeight * ART_BLUR;
+            g.drawImage(small, (bw - coverWidth) / 2, (bh - coverHeight) / 2, coverWidth, coverHeight, null);
         }
-        g.setColor(alpha(base, ART_DIM));
-        g.fillRect(0, 0, bw, bh);
-        g.setPaint(new RadialGradientPaint(new Point2D.Double(bw * 0.5, bh * 0.45), Math.max(bw, bh) * 0.75f,
-              new float[] { 0.5f, 1f }, new java.awt.Color[] { alpha(base, 0f), alpha(base, 0.6f) }));
+        g.setColor(new java.awt.Color(base.getRed(), base.getGreen(), base.getBlue(), Math.round(255 * ART_DIM)));
         g.fillRect(0, 0, bw, bh);
         g.dispose();
         if (backdrop != null) {
             backdrop.dispose();
         }
         backdrop = GpuStartScreen.texture(image, false);
-    }
-
-    private static java.awt.Color alpha(java.awt.Color color, float alpha) {
-        return new java.awt.Color(color.getRed(), color.getGreen(), color.getBlue(),
-              Math.round(255 * Math.max(0, Math.min(1, alpha))));
     }
 
     // ---- Each frame ----
@@ -339,6 +288,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             batch.setColor(1, 1, 1, 1);
             batch.draw(backdrop, 0, 0, bw, bh);
             batch.end();
+        }
+        if (railPending && folded) {
+            railPending = false;
+            rail.setChecked(true);
+            centre.show(BATTLEFIELD, Messages.getString("Lobby.battlefield"), battlefield.body());
         }
         stage.act(Math.min(0.1f, Gdx.graphics.getDeltaTime()));
         hud.update(Set.of());
