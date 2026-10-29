@@ -425,7 +425,9 @@ work for Swing, and item 11 is under investigation.
      `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`). `MM_START_PAGE=lobby` hosts a local game at once
      with the Host page's saved name ("Probe Player" when none is saved) on the first free port from the saved one,
      so the lobby scene shows; `MM_LOBBY_BOTS=n` adds n Princess bots on team 2, `MM_LOBBY_UNITS` loads `.mul`
-     files for the player, and `lobby+ready` presses Ready once the bots have joined. The same `MM_START_SHOT*`
+     files for the player, and `lobby+ready` presses Ready once the bots have joined. `MM_LOBBY_SIZE=WIDTHxHEIGHT`
+     sizes the window (without saving the size), `lobby+narrow` makes it 1100 by 800 so the battlefield folds into
+     its rail, and `lobby+rail` opens the folded battlefield. The same `MM_START_SHOT*`
      switches take the lobby's shot, which also logs the open windows (libGDX windows, GPU threads and showing
      Swing windows) to `logs\unified_log.log` (`GpuLobbyProbe`).
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
@@ -463,8 +465,13 @@ work for Swing, and item 11 is under investigation.
        frame with `ChatLounge` shows instead, so there is still only one window. For L1 the screen is minimal: the
        top bar (title, server line, ready count, Ready and Leave), the players by team and the chat. A probe opens
        it without clicking through (see step 3).
-     - L2 The shell: the top bar, the three columns over the dimmed art, the narrow-window rail and centre views with
-       Back.
+     - L2 ~~The shell~~. The lobby screen now has the briefing room's frame over the blurred, dimmed art: the top bar
+       (title, server and map line, ready count, a BV chip per side, Leave and Ready) over three columns, the players
+       with the chat docked under them, the forces, and the battlefield. Below 1280 units wide the battlefield folds
+       into a rail at the right edge that opens it in the centre as a view with Back (or Escape), in the forces'
+       place; the Swing room opened it over the forces' right side instead. The columns hold placeholders until
+       their steps come: each owner's units and BV in the forces, the map's size in the battlefield
+       (`LobbyTopBar`, `LobbyColumns`, `LobbyLayout`, `LobbyCentre` and the column panels).
      - L3 Players and chat: the team sections, player cards and their menus, adding bots, and the chat dock.
      - L4 Forces: unit cards, compact rows, owner sections, formations with drag and drop, sorting and the right-
        click menus.
