@@ -422,7 +422,12 @@ work for Swing, and item 11 is under investigation.
      `MM_START_PAGE` (such as `host+online+reveal`, `connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with
      `MM_START_SCENARIO` naming the scenario file) before `gradlew :megamek:run`;
      `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
-     `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`).
+     `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`). `MM_START_PAGE=lobby` hosts a local game at once
+     with the Host page's saved name ("Probe Player" when none is saved) on the first free port from the saved one,
+     so the lobby scene shows; `MM_LOBBY_BOTS=n` adds n Princess bots on team 2, `MM_LOBBY_UNITS` loads `.mul`
+     files for the player, and `lobby+ready` presses Ready once the bots have joined. The same `MM_START_SHOT*`
+     switches take the lobby's shot, which also logs the open windows (libGDX windows, GPU threads and showing
+     Swing windows) to `logs\unified_log.log` (`GpuLobbyProbe`).
   4. ~~Host and Connect~~ as modal cards over the main menu in app mode: form fields with their labels above, the
      main action named for what it does (**Host game**, **Connect**) and errors under the inputs instead of popups.
      Host keeps the password, port and server browser in a closed **Online options** section, which opens when the

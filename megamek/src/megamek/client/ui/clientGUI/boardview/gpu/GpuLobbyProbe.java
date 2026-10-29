@@ -129,13 +129,46 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private void apply(ClientGUI gui) {
         long start = System.nanoTime();
         Client client = gui.getClient();
-        Player local = client.getLocalPlayer();
-        if (local != null) {
-            local.setTeam(PLAYER_TEAM);
-            client.sendPlayerInfo();
-            loadUnits(client, local);
-        }
         List<BotClient> waiting = new ArrayList<>();
+        boolean[] joined = { false };
+        double readyAt = (shot == null ? 0 : shotAt) + READY_AFTER;
+        boolean[] readied = { !options.contains("ready") };
+        Timer timer = new Timer(POLL_MS, null);
+        timer.addActionListener(event -> {
+            // The bots join after the player, who gets the first player id as when they are added by hand
+            Player local = client.getLocalPlayer();
+            if (!joined[0] && local != null) {
+                joined[0] = true;
+                local.setTeam(PLAYER_TEAM);
+                client.sendPlayerInfo();
+                loadUnits(client, local);
+                addBots(gui, waiting);
+            }
+            waiting.removeIf(bot -> {
+                Player player = bot.getLocalPlayer();
+                if (player == null) {
+                    return false;
+                }
+                player.setTeam(BOT_TEAM);
+                bot.sendPlayerInfo();
+                loadUnits(bot, player);
+                return true;
+            });
+            double elapsed = (System.nanoTime() - start) / 1e9;
+            if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt && gui.chatlounge != null) {
+                readied[0] = true;
+                LOGGER.info("The lobby probe presses Ready");
+                gui.chatlounge.ready();
+            }
+            if (joined[0] && waiting.isEmpty() && readied[0]) {
+                timer.stop();
+            }
+        });
+        timer.start();
+    }
+
+    private void addBots(ClientGUI gui, List<BotClient> waiting) {
+        Client client = gui.getClient();
         for (int i = 1; i <= bots; i++) {
             String name = Messages.getString("Lobby.probeBot", i);
             BotClient bot = BotFactory.createBot(AIType.PRINCESS, name, client.getHost(), client.getPort());
@@ -149,31 +182,6 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 bot.die();
             }
         }
-        double readyAt = (shot == null ? 0 : shotAt) + READY_AFTER;
-        boolean[] readied = { !options.contains("ready") };
-        Timer timer = new Timer(POLL_MS, null);
-        timer.addActionListener(event -> {
-            waiting.removeIf(bot -> {
-                Player player = bot.getLocalPlayer();
-                if (player == null) {
-                    return false;
-                }
-                player.setTeam(BOT_TEAM);
-                bot.sendPlayerInfo();
-                loadUnits(bot, player);
-                return true;
-            });
-            double elapsed = (System.nanoTime() - start) / 1e9;
-            if (!readied[0] && waiting.isEmpty() && elapsed >= readyAt && gui.chatlounge != null) {
-                readied[0] = true;
-                LOGGER.info("The lobby probe presses Ready");
-                gui.chatlounge.ready();
-            }
-            if (waiting.isEmpty() && readied[0]) {
-                timer.stop();
-            }
-        });
-        timer.start();
     }
 
     /** Loads every unit list for {@code player}, sent by its own client. */
