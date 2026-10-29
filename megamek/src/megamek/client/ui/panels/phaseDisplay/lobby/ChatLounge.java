@@ -2658,6 +2658,14 @@ public class ChatLounge extends AbstractPhaseDisplay
         lblMapSummary.setToolTipText(selectedMaps.toString());
     }
 
+    /**
+     * The lobby's commands, which ask through this lobby's Swing dialogs; the native lobby runs its player actions
+     * through them so both lobbies act alike.
+     */
+    public LobbyCommands lobbyCommands() {
+        return lobbyCommands;
+    }
+
     @Override
     public void ready() {
         final Client client = clientgui.getClient();

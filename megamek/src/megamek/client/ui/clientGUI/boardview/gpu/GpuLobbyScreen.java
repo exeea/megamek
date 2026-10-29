@@ -14,6 +14,7 @@ import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.ui.Messages;
@@ -61,6 +62,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private Button rail;
     private boolean folded;
     private boolean railPending;
+    private boolean menuPending;
     private LobbySnapshot shown;
     private long start;
     private boolean shotSaved;
@@ -112,6 +114,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         railPending = probe.options().contains("rail");
+        menuPending = probe.options().contains("menu");
         if (!probe.sized()) {
             return;
         }
@@ -127,7 +130,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private void build() {
         boolean motion = !preferences.getReduceMotion();
         topBar = new LobbyTopBar(kit, window::leave, window::ready);
-        players = new LobbyPlayersPanel(kit, boardSkin.skin, window::chat);
+        players = new LobbyPlayersPanel(kit, playerActions());
         forces = new LobbyForcesPanel(kit);
         battlefield = new LobbyBattlefieldPanel(kit, boardSkin.skin);
         centre = new LobbyCentre(kit, forces.panel(), motion);
@@ -150,16 +153,88 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         stage.addActor(root);
         root.add(topBar).growX().pad(space("md"), space("lg"), space("md"), space("lg")).row();
         root.add(columns).grow().pad(0, space("lg"), space("lg"), space("lg"));
+        players.attach(stage.getRoot());
         stage.addListener(new InputListener() {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
-                if (keycode == Keys.ESCAPE && centre.showing() != null) {
+                if (keycode != Keys.ESCAPE) {
+                    return false;
+                }
+                // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys
+                if (players.back()) {
+                    return true;
+                }
+                if (stage.getKeyboardFocus() instanceof TextField) {
+                    stage.setKeyboardFocus(null);
+                    return true;
+                }
+                if (centre.showing() != null) {
                     centre.back();
                     return true;
                 }
                 return false;
             }
         });
+    }
+
+    /** The player column's actions, which the window runs on the Swing thread. */
+    private LobbyPlayersPanel.Actions playerActions() {
+        return new LobbyPlayersPanel.Actions() {
+            @Override
+            public void chat(String text) {
+                window.chat(text);
+            }
+
+            @Override
+            public void ready() {
+                window.ready();
+            }
+
+            @Override
+            public void playerSettings(int id) {
+                window.playerSettings(id);
+            }
+
+            @Override
+            public void camouflage(int id) {
+                window.camouflage(id);
+            }
+
+            @Override
+            public void changeTeam(int id, int team) {
+                window.changeTeam(id, team);
+            }
+
+            @Override
+            public void changeDeployment(int id, int position) {
+                window.changeDeployment(id, position);
+            }
+
+            @Override
+            public void toggleGameMaster() {
+                window.toggleGameMaster();
+            }
+
+            @Override
+            public void botSettings(int id) {
+                window.botSettings(id);
+            }
+
+            @Override
+            public void removeBot(int id) {
+                window.removeBot(id);
+            }
+
+            @Override
+            public void replaceWithBot(int id) {
+                window.replaceWithBot(id);
+            }
+
+            @Override
+            public void addBot(int team) {
+                window.addBot(team);
+            }
+        };
     }
 
     /** The battlefield's body goes back to its column whenever another view, or the forces, take the centre. */
@@ -226,6 +301,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             centre.show(BATTLEFIELD, Messages.getString("Lobby.battlefield"), battlefield.body());
         }
         stage.act(Math.min(0.1f, Gdx.graphics.getDeltaTime()));
+        // Once the bots have joined: a second before the shot
+        if (menuPending && (System.nanoTime() - start) / 1e9 > Math.max(1, window.probe().shotAt() - 1)
+              && players.openFirstMenu()) {
+            menuPending = false;
+        }
         hud.update(Set.of());
         stage.draw();
         takeShot();

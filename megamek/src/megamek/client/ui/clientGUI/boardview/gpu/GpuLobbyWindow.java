@@ -12,23 +12,41 @@ import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 
 import com.badlogic.gdx.ApplicationListener;
+import jakarta.annotation.Nullable;
+import megamek.client.AbstractClient;
+import megamek.client.Client;
+import megamek.client.bot.AIType;
 import megamek.client.bot.BotClient;
+import megamek.client.bot.BotFactory;
+import megamek.client.bot.princess.BehaviorSettings;
+import megamek.client.bot.princess.BehaviorSettingsFactory;
+import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
+import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
+import megamek.client.ui.enums.DialogResult;
+import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
+import megamek.common.board.Board;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -40,7 +58,12 @@ import megamek.common.event.player.GamePlayerChangeEvent;
 import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.event.player.GamePlayerConnectedEvent;
 import megamek.common.event.player.GamePlayerDisconnectedEvent;
+import megamek.common.icons.Camouflage;
+import megamek.common.loaders.MapSettings;
+import megamek.common.preference.PreferenceManager;
+import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
+import megamek.server.ServerBoardHelper;
 
 /**
  * The game lobby as a scene of MegaMek's one native window ({@link GpuHost}), for games MegaMek hosts or joins and
@@ -60,6 +83,9 @@ import megamek.logging.MMLogger;
  */
 public final class GpuLobbyWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuLobbyWindow.class);
+    /** How often, and how long at most, a new bot is checked for having joined, to put it on its team. */
+    private static final int BOT_JOIN_POLL_MS = 250;
+    private static final int BOT_JOIN_WAIT_MS = 10_000;
 
     /** EDT: the lobby holding the window or about to. */
     private static GpuLobbyWindow active;
@@ -168,6 +194,10 @@ public final class GpuLobbyWindow {
     private volatile LobbySnapshot snapshot = LobbySnapshot.EMPTY;
     private volatile GpuLobbyProbe probe;
     private boolean exitRequested;
+    /** EDT: the map settings whose custom deployment zones {@link #customZones} holds. */
+    private MapSettings zonesOf;
+    private Collection<Integer> customZones = List.of();
+    private PlayerSettingsDialog playerSettings;
 
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
@@ -268,7 +298,8 @@ public final class GpuLobbyWindow {
         LobbySnapshot read;
         try {
             ChatterBox chat = gui.getChatterBox();
-            read = LobbySnapshot.of(gui::getClient, chat == null ? List.of() : chat.lines(LobbySnapshot.CHAT_LINES));
+            read = LobbySnapshot.of(gui::getClient, chat == null ? List.of() : chat.lines(LobbySnapshot.CHAT_LINES),
+                  customZones());
         } catch (RuntimeException failure) {
             LOGGER.error(failure, "The lobby could not read the game");
             return;
@@ -325,6 +356,164 @@ public final class GpuLobbyWindow {
             }
         });
     }
+
+    /**
+     * EDT: the custom deployment zones of the board the map settings make, as the Swing lobby's deployment menu lists
+     * them; read again only when the map settings change, as reading them builds the board.
+     */
+    private Collection<Integer> customZones() {
+        MapSettings settings = gui.getClient().getMapSettings();
+        if (settings != zonesOf) {
+            zonesOf = settings;
+            try {
+                Board board = settings == null ? null : ServerBoardHelper.getPossibleGameBoard(settings, true);
+                customZones = board == null ? List.of() : List.copyOf(board.getCustomDeploymentZones());
+            } catch (RuntimeException failure) {
+                LOGGER.warn(failure, "The lobby could not read the custom deployment zones");
+                customZones = List.of();
+            }
+        }
+        return customZones;
+    }
+
+    /** Any thread: runs {@code action} with the player actions on the Swing thread, then shows what changed. */
+    private void players(Consumer<LobbyPlayerController> action) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || gui.chatlounge == null) {
+                return;
+            }
+            action.accept(new LobbyPlayerController(gui::getClient, gui.chatlounge.lobbyCommands(), dialogs));
+            queueRefresh();
+        });
+    }
+
+    /** Any thread: opens the player settings of the local player or their bot {@code id}. */
+    void playerSettings(int id) {
+        players(controller -> controller.playerSettings(id));
+    }
+
+    /** Any thread: asks for a camouflage for the local player or their bot {@code id}. */
+    void camouflage(int id) {
+        players(controller -> controller.camouflage(id));
+    }
+
+    /** Any thread: moves the local player or their bot {@code id} to {@code team}. */
+    void changeTeam(int id, int team) {
+        players(controller -> controller.changeTeam(id, team));
+    }
+
+    /** Any thread: sets the deployment area of the local player or their bot {@code id}. */
+    void changeDeployment(int id, int position) {
+        players(controller -> controller.changeDeployment(id, position));
+    }
+
+    /** Any thread: asks for the Game Master role, or gives it up. */
+    void toggleGameMaster() {
+        players(LobbyPlayerController::toggleGameMaster);
+    }
+
+    /** Any thread: opens the setup of the local bot {@code id}. */
+    void botSettings(int id) {
+        players(controller -> controller.botSettings(id));
+    }
+
+    /** Any thread: removes the local bot {@code id}. */
+    void removeBot(int id) {
+        players(controller -> controller.removeBot(id));
+    }
+
+    /** Any thread: has a new bot take the place of the disconnected player {@code id}. */
+    void replaceWithBot(int id) {
+        players(controller -> controller.replaceWithBot(id));
+    }
+
+    /** Any thread: adds a bot, through its setup dialog, on {@code team}. */
+    void addBot(int team) {
+        players(controller -> controller.addBot(team));
+    }
+
+    /** The Swing dialogs of the player actions, owned by the client's hidden frame, which this scene adopts. */
+    private final LobbyPlayerController.Dialogs dialogs = new LobbyPlayerController.Dialogs() {
+        @Override
+        public void playerSettings(Client client) {
+            if (playerSettings != null) {
+                playerSettings.dispose();
+            }
+            playerSettings = new PlayerSettingsDialog(gui, client, null);
+            playerSettings.setModal(false);
+            playerSettings.showDialog();
+        }
+
+        @Override
+        public Optional<Camouflage> camouflage(Camouflage initial, List<Entity> units) {
+            CamoChooserDialog chooser = new CamoChooserDialog(gui.getFrame(), initial);
+            try {
+                chooser.setDisplayedEntities(units);
+                return chooser.showDialog().isConfirmed() ? Optional.ofNullable(chooser.getSelectedItem())
+                      : Optional.empty();
+            } finally {
+                chooser.dispose();
+            }
+        }
+
+        @Override
+        public Optional<LobbyPlayerController.BotSetup> botSetup(@Nullable String name, BehaviorSettings behavior,
+              @Nullable AIType type) {
+            BotConfigDialog dialog = type == null
+                  ? new BotConfigDialog(gui.getFrame(), name, behavior, gui)
+                  : new BotConfigDialog(gui.getFrame(), name, behavior, gui, type);
+            dialog.setVisible(true);
+            if (dialog.getResult() != DialogResult.CONFIRMED) {
+                return Optional.empty();
+            }
+            return Optional.of(new LobbyPlayerController.BotSetup(dialog.getBotName(),
+                  type == null ? dialog.getSelectedAIType() : type, dialog.getBehaviorSettings()));
+        }
+
+        @Override
+        public @Nullable AbstractClient connectBot(LobbyPlayerController.BotSetup setup) {
+            Client client = gui.getClient();
+            BotClient bot = BotFactory.createBot(setup.type(), setup.name(), client.getHost(), client.getPort(),
+                  setup.behavior());
+            bot.setClientGUI(gui);
+            bot.getGame().addGameListener(new BotGUI(gui.getFrame(), bot));
+            boolean connected;
+            try {
+                connected = bot.connect();
+            } catch (Exception failure) {
+                LOGGER.error(failure, "The bot {} could not connect", setup.name());
+                connected = false;
+            }
+            if (!connected) {
+                gui.doAlertDialog(Messages.getString("ChatLounge.AlertBot.title"),
+                      Messages.getString("ChatLounge.AlertBot.message"));
+                bot.die();
+                return null;
+            }
+            return bot;
+        }
+
+        @Override
+        public void poll(BooleanSupplier step) {
+            long until = System.currentTimeMillis() + BOT_JOIN_WAIT_MS;
+            Timer timer = new Timer(BOT_JOIN_POLL_MS, null);
+            timer.addActionListener(event -> {
+                if (closing || step.getAsBoolean() || System.currentTimeMillis() > until) {
+                    timer.stop();
+                    queueRefresh();
+                }
+            });
+            timer.start();
+        }
+
+        @Override
+        public BehaviorSettings favouriteBehavior() {
+            BehaviorSettingsFactory factory = BehaviorSettingsFactory.getInstance();
+            return factory.getBehaviorOrDefault(
+                  PreferenceManager.getClientPreferences().getFavoritePrincessBehaviorSetting(),
+                  factory.DEFAULT_BEHAVIOR);
+        }
+    };
 
     /** GPU thread, as the screen's listener is disposed: returns every adopted dialog to its Swing owner. */
     void disposing() {
