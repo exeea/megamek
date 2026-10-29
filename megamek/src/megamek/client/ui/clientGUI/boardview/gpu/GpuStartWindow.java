@@ -240,7 +240,7 @@ public final class GpuStartWindow {
         if (anchor == null) {
             throw new IllegalStateException("Install the start window's owner before opening it");
         }
-        if (GpuBoardWindow.isShowingAny() || GpuUiLibraryWindow.isShowing()) {
+        if (GpuBoardWindow.isShowingAny() || GpuUiLibraryWindow.isShowing() || GpuLobbyWindow.isShowing()) {
             // The scene holding the window stays; the start screen comes back when it ends (GpuHost.whenIdle)
             return;
         }

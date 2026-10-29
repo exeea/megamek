@@ -262,6 +262,19 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (probe == null || probe.page() == null) {
             return;
         }
+        if (probe.lobby()) {
+            showPage(Page.HOST);
+            if (inputs.nameInput.getText().isBlank()) {
+                inputs.nameInput.setText(Messages.getString("Lobby.probePlayer"));
+            }
+            int port = StartHostForm.port(inputs.portInput.getText());
+            if (port >= 0) {
+                // Another MegaMek may already host on the saved port; the probe's game takes the next free one
+                inputs.portInput.setText(String.valueOf(StartScreenProbe.freePort(port)));
+            }
+            hostPage.submitHost();
+            return;
+        }
         Page asked;
         try {
             asked = Page.valueOf(probe.page());
@@ -310,31 +323,39 @@ final class GpuStartScreen extends ApplicationAdapter {
     /** Saves the frame just drawn as the developer switch's PNG, then quits when it asks to. */
     private void saveShot() {
         shotSaved = true;
-        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, bw, bh);
+        if (saveFrame(probe.shot(), bw, bh)) {
+            LOGGER.info("Start screen shot saved to {}", probe.shot().getAbsoluteFile());
+        }
+        if (probe.quit()) {
+            window.dispatch(Action.QUIT);
+        }
+    }
+
+    /** GPU thread: saves the frame just drawn, {@code width} by {@code height} pixels, as a PNG; false when it can't. */
+    static boolean saveFrame(File shot, int width, int height) {
+        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, width, height);
         try {
-            BufferedImage image = new BufferedImage(bw, bh, BufferedImage.TYPE_INT_RGB);
+            BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
             ByteBuffer rgba = pixels.getPixels();
-            for (int y = 0; y < bh; y++) {
+            for (int y = 0; y < height; y++) {
                 // The frame buffer's rows run upward
-                int from = (bh - y - 1) * bw * 4;
-                for (int x = 0; x < bw; x++, from += 4) {
+                int from = (height - y - 1) * width * 4;
+                for (int x = 0; x < width; x++, from += 4) {
                     image.setRGB(x, y, (rgba.get(from) & 0xFF) << 16 | (rgba.get(from + 1) & 0xFF) << 8
                           | rgba.get(from + 2) & 0xFF);
                 }
             }
-            File file = probe.shot().getAbsoluteFile();
+            File file = shot.getAbsoluteFile();
             if (file.getParentFile() != null) {
                 file.getParentFile().mkdirs();
             }
             ImageIO.write(image, "png", file);
-            LOGGER.info("Start screen shot saved to {}", file);
+            return true;
         } catch (IOException failure) {
-            LOGGER.error(failure, "The start screen could not save its shot to {}", probe.shot());
+            LOGGER.error(failure, "Could not save the shot to {}", shot);
+            return false;
         } finally {
             pixels.dispose();
-        }
-        if (probe.quit()) {
-            window.dispatch(Action.QUIT);
         }
     }
 
@@ -1035,7 +1056,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         stage.act(dt);
         hud.update(Set.of());
         stage.draw();
-        if (probe != null && probe.shot() != null && !shotSaved && clock() >= probe.shotAt()) {
+        if (probe != null && probe.shot() != null && !probe.lobby() && !shotSaved && clock() >= probe.shotAt()) {
             saveShot();
         }
         if (!settledRate && t >= StartTimeline.INTRO_END) {

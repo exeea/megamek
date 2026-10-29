@@ -2,10 +2,14 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+
+import megamek.MMConstants;
 
 /**
  * A developer switch for looking at the start screen without clicking through it, read from the environment:
@@ -13,7 +17,9 @@ import java.util.TreeSet;
  *     <li>{@code MM_START_PAGE}: the page to open at once, without the greeting, such as {@code host}, with options
  *     after a plus: {@code host+online+reveal} opens the Host page's online options and shows its password;
  *     {@code resume} reads the newest save and {@code briefing} opens the scenario file {@code MM_START_SCENARIO}
- *     names, or the last one played.</li>
+ *     names, or the last one played; {@code lobby} hosts a game at once with the Host page's saved values (on the next
+ *     free port when the saved one is taken), and the lobby's own probe ({@link GpuLobbyProbe}) takes over from there,
+ *     taking the shot itself.</li>
  *     <li>{@code MM_START_SHOT}: a PNG file the screen saves from its own frame buffer, {@code MM_START_SHOT_AT}
  *     seconds after its first frame (by default once the page has slid in, or the greeting has played).</li>
  *     <li>{@code MM_START_QUIT}: {@code true} to quit MegaMek once the shot is saved.</li>
@@ -23,6 +29,8 @@ import java.util.TreeSet;
 record StartScreenProbe(String page, Set<String> options, File shot, double shotAt, boolean quit) {
     /** The shot's time on a page: its items have slid in and its local address has been found. */
     static final double PAGE_SHOT_AT = 2.5;
+    /** Not a start page: hosts at once and leaves the shot to the lobby. */
+    static final String LOBBY = "LOBBY";
 
     /** The probe the environment asks for, or null when it asks for none. */
     static StartScreenProbe fromEnvironment() {
@@ -68,5 +76,22 @@ record StartScreenProbe(String page, Set<String> options, File shot, double shot
 
     boolean has(String option) {
         return options.contains(option);
+    }
+
+    /** True when the probe asks for the lobby, whose shot the lobby takes rather than the start screen. */
+    boolean lobby() {
+        return LOBBY.equals(page);
+    }
+
+    /** {@code port} when nothing listens on it, otherwise the next free port, up to 20 further. */
+    static int freePort(int port) {
+        for (int candidate = port; candidate <= Math.min(port + 20, MMConstants.MAX_PORT); candidate++) {
+            try (ServerSocket socket = new ServerSocket(candidate)) {
+                return socket.getLocalPort();
+            } catch (IOException busy) {
+                // Taken; try the next one
+            }
+        }
+        return port;
     }
 }

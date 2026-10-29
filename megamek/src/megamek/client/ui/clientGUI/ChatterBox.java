@@ -41,7 +41,9 @@ import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
+import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.List;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -242,6 +244,29 @@ public class ChatterBox implements KeyListener {
     }
 
     /**
+     * Sends {@code text} to the game's chat, or runs it when it is a client command and shows the answer, as Enter in
+     * the input line does.
+     */
+    public void submit(String text) {
+        if (!text.startsWith(ClientCommand.CLIENT_COMMAND)) {
+            client.sendChat(text);
+        } else {
+            systemMessage(clientGUI.runCommand(text));
+        }
+    }
+
+    /** The chat's last {@code max} non-blank lines, oldest first. */
+    public List<String> lines(int max) {
+        List<String> lines = new ArrayList<>();
+        for (String line : chatArea.getText().split("\n")) {
+            if (!line.isBlank()) {
+                lines.add(line);
+            }
+        }
+        return lines.size() > max ? new ArrayList<>(lines.subList(lines.size() - max, lines.size())) : lines;
+    }
+
+    /**
      * Replace the "Done" button in the chat box.
      *
      * @param button the <code>JButton</code> that should be used for "Done".
@@ -271,11 +296,7 @@ public class ChatterBox implements KeyListener {
             history.addFirst(inputField.getText());
             historyBookmark = -1;
 
-            if (!inputField.getText().startsWith(ClientCommand.CLIENT_COMMAND)) {
-                client.sendChat(inputField.getText());
-            } else {
-                systemMessage(clientGUI.runCommand(inputField.getText()));
-            }
+            submit(inputField.getText());
             inputField.setText("");
 
             if (history.size() > MAX_HISTORY) {

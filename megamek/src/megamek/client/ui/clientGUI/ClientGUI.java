@@ -95,7 +95,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyOverlay;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
@@ -1014,9 +1014,6 @@ public class ClientGUI extends AbstractClientGUI
 
     @Override
     public void initialize() {
-        // In MegaMek's own window the lobby shows inset over the start screen; it must lose its decorations before
-        // anything makes the frame displayable
-        GpuLobbyOverlay.adopt(frame, this::handleExit);
         menuBar = CommonMenuBar.getMenuBarForGame();
         menuBar.setClientSupplier(() -> client);
         frame.setJMenuBar(menuBar);
@@ -1093,12 +1090,18 @@ public class ClientGUI extends AbstractClientGUI
             controller.registerCommandAction(KeyCommandBind.BOT_COMMANDS.cmd, GUIP::toggleBotCommandsEnabled);
         }
 
-        showDefaultBoard(CG_DEFAULT);
+        // A joining client lands in the lounge; the phase the server sends next replaces the lobby when it is not
+        showDefaultBoard(CG_CHAT_LOUNGE);
         client.changePhase(GamePhase.UNKNOWN);
         // Unit tools are created on demand; constructing them here can wait for the cache on the EDT.
         new UnitLoadingDialog(frame).showForBackgroundLoad();
-        frame.setVisible(!GpuBoardWindow.isActiveFor(this));
+        frame.setVisible(!GpuBoardWindow.isActiveFor(this) && !GpuLobbyWindow.isActiveFor(this));
         GUIP.addPreferenceChangeListener(this);
+    }
+
+    /** The game's chat, which the native lobby shows and sends through; null before {@link #initialize}. */
+    public ChatterBox getChatterBox() {
+        return cb;
     }
 
     @Override
@@ -1780,6 +1783,7 @@ public class ClientGUI extends AbstractClientGUI
 
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
+        GpuLobbyWindow.closeFor(this);
         if (chatlounge != null) {
             chatlounge.killPreviewBV();
         }
@@ -1954,16 +1958,22 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /** Keep the lounge in its own UI; the selected board owns loading screens and subsequent game phases. */
+    /**
+     * The lounge shows the native lobby scene, and every later phase the native board, each replacing the other in the
+     * one window; the frame stays hidden behind both and shows only when the lobby scene can't start.
+     */
     void showDefaultBoard(String mainPanel) {
         if (getClient() instanceof BotClient) {
             return;
         }
         if (CG_CHAT_LOUNGE.equals(mainPanel)) {
             boardViewChosen = false;
-            GpuBoardWindow.showLegacy2D(this);
-        } else if (!boardViewChosen) {
+            GpuLobbyWindow.open(this);
+            GpuBoardWindow.closeFor(this);
+        } else if (!boardViewChosen && !(CG_DEFAULT.equals(mainPanel) && GpuLobbyWindow.isActiveFor(this))) {
+            // While waiting for the server (joining, or between the lounge and the first board phase) the lobby stays
             openGpuBoard();
+            GpuLobbyWindow.closeFor(this);
         }
     }
 
