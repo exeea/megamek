@@ -52,6 +52,7 @@ Agreed so far:
 | Review | Runnable galleries opened from MegaMek: one Swing, one libGDX. The Swing library is the complete set; libGDX is a subset that grows on demand. |
 | Naming, translucency | Role-based token names with a `UiTheme` rename pass; surfaces get opaque and overlay values. |
 | In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby is being ported to libGDX; until then it stays Swing. |
+| Lobby | **Final.** The lobby is rewritten in libGDX as a scene of the one window, for MegaMek and for MekHQ games alike: one lobby, not a Swing one beside a libGDX one. It replaces the Swing lobby outright, with no fallback while it is built, and lands as one pull request. The Swing briefing room explored on `design-system-start-followups` (steps 6 and 7 there) is the starting point for its layout, not a spec to copy: where libGDX allows more, such as a live 3D map or motion between views, the design is rethought. The lobby's Swing dialogs stay Swing at first and open over the window, as the board's do. See step 6 under Next steps. |
 | Native window | One libGDX window for the whole run (`GpuHost`), switching between scenes: start screen, map editor and preview, game and UI library. The Swing lobby shows inset over the dimmed start screen in the same window until it is ported to libGDX. A game always uses the GPU board; Legacy 2D remains only for map previews and the editor's 2D Preview. |
 | Animation | Broad UI animation (for example panel reveals) comes after the unification pass. |
 
@@ -435,8 +436,40 @@ work for Swing, and item 11 is under investigation.
        on Windows so far: on macOS it must run on the main thread, which the start window's loop holds (so it would
        open from that loop and pause drawing while it is open), and on Linux it uses GTK, which needs checking
        beside AWT. Both need testing on real machines; Swing's chooser stays the fallback.
-  6. The lobby as a briefing room in game mode: a top bar with Ready and summary chips, players on the left, forces in
-     the centre, the battlefield (map, conditions, victory) on the right and a chat dock.
-  7. The unit selector. 8. The lobby's dialogs. 9. A settings check.
+  6. The lobby in libGDX: a briefing room in game mode, as a scene of the one window, for MegaMek and MekHQ alike (see
+     the Lobby decision). The Swing version on `design-system-start-followups` settled the layout: a top bar with the
+     title, ready count, a BV chip per side and Ready; players by team on the left, with the chat docked under them;
+     forces as unit cards or formations in the centre; the battlefield (map, rules, victory, auto-resolve) on the
+     right, folding to a rail in a narrow window; and the unit selector as a Requisition view in the centre column.
+     The libGDX lobby starts from that and rethinks it where libGDX allows more. It lands in pieces, in one pull
+     request:
+     - L0 The lobby model. The lobby's state and actions leave `ChatLounge` and its helpers for a model that knows
+       neither Swing nor libGDX: players and teams, forces and formations, units, the map and options, readiness and
+       its warnings, chat, and every change the lobby sends to the server (adding, removing, moving and configuring
+       units, bots, teams, camo, deployment, C3 and transport). It has unit tests, so the view only reads it and
+       calls it.
+     - L1 The lobby scene. When the game reaches the lounge phase, the window switches to the lobby scene instead
+       of showing the lobby frame; when the game starts, it switches to the board. `GpuLobbyOverlay` and the dimmed
+       start screen go away. Leaving the lobby returns to the start screen. A MekHQ game opens the window at the
+       lobby with its forces already loaded, then the board, and closes after the game, as it does now. A probe
+       (`MM_START_PAGE=lobby`, as on the Swing branch) opens it without clicking through.
+     - L2 The shell: the top bar, the three columns over the dimmed art, the narrow-window rail and centre views with
+       Back.
+     - L3 Players and chat: the team sections, player cards and their menus, adding bots, and the chat dock.
+     - L4 Forces: unit cards, compact rows, owner sections, formations with drag and drop, sorting and the right-
+       click menus.
+     - L5 The battlefield: the map card (ideally a live 3D view of the board with the deployment zones), conditions,
+       rules, victory and auto-resolve.
+     - L6 Ready: the ready count, the BV chips, Ready and its warning chips.
+     - L7 The unit selector: the Requisition view, with categories, search, weight chips, the Filters drawer and the
+       dossier, then step 7.4 and 7.5's adding strip, skills, BV and sources. MekHQ, MegaMekLab and the main menu's
+       unit browser keep `AbstractUnitSelectorDialog`.
+     - L8 Dialogs. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load
+       and save choosers stay Swing at first, natively owned by the window so they stay in front of it, as the
+       board's are. Those the lobby uses most move to libGDX one at a time afterwards.
+     - L9 Removal and checks: the Swing lobby's view code, `ChatLounge`'s and `GpuLobbyOverlay` are deleted; MekHQ's
+       preloaded and auto-resolve games, MUL loading, hot-seat bots, blind drop, the Game Master and reconnecting to
+       a running game are checked.
+  7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.
