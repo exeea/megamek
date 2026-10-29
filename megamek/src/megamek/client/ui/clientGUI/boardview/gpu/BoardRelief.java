@@ -3836,9 +3836,14 @@ final class BoardRelief {
         return groundOcclusion(Math.max(0, reach) / metres(1));
     }
 
-    /** Ground in front of a taller cliff sees less sky; open ground and rims are unoccluded. */
+    /**
+     * The contact shade of ground in the corner at a rise's foot, with the decay of the wall's own foot
+     * (wallOcclusion); open ground and rims are unoccluded. How much sky the rise hides from the ground further out
+     * is the sky visibility's (GpuSkyVisibility), whose cells are 4 m. Poured ground takes the same per pixel
+     * (terrain-sculpt.frag).
+     */
     private static float groundOcclusion(float footMetres) {
-        return 1 - .3f * (float) Math.exp(-footMetres / 3.5f);
+        return 1 - .3f * (float) Math.exp(-footMetres / 1.6f);
     }
 
     /** Distances in metres to the nearest drop (rim) and rise (cliff foot) at this hex's level. */

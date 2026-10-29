@@ -48,7 +48,8 @@ vec3 groundLighting(vec3 albedo, vec3 normal, vec3 geometric, float wet, float r
           surfaceVisibility());
     metallicShare(ground, clamp(finish.metallic, 0.0, 1.0));
     ground.scatter = clamp(finish.scatter, 0.0, 1.0);
-    ground.occlusion = ground.specularOcclusion = occlusion;
+    // Its callers' occlusion is a texture's (a tile's or a road's map), finer than the geometric estimates.
+    ground.detail = ground.specularOcclusion = occlusion;
     ground.emission = finish.emission;
     albedo = shadeSurface(ground);
 #else

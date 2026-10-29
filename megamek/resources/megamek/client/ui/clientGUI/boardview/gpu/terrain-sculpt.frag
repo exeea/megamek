@@ -527,7 +527,8 @@ void main() {
             cavity = detail.a * .6 + .4;
         }
         if (ground && !shore && family(4.0)) {
-            occlusion = 1.0 - .3 * exp(-surfaceUV.y / 3.5);
+            // BoardRelief.groundOcclusion, per pixel.
+            occlusion = 1.0 - .3 * exp(-surfaceUV.y / 1.6);
         }
         if (shore && !natural && family(4.0) && face.z < .6) {
             concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,

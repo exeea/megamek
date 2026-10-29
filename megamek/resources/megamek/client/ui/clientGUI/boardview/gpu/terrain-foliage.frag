@@ -275,9 +275,10 @@ void main() {
     float transmitted = leaves * scatter;
 #endif
     // Actual thin tissue reflects on the visible side and transmits from the opposite side (thinTransmission).
-    // Canopy occlusion attenuates the incoming sky alone; the leaf cavity map also its reflection.
+    // Canopy occlusion attenuates the incoming sky alone; the leaf cavity map (detail) also its reflection.
     plant.back = thinTransmission(albedo, transmitted);
-    plant.occlusion = mix(.85, mix(.7, 1.0, face.z * .5 + .5), leaves) * surface.r;
+    plant.occlusion = mix(.85, mix(.7, 1.0, face.z * .5 + .5), leaves);
+    plant.detail = surface.r;
     plant.specularOcclusion = surface.r;
 #endif
     plant.emission = emission;

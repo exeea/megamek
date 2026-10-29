@@ -32,7 +32,8 @@ struct Surface {
     float film;              // water coat, 0 dry to 1 standing water: smooths the lobe, sets f0 and the diffuse budget
     vec3 f0;                 // reflectance of the metallic share at normal incidence: the metal's colour
     float metallic;          // share of the surface that is metal; the rest is a dielectric (f0 .04, or water's)
-    float occlusion;         // ambient occlusion of the diffuse sky
+    float occlusion;         // geometric occlusion of the diffuse sky; the lower of it and screen-space AO counts
+    float detail;            // a texture's finer occlusion of the diffuse sky, multiplied after that
     float specularOcclusion; // occlusion of the reflected environment
     float cavity;            // micro-occlusion: of the sky, local lights and reflections, and the sun's micro-shadow
     float visibility;        // of the sun: the shadow map and any self-shadowing, looked up by the caller
@@ -48,8 +49,8 @@ struct Surface {
 // An opaque dielectric over GROUND_ALBEDO, without occlusion, transmission, heat, emission or scattering; callers set
 // what they have.
 Surface opaqueSurface(vec3 albedo, vec3 normal, vec3 geometric, float roughness, float film, float visibility) {
-    return Surface(albedo, normal, geometric, roughness, film, vec3(.04), 0.0, 1.0, 1.0, 1.0, visibility, vec3(1.0),
-          vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0), 0.0, 0.0);
+    return Surface(albedo, normal, geometric, roughness, film, vec3(.04), 0.0, 1.0, 1.0, 1.0, 1.0, visibility,
+          vec3(1.0), vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0), 0.0, 0.0);
 }
 
 // Moon dust scatters the sun as lunar regolith does, not as a Lambertian surface: it takes cos i / (cos i + cos e)
@@ -119,7 +120,9 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     // The sky's ambient occlusion, with the screen-space occlusion of the opaque scene (ambient-occlusion.glsl): once,
     // for every surface, on the sky alone. Local lights and the sun keep their own visibility.
     vec2 screen = screenOcclusion();
-    float occlusion = s.occlusion * screen.x;
+    // Of two estimates of the same occlusion, the stronger, as Unity HDRP combines material and screen-space occlusion;
+    // then the texture's finer detail, which the screen-space estimate does not resolve.
+    float occlusion = min(s.occlusion, screen.x) * s.detail;
     vec3 localSpecular;
     vec3 localLight = lavaIrradiance(v_cloudPosition, normal, view, roughness, f0, localSpecular);
     // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
