@@ -99,6 +99,16 @@ public final class LobbyRules {
     }
 
     /**
+     * Returns true when the blind drop rules hide {@code player}'s forces from {@code viewer}: an enemy's, under blind
+     * drop or real blind drop, unless the viewer is the Game Master. Nothing is hidden while the viewer is
+     * {@code null}, before the server has assigned the local player.
+     */
+    public static boolean hidesForces(Game game, Player viewer, Player player) {
+        return viewer != null && !viewer.isGameMaster() && viewer.isEnemyOf(player)
+              && (isBlindDrop(game) || isRealBlindDrop(game));
+    }
+
+    /**
      * Returns true when teams share vision is on, regardless of whether double-blind is on.
      */
     public static boolean isTeamsShareVision(Game game) {
