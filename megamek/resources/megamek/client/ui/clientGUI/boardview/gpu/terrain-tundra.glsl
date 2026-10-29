@@ -34,7 +34,7 @@ vec4 tundraTexel(sampler2DArray maps, float layer, float tile, MaterialProjectio
     mat2 gradientB;
     float t;
     topCoordinates(p, tile, variation, !scales, a, b, gradientB, t);
-    vec4 top = mix(materialTexel(maps, layer, a, p.topGradient / tile), materialTexel(maps, layer, b, gradientB), t);
+    vec4 top = mixedTexel(maps, layer, a, p.topGradient / tile, b, gradientB, t);
 #ifdef volcanicFlag
     if (p.lying < 1.0) {
         vec4 steep = mix(materialTexel(maps, layer, p.y / tile + .37, p.yGradient / tile),

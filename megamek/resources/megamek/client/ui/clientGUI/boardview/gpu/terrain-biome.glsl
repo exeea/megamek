@@ -18,7 +18,8 @@ vec4 biomePlanar(sampler2DArray maps, float map, MaterialProjection p, float mix
     vec4 near = biomeTexel(maps, map, p.top / tile, p.topGradient / tile);
     // Relief: the first repeat only.
     if (normalMap) return vec4(mix(near.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail), near.a);
-    vec4 far = biomeTexel(maps, map, TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37));
+    vec4 far = mixer > 0.0 ? biomeTexel(maps, map, TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37))
+          : near;
     vec4 pigment = mix(near, far, mixer);
     return farDetail > 0.0 ? mix(pigment,
           biomeTexel(maps, map, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail) : pigment;

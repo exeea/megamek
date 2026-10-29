@@ -45,6 +45,13 @@ float heightTexel(float layer, vec2 uv, mat2 gradient) {
     return textureLod(u_terrainLayers, vec3(uv, layer), .5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1.0))).a;
 }
 
+// Two heights mixed by t, without the read whose weight is exactly zero: it would change nothing.
+float mixedHeight(float layer, vec2 a, mat2 gradientA, vec2 b, mat2 gradientB, float t) {
+    if (t <= 0.0) return heightTexel(layer, a, gradientA);
+    if (t >= 1.0) return heightTexel(layer, b, gradientB);
+    return mix(heightTexel(layer, a, gradientA), heightTexel(layer, b, gradientB), t);
+}
+
 // planar's height at its near reads (gradient in metres), for the parallax.
 float planarHeight(float map, vec2 p, mat2 gradient, float tile, float mixer) {
     return mix(heightTexel(map * .5, p / tile, gradient / tile),

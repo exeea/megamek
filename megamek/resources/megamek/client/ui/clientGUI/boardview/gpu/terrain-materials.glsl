@@ -164,6 +164,14 @@ vec4 materialTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient) {
     return textureGrad(maps, vec3(uv, layer), gradient[0], gradient[1]);
 }
 
+// Two reads mixed by t, without the read whose weight is exactly zero: it would change nothing. Gradients are explicit,
+// so the reads may sit in varying branches.
+vec4 mixedTexel(sampler2DArray maps, float layer, vec2 a, mat2 gradientA, vec2 b, mat2 gradientB, float t) {
+    if (t <= 0.0) return materialTexel(maps, layer, a, gradientA);
+    if (t >= 1.0) return materialTexel(maps, layer, b, gradientB);
+    return mix(materialTexel(maps, layer, a, gradientA), materialTexel(maps, layer, b, gradientB), t);
+}
+
 // Overlapping translated samples break the fungal source's recognisable repeats. Use identical offsets for
 // colour/height and normal/AO; translations keep tangent normals aligned and leave vertical cliff grain upright.
 vec2 materialOffset(vec2 cell) {
@@ -194,16 +202,15 @@ float fungusHeight(float layer, vec2 uv, mat2 gradient) {
 // Color/height and normal/AO must use the same selector; a translation does not rotate or resize their normals.
 vec4 translatedTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient, float variation) {
     float choice = variation * 8.0, index = floor(choice);
-    vec4 a = materialTexel(maps, layer, uv + materialOffset(vec2(index, 0.0)), gradient);
-    vec4 b = materialTexel(maps, layer, uv + materialOffset(vec2(index + 1.0, 0.0)), gradient);
-    return mix(a, b, smoothstep(.2, .8, fract(choice)));
+    return mixedTexel(maps, layer, uv + materialOffset(vec2(index, 0.0)), gradient,
+          uv + materialOffset(vec2(index + 1.0, 0.0)), gradient, smoothstep(.2, .8, fract(choice)));
 }
 
 // translatedTexel's height, for the parallax.
 float translatedHeight(float layer, vec2 uv, mat2 gradient, float variation) {
     float choice = variation * 8.0, index = floor(choice);
-    return mix(heightTexel(layer, uv + materialOffset(vec2(index, 0.0)), gradient),
-          heightTexel(layer, uv + materialOffset(vec2(index + 1.0, 0.0)), gradient), smoothstep(.2, .8, fract(choice)));
+    return mixedHeight(layer, uv + materialOffset(vec2(index, 0.0)), gradient,
+          uv + materialOffset(vec2(index + 1.0, 0.0)), gradient, smoothstep(.2, .8, fract(choice)));
 }
 
 // The ground's variation field is constant down a vertical face. Advance the source selection with projected
@@ -237,9 +244,8 @@ vec4 sampleMaterialMap(sampler2DArray maps, float layer, float tile, MaterialPro
         pigment = fungus ? fungusTexel(maps, layer, p.top / tile, p.topGradient / tile)
               : singleScale
               ? translatedTexel(maps, layer, p.top / tile, p.topGradient / tile, variation)
-              : mix(materialTexel(maps, layer, p.top / tile, p.topGradient / tile),
-              materialTexel(maps, layer, TURN * p.top / (tile * 2.37) + .31,
-                    TURN * p.topGradient / (tile * 2.37)), variation);
+              : mixedTexel(maps, layer, p.top / tile, p.topGradient / tile,
+                    TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37), variation);
         // Keep resolved sand ripples and cap fractures; their explicit gradients already select filtered mips.
         if (farDetail > 0.0 && !singleScale) {
             pigment = mix(pigment, materialTexel(maps, layer, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail);
@@ -263,8 +269,8 @@ float sampledHeight(float layer, float tile, MaterialProjection p, float variati
         mat2 gradient = p.topGradient / tile;
         height = fungus ? fungusHeight(layer, uv, gradient)
               : singleScale ? translatedHeight(layer, uv, gradient, variation)
-              : mix(heightTexel(layer, uv, gradient),
-                    heightTexel(layer, TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37)), variation);
+              : mixedHeight(layer, uv, gradient, TURN * p.top / (tile * 2.37) + .31,
+                    TURN * p.topGradient / (tile * 2.37), variation);
     }
     if (p.lying < 1.0) {
         vec2 y = p.y / tile + .37, x = p.x / tile;
@@ -394,8 +400,8 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
         vec4 near = fungus ? fungusTexel(u_terrainData, (normalMap - 1.0) * .5, p.top / tile, p.topGradient / tile)
               : singleScale ? translatedTexel(u_terrainData, (normalMap - 1.0) * .5, p.top / tile, p.topGradient / tile, variation)
               : materialTexel(u_terrainData, (normalMap - 1.0) * .5, p.top / tile, p.topGradient / tile);
-        vec4 far = fungus || singleScale ? near : materialTexel(u_terrainData, (normalMap - 1.0) * .5, TURN * p.top / (tile * 2.37) + .31,
-                    TURN * p.topGradient / (tile * 2.37));
+        vec4 far = fungus || singleScale || variation <= 0.0 ? near : materialTexel(u_terrainData, (normalMap - 1.0) * .5,
+              TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37));
         vec3 detail = fungus || singleScale ? mix(near.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail)
               : planarNormal(near, far, variation).rgb;
         normal = upNormal(detail, face);
@@ -946,19 +952,22 @@ PackedTopCoordinates packedTopCoordinates(MaterialProjection p, float tile, floa
 }
 
 vec4 packedTopColor(float layer, PackedTopCoordinates uv) {
-    return mix(materialTexel(u_terrainLayers, layer * .5, uv.a, uv.gradient),
-          materialTexel(u_terrainLayers, layer * .5, uv.b, uv.gradient), uv.blend);
+    return mixedTexel(u_terrainLayers, layer * .5, uv.a, uv.gradient, uv.b, uv.gradient, uv.blend);
 }
 
 // The packed layer's finish from its colour's reads.
 Finish packedTopFinish(float layer, PackedTopCoordinates uv) {
+    if (uv.blend <= 0.0) return finishTexel(layer, uv.a, uv.gradient);
+    if (uv.blend >= 1.0) return finishTexel(layer, uv.b, uv.gradient);
     return mixFinish(finishTexel(layer, uv.a, uv.gradient), finishTexel(layer, uv.b, uv.gradient), uv.blend);
 }
 
 // Returns RMS roughness and AO. Numeric maps remain necessary when normal detail is disabled or distant.
 vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
-    vec4 a = materialTexel(u_terrainData, layer * .5, uv.a, uv.gradient);
-    vec4 b = materialTexel(u_terrainData, layer * .5, uv.b, uv.gradient);
+    // Without the read whose weight is exactly zero: the other stands for both.
+    vec4 a = uv.blend < 1.0 ? materialTexel(u_terrainData, layer * .5, uv.a, uv.gradient) : vec4(0.0);
+    vec4 b = uv.blend > 0.0 ? materialTexel(u_terrainData, layer * .5, uv.b, uv.gradient) : a;
+    if (uv.blend >= 1.0) a = b;
     normal = vec3(0.0, 0.0, 1.0);
     if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
         vec2 xyA = a.rg * 2.0 - 1.0, xyB = b.rg * 2.0 - 1.0;
@@ -983,7 +992,7 @@ float rockHeight(float layer, float tile, MaterialProjection p, bool sides, floa
         mat2 gradientB;
         float t;
         topCoordinates(p, tile, variation, translated, a, b, gradientB, t);
-        return mix(heightTexel(layer, a, p.topGradient / tile), heightTexel(layer, b, gradientB), t);
+        return mixedHeight(layer, a, p.topGradient / tile, b, gradientB, t);
     }
     float height = mix(heightTexel(layer, p.y / tile + .37, p.yGradient / tile),
           heightTexel(layer, p.x / tile, p.xGradient / tile), p.side);
@@ -1019,16 +1028,9 @@ vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float 
         mat2 gradientB;
         float t;
         topCoordinates(p, tile, variation, translated, a, b, gradientB, t);
-        pigment = mix(materialTexel(u_terrainLayers, layer, a, p.topGradient / tile),
-              materialTexel(u_terrainLayers, layer, b, gradientB), t);
-        if (grain > 0.0) {
-            mapped = mix(materialTexel(FINISH_LAYERS, authored.a, a, p.topGradient / tile).rgb,
-                  materialTexel(FINISH_LAYERS, authored.a, b, gradientB).rgb, t);
-        }
-        if (emits) {
-            emitted = mix(materialTexel(FINISH_LAYERS, glow.a, a, p.topGradient / tile).rgb,
-                  materialTexel(FINISH_LAYERS, glow.a, b, gradientB).rgb, t);
-        }
+        pigment = mixedTexel(u_terrainLayers, layer, a, p.topGradient / tile, b, gradientB, t);
+        if (grain > 0.0) mapped = mixedTexel(FINISH_LAYERS, authored.a, a, p.topGradient / tile, b, gradientB, t).rgb;
+        if (emits) emitted = mixedTexel(FINISH_LAYERS, glow.a, a, p.topGradient / tile, b, gradientB, t).rgb;
         if (farDetail > 0.0 && !translated) {
             pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient * (4096.0 / tile)),
                   farDetail);
@@ -1077,8 +1079,9 @@ vec4 rockNormal(float layer, float tile, MaterialProjection p, vec3 face, bool s
         mat2 gradientB;
         float t;
         topCoordinates(p, tile, variation, translated, a, b, gradientB, t);
-        vec4 n = materialTexel(u_terrainData, layer, a, p.topGradient / tile);
-        vec4 m = materialTexel(u_terrainData, layer, b, gradientB);
+        vec4 n = t < 1.0 ? materialTexel(u_terrainData, layer, a, p.topGradient / tile) : vec4(0.0);
+        vec4 m = t > 0.0 ? materialTexel(u_terrainData, layer, b, gradientB) : n;
+        if (t >= 1.0) n = m;
         if (translated) {
             n = mix(n, m, t);
             normal = upNormal(mix(n.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail), face);
