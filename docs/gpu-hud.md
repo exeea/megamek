@@ -900,7 +900,7 @@ completes the second endpoint. These gestures also work with an editor tool acti
 `GpuMapSource` uses the same `RulerModel` and `GpuLosPanel` as battle mode.
 Changing maps clears the measurement and rejects commands from an older board generation.
 
-The lobby's 2D Preview and 3D Preview stay open together for an A/B comparison (`ChatLounge`). Both show one board,
+The lobby's 2D Preview and 3D Preview stay open together for an A/B comparison (`MapSetupDialog`). Both show one board,
 the lobby preview game's: the 3D buttons (the lobby's and the 2D preview's) show the open 2D preview's board, and the
 2D button shows the open 3D preview's board. Once the 2D preview is open its button rolls the map settings again, and
 the open 3D preview follows; that, a map change and a server-built battlefield update whichever is open without

@@ -444,7 +444,7 @@ work for Swing, and item 11 is under investigation.
        on Windows so far: on macOS it must run on the main thread, which the start window's loop holds (so it would
        open from that loop and pause drawing while it is open), and on Linux it uses GTK, which needs checking
        beside AWT. Both need testing on real machines; Swing's chooser stays the fallback.
-  6. The lobby in libGDX: a briefing room in game mode, as a scene of the one window, for MegaMek and MekHQ alike (see
+  6. ~~The lobby in libGDX~~: a briefing room in game mode, as a scene of the one window, for MegaMek and MekHQ alike (see
      the Lobby decision). The Swing version on `design-system-start-followups` settled the layout: a top bar with the
      title, ready count, a BV chip per side and Ready; players by team on the left, with the chat docked under them;
      forces as unit cards or formations in the centre; the battlefield (map, rules, victory, auto-resolve) on the
@@ -463,7 +463,7 @@ work for Swing, and item 11 is under investigation.
        screen are gone. Leave (or the window's close box) exits as the Swing lobby did and the start screen comes
        back. A MekHQ game opens the window at the lobby with its forces already loaded, then the board, and closes
        after the game, as it does now. If the lobby scene cannot start, the native window closes and the Swing
-       frame with `ChatLounge` shows instead, so there is still only one window. For L1 the screen is minimal: the
+       frame with `ChatLounge` shows instead, so there is still only one window (L9 replaced this with an error). For L1 the screen is minimal: the
        top bar (title, server line, ready count, Ready and Leave), the players by team and the chat. A probe opens
        it without clicking through (see step 3).
      - L2 ~~The shell~~. The lobby screen now has the briefing room's frame on the plain `surface.base`: the top bar
@@ -604,9 +604,32 @@ work for Swing, and item 11 is under investigation.
        live: the prompts, the save choosers, auto-resolve and advanced map search (the same path, by the source
        test); native ownership and focus on macOS and Linux; dialogs opened from within dialogs, which stay where
        their owner puts them.
-     - L9 Removal and checks: the Swing lobby's view code and `ChatLounge` (L1's fallback) are deleted; MekHQ's
-       preloaded and auto-resolve games, MUL loading, hot-seat bots, blind drop, the Game Master and reconnecting to
-       a running game are checked.
+     - L9 ~~Removal and checks~~. `ChatLounge` and the Swing lobby's view code are deleted: its player and unit
+       tables, force tree, renderers, popups (`LobbyMekPopup`, `PlayerTablePopup`), team overview, key dispatcher and
+       `LobbySwingMenus`, 15 files and about 9,200 lines. What the new lobby still took from them moved. The unit and
+       force menus are built from the model in `LobbyUnitMenu`, with `LobbyMekPopup`'s items, submenus, checks and
+       permissions (a parity test compared the two before the deletion). The sort orders are in `LobbyUnitOrder`,
+       and the clean-up of quirks, implants and ammunition when options change is in `LobbyUnitCleanup`. Map setup
+       is `MapSetupDialog`, a standalone Swing dialog opened through `LobbyDialogs` with the old map tab's board
+       size, map choice, surprise and random boards, generator, previews, load and save and the non-tileable nag.
+       Ready (with its GIF question and lobby save), auto-resolve, the battlefield's commands and the menu bar's
+       burst-fire and hot-load items are in `SwingLobbyServices`. The commands the unit menus run (customize, C3,
+       camo, load, delete, names, skills) are in `SwingLobbyUnitActions`. Copying and pasting units as text (Ctrl+C,
+       Ctrl+V in the old table) is gone. ClientGUI no longer builds a lounge panel. If the lobby scene cannot start,
+       an error (`Lobby.failure`) shows and the start screen comes back, or MegaMek exits if the window itself
+       failed. MekHQ and MegaMekLab use only `LobbyUtility`, `LobbyErrors` and `UIUtil.DOT_SPACER`, which stay, and
+       both compile against this MegaMek.
+       Checks:
+       - A MUL (`MM_LOBBY_UNITS`) loads for the player and a bot.
+       - `lobby+start` with a bot readies, answers the GIF question and the bot's readme and reaches the board.
+       - `lobby+blind` hides the bot's units and BV.
+       - The Game Master's menus and view are covered by `LobbyUnitMenuTest`, `LobbyForcesTest` and
+         `LobbySnapshotTest`.
+       - A client joining a running game opens the board, and the lobby comes back when the game returns to the
+         lounge (`ClientGUIBoardLifecycleTest`).
+       - MekHQ's `GameThread` and `AtBGameThread` use only the client API (options, map, conditions, `sendDone`), so
+         preloaded games and auto-resolve need no lounge panel, and `CommanderGUI` never had one.
+       Not checked live: a real MekHQ game, and a second client reconnecting over the network.
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.
