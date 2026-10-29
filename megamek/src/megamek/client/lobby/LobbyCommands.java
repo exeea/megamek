@@ -181,6 +181,33 @@ public class LobbyCommands {
     }
 
     /**
+     * Puts a newly added bot on {@code team} once the server has given it its player, as adding a bot to a team in
+     * the lobby needs: the bot joins on no particular team and is moved over by its own client. Call it until it
+     * returns {@code true}.
+     *
+     * @param bot  the new bot's client
+     * @param team the team to join; {@link Player#TEAM_UNASSIGNED} leaves the bot where the server put it
+     * @return {@code true} when the bot has its player and is on its team (or no team was asked for), {@code false}
+     *       while it still waits for its player
+     */
+    public boolean joinTeam(AbstractClient bot, int team) {
+        Player player = bot.getLocalPlayer();
+        if (player == null) {
+            return false;
+        }
+        if (team != Player.TEAM_UNASSIGNED && player.getTeam() != team) {
+            player.setTeam(team);
+            bot.sendPlayerInfo();
+        }
+        return true;
+    }
+
+    /** @return the client of the bot that plays {@code player} on this machine, or null when it is no local bot */
+    public @Nullable Client localBotClient(Player player) {
+        return localBots().get(player.getName()) instanceof Client bot ? bot : null;
+    }
+
+    /**
      * Removes a bot that runs on this machine.
      *
      * @param botClient the bot's client, or {@code null} when the selected player is no local bot

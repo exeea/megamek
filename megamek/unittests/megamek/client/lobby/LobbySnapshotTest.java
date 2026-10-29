@@ -99,11 +99,13 @@ class LobbySnapshotTest {
         enemy.setTeam(Player.TEAM_UNASSIGNED);
         bot.setTeam(Player.TEAM_NONE);
 
-        LobbySnapshot.TeamGroup first = snapshot().teams().get(0);
+        List<LobbySnapshot.TeamGroup> teams = snapshot().teams();
+        LobbySnapshot.TeamGroup last = teams.get(teams.size() - 1);
 
-        assertEquals(Player.TEAM_NONE, first.id());
-        assertEquals(Messages.getString("Lobby.noTeam"), first.name());
-        assertEquals(List.of("Enemy", "Bot"), first.players().stream().map(LobbySnapshot.PlayerRow::name).toList());
+        assertEquals(Player.TEAM_NONE, last.id());
+        assertEquals(Messages.getString("Lobby.noTeam"), last.name());
+        assertEquals(List.of("Bot", "Enemy"), last.players().stream().map(LobbySnapshot.PlayerRow::name).toList());
+        assertEquals(LobbySnapshot.Relation.NONE, last.relation());
     }
 
     @Test
@@ -182,7 +184,8 @@ class LobbySnapshotTest {
 
         assertEquals(Messages.getString("Lobby.mapOneBoard", 16, 17), snapshot.mapSummary());
         assertEquals(Messages.getString("Lobby.serverLocal", "2346"), snapshot.server());
-        assertEquals(List.of("Local: hello"), snapshot.chat());
+        assertEquals(List.of(new ChatLine(ChatLine.Kind.PLAYER, "Local", "hello", LobbySnapshot.Relation.OWN)),
+              snapshot.chat());
     }
 
     @Test
@@ -203,7 +206,7 @@ class LobbySnapshotTest {
     void keepsOnlyTheRecentChat() {
         List<String> chat = IntStream.range(0, LobbySnapshot.CHAT_LINES + 5).mapToObj(String::valueOf).toList();
 
-        List<String> kept = LobbySnapshot.of(() -> client, chat).chat();
+        List<String> kept = LobbySnapshot.of(() -> client, chat).chat().stream().map(ChatLine::text).toList();
 
         assertEquals(LobbySnapshot.CHAT_LINES, kept.size());
         assertEquals("5", kept.get(0));
@@ -223,7 +226,8 @@ class LobbySnapshotTest {
 
     private static LobbySnapshot.PlayerRow row(int id, String name, int team, boolean self, boolean observer,
           boolean hidden, int bv) {
-        return new LobbySnapshot.PlayerRow(id, name, team, false, self, self, false, observer, false, hidden, 1, bv);
+        return new LobbySnapshot.PlayerRow(id, name, team, false, self, self, false, observer, false, false, hidden, 1,
+              bv, 0, "", true, 0);
     }
 
     @Test
@@ -236,7 +240,7 @@ class LobbySnapshotTest {
                     row(3, "Foe 2", 1, false, false, false, 400))),
               new LobbySnapshot.TeamGroup(2, "Team 2", List.of(row(1, "Me", 2, true, false, false, 1000),
                     row(6, "Ally", 2, false, false, false, 500))));
-        LobbySnapshot snapshot = new LobbySnapshot(1, false, false, teams, List.of(), "", "");
+        LobbySnapshot snapshot = snapshotOf(teams);
 
         assertEquals(List.of(new LobbySnapshot.Side("Team 2", true, false, 1500),
               new LobbySnapshot.Side("Team 1", false, true, 400),
@@ -249,9 +253,120 @@ class LobbySnapshotTest {
               new LobbySnapshot.TeamGroup(Player.TEAM_NONE, "No team",
                     List.of(row(2, "Other", Player.TEAM_NONE, false, false, false, 300),
                           row(1, "Me", Player.TEAM_NONE, true, false, false, 200))));
-        LobbySnapshot snapshot = new LobbySnapshot(1, false, false, teams, List.of(), "", "");
+        LobbySnapshot snapshot = snapshotOf(teams);
 
         assertEquals(List.of(new LobbySnapshot.Side("Me", true, false, 200),
               new LobbySnapshot.Side("Other", false, false, 300)), snapshot.sides());
+    }
+
+    private static LobbySnapshot snapshotOf(List<LobbySnapshot.TeamGroup> teams) {
+        return new LobbySnapshot(1, false, false, false, teams, List.of(), List.of(), "", "");
+    }
+
+    @Test
+    void putsTheLocalTeamFirstAndTheLocalPlayerFirstInIt() {
+        local.setTeam(3);
+        enemy.setTeam(1);
+        Player ally = spy(new Player(0, "Ally"));
+        ally.setTeam(3);
+        doReturn(0).when(ally).getBV();
+        units(ally, 0);
+        when(game.getPlayersList()).thenReturn(List.of(ally, enemy, local, bot));
+
+        LobbySnapshot snapshot = snapshot();
+
+        assertEquals(List.of(3, 1), snapshot.teams().stream().map(LobbySnapshot.TeamGroup::id).toList());
+        assertEquals(List.of("Local", "Ally"), snapshot.teams().get(0).players().stream()
+              .map(LobbySnapshot.PlayerRow::name).toList());
+        assertEquals(LobbySnapshot.Relation.OWN, snapshot.teams().get(0).relation());
+        assertEquals(LobbySnapshot.Relation.ENEMY, snapshot.teams().get(1).relation());
+        assertEquals(3, snapshot.localTeam());
+    }
+
+    @Test
+    void sumsTeamsUpWithoutTheirHiddenForces() {
+        when(options.booleanOption(OptionsConstants.BASE_BLIND_DROP)).thenReturn(true);
+        ArrayList<Entity> heavy = new ArrayList<>();
+        Entity atlas = mock(Entity.class);
+        when(atlas.getWeight()).thenReturn(100.0);
+        Entity locust = mock(Entity.class);
+        when(locust.getWeight()).thenReturn(20.0);
+        heavy.add(atlas);
+        heavy.add(locust);
+        when(game.getPlayerEntities(local, false)).thenReturn(heavy);
+
+        LobbySnapshot snapshot = snapshot();
+        LobbySnapshot.TeamGroup own = snapshot.teams().get(0);
+        LobbySnapshot.TeamGroup foes = snapshot.teams().get(1);
+
+        assertEquals(2000, own.bv());
+        assertEquals(3, own.units());
+        assertEquals(120, own.tons());
+        assertEquals(120, own.players().get(0).tons());
+        assertFalse(own.hidden());
+        assertTrue(foes.hidden());
+        assertEquals(0, foes.bv());
+        assertEquals(Messages.getString("ChatLounge.Blind"), foes.players().get(0).start());
+        assertTrue(foes.players().get(0).startValid());
+    }
+
+    @Test
+    void namesTheDeploymentArea() {
+        local.setStartingPos(2);
+        local.setStartWidth(3);
+        local.setStartOffset(0);
+
+        assertEquals("N", snapshot().players().get(0).start());
+        local.setStartOffset(2);
+        assertEquals("N, 2, 3", snapshot().players().get(0).start());
+        assertEquals("N", LobbySnapshot.deploymentName(2));
+        assertEquals(Messages.getString("Lobby.zone", 4),
+              LobbySnapshot.deploymentName(megamek.common.board.Board.encodeCustomDeploymentZoneID(4)));
+    }
+
+    @Test
+    void marksGhostsAndLocalBots() {
+        doReturn(true).when(enemy).isGhost();
+
+        List<LobbySnapshot.PlayerRow> players = snapshot().players();
+
+        assertTrue(players.get(2).ghost());
+        assertFalse(players.get(0).ghost());
+        assertTrue(players.get(1).localBot());
+        assertFalse(players.get(0).localBot());
+        assertFalse(players.get(2).localBot());
+    }
+
+    @Test
+    void offersTheGameMasterRoleOnlyWhenAllowedAndFree() {
+        assertFalse(snapshot().gameMasterAvailable());
+
+        when(options.booleanOption(OptionsConstants.GAME_MASTER_ALLOW)).thenReturn(true);
+        assertTrue(snapshot().gameMasterAvailable());
+
+        enemy.setGameMaster(true);
+        assertFalse(snapshot().gameMasterAvailable());
+
+        enemy.setGameMaster(false);
+        local.setGameMaster(true);
+        assertTrue(snapshot().gameMasterAvailable());
+    }
+
+    @Test
+    void findsTheFirstFreeTeam() {
+        assertEquals(3, snapshot().freeTeam());
+
+        List<LobbySnapshot.TeamGroup> full = IntStream.range(1, LobbySnapshot.TEAM_COUNT)
+              .mapToObj(team -> new LobbySnapshot.TeamGroup(team, "Team " + team,
+                    List.of(row(team, "P" + team, team, team == 1, false, false, 0))))
+              .toList();
+        assertEquals(Player.TEAM_NONE, snapshotOf(full).freeTeam());
+    }
+
+    @Test
+    void keepsTheCustomZonesSorted() {
+        LobbySnapshot snapshot = LobbySnapshot.of(() -> client, List.of(), List.of(5, 2));
+
+        assertEquals(List.of(2, 5), snapshot.customZones());
     }
 }

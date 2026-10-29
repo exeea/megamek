@@ -292,4 +292,39 @@ class LobbyCommandsTest {
 
         verify(botClient).sendUpdateEntity(units);
     }
+
+    @Test
+    void aNewBotJoinsItsTeamOnceItHasItsPlayer() {
+        Client newBot = mock(Client.class);
+
+        assertFalse(commands.joinTeam(newBot, TEAM_ENEMY));
+        verify(newBot, never()).sendPlayerInfo();
+
+        Player joined = new Player(6, "New Bot");
+        joined.setTeam(TEAM_LOCAL);
+        when(newBot.getLocalPlayer()).thenReturn(joined);
+
+        assertTrue(commands.joinTeam(newBot, TEAM_ENEMY));
+        assertEquals(TEAM_ENEMY, joined.getTeam());
+        verify(newBot).sendPlayerInfo();
+    }
+
+    @Test
+    void aNewBotAlreadyOnItsTeamSendsNothing() {
+        Client newBot = mock(Client.class);
+        Player joined = new Player(6, "New Bot");
+        joined.setTeam(TEAM_ENEMY);
+        when(newBot.getLocalPlayer()).thenReturn(joined);
+
+        assertTrue(commands.joinTeam(newBot, TEAM_ENEMY));
+        assertTrue(commands.joinTeam(newBot, Player.TEAM_UNASSIGNED));
+        verify(newBot, never()).sendPlayerInfo();
+    }
+
+    @Test
+    void findsTheClientsOfLocalBotsOnly() {
+        assertSame(botClient, commands.localBotClient(bot));
+        assertNull(commands.localBotClient(local));
+        assertNull(commands.localBotClient(enemy));
+    }
 }
