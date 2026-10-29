@@ -16,6 +16,7 @@ import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -203,12 +204,23 @@ public final class UiKit {
      * is on the bar, lighter while hovered and lighter still while dragged.
      */
     public ScrollPane scrollList(Actor list, boolean token) {
+        return scrollList(list, token, true);
+    }
+
+    /**
+     * A list as {@link #scrollList(Actor, boolean)}; without {@code framed}, with no frame behind it, for a list that
+     * fills a panel of its own.
+     */
+    public ScrollPane scrollList(Actor list, boolean token, boolean framed) {
         if (!token) {
             return scrollList(list);
         }
         ScrollPane scroll = scrollList(list);
         ScrollPane.ScrollPaneStyle rest = new ScrollPane.ScrollPaneStyle(
               skin.get(UiTheme.TOKEN_LIST, ScrollPane.ScrollPaneStyle.class));
+        if (!framed) {
+            rest.background = null;
+        }
         ScrollPane.ScrollPaneStyle over = new ScrollPane.ScrollPaneStyle(rest);
         over.vScroll = skin.getDrawable("scroll-rail");
         over.vScrollKnob = skin.getDrawable("scroll-thumb-over");
@@ -237,7 +249,7 @@ public final class UiKit {
             if (scroll.isScrollY() && scroll.isDragging()) {
                 look = down;
             } else if (scroll.isScrollY()) {
-                float right = scroll.getWidth() - rest.background.getRightWidth();
+                float right = scroll.getWidth() - (rest.background == null ? 0 : rest.background.getRightWidth());
                 if (pointer[0] >= right - scroll.getScrollBarWidth() && pointer[0] <= right) {
                     look = over;
                 }
@@ -804,6 +816,33 @@ public final class UiKit {
             chip.add(typeLabel(text, "small", "text.primary")).padLeft(xs).padRight(md);
         }
         return chip;
+    }
+
+    /**
+     * A tally chip in the token look: {@code text} in small and text.primary with no icon, in a pill edged by the
+     * {@link UiTheme#TOKEN_CHIP} frame {@code edge} (neutral, accent, success, warning or danger), such as a side's
+     * Battle Value edged in the side's colour.
+     */
+    public Table edgeChip(String text, String edge) {
+        Table chip = new Table();
+        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + edge));
+        float md = space("md");
+        chip.add(typeLabel(text, "small", "text.primary")).padLeft(md).padRight(md);
+        return chip;
+    }
+
+    /**
+     * A rail: a folded panel standing at the window's edge, as the token panel with {@code icon} at its top and
+     * {@code title} read downwards in the title role. It toggles, its edge lighting on hover, and shows selected while
+     * checked ({@link UiTheme#TOKEN_RAIL}); the view opens and closes the folded panel on its change.
+     */
+    public Button rail(String title, String icon) {
+        Button rail = new Button(skin, UiTheme.TOKEN_RAIL);
+        rail.top();
+        rail.add(icon(icon, DesignTokens.shipped().size().get("icon.md"), UiTheme.tokenColor("text.secondary")))
+              .row();
+        rail.add(new UiVerticalText(roleTypeLabel("title", title, "text.secondary"))).padTop(space("md"));
+        return rail;
     }
 
     /** A search field (.field) with its placeholder, and a clear button while it holds text. */

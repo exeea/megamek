@@ -26,6 +26,7 @@ import com.badlogic.gdx.graphics.g2d.freetype.FreeType;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
@@ -1571,6 +1572,11 @@ public final class UiTheme implements Disposable {
     public static final String TOKEN_PANEL_PLAIN = "token-panel-plain";
     /** The rails frame, which replaces {@code panel-rails}: the overlay panel with border.control rails, no corners. */
     public static final String TOKEN_RAILS = "token-rails";
+    /**
+     * The Button style of a folded panel's rail ({@code UiKit.rail}): the token panel, its edge in border.control on
+     * hover, and the selection's wash, edge and ticks while checked.
+     */
+    public static final String TOKEN_RAIL = "token-rail";
 
     /**
      * Token v0 styles for hud-v3's containers (docs/design-system/tokens.md, Panels, Dialogs and Tooltips): the panel
@@ -1607,6 +1613,22 @@ public final class UiTheme implements Disposable {
         skin.add(TOKEN_RAILS, pad(new HudFrame(white, overlayPanel, token(tokens.color("border.control", mode)), null,
               0, null), sm, md), Drawable.class);
 
+        // A rail is the panel as a toggle: its edge lights on hover, and it takes the selection's wash and edge
+        Color selectedEdge = token(tokens.color("selected.primary", mode));
+        Drawable railOver = pad(new HudFrame(white, panel, null, strong, tick,
+              token(tokens.color("border.control", mode)), border).paperRoll(), lg, lg);
+        Drawable railOn = pad(new HudFrame(white, token(ColorMath.over(tokens.color("selected.background", mode),
+              tokens.color("surface.panel", mode))), null, selectedEdge, tick, selectedEdge, border).paperRoll(), lg,
+              lg);
+        Button.ButtonStyle rail = new Button.ButtonStyle();
+        rail.up = skin.getDrawable(TOKEN_PANEL);
+        rail.over = railOver;
+        rail.down = railOver;
+        rail.checked = railOn;
+        rail.checkedOver = railOn;
+        rail.checkedDown = railOn;
+        skin.add(TOKEN_RAIL, rail);
+
         Label.LabelStyle tipText = new Label.LabelStyle(skin.get(TYPE + "small", Label.LabelStyle.class));
         tipText.fontColor = token(tokens.color("text.primary", mode));
         TextTooltip.TextTooltipStyle tip = new TextTooltip.TextTooltipStyle(tipText, box("token-tip",
@@ -1618,7 +1640,7 @@ public final class UiTheme implements Disposable {
 
     /** The Label style of a token count badge's digits: caption's size in the medium face. */
     public static final String TOKEN_BADGE = "token-badge";
-    /** The prefix of a token status chip's frame, followed by neutral, success, warning or danger. */
+    /** The prefix of a token chip's frame, followed by neutral, success, warning, danger or accent. */
     public static final String TOKEN_CHIP = "token-chip-";
     /** The prefix of a token toast's card, followed by the level's name in lower case. */
     public static final String TOKEN_TOAST = "token-toast-";
@@ -1637,10 +1659,11 @@ public final class UiTheme implements Disposable {
         float md = tokens.space().get("md");
         float lg = tokens.space().get("lg");
         float chip = tokens.size().get("icon.sm") + 2 * tokens.space().get("xxs");
-        String[] tones = {"neutral", "success", "warning", "danger"};
-        for (String tone : tones) {
-            String edge = "neutral".equals(tone) ? "border.control" : "status." + tone;
-            box(TOKEN_CHIP + tone, Color.CLEAR, token(tokens.color(edge, mode)), border, radius, null, 0, 0, chip);
+        String[][] tones = { { "neutral", "border.control" }, { "success", "status.success" },
+                             { "warning", "status.warning" }, { "danger", "status.danger" },
+                             { "accent", "accent.primary" } };
+        for (String[] tone : tones) {
+            box(TOKEN_CHIP + tone[0], Color.CLEAR, token(tokens.color(tone[1], mode)), border, radius, null, 0, 0, chip);
         }
 
         // The badge's ring is drawn inside its box, so the box is the badge plus the ring on each side
