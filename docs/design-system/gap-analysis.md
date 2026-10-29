@@ -555,9 +555,32 @@ work for Swing, and item 11 is under investigation.
        standing down. Probes: `lobby+ready` now readies the player alone a second before the shot, `lobby+start`
        presses Ready as before, `lobby+blocked` turns on the commander victory, `lobby+overlap` exclusive double
        blind deployment, and `lobby+blind` the real blind drop. Not yet checked live: the pulse, the popovers,
-       the warning clicks and the key, which the probe does not press.     - L7 The unit selector: the Requisition view, with categories, search, weight chips, the Filters drawer and the
-       dossier, then step 7.4 and 7.5's adding strip, skills, BV and sources. MekHQ, MegaMekLab and the main menu's
-       unit browser keep `AbstractUnitSelectorDialog`.
+       the warning clicks and the key, which the probe does not press.
+     - L7 ~~The unit selector~~. The forces column's Add unit opens the Requisition view in the centre
+       (`LobbyCentre.REQUISITION`, Back and Escape, which first shuts the Filters drawer, then the dossier). Category
+       tabs (All, Meks, Vehicles, Infantry, Battle Armor, ProtoMeks, Aerospace, Large craft) in a scroll strip, the
+       search field, the weight chips (Light takes in ultra-light, Assault super-heavy; off for Large craft) and a
+       Filters button with its count open the results: a count, a BV / PV toggle and a virtualised list
+       (`UiVirtualList`) of rows with the unit's sprite, name, "100 t · Mek · Inner Sphere · 2954" and its BV or PV.
+       The Filters drawer holds the dialog's main filters: type within the category, tech base, rules level (none above
+       the game's), role, canon, published record sheet, era (from the eras file) and source book, with Clear. A
+       picked unit opens the dossier beside the list, or over it in a narrow window: name, details, BV, Add to force,
+       the sprite, move, armor, structure, BV, PV, cost, the merged armament and the details (weight class, tech base,
+       role, rules level, year, source). The adding strip (7.4 and 7.5) chooses the owner (you or the bots you may add
+       for), skills (Default: the file's; Random, preselected as the dialog's average-skills preference does; Set:
+       gunnery and piloting steppers, the shown BV then adjusted) and a quantity up to 12, then Add, which reads
+       "Added ✓" a moment; below run the visit's units, BV and tonnage, each added unit with × to take it back out,
+       and Sources: Load list… (MUL) and Random army…, the forces column's. The catalogue is the unit cache, filtered
+       by the toolkit-free `RequisitionCatalog` exactly as `AbstractUnitSelectorDialog`: the game's year, tech
+       level (era-based too), canon-only and invalid units, the search over name, model and the asset card without
+       case or accents; `RequisitionSearch` runs it on its own thread, newest query only, the typing debounced by
+       150 ms. Adding goes through `LobbyCommands.addUnits`, the dialog's own path (Clan pilots, the asset crew,
+       names, `sendAddEntity` and the chat line). Timings on this machine: the first open waits for the unit cache,
+       about 1.9 to 2 s (10,920 units); afterwards the full list filters in about 45 ms and "Atlas" in 2 to 3 ms.
+       Not ported, being Swing-bound: the TRO readout, Alpha Strike card, factions and damage tabs, and the advanced
+       search. Probes: `lobby+requisition`, with `+atlas`, `+filters` and `+pick`. Not yet checked live: adding,
+       taking back, the owner switch, the keyboard, the dossier's slide and the Sources buttons. MekHQ, MegaMekLab
+       and the main menu's unit browser keep `AbstractUnitSelectorDialog`.
      - L8 Dialogs. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load
        and save choosers stay Swing at first, natively owned by the window so they stay in front of it, as the
        board's are. Those the lobby uses most move to libGDX one at a time afterwards.

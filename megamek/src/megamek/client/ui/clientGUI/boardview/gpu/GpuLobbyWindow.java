@@ -14,8 +14,10 @@ import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -50,6 +52,7 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -78,6 +81,7 @@ import megamek.common.force.Force;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MapSettings;
+import megamek.common.loaders.MekSummary;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
@@ -232,6 +236,9 @@ public final class GpuLobbyWindow {
     private JPopupMenu unitMenu;
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
     private final Set<String> spriteKeys = new HashSet<>();
+    /** The catalogue units whose sprites the Requisition asked for, the latest first, and the thread that draws them. */
+    private final Deque<MekSummary> spriteQueue = new ArrayDeque<>();
+    private Thread spriteThread;
     private Map<Integer, String> sentSprites = Map.of();
     /** Set when a new screen needs every sprite again. */
     private volatile boolean spritesStale;
@@ -565,6 +572,96 @@ public final class GpuLobbyWindow {
             }
             refreshSoon();
         });
+    }
+
+    // ---- The Requisition ----
+
+    /** Any thread: adds {@code quantity} copies of {@code unit} for {@code ownerId}, as the unit selector does. */
+    void requisitionAdd(MekSummary unit, int quantity, int ownerId, RequisitionSkills skills) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || gui.chatlounge == null) {
+                return;
+            }
+            new LobbyRequisitionController(gui::getClient, gui.chatlounge.lobbyCommands(),
+                  LobbyRequisitionController.FILES).add(unit, quantity, ownerId, skills);
+            refreshSoon();
+        });
+    }
+
+    /** Any thread: takes the unit {@code id}, which the Requisition added, back out of the game. */
+    void requisitionRemove(int id) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || gui.chatlounge == null) {
+                return;
+            }
+            new LobbyRequisitionController(gui::getClient, gui.chatlounge.lobbyCommands(),
+                  LobbyRequisitionController.FILES).remove(id);
+            refreshSoon();
+        });
+    }
+
+    /**
+     * Any thread: draws the sprites of catalogue {@code units} in the local player's camouflage and hands each to the
+     * screen. The files are read on a thread of their own, the latest asked first, as the newest rows are those in view.
+     */
+    void requisitionSprites(List<MekSummary> units) {
+        synchronized (spriteQueue) {
+            for (MekSummary unit : units) {
+                spriteQueue.remove(unit);
+                spriteQueue.addFirst(unit);
+            }
+            if (spriteThread == null) {
+                spriteThread = new Thread(this::drawRequisitionSprites, "Requisition sprites");
+                spriteThread.setDaemon(true);
+                spriteThread.start();
+            }
+            spriteQueue.notifyAll();
+        }
+    }
+
+    private void drawRequisitionSprites() {
+        while (true) {
+            MekSummary unit;
+            synchronized (spriteQueue) {
+                while (spriteQueue.isEmpty()) {
+                    try {
+                        spriteQueue.wait();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                unit = spriteQueue.pollFirst();
+            }
+            if (closing) {
+                continue;
+            }
+            Entity entity = LobbyRequisitionController.FILES.read(unit);
+            if (entity == null) {
+                continue;
+            }
+            String key = LobbyRequisitionPanel.spriteKey(unit);
+            try {
+                // The tileset and its images are Swing's
+                SwingUtilities.invokeAndWait(() -> {
+                    Player local = gui.getClient().getLocalPlayer();
+                    BufferedImage image = (local == null) ? null : sprite(entity, local.getCamouflage());
+                    if (image != null) {
+                        GpuHost.post(() -> {
+                            GpuLobbyScreen shown = screen;
+                            if (shown != null) {
+                                shown.requisitionSprite(key, image);
+                            }
+                        });
+                    }
+                });
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (java.lang.reflect.InvocationTargetException failure) {
+                LOGGER.warn(failure, "The Requisition could not draw the sprite of {}", unit.getName());
+            }
+        }
     }
 
     // ---- The battlefield column ----

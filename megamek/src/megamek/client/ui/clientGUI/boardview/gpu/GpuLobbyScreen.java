@@ -3,9 +3,14 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -24,9 +29,12 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.RequisitionSearch;
+import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.design.DesignTokens;
@@ -35,6 +43,7 @@ import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.loaders.MekSummary;
 import megamek.logging.MMLogger;
 
 /**
@@ -50,6 +59,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private static final int FRAMES_PER_SECOND = 30;
     /** The centre view that shows the folded battlefield. */
     static final String BATTLEFIELD = "battlefield";
+    /** The centre view that shows the Requisition, the unit selector. */
+    static final String REQUISITION = "requisition";
+    /** How many catalogue sprites the Requisition keeps as textures; the least recently shown go first. */
+    private static final int REQUISITION_SPRITES = 200;
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -69,6 +82,12 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private LobbyForcesPanel forces;
     private LobbyBattlefieldPanel battlefield;
     private LobbyCentre centre;
+    private LobbyRequisitionPanel requisition;
+    private ExecutorService searchThread;
+    private RequisitionSearch search;
+    /** The Requisition's sprites by catalogue unit, the least recently shown first. */
+    private final LinkedHashMap<String, TextureRegionDrawable> requisitionSprites = new LinkedHashMap<>(64, .75f,
+          true);
     private LobbyColumns columns;
     private Button rail;
     private boolean folded;
@@ -142,6 +161,18 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (probe.options().contains("autoresolve")) {
             battlefield.openAutoResolve();
         }
+        if (probe.options().contains("requisition")) {
+            openRequisition();
+            if (probe.options().contains("atlas")) {
+                requisition.probeSearch("Atlas");
+            }
+            if (probe.options().contains("filters")) {
+                requisition.probeFilters();
+            }
+            if (probe.options().contains("pick")) {
+                requisition.probePick();
+            }
+        }
         if (!probe.sized()) {
             return;
         }
@@ -163,6 +194,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         battlefield = new LobbyBattlefieldPanel(kit, battlefieldActions());
         battlefield.map(null, LobbyBattlefieldPanel.MAP_ASPECT, true);
         centre = new LobbyCentre(kit, forces.panel(), motion);
+        searchThread = Executors.newSingleThreadExecutor(work -> {
+            Thread thread = new Thread(work, "Requisition search");
+            thread.setDaemon(true);
+            return thread;
+        });
+        search = new RequisitionSearch(RequisitionSearch::fromCache, searchThread);
+        requisition = new LobbyRequisitionPanel(kit, requisitionActions(), requisitionSprites::get, motion);
         rail = kit.rail(Messages.getString("Lobby.battlefield"), "map");
         rail.setProgrammaticChangeEvents(false);
         kit.tip(rail, true).getActor().setText(Messages.getString("Lobby.railTip"));
@@ -198,6 +236,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 }
                 if (stage.getKeyboardFocus() instanceof TextField) {
                     stage.setKeyboardFocus(null);
+                    return true;
+                }
+                if (REQUISITION.equals(centre.showing()) && requisition.back()) {
                     return true;
                 }
                 if (centre.showing() != null) {
@@ -317,7 +358,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         return new LobbyForcesPanel.Actions() {
             @Override
             public void command(LobbyForcesPanel.Command command) {
-                window.forcesCommand(command);
+                if (command == LobbyForcesPanel.Command.ADD_UNIT) {
+                    openRequisition();
+                } else {
+                    window.forcesCommand(command);
+                }
             }
 
             @Override
@@ -345,6 +390,70 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.chooseMenu(path);
             }
         };
+    }
+
+    /** The Requisition's actions: searches on their own thread, the rest through the window on the Swing thread. */
+    private LobbyRequisitionPanel.Actions requisitionActions() {
+        return new LobbyRequisitionPanel.Actions() {
+            @Override
+            public void search(RequisitionSearch.Query query, Consumer<RequisitionSearch.Result> done) {
+                search.search(query, result -> GpuHost.post(() -> {
+                    if (stage != null) {
+                        done.accept(result);
+                    }
+                }));
+            }
+
+            @Override
+            public void add(MekSummary unit, int quantity, int ownerId, RequisitionSkills skills) {
+                window.requisitionAdd(unit, quantity, ownerId, skills);
+            }
+
+            @Override
+            public void remove(int id) {
+                window.requisitionRemove(id);
+            }
+
+            @Override
+            public void sprites(List<MekSummary> units) {
+                window.requisitionSprites(units);
+            }
+
+            @Override
+            public void source(LobbyForcesPanel.Command command) {
+                window.forcesCommand(command);
+            }
+        };
+    }
+
+    /** Opens the Requisition in the forces' place, afresh unless it shows already. */
+    private void openRequisition() {
+        if (REQUISITION.equals(centre.showing())) {
+            return;
+        }
+        centre.show(REQUISITION, Messages.getString("Lobby.requisition.title"), requisition.body());
+        requisition.opened(shown == null ? LobbyForces.EMPTY : shown.forces());
+    }
+
+    /** GPU thread: takes the sprite the window drew of the catalogue unit {@code key}. */
+    void requisitionSprite(String key, BufferedImage image) {
+        if (stage == null) {
+            return;
+        }
+        Texture texture = GpuStartScreen.texture(image, true);
+        texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        TextureRegionDrawable old = requisitionSprites.put(key, new TextureRegionDrawable(texture));
+        if (old != null) {
+            old.getRegion().getTexture().dispose();
+        }
+        Iterator<Map.Entry<String, TextureRegionDrawable>> eldest = requisitionSprites.entrySet().iterator();
+        while (requisitionSprites.size() > REQUISITION_SPRITES && eldest.hasNext()) {
+            Map.Entry<String, TextureRegionDrawable> entry = eldest.next();
+            eldest.remove();
+            entry.getValue().getRegion().getTexture().dispose();
+            requisition.spriteForgotten(entry.getKey());
+        }
+        requisition.spriteArrived(key);
     }
 
     /** The battlefield column's actions, which the window runs on the Swing thread. */
@@ -450,6 +559,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (before == null || !before.forces().equals(snapshot.forces())) {
             forces.show(snapshot.forces());
         }
+        requisition.show(snapshot.requisition(), snapshot.forces());
         battlefield.show(snapshot);
     }
 
@@ -516,6 +626,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         window.disposing();
         spriteTextures.values().forEach(Texture::dispose);
         spriteTextures.clear();
+        requisitionSprites.values().forEach(sprite -> sprite.getRegion().getTexture().dispose());
+        requisitionSprites.clear();
+        if (searchThread != null) {
+            searchThread.shutdownNow();
+        }
         if (mapTexture != null) {
             mapTexture.dispose();
             mapTexture = null;

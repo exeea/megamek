@@ -1128,6 +1128,9 @@ the unit card, the forces panel and overview and the HUD kit still make hud-v3's
 in capitals. hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
 they take the filter chip's look: `token-pill`, `token-pill-over` and `token-pill-on` in `GpuBoardSkin`, with the
 check before the target's letter square when on.
+`UiKit.filterChip(text)` makes [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java), the filter chip (`token-filter-chip`): the neutral chip in text.secondary at rest; on, it fills in the accent's pressed tint, its text turns text.primary and the check shows in room the chip always keeps, so it never resizes. `UiFilterChip.sameWidth(chips)` gives a group one width (the Requisition view's weight chips and the Filters drawer's choices).
+
+**Steppers and long lists (libGDX).** `UiKit.stepper(value, min, max)` makes [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java): − value + in `button-icon` compact buttons round the value in body.strong, disabled at the bounds, stepped by the arrow keys with the focus, firing a ChangeEvent per step (the Requisition strip's quantity and set skills). [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java) is a list of any length with one row height for a scroll pane: only the rows in view exist, reused as it scrolls (`UiVirtualList.visible` works out which), with the token row's hover and selected washes; a click selects, a double click or Enter activates, and Up, Down, Home, End, Page Up and Page Down move the selection (`UiVirtualList.step`) with the scroll pane following. The Requisition view lists its thousands of units in one.
 
 ## Toasts
 
@@ -1199,6 +1202,7 @@ newest on top and the hover pause are the developers' work.
 | [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
 | [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
+| [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java), [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java), [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java) | The libGDX virtualised list, stepper and filter chip |
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
 | [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |

@@ -71,6 +71,9 @@ import megamek.logging.MMLogger;
  *     zones.</li>
  *     <li>{@code lobby+autoresolve}: turns on the client setting that shows auto-resolve, and opens its settings in
  *     the battlefield.</li>
+ *     <li>{@code lobby+requisition}: opens the Requisition view; with {@code +atlas} it searches for "Atlas", with
+ *     {@code +filters} it opens the Filters drawer and with {@code +pick} it picks the first result, showing its
+ *     dossier.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
