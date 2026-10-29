@@ -1,18 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.AWTEvent;
-import java.awt.Dialog;
-import java.awt.Frame;
 import java.awt.Graphics2D;
-import java.awt.HeadlessException;
 import java.awt.Image;
 import java.awt.Rectangle;
-import java.awt.Toolkit;
 import java.awt.Window;
-import java.awt.event.AWTEventListener;
-import java.awt.event.ComponentEvent;
-import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -20,7 +12,6 @@ import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,7 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import javax.swing.JFrame;
-import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -122,9 +112,37 @@ public final class GpuLobbyWindow {
     private static volatile ClientGUI pending;
 
     private final ClientGUI gui;
-    private final Set<Dialog> modalDialogs = new LinkedHashSet<>();
-    private final Map<Dialog, Boolean> dialogOnTop = new HashMap<>();
-    private final AWTEventListener dialogListener = this::dialogEvent;
+    private final LobbyDialogs swingDialogs = new LobbyDialogs(new LobbyDialogs.Host() {
+        @Override
+        public JFrame frame() {
+            return gui.getFrame();
+        }
+
+        @Override
+        public GpuNativeDialogOwner nativeOwner() {
+            return nativeOwner;
+        }
+
+        @Override
+        public Rectangle bounds() {
+            return GpuHost.swingClientBounds();
+        }
+
+        @Override
+        public void inputBlocked(boolean blocked) {
+            setInputBlocked(blocked);
+        }
+
+        @Override
+        public void focus() {
+            GpuHost.focus();
+        }
+
+        @Override
+        public boolean closing() {
+            return closing;
+        }
+    });
     private final AtomicBoolean refreshQueued = new AtomicBoolean();
     private final GameListener gameListener = new GameListenerAdapter() {
         @Override
@@ -195,8 +213,8 @@ public final class GpuLobbyWindow {
 
         @Override
         public void closeRequested() {
-            if (modalOpen) {
-                SwingUtilities.invokeLater(GpuLobbyWindow.this::frontModal);
+            if (swingDialogs.blocked()) {
+                SwingUtilities.invokeLater(swingDialogs::frontModal);
             } else {
                 leave();
             }
@@ -204,8 +222,8 @@ public final class GpuLobbyWindow {
 
         @Override
         public void focusGained() {
-            if (modalOpen) {
-                SwingUtilities.invokeLater(GpuLobbyWindow.this::frontModal);
+            if (swingDialogs.blocked()) {
+                SwingUtilities.invokeLater(swingDialogs::frontModal);
             }
         }
 
@@ -215,8 +233,6 @@ public final class GpuLobbyWindow {
         }
     };
 
-    /** Whether a modal dialog is open; the GPU thread reads it to send clicks on the window to that dialog. */
-    private volatile boolean modalOpen;
     private volatile boolean closing;
     private volatile GpuNativeDialogOwner nativeOwner;
     /** The screen while its listener exists; written on the GPU thread. */
@@ -279,8 +295,7 @@ public final class GpuLobbyWindow {
         GpuLobbyWindow window = new GpuLobbyWindow(gui);
         active = window;
         gui.getClient().getGame().addGameListener(window.gameListener);
-        Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
-              AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK);
+        window.swingDialogs.install();
         window.refresh();
         GpuHost.show(window.scene);
         window.probe = GpuLobbyProbe.applyOnce(gui);
@@ -355,7 +370,15 @@ public final class GpuLobbyWindow {
 
     /** Whether a modal Swing dialog over the lobby is open. */
     boolean modalOpen() {
-        return modalOpen;
+        return swingDialogs.blocked();
+    }
+
+    /** EDT, for the developer switch's {@code lobby+dialog=name}: opens that dialog and photographs the screen. */
+    void probeDialog() {
+        GpuLobbyProbe shown = probe;
+        if (shown != null && !closing) {
+            shown.dialogShot(this, gui);
+        }
     }
 
     private void queueRefresh() {
@@ -1015,7 +1038,7 @@ public final class GpuLobbyWindow {
 
         @Override
         public Optional<Camouflage> camouflage(Camouflage initial, List<Entity> units) {
-            CamoChooserDialog chooser = new CamoChooserDialog(gui.getFrame(), initial);
+            CamoChooserDialog chooser = new CamoChooserDialog(swingDialogs.parent(), initial);
             try {
                 chooser.setDisplayedEntities(units);
                 return chooser.showDialog().isConfirmed() ? Optional.ofNullable(chooser.getSelectedItem())
@@ -1029,8 +1052,8 @@ public final class GpuLobbyWindow {
         public Optional<LobbyPlayerController.BotSetup> botSetup(@Nullable String name, BehaviorSettings behavior,
               @Nullable AIType type) {
             BotConfigDialog dialog = type == null
-                  ? new BotConfigDialog(gui.getFrame(), name, behavior, gui)
-                  : new BotConfigDialog(gui.getFrame(), name, behavior, gui, type);
+                  ? new BotConfigDialog(swingDialogs.parent(), name, behavior, gui)
+                  : new BotConfigDialog(swingDialogs.parent(), name, behavior, gui, type);
             dialog.setVisible(true);
             if (dialog.getResult() != DialogResult.CONFIRMED) {
                 return Optional.empty();
@@ -1045,7 +1068,7 @@ public final class GpuLobbyWindow {
             BotClient bot = BotFactory.createBot(setup.type(), setup.name(), client.getHost(), client.getPort(),
                   setup.behavior());
             bot.setClientGUI(gui);
-            bot.getGame().addGameListener(new BotGUI(gui.getFrame(), bot));
+            bot.getGame().addGameListener(new BotGUI(swingDialogs.parent(), bot));
             boolean connected;
             try {
                 connected = bot.connect();
@@ -1104,22 +1127,13 @@ public final class GpuLobbyWindow {
         if (frame != null && frame.isVisible()) {
             frame.setVisible(false);
         }
-        for (Window window : Window.getWindows()) {
-            if (window.isShowing() && window instanceof Dialog dialog && belongsToClient(dialog)) {
-                centre(dialog);
-                raise(dialog);
-            }
-        }
+        swingDialogs.presented();
         refresh();
     }
 
     private void finished(Throwable failure) {
-        Toolkit.getDefaultToolkit().removeAWTEventListener(dialogListener);
+        swingDialogs.uninstall();
         gui.getClient().getGame().removeGameListener(gameListener);
-        modalDialogs.clear();
-        modalOpen = false;
-        dialogOnTop.forEach(Dialog::setAlwaysOnTop);
-        dialogOnTop.clear();
         boolean replaced = closing;
         closing = true;
         if (mapTimer != null) {
@@ -1148,111 +1162,11 @@ public final class GpuLobbyWindow {
 
     // ---- Dialogs over the lobby ----
 
-    private void dialogEvent(AWTEvent event) {
-        if (!(event.getSource() instanceof Dialog dialog)) {
-            return;
-        }
-        int id = event.getID();
-        if (id == ComponentEvent.COMPONENT_HIDDEN || id == WindowEvent.WINDOW_CLOSED) {
-            endModal(dialog);
-            GpuNativeDialogOwner owner = nativeOwner;
-            if (owner != null) {
-                if (id == WindowEvent.WINDOW_CLOSED) {
-                    owner.forget(dialog);
-                } else {
-                    owner.hidden(dialog);
-                }
-            }
-            if (id == WindowEvent.WINDOW_CLOSED) {
-                Boolean wasOnTop = dialogOnTop.remove(dialog);
-                if (wasOnTop != null) {
-                    dialog.setAlwaysOnTop(wasOnTop);
-                }
-            }
-        } else if (id == ComponentEvent.COMPONENT_SHOWN && !closing && belongsToClient(dialog)) {
-            centre(dialog);
-            raise(dialog);
-        }
-    }
-
-    /**
-     * A dialog of the client's hidden frame, or a modal one without an owner of its own, which Swing gives its hidden
-     * shared frame: both would otherwise hide behind the native window.
-     */
-    private boolean belongsToClient(Dialog dialog) {
-        Frame shared;
-        try {
-            shared = JOptionPane.getRootFrame();
-        } catch (HeadlessException headless) {
-            shared = null;
-        }
-        for (Window current = dialog.getOwner(); current != null; current = current.getOwner()) {
-            if (current == gui.getFrame() || current == shared && dialog.isModal()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Centres a dialog of the hidden frame over the window; the hidden frame would centre it on the screen. */
-    private static void centre(Dialog dialog) {
-        Rectangle bounds = GpuHost.clientBounds();
-        if (bounds == null || dialog.getOwner() instanceof Dialog) {
-            return;
-        }
-        Rectangle swing = GpuStartWindow.toSwing(bounds);
-        dialog.setLocation(swing.x + (swing.width - dialog.getWidth()) / 2,
-              swing.y + (swing.height - dialog.getHeight()) / 2);
-    }
-
-    /**
-     * Keeps a dialog above the window until either closes: owned natively where the platform allows, otherwise
-     * floating on top. A modal dialog blocks the screen's input as it would its Swing owner's.
-     */
-    private void raise(Dialog dialog) {
-        GpuNativeDialogOwner owner = nativeOwner;
-        if (owner != null && (dialog.getOwner() instanceof Dialog parent && parent.isShowing() && owner.owns(parent)
-              || owner.adopt(dialog))) {
-            Boolean wasOnTop = dialogOnTop.remove(dialog);
-            if (wasOnTop != null) {
-                dialog.setAlwaysOnTop(wasOnTop);
-            }
-            if (dialog.isModal() && modalDialogs.add(dialog) && modalDialogs.size() == 1) {
-                setInputBlocked(true);
-            }
-            dialog.toFront();
-            return;
-        }
-        dialogOnTop.putIfAbsent(dialog, dialog.isAlwaysOnTop());
-        dialog.setAlwaysOnTop(true);
-        dialog.toFront();
-    }
-
-    private void endModal(Dialog dialog) {
-        if (modalDialogs.remove(dialog) && modalDialogs.isEmpty()) {
-            setInputBlocked(false);
-        }
-    }
-
-    /** EDT: brings the newest open modal dialog to the front when the window is clicked or asked to close. */
-    private void frontModal() {
-        List<Dialog> showing = new ArrayList<>();
-        for (Dialog dialog : modalDialogs) {
-            if (dialog.isShowing()) {
-                showing.add(dialog);
-            }
-        }
-        if (!showing.isEmpty()) {
-            showing.get(showing.size() - 1).toFront();
-        }
-    }
-
     /**
      * Blocks or restores the screen's input. The native window itself stays enabled, as the start screen's does, so
      * Windows doesn't hand the activation to another application as a modal dialog closes.
      */
     private void setInputBlocked(boolean blocked) {
-        modalOpen = blocked;
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
             if (shown != null) {

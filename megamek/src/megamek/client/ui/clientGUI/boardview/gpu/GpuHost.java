@@ -212,6 +212,14 @@ public final class GpuHost {
         return clientBounds;
     }
 
+    /**
+     * The open window's client area in Swing's coordinates, or null while it is closed: the area a dialog of a hidden
+     * Swing frame should size and centre itself by while the window shows in its place.
+     */
+    public static Rectangle swingClientBounds() {
+        Rectangle bounds = clientBounds;
+        return bounds == null ? null : GpuStartWindow.toSwing(bounds);
+    }
 
     /** Any thread: brings the window to the front and gives it the keyboard. */
     static void focus() {

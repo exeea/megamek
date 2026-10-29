@@ -1,0 +1,87 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.Test;
+
+/**
+ * Every Swing dialog the native lobby opens goes through {@link LobbyDialogs}: the lobby's own on its
+ * {@link LobbyDialogs#parent()}, the lobby prompts' on the same client frame, and nothing else in the lobby watches the
+ * toolkit or opens a dialog of its own.
+ */
+class LobbyDialogEntryPointsTest {
+    private static final Path GPU = Path.of("src/megamek/client/ui/clientGUI/boardview/gpu");
+    private static final Path PROMPTS = Path.of("src/megamek/client/ui/panels/phaseDisplay/lobby/SwingLobbyPrompts.java");
+    /** A dialog or chooser made in the source, and its first argument. */
+    private static final Pattern DIALOG = Pattern.compile("new (\\w*(?:Dialog|Chooser)\\w*)\\(\\s*([\\w.]*(?:\\(\\))?)");
+    private static final Pattern OPTION_PANE = Pattern.compile("JOptionPane\\.show\\w+\\(\\s*([\\w.]*(?:\\(\\))?)");
+    /** The owners a lobby dialog may take: the helper's parent, or the client, whose frame the dialog then uses. */
+    private static final List<String> LOBBY_OWNERS = List.of("swingDialogs.parent()", "gui");
+    private static final List<String> PROMPT_OWNERS = List.of("frame()", "lobby.getClientGUI()");
+
+    @Test
+    void theLobbysOwnDialogsUseTheOnePath() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        int checked = 0;
+        try (Stream<Path> files = Files.list(GPU)) {
+            for (Path file : files.filter(LobbyDialogEntryPointsTest::lobbySource).toList()) {
+                checked++;
+                String source = Files.readString(file);
+                String name = file.getFileName().toString();
+                owners(name, source, DIALOG, 2, LOBBY_OWNERS, offenders);
+                owners(name, source, OPTION_PANE, 1, List.of(), offenders);
+                if (!name.equals("LobbyDialogs.java") && source.contains("addAWTEventListener")) {
+                    offenders.add(name + ": watches the toolkit itself");
+                }
+            }
+        }
+        assertTrue(checked > 5, "Lobby sources not found at " + GPU.toAbsolutePath());
+        assertEquals(List.of(), offenders);
+    }
+
+    @Test
+    void theLobbyWindowInstallsTheHelper() throws IOException {
+        String window = Files.readString(GPU.resolve("GpuLobbyWindow.java"));
+        assertTrue(window.contains("new LobbyDialogs("));
+        assertTrue(window.contains("swingDialogs.install()"));
+        assertTrue(window.contains("swingDialogs.uninstall()"));
+        assertTrue(window.contains("swingDialogs.presented()"));
+    }
+
+    @Test
+    void thePromptsDialogsUseTheClientFrame() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        String source = Files.readString(PROMPTS);
+        owners("SwingLobbyPrompts.java", source, DIALOG, 2, PROMPT_OWNERS, offenders);
+        owners("SwingLobbyPrompts.java", source, OPTION_PANE, 1, PROMPT_OWNERS, offenders);
+        assertTrue(source.contains("return lobby.getClientGUI().getFrame();"));
+        assertEquals(List.of(), offenders);
+    }
+
+    private static boolean lobbySource(Path file) {
+        String name = file.getFileName().toString();
+        return name.endsWith(".java") && (name.startsWith("Lobby") || name.startsWith("GpuLobby"));
+    }
+
+    private static void owners(String name, String source, Pattern pattern, int group, List<String> allowed,
+          List<String> offenders) {
+        Matcher matcher = pattern.matcher(source);
+        while (matcher.find()) {
+            String owner = matcher.group(group).trim();
+            if (!allowed.contains(owner) && !matcher.group().startsWith("new LobbyDialogs(")) {
+                offenders.add(name + ": " + matcher.group().trim());
+            }
+        }
+    }
+}

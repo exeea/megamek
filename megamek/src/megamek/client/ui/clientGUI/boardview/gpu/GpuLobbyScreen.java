@@ -611,6 +611,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         shotSaved = true;
+        if (probe.dialog() != null) {
+            // The frame buffer has no Swing dialogs, so the screen is photographed instead
+            SwingUtilities.invokeLater(window::probeDialog);
+            return;
+        }
         GpuLobbyProbe.reportWindows();
         if (GpuStartScreen.saveFrame(probe.shot(), bw, bh)) {
             LOGGER.info("Lobby shot saved to {}", probe.shot().getAbsoluteFile());

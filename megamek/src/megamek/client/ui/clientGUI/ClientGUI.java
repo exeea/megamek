@@ -44,6 +44,8 @@ import java.awt.FlowLayout;
 import java.awt.HeadlessException;
 import java.awt.Image;
 import java.awt.KeyboardFocusManager;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -95,6 +97,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuHost;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
@@ -3147,9 +3150,24 @@ public class ClientGUI extends AbstractClientGUI
               ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
               ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         textArea.setText("<pre>" + message + "</pre>");
-        scrollPane.setPreferredSize(new Dimension((int) (clientGuiPanel.getSize().getWidth() / 1.5),
-              (int) (clientGuiPanel.getSize().getHeight() / 1.5)));
+        scrollPane.setPreferredSize(new Dimension((int) (alertArea().getWidth() / 1.5),
+              (int) (alertArea().getHeight() / 1.5)));
         JOptionPane.showMessageDialog(frame, scrollPane, title, messageType);
+    }
+
+    /**
+     * The area an alert sizes itself by: the client's panel while it shows; the native window while that shows in place
+     * of the hidden frame, as in the libGDX lobby, where the panel has no size; the screen otherwise.
+     */
+    private Dimension alertArea() {
+        if (clientGuiPanel.isShowing()) {
+            return clientGuiPanel.getSize();
+        }
+        Rectangle window = GpuHost.swingClientBounds();
+        if (window != null) {
+            return window.getSize();
+        }
+        return Toolkit.getDefaultToolkit().getScreenSize();
     }
 
     /**
