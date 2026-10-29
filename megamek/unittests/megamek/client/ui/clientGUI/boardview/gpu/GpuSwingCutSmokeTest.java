@@ -58,6 +58,7 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -102,6 +103,12 @@ class GpuSwingCutSmokeTest {
         List<Window> windows() {
             return List.of(minimap, players, rounds, forces, bots, unit, report, ruler);
         }
+    }
+
+    @AfterEach
+    void awaitHostClosed() throws Exception {
+        // The next suite's own window must not start while the host's thread still shuts GLFW down
+        await(() -> !GpuHost.isOpen());
     }
 
     @Test
@@ -205,8 +212,7 @@ class GpuSwingCutSmokeTest {
                     GpuBoardWindow.closeFor(gui);
                     return null;
                 });
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
                 onSwing(() -> {
                     client.windows().forEach(Window::dispose);
                     client.frame().dispose();

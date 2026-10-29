@@ -118,8 +118,8 @@ class GpuBoardWindowSmokeTest {
 
     @AfterEach
     void restoreBoardStyle() throws Exception {
-        await(() -> Thread.getAllStackTraces().keySet().stream()
-              .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+        // The next suite's own window must not start while the host's thread still shuts GLFW down
+        await(() -> !GpuHost.isOpen());
         var prefs = GUIPreferences.getInstance();
         for (String key : WINDOW_BOUNDS) { prefs.setValue(key, savedBounds.get(key)); }
         prefs.setValue(GUIPreferences.GPU_BOARD_MAXIMIZED, savedMaximized);
@@ -258,8 +258,7 @@ class GpuBoardWindowSmokeTest {
                     return true;
                 }));
                 await(() -> onSwing(launcher::isShowing));
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
                 assertTrue(workers.get().isTerminated(), "No terrain workers may outlive their native window");
                 assertTrue(source.isClosed());
                 assertNull(onSwing(() -> savePrompt(launcher)), "Cancelling loading must not report a startup failure");
@@ -1437,8 +1436,7 @@ class GpuBoardWindowSmokeTest {
                     ui.frame().dispose();
                     return null;
                 });
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
                 onSwing(() -> {
                     assertFalse(ui.frame().isDisplayable());
                     assertFalse(ui.frame().isVisible());
@@ -1453,8 +1451,7 @@ class GpuBoardWindowSmokeTest {
                     ui.menus().die();
                     return null;
                 });
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
             }
         }
     }
