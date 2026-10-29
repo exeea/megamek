@@ -435,6 +435,30 @@ public final class UiKit {
     }
 
     /**
+     * A solid fill in a token colour role, such as a team's colour bar; its size is its cell's. An area filled with a
+     * colour from the game, such as a player's swatch, takes {@link #solid(Color)}.
+     */
+    public Image solid(String role) {
+        return solid(UiTheme.tokenColor(role));
+    }
+
+    /** A solid fill in {@code color}, sized by its cell, such as a player's colour swatch. */
+    public Image solid(Color color) {
+        return new Image(skin.newDrawable("white", color));
+    }
+
+    /**
+     * A card (Token v0's {@code token-card}: surface.panel with a border.subtle edge and the md radius), padded sm and md
+     * as a list card is, for one item of a list such as a lobby player; its rows are the view's.
+     */
+    public Table card() {
+        Table card = new Table();
+        card.setBackground(skin.getDrawable("token-card"));
+        card.pad(space("sm"), space("md"), space("sm"), space("sm"));
+        return card;
+    }
+
+    /**
      * A panel (.panel): the frame, padded only by its 2-unit rails and transparent side borders, with its rows from the
      * top; headers, lists and footers bring their own padding. A panel that pads its content itself sets its padding.
      */

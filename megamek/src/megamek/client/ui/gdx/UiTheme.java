@@ -185,6 +185,11 @@ public final class UiTheme implements Disposable {
           Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
           // shield_person: the Game Master's toast (Token v0)
           Map.entry("shield-person", 0xF650),
+          // The lobby's player cards: more_vert, add, check_circle, radio_button_unchecked, hourglass_empty,
+          // smart_toy (a bot) and palette (camouflage)
+          Map.entry("more-vert", 0xE5D4), Map.entry("add", 0xE145), Map.entry("check-circle", 0xE86C),
+          Map.entry("radio-unchecked", 0xE836), Map.entry("hourglass", 0xE88B), Map.entry("bot", 0xF06C),
+          Map.entry("palette", 0xE40A),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,
           // security, visibility, terrain, visibility_off (a TAG link's crosshair is "locate").
           Map.entry("power", 0xE8AC), Map.entry("prone", 0xE258), Map.entry("anchor", 0xF1CD),

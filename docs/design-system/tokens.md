@@ -1049,6 +1049,10 @@ row, each `md` below the one before. `token-panel-danger` replaces `panel-foe` (
 `token-frame` is the plain frame, `token-rails` replaces `panel-rails` (the Tactical View chip: the overlay panel
 with `border.control` rails), `token-panel-overlay` is the panel on the overlay surface over the board, and `token-divider` replaces `rule`. `new UiPopover(kit, dismissed, UiTheme.TOKEN)` is the popover in the
 `token-popup` frame, with a `body.strong` title over `small` detail in `text.secondary` and a `border.subtle` divider.
+`UiKit.card()` is a card inside a panel (the lobby's player cards): the `token-card` frame padded `sm`, with `md` on
+the leading side. `UiKit.solid(role)` is a flat block of a color token (a team's edge bar, a player's color swatch),
+sized by its cell. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot` and
+`palette` glyphs to `UiTheme.ICONS`.
 
 The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`
 is the unit row as a selectable plain panel: the `token-unit-row` style has a `border.subtle` edge at rest,
