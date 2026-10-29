@@ -1554,6 +1554,12 @@ public final class UiTheme implements Disposable {
 
         box("token-card", token(tokens.color("surface.panel", mode)), subtle, border, tokens.radius().get("md"), null,
               0, 0, 0);
+        // A selected card keeps its surface under an accent edge; a card that takes a drop rises, under the same edge
+        Color accentEdge = token(tokens.color("accent.primary", mode));
+        box("token-card-selected", token(tokens.color("surface.panel", mode)), accentEdge, border,
+              tokens.radius().get("md"), null, 0, 0, 0);
+        box("token-card-drop", token(tokens.color("surface.raised", mode)), accentEdge, 2 * border,
+              tokens.radius().get("md"), null, 0, 0, 0);
 
         float band = md;
         float active = tokens.size().get("selection.width");

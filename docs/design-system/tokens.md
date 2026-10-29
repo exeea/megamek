@@ -1051,7 +1051,9 @@ with `border.control` rails), `token-panel-overlay` is the panel on the overlay 
 `token-popup` frame, with a `body.strong` title over `small` detail in `text.secondary` and a `border.subtle` divider.
 `UiKit.card()` is a card inside a panel (the lobby's player cards): the `token-card` frame padded `sm`, with `md` on
 the leading side. `UiKit.solid(role)` is a flat block of a color token (a team's edge bar, a player's color swatch),
-sized by its cell. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot` and
+sized by its cell. 	oken-card-selected is a selected card (a unit picked with ctrl or shift click): the same
+surface under an ccent.primary edge. 	oken-card-drop is the card or formation under a dragged unit: surface.raised,
+with a doubled ccent.primary edge; between rows the drop target is a 	oken-row-slot strip. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot` and
 `palette` glyphs to `UiTheme.ICONS`.
 
 The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`

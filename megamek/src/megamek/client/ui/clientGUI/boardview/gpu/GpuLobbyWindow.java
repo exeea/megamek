@@ -4,19 +4,24 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.AWTEvent;
 import java.awt.Dialog;
 import java.awt.Frame;
+import java.awt.Graphics2D;
 import java.awt.HeadlessException;
+import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,6 +29,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
+import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -37,7 +43,10 @@ import megamek.client.bot.BotFactory;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.lobby.LobbyForces;
+import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.LobbyUnit;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -45,7 +54,10 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
 import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
 import megamek.client.ui.enums.DialogResult;
+import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
+import megamek.client.ui.tileset.EntityImage;
+import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.common.board.Board;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
@@ -58,6 +70,8 @@ import megamek.common.event.player.GamePlayerChangeEvent;
 import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.event.player.GamePlayerConnectedEvent;
 import megamek.common.event.player.GamePlayerDisconnectedEvent;
+import megamek.common.force.Force;
+import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MapSettings;
 import megamek.common.preference.PreferenceManager;
@@ -148,6 +162,8 @@ public final class GpuLobbyWindow {
         public ApplicationListener listener() {
             GpuLobbyScreen created = new GpuLobbyScreen(GpuLobbyWindow.this, GUIPreferences.getInstance());
             screen = created;
+            spritesStale = true;
+            queueRefresh();
             return created;
         }
 
@@ -198,6 +214,13 @@ public final class GpuLobbyWindow {
     private MapSettings zonesOf;
     private Collection<Integer> customZones = List.of();
     private PlayerSettingsDialog playerSettings;
+    /** EDT: the Swing unit menu whose items the screen shows, until one is chosen. */
+    private JPopupMenu unitMenu;
+    /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
+    private final Set<String> spriteKeys = new HashSet<>();
+    private Map<Integer, String> sentSprites = Map.of();
+    /** Set when a new screen needs every sprite again. */
+    private volatile boolean spritesStale;
 
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
@@ -299,12 +322,13 @@ public final class GpuLobbyWindow {
         try {
             ChatterBox chat = gui.getChatterBox();
             read = LobbySnapshot.of(gui::getClient, chat == null ? List.of() : chat.lines(LobbySnapshot.CHAT_LINES),
-                  customZones());
+                  customZones(), unitOrder());
         } catch (RuntimeException failure) {
             LOGGER.error(failure, "The lobby could not read the game");
             return;
         }
         snapshot = read;
+        sendSprites(read);
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
             if (shown != null) {
@@ -430,6 +454,191 @@ public final class GpuLobbyWindow {
     /** Any thread: adds a bot, through its setup dialog, on {@code team}. */
     void addBot(int team) {
         players(controller -> controller.addBot(team));
+    }
+
+    // ---- The forces column ----
+
+    /** Any thread: runs {@code action} with the unit and formation actions on the Swing thread, then shows the result. */
+    private void forces(Consumer<LobbyForcesController> action) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || gui.chatlounge == null) {
+                return;
+            }
+            action.accept(new LobbyForcesController(gui::getClient, gui.chatlounge.lobbyCommands()));
+            refreshSoon();
+        });
+    }
+
+    /** Any thread: runs one of the forces column's commands through the Swing lobby, as its buttons do. */
+    void forcesCommand(LobbyForcesPanel.Command command) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || gui.chatlounge == null) {
+                return;
+            }
+            switch (command) {
+                case ADD_UNIT -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.ADD_UNIT, null);
+                case RANDOM_ARMY -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.RANDOM_ARMY, null);
+                case SKILLS -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.SKILLS, null);
+                case NAMES -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.NAMES, null);
+                case C3 -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.C3, null);
+                case LOAD_LIST, SAVE_LIST, PRINT_LIST -> gui.chatlounge.forcesCommand(
+                      ChatLounge.ForcesCommand.valueOf(command.name()), gui.getClient().getLocalPlayer());
+                case NEW_FORMATION -> gui.chatlounge.lobbyCommands().forceCreateEmpty();
+            }
+            refreshSoon();
+        });
+    }
+
+    /** Any thread: orders the units by the Swing unit table's order {@code index}. */
+    void sortUnits(int index) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && gui.chatlounge != null) {
+                gui.chatlounge.sortUnits(index);
+                queueRefresh();
+            }
+        });
+    }
+
+    /** Any thread: opens the configuration of the editable unit {@code id}. */
+    void configureUnit(int id) {
+        forces(controller -> controller.configure(id));
+    }
+
+    /** Any thread: moves dragged units or formations onto {@code target}. */
+    void dropForces(List<Integer> unitIds, List<Integer> formationIds, LobbyForcesController.Target target) {
+        forces(controller -> controller.drop(unitIds, formationIds, target));
+    }
+
+    /**
+     * Any thread: reads the Swing lobby's unit menu for these units and formations and sends its items to the screen;
+     * the menu stays here until one is chosen.
+     */
+    void unitMenu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || gui.chatlounge == null) {
+                return;
+            }
+            Game game = gui.getClient().getGame();
+            List<Entity> entities = unitIds.stream().map(game::getEntity).filter(Objects::nonNull).toList();
+            List<Force> formations = formationIds.stream().map(game.getForces()::getForce).filter(Objects::nonNull)
+                  .toList();
+            List<LobbyMenuEntry> entries;
+            try {
+                unitMenu = gui.chatlounge.unitMenu(entities, formations, formationsView);
+                entries = LobbySwingMenus.read(unitMenu);
+            } catch (RuntimeException failure) {
+                LOGGER.error(failure, "The lobby could not read the unit menu");
+                unitMenu = null;
+                entries = List.of();
+            }
+            List<LobbyMenuEntry> read = entries;
+            GpuHost.post(() -> {
+                GpuLobbyScreen shown = screen;
+                if (shown != null) {
+                    shown.unitMenu(read);
+                }
+            });
+        });
+    }
+
+    /** Any thread: chooses the item at {@code path} of the unit menu last read, as clicking it in Swing would. */
+    void chooseMenu(List<Integer> path) {
+        SwingUtilities.invokeLater(() -> {
+            JPopupMenu menu = unitMenu;
+            unitMenu = null;
+            if (!closing && menu != null) {
+                LobbySwingMenus.choose(menu, path);
+                refreshSoon();
+            }
+        });
+    }
+
+    /** Reads the lobby now and twice more, as the server's answer to a unit change takes a moment to come back. */
+    private void refreshSoon() {
+        queueRefresh();
+        for (int delay : new int[] { 300, 1000 }) {
+            Timer timer = new Timer(delay, event -> queueRefresh());
+            timer.setRepeats(false);
+            timer.start();
+        }
+    }
+
+    /** EDT: the order of the units as the Swing unit table sorts them, and the orders it offers. */
+    private LobbyForces.Order unitOrder() {
+        if (gui.chatlounge == null) {
+            return LobbyForces.Order.NONE;
+        }
+        try {
+            List<Integer> ids = gui.chatlounge.sortedUnits().stream().map(Entity::getId).toList();
+            return new LobbyForces.Order(ids, gui.chatlounge.unitSortNames(), gui.chatlounge.unitSortIndex());
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The lobby could not read the unit order");
+            return LobbyForces.Order.NONE;
+        }
+    }
+
+    /**
+     * EDT: the lobby sprite of each shown unit as a key, and the images of keys not sent before; a unit a blind drop
+     * hides has none.
+     */
+    private void sendSprites(LobbySnapshot read) {
+        if (spritesStale) {
+            spritesStale = false;
+            spriteKeys.clear();
+            sentSprites = Map.of();
+        }
+        Game game = gui.getClient().getGame();
+        Map<Integer, String> keys = new HashMap<>();
+        Map<String, BufferedImage> fresh = new HashMap<>();
+        for (LobbyUnit unit : read.forces().units()) {
+            Entity entity = unit.hidden() ? null : game.getEntity(unit.id());
+            if (entity == null) {
+                continue;
+            }
+            Camouflage camouflage = entity.getCamouflageOrElseOwners();
+            String key = entity.getChassis() + '|' + entity.getModel() + '|' + camouflage.getCategory() + '|'
+                  + camouflage.getFilename();
+            keys.put(unit.id(), key);
+            if (spriteKeys.add(key)) {
+                BufferedImage image = sprite(entity, camouflage);
+                if (image != null) {
+                    fresh.put(key, image);
+                }
+            }
+        }
+        if (keys.equals(sentSprites) && fresh.isEmpty()) {
+            return;
+        }
+        sentSprites = keys;
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.sprites(keys, fresh);
+            }
+        });
+    }
+
+    private static @Nullable BufferedImage sprite(Entity entity, Camouflage camouflage) {
+        try {
+            Image base = MMStaticDirectoryManager.getMekTileset().imageFor(entity);
+            Image icon = base == null ? null
+                  : EntityImage.createLobbyIcon(base, camouflage, entity).loadPreviewImage(false);
+            if (icon == null || icon.getWidth(null) <= 0 || icon.getHeight(null) <= 0) {
+                return null;
+            }
+            if (icon instanceof BufferedImage buffered) {
+                return buffered;
+            }
+            BufferedImage copy = new BufferedImage(icon.getWidth(null), icon.getHeight(null),
+                  BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = copy.createGraphics();
+            graphics.drawImage(icon, 0, 0, null);
+            graphics.dispose();
+            return copy;
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The lobby could not draw the sprite of {}", entity.getShortName());
+            return null;
+        }
     }
 
     /** The Swing dialogs of the player actions, owned by the client's hidden frame, which this scene adopts. */

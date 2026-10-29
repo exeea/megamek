@@ -1,6 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.image.BufferedImage;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import javax.swing.SwingUtilities;
 
@@ -9,13 +13,17 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -63,6 +71,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean folded;
     private boolean railPending;
     private boolean menuPending;
+    private boolean unitMenuPending;
+    /** The units' sprites by their window's key, and each shown unit's. */
+    private final Map<String, Texture> spriteTextures = new HashMap<>();
+    private final Map<Integer, Drawable> spriteDrawables = new HashMap<>();
     private LobbySnapshot shown;
     private long start;
     private boolean shotSaved;
@@ -115,6 +127,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
         railPending = probe.options().contains("rail");
         menuPending = probe.options().contains("menu");
+        unitMenuPending = probe.options().contains("unitmenu");
+        if (probe.options().contains("compact")) {
+            forces.compact(true);
+        }
+        if (probe.options().contains("formations")) {
+            forces.showFormations();
+        }
         if (!probe.sized()) {
             return;
         }
@@ -131,7 +150,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         boolean motion = !preferences.getReduceMotion();
         topBar = new LobbyTopBar(kit, window::leave, window::ready);
         players = new LobbyPlayersPanel(kit, playerActions());
-        forces = new LobbyForcesPanel(kit);
+        forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
         battlefield = new LobbyBattlefieldPanel(kit, boardSkin.skin);
         centre = new LobbyCentre(kit, forces.panel(), motion);
         rail = kit.rail(Messages.getString("Lobby.battlefield"), "map");
@@ -154,6 +173,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         root.add(topBar).growX().pad(space("md"), space("lg"), space("md"), space("lg")).row();
         root.add(columns).grow().pad(0, space("lg"), space("lg"), space("lg"));
         players.attach(stage.getRoot());
+        forces.attach(stage.getRoot());
         stage.addListener(new InputListener() {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
@@ -161,7 +181,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     return false;
                 }
                 // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys
-                if (players.back()) {
+                if (players.back() || forces.back()) {
                     return true;
                 }
                 if (stage.getKeyboardFocus() instanceof TextField) {
@@ -237,6 +257,69 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         };
     }
 
+    /** The forces column's actions, which the window runs on the Swing thread. */
+    private LobbyForcesPanel.Actions forceActions() {
+        return new LobbyForcesPanel.Actions() {
+            @Override
+            public void command(LobbyForcesPanel.Command command) {
+                window.forcesCommand(command);
+            }
+
+            @Override
+            public void sort(int index) {
+                window.sortUnits(index);
+            }
+
+            @Override
+            public void configure(int unitId) {
+                window.configureUnit(unitId);
+            }
+
+            @Override
+            public void drop(List<Integer> unitIds, List<Integer> formationIds, LobbyForcesController.Target target) {
+                window.dropForces(unitIds, formationIds, target);
+            }
+
+            @Override
+            public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
+                window.unitMenu(unitIds, formationIds, formationsView);
+            }
+
+            @Override
+            public void choose(List<Integer> path) {
+                window.chooseMenu(path);
+            }
+        };
+    }
+
+    /** GPU thread: opens the unit menu the window read for the forces column. */
+    void unitMenu(List<LobbyMenuEntry> entries) {
+        if (forces != null) {
+            forces.showMenu(entries);
+        }
+    }
+
+    /** GPU thread: takes the images of new sprite keys and each shown unit's key, then draws the cards again. */
+    void sprites(Map<Integer, String> keys, Map<String, BufferedImage> images) {
+        if (stage == null) {
+            return;
+        }
+        images.forEach((key, image) -> {
+            Texture old = spriteTextures.put(key, GpuStartScreen.texture(image, false));
+            if (old != null) {
+                old.dispose();
+            }
+        });
+        spriteDrawables.clear();
+        keys.forEach((id, key) -> {
+            Texture texture = spriteTextures.get(key);
+            if (texture != null) {
+                spriteDrawables.put(id, new TextureRegionDrawable(texture));
+            }
+        });
+        forces.redraw();
+    }
+
     /** The battlefield's body goes back to its column whenever another view, or the forces, take the centre. */
     private void centreChanged(String showing) {
         boolean battlefieldShown = BATTLEFIELD.equals(showing);
@@ -268,8 +351,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         shown = snapshot;
         topBar.show(snapshot);
         players.show(snapshot, before);
-        if (before == null || !before.teams().equals(snapshot.teams())) {
-            forces.show(snapshot);
+        if (before == null || !before.forces().equals(snapshot.forces())) {
+            forces.show(snapshot.forces());
         }
         battlefield.show(snapshot);
     }
@@ -306,6 +389,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
               && players.openFirstMenu()) {
             menuPending = false;
         }
+        if (unitMenuPending && (System.nanoTime() - start) / 1e9 > Math.max(1, window.probe().shotAt() - 1)
+              && forces.openFirstUnitMenu()) {
+            unitMenuPending = false;
+        }
         hud.update(Set.of());
         stage.draw();
         takeShot();
@@ -331,6 +418,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     @Override
     public void dispose() {
         window.disposing();
+        spriteTextures.values().forEach(Texture::dispose);
+        spriteTextures.clear();
         for (Object disposable : new Object[] { stage }) {
             if (disposable instanceof com.badlogic.gdx.utils.Disposable resource) {
                 resource.dispose();

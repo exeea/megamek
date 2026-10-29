@@ -489,8 +489,24 @@ work for Swing, and item 11 is under investigation.
        commands work) and recalls sent lines with Up and Down (`ChatHistory`). Escape closes a menu first, then
        leaves the chat field. Not yet checked live: the Swing dialogs opening from the native window, the bot's team
        move after it joins, and the submenus as drawn (the probe opens only the root menu, `lobby+menu`).
-     - L4 Forces: unit cards, compact rows, owner sections, formations with drag and drop, sorting and the right-
-       click menus.
+     - L4 ~~Forces~~. The forces column has a Units / Formations switch, a compact toggle, ChatLounge's sort choices
+       in a select, and Random army, Add unit and a ⋮ menu in its header. In Units view each owner (you first, then
+       by team) has a header with an edge bar and the BV, tonnage and units, or "hidden" under blind drop. A unit card
+       shows the lobby sprite in the player's camo, the name, number and BV, the tonnage, weight class, role and
+       start, the pilot with gunnery/piloting, and up to three tags (C3, carried, transporting, offboard, hidden,
+       damage and configuration warnings in the danger or warning tone) with a "+n" for the rest. Compact rows put
+       all of that on one line. Formations view is MegaMek's force tree: a header per formation (fold, glyph, name,
+       BV, tonnage, units, owner and ⋮), nested units and subformations, and the units outside any formation under
+       their owner. Ctrl and shift click select several units. Dragging units onto a formation, or onto the strip
+       between rows, moves or reorders them through ChatLounge's force commands; the target rises (	oken-card-drop)
+       and the strip lights while the drag is over it. The unit and formation menus (⋮ and right-click) are
+       ChatLounge's own LobbyMekPopup, read into LobbyMenuEntry trees on the EDT (LobbySwingMenus) and drawn as
+       nested popovers, so their items, submenus, checks and permissions are ChatLounge's. LobbyForcesController
+       runs the panel's commands on the EDT with ChatLounge's permission rules. LobbySnapshot gained orces
+       (LobbyForces, LobbyUnit), built in ChatLounge's sort order with blind drop hiding enemy units as the
+       Swing tables do. Add unit opens the unit selector, owned by the native window. Not yet checked live: drag and
+       drop and multi-select (the probes do not drag), and the Swing dialogs from the menus. A formation change made
+       by another client with no unit change fires no game event, so it shows at the next event, as in ChatLounge.
      - L5 The battlefield: the map card (ideally a live 3D view of the board with the deployment zones), conditions,
        rules, victory and auto-resolve.
      - L6 Ready: the ready count, the BV chips, Ready and its warning chips.

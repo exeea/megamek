@@ -26,6 +26,7 @@ import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.common.Player;
+import megamek.common.force.Force;
 import megamek.common.loaders.MULParser;
 import megamek.common.options.GameOptions;
 import megamek.common.units.Entity;
@@ -50,6 +51,10 @@ import megamek.logging.MMLogger;
  *     <li>{@code lobby+rail}: opens the folded battlefield from its rail.</li>
  *     <li>{@code lobby+menu}: opens the first bot's player menu (the first player's without bots) before the shot.</li>
  *     <li>{@code lobby+chat}: has the player and each bot say a line in the chat as they join.</li>
+ *     <li>{@code lobby+formations}: puts the player's first units in a formation and a sub-formation, and shows the
+ *     forces as formations.</li>
+ *     <li>{@code lobby+compact}: shows the forces as compact rows.</li>
+ *     <li>{@code lobby+unitmenu}: opens the menu of the player's first unit before the shot.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
@@ -66,6 +71,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final int BOT_TEAM = 2;
     static final int NARROW_WIDTH = 1100;
     static final int NARROW_HEIGHT = 800;
+    /** The formation steps of {@code lobby+formations}: a lance, then a sub-formation inside it. */
+    private static final int FORMED = 2;
+    private static final double FORM_WAIT = 20;
 
     private static boolean taken;
 
@@ -170,6 +178,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         boolean[] joined = { false };
         double readyAt = (shot == null ? 0 : shotAt) + READY_AFTER;
         boolean[] readied = { !options.contains("ready") };
+        int[] formed = { options.contains("formations") ? 0 : FORMED };
         Timer timer = new Timer(POLL_MS, null);
         timer.addActionListener(event -> {
             // The bots join after the player, who gets the first player id as when they are added by hand
@@ -194,12 +203,15 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 return true;
             });
             double elapsed = (System.nanoTime() - start) / 1e9;
+            if (joined[0] && formed[0] < FORMED) {
+                formed[0] = elapsed > FORM_WAIT ? FORMED : form(client, local, formed[0]);
+            }
             if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt && gui.chatlounge != null) {
                 readied[0] = true;
                 LOGGER.info("The lobby probe presses Ready");
                 gui.chatlounge.ready();
             }
-            if (joined[0] && waiting.isEmpty() && readied[0]) {
+            if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED) {
                 timer.stop();
             }
         });
@@ -228,6 +240,34 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         if (options.contains("chat")) {
             client.sendChat(Messages.getString("Lobby.probeChat"));
         }
+    }
+
+    /**
+     * With {@code lobby+formations}, puts the player's first two units in a formation and, once it exists, their next
+     * two in a sub-formation of it; returns the step reached.
+     */
+    private static int form(Client client, Player local, int step) {
+        List<Entity> mine = client.getGame().getEntitiesVector().stream()
+              .filter(entity -> entity.getOwnerId() == local.getId()).toList();
+        if (step == 0) {
+            if (mine.size() < 2) {
+                return 0;
+            }
+            client.sendAddForce(Force.createToplevelForce(Messages.getString("Lobby.probeFormation"), local),
+                  new ArrayList<>(mine.subList(0, 2)));
+            return 1;
+        }
+        Force top = client.getGame().getForces().getTopLevelForces().stream()
+              .filter(force -> force.getOwnerId() == local.getId()).findFirst().orElse(null);
+        if (top == null) {
+            return 1;
+        }
+        List<Entity> free = mine.stream().filter(entity -> entity.getForceId() == Force.NO_FORCE).toList();
+        if (free.size() >= 2) {
+            client.sendAddForce(Force.createSubforce(Messages.getString("Lobby.probeSubFormation"), top),
+                  new ArrayList<>(free.subList(0, 2)));
+        }
+        return FORMED;
     }
 
     /** Loads every unit list for {@code player}, sent by its own client. */
