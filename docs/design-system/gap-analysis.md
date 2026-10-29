@@ -51,9 +51,9 @@ Agreed so far:
 | Ownership | Vicente owns UI decisions and presents them to the team. |
 | Review | Runnable galleries opened from MegaMek: one Swing, one libGDX. The Swing library is the complete set; libGDX is a subset that grows on demand. |
 | Naming, translucency | Role-based token names with a `UiTheme` rename pass; surfaces get opaque and overlay values. |
-| In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby is being ported to libGDX; until then it stays Swing. |
+| In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby is a libGDX scene of the window (step 6, L1); its dialogs stay Swing for now. |
 | Lobby | **Final.** The lobby is rewritten in libGDX as a scene of the one window, for MegaMek and for MekHQ games alike: one lobby, not a Swing one beside a libGDX one. It replaces the Swing lobby outright, with no fallback while it is built, and lands as one pull request. The Swing briefing room explored on `design-system-start-followups` (steps 6 and 7 there) is the starting point for its layout, not a spec to copy: where libGDX allows more, such as a live 3D map or motion between views, the design is rethought. The lobby's Swing dialogs stay Swing at first and open over the window, as the board's do. See step 6 under Next steps. |
-| Native window | One libGDX window for the whole run (`GpuHost`), switching between scenes: start screen, map editor and preview, game and UI library. The Swing lobby shows inset over the dimmed start screen in the same window until it is ported to libGDX. A game always uses the GPU board; Legacy 2D remains only for map previews and the editor's 2D Preview. |
+| Native window | One libGDX window for the whole run (`GpuHost`), switching between scenes: start screen, lobby, map editor and preview, game and UI library. No Swing frame shows beside it; Swing dialogs are natively owned by it so they stay in front. A game always uses the GPU board; Legacy 2D remains only for map previews and the editor's 2D Preview. |
 | Animation | Broad UI animation (for example panel reveals) comes after the unification pass. |
 
 ## Sources inventoried
@@ -377,7 +377,7 @@ work for Swing, and item 11 is under investigation.
      through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
      sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
      left. The window opens maximized the first time and remembers its bounds; it is the one window of the whole run,
-     and the lobby shows inset over the dimmed start screen in it. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
+     and hosting or joining a game switches it to the lobby scene. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
      notice waits for the reveal to end. The old splash medal is dropped. Its pages replace the menu in the menu's own
      column, with Back (Esc) to return, so the art stays in view. ~~G1, the window and menu~~, ~~G2, the Host
      page~~, ~~G3, the Connect page~~, ~~G4, Load game~~, ~~G5, the scenario browser~~ and ~~G6, the briefing~~ are
@@ -448,11 +448,16 @@ work for Swing, and item 11 is under investigation.
        its warnings, chat, and every change the lobby sends to the server (adding, removing, moving and configuring
        units, bots, teams, camo, deployment, C3 and transport). It has unit tests, so the view only reads it and
        calls it.
-     - L1 The lobby scene. When the game reaches the lounge phase, the window switches to the lobby scene instead
-       of showing the lobby frame; when the game starts, it switches to the board. `GpuLobbyOverlay` and the dimmed
-       start screen go away. Leaving the lobby returns to the start screen. A MekHQ game opens the window at the
-       lobby with its forces already loaded, then the board, and closes after the game, as it does now. A probe
-       (`MM_START_PAGE=lobby`, as on the Swing branch) opens it without clicking through.
+     - L1 ~~The lobby scene~~. When the game reaches the lounge phase, the window switches to the lobby scene
+       (`GpuLobbyWindow` on the Swing thread, `GpuLobbyScreen` on the GPU thread, fed immutable `LobbySnapshot`s)
+       instead of showing the lobby frame; when the game starts, it switches to the board, and a game that returns
+       to the lounge shows the lobby again. The ClientGUI frame stays hidden. `GpuLobbyOverlay` and the dimmed start
+       screen are gone. Leave (or the window's close box) exits as the Swing lobby did and the start screen comes
+       back. A MekHQ game opens the window at the lobby with its forces already loaded, then the board, and closes
+       after the game, as it does now. If the lobby scene cannot start, the native window closes and the Swing
+       frame with `ChatLounge` shows instead, so there is still only one window. For L1 the screen is minimal: the
+       top bar (title, server line, ready count, Ready and Leave), the players by team and the chat. A probe opens
+       it without clicking through (see step 3).
      - L2 The shell: the top bar, the three columns over the dimmed art, the narrow-window rail and centre views with
        Back.
      - L3 Players and chat: the team sections, player cards and their menus, adding bots, and the chat dock.
@@ -467,7 +472,7 @@ work for Swing, and item 11 is under investigation.
      - L8 Dialogs. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load
        and save choosers stay Swing at first, natively owned by the window so they stay in front of it, as the
        board's are. Those the lobby uses most move to libGDX one at a time afterwards.
-     - L9 Removal and checks: the Swing lobby's view code, `ChatLounge`'s and `GpuLobbyOverlay` are deleted; MekHQ's
+     - L9 Removal and checks: the Swing lobby's view code and `ChatLounge` (L1's fallback) are deleted; MekHQ's
        preloaded and auto-resolve games, MUL loading, hot-seat bots, blind drop, the Game Master and reconnecting to
        a running game are checked.
   7. A settings check across the startup path.

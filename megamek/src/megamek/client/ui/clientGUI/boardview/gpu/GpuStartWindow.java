@@ -47,8 +47,8 @@ import megamek.logging.MMLogger;
  * MegaMek's start screen, the first scene of the one native (libGDX) window ({@link GpuHost}): the greeting, the art
  * and the main menu. The Swing main frame stays hidden and owns the forms the menu opens, which the window adopts
  * natively so they stay above it. A board, the map editor or the UI library takes the window's place when it opens
- * and the start screen comes back, without the greeting, when they close; the game lobby shows over the dimmed start
- * screen. There is no Swing fallback: if OpenGL cannot start, MegaMek says so and exits.
+ * and the start screen comes back, without the greeting, when they close; so does the game lobby, from hosting or
+ * joining a game until leaving it. There is no Swing fallback: if OpenGL cannot start, MegaMek says so and exits.
  */
 public final class GpuStartWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuStartWindow.class);
@@ -164,8 +164,6 @@ public final class GpuStartWindow {
     /** EDT: what to run once the intro finishes, and whether it has. */
     private Runnable onSettled;
     private boolean settled;
-    /** EDT: whether the scene has started and not ended, so the lobby can show over it. */
-    private boolean backdrop;
     private volatile GpuStartScreen screen;
     private final GpuHost.Scene scene = new GpuHost.Scene() {
         @Override
@@ -189,7 +187,7 @@ public final class GpuStartWindow {
         public void closeRequested() {
             if (modalOpen) {
                 SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
-            } else if (!GpuLobbyOverlay.requestClose()) {
+            } else {
                 dispatch(Action.QUIT);
             }
         }
@@ -372,10 +370,6 @@ public final class GpuStartWindow {
         dialogOnTop.clear();
         if (open == this) {
             open = null;
-        }
-        if (backdrop) {
-            backdrop = false;
-            GpuLobbyOverlay.backdropChanged();
         }
         if (failure != null && !closeRequested) {
             LOGGER.error(failure, "The start screen's native window failed");
@@ -656,27 +650,12 @@ public final class GpuStartWindow {
         dialog.toFront();
     }
 
-    /** EDT, once the scene has started: the lobby may show over it, and the forms that floated meanwhile are owned. */
+    /** EDT, once the scene has started: the forms that floated meanwhile are owned. */
     private void shown() {
         if (open != this || closeRequested) {
             return;
         }
-        backdrop = true;
-        GpuLobbyOverlay.backdropChanged();
         adoptFloating();
-    }
-
-    /**
-     * EDT: whether the start screen shows in the window, so the game lobby can show inset over it; false while
-     * another scene (a board, an editor, a map preview or the UI library) holds the window.
-     */
-    public static boolean isBackdrop() {
-        return open != null && open.backdrop;
-    }
-
-    /** EDT: the native owner of the forms over the start screen while it is the backdrop, else null. */
-    static GpuNativeDialogOwner backdropOwner() {
-        return isBackdrop() ? open.nativeOwner : null;
     }
 
     /** EDT: owns the forms that floated while the scene started. */

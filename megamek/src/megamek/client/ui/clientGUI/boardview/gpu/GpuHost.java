@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Rectangle;
-import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationListener;
@@ -15,7 +14,6 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.util.ScreenFit;
@@ -31,17 +29,10 @@ import org.lwjgl.glfw.GLFW;
  * <p>Scenes are asked for on any thread and switch on the GPU thread, between frames: the old scene's listener is
  * paused and disposed, the shared OpenGL state is reset, and the new scene's listener is created and sized. A scene
  * that fails ends with the failure; the window stays for the next scene.</p>
- *
- * <p>The window can dim the scene and ignore its input while a Swing window shows inset over it, as the game lobby
- * does ({@link #dim}).</p>
  */
 public final class GpuHost {
     private static final MMLogger LOGGER = MMLogger.create(GpuHost.class);
-    /** How long the dim layer takes to fade in or out, in seconds. */
-    private static final float DIM_FADE = 0.15f;
-    /** How dark the dim layer is at full strength. */
-    private static final float DIM_ALPHA = 0.6f;
-    /** Frames between saves of the window's bounds; following the window for an overlay is every frame. */
+    /** Frames between saves of the window's bounds. */
     private static final int BOUNDS_SAVE_FRAMES = 15;
 
     /** What runs in the window. The callbacks other than {@link #ended} run on the GPU thread. */
@@ -86,9 +77,6 @@ public final class GpuHost {
     private static volatile boolean everOpened;
     /** The window's client area in GLFW screen coordinates, followed every frame; null while it is closed. */
     private static volatile Rectangle clientBounds;
-    private static volatile Consumer<Rectangle> boundsWatcher;
-    private static volatile boolean dimmed;
-    private static volatile Runnable dimClicked;
 
     /** Written under {@link #LOCK} by the GPU thread: the scene shown now. */
     private static volatile Scene current;
@@ -215,40 +203,6 @@ public final class GpuHost {
         return clientBounds;
     }
 
-    /**
-     * Any thread: {@code watcher} hears, on the Swing thread, each new client area of the window in GLFW screen
-     * coordinates, starting with the current one; null stops it.
-     */
-    static void watchBounds(Consumer<Rectangle> watcher) {
-        boundsWatcher = watcher;
-        Rectangle bounds = clientBounds;
-        if (watcher != null && bounds != null) {
-            SwingUtilities.invokeLater(() -> {
-                if (boundsWatcher == watcher) {
-                    watcher.accept(bounds);
-                }
-            });
-        }
-    }
-
-    /**
-     * Any thread: dims the scene and ignores its input while a Swing window shows over it, or brings it back.
-     * {@code clicked} runs on the Swing thread when the dimmed scene is clicked.
-     */
-    static void dim(boolean dim, Runnable clicked) {
-        dimClicked = clicked;
-        dimmed = dim;
-        post(() -> {
-            if (dim && listener != null) {
-                // Keys held as the scene dims would otherwise stay held
-                listener.pause();
-            }
-        });
-    }
-
-    static boolean isDimmed() {
-        return dimmed;
-    }
 
     /** Any thread: brings the window to the front and gives it the keyboard. */
     static void focus() {
@@ -428,8 +382,8 @@ public final class GpuHost {
     }
 
     /**
-     * Follows the window as the user moves, resizes or maximizes it: the client area for an overlay every frame, and
-     * the bounds to save a few times a second. The normal bounds update only while the window is neither maximized nor
+     * Follows the window as the user moves, resizes or maximizes it: its client area every frame, and the bounds to
+     * save a few times a second. The normal bounds update only while the window is neither maximized nor
      * minimized, so a maximized window keeps the size it restores to, and a minimized one does not save the far-off
      * position Windows reports for it.
      */
@@ -446,17 +400,8 @@ public final class GpuHost {
         int[] height = new int[1];
         GLFW.glfwGetWindowSize(handle, width, height);
         Rectangle client = new Rectangle(window.getPositionX(), window.getPositionY(), width[0], height[0]);
-        if (!client.equals(clientBounds)) {
-            clientBounds = client;
-            Consumer<Rectangle> watcher = boundsWatcher;
-            if (watcher != null) {
-                SwingUtilities.invokeLater(() -> {
-                    if (boundsWatcher == watcher) {
-                        watcher.accept(client);
-                    }
-                });
-            }
-        }
+        clientBounds = client;
+
         // Fullscreen keeps the windowed bounds it returns to, which are also what the next start opens.
         if (graphics.isFullscreen() || ++framesSinceSave < BOUNDS_SAVE_FRAMES) {
             return;
@@ -477,17 +422,13 @@ public final class GpuHost {
 
     /** The window's listener: hands each frame to the scene and switches scenes between frames. */
     private static final class Root implements ApplicationListener {
-        private ShapeRenderer shapes;
-        /** The dim layer's strength, from 0 (none) to 1. */
-        private float dim;
-        /** The scene's own input, which {@link #GUARD} passes events to unless the scene is dimmed. */
+        /** The scene's own input, which {@link #GUARD} passes events to. */
         private static InputProcessor sceneInput;
         private static final InputProcessor GUARD = new Guard();
 
         @Override
         public void create() {
             application = (Lwjgl3Application) Gdx.app;
-            shapes = new ShapeRenderer();
         }
 
         @Override
@@ -531,7 +472,6 @@ public final class GpuHost {
                 Gdx.gl.glClearColor(.045f, .065f, .075f, 1);
                 Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
             }
-            drawDim();
             guardInput();
         }
 
@@ -587,23 +527,6 @@ public final class GpuHost {
             }
         }
 
-        /** The scene darkened under a Swing window, fading in and out. */
-        private void drawDim() {
-            float step = Gdx.graphics.getDeltaTime() / DIM_FADE;
-            dim = dimmed ? Math.min(1, dim + step) : Math.max(0, dim - step);
-            if (dim <= 0) {
-                return;
-            }
-            resetGl();
-            Gdx.gl.glEnable(GL20.GL_BLEND);
-            Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-            shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-            shapes.begin(ShapeRenderer.ShapeType.Filled);
-            shapes.setColor(0, 0, 0, DIM_ALPHA * dim);
-            shapes.rect(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-            shapes.end();
-            Gdx.gl.glDisable(GL20.GL_BLEND);
-        }
 
         /** Keeps the scene's input behind the guard, whichever processor the scene set last. */
         private void guardInput() {
@@ -633,13 +556,12 @@ public final class GpuHost {
             if (current != null) {
                 stop(null);
             }
-            shapes.dispose();
         }
 
-        /** Passes input to the scene unless it is dimmed; a click on the dimmed scene goes to the window over it. */
+        /** Passes input to the scene, whichever processor it set last. */
         private static final class Guard extends InputAdapter {
             private InputProcessor target() {
-                return dimmed ? null : sceneInput;
+                return sceneInput;
             }
 
             @Override
@@ -662,14 +584,9 @@ public final class GpuHost {
 
             @Override
             public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-                if (dimmed) {
-                    Runnable clicked = dimClicked;
-                    if (clicked != null) {
-                        SwingUtilities.invokeLater(clicked);
-                    }
-                    return true;
-                }
-                return sceneInput != null && sceneInput.touchDown(screenX, screenY, pointer, button);
+                InputProcessor target = target();
+                return target != null && target.touchDown(screenX, screenY, pointer, button);
+
             }
 
             @Override
