@@ -1106,11 +1106,13 @@ value whose `onRemove` runs after the chip leaves its parent (`TagChip.removeTag
 for it.
 
 **libGDX.** `UiKit.chip(text, tone, true)` is the status chip: `Tone.OK`, `WARN` and `BAD` get the check, warning and
-error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip. A
+error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip;
+`UiKit.edgeChip(text, edge)` is the status chip without an icon, edged in any `token-chip-*` frame (the lobby's sides).
+Both set their text in upper case, as the `overline` role in either [presentation](#presentation-mode). A
 button in a token style (`button-*`) draws `UiButton.badge` as the count badge, in the `token-badge` face and frame
 with its ring in `surface.panel`, and `UiButton.dot` as the dot; hud-v3's buttons keep the amber pill. About 25 calls in
-the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips, in capitals (the sentence case
-question is open for the whole HUD). hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
+the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips (`UiKit.chip(text, tone)`), also
+in capitals. hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
 they take the filter chip's look: `token-pill`, `token-pill-over` and `token-pill-on` in `GpuBoardSkin`, with the
 check before the target's letter square when on.
 

@@ -68,6 +68,12 @@ public final class UiKit {
         }
     }
 
+    /**
+     * The text role whose case token chips follow: tokens-v0 cases chips and badges with the {@code overline} tags,
+     * upper case in both the app and the game presentation.
+     */
+    static final String CHIP_CASE = "overline";
+
     /** The skin the widgets are built from: a UiTheme's, or one that a view's own skin composes with it. */
     public final Skin skin;
     private final Texture white;
@@ -804,7 +810,7 @@ public final class UiKit {
     /**
      * A chip in hud-v3's look, or with {@code token} Token v0's status chip: OK, WARN and BAD with their status icon
      * and a 1px edge in the status color over text.primary, NORMAL the neutral chip with a border.control edge and
-     * text.secondary; small type, sentence case.
+     * text.secondary; small type, in upper case as the overline in either presentation.
      */
     public Actor chip(String text, Tone tone, boolean token) {
         if (!token) {
@@ -838,7 +844,8 @@ public final class UiKit {
 
     /**
      * The status chip's geometry: {@code icon.sm} plus {@code xxs} above and below, 20 high whatever the type's line
-     * height; {@code xs} before an icon or {@code md} before the text, {@code md} after it; small type.
+     * height; {@code xs} before an icon or {@code md} before the text, {@code md} after it; small type, cased as
+     * {@link #CHIP_CASE}.
      */
     private Table tokenChip(String frame, String icon, String iconRole, String text, String textRole) {
         DesignTokens tokens = DesignTokens.shipped();
@@ -852,7 +859,7 @@ public final class UiKit {
         if (icon != null) {
             chip.add(icon(icon, iconSize, UiTheme.tokenColor(iconRole))).size(iconSize).padRight(xs);
         }
-        chip.add(typeLabel(text, "small", textRole)).height(iconSize);
+        chip.add(typeLabel(cased(CHIP_CASE, text), "small", textRole)).height(iconSize);
         return chip;
     }
 
