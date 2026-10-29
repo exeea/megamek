@@ -890,6 +890,24 @@ public final class UiKit {
     }
 
     /**
+     * A compact whole-number stepper ({@link UiStepper}): − {@code value} +, within {@code min} and {@code max}.
+     */
+    public UiStepper stepper(int value, int min, int max) {
+        return new UiStepper(this, value, min, max);
+    }
+
+    /**
+     * A filter chip ({@link UiFilterChip}): the status chip's geometry and type, toggling on a click; on, it fills in
+     * the accent's pressed tint and a check leads its text. The view reads {@code isChecked()} on its change.
+     */
+    public UiFilterChip filterChip(String text) {
+        float iconSize = DesignTokens.shipped().size().get("icon.sm");
+        return new UiFilterChip(skin, icon("check", iconSize, UiTheme.tokenColor("accent.primary")),
+              typeLabel(cased(CHIP_CASE, text), "small", "text.secondary"), iconSize, space("xxs"), space("xs"),
+              space("md"));
+    }
+
+    /**
      * The status chip's geometry: {@code icon.sm} plus {@code xxs} above and below, 20 high whatever the type's line
      * height; {@code xs} before an icon or {@code md} before the text, {@code md} after it; small type, cased as
      * {@link #CHIP_CASE}.

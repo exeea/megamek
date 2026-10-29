@@ -1697,6 +1697,11 @@ public final class UiTheme implements Disposable {
      * status color under the pointer, filled pressed or checked (lit).
      */
     public static final String TOKEN_CHIP_BUTTON = "token-chip-button-";
+    /**
+     * The Button style of a filter chip ({@link UiFilterChip}): the neutral chip at rest, washed under the pointer, and
+     * filled in the accent's pressed tint with its accent edge while on.
+     */
+    public static final String TOKEN_FILTER_CHIP = "token-filter-chip";
     /** The prefix of a token toast's card, followed by the level's name in lower case. */
     public static final String TOKEN_TOAST = "token-toast-";
 
@@ -1733,6 +1738,13 @@ public final class UiTheme implements Disposable {
             acting.checkedOver = acting.down;
             skin.add(TOKEN_CHIP_BUTTON + tone[0], acting);
         }
+        Button.ButtonStyle filter = new Button.ButtonStyle();
+        filter.up = skin.getDrawable(TOKEN_CHIP + "neutral");
+        filter.over = skin.getDrawable(TOKEN_CHIP + "neutral-over");
+        filter.down = skin.getDrawable(TOKEN_CHIP + "accent-lit");
+        filter.checked = filter.down;
+        filter.checkedOver = filter.down;
+        skin.add(TOKEN_FILTER_CHIP, filter);
 
         // The badge's ring is drawn inside its box, so the box is the badge plus the ring on each side
         float ring = tokens.space().get("xxs");
