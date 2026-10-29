@@ -7,7 +7,7 @@ import java.util.Objects;
 import jakarta.annotation.Nullable;
 
 /**
- * One entry of a menu read from the Swing lobby, such as its unit menu, for a view that draws its own menus: an item,
+ * One entry of a menu built from the game, such as the unit menu, for a view that draws its own menus: an item,
  * a submenu with its {@link #children()}, or a separator. The view hands the chosen item back by its path of indices.
  *
  * @param label     the entry's text; empty for a separator

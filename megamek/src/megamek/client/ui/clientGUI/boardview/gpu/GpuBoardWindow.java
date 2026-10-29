@@ -1115,8 +1115,8 @@ public final class GpuBoardWindow {
                     browser.refreshBoards();
                 }
                 ClientGUI client = ClientGUI.forFrame(owner);
-                if (client != null && client.chatlounge != null) {
-                    client.chatlounge.boardEditorClosed(editor.lastSavedPath(), editor.lastSaveFromAssembledPreview());
+                if (client != null) {
+                    client.boardEditorClosed(editor.lastSavedPath(), editor.lastSaveFromAssembledPreview());
                     break;
                 }
             } catch (RuntimeException failure) {

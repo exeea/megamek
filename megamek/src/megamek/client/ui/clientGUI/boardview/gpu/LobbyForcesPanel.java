@@ -55,8 +55,7 @@ import megamek.client.ui.gdx.UiTheme;
  * unit only its rough description, as the Swing unit table does.
  *
  * <p>A click selects a card, Ctrl adds or removes one and Shift a run of them; a right click or a card's ⋮ opens the
- * Swing lobby's unit menu for the selection, read through the window, so its items and their rules are the Swing
- * lobby's. A double click configures an editable unit. In the formations, units and formations are dragged onto a
+ * unit menu for the selection, which the window builds ({@link megamek.client.lobby.LobbyUnitMenu}). A double click configures an editable unit. In the formations, units and formations are dragged onto a
  * formation, onto a unit in one, or onto the strip that shows at the end to leave their formation, as in the Swing force
  * tree; the card that would take the drop rises under an accent edge.</p>
  */
@@ -67,7 +66,7 @@ final class LobbyForcesPanel {
     /** The deepest menu: the unit menu and its submenus. */
     private static final int MENU_LEVELS = 5;
 
-    /** The forces column's commands that the window runs through the Swing lobby. */
+    /** The forces column's commands that the window runs, most through a Swing dialog. */
     enum Command {
         ADD_UNIT, RANDOM_ARMY, LOAD_LIST, SAVE_LIST, PRINT_LIST, NAMES, SKILLS, C3, NEW_FORMATION
     }

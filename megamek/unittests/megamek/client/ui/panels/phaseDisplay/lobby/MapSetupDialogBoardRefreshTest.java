@@ -47,11 +47,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
-class ChatLoungeBoardRefreshTest {
+class MapSetupDialogBoardRefreshTest {
     @TempDir
     Path temporary;
     private File previousBoards;
-    private ChatLounge lounge;
+    private MapSetupDialog lounge;
     private Client client;
     private Game game;
 
@@ -62,10 +62,10 @@ class ChatLoungeBoardRefreshTest {
         client = mock(Client.class);
         game = new Game();
         game.setPhase(GamePhase.LOUNGE);
-        lounge = mock(ChatLounge.class);
+        lounge = mock(MapSetupDialog.class);
         when(lounge.client()).thenReturn(client);
         when(lounge.game()).thenReturn(game);
-        doCallRealMethod().when(lounge).boardEditorClosed(any(), anyBoolean());
+        doCallRealMethod().when(lounge).editorSaved(any(), anyBoolean());
         lounge.mapSettings = MapSettings.getInstance();
         lounge.mapSettings.setBoardSize(2, 2);
         lounge.mapSettings.setMapSize(2, 1);
@@ -85,7 +85,7 @@ class ChatLoungeBoardRefreshTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        ChatLounge.ImageLoader loader = field("loader");
+        MapSetupDialog.ImageLoader loader = field("loader");
         loader.cancel(true);
         Configuration.setBoardsDir(previousBoards);
     }
@@ -93,8 +93,8 @@ class ChatLoungeBoardRefreshTest {
     @Test
     void savedSelectedSheetKeepsAssemblyAndRequestsServerReload() throws Exception {
         Path saved = save("existing.board2", 2, 2);
-        ChatLounge.ImageLoader previous = field("loader");
-        SwingUtilities.invokeAndWait(() -> lounge.boardEditorClosed(saved, false));
+        MapSetupDialog.ImageLoader previous = field("loader");
+        SwingUtilities.invokeAndWait(() -> lounge.editorSaved(saved, false));
 
         ArgumentCaptor<MapSettings> request = ArgumentCaptor.forClass(MapSettings.class);
         verify(client).sendMapSettings(request.capture());
@@ -133,7 +133,7 @@ class ChatLoungeBoardRefreshTest {
         session.save(saved);
 
         SwingUtilities.invokeAndWait(() ->
-              lounge.boardEditorClosed(session.lastSavedPath(), session.lastSaveFromAssembledPreview()));
+              lounge.editorSaved(session.lastSavedPath(), session.lastSaveFromAssembledPreview()));
         ArgumentCaptor<MapSettings> request = ArgumentCaptor.forClass(MapSettings.class);
         verify(client).sendMapSettings(request.capture());
         Board reloaded = ServerBoardHelper.getPossibleGameBoard(request.getValue(), false);
@@ -148,7 +148,7 @@ class ChatLoungeBoardRefreshTest {
     void saveAsSelectsSavedDocumentSizeAndServerScanIncludesTheNewMap() throws Exception {
         save("existing.board2", 2, 2);
         Path saved = save("new map.board2", 3, 4);
-        SwingUtilities.invokeAndWait(() -> lounge.boardEditorClosed(saved, false));
+        SwingUtilities.invokeAndWait(() -> lounge.editorSaved(saved, false));
 
         ArgumentCaptor<MapSettings> request = ArgumentCaptor.forClass(MapSettings.class);
         verify(client).sendMapSettings(request.capture());
@@ -168,7 +168,7 @@ class ChatLoungeBoardRefreshTest {
         Path saved = temporary.resolve("outside.board2");
         BoardFile.save(Board.createEmptyBoard(3, 4), saved);
         MapSettings settings = MapSettings.getInstance(lounge.mapSettings);
-        assertSame(settings, ChatLounge.settingsForSavedBoard(settings, saved, true));
+        assertSame(settings, MapSetupDialog.settingsForSavedBoard(settings, saved, true));
         assertEquals(lounge.mapSettings.getBoardsSelectedVector(), settings.getBoardsSelectedVector());
         assertEquals(new BoardDimensions(2, 2), settings.getBoardSize());
     }
@@ -176,9 +176,9 @@ class ChatLoungeBoardRefreshTest {
     @Test
     void finishedOldThumbnailCannotRestoreStaleImageOrValidationFlags() throws Exception {
         Path saved = save("existing.board2", 2, 2);
-        ChatLounge.ImageLoader previous = field("loader");
-        SwingUtilities.invokeAndWait(() -> lounge.boardEditorClosed(saved, false));
-        var prepare = ChatLounge.ImageLoader.class.getDeclaredMethod("prepareImage", String.class);
+        MapSetupDialog.ImageLoader previous = field("loader");
+        SwingUtilities.invokeAndWait(() -> lounge.editorSaved(saved, false));
+        var prepare = MapSetupDialog.ImageLoader.class.getDeclaredMethod("prepareImage", String.class);
         prepare.setAccessible(true);
         BufferedImage image = new BufferedImage(8, 8, BufferedImage.TYPE_INT_RGB);
         try (var minimaps = mockStatic(MinimapPanel.class)) {
@@ -187,7 +187,7 @@ class ChatLoungeBoardRefreshTest {
             assertTrue(this.<Map<?, ?>>field("baseImages").isEmpty());
             assertTrue(this.<List<?>>field("invalidBoards").isEmpty());
             assertTrue(this.<List<?>>field("serverBoards").isEmpty());
-            ChatLounge.ImageLoader current = field("loader");
+            MapSetupDialog.ImageLoader current = field("loader");
             assertSame(image, prepare.invoke(current, "/existing.board2"));
             assertSame(image, this.<Map<String, Image>>field("baseImages").get("/existing.board2"));
         }
@@ -198,14 +198,11 @@ class ChatLoungeBoardRefreshTest {
 
     @Test
     void noSaveOrNoLongerInLobbyDoesNotReload() throws Exception {
-        ChatLounge.ImageLoader previous = field("loader");
-        SwingUtilities.invokeAndWait(() -> lounge.boardEditorClosed(null, false));
+        MapSetupDialog.ImageLoader previous = field("loader");
+        SwingUtilities.invokeAndWait(() -> lounge.editorSaved(null, false));
         game.setPhase(GamePhase.MOVEMENT);
         Path saved = save("existing.board2", 2, 2);
-        SwingUtilities.invokeAndWait(() -> lounge.boardEditorClosed(saved, false));
-        game.setPhase(GamePhase.LOUNGE);
-        when(lounge.isIgnoringEvents()).thenReturn(true);
-        SwingUtilities.invokeAndWait(() -> lounge.boardEditorClosed(saved, false));
+        SwingUtilities.invokeAndWait(() -> lounge.editorSaved(saved, false));
         verify(client, never()).sendMapSettings(any());
         assertFalse(previous.isCancelled());
     }
@@ -217,14 +214,14 @@ class ChatLoungeBoardRefreshTest {
     }
 
     private void field(String name, Object value) throws ReflectiveOperationException {
-        var field = ChatLounge.class.getDeclaredField(name);
+        var field = MapSetupDialog.class.getDeclaredField(name);
         field.setAccessible(true);
         field.set(lounge, value);
     }
 
     @SuppressWarnings("unchecked")
     private <T> T field(String name) throws ReflectiveOperationException {
-        var field = ChatLounge.class.getDeclaredField(name);
+        var field = MapSetupDialog.class.getDeclaredField(name);
         field.setAccessible(true);
         return (T) field.get(lounge);
     }

@@ -32,16 +32,15 @@
  */
 package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts by unit ID. */
 public class IDSorter extends MekTableSorter {
 
     /** A Lobby Mek Table sorter that sorts by unit ID. */
     public IDSorter(Sorting sorting) {
-        super(I18n.getTextAt(RESOURCE_BUNDLE, "IDSorter.DisplayName"), MekTableModel.COL_UNIT, sorting);
+        super(I18n.getTextAt(RESOURCE_BUNDLE, "IDSorter.DisplayName"), sorting);
     }
 
     @Override

@@ -50,7 +50,7 @@ class MapListPopup {
     static final String MLP_BOARD = "BOARD";
     static final String MLP_SURPRISE = "SURPRISE";
 
-    static ScalingPopup mapListPopup(List<String> boards, int numButtons, ActionListener listener, ChatLounge lobby,
+    static ScalingPopup mapListPopup(List<String> boards, int numButtons, ActionListener listener, MapSetupDialog lobby,
           boolean enableRotation) {
 
         if (boards.isEmpty()) {

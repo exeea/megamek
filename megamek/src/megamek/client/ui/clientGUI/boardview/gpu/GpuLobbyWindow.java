@@ -22,7 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import javax.swing.JFrame;
-import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -42,6 +41,8 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.LobbyUnitMenu;
+import megamek.client.lobby.LobbyUnitOrder;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
@@ -50,8 +51,10 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
 import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
 import megamek.client.ui.enums.DialogResult;
-import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
+import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.common.Player;
@@ -84,15 +87,15 @@ import megamek.server.ServerBoardHelper;
  * ({@link GpuLobbyScreen}) as a {@link LobbySnapshot}, and runs the screen's actions on the Swing thread, where the
  * game is.
  *
- * <p>Ready runs the Swing lobby's own ready step ({@code ChatLounge.ready()}), whose questions ask through
+ * <p>Ready runs the lobby's ready step ({@link SwingLobbyServices#ready()}), whose questions ask through
  * {@code SwingLobbyPrompts}: Swing dialogs owned by the hidden client frame. While a red warning blocks readying, the
  * top bar lights its warnings instead of that step's blocked dialog. This scene owns the dialogs natively, as the board
  * and the start screen own theirs, so they stay in front of the window, and a modal one blocks the screen's input.
  * Leave and the window's close box run the client's own exit ({@link ClientGUI#handleExit}), with its save question.
  * </p>
  *
- * <p>When the scene fails, for example because OpenGL can't start, the client's Swing frame shows with the Swing lobby
- * instead.</p>
+ * <p>When the scene fails, for example because OpenGL can't start, an error says so and the client leaves the game,
+ * back to the start screen.</p>
  */
 public final class GpuLobbyWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuLobbyWindow.class);
@@ -248,8 +251,8 @@ public final class GpuLobbyWindow {
     private MapSettings zonesOf;
     private Collection<Integer> customZones = List.of();
     private PlayerSettingsDialog playerSettings;
-    /** EDT: the Swing unit menu whose items the screen shows, until one is chosen. */
-    private JPopupMenu unitMenu;
+    /** EDT: the unit menu whose items the screen shows, until one is chosen. */
+    private LobbyUnitMenu unitMenu;
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
     private final Set<String> spriteKeys = new HashSet<>();
     /** The catalogue units whose sprites the Requisition asked for, the latest first, and the thread that draws them. */
@@ -396,10 +399,11 @@ public final class GpuLobbyWindow {
         }
         LobbySnapshot read;
         try {
+            SwingLobbyServices services = SwingLobbyServices.of(gui);
+            services.cleanUnits();
             ChatterBox chat = gui.getChatterBox();
             read = LobbySnapshot.of(gui::getClient, chat == null ? List.of() : chat.lines(LobbySnapshot.CHAT_LINES),
-                  customZones(), unitOrder(), gui.chatlounge == null ? LobbyBattlefield.AutoResolve.DEFAULT
-                        : gui.chatlounge.autoResolveSettings());
+                  customZones(), unitOrder(), services.autoResolveSettings());
             bakeMap();
         } catch (RuntimeException failure) {
             LOGGER.error(failure, "The lobby could not read the game");
@@ -431,13 +435,10 @@ public final class GpuLobbyWindow {
             if (closing) {
                 return;
             }
-            if (gui.chatlounge == null) {
-                return;
-            }
             Player local = gui.getClient().getLocalPlayer();
             boolean readying = local != null && !local.isDone();
             // A red warning blocks readying: the bar lights them, and their tooltips say why, instead of a dialog
-            if (readying && !gui.chatlounge.lobbyCommands().readyBlockers().isEmpty()) {
+            if (readying && !gui.lobbyCommands().readyBlockers().isEmpty()) {
                 GpuHost.post(() -> {
                     GpuLobbyScreen shown = screen;
                     if (shown != null) {
@@ -446,7 +447,7 @@ public final class GpuLobbyWindow {
                 });
                 return;
             }
-            gui.chatlounge.ready();
+            SwingLobbyServices.of(gui).ready();
             if (local != null && local.isDone() != readying) {
                 // The server echoes the state a moment later; until then the bar and the card show it at once
                 pendingReady = readying;
@@ -511,10 +512,10 @@ public final class GpuLobbyWindow {
     /** Any thread: runs {@code action} with the player actions on the Swing thread, then shows what changed. */
     private void players(Consumer<LobbyPlayerController> action) {
         SwingUtilities.invokeLater(() -> {
-            if (closing || gui.chatlounge == null) {
+            if (closing) {
                 return;
             }
-            action.accept(new LobbyPlayerController(gui::getClient, gui.chatlounge.lobbyCommands(), dialogs));
+            action.accept(new LobbyPlayerController(gui::getClient, gui.lobbyCommands(), dialogs));
             queueRefresh();
         });
     }
@@ -569,29 +570,27 @@ public final class GpuLobbyWindow {
     /** Any thread: runs {@code action} with the unit and formation actions on the Swing thread, then shows the result. */
     private void forces(Consumer<LobbyForcesController> action) {
         SwingUtilities.invokeLater(() -> {
-            if (closing || gui.chatlounge == null) {
+            if (closing) {
                 return;
             }
-            action.accept(new LobbyForcesController(gui::getClient, gui.chatlounge.lobbyCommands()));
+            action.accept(new LobbyForcesController(gui::getClient, gui.lobbyCommands()));
             refreshSoon();
         });
     }
 
-    /** Any thread: runs one of the forces column's commands through the Swing lobby, as its buttons do. */
+    /** Any thread: runs one of the forces column's commands, most of which open a Swing dialog. */
     void forcesCommand(LobbyForcesPanel.Command command) {
         SwingUtilities.invokeLater(() -> {
-            if (closing || gui.chatlounge == null) {
+            if (closing) {
                 return;
             }
+            SwingLobbyServices services = SwingLobbyServices.of(gui);
             switch (command) {
-                case ADD_UNIT -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.ADD_UNIT, null);
-                case RANDOM_ARMY -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.RANDOM_ARMY, null);
-                case SKILLS -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.SKILLS, null);
-                case NAMES -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.NAMES, null);
-                case C3 -> gui.chatlounge.forcesCommand(ChatLounge.ForcesCommand.C3, null);
-                case LOAD_LIST, SAVE_LIST, PRINT_LIST -> gui.chatlounge.forcesCommand(
-                      ChatLounge.ForcesCommand.valueOf(command.name()), gui.getClient().getLocalPlayer());
-                case NEW_FORMATION -> gui.chatlounge.lobbyCommands().forceCreateEmpty();
+                case ADD_UNIT, RANDOM_ARMY, SKILLS, NAMES, C3 -> services.forcesCommand(
+                      SwingLobbyServices.ForcesCommand.valueOf(command.name()), null);
+                case LOAD_LIST, SAVE_LIST, PRINT_LIST -> services.forcesCommand(
+                      SwingLobbyServices.ForcesCommand.valueOf(command.name()), gui.getClient().getLocalPlayer());
+                case NEW_FORMATION -> gui.lobbyCommands().forceCreateEmpty();
             }
             refreshSoon();
         });
@@ -602,10 +601,10 @@ public final class GpuLobbyWindow {
     /** Any thread: adds {@code quantity} copies of {@code unit} for {@code ownerId}, as the unit selector does. */
     void requisitionAdd(MekSummary unit, int quantity, int ownerId, RequisitionSkills skills) {
         SwingUtilities.invokeLater(() -> {
-            if (closing || gui.chatlounge == null) {
+            if (closing) {
                 return;
             }
-            new LobbyRequisitionController(gui::getClient, gui.chatlounge.lobbyCommands(),
+            new LobbyRequisitionController(gui::getClient, gui.lobbyCommands(),
                   LobbyRequisitionController.FILES).add(unit, quantity, ownerId, skills);
             refreshSoon();
         });
@@ -614,10 +613,10 @@ public final class GpuLobbyWindow {
     /** Any thread: takes the unit {@code id}, which the Requisition added, back out of the game. */
     void requisitionRemove(int id) {
         SwingUtilities.invokeLater(() -> {
-            if (closing || gui.chatlounge == null) {
+            if (closing) {
                 return;
             }
-            new LobbyRequisitionController(gui::getClient, gui.chatlounge.lobbyCommands(),
+            new LobbyRequisitionController(gui::getClient, gui.lobbyCommands(),
                   LobbyRequisitionController.FILES).remove(id);
             refreshSoon();
         });
@@ -692,25 +691,25 @@ public final class GpuLobbyWindow {
     /** Any thread: runs {@code action} with the battlefield actions on the Swing thread, then shows the result. */
     private void battlefield(Consumer<LobbyBattlefieldController> action) {
         SwingUtilities.invokeLater(() -> {
-            if (closing || gui.chatlounge == null) {
+            if (closing) {
                 return;
             }
-            action.accept(new LobbyBattlefieldController(gui::getClient, lounge(gui.chatlounge)));
+            action.accept(new LobbyBattlefieldController(gui::getClient, lounge(SwingLobbyServices.of(gui))));
             queueRefresh();
         });
     }
 
-    /** The Swing lobby's battlefield controls, with the board editor as the start screen opens it. */
-    private LobbyBattlefieldController.Lounge lounge(ChatLounge lounge) {
+    /** The battlefield's Swing dialogs and the map setup, with the board editor as the start screen opens it. */
+    private LobbyBattlefieldController.Lounge lounge(SwingLobbyServices lounge) {
         return new LobbyBattlefieldController.Lounge() {
             @Override
             public void command(LobbyBattlefieldController.Command command) {
-                lounge.battlefieldCommand(ChatLounge.BattlefieldCommand.valueOf(command.name()));
+                lounge.battlefieldCommand(SwingLobbyServices.BattlefieldCommand.valueOf(command.name()));
             }
 
             @Override
             public void mapSetup() {
-                lounge.openMapSetup();
+                MapSetupDialog.open(gui);
             }
 
             @Override
@@ -735,12 +734,12 @@ public final class GpuLobbyWindow {
         };
     }
 
-    /** Any thread: runs one of the battlefield column's actions through the Swing lobby, as its map tab does. */
+    /** Any thread: runs one of the battlefield column's actions. */
     void battlefieldCommand(LobbyBattlefieldController.Command command) {
         battlefield(controller -> controller.run(command));
     }
 
-    /** Any thread: sets the auto-resolve settings of the Swing lobby. */
+    /** Any thread: sets the lobby's auto-resolve settings. */
     void autoResolve(boolean chances, int runs, int threads) {
         battlefield(controller -> controller.autoResolve(chances, runs, threads));
     }
@@ -840,11 +839,11 @@ public final class GpuLobbyWindow {
         }
     }
 
-    /** Any thread: orders the units by the Swing unit table's order {@code index}. */
+    /** Any thread: orders the units by the order {@code index}. */
     void sortUnits(int index) {
         SwingUtilities.invokeLater(() -> {
-            if (!closing && gui.chatlounge != null) {
-                gui.chatlounge.sortUnits(index);
+            if (!closing) {
+                SwingLobbyServices.of(gui).unitOrder().select(index);
                 queueRefresh();
             }
         });
@@ -861,12 +860,12 @@ public final class GpuLobbyWindow {
     }
 
     /**
-     * Any thread: reads the Swing lobby's unit menu for these units and formations and sends its items to the screen;
-     * the menu stays here until one is chosen.
+     * Any thread: builds the unit menu for these units and formations and sends its items to the screen; the menu stays
+     * here until one is chosen.
      */
     void unitMenu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
         SwingUtilities.invokeLater(() -> {
-            if (closing || gui.chatlounge == null) {
+            if (closing) {
                 return;
             }
             Game game = gui.getClient().getGame();
@@ -875,8 +874,8 @@ public final class GpuLobbyWindow {
                   .toList();
             List<LobbyMenuEntry> entries;
             try {
-                unitMenu = gui.chatlounge.unitMenu(entities, formations, formationsView);
-                entries = LobbySwingMenus.read(unitMenu);
+                unitMenu = LobbyUnitMenu.of(gui.getClient(), gui.lobbyCommands(), entities, formations, formationsView);
+                entries = unitMenu.entries();
             } catch (RuntimeException failure) {
                 LOGGER.error(failure, "The lobby could not read the unit menu");
                 unitMenu = null;
@@ -892,13 +891,14 @@ public final class GpuLobbyWindow {
         });
     }
 
-    /** Any thread: chooses the item at {@code path} of the unit menu last read, as clicking it in Swing would. */
+    /** Any thread: runs the item at {@code path} of the unit menu last built. */
     void chooseMenu(List<Integer> path) {
         SwingUtilities.invokeLater(() -> {
-            JPopupMenu menu = unitMenu;
+            LobbyUnitMenu menu = unitMenu;
             unitMenu = null;
-            if (!closing && menu != null) {
-                LobbySwingMenus.choose(menu, path);
+            String command = (menu == null) ? null : menu.command(path);
+            if (!closing && command != null) {
+                new SwingLobbyUnitActions(gui).run(command);
                 refreshSoon();
             }
         });
@@ -914,14 +914,12 @@ public final class GpuLobbyWindow {
         }
     }
 
-    /** EDT: the order of the units as the Swing unit table sorts them, and the orders it offers. */
+    /** EDT: the order of the units, and the orders offered. */
     private LobbyForces.Order unitOrder() {
-        if (gui.chatlounge == null) {
-            return LobbyForces.Order.NONE;
-        }
         try {
-            List<Integer> ids = gui.chatlounge.sortedUnits().stream().map(Entity::getId).toList();
-            return new LobbyForces.Order(ids, gui.chatlounge.unitSortNames(), gui.chatlounge.unitSortIndex());
+            LobbyUnitOrder order = SwingLobbyServices.of(gui).unitOrder();
+            List<Integer> ids = order.sorted().stream().map(Entity::getId).toList();
+            return new LobbyForces.Order(ids, order.names(), order.index());
         } catch (RuntimeException failure) {
             LOGGER.warn(failure, "The lobby could not read the unit order");
             return LobbyForces.Order.NONE;
@@ -1145,18 +1143,14 @@ public final class GpuLobbyWindow {
         if (failure == null && !replaced && gui.getClient().getGame().getPhase().isLounge()) {
             // Another scene took the window, such as the 3D preview; the lobby comes back when it closes
             displaced = gui;
-        } else if (gui.chatlounge != null) {
-            gui.chatlounge.closeMapSetup();
+        } else {
+            MapSetupDialog.close(gui);
         }
         if (failure != null && !replaced) {
-            LOGGER.error(failure, "The native lobby failed; the Swing lobby shows instead");
-            // The Swing lobby replaces the native window rather than standing beside the start screen
-            GpuHost.closeWhenIdle();
-            JFrame frame = gui.getFrame();
-            if (frame != null && frame.isDisplayable()) {
-                frame.setVisible(true);
-                frame.toFront();
-            }
+            LOGGER.error(failure, "The native lobby failed; the client leaves the game");
+            // MegaMek's own window that never opened can't show the start screen either; MekHQ's game returns to MekHQ
+            boolean exit = GpuHost.keepsOpen() && !GpuHost.everOpened();
+            SwingLobbyServices.sceneFailed(gui, failure, exit);
         }
     }
 

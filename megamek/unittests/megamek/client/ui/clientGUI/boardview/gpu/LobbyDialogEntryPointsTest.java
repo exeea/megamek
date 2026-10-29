@@ -17,18 +17,21 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Every Swing dialog the native lobby opens goes through {@link LobbyDialogs}: the lobby's own on its
- * {@link LobbyDialogs#parent()}, the lobby prompts' on the same client frame, and nothing else in the lobby watches the
- * toolkit or opens a dialog of its own.
+ * {@link LobbyDialogs#parent()}, the lobby prompts', services' and unit actions' on the same client frame, and nothing
+ * else in the lobby watches the toolkit or opens a dialog of its own.
  */
 class LobbyDialogEntryPointsTest {
     private static final Path GPU = Path.of("src/megamek/client/ui/clientGUI/boardview/gpu");
-    private static final Path PROMPTS = Path.of("src/megamek/client/ui/panels/phaseDisplay/lobby/SwingLobbyPrompts.java");
+    private static final Path SWING_LOBBY = Path.of("src/megamek/client/ui/panels/phaseDisplay/lobby");
+    private static final Path PROMPTS = SWING_LOBBY.resolve("SwingLobbyPrompts.java");
     /** A dialog or chooser made in the source, and its first argument. */
     private static final Pattern DIALOG = Pattern.compile("new (\\w*(?:Dialog|Chooser)\\w*)\\(\\s*([\\w.]*(?:\\(\\))?)");
     private static final Pattern OPTION_PANE = Pattern.compile("JOptionPane\\.show\\w+\\(\\s*([\\w.]*(?:\\(\\))?)");
     /** The owners a lobby dialog may take: the helper's parent, or the client, whose frame the dialog then uses. */
     private static final List<String> LOBBY_OWNERS = List.of("swingDialogs.parent()", "gui");
-    private static final List<String> PROMPT_OWNERS = List.of("frame()", "lobby.getClientGUI()");
+    private static final List<String> PROMPT_OWNERS = List.of("frame()", "clientGUI", "clientGUI.getFrame()");
+    /** A file chooser's first argument is its folder; it takes its owner as it shows. */
+    private static final Pattern FOLDER_CHOOSER = Pattern.compile("new JFileChooser\\(");
 
     @Test
     void theLobbysOwnDialogsUseTheOnePath() throws IOException {
@@ -65,8 +68,21 @@ class LobbyDialogEntryPointsTest {
         String source = Files.readString(PROMPTS);
         owners("SwingLobbyPrompts.java", source, DIALOG, 2, PROMPT_OWNERS, offenders);
         owners("SwingLobbyPrompts.java", source, OPTION_PANE, 1, PROMPT_OWNERS, offenders);
-        assertTrue(source.contains("return lobby.getClientGUI().getFrame();"));
+        assertTrue(source.contains("return clientGUI.getFrame();"));
         assertEquals(List.of(), offenders);
+    }
+
+    @Test
+    void theServicesAndUnitActionsDialogsUseTheClientFrame() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        for (String name : List.of("SwingLobbyServices.java", "SwingLobbyUnitActions.java")) {
+            String source = Files.readString(SWING_LOBBY.resolve(name));
+            owners(name, FOLDER_CHOOSER.matcher(source).replaceAll("new FolderChooser(frame(), "), DIALOG, 2,
+                  PROMPT_OWNERS, offenders);
+            owners(name, source, OPTION_PANE, 1, PROMPT_OWNERS, offenders);
+        }
+        // The lobby scene's failure shows after the window is gone, so its message stands on its own
+        assertEquals(List.of("SwingLobbyServices.java: JOptionPane.showMessageDialog(null"), offenders);
     }
 
     private static boolean lobbySource(Path file) {

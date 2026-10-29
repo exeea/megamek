@@ -32,8 +32,8 @@
  */
 package megamek.client.ui.dialogs.forceDisplay;
 
-import static megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel.DOT_SPACER;
 import static megamek.client.ui.util.UIUtil.CONNECTED_SIGN;
+import static megamek.client.ui.util.UIUtil.DOT_SPACER;
 import static megamek.client.ui.util.UIUtil.ECM_SIGN;
 import static megamek.client.ui.util.UIUtil.QUIRKS_SIGN;
 import static megamek.client.ui.util.UIUtil.UNCONNECTED_SIGN;

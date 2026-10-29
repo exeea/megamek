@@ -32,11 +32,10 @@
  */
 package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
 import megamek.common.options.IGameOptions;
 import megamek.common.options.OptionsConstants;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts by tonnage. */
 public class TonnageSorter extends MekTableSorter {
@@ -47,7 +46,7 @@ public class TonnageSorter extends MekTableSorter {
      * @param sorting The sorting direction (ascending or descending).
      */
     public TonnageSorter(Sorting sorting) {
-        super(I18n.getTextAt(MekTableSorter.RESOURCE_BUNDLE, "TonnageSorter.DisplayName"), MekTableModel.COL_UNIT,
+        super(I18n.getTextAt(MekTableSorter.RESOURCE_BUNDLE, "TonnageSorter.DisplayName"),
               sorting);
     }
 

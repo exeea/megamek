@@ -119,7 +119,7 @@ class LobbyForcePacketTest {
         return entity;
     }
 
-    /** Renames the lance on a copy of the forces, as LobbyActions.forceRename does on the client's copy. */
+    /** Renames the lance on a copy of the forces, as LobbyCommands.forceRename does on the client's copy. */
     private Force renamedLanceCopy(String newName) {
         Forces clientForces = serverGame.getForces().clone();
         clientForces.renameForce(newName, lanceId);

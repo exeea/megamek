@@ -13,10 +13,10 @@ import megamek.common.units.Entity;
 
 /**
  * The native lobby's unit and formation actions that its forces column runs itself, on the Swing thread: dropping
- * dragged units and formations, moving one up or down, configuring a unit, and deleting. They follow the Swing lobby's
- * force tree ({@code MekForceTreeTransferHandler}) and use its commands ({@link LobbyCommands}), whose checks refuse what
+ * dragged units and formations, moving one up or down, configuring a unit, and deleting. They follow the old Swing lobby's
+ * force tree's drop rules and use the lobby's commands ({@link LobbyCommands}), whose checks refuse what
  * the local player may not do. It needs neither OpenGL nor Swing components, so it can be tested on its own. The unit
- * menu itself is the Swing lobby's, read through {@link LobbySwingMenus}.
+ * menu itself is {@link megamek.client.lobby.LobbyUnitMenu}.
  */
 final class LobbyForcesController {
 

@@ -712,18 +712,18 @@ public class PlayerSettingsDialog extends AbstractButtonDialog {
         // Unit Munition Configuration
         String faction = getFactionCode();
         team.setFaction(faction);
-        if (clientgui.chatlounge != null) {
+        if (clientgui != null) {
             ArrayList<Entity> updateEntities = clientgui.getClient().getGame().getPlayerEntities(player, false);
 
             if (munitionTree != null && rp != null) {
                 rp.friendlyFaction = faction;
                 rp.binFillPercent = (rp.isPirate) ? TeamLoadOutGenerator.UNSET_FILL_RATIO : 1.0f;
                 // Clear any bomb assignments
-                LobbyMekPopupActions.resetBombChoices(clientgui, client.getGame(), updateEntities);
+                SwingLobbyUnitActions.resetBombChoices(clientgui, client.getGame(), updateEntities);
                 tlg.reconfigureEntities(updateEntities, faction, munitionTree, rp, null);
                 // Use sendUpdate because we want the Game to allow us to change on Bot's
                 // behalf.
-                clientgui.chatlounge.sendProxyUpdates(updateEntities, client.getLocalPlayer());
+                clientgui.lobbyCommands().sendProxyUpdates(updateEntities, client.getLocalPlayer());
             }
         }
 

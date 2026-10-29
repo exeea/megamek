@@ -32,18 +32,17 @@
  */
 package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
 import megamek.common.options.IGameOptions;
 import megamek.common.options.OptionsConstants;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts by BV. */
 public class BVSorter extends MekTableSorter {
 
     /** A Lobby Mek Table sorter that sorts by BV. */
     public BVSorter(Sorting sorting) {
-        super(I18n.getTextAt(RESOURCE_BUNDLE, "BVSorter.DisplayName"), MekTableModel.COL_BV, sorting);
+        super(I18n.getTextAt(RESOURCE_BUNDLE, "BVSorter.DisplayName"), sorting);
     }
 
     @Override

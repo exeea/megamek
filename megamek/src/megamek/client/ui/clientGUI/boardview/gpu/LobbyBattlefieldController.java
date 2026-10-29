@@ -8,9 +8,8 @@ import megamek.common.loaders.MapSettings;
 
 /**
  * The native lobby's battlefield actions, on the Swing thread: the map setup, the planetary conditions, the game
- * options, the victory conditions, the map's files and previews, and auto-resolve. Each runs as the Swing lobby's own
- * button does ({@link Lounge}), with its dialog and its checks; this controller refuses beforehand what the Swing lobby
- * disables, such as the planetary conditions in space. It needs neither OpenGL nor Swing components, so it can be
+ * options, the victory conditions, the map's files and previews, and auto-resolve. Each runs through the window's Swing dialogs
+ * ({@link Lounge}), with their checks; this controller refuses beforehand what may not run now, such as the planetary conditions in space. It needs neither OpenGL nor Swing components, so it can be
  * tested on its own.
  */
 final class LobbyBattlefieldController {
@@ -21,24 +20,24 @@ final class LobbyBattlefieldController {
         PREVIEW_3D, BOARD_EDITOR, RUN_AUTO_RESOLVE
     }
 
-    /** The Swing lobby's battlefield controls, which this controller runs. */
+    /** The battlefield's Swing dialogs and services, which this controller runs. */
     interface Lounge {
-        /** Runs the Swing lobby's button for {@code command}; never {@link Command#MAP_SETUP} or the editor. */
+        /** Runs {@code command}; never {@link Command#MAP_SETUP} or the editor. */
         void command(Command command);
 
-        /** Shows the Swing lobby's map tab in a window of its own. */
+        /** Shows the map setup dialog. */
         void mapSetup();
 
         /** Opens the board editor. */
         void boardEditor();
 
-        /** Sets the Swing lobby's auto-resolve settings; the values are within their bounds. */
+        /** Sets the lobby's auto-resolve settings; the values are within their bounds. */
         void autoResolve(boolean chances, int runs, int threads);
 
-        /** The Swing lobby's auto-resolve settings. */
+        /** The lobby's auto-resolve settings. */
         LobbyBattlefield.AutoResolve autoResolve();
 
-        /** Runs auto-resolve as the Swing lobby's button does. */
+        /** Runs auto-resolve. */
         void runAutoResolve();
     }
 

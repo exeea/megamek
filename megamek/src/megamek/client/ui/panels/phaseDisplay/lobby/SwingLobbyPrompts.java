@@ -15,6 +15,7 @@ import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyPrompts;
 import megamek.client.lobby.ReadyCheck;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.MMDialogs.MMConfirmDialog;
 import megamek.client.ui.dialogs.SBFStats.SBFStatsDialog;
@@ -31,17 +32,17 @@ import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.units.Entity;
 
-/** The Swing lobby's dialogs for the lobby commands, centered on the client GUI's frame. */
-class SwingLobbyPrompts implements LobbyPrompts {
+/** The lobby commands' Swing dialogs, centered on the client GUI's frame. */
+public class SwingLobbyPrompts implements LobbyPrompts {
 
-    private final ChatLounge lobby;
+    private final ClientGUI clientGUI;
 
     /** The tab of the single-unit configuration dialog that was last shown, to reopen it on the same tab. */
     private String cmdSelectedTab = null;
 
-    /** @param lobby the lobby; its client GUI is looked up only when a dialog is shown */
-    SwingLobbyPrompts(ChatLounge lobby) {
-        this.lobby = lobby;
+    /** @param clientGUI the client GUI that owns the dialogs */
+    public SwingLobbyPrompts(ClientGUI clientGUI) {
+        this.clientGUI = clientGUI;
     }
 
     @Override
@@ -56,7 +57,7 @@ class SwingLobbyPrompts implements LobbyPrompts {
 
     @Override
     public void readyBlocked(ReadyCheck.Blocker blocker) {
-        lobby.getClientGUI().doAlertDialog(blocker.title(), blocker.message());
+        clientGUI.doAlertDialog(blocker.title(), blocker.message());
     }
 
     @Override
@@ -85,7 +86,7 @@ class SwingLobbyPrompts implements LobbyPrompts {
 
     @Override
     public CustomizeResult customizeUnits(Client client, List<Entity> units, boolean editable) {
-        CustomMekDialog cmd = new CustomMekDialog(lobby.getClientGUI(), client, new ArrayList<>(units), editable);
+        CustomMekDialog cmd = new CustomMekDialog(clientGUI, client, new ArrayList<>(units), editable);
         cmd.setSize(new Dimension(GUIPreferences.getInstance().getCustomUnitWidth(),
               GUIPreferences.getInstance().getCustomUnitHeight()));
         cmd.setTitle(Messages.getString("ChatLounge.CustomizeUnits"));
@@ -101,7 +102,7 @@ class SwingLobbyPrompts implements LobbyPrompts {
     public CustomizeResult customizeUnit(Client client, Entity unit, boolean editable) {
         List<Entity> entities = new ArrayList<>();
         entities.add(unit);
-        CustomMekDialog cmd = new CustomMekDialog(lobby.getClientGUI(), client, entities, editable);
+        CustomMekDialog cmd = new CustomMekDialog(clientGUI, client, entities, editable);
         cmd.setSize(new Dimension(GUIPreferences.getInstance().getCustomUnitWidth(),
               GUIPreferences.getInstance().getCustomUnitHeight()));
         cmd.refreshOptions();
@@ -176,6 +177,6 @@ class SwingLobbyPrompts implements LobbyPrompts {
     }
 
     private JFrame frame() {
-        return lobby.getClientGUI().getFrame();
+        return clientGUI.getFrame();
     }
 }

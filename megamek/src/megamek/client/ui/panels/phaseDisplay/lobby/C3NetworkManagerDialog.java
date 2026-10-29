@@ -59,7 +59,9 @@ import javax.swing.tree.TreePath;
 import javax.swing.tree.TreeSelectionModel;
 
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.event.GameListenerAdapter;
@@ -76,7 +78,7 @@ import megamek.common.util.C3Util;
  * Configuration Diagram draws them (CR p.199): company node on top, lance masters and direct slaves below, slaves of
  * lance masters one level deeper. Masterless systems (C3i, NC3, Nova CEWS) show as flat member lists.
  *
- * <p>Actions apply immediately through {@link LobbyActions} - the same path as the right-click menu - so the server
+ * <p>Actions apply immediately through {@link LobbyCommands} - the same path as the right-click menu - so the server
  * and all clients stay in sync, and this dialog refreshes itself from entity update events.</p>
  */
 public class C3NetworkManagerDialog extends JDialog {
@@ -86,7 +88,7 @@ public class C3NetworkManagerDialog extends JDialog {
     private static final int PADDING = UIUtil.scaleForGUI(10);
     private static final int PADDING_SMALL = UIUtil.scaleForGUI(5);
 
-    private final ChatLounge lobby;
+    private final LobbyCommands commands;
     private final Game game;
     private final int localPlayerId;
 
@@ -162,8 +164,8 @@ public class C3NetworkManagerDialog extends JDialog {
     /** Masters the player dragged onto the network side to start a network; shown as seeds until connected. */
     private final Set<Integer> seededMasterIds = new HashSet<>();
 
-    public C3NetworkManagerDialog(ChatLounge lobby) {
-        this(lobby, List.of());
+    public C3NetworkManagerDialog(ClientGUI clientGUI) {
+        this(clientGUI, List.of());
     }
 
     /**
@@ -171,11 +173,11 @@ public class C3NetworkManagerDialog extends JDialog {
      * manager") continues where the player left off: unassigned units are selected in the roster, networked units
      * in the network tree.
      */
-    public C3NetworkManagerDialog(ChatLounge lobby, Collection<Entity> preselectedUnits) {
-        super(lobby.getClientGUI().getFrame(), Messages.getString("C3NetworkManagerDialog.title"), false);
-        this.lobby = lobby;
-        this.game = lobby.game();
-        this.localPlayerId = lobby.getClientGUI().getClient().getLocalPlayer().getId();
+    public C3NetworkManagerDialog(ClientGUI clientGUI, Collection<Entity> preselectedUnits) {
+        super(clientGUI.getFrame(), Messages.getString("C3NetworkManagerDialog.title"), false);
+        this.commands = clientGUI.lobbyCommands();
+        this.game = clientGUI.getClient().getGame();
+        this.localPlayerId = clientGUI.getClient().getLocalPlayer().getId();
         for (Entity unit : preselectedUnits) {
             initialSelectionIds.add(unit.getId());
         }
@@ -193,7 +195,7 @@ public class C3NetworkManagerDialog extends JDialog {
 
         setMinimumSize(UIUtil.scaleForGUI(750, 500));
         pack();
-        setLocationRelativeTo(lobby.getClientGUI().getFrame());
+        setLocationRelativeTo(clientGUI.getFrame());
     }
 
     private void initializeUI() {
@@ -1212,15 +1214,15 @@ public class C3NetworkManagerDialog extends JDialog {
             }
             builtAnything = true;
             if (blueprint.isCompanyConfiguration()) {
-                lobby.lobbyActions.c3SetCompanyMaster(List.of(company));
+                commands.c3SetCompanyMaster(List.of(company));
             }
             List<Entity> directSlaveUnits = resolveUnits(blueprint.directSlaves);
             if (!directSlaveUnits.isEmpty()) {
-                lobby.lobbyActions.c3Connect(directSlaveUnits, company.getId(), false);
+                commands.c3Connect(directSlaveUnits, company.getId(), false);
             }
             List<Entity> lanceMasterUnits = resolveUnits(blueprint.lanceMasters);
             if (!lanceMasterUnits.isEmpty()) {
-                lobby.lobbyActions.c3Connect(lanceMasterUnits, company.getId(), false);
+                commands.c3Connect(lanceMasterUnits, company.getId(), false);
             }
             for (int lanceIndex = 0; lanceIndex < blueprint.lanceMasters.length; lanceIndex++) {
                 List<Entity> lanceSlaveUnits = resolveUnits(blueprint.lanceSlaves[lanceIndex]);
@@ -1228,7 +1230,7 @@ public class C3NetworkManagerDialog extends JDialog {
                 if (lanceMasterId == null) {
                     orphanSlaves += lanceSlaveUnits.size();
                 } else if (!lanceSlaveUnits.isEmpty()) {
-                    lobby.lobbyActions.c3Connect(lanceSlaveUnits, lanceMasterId, false);
+                    commands.c3Connect(lanceSlaveUnits, lanceMasterId, false);
                 }
             }
         }
@@ -1284,7 +1286,7 @@ public class C3NetworkManagerDialog extends JDialog {
             statusLabel.setText(Messages.getString("C3NetworkManagerDialog.selectTwoPeers"));
             return;
         }
-        lobby.lobbyActions.c3JoinNh(matchingUnits, matchingUnits.get(0).getId(), true);
+        commands.c3JoinNh(matchingUnits, matchingUnits.get(0).getId(), true);
         refresh();
     }
 
@@ -1358,7 +1360,7 @@ public class C3NetworkManagerDialog extends JDialog {
             return;
         }
         if (target.hasNhC3()) {
-            lobby.lobbyActions.c3JoinNh(joiners, target.getId(), false);
+            commands.c3JoinNh(joiners, target.getId(), false);
             refresh();
             return;
         }
@@ -1372,9 +1374,9 @@ public class C3NetworkManagerDialog extends JDialog {
         boolean targetIsSubordinate = (target.getC3Master() != null) && !target.isC3CompanyCommander();
         if (!target.isC3CompanyCommander() && !targetIsSubordinate
               && (joiningMasters || (target.getOperableC3MCount() >= 2))) {
-            lobby.lobbyActions.c3SetCompanyMaster(List.of(target));
+            commands.c3SetCompanyMaster(List.of(target));
         }
-        lobby.lobbyActions.c3Connect(joiners, target.getId(), false);
+        commands.c3Connect(joiners, target.getId(), false);
         refresh();
     }
 
@@ -1384,7 +1386,7 @@ public class C3NetworkManagerDialog extends JDialog {
             statusLabel.setText(Messages.getString("C3NetworkManagerDialog.selectTwoPeers"));
             return;
         }
-        lobby.lobbyActions.c3JoinNh(selection, selection.get(0).getId(), true);
+        commands.c3JoinNh(selection, selection.get(0).getId(), true);
         refresh();
     }
 
@@ -1394,7 +1396,7 @@ public class C3NetworkManagerDialog extends JDialog {
             statusLabel.setText(Messages.getString("C3NetworkManagerDialog.selectNetworkUnits"));
             return;
         }
-        lobby.lobbyActions.c3DisconnectFromNetwork(selection);
+        commands.c3DisconnectFromNetwork(selection);
         refresh();
     }
 
@@ -1430,7 +1432,7 @@ public class C3NetworkManagerDialog extends JDialog {
         }
         seededMasterIds.clear();
         if (!unitsToDisconnect.isEmpty()) {
-            lobby.lobbyActions.c3DisconnectFromNetwork(unitsToDisconnect);
+            commands.c3DisconnectFromNetwork(unitsToDisconnect);
         }
         refresh();
     }
@@ -1779,10 +1781,10 @@ public class C3NetworkManagerDialog extends JDialog {
                     return false;
                 }
                 if (!networkedUnits.isEmpty()) {
-                    lobby.lobbyActions.c3DisconnectFromNetwork(networkedUnits);
+                    commands.c3DisconnectFromNetwork(networkedUnits);
                 }
                 if (!soloCommandersToDemote.isEmpty()) {
-                    lobby.lobbyActions.c3SetLanceMaster(soloCommandersToDemote);
+                    commands.c3SetLanceMaster(soloCommandersToDemote);
                 }
                 refresh();
             }
@@ -1813,7 +1815,7 @@ public class C3NetworkManagerDialog extends JDialog {
                 }
             }
             if (peerUnits.size() >= 2) {
-                lobby.lobbyActions.c3JoinNh(peerUnits, target.getId(), true);
+                commands.c3JoinNh(peerUnits, target.getId(), true);
                 refresh();
                 return;
             }

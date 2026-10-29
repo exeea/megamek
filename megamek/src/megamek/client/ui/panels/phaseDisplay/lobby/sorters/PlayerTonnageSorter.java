@@ -33,20 +33,14 @@
 package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 
 import megamek.client.Client;
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts by 1) player 2) tonnage. */
 public class PlayerTonnageSorter extends MekTableSorter {
 
     private final Client client;
 
-    /** A Lobby Mek Table sorter that sorts by 1) player 2) tonnage. */
-    public PlayerTonnageSorter(ClientGUI clientGUI, Sorting sorting) {
-        this(clientGUI.getClient(), sorting);
-    }
 
     /**
      * A Lobby Mek Table sorter that sorts by 1) player 2) tonnage.
@@ -55,8 +49,7 @@ public class PlayerTonnageSorter extends MekTableSorter {
      * @param sorting The sorting direction (ascending or descending).
      */
     public PlayerTonnageSorter(Client client, Sorting sorting) {
-        super(I18n.getTextAt(RESOURCE_BUNDLE, "PlayerTonnageSorter.DisplayName"),
-              MekTableModel.COL_UNIT, sorting);
+        super(I18n.getTextAt(RESOURCE_BUNDLE, "PlayerTonnageSorter.DisplayName"), sorting);
         this.client = client;
     }
 

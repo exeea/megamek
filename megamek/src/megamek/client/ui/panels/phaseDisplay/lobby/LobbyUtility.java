@@ -71,7 +71,7 @@ import megamek.common.util.C3Util;
 import megamek.logging.MMLogger;
 
 /**
- * This class provides static helper functions for the Lobby aka ChatLounge.
+ * This class provides static helper functions for the lobby.
  *
  * @author Simon
  */

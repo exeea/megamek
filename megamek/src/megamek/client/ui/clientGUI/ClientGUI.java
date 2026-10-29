@@ -60,6 +60,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -81,6 +82,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.commands.*;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.ratgenerator.GenerationContext;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.AudioService;
@@ -138,8 +140,10 @@ import megamek.client.ui.panels.ReceivingGameDataPanel;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.panels.phaseDisplay.*;
-import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
+import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.tileset.TilesetManager;
@@ -382,7 +386,7 @@ public class ClientGUI extends AbstractClientGUI
     protected JComponent curPanel;
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
-    public ChatLounge chatlounge;
+    private LobbyCommands lobbyCommands;
 
     private final ConcurrentLinkedQueue<Runnable> toastDripQueue = new ConcurrentLinkedQueue<>();
     private javax.swing.Timer toastDripTimer;
@@ -1449,18 +1453,8 @@ public class ClientGUI extends AbstractClientGUI
                 ignoreHotKeys = false;
                 break;
             case FILE_UNITS_PASTE:
-                if (curPanel instanceof ChatLounge) {
-                    ignoreHotKeys = true;
-                    ((ChatLounge) curPanel).importClipboard();
-                    ignoreHotKeys = false;
-                }
-                break;
             case FILE_UNITS_COPY:
-                if (curPanel instanceof ChatLounge) {
-                    ignoreHotKeys = true;
-                    ((ChatLounge) curPanel).copyToClipboard();
-                    ignoreHotKeys = false;
-                }
+                // the lobby's units were copied and pasted in the Swing lobby's unit table, which is gone
                 break;
             case FILE_UNITS_OPEN:
                 ignoreHotKeys = true;
@@ -1509,14 +1503,14 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case GAME_ALL_MG_BURST_ON:
             case GAME_ALL_MG_BURST_OFF:
-                if (curPanel instanceof ChatLounge lounge) {
-                    lounge.setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
+                if (client.getGame().getPhase().isLounge()) {
+                    SwingLobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
                 }
                 break;
             case GAME_ALL_HOT_LOAD_ON:
             case GAME_ALL_HOT_LOAD_OFF:
-                if (curPanel instanceof ChatLounge lounge) {
-                    lounge.setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
+                if (client.getGame().getPhase().isLounge()) {
+                    SwingLobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
                 }
                 break;
             case VIEW_NETWORK_INFORMATION:
@@ -1787,9 +1781,7 @@ public class ClientGUI extends AbstractClientGUI
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
         GpuLobbyWindow.closeFor(this);
-        if (chatlounge != null) {
-            chatlounge.killPreviewBV();
-        }
+        SwingLobbyServices.forget(this);
         client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
@@ -1893,9 +1885,6 @@ public class ClientGUI extends AbstractClientGUI
         switch (phase) {
             case LOUNGE:
                 // reset old report tabs and images, if any
-                ChatLounge cl = (ChatLounge) phaseComponents.get(String.valueOf(GamePhase.LOUNGE));
-                cb.setDoneButton(cl.getButDone());
-                cl.setBottom(cb.getComponent());
                 tilesetManager.reset();
                 break;
             case POINTBLANK_SHOT:
@@ -2026,8 +2015,8 @@ public class ClientGUI extends AbstractClientGUI
         String main;
         switch (phase) {
             case LOUNGE:
-                component = new ChatLounge(this);
-                chatlounge = (ChatLounge) component;
+                // the lobby shows in the native window; the hidden frame keeps an empty card for the phase
+                component = new JPanel();
                 main = CG_CHAT_LOUNGE;
                 component.setName(main);
                 panMain.add(component, main);
@@ -2039,7 +2028,7 @@ public class ClientGUI extends AbstractClientGUI
                 panMain.add(component, main);
                 break;
             case EXCHANGE:
-                chatlounge.killPreviewBV();
+                MapSetupDialog.closePreviews(this);
                 component = new ReceivingGameDataPanel();
                 main = CG_EXCHANGE;
                 component.setName(main);
@@ -3559,7 +3548,7 @@ public class ClientGUI extends AbstractClientGUI
      * find MML either automatically or based on a configured client setting.
      *
      * @param unitList The list of units to print
-     * @param button   This should always be ChatLounge#butPrintList, if you need to trigger this method from somewhere
+     * @param button   The button that started the printing, which shows the progress; if you need to trigger this method from somewhere
      *                 else, override it.
      */
     public void printList(ArrayList<Entity> unitList, JButton button) {
@@ -4131,9 +4120,6 @@ public class ClientGUI extends AbstractClientGUI
                 gameOptionsDialog.update(getClient().getGame().getOptions());
             }
 
-            if (curPanel instanceof ChatLounge cl) {
-                cl.updateMapSettings(getClient().getMapSettings());
-            }
 
             // the host may have turned Allow Game Master on or off, which offers or takes away the Become entry,
             // or the burst fire and hot-loading options behind the lobby's all-units equipment shortcuts
@@ -4479,6 +4465,21 @@ public class ClientGUI extends AbstractClientGUI
         return client;
     }
 
+    /** @return the lobby's commands for this client, with their Swing dialogs */
+    public LobbyCommands lobbyCommands() {
+        if (lobbyCommands == null) {
+            lobbyCommands = new LobbyCommands(this::getClient, new SwingLobbyPrompts(this));
+        }
+        return lobbyCommands;
+    }
+
+    /**
+     * EDT: the board editor opened from the lobby saved {@code savedFile}, or nothing (null); while still in the lobby,
+     * the map settings take the saved board, as the map setup's own Edit Board does.
+     */
+    public void boardEditorClosed(@Nullable Path savedFile, boolean savedAssembledPreview) {
+        MapSetupDialog.boardEditorClosed(this, savedFile, savedAssembledPreview);
+    }
     @Override
     public JComponent turnTimerComponent() {
         return menuBar;

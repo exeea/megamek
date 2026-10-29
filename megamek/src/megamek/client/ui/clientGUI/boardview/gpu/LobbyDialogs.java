@@ -28,8 +28,8 @@ import jakarta.annotation.Nullable;
 /**
  * The one path every Swing dialog of the native lobby takes: game options, player settings, bot setup, camouflage, unit
  * customisation, C3, map setup, the load and save choosers and every question and alert. The lobby opens them all on
- * {@link #parent()}, the client's frame, which stays hidden behind the native window; ChatLounge's and the lobby
- * prompts' dialogs use that frame too. A Swing dialog of that frame, or a modal one Swing gives its shared frame (a
+ * {@link #parent()}, the client's frame, which stays hidden behind the native window; the map setup's, the lobby
+ * services' and the lobby prompts' dialogs use that frame too. A Swing dialog of that frame, or a modal one Swing gives its shared frame (a
  * {@code JOptionPane} without a parent, as MekHQ asks while it sets up a game), is then caught as it shows:
  * <ul>
  *     <li>centred over the native window rather than the hidden frame, which would put it at the screen's corner or

@@ -26,6 +26,8 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.Vector;
 import javax.imageio.ImageIO;
+import javax.swing.JDialog;
+import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -40,6 +42,8 @@ import megamek.client.bot.BotFactory;
 import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.dialogs.buttonDialogs.AbstractNagDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.force.Force;
@@ -64,7 +68,8 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+ready}: readies the player alone, without their bots, a second before the shot (or once the
  *     bots have joined without one), so the shot shows the ready state while the table waits for the bots.</li>
  *     <li>{@code lobby+start}: presses Ready as the lobby does, for the player and their bots, once the bots have
- *     joined (and after the shot), to watch the game start.</li>
+ *     joined (and after the shot), to watch the game start; it answers No to any question Ready asks, such as
+ *     whether to record the battle's GIF.</li>
  *     <li>{@code lobby+blocked}: turns on the victory condition of killing the commander, so forces without one
  *     raise a red warning that blocks Ready.</li>
  *     <li>{@code lobby+overlap}: turns on double blind with exclusive deployment, so every player left on any edge
@@ -110,6 +115,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final int POLL_MS = 250;
     /** How long after the shot, or after the bots have joined when there is none, Ready is pressed. */
     private static final double READY_AFTER = 1;
+    private static final long ANSWER_NO_NANOS = 30_000_000_000L;
     private static final int PLAYER_TEAM = 1;
     private static final int BOT_TEAM = 2;
     static final int NARROW_WIDTH = 1100;
@@ -264,17 +270,41 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             if (joined[0] && formed[0] < FORMED) {
                 formed[0] = elapsed > FORM_WAIT ? FORMED : form(client, local, formed[0]);
             }
-            if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt && gui.chatlounge != null) {
+            if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt) {
                 readied[0] = true;
                 if (starts) {
                     LOGGER.info("The lobby probe presses Ready");
-                    gui.chatlounge.ready();
+                    answerNo();
+                    SwingLobbyServices.of(gui).ready();
                 } else {
                     LOGGER.info("The lobby probe readies the player");
                     client.sendDone(true);
                 }
             }
             if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED) {
+                timer.stop();
+            }
+        });
+        timer.start();
+    }
+
+    /** For a while, answers No to the questions the lobby asks and closes the nags, so the game starts unattended. */
+    private static void answerNo() {
+        long until = System.nanoTime() + ANSWER_NO_NANOS;
+        Timer timer = new Timer(POLL_MS, null);
+        timer.addActionListener(event -> {
+            for (Window window : Window.getWindows()) {
+                if (window instanceof JDialog dialog && dialog.isShowing()
+                      && dialog.getContentPane().getComponentCount() > 0
+                      && dialog.getContentPane().getComponent(0) instanceof JOptionPane pane) {
+                    LOGGER.info("The lobby probe answers No to {}", dialog.getTitle());
+                    pane.setValue(JOptionPane.NO_OPTION);
+                } else if (window instanceof AbstractNagDialog nag && nag.isShowing()) {
+                    LOGGER.info("The lobby probe closes {}", nag.getTitle());
+                    nag.setVisible(false);
+                }
+            }
+            if (System.nanoTime() > until) {
                 timer.stop();
             }
         });
