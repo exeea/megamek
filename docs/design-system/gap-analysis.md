@@ -581,9 +581,29 @@ work for Swing, and item 11 is under investigation.
        search. Probes: `lobby+requisition`, with `+atlas`, `+filters` and `+pick`. Not yet checked live: adding,
        taking back, the owner switch, the keyboard, the dossier's slide and the Sources buttons. MekHQ, MegaMekLab
        and the main menu's unit browser keep `AbstractUnitSelectorDialog`.
-     - L8 Dialogs. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load
-       and save choosers stay Swing at first, natively owned by the window so they stay in front of it, as the
-       board's are. Those the lobby uses most move to libGDX one at a time afterwards.
+     - L8 ~~Dialogs~~. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load
+       and save choosers stay Swing, natively owned by the window so they stay in front of it, as the board's are.
+       Those the lobby uses most move to libGDX one at a time afterwards. Every dialog the lobby opens goes through
+       one path, `LobbyDialogs`: players (player settings, camo, bot setup, the bot-connect alert, the bot window),
+       forces (random army, skills, random names, C3 network, load, save and print list with the MUL check, the
+       unit menu's customize, C3, loadout, readout, BV and cost), battlefield (planetary conditions, game options,
+       victory conditions, random map, map setup with its preview and size questions, load and save map setup,
+       auto-resolve, advanced map search) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
+       warning, force names, squadrons, battlefield support, unit editor, training, SBF and AS stats). Each is owned
+       by the hidden client frame or a dialog of it; `LobbyDialogs` adopts each one as it shows (also the modal
+       questions MekHQ asks with no parent, which Swing gives its shared hidden frame), centres it on the window's
+       client bounds rather than the hidden frame, owns it natively (or keeps it on top where it can't), blocks the
+       lobby's input while a modal one is open (the floating path did not before), and gives the window the focus
+       back when the last one closes if a dialog had it. `ClientGUI.doAlertDialog` sizes its text from the window,
+       not the hidden frame. `LobbyDialogsTest` covers the path, `LobbyDialogEntryPointsTest` that no lobby file
+       opens a dialog any other way. Probe `lobby+dialog=name` opens one (`gameoptions`, `conditions`, `victory`,
+       `randommap`, `mapsetup`, `loadmapsetup`, `camo`, `playersettings`, `botconfig`, `addbot`, `customize`, `c3`,
+       `randomarmy`, `skills`, `names`, `loadlist`, `alert`) and photographs the window and its dialogs from the
+       screen: all 17 checked on Windows, centred within a pixel, modal ones blocking, the focus back on closing.
+       MekHQ needs nothing more: its lobby use is the client API and the parentless questions above. Not checked
+       live: the prompts, the save choosers, auto-resolve and advanced map search (the same path, by the source
+       test); native ownership and focus on macOS and Linux; dialogs opened from within dialogs, which stay where
+       their owner puts them.
      - L9 Removal and checks: the Swing lobby's view code and `ChatLounge` (L1's fallback) are deleted; MekHQ's
        preloaded and auto-resolve games, MUL loading, hot-seat bots, blind drop, the Game Master and reconnecting to
        a running game are checked.
