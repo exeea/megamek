@@ -96,7 +96,7 @@ class GpuShadowSmokeTest {
         assertTrue(renderer.contains(System.getProperty("megamek.gpu.expectedRenderer", "")), renderer);
         String original = GpuShaderSource.readDisk("terrain-sculpt.frag");
         // The sculpt chooses the face whose side the sun must reach; shadeSurface (surface-shading.glsl) gates on it.
-        String incidentFace = "cliff && !panel ? face : geometric";
+        String incidentFace = "smoothSupport ? face : geometric";
         String viewGuard = "normal = shadingNormal(normal, geometric, view);";
         String output = "fragColor = vec4(result, 1.0);";
         for (String anchor : List.of(incidentFace, viewGuard, output)) {
