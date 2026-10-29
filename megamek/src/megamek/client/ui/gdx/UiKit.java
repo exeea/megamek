@@ -867,24 +867,51 @@ public final class UiKit {
     }
 
     /**
+     * A status chip as {@link #chip(String, Tone, boolean)} that acts on a click: under the pointer its status color
+     * washes it, pressed or checked it fills ({@link UiTheme#TOKEN_CHIP_BUTTON}). Check it for a moment to light it,
+     * as when it asks to be seen.
+     */
+    public Button actingChip(String text, Tone tone) {
+        String frame = switch (tone) {
+            case OK -> "success";
+            case WARN -> "warning";
+            case BAD -> "danger";
+            default -> "neutral";
+        };
+        Button chip = new Button(skin, UiTheme.TOKEN_CHIP_BUTTON + frame);
+        chip.setProgrammaticChangeEvents(false);
+        fillChip(chip, frame.equals("neutral") ? null : switch (tone) {
+            case OK -> "check";
+            case WARN -> "warn";
+            default -> "error";
+        }, frame.equals("neutral") ? null : "status." + frame, text,
+              frame.equals("neutral") ? "text.secondary" : "text.primary");
+        return chip;
+    }
+
+    /**
      * The status chip's geometry: {@code icon.sm} plus {@code xxs} above and below, 20 high whatever the type's line
      * height; {@code xs} before an icon or {@code md} before the text, {@code md} after it; small type, cased as
      * {@link #CHIP_CASE}.
      */
     private Table tokenChip(String frame, String icon, String iconRole, String text, String textRole) {
+        Table chip = new Table();
+        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + frame));
+        fillChip(chip, icon, iconRole, text, textRole);
+        return chip;
+    }
+
+    private void fillChip(Table chip, String icon, String iconRole, String text, String textRole) {
         DesignTokens tokens = DesignTokens.shipped();
         float iconSize = tokens.size().get("icon.sm");
         float xxs = space("xxs");
         float xs = space("xs");
         float md = space("md");
-        Table chip = new Table();
-        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + frame));
         chip.pad(xxs, icon == null ? md : xs, xxs, md);
         if (icon != null) {
             chip.add(icon(icon, iconSize, UiTheme.tokenColor(iconRole))).size(iconSize).padRight(xs);
         }
         chip.add(typeLabel(cased(CHIP_CASE, text), "small", textRole)).height(iconSize);
-        return chip;
     }
 
     /**

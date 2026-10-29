@@ -414,6 +414,8 @@ buttons with the default margin. Buttons from the factories grow to the size's h
 **libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `TextButtonStyle`s
 `button-<kind>` and `button-<kind>-compact` (`button-primary`, `button-secondary`, `button-quiet`, `button-danger`,
 `button-toggle`, `button-icon`, `button-special`), built from the tokens. `UiKit.button(style, icon, text, sub)` makes one.
+`UiTheme.DONE_BUTTON` (`button-done`, with `-compact` and `-caps` copies) is a primary button in `status.success` with
+its label in `text.onAccent`: the lobby's Ready once the player is ready, with a check before the label.
 libGDX gives hover priority over focus, so [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) draws
 the focus ring as an overlay when it has keyboard focus; `focused(true)` and `held(true)` freeze those states for the
 gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; aligning them is part of the type pass.
@@ -1117,7 +1119,9 @@ for it.
 **libGDX.** `UiKit.chip(text, tone, true)` is the status chip: `Tone.OK`, `WARN` and `BAD` get the check, warning and
 error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip;
 `UiKit.edgeChip(text, edge)` is the status chip without an icon, edged in any `token-chip-*` frame (the lobby's sides).
-Both set their text in upper case, as the `overline` role in either [presentation](#presentation-mode). A
+`UiKit.actingChip(text, tone)` is the status chip as a button (`token-chip-button-<tone>`): `tint.hover` washes it
+under the pointer and `tint.pressed` fills it pressed or checked, so checking it for a moment lights it (the lobby's
+warning chips, which a blocked Ready lights for 700 ms). All three set their text in upper case, as the `overline` role in either [presentation](#presentation-mode). A
 button in a token style (`button-*`) draws `UiButton.badge` as the count badge, in the `token-badge` face and frame
 with its ring in `surface.panel`, and `UiButton.dot` as the dot; hud-v3's buttons keep the amber pill. About 25 calls in
 the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips (`UiKit.chip(text, tone)`), also
