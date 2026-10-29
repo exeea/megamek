@@ -25,7 +25,7 @@ class GpuSkyVisibilityTest {
         for (int j = 0; j < SIZE; j++) {
             for (int i = WALL; i < SIZE; i++) { heights[j * SIZE + i] = wall; }
         }
-        return new GpuSkyVisibility.Field(SIZE, SIZE, 3, 0, 0, -cell, cell, cell, heights);
+        return new GpuSkyVisibility.Field(SIZE, SIZE, 3, 0, 0, -cell, cell, cell, heights, heights);
     }
 
     private static int value(byte[] values, int i, int j, int layer, int quarter) {

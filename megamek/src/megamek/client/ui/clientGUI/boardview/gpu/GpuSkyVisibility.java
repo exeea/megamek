@@ -44,9 +44,13 @@ final class GpuSkyVisibility implements Disposable {
     private static final float REACH_METRES = 300;
     private static final float STEP_GROWTH = 1.25f;
 
-    /** The board's heights and the volume's frame, all in world units; heights are NaN off the board. */
+    /**
+     * The board's tops and the volume's frame, all in world units: {@code heights} the tops; {@code floors} the level each
+     * cell's centre stands at, its hex's surface or the top of a structure covering it, without the tops' half cell of
+     * reach. Both NaN off the board.
+     */
     record Field(int width, int height, int layers, float x, float y, float z, float cell, float layer,
-          float[] heights) { }
+          float[] heights, float[] floors) { }
 
     /** The neutral volume until the first board's, owned; made when first bound, on the render thread. */
     private Texture3D texture;
@@ -147,7 +151,8 @@ final class GpuSkyVisibility implements Disposable {
     /**
      * The board's tops at the cells' centres, and the layers that span them: the hexes' surfaces, raised to the top of a
      * structure's body (BoardObstacles#structures) where it reaches within half a cell of the centre, so a wall thinner
-     * than a cell still counts and the ground between a building and its hex's edge stays ground. Worker thread.
+     * than a cell still counts and the ground between a building and its hex's edge stays ground. The floors take a
+     * body's top only where it covers the centre, so an alley that reach fills keeps its ground. Worker thread.
      */
     private static Field field(BoardScene scene) {
         float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
@@ -169,6 +174,7 @@ final class GpuSkyVisibility implements Disposable {
                 heights[j * width + i] = tile == null ? Float.NaN : BoardGeometry.surfaceZ(tile);
             }
         }
+        float[] floors = heights.clone();
         for (BoardScene.Tile tile : scene.tiles()) {
             if (tile.cover().structure() == 0) { continue; }
             for (var body : BoardObstacles.structures(scene, tile)) {
@@ -182,10 +188,12 @@ final class GpuSkyVisibility implements Disposable {
                     int j1 = Math.min(height - 1, (int) Math.floor((Math.max(a.y, Math.max(b.y, c.y)) - minY) / cell));
                     for (int j = j0; j <= j1; j++) {
                         for (int i = i0; i <= i1; i++) {
-                            // NaN, off the board, stays off it.
-                            if (heights[j * width + i] < body.high() && BoardObstacles.Footprint.near(a, b, c,
-                                  minX + (i + .5f) * cell, minY + (j + .5f) * cell, cell / 2)) {
-                                heights[j * width + i] = body.high();
+                            int at = j * width + i;
+                            float x = minX + (i + .5f) * cell, y = minY + (j + .5f) * cell;
+                            // NaN, off the board, stays off it. A floor never stands above its top.
+                            if (floors[at] < body.high() && BoardObstacles.Footprint.near(a, b, c, x, y, cell / 2)) {
+                                heights[at] = Math.max(heights[at], body.high());
+                                if (BoardObstacles.Footprint.near(a, b, c, x, y, 0)) { floors[at] = body.high(); }
                             }
                         }
                     }
@@ -202,7 +210,7 @@ final class GpuSkyVisibility implements Disposable {
         float bottom = low - BoardGeometry.level(), top = high + 2 * BoardGeometry.level();
         int layers = MathUtils.clamp((int) Math.ceil((top - bottom) / (BoardGeometry.level() / 2)) + 1, 2, MAX_LAYERS);
         return new Field(width, height, layers, minX + cell / 2, minY + cell / 2, bottom, cell,
-              (top - bottom) / (layers - 1), heights);
+              (top - bottom) / (layers - 1), heights, floors);
     }
 
     /**
@@ -210,21 +218,22 @@ final class GpuSkyVisibility implements Disposable {
      * south-east), for the shader to weigh by the quarters a surface faces: a wall must not count the sky that it hides
      * itself. Over its DIRECTIONS / 4 azimuths, a quarter keeps the mean cos² of the horizon's elevation
      * (1 / (1 + tan²)), the share of a uniform sky's light that reaches a level receiver past the relief. A cell inside
-     * the ground searches from the lowest top around it, its own or a neighbour's: inside a plateau or a plain it holds
-     * the surface's values, so filtering towards the surface never reads rock, and behind a wall's foot it holds the
-     * foot's shade rather than the open sky on top. Worker thread.
+     * the ground or a structure searches from the lowest floor around it, its own or a neighbour's: inside a plateau, a
+     * plain or a roof (away from its edge) it holds the surface's values, so filtering towards the surface never reads
+     * rock; behind a wall's foot it holds the foot's shade rather than the open sky on top; and in an alley the tops'
+     * reach fills, its floor's shade rather than the roofs' open sky. Worker thread.
      */
     static byte[] search(Field field) {
         int width = field.width(), height = field.height(), layers = field.layers();
-        float[] heights = field.heights();
+        float[] heights = field.heights(), floors = field.floors();
         float[] lowest = new float[width * height];
         for (int j = 0; j < height; j++) {
             for (int i = 0; i < width; i++) {
-                float low = heights[j * width + i];
+                float low = floors[j * width + i];
                 for (int y = Math.max(0, j - 1); y <= Math.min(height - 1, j + 1); y++) {
                     for (int x = Math.max(0, i - 1); x <= Math.min(width - 1, i + 1); x++) {
                         // NaN, off the board, never wins a comparison.
-                        if (heights[y * width + x] < low) { low = heights[y * width + x]; }
+                        if (floors[y * width + x] < low) { low = floors[y * width + x]; }
                     }
                 }
                 lowest[j * width + i] = low;
