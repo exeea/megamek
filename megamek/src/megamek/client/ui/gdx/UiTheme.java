@@ -1488,6 +1488,8 @@ public final class UiTheme implements Disposable {
     public static final String TOKEN_LIST = "token-list";
     /** The token look of hud-v3's split pane divider ({@code hud-split}). */
     public static final String TOKEN_SPLIT = "token-split";
+    /** The Button style of a card that opens something ({@code UiPictureCard}): its edge in border.strong on hover. */
+    public static final String TOKEN_PICTURE_CARD = "token-picture-card";
 
     /**
      * Token v0 styles for hud-v3's own lists, trees, grids and splits (docs/design-system/tokens.md, Lists and trees,
@@ -1560,6 +1562,14 @@ public final class UiTheme implements Disposable {
               tokens.radius().get("md"), null, 0, 0, 0);
         box("token-card-drop", token(tokens.color("surface.raised", mode)), accentEdge, 2 * border,
               tokens.radius().get("md"), null, 0, 0, 0);
+        // A card that opens something takes the border.strong edge under the pointer
+        Button.ButtonStyle pictureCard = new Button.ButtonStyle();
+        pictureCard.up = skin.getDrawable("token-card");
+        pictureCard.over = box("token-card-over", token(tokens.color("surface.panel", mode)),
+              token(tokens.color("border.strong", mode)), border, tokens.radius().get("md"), null, 0, 0, 0);
+        pictureCard.down = pictureCard.over;
+        pictureCard.disabled = pictureCard.up;
+        skin.add(TOKEN_PICTURE_CARD, pictureCard);
 
         float band = md;
         float active = tokens.size().get("selection.width");

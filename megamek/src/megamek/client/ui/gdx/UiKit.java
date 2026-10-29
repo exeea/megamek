@@ -1001,6 +1001,14 @@ public final class UiKit {
         return new UiChoice(this, UiChoice.Kind.SWITCH, text, on);
     }
 
+    /**
+     * A card that shows a picture and opens something when clicked ({@link UiPictureCard}); {@code text} shows, muted,
+     * until it has a picture, in a card {@code aspect} times as high as it is wide.
+     */
+    public UiPictureCard pictureCard(String text, float aspect) {
+        return new UiPictureCard(this, text, aspect);
+    }
+
     /** Makes radio buttons exclusive: exactly one stays selected, the first checked one or else the first. */
     public com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice> radioGroup(UiChoice... radios) {
         var group = new com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice>();
