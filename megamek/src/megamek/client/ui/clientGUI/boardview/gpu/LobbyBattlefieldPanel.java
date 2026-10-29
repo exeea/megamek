@@ -138,8 +138,6 @@ final class LobbyBattlefieldPanel {
 
         body.top();
         ScrollPane scroll = kit.scrollList(content, true, false);
-        content.padRight(scroll.getStyle().vScrollKnob == null ? 0
-              : scroll.getStyle().vScrollKnob.getMinWidth() + space("xs"));
         body.add(scroll).grow();
         fillAutoResolve();
         dock();

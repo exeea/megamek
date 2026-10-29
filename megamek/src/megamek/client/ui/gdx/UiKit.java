@@ -207,7 +207,8 @@ public final class UiKit {
     /**
      * A list as {@link #scrollList(Actor)}; with {@code token}, in the Token v0 look (docs/design-system/tokens.md,
      * Lists and trees, Scrollbars): the input frame, and a pill thumb that always shows, over a rail while the pointer
-     * is on the bar, lighter while hovered and lighter still while dragged.
+     * is on the bar, lighter while hovered and lighter still while dragged. The bar takes a strip of its own beside the
+     * list, {@code xs} clear of it, so nothing in the list draws under the bar.
      */
     public ScrollPane scrollList(Actor list, boolean token) {
         return scrollList(list, token, true);
@@ -234,6 +235,8 @@ public final class UiKit {
         down.vScrollKnob = skin.getDrawable("scroll-thumb-down");
         scroll.setStyle(rest);
         scroll.setFadeScrollBars(false);
+        // The bar takes its own strip beside the list, so rows, their washes and their trailing text end before it
+        scroll.setScrollbarsOnTop(false);
         // The pointer's x in the pane while it is over it, else negative
         float[] pointer = { -1 };
         scroll.addListener(new InputListener() {
@@ -256,7 +259,7 @@ public final class UiKit {
                 look = down;
             } else if (scroll.isScrollY()) {
                 float right = scroll.getWidth() - (rest.background == null ? 0 : rest.background.getRightWidth());
-                if (pointer[0] >= right - scroll.getScrollBarWidth() && pointer[0] <= right) {
+                if (overScrollBar(pointer[0], right, scroll.getScrollBarWidth())) {
                     look = over;
                 }
             }
@@ -265,6 +268,14 @@ public final class UiKit {
             }
         })));
         return scroll;
+    }
+
+    /**
+     * Whether a pointer at {@code x} in a scroll pane is on its vertical bar's strip, {@code width} wide (the bar and
+     * its gap to the list) and ending at {@code right}; a negative {@code x} is a pointer elsewhere.
+     */
+    static boolean overScrollBar(float x, float right, float width) {
+        return width > 0 && x >= 0 && x >= right - width && x <= right;
     }
 
     /**

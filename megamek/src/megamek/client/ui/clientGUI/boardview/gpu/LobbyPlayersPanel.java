@@ -118,8 +118,6 @@ final class LobbyPlayersPanel {
         panel.add(header).growX().row();
         playerList.top();
         roster = kit.scrollList(playerList, true, false);
-        // The cards end beside the scroll bar, which lies over the list, rather than under it
-        playerList.padRight(barWidth(roster));
         panel.add(roster).grow().row();
 
         panel.add(new Image(kit.skin.getDrawable("token-divider"))).growX().height(size("border"))
@@ -127,7 +125,6 @@ final class LobbyPlayersPanel {
         panel.add(kit.caption(Messages.getString("Lobby.chat"), true)).left().padTop(space("sm")).row();
         chatList.top().left();
         chatScroll = kit.scrollList(chatList, true);
-        chatList.padRight(barWidth(chatScroll));
         chatScroll.addAction(forever(run(this::keepChatAtEnd)));
         Label sample = kit.typeLabel("", "body", "text.secondary");
         Drawable frame = chatScroll.getStyle().background;
@@ -162,12 +159,6 @@ final class LobbyPlayersPanel {
 
     private static float space(String name) {
         return DesignTokens.shipped().space().get(name);
-    }
-
-    /** The width of {@code scroll}'s vertical bar, which lies over its list. */
-    private static float barWidth(ScrollPane scroll) {
-        Drawable bar = scroll.getStyle().vScrollKnob;
-        return bar == null ? 0 : bar.getMinWidth() + space("xs");
     }
 
     private static float size(String name) {

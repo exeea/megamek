@@ -1570,18 +1570,20 @@ public final class UiTheme implements Disposable {
         box("token-row-lifted", token(tokens.color("surface.raised", mode)), control, border, radius, null, 0, 0, 0);
         box("token-row-slot", token(tokens.color("surface.base", mode)), subtle, border, radius, null, 0, 0, 0);
 
-        // The frame pads xs, which insets the rows' shape; the bar sits over the rows, inside the frame's edge
-        float bar = sm + 2 * tokens.space().get("xxs");
+        // The frame pads xs, which insets the rows' shape. The bar sits inside the frame's edge, beside the rows rather
+        // than over them (UiKit.scrollList), xs clear of them, so no row content or wash runs under it.
+        float xxs = tokens.space().get("xxs");
+        float bar = sm + 2 * xxs;
         ScrollPane.ScrollPaneStyle list = new ScrollPane.ScrollPaneStyle();
         list.background = box("list-frame", token(tokens.color("surface.input", mode)), control, border,
               tokens.radius().get("md"), null, xs, xs, 0);
-        list.vScroll = skin.newDrawable("white", Color.CLEAR);
-        list.vScroll.setMinWidth(bar);
-        list.vScrollKnob = scrollThumb("scroll-thumb", control, sm, height);
+        list.vScroll = scrollStrip(null, bar, xs);
+        list.vScrollKnob = scrollThumb("scroll-thumb", control, sm, height, xxs);
         skin.add(TOKEN_LIST, list);
-        box("scroll-rail", hover, null, 0, bar / 2, null, 0, 0, 0).setMinWidth(bar);
-        scrollThumb("scroll-thumb-over", token(tokens.color("text.muted", mode)), sm, height);
-        scrollThumb("scroll-thumb-down", token(tokens.color("text.secondary", mode)), sm, height);
+        skin.add("scroll-rail", scrollStrip(box("scroll-rail-pill", hover, null, 0, bar / 2, null, 0, 0, 0), bar, xs),
+              Drawable.class);
+        scrollThumb("scroll-thumb-over", token(tokens.color("text.muted", mode)), sm, height, xxs);
+        scrollThumb("scroll-thumb-down", token(tokens.color("text.secondary", mode)), sm, height, xxs);
 
         box("token-card", token(tokens.color("surface.panel", mode)), subtle, border, tokens.radius().get("md"), null,
               0, 0, 0);
@@ -1784,12 +1786,39 @@ public final class UiTheme implements Disposable {
         return drawable;
     }
 
-    /** A scroll bar's pill thumb, {@code width} wide and at least {@code length} long. */
-    private NinePatchDrawable scrollThumb(String name, Color color, float width, float length) {
-        NinePatchDrawable thumb = box(name, color, null, 0, width / 2, null, 0, 0, 0);
-        thumb.setMinWidth(width);
+    /**
+     * A scroll bar's pill thumb, {@code width} wide and at least {@code length} long, {@code inset} from the bar's
+     * trailing side. The scroll pane puts a thumb against that side, so the drawable is wider than the pill by the inset.
+     */
+    private Drawable scrollThumb(String name, Color color, float width, float length, float inset) {
+        NinePatchDrawable pill = box(name + "-pill", color, null, 0, width / 2, null, 0, 0, 0);
+        Drawable thumb = new BaseDrawable() {
+            @Override
+            public void draw(Batch batch, float x, float y, float drawnWidth, float height) {
+                pill.draw(batch, x, y, Math.max(0, drawnWidth - inset), height);
+            }
+        };
+        thumb.setMinWidth(width + inset);
         thumb.setMinHeight(length);
+        skin.add(name, thumb, Drawable.class);
         return thumb;
+    }
+
+    /**
+     * The scroll bar's strip, {@code bar} wide plus a {@code gap} on the content's side; {@code look} (null: nothing)
+     * fills only the bar, so the gap stays clear between the content and the bar.
+     */
+    private static Drawable scrollStrip(Drawable look, float bar, float gap) {
+        Drawable strip = new BaseDrawable() {
+            @Override
+            public void draw(Batch batch, float x, float y, float width, float height) {
+                if (look != null) {
+                    look.draw(batch, x + width - bar, y, bar, height);
+                }
+            }
+        };
+        strip.setMinWidth(bar + gap);
+        return strip;
     }
 
     /** A divider line {@code thickness} thick across the middle of a grab band {@code band} high (or wide). */

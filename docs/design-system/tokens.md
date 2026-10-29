@@ -757,9 +757,12 @@ scrolls instead of drawing a stripe beside it.
 them without changes. A bar takes the color of an opaque view, otherwise the viewport's; a transparent scroll pane
 shows what's behind it.
 
-**libGDX.** The `token-list` scroll pane style has the 10-wide bar and the `border.control` pill thumb, which always
-shows; `UiKit.scrollList(list, true)` swaps in the `scroll-rail` and the `text.muted` thumb while the pointer is on the
-bar and the `text.secondary` thumb while it drags. hud-v3's 4-wide `hud-list` knob stays as hud-v3 draws it.
+**libGDX.** The `token-list` scroll pane style has the 10-wide bar and the `border.control` pill thumb, `xxs` in from
+the bar's sides, which always shows. `UiKit.scrollList(list, true)` gives the bar a strip of its own beside the list,
+the bar plus an `xs` (4) gap, so rows, their hover and selection washes and their right-aligned values all end left of
+it and nothing draws under the bar. The pointer anywhere on the strip swaps in the `scroll-rail` and the `text.muted`
+thumb, and dragging shows the `text.secondary` thumb. hud-v3's 4-wide `hud-list` knob, which sits on the content, stays
+as hud-v3 draws it.
 
 ## Sliders
 
