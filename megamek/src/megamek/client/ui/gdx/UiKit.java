@@ -653,6 +653,23 @@ public final class UiKit {
         return button;
     }
 
+    /**
+     * The widest of a token button's faces: its preferred width showing each of {@code texts}, cased as a button
+     * label, so a button whose text changes, or a matched pair of buttons, can keep one width. The button shows its
+     * text as before afterwards.
+     */
+    public float faceWidth(UiButton button, String... texts) {
+        CharSequence shown = button.getText();
+        String kept = shown == null ? "" : shown.toString();
+        float width = 0;
+        for (String text : texts) {
+            button.setText(cased("button", text));
+            width = Math.max(width, button.getPrefWidth());
+        }
+        button.setText(kept);
+        return width;
+    }
+
     /** The gap between a button's parts: .b's 1 unit when they stack, a utility's 4, and the row gaps per style. */
     private static float gap(String style, boolean column) {
         if (column) {
@@ -799,35 +816,43 @@ public final class UiKit {
             case BAD -> "danger";
             default -> null;
         };
-        float xs = space("xs");
-        float md = space("md");
-        Table chip = new Table();
-        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + (status == null ? "neutral" : status)));
         if (status == null) {
-            chip.add(typeLabel(text, "small", "text.secondary")).padLeft(md).padRight(md);
-        } else {
-            String icon = switch (tone) {
-                case OK -> "check";
-                case WARN -> "warn";
-                default -> "error";
-            };
-            chip.add(icon(icon, DesignTokens.shipped().size().get("icon.sm"), UiTheme.tokenColor("status." + status)))
-                  .padLeft(xs);
-            chip.add(typeLabel(text, "small", "text.primary")).padLeft(xs).padRight(md);
+            return tokenChip("neutral", null, null, text, "text.secondary");
         }
-        return chip;
+        String icon = switch (tone) {
+            case OK -> "check";
+            case WARN -> "warn";
+            default -> "error";
+        };
+        return tokenChip(status, icon, "status." + status, text, "text.primary");
     }
 
     /**
-     * A tally chip in the token look: {@code text} in small and text.primary with no icon, in a pill edged by the
-     * {@link UiTheme#TOKEN_CHIP} frame {@code edge} (neutral, accent, success, warning or danger), such as a side's
-     * Battle Value edged in the side's colour.
+     * Token v0's status chip without an icon, its edge in the {@link UiTheme#TOKEN_CHIP} frame {@code edge} (neutral,
+     * accent, success, warning or danger) and its text in text.primary, such as a side's Battle Value edged in the
+     * side's colour. It has the status chip's height, padding and type ({@link #chip(String, Tone, boolean)}).
      */
     public Table edgeChip(String text, String edge) {
-        Table chip = new Table();
-        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + edge));
+        return tokenChip(edge, null, null, text, "text.primary");
+    }
+
+    /**
+     * The status chip's geometry: {@code icon.sm} plus {@code xxs} above and below, 20 high whatever the type's line
+     * height; {@code xs} before an icon or {@code md} before the text, {@code md} after it; small type.
+     */
+    private Table tokenChip(String frame, String icon, String iconRole, String text, String textRole) {
+        DesignTokens tokens = DesignTokens.shipped();
+        float iconSize = tokens.size().get("icon.sm");
+        float xxs = space("xxs");
+        float xs = space("xs");
         float md = space("md");
-        chip.add(typeLabel(text, "small", "text.primary")).padLeft(md).padRight(md);
+        Table chip = new Table();
+        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + frame));
+        chip.pad(xxs, icon == null ? md : xs, xxs, md);
+        if (icon != null) {
+            chip.add(icon(icon, iconSize, UiTheme.tokenColor(iconRole))).size(iconSize).padRight(xs);
+        }
+        chip.add(typeLabel(text, "small", textRole)).height(iconSize);
         return chip;
     }
 
