@@ -48,7 +48,7 @@ class GpuWaterCoverageTest {
                 for (var face : river.faces) {
                     if (face.finish() != BoardSurface.Finish.TOP && face.finish() != BoardSurface.Finish.SHORE) { continue; }
                     var mesh = mesh();
-                    GpuTerrain.coveredFace(mesh, river, face, List.of(river));
+                    GpuWaterCover.coveredFace(mesh, river, face, List.of(river));
                     assertEquals(3, mesh.getNumVertices(), "An exposed bank needs no additional triangles");
                     assertEquals(3, mesh.getNumIndices());
                     int stride = mesh.getAttributes().vertexSize / Float.BYTES;
@@ -138,7 +138,7 @@ class GpuWaterCoverageTest {
             if (Math.min(face.a().z, Math.min(face.b().z, face.c().z))
                   <= BoardGeometry.waterZ(lower.tile) + BoardGeometry.hexScale()) { continue; }
             var mesh = mesh();
-            GpuTerrain.coveredFace(mesh, pool, face, List.of(pool, lower));
+            GpuWaterCover.coveredFace(mesh, pool, face, List.of(pool, lower));
             int stride = mesh.getAttributes().vertexSize / Float.BYTES;
             int colorOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
             float[] vertices = new float[mesh.getNumVertices() * stride];
@@ -195,7 +195,7 @@ class GpuWaterCoverageTest {
             if (a == null || b == null || c == null || a.kind() != BoardRelief.Kind.GROUND
                   || b.kind() != a.kind() || c.kind() != a.kind() || area(face.a(), face.b(), face.c()) < .001f) { continue; }
             var mesh = mesh();
-            GpuTerrain.coveredFace(mesh, land, face, List.of(water));
+            GpuWaterCover.coveredFace(mesh, land, face, List.of(water));
             int stride = mesh.getAttributes().vertexSize / Float.BYTES;
             int colorOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
             int uvOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.TextureCoordinates).offset / Float.BYTES;
@@ -304,7 +304,7 @@ class GpuWaterCoverageTest {
                     }
                     if (!bedBoundary(surface, face)) { continue; }
                     MeshBuilder mesh = mesh();
-                    GpuTerrain.coveredFace(mesh, surface, face, List.of(surface));
+                    GpuWaterCover.coveredFace(mesh, surface, face, List.of(surface));
                     int stride = mesh.getAttributes().vertexSize / Float.BYTES;
                     int colorOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
                     int uvOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.TextureCoordinates).offset / Float.BYTES;
@@ -353,7 +353,7 @@ class GpuWaterCoverageTest {
                     if ((surface == land && face.landEdge() != 0)
                           || face.finish() == BoardSurface.Finish.BED) { continue; }
                     MeshBuilder mesh = mesh();
-                    GpuTerrain.coveredFace(mesh, surface, face, waters);
+                    GpuWaterCover.coveredFace(mesh, surface, face, waters);
                     int stride = mesh.getAttributes().vertexSize / Float.BYTES;
                     int colorOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
                     float[] vertices = new float[mesh.getNumVertices() * stride];
