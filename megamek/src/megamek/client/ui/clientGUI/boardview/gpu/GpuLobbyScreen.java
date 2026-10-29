@@ -1,11 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.IOException;
 import java.util.Set;
-import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -13,9 +9,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -30,12 +23,11 @@ import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiKit;
-import megamek.common.Configuration;
 import megamek.logging.MMLogger;
 
 /**
- * The native lobby's screen ({@link GpuLobbyWindow}), the briefing room in the game presentation over the start
- * screen's battle art, blurred and dimmed: the top bar ({@link LobbyTopBar}) over three columns ({@link LobbyColumns}),
+ * The native lobby's screen ({@link GpuLobbyWindow}), the briefing room in the game presentation on the plain
+ * surface.base: the top bar ({@link LobbyTopBar}) over three columns ({@link LobbyColumns}),
  * the players with the chat docked under them on the left, the forces in the centre and the battlefield on the right.
  * In a narrow window the battlefield folds into a rail that opens it in the centre, in the forces' place, as a view with
  * Back ({@link LobbyCentre}). It draws only the {@link LobbySnapshot}s its window sends and hands every action back to
@@ -51,15 +43,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private final GUIPreferences preferences;
     private final DesignTokens tokens = DesignTokens.shipped();
     private final java.awt.Color base = awtColor("surface.base");
-    private final Matrix4 pixels = new Matrix4();
 
     private GpuBoardSkin boardSkin;
     private GpuHudKit hud;
     private UiKit kit;
     private Stage stage;
-    private SpriteBatch batch;
-    private BufferedImage art;
-    private Texture backdrop;
     private float scale = 1;
     private int bw;
     private int bh;
@@ -108,8 +96,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         kit = hud.ui;
         kit.presentation(Presentation.GAME);
         stage = new Stage(new ScreenViewport());
-        batch = new SpriteBatch();
-        art = readArt();
         build();
         setInputBlocked(window.modalOpen());
         Gdx.graphics.setForegroundFPS(FRAMES_PER_SECOND);
@@ -117,16 +103,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         start = System.nanoTime();
         // Sizing the window draws a frame at once on some platforms
         sizeForProbe();
-    }
-
-    private static BufferedImage readArt() {
-        File file = new File(Configuration.miscImagesDir(), "mm-background.jpg");
-        try {
-            return ImageIO.read(file);
-        } catch (IOException failure) {
-            LOGGER.error(failure, "The lobby could not read {}", file);
-            return null;
-        }
     }
 
     /** Gives the window the developer switch's size, keeping the saved size as it was. */
@@ -235,18 +211,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         stage.getViewport().update(width, height, true);
         bw = Gdx.graphics.getBackBufferWidth();
         bh = Gdx.graphics.getBackBufferHeight();
-        pixels.setToOrtho2D(0, 0, bw, bh);
         applyFold();
-        rebuildBackdrop();
-    }
-
-    /** The start screen's art behind the lobby ({@link LobbyBackdrop}), painted once per size. */
-    private void rebuildBackdrop() {
-        BufferedImage image = LobbyBackdrop.paint(art, bw, bh, base.getRGB() & 0xFFFFFF);
-        if (backdrop != null) {
-            backdrop.dispose();
-        }
-        backdrop = GpuStartScreen.texture(image, false);
     }
 
     // ---- Each frame ----
@@ -255,13 +220,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     public void render() {
         Gdx.gl.glClearColor(base.getRed() / 255f, base.getGreen() / 255f, base.getBlue() / 255f, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
-        if (backdrop != null) {
-            batch.setProjectionMatrix(pixels);
-            batch.begin();
-            batch.setColor(1, 1, 1, 1);
-            batch.draw(backdrop, 0, 0, bw, bh);
-            batch.end();
-        }
         if (railPending && folded) {
             railPending = false;
             rail.setChecked(true);
@@ -293,7 +251,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     @Override
     public void dispose() {
         window.disposing();
-        for (Object disposable : new Object[] { stage, batch, backdrop }) {
+        for (Object disposable : new Object[] { stage }) {
             if (disposable instanceof com.badlogic.gdx.utils.Disposable resource) {
                 resource.dispose();
             }

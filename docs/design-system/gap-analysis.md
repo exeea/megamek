@@ -465,13 +465,14 @@ work for Swing, and item 11 is under investigation.
        frame with `ChatLounge` shows instead, so there is still only one window. For L1 the screen is minimal: the
        top bar (title, server line, ready count, Ready and Leave), the players by team and the chat. A probe opens
        it without clicking through (see step 3).
-     - L2 ~~The shell~~. The lobby screen now has the briefing room's frame over the blurred, dimmed art: the top bar
+     - L2 ~~The shell~~. The lobby screen now has the briefing room's frame on the plain `surface.base`: the top bar
        (title, server and map line, ready count, a BV chip per side, Leave and Ready) over three columns, the players
        with the chat docked under them, the forces, and the battlefield. Below 1280 units wide the battlefield folds
        into a rail at the right edge that opens it in the centre as a view with Back (or Escape), in the forces'
        place; the Swing room opened it over the forces' right side instead. The columns hold placeholders until
        their steps come: each owner's units and BV in the forces, the map's size in the battlefield
-       (`LobbyTopBar`, `LobbyColumns`, `LobbyLayout`, `LobbyCentre` and the column panels).
+       (`LobbyTopBar`, `LobbyColumns`, `LobbyLayout`, `LobbyCentre` and the column panels). The start screen's art
+       is not behind it: dimmed enough to read over, almost nothing of it showed, so it only cost loading time.
      - L3 Players and chat: the team sections, player cards and their menus, adding bots, and the chat dock.
      - L4 Forces: unit cards, compact rows, owner sections, formations with drag and drop, sorting and the right-
        click menus.
