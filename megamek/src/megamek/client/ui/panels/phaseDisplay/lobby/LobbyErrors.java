@@ -32,174 +32,153 @@
  */
 package megamek.client.ui.panels.phaseDisplay.lobby;
 
-import java.text.MessageFormat;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 
-import megamek.client.ui.Messages;
+import megamek.client.lobby.LobbyError;
 
 /** Contains static methods that show common info/error messages for the lobby. */
 public final class LobbyErrors {
 
-    private static final String SINGLE_OWNER = "For this action, the selected units must have a single owner.";
-    private static final String CONFIG_ENEMY = "Cannot configure units of other players except units of your bots.";
-    private static final String VIEW_HIDDEN = "Cannot view or set details on hidden units.";
-    private static final String SINGLE_UNIT = "Cannot {0} for more than one unit at a time.";
-    private static final String SINGLE_UNIT_OR_FORCE = "Please select a single unit or a single force.";
-    private static final String TEN_UNITS = "Please select fewer than 10 units.";
-    private static final String NO_DETACH_OFF_BOARD = "An off board train cannot be uncoupled. "
-          + "There is no board position to leave a trailer at.";
-    private static final String HEAT_TRACKING = "Cannot apply a heat setting to units that do not track heat.";
-    private static final String ONLY_MEKS = "This setting can only be applied to Meks.";
-    private static final String ONLY_C3M = "Only units with a C3M can be set to be Company Masters.";
-    private static final String SAME_C3 = "The C3 systems of the selected units don't match. Select only the same type of C3 units.";
-    private static final String EXCEED_C3_CAPACITY = "Connecting the selected units exceed this C3 system's capacity.";
-    private static final String LOAD_ONLY_ALLIED = "Can only load units that are allied with each other.";
-    private static final String ONLY_FIGHTERS = "Only aerospace and conventional fighters can join squadrons.";
-    private static final String NO_BAY = "The unit does not have that bay.";
-    private static final String ONLY_OWN_BOT = "Can only remove bots that were added in this lobby.";
-    private static final String NO_DUAL_LOAD = "It is not possible to re-load two units to a new transport where one unit currently carries the other. Please unload the units first.";
-    private static final String ONLY_TEAM = "Combinations like loading, C3 connections and shared forces are only valid within a team.";
-    private static final String ENTITY_OR_FORCE = "Please select either only forces or only units.";
-    private static final String FORCE_EMPTY = "Please select only empty forces.";
-    private static final String FORCE_ASSIGN_ONLY_TEAM = "Can only reassign a force to a teammate when reassigning without units.";
-    private static final String FORCE_ATTACH_TO_SUB_FORCE = "Cannot attach a force to its own sub force.";
-    private static final String PLAYER_DONE = "Cannot edit units while your status is Done.";
-    private static final String SBF_CONVERSION_ERROR = "At least some of the forces you selected cannot be " +
-          "converted to SBF Formations. Please select only the topmost forces to be converted, no subForces. " +
-          "A converted force must conform to the rules given in Interstellar Operations. Conversion " +
-          "will typically work with companies created in the Force Generator.";
-    private static final String NO_DUAL_TOW = "Both units must have an open appropriate tow hitch.";
-    private static final String ONLY_TRAIN_MEMBERS = "Select one tractor and the trailers to hitch behind it. "
-          + "Units that are already part of a train must be detached first.";
-    private static final String SINGLE_TRACTOR_REQUIRED = "Select exactly one tractor to head the train. "
-          + "Every other selected unit must be a trailer.";
-    private static final String EDIT_DAMAGE = "The Game Master edits the damage of every unit. "
-          + "When there is no Game Master, you may edit the damage of your own units.";
+    /**
+     * Shows the given lobby error: under its title as an error when it has one, otherwise as a plain notice.
+     *
+     * @param owner the frame to center on
+     * @param error the error to show
+     * @param args  the arguments of an error that takes them
+     */
+    public static void show(JFrame owner, LobbyError error, Object... args) {
+        String title = error.title();
+        if (title == null) {
+            JOptionPane.showMessageDialog(owner, error.message(args));
+        } else {
+            JOptionPane.showMessageDialog(owner, error.message(args), title, JOptionPane.ERROR_MESSAGE);
+        }
+    }
 
     public static void showOnlyOwnBot(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, ONLY_OWN_BOT);
+        show(owner, LobbyError.ONLY_OWN_BOT);
     }
 
     public static void showOnlySingleEntityOrForce(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, SINGLE_UNIT_OR_FORCE);
+        show(owner, LobbyError.SINGLE_UNIT_OR_FORCE);
     }
 
     public static void showSingleOwnerRequired(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, SINGLE_OWNER);
+        show(owner, LobbyError.SINGLE_OWNER);
     }
 
     public static void showForceNoAttachSubForce(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, FORCE_ATTACH_TO_SUB_FORCE);
+        show(owner, LobbyError.FORCE_ATTACH_TO_SUB_FORCE);
     }
 
     public static void showNoDetachOffBoard(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, NO_DETACH_OFF_BOARD);
+        show(owner, LobbyError.NO_DETACH_OFF_BOARD);
     }
 
     public static void showOnlyTeam(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, ONLY_TEAM);
+        show(owner, LobbyError.ONLY_TEAM);
     }
 
     public static void showOnlyC3M(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, ONLY_C3M);
+        show(owner, LobbyError.ONLY_C3M);
     }
 
     public static void showNoDualLoad(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, NO_DUAL_LOAD);
+        show(owner, LobbyError.NO_DUAL_LOAD);
     }
 
     public static void showNoDualTow(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, NO_DUAL_TOW);
+        show(owner, LobbyError.NO_DUAL_TOW);
     }
 
     public static void showOnlyTrainMembers(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, ONLY_TRAIN_MEMBERS);
+        show(owner, LobbyError.ONLY_TRAIN_MEMBERS);
     }
 
     public static void showSingleTractorRequired(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, SINGLE_TRACTOR_REQUIRED);
+        show(owner, LobbyError.SINGLE_TRACTOR_REQUIRED);
     }
 
     public static void showNoSuchBay(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, NO_BAY);
+        show(owner, LobbyError.NO_SUCH_BAY);
     }
 
     public static void showSquadronTooMany(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, Messages.getString("FighterSquadron.toomany"));
+        show(owner, LobbyError.SQUADRON_TOO_MANY);
     }
 
     public static void showOnlyFighter(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, ONLY_FIGHTERS);
+        show(owner, LobbyError.ONLY_FIGHTERS);
     }
 
     public static void showLoadOnlyAllied(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, LOAD_ONLY_ALLIED);
+        show(owner, LobbyError.LOAD_ONLY_ALLIED);
     }
 
     public static void showExceedC3Capacity(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, EXCEED_C3_CAPACITY);
+        show(owner, LobbyError.EXCEED_C3_CAPACITY);
     }
 
     public static void showSameC3(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, SAME_C3);
+        show(owner, LobbyError.SAME_C3);
     }
 
     public static void showCannotConfigEnemies(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, CONFIG_ENEMY);
+        show(owner, LobbyError.CANNOT_CONFIG_ENEMIES);
     }
 
     public static void showCannotViewHidden(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, VIEW_HIDDEN);
+        show(owner, LobbyError.CANNOT_VIEW_HIDDEN);
     }
 
     public static void showCannotEditDamage(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, EDIT_DAMAGE);
+        show(owner, LobbyError.CANNOT_EDIT_DAMAGE);
     }
 
     public static void showSingleUnit(JFrame owner, String action) {
-        JOptionPane.showMessageDialog(owner, MessageFormat.format(SINGLE_UNIT, action));
+        show(owner, LobbyError.SINGLE_UNIT, action);
     }
 
     public static void showTenUnits(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, TEN_UNITS);
+        show(owner, LobbyError.TEN_UNITS);
     }
 
     public static void showHeatTracking(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, HEAT_TRACKING);
+        show(owner, LobbyError.HEAT_TRACKING);
     }
 
     public static void showOnlyMeks(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, ONLY_MEKS);
+        show(owner, LobbyError.ONLY_MEKS);
     }
 
     public static void showOnlyTeammate(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, FORCE_ASSIGN_ONLY_TEAM);
+        show(owner, LobbyError.ONLY_TEAMMATE);
     }
 
     public static void showOnlyEntityOrForce(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, ENTITY_OR_FORCE);
+        show(owner, LobbyError.ENTITY_OR_FORCE);
     }
 
     @Deprecated(since = "0.51.0", forRemoval = true)
     public static void showOnlyEmptyForce(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, FORCE_EMPTY);
+        show(owner, LobbyError.FORCE_EMPTY);
     }
 
     public static void showSBFConversion(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, SBF_CONVERSION_ERROR);
+        show(owner, LobbyError.SBF_CONVERSION);
     }
 
     public static void showCannotEditWhileDone(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, PLAYER_DONE);
+        show(owner, LobbyError.PLAYER_DONE);
     }
 
     public static void showCannotDisconnectMasterUnit(JFrame owner) {
-        JOptionPane.showMessageDialog(owner, Messages.getString("LobbyErrors.cannotDisconnectMaster"));
+        show(owner, LobbyError.CANNOT_DISCONNECT_MASTER);
     }
 
     public static void showADFReadError(JFrame owner, String message) {
-        JOptionPane.showMessageDialog(owner, message);
+        show(owner, LobbyError.ADF_READ, message);
     }
 
     private LobbyErrors() {}
