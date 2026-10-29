@@ -498,17 +498,39 @@ work for Swing, and item 11 is under investigation.
        all of that on one line. Formations view is MegaMek's force tree: a header per formation (fold, glyph, name,
        BV, tonnage, units, owner and ⋮), nested units and subformations, and the units outside any formation under
        their owner. Ctrl and shift click select several units. Dragging units onto a formation, or onto the strip
-       between rows, moves or reorders them through ChatLounge's force commands; the target rises (	oken-card-drop)
+       between rows, moves or reorders them through ChatLounge's force commands; the target rises (`token-card-drop`)
        and the strip lights while the drag is over it. The unit and formation menus (⋮ and right-click) are
-       ChatLounge's own LobbyMekPopup, read into LobbyMenuEntry trees on the EDT (LobbySwingMenus) and drawn as
-       nested popovers, so their items, submenus, checks and permissions are ChatLounge's. LobbyForcesController
-       runs the panel's commands on the EDT with ChatLounge's permission rules. LobbySnapshot gained orces
-       (LobbyForces, LobbyUnit), built in ChatLounge's sort order with blind drop hiding enemy units as the
+       ChatLounge's own `LobbyMekPopup`, read into `LobbyMenuEntry` trees on the EDT (`LobbySwingMenus`) and drawn as
+       nested popovers, so their items, submenus, checks and permissions are ChatLounge's. `LobbyForcesController`
+       runs the panel's commands on the EDT with ChatLounge's permission rules. `LobbySnapshot` gained `forces`
+       (`LobbyForces`, `LobbyUnit`), built in ChatLounge's sort order with blind drop hiding enemy units as the
        Swing tables do. Add unit opens the unit selector, owned by the native window. Not yet checked live: drag and
        drop and multi-select (the probes do not drag), and the Swing dialogs from the menus. A formation change made
        by another client with no unit change fires no game event, so it shows at the next event, as in ChatLounge.
-     - L5 The battlefield: the map card (ideally a live 3D view of the board with the deployment zones), conditions,
-       rules, victory and auto-resolve.
+     - L5 ~~The battlefield~~. The battlefield column shows the map card, the map's size and sheets (or "Rolled at
+       launch"), Edit map and a ⋮ menu, then Planetary conditions, Rules (the year and tech level, with up to three
+       notable rules as chips and a "+n"), Victory, and a folded Auto-resolve section, each with Change. The map card
+       is the minimap drawn once per board or zone change (`LobbyMapThumbnail`, from the reference's
+       `StartMapThumbnail`): the server's board, or the one the map settings make of their fixed boards, as
+       ChatLounge previews it. Your zone is in the accent edged in `text.primary`, your team's in the accent and the
+       others in danger. It is baked on a worker after a short pause and uploaded as a texture. A live 3D view was
+       left out: `GpuBattleView` is a whole scene with its own camera, input and asset loading, and has no
+       offscreen path, so embedding it would cost far more than a summary card needs; the 3D preview is one click
+       away in the ⋮ menu. The card and Edit map open ChatLounge's own map tab in a window owned by the native
+       window (`ChatLounge.openMapSetup`), so board size, map choice, map settings, surprise boards, the
+       non-tileable nag and who may change the map stay ChatLounge's. The ⋮ menu has random map settings, generate,
+       load and save map setup, Preview in 3D and Board Editor. Change runs ChatLounge's buttons for the planetary
+       conditions, game options and victory conditions, so their dialogs and permissions are its own. Auto-resolve
+       shows when the client setting does and blind drop is not real; its switch, runs and parallelism write
+       ChatLounge's controls, and Run presses its button, so the SBF and Alpha Strike conversion prompts are
+       unchanged. `LobbyBattlefieldController` runs every action on the EDT and refuses what ChatLounge disables
+       (conditions and map files in space, generate while a board is unset or a surprise).
+       `LobbySnapshot` gained `battlefield` (`LobbyBattlefield`: the map, conditions, rules, notable rules, victory and auto-resolve lines). The 3D
+       preview and the board editor take the window, so the lobby shows again when they close
+       (`GpuLobbyWindow.reopenFor`). Probes: `lobby+zones` deploys the player west and the bots east, and
+       `lobby+autoresolve` turns on the auto-resolve setting for the run and opens it. Not yet checked live: the
+       Swing dialogs from the column, the map setup window, and the preview and editor round trip; MekHQ may flash
+       its start screen between the preview and the lobby.
      - L6 Ready: the ready count, the BV chips, Ready and its warning chips.
      - L7 The unit selector: the Requisition view, with categories, search, weight chips, the Filters drawer and the
        dossier, then step 7.4 and 7.5's adding strip, skills, BV and sources. MekHQ, MegaMekLab and the main menu's

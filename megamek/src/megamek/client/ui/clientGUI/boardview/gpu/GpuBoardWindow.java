@@ -1094,6 +1094,9 @@ public final class GpuBoardWindow {
         // The native window is already destroyed. Never resurrect a client that is shutting down.
         if (afterClose != null) {
             afterClose.run();
+        } else if (GpuLobbyWindow.reopenFor(swingWindow)) {
+            // The lobby that opened this preview or editor shows again
+            LOGGER.debug("The lobby shows again");
         } else if (restoreLegacy2D && swingWindow != null) {
             showLegacy2D(gui, swingWindow);
         }

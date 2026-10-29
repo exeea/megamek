@@ -26,9 +26,11 @@ import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.common.Player;
+import megamek.common.board.Board;
 import megamek.common.force.Force;
 import megamek.common.loaders.MULParser;
 import megamek.common.options.GameOptions;
+import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
 
@@ -55,6 +57,10 @@ import megamek.logging.MMLogger;
  *     forces as formations.</li>
  *     <li>{@code lobby+compact}: shows the forces as compact rows.</li>
  *     <li>{@code lobby+unitmenu}: opens the menu of the player's first unit before the shot.</li>
+ *     <li>{@code lobby+zones}: deploys the player at the west edge and the bots at the east, so the map shows
+ *     zones.</li>
+ *     <li>{@code lobby+autoresolve}: turns on the client setting that shows auto-resolve, and opens its settings in
+ *     the battlefield.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
@@ -173,6 +179,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
 
     private void apply(ClientGUI gui) {
         long start = System.nanoTime();
+        if (options.contains("autoresolve")) {
+            PreferenceManager.getClientPreferences().setShowAutoResolvePanel(true);
+        }
         Client client = gui.getClient();
         List<BotClient> waiting = new ArrayList<>();
         boolean[] joined = { false };
@@ -186,6 +195,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             if (!joined[0] && local != null) {
                 joined[0] = true;
                 local.setTeam(PLAYER_TEAM);
+                if (options.contains("zones")) {
+                    local.setStartingPos(Board.START_W);
+                }
                 client.sendPlayerInfo();
                 loadUnits(client, local);
                 chat(client);
@@ -197,6 +209,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                     return false;
                 }
                 player.setTeam(BOT_TEAM);
+                if (options.contains("zones")) {
+                    player.setStartingPos(Board.START_E);
+                }
                 bot.sendPlayerInfo();
                 loadUnits(bot, player);
                 chat(bot);

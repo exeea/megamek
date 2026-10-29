@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -31,6 +32,7 @@ import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.Timer;
 
 import com.badlogic.gdx.ApplicationListener;
@@ -43,6 +45,7 @@ import megamek.client.bot.BotFactory;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
@@ -58,6 +61,7 @@ import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
+import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
@@ -100,9 +104,13 @@ public final class GpuLobbyWindow {
     /** How often, and how long at most, a new bot is checked for having joined, to put it on its team. */
     private static final int BOT_JOIN_POLL_MS = 250;
     private static final int BOT_JOIN_WAIT_MS = 10_000;
+    /** How long the map waits for changes to settle before it is drawn again. */
+    private static final int MAP_DELAY_MS = 150;
 
     /** EDT: the lobby holding the window or about to. */
     private static GpuLobbyWindow active;
+    /** EDT: the client whose lobby a scene it opened, such as the 3D preview or the board editor, replaced. */
+    private static ClientGUI displaced;
     /** The client whose lobby an open from another thread is about to show. */
     private static volatile ClientGUI pending;
 
@@ -221,6 +229,11 @@ public final class GpuLobbyWindow {
     private Map<Integer, String> sentSprites = Map.of();
     /** Set when a new screen needs every sprite again. */
     private volatile boolean spritesStale;
+    /** EDT: what the map picture last drawn, or being drawn, shows; the newest drawing's number, and its delay. */
+    private MapKey mapKey;
+    private int mapGeneration;
+    private Timer mapTimer;
+    private volatile BufferedImage lastMap;
 
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
@@ -242,6 +255,7 @@ public final class GpuLobbyWindow {
         if (pending == gui) {
             pending = null;
         }
+        displaced = null;
         if (active != null) {
             if (active.gui == gui && !active.closing) {
                 GpuHost.focus();
@@ -264,9 +278,35 @@ public final class GpuLobbyWindow {
         if (pending == gui) {
             pending = null;
         }
+        if (displaced == gui) {
+            displaced = null;
+        }
         if (active != null && active.gui == gui) {
             active.close();
         }
+    }
+
+    /**
+     * EDT: when a scene that replaced a lobby closes, for example the 3D preview or the board editor it opened, shows
+     * that lobby again if {@code owner} is its client's frame or a window of it and the game is still in the lounge.
+     * Returns whether it did.
+     */
+    static boolean reopenFor(@Nullable Window owner) {
+        ClientGUI gui = displaced;
+        if (gui == null) {
+            return false;
+        }
+        for (Window current = owner; current != null; current = current.getOwner()) {
+            if (current == gui.getFrame()) {
+                displaced = null;
+                if (!gui.getClient().getGame().getPhase().isLounge()) {
+                    return false;
+                }
+                open(gui);
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether {@code gui}'s lobby holds the native window or is about to, so its Swing frame stays hidden. */
@@ -322,7 +362,9 @@ public final class GpuLobbyWindow {
         try {
             ChatterBox chat = gui.getChatterBox();
             read = LobbySnapshot.of(gui::getClient, chat == null ? List.of() : chat.lines(LobbySnapshot.CHAT_LINES),
-                  customZones(), unitOrder());
+                  customZones(), unitOrder(), gui.chatlounge == null ? LobbyBattlefield.AutoResolve.DEFAULT
+                        : gui.chatlounge.autoResolveSettings());
+            bakeMap();
         } catch (RuntimeException failure) {
             LOGGER.error(failure, "The lobby could not read the game");
             return;
@@ -487,6 +529,159 @@ public final class GpuLobbyWindow {
             }
             refreshSoon();
         });
+    }
+
+    // ---- The battlefield column ----
+
+    /** Any thread: runs {@code action} with the battlefield actions on the Swing thread, then shows the result. */
+    private void battlefield(Consumer<LobbyBattlefieldController> action) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || gui.chatlounge == null) {
+                return;
+            }
+            action.accept(new LobbyBattlefieldController(gui::getClient, lounge(gui.chatlounge)));
+            queueRefresh();
+        });
+    }
+
+    /** The Swing lobby's battlefield controls, with the board editor as the start screen opens it. */
+    private LobbyBattlefieldController.Lounge lounge(ChatLounge lounge) {
+        return new LobbyBattlefieldController.Lounge() {
+            @Override
+            public void command(LobbyBattlefieldController.Command command) {
+                lounge.battlefieldCommand(ChatLounge.BattlefieldCommand.valueOf(command.name()));
+            }
+
+            @Override
+            public void mapSetup() {
+                lounge.openMapSetup();
+            }
+
+            @Override
+            public void boardEditor() {
+                GpuBoardWindow.openEditor(gui.getFrame(), null, false);
+            }
+
+            @Override
+            public void autoResolve(boolean chances, int runs, int threads) {
+                lounge.setAutoResolveSettings(chances, runs, threads);
+            }
+
+            @Override
+            public LobbyBattlefield.AutoResolve autoResolve() {
+                return lounge.autoResolveSettings();
+            }
+
+            @Override
+            public void runAutoResolve() {
+                lounge.runAutoResolve();
+            }
+        };
+    }
+
+    /** Any thread: runs one of the battlefield column's actions through the Swing lobby, as its map tab does. */
+    void battlefieldCommand(LobbyBattlefieldController.Command command) {
+        battlefield(controller -> controller.run(command));
+    }
+
+    /** Any thread: sets the auto-resolve settings of the Swing lobby. */
+    void autoResolve(boolean chances, int runs, int threads) {
+        battlefield(controller -> controller.autoResolve(chances, runs, threads));
+    }
+
+    /** The newest map picture, which a screen shows as it is created; null while none is drawn. */
+    @Nullable
+    BufferedImage lastMap() {
+        return lastMap;
+    }
+
+    /**
+     * EDT: draws the map again, shortly, when the board or a deployment zone changed: the map the server made, or else
+     * the one the map settings make of their fixed boards, as the Swing lobby previews it.
+     */
+    private void bakeMap() {
+        Client client = gui.getClient();
+        MapSettings settings = client.getMapSettings();
+        Board serverBoard = client.getGame().getBoard();
+        if (serverBoard != null && (serverBoard.getWidth() <= 0 || serverBoard.getHeight() <= 0)) {
+            serverBoard = null;
+        }
+        List<Player> players = new ArrayList<>();
+        List<List<Integer>> zones = new ArrayList<>();
+        for (Player player : client.getGame().getPlayersList()) {
+            players.add(player.copy());
+            zones.add(List.of(player.getId(), player.getTeam(), player.getStartingPos(), player.getStartWidth(),
+                  player.getStartOffset(), player.getStartingAnyNWx(), player.getStartingAnyNWy(),
+                  player.getStartingAnySEx(), player.getStartingAnySEy(), player.isObserver() ? 1 : 0));
+        }
+        Player local = client.getLocalPlayer();
+        MapKey key = new MapKey(settings, serverBoard, zones, local == null ? Player.PLAYER_NONE : local.getId());
+        if (key.equals(mapKey)) {
+            return;
+        }
+        mapKey = key;
+        Board board = serverBoard;
+        MapSettings copy = settings == null ? null : MapSettings.getInstance(settings);
+        Player localCopy = local == null ? null : local.copy();
+        int ticket = ++mapGeneration;
+        Runnable bake = () -> new SwingWorker<BufferedImage, Void>() {
+            @Override
+            protected BufferedImage doInBackground() {
+                Board drawn = board != null ? board
+                      : copy == null ? null : ServerBoardHelper.getPossibleGameBoard(copy, true);
+                if (drawn == null || drawn.getWidth() <= 0 || drawn.getHeight() <= 0) {
+                    return null;
+                }
+                return LobbyMapThumbnail.bake(drawn, players, localCopy, LobbyMapThumbnail.LONG_SIDE);
+            }
+
+            @Override
+            protected void done() {
+                if (ticket != mapGeneration || closing) {
+                    return;
+                }
+                BufferedImage image = null;
+                try {
+                    image = get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                    LOGGER.warn(e.getCause(), "The lobby could not draw the map");
+                }
+                sendMap(image, false);
+            }
+        }.execute();
+        if (mapTimer != null) {
+            mapTimer.stop();
+        }
+        mapTimer = new Timer(MAP_DELAY_MS, event -> bake.run());
+        mapTimer.setRepeats(false);
+        mapTimer.start();
+    }
+
+    private void sendMap(@Nullable BufferedImage image, boolean drawing) {
+        lastMap = image;
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.map(image, drawing);
+            }
+        });
+    }
+
+    /** What the map picture shows: the map settings, the server's board, each player's zone, and who is local. */
+    private record MapKey(@Nullable MapSettings settings, @Nullable Board board, List<List<Integer>> zones,
+          int local) {
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof MapKey key && key.settings == settings && key.board == board
+                  && key.zones.equals(zones) && key.local == local;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(System.identityHashCode(settings), System.identityHashCode(board), zones, local);
+        }
     }
 
     /** Any thread: orders the units by the Swing unit table's order {@code index}. */
@@ -794,8 +989,17 @@ public final class GpuLobbyWindow {
         dialogOnTop.clear();
         boolean replaced = closing;
         closing = true;
+        if (mapTimer != null) {
+            mapTimer.stop();
+        }
         if (active == this) {
             active = null;
+        }
+        if (failure == null && !replaced && gui.getClient().getGame().getPhase().isLounge()) {
+            // Another scene took the window, such as the 3D preview; the lobby comes back when it closes
+            displaced = gui;
+        } else if (gui.chatlounge != null) {
+            gui.chatlounge.closeMapSetup();
         }
         if (failure != null && !replaced) {
             LOGGER.error(failure, "The native lobby failed; the Swing lobby shows instead");

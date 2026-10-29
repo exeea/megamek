@@ -23,6 +23,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import jakarta.annotation.Nullable;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.ui.Messages;
@@ -75,6 +76,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     /** The units' sprites by their window's key, and each shown unit's. */
     private final Map<String, Texture> spriteTextures = new HashMap<>();
     private final Map<Integer, Drawable> spriteDrawables = new HashMap<>();
+    private Texture mapTexture;
     private LobbySnapshot shown;
     private long start;
     private boolean shotSaved;
@@ -111,6 +113,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         kit.presentation(Presentation.GAME);
         stage = new Stage(new ScreenViewport());
         build();
+        map(window.lastMap(), true);
         setInputBlocked(window.modalOpen());
         Gdx.graphics.setForegroundFPS(FRAMES_PER_SECOND);
         show(window.snapshot());
@@ -134,6 +137,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (probe.options().contains("formations")) {
             forces.showFormations();
         }
+        if (probe.options().contains("autoresolve")) {
+            battlefield.openAutoResolve();
+        }
         if (!probe.sized()) {
             return;
         }
@@ -151,7 +157,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         topBar = new LobbyTopBar(kit, window::leave, window::ready);
         players = new LobbyPlayersPanel(kit, playerActions());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
-        battlefield = new LobbyBattlefieldPanel(kit, boardSkin.skin);
+        battlefield = new LobbyBattlefieldPanel(kit, battlefieldActions());
+        battlefield.map(null, LobbyBattlefieldPanel.MAP_ASPECT, true);
         centre = new LobbyCentre(kit, forces.panel(), motion);
         rail = kit.rail(Messages.getString("Lobby.battlefield"), "map");
         rail.setProgrammaticChangeEvents(false);
@@ -174,6 +181,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         root.add(columns).grow().pad(0, space("lg"), space("lg"), space("lg"));
         players.attach(stage.getRoot());
         forces.attach(stage.getRoot());
+        battlefield.attach(stage.getRoot());
         stage.addListener(new InputListener() {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
@@ -181,7 +189,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     return false;
                 }
                 // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys
-                if (players.back() || forces.back()) {
+                if (players.back() || forces.back() || battlefield.back()) {
                     return true;
                 }
                 if (stage.getKeyboardFocus() instanceof TextField) {
@@ -290,6 +298,43 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.chooseMenu(path);
             }
         };
+    }
+
+    /** The battlefield column's actions, which the window runs on the Swing thread. */
+    private LobbyBattlefieldPanel.Actions battlefieldActions() {
+        return new LobbyBattlefieldPanel.Actions() {
+            @Override
+            public void command(LobbyBattlefieldController.Command command) {
+                window.battlefieldCommand(command);
+            }
+
+            @Override
+            public void autoResolve(boolean chances, int runs, int threads) {
+                window.autoResolve(chances, runs, threads);
+            }
+        };
+    }
+
+    /**
+     * GPU thread: shows the map the window drew, or, without one, that it is being drawn ({@code drawing}) or that
+     * there is none.
+     */
+    void map(@Nullable BufferedImage image, boolean drawing) {
+        if (stage == null) {
+            return;
+        }
+        if (mapTexture != null) {
+            mapTexture.dispose();
+            mapTexture = null;
+        }
+        if (image == null) {
+            battlefield.map(null, LobbyBattlefieldPanel.MAP_ASPECT, drawing);
+            return;
+        }
+        mapTexture = GpuStartScreen.texture(image, true);
+        mapTexture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        float aspect = Math.clamp((float) image.getHeight() / image.getWidth(), .4f, 1f);
+        battlefield.map(new TextureRegionDrawable(mapTexture), aspect, false);
     }
 
     /** GPU thread: opens the unit menu the window read for the forces column. */
@@ -423,6 +468,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         window.disposing();
         spriteTextures.values().forEach(Texture::dispose);
         spriteTextures.clear();
+        if (mapTexture != null) {
+            mapTexture.dispose();
+            mapTexture = null;
+        }
         for (Object disposable : new Object[] { stage }) {
             if (disposable instanceof com.badlogic.gdx.utils.Disposable resource) {
                 resource.dispose();
