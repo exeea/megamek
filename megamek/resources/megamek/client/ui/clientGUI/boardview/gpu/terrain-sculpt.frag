@@ -718,7 +718,10 @@ void main() {
     vec3 receiver = leaf && dot(face, light) < 0.0 ? -face : face;
     // Natural cliffs approximate a curved surface with shared vertex normals. Use that unmapped surface for
     // incident sidedness: a triangle cutoff exposes their tessellation at the light horizon. Planar panels and
-    // other geometry retain triangle support; normal-map detail cannot move this incident hemisphere.
+    // other geometry retain triangle support; normal-map detail cannot move this incident hemisphere. Their mapped
+    // detail fades into that horizon (terminatorShadow), never steps to dark at it; a scattering material keeps the
+    // light it wraps past the horizon (shadeSurface), which this visibility would scale too.
+    bool smoothSupport = cliff && !panel;
     // Where distance flattens natural relief, its share of the sun comes off here, so far zoom keeps its tone.
     // The shadow is looked up on the visible relief, about RELIEF_METRES deep, not the smooth mesh, so raised grains
     // catch the light at a shadow's edge. Hollows stay on the mesh: pushed into it they would shade themselves under
@@ -730,8 +733,9 @@ void main() {
     vec2 tufts = world.xy + world.z * vec2(.6, -.4);
     vec2 fray = (texture(u_rainNoise, tufts / 19.2 + .31).gb - .5 + .5 * (texture(u_rainNoise, tufts / 6.4 + .67).rg - .5))
           * (2.0 * FRAY_METRES / 1.5);
-    Surface surface = opaqueSurface(albedo, normal, cliff && !panel ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light, u_metre, lift, fray) * sunOnRelief(relief, dot(face, light)) * hollows);
+    Surface surface = opaqueSurface(albedo, normal, smoothSupport ? face : geometric, finish.roughness, film,
+          sculptShadow(receiver, light, u_metre, lift, fray) * sunOnRelief(relief, dot(face, light)) * hollows
+                * (smoothSupport && finish.scatter <= 0.0 ? terminatorShadow(face, normal, light) : 1.0));
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.
     metallicShare(surface, clamp(finish.metallic, 0.0, 1.0));
     surface.scatter = clamp(finish.scatter, 0.0, 1.0);

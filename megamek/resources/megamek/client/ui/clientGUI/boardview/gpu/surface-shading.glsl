@@ -78,6 +78,18 @@ vec3 thinTransmission(vec3 albedo, float share) {
     return min(vec3(share), (1.0 - albedo) / max(albedo, vec3(1e-4)));
 }
 
+// Chiang, Li and Burley, "Taming the Shadow Terminator" (2019): a shading normal that leans further towards the sun than
+// the smooth surface it details is shadowed by that surface's bumps, down to nothing at the surface's horizon, so the
+// light fades into the terminator instead of stepping from lit to unlit there. For a smooth support only: across a
+// faceted one it would differ from triangle to triangle.
+float terminatorShadow(vec3 support, vec3 normal, vec3 light) {
+    float sl = dot(support, light), nl = dot(normal, light), sn = dot(support, normal);
+    if (sl <= 0.0) return 0.0;
+    if (nl <= 0.0 || sn <= 0.0) return 1.0;
+    float g = min(1.0, sl / max(nl * sn, 1e-6));
+    return g * (1.0 + g * (1.0 - g));
+}
+
 // Reflected and emitted radiance. caustic and submerged describe water above the surface: the light its waves focus
 // onto it and how many levels of water lie over it (water-optics.glsl).
 vec3 shadeSurface(Surface s, float caustic, float submerged) {
