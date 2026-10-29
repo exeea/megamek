@@ -10,7 +10,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 
 /**
- * A filter chip ({@link UiTheme#TOKEN_FILTER_CHIP}): a status chip that toggles a filter on and off. At rest it is the
+ * A filter chip ({@link UiTheme#TOKEN_FILTER_CHIP}): a chip that toggles a filter on and off, control.sm high. At rest it is the
  * neutral chip with text.secondary; on, it fills in the accent's pressed tint, its text turns text.primary and a check
  * shows in the room the chip always keeps for it, so turning it on never resizes it. {@link #sameWidth(List)} gives a
  * group one width, so the chips line up. Made by {@link UiKit#filterChip(String)}.
@@ -23,8 +23,11 @@ public final class UiFilterChip extends Button {
     private float width;
     private boolean shownChecked;
 
-    /** The chip pads {@code vertical} above and below, {@code iconGap} round the check and {@code textGap} after. */
-    UiFilterChip(Skin skin, UiKit.Icon check, Label text, float iconSize, float vertical, float iconGap,
+    /**
+     * The chip pads {@code vertical} above and below, {@code side} before the check and after the text, and
+     * {@code iconGap} between them.
+     */
+    UiFilterChip(Skin skin, UiKit.Icon check, Label text, float iconSize, float vertical, float side, float iconGap,
           float textGap) {
         super(skin, UiTheme.TOKEN_FILTER_CHIP);
         this.check = check;
@@ -32,7 +35,7 @@ public final class UiFilterChip extends Button {
         on = UiTheme.tokenColor("text.primary");
         off = UiTheme.tokenColor("text.secondary");
         setProgrammaticChangeEvents(false);
-        pad(vertical, iconGap, vertical, textGap);
+        pad(vertical, side, vertical, textGap);
         add(check).size(iconSize).padRight(iconGap);
         add(text).height(iconSize).expandX().left();
         shownChecked = !isChecked();

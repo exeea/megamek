@@ -897,14 +897,17 @@ public final class UiKit {
     }
 
     /**
-     * A filter chip ({@link UiFilterChip}): the status chip's geometry and type, toggling on a click; on, it fills in
-     * the accent's pressed tint and a check leads its text. The view reads {@code isChecked()} on its change.
+     * A filter chip ({@link UiFilterChip}): a control, so {@code control.sm} high like the compact buttons, fields and
+     * selects beside it, with {@code lg} padding at its sides and the status chip's type; toggling on a click, on it
+     * fills in the accent's pressed tint and a check leads its text. The view reads {@code isChecked()} on its change.
      */
     public UiFilterChip filterChip(String text) {
-        float iconSize = DesignTokens.shipped().size().get("icon.sm");
+        DesignTokens tokens = DesignTokens.shipped();
+        float iconSize = tokens.size().get("icon.sm");
+        float vertical = (tokens.size().get("control.sm") - iconSize) / 2;
         return new UiFilterChip(skin, icon("check", iconSize, UiTheme.tokenColor("accent.primary")),
-              typeLabel(cased(CHIP_CASE, text), "small", "text.secondary"), iconSize, space("xxs"), space("xs"),
-              space("md"));
+              typeLabel(cased(CHIP_CASE, text), "small", "text.secondary"), iconSize, vertical, space("lg"),
+              space("xs"), space("lg"));
     }
 
     /**
