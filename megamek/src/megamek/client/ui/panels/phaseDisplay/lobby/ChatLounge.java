@@ -4222,6 +4222,117 @@ public class ChatLounge extends AbstractPhaseDisplay
         return butForceView.isSelected();
     }
 
+    // region Bridges for the native lobby
+
+    /** The forces column's commands that another view of this lobby (the native lobby) can run. */
+    public enum ForcesCommand {
+        ADD_UNIT, RANDOM_ARMY, SKILLS, NAMES, C3, LOAD_LIST, SAVE_LIST, PRINT_LIST
+    }
+
+    /**
+     * EDT: the unit and force menu of the unit table and the force tree for the given selection, for another view of
+     * this lobby to show; its items act as they do here.
+     *
+     * @param forceView whether to offer the force tree's items, such as Move Up and Move Down
+     */
+    public JPopupMenu unitMenu(java.util.List<Entity> entities, java.util.List<Force> forces, boolean forceView) {
+        return LobbyMekPopup.getPopup(entities, forces, new LobbyMekPopupActions(this), this, forceView);
+    }
+
+    /** The unit orders the unit table may use under the game's options. */
+    private java.util.List<MekTableSorter> allowedSorters() {
+        return union(unitSorters, bvSorters).stream()
+              .filter(sorter -> sorter.isAllowed(game().getOptions())).toList();
+    }
+
+    /**
+     * The unit orders the unit table may use under the game's options, by their names; an order that comes both ways
+     * carries an arrow for its direction.
+     */
+    public java.util.List<String> unitSortNames() {
+        java.util.List<MekTableSorter> sorters = allowedSorters();
+        java.util.List<String> names = new ArrayList<>();
+        for (MekTableSorter sorter : sorters) {
+            String name = sorter.getDisplayName();
+            boolean twoWays = sorters.stream().filter(other -> other.getDisplayName().equals(name)).count() > 1;
+            names.add(twoWays ? name + (sorter.getSortingDirection() == Sorting.ASCENDING ? " \u2191" : " \u2193")
+                  : name);
+        }
+        return names;
+    }
+
+    /** The index of the unit table's order in {@link #unitSortNames()}, or -1. */
+    public int unitSortIndex() {
+        return allowedSorters().indexOf(activeSorter);
+    }
+
+    /** EDT: orders the unit table by the order at {@code index} in {@link #unitSortNames()}. */
+    public void sortUnits(int index) {
+        java.util.List<MekTableSorter> sorters = allowedSorters();
+        if (index < 0 || index >= sorters.size() || sorters.get(index) == activeSorter) {
+            return;
+        }
+        activeSorter = sorters.get(index);
+        refreshEntities();
+        updateTableHeaders();
+    }
+
+    /**
+     * EDT: every unit in the unit table's order, trains and C3 networks kept together, before the blind drop rules
+     * leave any out.
+     */
+    public java.util.List<Entity> sortedUnits() {
+        ArrayList<Entity> units = new ArrayList<>(clientgui.getClient().getEntitiesVector());
+        if (activeSorter != null) {
+            units.sort(MekTableSorter.keepingC3NetworksTogether(units,
+                  MekTableSorter.keepingCarriedUnitsTogether(activeSorter)));
+        }
+        return units;
+    }
+
+    /**
+     * EDT: runs one of the forces column's commands as its button here does; the unit list commands act for
+     * {@code player}, when the local player may act for them.
+     */
+    public void forcesCommand(ForcesCommand command, @Nullable Player player) {
+        switch (command) {
+            case ADD_UNIT -> addUnit();
+            case RANDOM_ARMY -> createArmy();
+            case SKILLS -> new SkillGenerationDialog(clientgui.getFrame(), clientgui,
+                  clientgui.getClient().getGame().getEntitiesVector()).showDialog();
+            case NAMES -> loadRandomNames();
+            case C3 -> new C3NetworkManagerDialog(this).setVisible(true);
+            case LOAD_LIST, SAVE_LIST, PRINT_LIST -> unitList(command, player);
+        }
+    }
+
+    private void unitList(ForcesCommand command, @Nullable Player player) {
+        if ((player == null) || !mayActForPlayer(player)) {
+            clientgui.doAlertDialog(Messages.getString("ChatLounge.ImproperCommand"),
+                  Messages.getString("ChatLounge.SelectBotOrPlayer"));
+            return;
+        }
+        if (command == ForcesCommand.LOAD_LIST) {
+            clientgui.loadListFile(player);
+            return;
+        }
+        ArrayList<Entity> entities = unitsInForceTreeOrder(player);
+        for (Entity entity : entities) {
+            entity.setForceString(game().getForces().forceStringFor(entity));
+        }
+        try {
+            if (command == ForcesCommand.SAVE_LIST) {
+                clientgui.saveListFile(entities, player.getName());
+            } else {
+                clientgui.printList(entities, butPrintList);
+            }
+        } finally {
+            clearForceStrings(entities);
+        }
+    }
+
+    // endregion
+
     /** The lobby ends: its 2D and 3D previews close. */
     public void killPreviewBV() {
         close2DPreview();

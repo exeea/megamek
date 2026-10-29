@@ -181,6 +181,15 @@ class LobbyMekPopup {
 
     static ScalingPopup getPopup(List<Entity> entities, List<Force> forces, ActionListener listener,
           ChatLounge lobby) {
+        return getPopup(entities, forces, listener, lobby, lobby.isForceView());
+    }
+
+    /**
+     * The unit and force menu for the given selection; {@code forceView} adds the items that act on the force tree,
+     * such as Move Up and Move Down, as the force view shows them.
+     */
+    static ScalingPopup getPopup(List<Entity> entities, List<Force> forces, ActionListener listener,
+          ChatLounge lobby, boolean forceView) {
         ClientGUI clientGui = lobby.getClientGUI();
         Game game = lobby.game();
         var opts = game.getOptions();
@@ -267,7 +276,7 @@ class LobbyMekPopup {
         popup.add(menuItem("Set individual camo...", LMP_INDI_CAMO + NO_INFO + seIds, hasJoinedEntities, listener,
               KeyEvent.VK_I));
 
-        if (lobby.isForceView()) {
+        if (forceView) {
             JMenuItem moveUp = menuItem("Move Up", LMP_MOVE_UP + "|" + foToken(forces) + eIds,
                   !forces.isEmpty() || !entities.isEmpty(), listener, KeyEvent.VK_I);
             moveUp.setAccelerator(KeyStroke.getKeyStroke("ctrl UP"));
@@ -336,7 +345,7 @@ class LobbyMekPopup {
 
         popup.add(c3Menu(hasJoinedEntities, joinedEntities, clientGui, listener));
         popup.add(forceMenu(lobby, entities, forces, listener));
-        if (lobby.isForceView() && (forces.size() == 1)) {
+        if (forceView && (forces.size() == 1)) {
             addBotFormationMenu(popup, lobby, forces.getFirst());
         }
         addBotFacingItem(popup, clientGui, joinedEntities);
@@ -349,7 +358,7 @@ class LobbyMekPopup {
         }
 
         popup.add(menuItem("Convert to SBF Formation", LMP_SBF_FORMATION + "|" + foToken(forces) + eIds,
-              lobby.isForceView(), listener));
+              forceView, listener));
         popup.add(ScalingPopup.spacer());
         // Enabled whenever anything is selected, forces included: the handler deletes selected forces with their
         // units after asking, exactly as the Delete key does, so the menu must not stay greyed out in the force

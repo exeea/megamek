@@ -260,7 +260,7 @@ class LobbySnapshotTest {
     }
 
     private static LobbySnapshot snapshotOf(List<LobbySnapshot.TeamGroup> teams) {
-        return new LobbySnapshot(1, false, false, false, teams, List.of(), List.of(), "", "");
+        return new LobbySnapshot(1, false, false, false, teams, List.of(), List.of(), "", "", LobbyForces.EMPTY);
     }
 
     @Test
