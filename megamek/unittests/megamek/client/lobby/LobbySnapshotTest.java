@@ -231,37 +231,43 @@ class LobbySnapshotTest {
     }
 
     @Test
-    void sumsUpTheSidesWithTheLocalPlayersFirst() {
-        List<LobbySnapshot.TeamGroup> teams = List.of(
-              new LobbySnapshot.TeamGroup(Player.TEAM_NONE, "No team",
-                    List.of(row(4, "Loner", Player.TEAM_NONE, false, false, false, 700),
-                          row(5, "Watcher", Player.TEAM_NONE, false, true, false, 0))),
-              new LobbySnapshot.TeamGroup(1, "Team 1", List.of(row(2, "Foe", 1, false, false, true, 0),
-                    row(3, "Foe 2", 1, false, false, false, 400))),
-              new LobbySnapshot.TeamGroup(2, "Team 2", List.of(row(1, "Me", 2, true, false, false, 1000),
-                    row(6, "Ally", 2, false, false, false, 500))));
-        LobbySnapshot snapshot = snapshotOf(teams);
-
-        assertEquals(List.of(new LobbySnapshot.Side("Team 2", true, false, 1500),
-              new LobbySnapshot.Side("Team 1", false, true, 400),
-              new LobbySnapshot.Side("Loner", false, false, 700)), snapshot.sides());
+    void countsOnlyThePlayersTheServerWaitsFor() {
+        LobbySnapshot.PlayerRow ghost = new LobbySnapshot.PlayerRow(3, "Gone", 1, false, false, false, false, false,
+              false, true, false, 1, 0, 0, "", true, 0);
+        LobbySnapshot snapshot = snapshotOf(List.of(new LobbySnapshot.TeamGroup(1, "Team 1",
+              List.of(row(1, "Me", 1, true, false, false, 0), row(2, "Watcher", 1, false, true, false, 0), ghost,
+                    row(4, "Ally", 1, false, false, false, 0).withReady(true)))));
+        assertEquals(1, snapshot.readyCount());
+        assertEquals(2, snapshot.readyTotal());
+        assertEquals(List.of("Me"), snapshot.waitingFor());
+        assertEquals(4, snapshot.playerCount());
     }
 
     @Test
-    void aLocalPlayerOnNoTeamIsTheirOwnSide() {
-        List<LobbySnapshot.TeamGroup> teams = List.of(
-              new LobbySnapshot.TeamGroup(Player.TEAM_NONE, "No team",
-                    List.of(row(2, "Other", Player.TEAM_NONE, false, false, false, 300),
-                          row(1, "Me", Player.TEAM_NONE, true, false, false, 200))));
-        LobbySnapshot snapshot = snapshotOf(teams);
+    void showsTheLocalPlayerAndTheirBotsReadyAtOnce() {
+        LobbySnapshot snapshot = snapshot().withLocalReady(true);
 
-        assertEquals(List.of(new LobbySnapshot.Side("Me", true, false, 200),
-              new LobbySnapshot.Side("Other", false, false, 300)), snapshot.sides());
+        assertTrue(snapshot.localReady());
+        assertTrue(snapshot.players().get(0).ready());
+        assertTrue(snapshot.players().get(1).ready());
+        assertFalse(snapshot.players().get(2).ready());
+        assertEquals(2, snapshot.readyCount());
+        assertEquals(List.of("Enemy"), snapshot.waitingFor());
+        assertFalse(snapshot.withLocalReady(false).players().get(1).ready());
     }
 
+    @Test
+    void readsTheSides() {
+        LobbySnapshot snapshot = snapshot();
+
+        assertEquals(List.of(new LobbyReadiness.Side(Messages.getString("Lobby.team", 1),
+                    LobbySnapshot.Relation.OWN, false, 2000),
+              new LobbyReadiness.Side(Messages.getString("Lobby.team", 2), LobbySnapshot.Relation.ENEMY, false,
+                    3000)), snapshot.sides());
+    }
     private static LobbySnapshot snapshotOf(List<LobbySnapshot.TeamGroup> teams) {
         return new LobbySnapshot(1, false, false, false, teams, List.of(), List.of(), "", "", LobbyForces.EMPTY,
-              LobbyBattlefield.EMPTY);
+              LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY);
     }
 
     @Test

@@ -60,28 +60,43 @@ public final class ReadyCheck {
      */
     public static List<Blocker> blockers(Game game, Player localPlayer, Collection<Player> localBots) {
         List<Blocker> blockers = new ArrayList<>();
-        for (Player player : game.getPlayersList()) {
-            if (!LobbyRules.isValidStartPos(game, player)) {
-                blockers.add(new Blocker(Reason.OVERLAPPING_DEPLOYMENT, List.of()));
-                break;
-            }
+        if (!overlapping(game).isEmpty()) {
+            blockers.add(new Blocker(Reason.OVERLAPPING_DEPLOYMENT, List.of()));
         }
-
-        if (game.getOptions().booleanOption(OptionsConstants.VICTORY_COMMANDER_KILLED)) {
-            List<String> players = new ArrayList<>();
-            if (lacksCommander(game, localPlayer)) {
-                players.add(localPlayer.getName());
-            }
-            for (Player bot : localBots) {
-                if (lacksCommander(game, bot)) {
-                    players.add(bot.getName());
-                }
-            }
-            if (!players.isEmpty()) {
-                blockers.add(new Blocker(Reason.NO_COMMANDER, players));
-            }
+        List<String> leaderless = withoutCommander(game, localPlayer, localBots).stream().map(Player::getName)
+              .toList();
+        if (!leaderless.isEmpty()) {
+            blockers.add(new Blocker(Reason.NO_COMMANDER, leaderless));
         }
         return blockers;
+    }
+
+    /**
+     * @return the players whose deployment area overlaps another's where double blind with exclusive deployment
+     *       forbids it, in the game's player order; empty when none does
+     */
+    public static List<Player> overlapping(Game game) {
+        return game.getPlayersList().stream().filter(player -> !LobbyRules.isValidStartPos(game, player)).toList();
+    }
+
+    /**
+     * @return the local player and those of their bots that have units but no commander while commander killed
+     *       victory is on, the local player first; empty when the option is off or all have one
+     */
+    public static List<Player> withoutCommander(Game game, Player localPlayer, Collection<Player> localBots) {
+        if (!game.getOptions().booleanOption(OptionsConstants.VICTORY_COMMANDER_KILLED)) {
+            return List.of();
+        }
+        List<Player> players = new ArrayList<>();
+        if (lacksCommander(game, localPlayer)) {
+            players.add(localPlayer);
+        }
+        for (Player bot : localBots) {
+            if (lacksCommander(game, bot)) {
+                players.add(bot);
+            }
+        }
+        return players;
     }
 
     private static boolean lacksCommander(Game game, Player player) {

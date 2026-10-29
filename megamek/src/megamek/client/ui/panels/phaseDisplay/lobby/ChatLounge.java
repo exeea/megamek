@@ -2673,7 +2673,9 @@ public class ChatLounge extends AbstractPhaseDisplay
     public void ready() {
         final Client client = clientgui.getClient();
         final Game game = client.getGame();
-        if (!lobbyCommands.checkReady()) {
+        boolean done = !localPlayer().isDone();
+        // Only readying is checked; standing down is always allowed
+        if (done && !lobbyCommands.checkReady()) {
             return;
         }
 
@@ -2682,8 +2684,6 @@ public class ChatLounge extends AbstractPhaseDisplay
         }
 
         killPreviewBV();
-
-        boolean done = !localPlayer().isDone();
 
         // Ask up front (once) whether to record the combat-summary GIF, so recording never has to interrupt play
         // mid-game. No-op unless the preference is "ask" and no choice has been made for this game yet.

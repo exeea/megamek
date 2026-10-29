@@ -42,10 +42,12 @@ import megamek.common.units.FighterSquadron;
  * @param server              where the game runs: a local game's port, or the server's address and port
  * @param forces              the units and formations the local player may see
  * @param battlefield         the map, conditions, rules, victory and auto-resolve as the battlefield column sums them up
+ * @param readiness           each side's Battle Value and the warnings to heed before Ready
  */
 public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean localReady,
       boolean gameMasterAvailable, List<TeamGroup> teams, List<ChatLine> chat, List<Integer> customZones,
-      String mapSummary, String server, LobbyForces forces, LobbyBattlefield battlefield) {
+      String mapSummary, String server, LobbyForces forces, LobbyBattlefield battlefield,
+      LobbyReadiness readiness) {
 
     /** The most chat lines a snapshot carries. */
     public static final int CHAT_LINES = 200;
@@ -55,7 +57,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
 
     /** An empty lobby, as shown before the client has its game. */
     public static final LobbySnapshot EMPTY = new LobbySnapshot(Player.PLAYER_NONE, false, false, false, List.of(),
-          List.of(), List.of(), "", "", LobbyForces.EMPTY, LobbyBattlefield.EMPTY);
+          List.of(), List.of(), "", "", LobbyForces.EMPTY, LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY);
 
     public LobbySnapshot {
         teams = List.copyOf(teams);
@@ -65,6 +67,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         Objects.requireNonNull(server);
         Objects.requireNonNull(forces);
         Objects.requireNonNull(battlefield);
+        Objects.requireNonNull(readiness);
     }
 
     /** How a player or team stands to the local player. */
@@ -153,67 +156,54 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         public boolean localBot() {
             return local && !self;
         }
+
+        /** @return this player shown {@code ready} */
+        public PlayerRow withReady(boolean ready) {
+            return new PlayerRow(id, name, team, bot, self, local, gameMaster, observer, ready, ghost, hidden, units,
+                  bv, tons, start, startValid, colour);
+        }
+    }
+
+    /** @return the sides that field forces and their Battle Value, as the ready bar shows them */
+    public List<LobbyReadiness.Side> sides() {
+        return readiness.sides();
     }
 
     /**
-     * One side of the battle as the top bar sums it up: a team, or a player on no team.
-     *
-     * @param name     the team's or the player's name
-     * @param friendly whether it is the local player's side
-     * @param hidden   whether a blind drop hides any of its players' forces from the local player
-     * @param bv       the Battle Value of the side's players whose forces are not hidden
+     * @return whether the server waits for {@code player} to be ready before the game starts: everyone but ghosts and
+     *       observers, as the server counts them
      */
-    public record Side(String name, boolean friendly, boolean hidden, int bv) { }
-
-    /**
-     * @return the sides that field forces: the local player's first, then the other teams in team order, then each
-     *       other player on no team; observers field none
-     */
-    public List<Side> sides() {
-        int localTeam = Player.TEAM_NONE;
-        for (PlayerRow player : players()) {
-            if (player.self()) {
-                localTeam = player.team();
-            }
-        }
-        List<Side> own = new ArrayList<>();
-        List<Side> teamSides = new ArrayList<>();
-        List<Side> loners = new ArrayList<>();
-        for (TeamGroup team : teams) {
-            if (team.id() <= Player.TEAM_NONE) {
-                for (PlayerRow player : team.players()) {
-                    if (!player.observer()) {
-                        Side side = new Side(player.name(), player.self(), player.hidden(), player.bv());
-                        (player.self() ? own : loners).add(side);
-                    }
-                }
-                continue;
-            }
-            boolean fields = false;
-            boolean hidden = false;
-            int bv = 0;
-            for (PlayerRow player : team.players()) {
-                if (!player.observer()) {
-                    fields = true;
-                    hidden |= player.hidden();
-                    bv += player.bv();
-                }
-            }
-            if (fields) {
-                boolean friendly = team.id() == localTeam;
-                (friendly ? own : teamSides).add(new Side(team.name(), friendly, hidden, bv));
-            }
-        }
-        own.addAll(teamSides);
-        own.addAll(loners);
-        return own;
+    public static boolean counted(PlayerRow player) {
+        return !player.ghost() && !player.observer();
     }
 
-    /** @return how many players are ready */
+    /** @return how many of the players the server waits for are ready */
     public int readyCount() {
-        return (int) players().stream().filter(PlayerRow::ready).count();
+        return (int) players().stream().filter(LobbySnapshot::counted).filter(PlayerRow::ready).count();
     }
 
+    /** @return how many players the server waits for to be ready */
+    public int readyTotal() {
+        return (int) players().stream().filter(LobbySnapshot::counted).count();
+    }
+
+    /** @return the names of the players the server still waits for, in roster order */
+    public List<String> waitingFor() {
+        return players().stream().filter(LobbySnapshot::counted).filter(player -> !player.ready())
+              .map(PlayerRow::name).toList();
+    }
+
+    /**
+     * @return this snapshot with the local player and their bots shown {@code ready}, as they will be once the server
+     *       confirms what was sent
+     */
+    public LobbySnapshot withLocalReady(boolean ready) {
+        List<TeamGroup> shown = teams.stream().map(team -> new TeamGroup(team.id(), team.name(),
+              team.players().stream().map(player -> player.local() ? player.withReady(ready) : player).toList()))
+              .toList();
+        return new LobbySnapshot(localPlayerId, localGameMaster, ready, gameMasterAvailable, shown, chat,
+              customZones, mapSummary, server, forces, battlefield, readiness);
+    }
     /** @return how many players are in the lobby */
     public int playerCount() {
         return players().size();
@@ -295,10 +285,12 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         if (local != null) {
             localIds.add(local.getId());
         }
+        List<Player> localBots = new ArrayList<>();
         for (AbstractClient bot : session.localBots().values()) {
             Player botPlayer = bot.getLocalPlayer();
             if (botPlayer != null) {
                 localIds.add(botPlayer.getId());
+                localBots.add(botPlayer);
             }
         }
         Map<Integer, List<PlayerRow>> byTeam = new TreeMap<>();
@@ -334,12 +326,14 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         List<String> recent = chat.size() > CHAT_LINES ? chat.subList(chat.size() - CHAT_LINES, chat.size()) : chat;
         List<ChatLine> lines = recent.stream().map(line -> ChatLine.parse(line, game.getPlayersList(), local))
               .toList();
+        LobbyForces forces = LobbyForces.of(session, order);
         return new LobbySnapshot(local == null ? Player.PLAYER_NONE : local.getId(),
               local != null && local.isGameMaster(), local != null && local.isDone(),
               gameMasterAvailable(game, local), teams, lines, new ArrayList<>(new TreeSet<>(customZones)),
               mapSummary(client.getMapSettings()), server(client.getHost(), client.getPort()),
-              LobbyForces.of(session, order), LobbyBattlefield.of(game.getOptions(), game.getPlanetaryConditions(),
-              client.getMapSettings(), autoResolve));
+              forces, LobbyBattlefield.of(game.getOptions(), game.getPlanetaryConditions(),
+              client.getMapSettings(), autoResolve), LobbyReadiness.of(game, local, localBots, forces,
+              client.getMapSettings()));
     }
 
     /** Where a team goes in the list: the local player's team first, the players on no team last. */
