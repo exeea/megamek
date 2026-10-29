@@ -229,15 +229,21 @@ class GpuShaderLoadSmokeTest {
                             step++;
                         } else if (step == 2 && watch.seconds() > 15) {
                             var terrain = (GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain");
-                            boolean curved = false;
+                            boolean curved = false, coated = false;
                             for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
                                 for (Object instance : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "opaque")) {
                                     for (var material : ((ModelInstance) instance).materials) {
                                         curved |= GpuTessellation.curved(material);
                                     }
                                 }
+                                for (Object instance : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "overlays")) {
+                                    for (var material : ((ModelInstance) instance).materials) {
+                                        coated |= GpuTessellation.curved(material) && material.has(GpuRoads.Mask.TYPE);
+                                    }
+                                }
                             }
                             assertTrue(curved, "The close view's full-detail chunks draw curving relief");
+                            assertTrue(coated, "and road coats curving with it, whose programs link while loading too");
                             Gdx.app.exit();
                         }
                     } catch (Throwable error) {

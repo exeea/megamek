@@ -4,14 +4,26 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -25,6 +37,217 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class GpuRoadSourceTest {
+    @Test
+    void roadEndCoversTheTerrainRimBeyondItsHex() {
+        var scene = GpuRailTessellationSmokeTest.scene(true);
+        var source = scene.tile(3, 4);
+        var road = BoardRoad.of(scene, source);
+        var pavement = GpuRoads.patches(source, road).stream()
+              .filter(p -> p.texture().equals("roads/asphalt") && p.lift() == GpuRoads.SURFACE_LIFT)
+              .findFirst().orElseThrow();
+        road.clipPaint(pavement.shape());
+        for (var lod : TerrainLod.values()) {
+            var supportingFaces = new ArrayList<BoardSurface.Face>();
+            var triangles = new ArrayList<BoardTacticalGeometry.Triangle>();
+            // Coarser rims can move the same support into a neighbouring hex's mesh.
+            for (int d = -1; d < 6; d++) {
+                var tile = d < 0 ? source : scene.neighbor(source, d);
+                var surface = new BoardSurface(scene, tile, lod);
+                supportingFaces.addAll(surface.groundFaces());
+                supportingFaces.addAll(surface.walls(scene, BoardGeometry.floor(scene)));
+                triangles.addAll(GpuRoads.drape(source, surface, pavement));
+            }
+            for (float x : new float[] { 253, 255, 257 }) {
+                // The reported notch lies on the rim of 0505, inside 0405's rounded road end.
+                float y = -330;
+                assertTrue(pavement.shape().contains(x - BoardGeometry.centerX(source.coords()),
+                      y - BoardGeometry.centerY(source.coords())));
+                float support = BoardSurface.sampleHeight(supportingFaces, x, y, Float.NaN);
+                assertTrue(Float.isFinite(support), "The road end has existing terrain support at " + lod);
+                var ray = new Ray(new Vector3(x, y, 200), new Vector3(0, 0, -1));
+                var hit = new Vector3();
+                double painted = triangles.stream().mapToDouble(t -> Intersector.intersectRayTriangle(ray,
+                      t.a(), t.b(), t.c(), hit) ? hit.z : Double.NEGATIVE_INFINITY).max().orElseThrow();
+                assertEquals(support + pavement.lift() * BoardGeometry.hexScale(), painted, .001,
+                      "Pavement must cover the rim at " + x + "," + y + " / " + lod);
+            }
+        }
+    }
+
+    @Test
+    void tessellatedRoadsUseTheirSupportingControlTriangles() throws Exception {
+        var scene = scene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
+        var texture = mock(Texture.class);
+        when(texture.getWidth()).thenReturn(16);
+        when(texture.getHeight()).thenReturn(16);
+        int checked = 0;
+        for (var at : List.of(new Coords(0, 6), new Coords(1, 6), new Coords(0, 7))) {
+            var tile = scene.tile(at);
+            var surface = new BoardSurface(scene, tile, TerrainLod.FULL);
+            surface.walls(scene, BoardGeometry.floor(scene));
+            var supportFaces = new ArrayList<>(surface.groundFaces());
+            supportFaces.addAll(surface.walls(scene, BoardGeometry.floor(scene)));
+            var road = BoardRoad.of(scene, tile);
+            for (var patch : GpuRoads.patches(tile, road)) {
+                var triangles = GpuRoads.drape(tile, surface, patch);
+                var sources = new HashMap<BoardTacticalGeometry.Triangle, BoardSurface.Face>();
+                float lift = patch.lift() * BoardGeometry.hexScale();
+                for (var face : supportFaces) {
+                    sources.put(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, lift),
+                          new Vector3(face.b()).add(0, 0, lift), new Vector3(face.c()).add(0, 0, lift), -1), face);
+                }
+                var mask = new GpuRoads.Mask(new TextureRegion(texture), GpuRoads.mask(road, patch));
+                var mesh = new MeshBuilder();
+                mesh.begin(GpuRoads.TESSELLATED_VERTICES, GL20.GL_TRIANGLES);
+                GpuRoads.write(() -> mesh, triangles, patch, mask, surface, false, 0, 1, true, null);
+                int stride = GpuRoads.TESSELLATED_VERTICES.vertexSize / Float.BYTES;
+                float[] vertices = new float[mesh.getNumVertices() * stride];
+                mesh.getVertices(vertices, 0);
+                for (int offset = 0; offset < vertices.length; offset += stride) {
+                    float[] v = Arrays.copyOfRange(vertices, offset, offset + stride);
+                    var face = sources.get(triangles.get(offset / stride / 3));
+                    assertTrue(face != null, "The coat must use an original supporting triangle");
+                    var point = List.of(face.a(), face.b(), face.c()).get(offset / stride % 3);
+                    var support = GpuTerrain.sculptVertex(point, surface.relief.shade(point), Float.NaN, surface);
+                    assertEquals(point, new Vector3(v[0], v[1], v[2]), "Original control position before lift");
+                    String contact = "Support at " + support.position + " in " + at + " / " + patch.texture();
+                    assertEquals(support.normal.x, v[3], contact);
+                    assertEquals(support.normal.y, v[4], contact);
+                    assertEquals(support.normal.z, v[5], contact);
+                    // The shape payload follows the existing road mask and atlas coordinates: the ground's own inputs.
+                    int shape = stride - 5;
+                    assertEquals(support.color.toFloatBits(), v[shape]);
+                    assertEquals(support.uv.x, v[shape + 1]);
+                    assertEquals(support.uv.y, v[shape + 2]);
+                    assertEquals(patch.lift() * BoardGeometry.hexScale(), v[shape + 3], .00001f,
+                          "Clearance is applied after both patches evaluate the same surface");
+                    assertEquals(surface.fixedTessellation(point) ? 1 : 0, v[shape + 4], contact + ": fixed as its ground");
+                    checked++;
+                }
+                float[] original = vertices.clone();
+                var relocated = new GpuRoads.Mask(new TextureRegion(texture, 4, 4, 8, 8), mask.data);
+                GpuRoads.relocate(vertices, relocated, GpuRoads.TESSELLATED_VERTICES);
+                int region = GpuRoads.VERTICES.vertexSize / Float.BYTES - 4;
+                float[] placement = { relocated.offsetU, relocated.offsetV, relocated.scaleU, relocated.scaleV };
+                for (int i = 0; i < vertices.length; i++) {
+                    int field = i % stride - region;
+                    assertEquals(field >= 0 && field < 4 ? placement[field] : original[i], vertices[i],
+                          "An edited road atlas must relocate every coat without corrupting its shape inputs");
+                }
+            }
+        }
+        assertTrue(checked > 100, "Exercise the reported road bends and their edge triangles");
+    }
+
+    /** A drawn ground corner's tessellation inputs. */
+    private record Corner(Vector3 normal, float color, float u, float v) { }
+
+    @Test
+    void tessellatedRoadsFollowTheGroundsSplitTriangles() throws Exception {
+        var texture = mock(Texture.class);
+        when(texture.getWidth()).thenReturn(16);
+        when(texture.getHeight()).thenReturn(16);
+        int pieces = 0;
+        for (String board : List.of("unofficial/Drewbacca/16x17 Fire And Ice 2.board",
+              "AGoAC Maps/16x17 Grassland 2 (Low Bridges).board")) {
+            var scene = scene(board);
+            Map<Coords, BoardSurface> surfaces = new HashMap<>();
+            for (int x = 0; x < scene.width(); x++) {
+                for (int y = 0; y < scene.height(); y++) {
+                    surfaces.put(new Coords(x, y), new BoardSurface(scene, scene.tile(x, y), TerrainLod.FULL));
+                }
+            }
+            for (var surface : List.copyOf(surfaces.values())) {
+                var tile = surface.tile;
+                if (!BoardRoad.rendered(tile) || !surface.relief.sculpted()) { continue; }
+                var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), TerrainLod.FULL,
+                      surfaces);
+                // The ground as drawn: the blend plan's triangles, and the other sculpted faces as their mesh writes them.
+                Map<List<Vector3>, List<Corner>> ground = new HashMap<>();
+                for (var group : plan.blended().values()) {
+                    for (var t : group) {
+                        List<Corner> corners = new ArrayList<>();
+                        for (var v : List.of(t.a().vertex(), t.b().vertex(), t.c().vertex())) {
+                            corners.add(new Corner(v.normal, v.color.toFloatBits(), v.uv.x, v.uv.y));
+                        }
+                        ground.put(List.of(t.a().vertex().position, t.b().vertex().position, t.c().vertex().position),
+                              corners);
+                    }
+                }
+                var layout = MeshBuilder.createAttributes(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
+                      | VertexAttributes.Usage.ColorPacked | VertexAttributes.Usage.TextureCoordinates);
+                var drawn = new MeshBuilder();
+                drawn.begin(layout, GL20.GL_TRIANGLES);
+                GpuTerrain.sculptedFaces(() -> drawn, surface, plan.formed(), tile.liquid().present()
+                      ? GpuWaterShader.palette(tile.liquid()) : Float.NaN, scene, surfaces);
+                int size = layout.vertexSize / Float.BYTES, normal = layout.getOffset(VertexAttributes.Usage.Normal);
+                int color = layout.getOffset(VertexAttributes.Usage.ColorPacked);
+                int uv = layout.getOffset(VertexAttributes.Usage.TextureCoordinates);
+                float[] floats = new float[drawn.getNumVertices() * size];
+                short[] indices = new short[drawn.getNumIndices()];
+                drawn.getVertices(floats, 0);
+                drawn.getIndices(indices, 0);
+                for (int i = 0; i < indices.length; i += 3) {
+                    List<Vector3> positions = new ArrayList<>();
+                    List<Corner> corners = new ArrayList<>();
+                    for (int k = 0; k < 3; k++) {
+                        int v = Short.toUnsignedInt(indices[i + k]) * size;
+                        positions.add(new Vector3(floats[v], floats[v + 1], floats[v + 2]));
+                        corners.add(new Corner(new Vector3(floats[v + normal], floats[v + normal + 1],
+                              floats[v + normal + 2]), floats[v + color], floats[v + uv], floats[v + uv + 1]));
+                    }
+                    ground.put(positions, corners);
+                }
+                // Faces the ground does not draw whole, and the pieces it draws instead.
+                Set<List<Vector3>> split = new HashSet<>(), whole = new HashSet<>();
+                Set<List<Vector3>> parts = new HashSet<>(ground.keySet());
+                for (var face : plan.formed()) {
+                    var corners = List.of(face.a(), face.b(), face.c());
+                    if (ground.containsKey(corners)) { whole.add(corners); } else { split.add(corners); }
+                }
+                plan.supports().forEach((face, vertices) -> {
+                    var corners = List.of(face.a(), face.b(), face.c());
+                    if (vertices.size() > 3) { split.add(corners); } else { whole.add(corners); }
+                });
+                parts.removeAll(whole);
+                var road = BoardRoad.of(scene, tile);
+                for (var patch : GpuRoads.patches(tile, road)) {
+                    var mask = new GpuRoads.Mask(new TextureRegion(texture), GpuRoads.mask(road, patch));
+                    var mesh = new MeshBuilder();
+                    mesh.begin(GpuRoads.TESSELLATED_VERTICES, GL20.GL_TRIANGLES);
+                    GpuRoads.write(() -> mesh, GpuRoads.drape(tile, surface, patch), patch, mask, surface, false, 0, 1,
+                          true, GpuTerrain.coatSupports(plan, surface, scene, surfaces));
+                    int stride = GpuRoads.TESSELLATED_VERTICES.vertexSize / Float.BYTES, shape = stride - 5;
+                    float[] vertices = new float[mesh.getNumVertices() * stride];
+                    mesh.getVertices(vertices, 0);
+                    for (int offset = 0; offset < vertices.length; offset += 3 * stride) {
+                        List<Vector3> positions = new ArrayList<>();
+                        for (int k = 0; k < 3; k++) {
+                            int v = offset + k * stride;
+                            positions.add(new Vector3(vertices[v], vertices[v + 1], vertices[v + 2]));
+                        }
+                        String at = board + " " + tile.coords() + " / " + patch.texture() + " " + positions;
+                        assertFalse(split.contains(positions), "A coat must not span a face its ground splits: " + at);
+                        var corners = ground.get(positions);
+                        if (corners == null) { continue; }
+                        if (parts.contains(positions)) { pieces++; }
+                        for (int k = 0; k < 3; k++) {
+                            int v = offset + k * stride;
+                            var corner = corners.get(k);
+                            var drawnNormal = new Vector3(vertices[v + 3], vertices[v + 4], vertices[v + 5]);
+                            assertEquals(corner.normal(), drawnNormal, at);
+                            assertEquals(corner.color(), vertices[v + shape], at);
+                            assertEquals(corner.u(), vertices[v + shape + 1], at);
+                            assertEquals(corner.v(), vertices[v + shape + 2], at);
+                            assertEquals(surface.fixedTessellation(positions.get(k)) ? 1 : 0, vertices[v + shape + 4], at);
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(pieces > 0, "Exercise coats over the ground's split triangles");
+    }
+
     @Test
     void forestsEndRoadsReachBothEndsOfTheBridgeAtEveryDetail() throws Exception {
         var scene = scene("unofficial/Strategoslevel3/32x17 (CW) Forests End  - Road.board");

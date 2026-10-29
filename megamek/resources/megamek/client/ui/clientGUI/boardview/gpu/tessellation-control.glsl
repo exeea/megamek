@@ -18,7 +18,7 @@ float tessSegments(int i, int j) {
     vec3 middle = vs_position[i] + halfEdge;
     // The curve's middle (tessellation-evaluation.glsl), as far as the edge's shape rounds it.
     vec3 bulge = -.5 * (dot(halfEdge, na) * na - dot(halfEdge, nb) * nb)
-          * min(tessShape(vs_color[i]), tessShape(vs_color[j]));
+          * min(vs_shape[i], vs_shape[j]);
     if (dot(bulge, na + nb) <= 0.0 || length(bulge) < TESS_BULGE) return 1.0;
     vec4 chord = u_tessView * vec4(middle, 1.0), curve = u_tessView * vec4(middle + bulge, 1.0);
     // Behind a perspective camera an edge has no size on screen.

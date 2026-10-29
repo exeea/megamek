@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.nio.IntBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -12,11 +13,14 @@ import java.util.regex.Pattern;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
@@ -73,6 +77,44 @@ final class GpuTessellation {
     static boolean curved(Material material) { return material.id.endsWith(CURVED); }
 
     /**
+     * A curved relief's layout with whether each vertex stays where its mesh puts it (a_tessFixed, from
+     * BoardSurface#fixedTessellation): the one input for the rigid contacts its colour and texture coordinates do not
+     * hold.
+     */
+    static VertexAttributes contacts(VertexAttributes source) {
+        if (hasContacts(source)) { return source; }
+        VertexAttribute[] attributes = new VertexAttribute[source.size() + 1];
+        for (int i = 0; i < source.size(); i++) { attributes[i] = source.get(i).copy(); }
+        attributes[source.size()] = new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_tessFixed", 3);
+        return new VertexAttributes(attributes);
+    }
+
+    static boolean hasContacts(VertexAttributes attributes) {
+        // Chunk workers share layouts; libGDX's cached iterator is not safe across those workers.
+        for (int i = 0; i < attributes.size(); i++) {
+            if (attributes.get(i).alias.equals("a_tessFixed")) { return true; }
+        }
+        return false;
+    }
+
+    /** Resolve contacts after water clipping and material subdivision, without altering normals or material data. */
+    static short vertex(MeshPartBuilder mesh, MeshPartBuilder.VertexInfo vertex, BoardSurface surface) {
+        if (!hasContacts(mesh.getAttributes())) { return mesh.vertex(vertex); }
+        // MeshBuilder's standard layout puts packed colour before normals; the blended layout writes its own order.
+        return vertex(mesh, surface != null && surface.fixedTessellation(vertex.position), vertex.position.x,
+              vertex.position.y, vertex.position.z, vertex.color.toFloatBits(), vertex.normal.x, vertex.normal.y,
+              vertex.normal.z, vertex.uv.x, vertex.uv.y);
+    }
+
+    static short vertex(MeshPartBuilder mesh, boolean fixed, float... values) {
+        if (hasContacts(mesh.getAttributes())) {
+            values = Arrays.copyOf(values, values.length + 1);
+            values[values.length - 1] = fixed ? 1 : 0;
+        }
+        return mesh.vertex(values);
+    }
+
+    /**
      * Whether a triangle with these corners and vertex normals curves: one of its edges bulges outward more than nine
      * tenths of {@link #BULGE_METRES}. Every other edge keeps one segment, straight (tessellation-control.glsl), so the triangles
      * that do not curve meet those that do without a crack; the margin keeps the stage's own test, whose shape only
@@ -104,6 +146,7 @@ final class GpuTessellation {
      * the original declares it.
      */
     static String vertex(String source) {
+        source = "#ifdef terrainContactFlag\nin float a_tessFixed;\n#endif\n" + source;
         Map<String, String> inputs = new LinkedHashMap<>();
         StringBuilder pass = new StringBuilder(), control = new StringBuilder(), evaluation = new StringBuilder();
         boolean renamed = false;
@@ -144,7 +187,7 @@ final class GpuTessellation {
                   .append(" = gl_TessCoord.x * tc_").append(name).append("[0] + gl_TessCoord.y * tc_").append(name)
                   .append("[1] + gl_TessCoord.z * tc_").append(name).append("[2];\n#endif\n");
         }
-        String shape = GpuShaderSource.read("terrain-rockiness.glsl") + GpuShaderSource.read("tessellation-shape.glsl");
+        String shape = GpuShaderSource.read("tessellation-shape.glsl");
         String passCopies = copies.toString().replaceAll("OUT_(\\w+)", "vs_$1").replaceAll("IN_(\\w+)", "$1");
         String controlCopies = copies.toString().replaceAll("OUT_(\\w+)", "tc_$1[gl_InvocationID]")
               .replaceAll("IN_(\\w+)", "vs_$1[gl_InvocationID]");
@@ -155,27 +198,41 @@ final class GpuTessellation {
               out vec3 vs_position;
               out vec3 vs_normal;
               out vec4 vs_color;
-              """ + pass + """
+              out float vs_shape;
+              """ + pass + shape + """
               void main() {
                   vs_position = a_position;
                   // A zero normal stays zero: its edges keep one segment and their chords (tessellation-*.glsl).
                   vs_normal = dot(a_normal, a_normal) > 0.0 ? normalize(a_normal) : vec3(0.0);
                   vs_color = a_color;
+              #ifdef TESS_a_tessColor
+                  vs_shape = tessShape(a_tessColor, a_tessUV);
+              #elif defined(TESS_a_texCoord0)
+                  vs_shape = tessShape(a_color, a_texCoord0);
+              #else
+                  vs_shape = 0.0;
+              #endif
+              #ifdef TESS_a_tessFixed
+                  vs_shape *= 1.0 - a_tessFixed;
+              #endif
               """ + passCopies + "}\n"
               + CONTROL + "\n" + """
               layout(vertices = 3) out;
               in vec3 vs_position[];
               in vec3 vs_normal[];
               in vec4 vs_color[];
+              in float vs_shape[];
               out vec3 tc_position[];
               out vec3 tc_normal[];
               out vec4 tc_color[];
-              """ + control + shape + "const float TESS_BULGE = " + BoardRelief.metres(BULGE_METRES) + ";\n"
+              out float tc_shape[];
+              """ + control + "const float TESS_BULGE = " + BoardRelief.metres(BULGE_METRES) + ";\n"
               + GpuShaderSource.read("tessellation-control.glsl") + """
               void main() {
                   tc_position[gl_InvocationID] = vs_position[gl_InvocationID];
                   tc_normal[gl_InvocationID] = vs_normal[gl_InvocationID];
                   tc_color[gl_InvocationID] = vs_color[gl_InvocationID];
+                  tc_shape[gl_InvocationID] = vs_shape[gl_InvocationID];
               """ + controlCopies + """
                   if (gl_InvocationID == 0) { tessellationLevels(); }
               }
@@ -185,7 +242,8 @@ final class GpuTessellation {
               in vec3 tc_position[];
               in vec3 tc_normal[];
               in vec4 tc_color[];
-              """ + evaluation + shape + GpuShaderSource.read("tessellation-evaluation.glsl") + """
+              in float tc_shape[];
+              """ + evaluation + GpuShaderSource.read("tessellation-evaluation.glsl") + """
               void main() {
                   vec3 surface = phongPoint();
               #ifdef TESS_a_position
@@ -198,6 +256,9 @@ final class GpuTessellation {
                   a_color = gl_TessCoord.x * tc_color[0] + gl_TessCoord.y * tc_color[1] + gl_TessCoord.z * tc_color[2];
               #endif
               """ + interpolation + """
+              #ifdef TESS_a_tessLift
+                  a_position.z += a_tessLift;
+              #endif
                   tessVertex();
               }
               """;

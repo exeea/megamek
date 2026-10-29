@@ -13,7 +13,7 @@ vec3 phongNormal() {
 
 vec3 phongPoint() {
     vec3 b = gl_TessCoord;
-    float s0 = tessShape(tc_color[0]), s1 = tessShape(tc_color[1]), s2 = tessShape(tc_color[2]);
+    float s0 = tc_shape[0], s1 = tc_shape[1], s2 = tc_shape[2];
     // The edge facing each vertex.
     float e0 = min(s1, s2), e1 = min(s2, s0), e2 = min(s0, s1);
     float shape;

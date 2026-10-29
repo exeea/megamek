@@ -11,10 +11,12 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
+import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
@@ -27,6 +29,53 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuSurfaceBlendTest {
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void tessellationContactsPreserveMaterialsAfterSubdivision(boolean blended) throws Exception {
+        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        // Dry ground beside the ford: its edge shared with the water stays fixed, its own bank curves.
+        var tile = scene.tile(7, 6);
+        var surface = new BoardSurface(scene, tile);
+        var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), TerrainLod.FULL,
+              new java.util.HashMap<>());
+        int pinned = 0, curved = 0;
+        for (var group : plan.blended().entrySet()) {
+            var plain = new MeshBuilder();
+            var tessellated = new MeshBuilder();
+            var attributes = blended ? GpuSurfaceBlend.VERTICES : MeshBuilder.createAttributes(
+                  VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.ColorPacked
+                        | VertexAttributes.Usage.TextureCoordinates);
+            plain.begin(attributes, GL20.GL_TRIANGLES);
+            tessellated.begin(GpuTessellation.contacts(attributes), GL20.GL_TRIANGLES);
+            for (var triangle : group.getValue()) {
+                if (blended) {
+                    triangle.write(plain, group.getKey(), null);
+                    triangle.write(tessellated, group.getKey(), surface);
+                } else {
+                    for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                        plain.vertex(point.vertex());
+                        GpuTessellation.vertex(tessellated, point.vertex(), surface);
+                    }
+                }
+            }
+            int stride = attributes.vertexSize / Float.BYTES;
+            float[] original = new float[plain.getNumVertices() * stride];
+            float[] actual = new float[tessellated.getNumVertices() * (stride + 1)];
+            plain.getVertices(original, 0);
+            tessellated.getVertices(actual, 0);
+            assertEquals(plain.getNumVertices(), tessellated.getNumVertices());
+            for (int i = 0; i < plain.getNumVertices(); i++) {
+                for (int channel = 0; channel < stride; channel++) {
+                    assertEquals(original[i * stride + channel], actual[i * (stride + 1) + channel],
+                          "Contact data must preserve water optics, normals, distances and blended materials");
+                }
+                if (actual[i * (stride + 1) + stride] == 1) { pinned++; }
+                else { curved++; }
+            }
+        }
+        assertTrue(pinned > 0 && curved > 0, "Pin contacts while retaining the surrounding ground's curvature");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 4 })
     void submergedBanksRetainTheAdjacentLandsGeology(int level) {

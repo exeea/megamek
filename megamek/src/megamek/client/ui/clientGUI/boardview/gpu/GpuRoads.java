@@ -10,13 +10,16 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
@@ -33,10 +36,23 @@ import megamek.common.board.HexAppearance;
 
 /** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
 final class GpuRoads {
-    static final VertexAttributes VERTICES = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(),
-          VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
-          new VertexAttribute(VertexAttributes.Usage.Generic, 2, "a_roadMaskUV"),
-          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_roadMaskRegion", 1));
+    static final VertexAttributes VERTICES = attributes(false);
+    static final VertexAttributes TESSELLATED_VERTICES = attributes(true);
+
+    private static VertexAttributes attributes(boolean tessellated) {
+        var attributes = new ArrayList<>(List.of(VertexAttribute.Position(), VertexAttribute.Normal(),
+              VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
+              new VertexAttribute(VertexAttributes.Usage.Generic, 2, "a_roadMaskUV"),
+              new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_roadMaskRegion", 1)));
+        if (tessellated) {
+            attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 4, GL20.GL_UNSIGNED_BYTE, true, "a_tessColor", 2));
+            attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 2, "a_tessUV", 3));
+            attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_tessLift", 4));
+            // Whether the support stays where its mesh puts it (BoardSurface#fixedTessellation), as the ground's own.
+            attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_tessFixed", 5));
+        }
+        return new VertexAttributes(attributes.toArray(VertexAttribute[]::new));
+    }
     record MaskData(BoardScene.Pixels pixels, float x, float y, float width, float height) { }
 
     /** Renderer-owned exact sharing across chunks/workers; only live materials keep masks in memory. */
@@ -215,8 +231,8 @@ final class GpuRoads {
     static float layer(Material material) { return material.get(Surface.class, TYPE).lift; }
 
     /** Atlas replacements must update every reused vertex, even when different masks now share a draw. */
-    static void relocate(float[] vertices, Mask mask) {
-        int stride = VERTICES.vertexSize / Float.BYTES;
+    static void relocate(float[] vertices, Mask mask, VertexAttributes attributes) {
+        int stride = attributes.vertexSize / Float.BYTES;
         int region = VERTICES.get(VERTICES.size() - 1).offset / Float.BYTES;
         for (int i = region; i < vertices.length; i += stride) {
             vertices[i] = mask.offsetU; vertices[i + 1] = mask.offsetV;
@@ -628,9 +644,8 @@ final class GpuRoads {
         boolean apart = tile.elevation() != surface.tile.elevation() && BoardBridge.feature(tile) == null;
         // A road through water lies on its bed (BoardRoad#bed); a bridge's apron keeps to the dry bank.
         boolean bed = surface.tile.liquid().present() && BoardBridge.feature(tile) == null;
-        for (var face : surface.groundFaces()) {
-            boolean ground = face.finish() == BoardSurface.Finish.TOP
-                  || bed && (face.finish() == BoardSurface.Finish.BED || face.finish() == BoardSurface.Finish.SHORE);
+        for (var face : surface.coatingFaces()) {
+            boolean ground = bed || face.finish() != BoardSurface.Finish.BED && face.finish() != BoardSurface.Finish.SHORE;
             if (!ground || apart && !surface.carries(face, tile)) { continue; }
             float area = (face.b().x - face.a().x) * (face.c().y - face.a().y)
                   - (face.b().y - face.a().y) * (face.c().x - face.a().x);
@@ -641,10 +656,14 @@ final class GpuRoads {
             float minY = (Math.min(face.a().y, Math.min(face.b().y, face.c().y)) - cy) / scale;
             float maxY = (Math.max(face.a().y, Math.max(face.b().y, face.c().y)) - cy) / scale;
             if (!bounds.intersects(minX, minY, maxX - minX, maxY - minY)) { continue; }
-            result.add(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, patch.lift() * scale),
-                  new Vector3(face.b()).add(0, 0, patch.lift() * scale), new Vector3(face.c()).add(0, 0, patch.lift() * scale), -1));
+            result.add(lifted(face, patch.lift() * scale));
         }
         return result;
+    }
+
+    private static BoardTacticalGeometry.Triangle lifted(BoardSurface.Face face, float lift) {
+        return new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, lift),
+              new Vector3(face.b()).add(0, 0, lift), new Vector3(face.c()).add(0, 0, lift), -1);
     }
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
@@ -735,12 +754,25 @@ final class GpuRoads {
         return new MaskData(new BoardScene.Pixels(image).compact(), x, y, w, h);
     }
 
-    /** {@code coverage} widens the patch's world-space texture repeat with its texture (GpuAssets.coverage). */
+    /**
+     * {@code coverage} widens the patch's world-space texture repeat with its texture (GpuAssets.coverage); a
+     * {@code tessellated} coat writes its support's control data (TESSELLATED_VERTICES), on the ground's own final
+     * triangles where water clipping or material subdivision split its face ({@code supports}, GpuTerrain.coatSupports).
+     */
     static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
-          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat, float coverage) {
+          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat, float coverage, boolean tessellated,
+          Function<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports) {
         Map<Vector3, Vector3> normals = new HashMap<>();
-        for (var face : flat ? List.<BoardSurface.Face>of() : surface.groundFaces()) {
-            if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+        Map<BoardTacticalGeometry.Triangle, BoardSurface.Face> ground = new HashMap<>();
+        float lift = patch.lift() * BoardGeometry.hexScale();
+        for (var face : flat ? List.<BoardSurface.Face>of() : surface.coatingFaces()) {
+            if (tessellated) {
+                // A rim and its top can share a position with different normals. Preserve the source face and its
+                // original corner identities, rather than choosing one normal for every occurrence of that position.
+                ground.put(lifted(face, lift), face);
+                continue;
+            }
+            if (face.finish() == BoardSurface.Finish.BED || face.finish() == BoardSurface.Finish.SHORE) { continue; }
             Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
             for (var p : List.of(face.a(), face.b(), face.c())) {
                 normals.computeIfAbsent(normalKey(p, 0), unused -> new Vector3()).add(normal);
@@ -748,27 +780,74 @@ final class GpuRoads {
         }
         for (var t : triangles) {
             float repeat = BoardRelief.detailMetres(patch.repeat()) * coverage;
-            float lift = patch.lift() * BoardGeometry.hexScale();
             Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
             Vector3 a = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();
             Vector3 b = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor();
             Vector3 c = flat ? fallback : new Vector3(normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor();
+            var support = ground.get(t);
+            var pieces = support == null || supports == null ? null : supports.apply(support);
+            if (pieces != null) {
+                // The ground's midpoints may curve where this face's own edges would not; follow them exactly.
+                for (int i = 0; i < pieces.size(); i += 3) {
+                    var pa = pieces.get(i);
+                    var pb = pieces.get(i + 1);
+                    var pc = pieces.get(i + 2);
+                    MeshPartBuilder mesh = meshes.get();
+                    mesh.triangle(carrier(mesh, pa.position, fallback, repeat, mask, surface, coat, tessellated, lift, pa),
+                          carrier(mesh, pb.position, fallback, repeat, mask, surface, coat, tessellated, lift, pb),
+                          carrier(mesh, pc.position, fallback, repeat, mask, surface, coat, tessellated, lift, pc));
+                }
+                continue;
+            }
+            var ga = sculpted(support, 0, surface);
+            var gb = sculpted(support, 1, surface);
+            var gc = sculpted(support, 2, surface);
             MeshPartBuilder mesh = meshes.get();
-            mesh.triangle(carrier(mesh, t.a(), a, repeat, mask, surface.tile, coat),
-                  carrier(mesh, t.b(), b, repeat, mask, surface.tile, coat),
-                  carrier(mesh, t.c(), c, repeat, mask, surface.tile, coat));
+            mesh.triangle(carrier(mesh, t.a(), a, repeat, mask, surface, coat, tessellated, lift, ga),
+                  carrier(mesh, t.b(), b, repeat, mask, surface, coat, tessellated, lift, gb),
+                  carrier(mesh, t.c(), c, repeat, mask, surface, coat, tessellated, lift, gc));
         }
+    }
+
+    /**
+     * The ground vertex at a support face's corner, as its own mesh writes it (a water hex's ground carries its water's
+     * palette); null without a support.
+     */
+    private static MeshPartBuilder.VertexInfo sculpted(BoardSurface.Face support, int corner, BoardSurface surface) {
+        if (support == null) { return null; }
+        Vector3 p = corner == 0 ? support.a() : corner == 1 ? support.b() : support.c();
+        float shore = surface.tile.liquid().present() ? GpuWaterShader.palette(surface.tile.liquid()) : Float.NaN;
+        return GpuTerrain.sculptVertex(p, surface.relief.shade(p), shore, surface);
     }
 
     private static Vector3 normalKey(Vector3 p, float lift) {
         return new Vector3(p.x, p.y, Math.round((p.z - lift) / (.001f * BoardGeometry.hexScale())));
     }
 
-    private static short carrier(MeshPartBuilder mesh, Vector3 p, Vector3 normal, float repeat, Mask mask, BoardScene.Tile tile,
-          float coat) {
-        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat,
+    /** {@code ground}: the ground vertex a tessellated coat stands on, null where it has none (it stays flat). */
+    private static short carrier(MeshPartBuilder mesh, Vector3 p, Vector3 normal, float repeat, Mask mask,
+          BoardSurface surface, float coat, boolean tessellated, float lift, MeshPartBuilder.VertexInfo ground) {
+        // Tessellate the same control triangle as the ground, then lift the coating in the evaluation stage. Lifting
+        // its control points first changes the screen-space split and can expose the ground between the two meshes.
+        var tile = surface.tile;
+        if (ground != null) { normal = ground.normal; }
+        float[] vertex = { p.x, p.y, ground == null ? p.z : ground.position.z, normal.x, normal.y, normal.z,
+              coat, p.x / repeat, -p.y / repeat,
               maskU(tile.coords(), mask.data, p), maskV(tile.coords(), mask.data, p),
-              mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV);
+              mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV };
+        if (tessellated) {
+            int shape = vertex.length;
+            vertex = Arrays.copyOf(vertex, shape + 5);
+            vertex[shape + 4] = 1;
+            if (ground != null) {
+                vertex[shape] = ground.color.toFloatBits();
+                vertex[shape + 1] = ground.uv.x;
+                vertex[shape + 2] = ground.uv.y;
+                vertex[shape + 3] = lift;
+                vertex[shape + 4] = surface.fixedTessellation(ground.position) ? 1 : 0;
+            }
+        }
+        return mesh.vertex(vertex);
     }
 
     /** Where the point {@code p} of the hex at {@code at} lies across {@code mask}: 0 at its left edge, 1 at its right. */

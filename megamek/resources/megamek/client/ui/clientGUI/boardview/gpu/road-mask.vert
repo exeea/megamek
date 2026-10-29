@@ -3,6 +3,12 @@
 #ifdef roadMaskFlag
 in vec2 a_roadMaskUV;
 in vec4 a_roadMaskRegion;
+// The supporting terrain's shape inputs. Coats keep their own colour and texture coordinates for shading.
+#ifdef tessellationFlag
+in vec4 a_tessColor;
+in vec2 a_tessUV;
+in float a_tessLift;
+#endif
 out vec2 v_roadMaskUV;
 flat out vec4 v_roadMaskRegion;
 #endif

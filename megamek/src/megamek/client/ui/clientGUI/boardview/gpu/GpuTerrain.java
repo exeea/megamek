@@ -325,7 +325,13 @@ final class GpuTerrain implements Disposable {
             }
             // Sculpted relief draws tessellated where the context offers it (GpuTessellation), and its twin alike.
             boolean tessellated = tessellates(renderable);
-            if (tessellated) { shaderName += " tessellated"; }
+            if (tessellated) {
+                shaderName += " tessellated";
+                prefix += "#define tessellationFlag\n";
+                if (GpuTessellation.hasContacts(renderable.meshPart.mesh.getVertexAttributes())) {
+                    prefix += "#define terrainContactFlag\n";
+                }
+            }
             // The pre-pass draws twin by twin (renderPrepass): a twin sorts with no program.
             Shader group = depthOnly ? null : familyGroup(renderable, shaders);
             DefaultShader result = new DefaultShader(renderable, chosen,
@@ -1291,7 +1297,8 @@ final class GpuTerrain implements Disposable {
 
     /** Whether a sculpted material has a curving copy where its chunk is built for tessellation (sculptedTriangles). */
     private static boolean curvable(Material material) {
-        return GpuTessellation.available() && material.has(Sculpt.TYPE) && !material.has(GpuMagmaShader.TYPE)
+        return GpuTessellation.available() && (material.has(Sculpt.TYPE) || material.has(GpuRoads.Mask.TYPE))
+              && !material.has(GpuMagmaShader.TYPE)
               && !GpuTessellation.curved(material);
     }
 
@@ -2094,7 +2101,7 @@ final class GpuTerrain implements Disposable {
             GpuPropBatch.copyVertices(range.mesh(), range.offset(), range.count(), points, indices);
             float[] vertices = points.toArray();
             var mask = material.get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
-            if (mask != null) { GpuRoads.relocate(vertices, mask); }
+            if (mask != null) { GpuRoads.relocate(vertices, mask, range.mesh().getVertexAttributes()); }
             short[] elements = indices.toArray();
             int count = vertices.length / (range.mesh().getVertexSize() / Float.BYTES);
             geometry.computeIfAbsent(GpuRoads.batchMaterial(material), key -> new ArrayList<>()).add(new Shape(owner, material, range.route(), range.lift(), batch -> {
@@ -2228,7 +2235,11 @@ final class GpuTerrain implements Disposable {
             endRange();
             material = next;
             VertexAttributes attributes = material.has(GpuSurfaceBlend.TYPE) ? GpuSurfaceBlend.VERTICES
-                  : material.has(GpuRoads.Mask.TYPE) ? GpuRoads.VERTICES : STANDARD;
+                  : material.has(GpuRoads.Mask.TYPE) ? GpuTessellation.curved(material)
+                        ? GpuRoads.TESSELLATED_VERTICES : GpuRoads.VERTICES : STANDARD;
+            if (material.has(Sculpt.TYPE) && GpuTessellation.curved(material)) {
+                attributes = GpuTessellation.contacts(attributes);
+            }
             current = active.computeIfAbsent(attributes, key -> {
                 Buffer buffer = new Buffer(key);
                 buffers.add(buffer);
@@ -3444,7 +3455,9 @@ final class GpuTerrain implements Disposable {
         // Built for tessellation, a sculpted material's curving copy draws once a chunk refines to full detail: its
         // programs link now, behind the loading stage, so a zoom never links one (GpuTessellation.curvedCopy).
         if (tessellation && curvable(material)) {
-            prepareTerrainMaterial(GpuTessellation.curvedCopy(material), attributes, instances);
+            prepareTerrainMaterial(GpuTessellation.curvedCopy(material),
+                  material.has(GpuRoads.Mask.TYPE) ? GpuRoads.TESSELLATED_VERTICES
+                        : GpuTessellation.contacts(attributes), instances);
         }
         for (Renderable sample : terrainMaterialSamples) {
             // A cliff chunk's relief takes its own sample, which links the program's depth twin too.
@@ -3862,7 +3875,7 @@ final class GpuTerrain implements Disposable {
             });
         }
         roads(build.layers.get(2), build.prepared.roads().getOrDefault(coords, List.of()),
-              build.prepared.surfaces().get(coords), build.chunk.roadMasks, build.scene, tile);
+              build.prepared.surfaces().get(coords), build.chunk.roadMasks, build.scene, tile, null);
         collectFeatures(build, tile, build.prepared.surfaces().get(coords), ground(build, coords));
     }
 
@@ -3893,7 +3906,7 @@ final class GpuTerrain implements Disposable {
             // Space is completely transparent. Its retained CPU surface supports picking and overlays only;
             // the atmosphere's shared skybox shows through without an opaque colour or depth plane.
             // Bridges and explicit structures remain physical objects over the aerospace background.
-            roads(overlay, prepared.roads().getOrDefault(tile.coords(), List.of()), surface, chunk.roadMasks, scene, tile);
+            roads(overlay, prepared.roads().getOrDefault(tile.coords(), List.of()), surface, chunk.roadMasks, scene, tile, null);
             collectFeatures(build, tile, surface, new GroundView(surface.faces, BoardGeometry.groundZ(tile),
                   prepared.bridgeShapes().get(tile.coords())));
             return;
@@ -3993,7 +4006,9 @@ final class GpuTerrain implements Disposable {
                   mesh -> sculptedFaces(mesh, surface, poured, Float.NaN, scene, surfaces));
             for (var face : poured) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
         }
-        roads(overlay, prepared.roads().getOrDefault(tile.coords(), List.of()), surface, chunk.roadMasks, scene, tile);
+        boolean curving = sculpted && chunk.tessellated && chunk.lod == TerrainLod.FULL && GpuTessellation.available();
+        roads(overlay, prepared.roads().getOrDefault(tile.coords(), List.of()), surface, chunk.roadMasks, scene, tile,
+              curving ? coatSupports(prepared.sculpts().get(tile.coords()), surface, scene, surfaces) : null);
         if (BoardFeatures.shaft(tile)) {
             // A Solaris elevator's platform, and raised, its lift open beneath it, down to the lowest ground beside it;
             // the hex's top and straight walls stay for picking only.
@@ -5001,6 +5016,15 @@ final class GpuTerrain implements Disposable {
                     }
                 }
             }
+            // Built for tessellation, a road's coat curves with its ground once the chunk refines to full detail: its
+            // curving copy links now too (prepareTerrainMaterial), as the editor's overlays do below.
+            if (tessellation && !editable) {
+                for (Renderable part : GpuTerrainDepth.snapshot(chunk.overlays)) {
+                    if (part.material.has(GpuRoads.Mask.TYPE)) {
+                        prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
+                    }
+                }
+            }
             // The ground switches to family programs as they become ready; scatter and water keep generic ones.
             for (Renderable part : chunk.terrainRenderables) {
                 familyPrograms.request(part.material, part.meshPart.size, part.meshPart.mesh.getVertexAttributes());
@@ -5010,7 +5034,9 @@ final class GpuTerrain implements Disposable {
                 if (familySession && chunk.tessellated && curvable(part.material)) {
                     Material copy = GpuTessellation.curvedCopy(part.material);
                     curvedFamilies.add(copy);
-                    familyPrograms.request(copy, part.meshPart.size, part.meshPart.mesh.getVertexAttributes());
+                    familyPrograms.request(copy, part.meshPart.size,
+                          part.material.has(GpuRoads.Mask.TYPE) ? GpuRoads.TESSELLATED_VERTICES
+                                : GpuTessellation.contacts(part.meshPart.mesh.getVertexAttributes()));
                 }
             }
             chunk.depthTerrain = new GpuTerrainDepth(chunk.opaque);
@@ -5238,12 +5264,14 @@ final class GpuTerrain implements Disposable {
     /**
      * Sculpted tops, cliffs and rock formations share a material per surface family; {@code ground} are the volcanic
      * tops, which keep their magma material. Shared vertices carry the canonical normal, occlusion and material masks
-     * across mesh boundaries.
+     * across mesh boundaries. {@code supports} are each blended face's final triangles, after water clipping and
+     * material subdivision, as vertex triples (coatSupports).
      */
     record SculptPlan(List<BoardSurface.Face> walls, List<BoardSurface.Face> ground,
           List<BoardSurface.Face> formed, List<BoardSurface.Face> bed,
           Map<Vector3, Vector3> bedNormals,
-          Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> blended) { }
+          Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> blended,
+          Map<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports) { }
 
     static SculptPlan prepareSculpt(BoardScene scene, BoardScene.Tile tile, BoardSurface surface, float floor,
           TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
@@ -5265,6 +5293,7 @@ final class GpuTerrain implements Disposable {
         Map<Vector3, Vector3> bedNormals = wallNormals(bed);
         bed = surface.renderBed(bed);
         Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups = new LinkedHashMap<>();
+        Map<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports = new HashMap<>();
         float spacing = GpuSurfaceBlend.spacing(lod);
         var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
         // Open-water banks belong to their adjacent land. Process them with the shared water field below,
@@ -5289,8 +5318,9 @@ final class GpuTerrain implements Disposable {
             var waters = coveringWaters(scene, surface, surfaces);
             for (var face : blended) {
                 boolean cliff = surface.relief.shade(face.a()).kind() != BoardRelief.Kind.GROUND;
-                coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups, BoardSurfaceBlend.family(tile),
-                      polygon, p -> cliff ? sampler.sampleCliff(p.x, p.y, p.z) : sampler.sample(p.x, p.y, p.z), spacing));
+                blendFace(groups, supports, face, pieces -> coveredPolygons(surface, face, waters,
+                      polygon -> GpuSurfaceBlend.appendPolygon(pieces, BoardSurfaceBlend.family(tile), polygon,
+                            p -> cliff ? sampler.sampleCliff(p.x, p.y, p.z) : sampler.sample(p.x, p.y, p.z), spacing)));
             }
         }
         if (openWater(tile) != null) {
@@ -5312,8 +5342,9 @@ final class GpuTerrain implements Disposable {
             });
             var waters = coveringWaters(scene, surface, surfaces);
             for (var face : blended) {
-                coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups,
-                      surface.family(face), polygon, p -> sampler.sample(p.x, p.y, p.z), spacing));
+                blendFace(groups, supports, face, pieces -> coveredPolygons(surface, face, waters,
+                      polygon -> GpuSurfaceBlend.appendPolygon(pieces, surface.family(face), polygon,
+                            p -> sampler.sample(p.x, p.y, p.z), spacing)));
             }
             float shore = surface.bedUnderLevelWater() ? GpuWaterShader.palette(tile.liquid()) : Float.NaN;
             Function<Vector3, MeshPartBuilder.VertexInfo> vertices = p -> bedVertex(p, surface, bedNormals, shore);
@@ -5342,7 +5373,42 @@ final class GpuTerrain implements Disposable {
             }
             bed.clear();
         }
-        return new SculptPlan(walls, ground, formed, bed, bedNormals, groups);
+        return new SculptPlan(walls, ground, formed, bed, bedNormals, groups, supports);
+    }
+
+    /** Appends one face's blended triangles to {@code groups}, keeping their vertices as its {@code supports} too. */
+    private static void blendFace(Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
+          Map<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports, BoardSurface.Face face,
+          Consumer<Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>>> append) {
+        Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> pieces = new LinkedHashMap<>();
+        append.accept(pieces);
+        List<MeshPartBuilder.VertexInfo> triangles = new ArrayList<>();
+        pieces.forEach((palette, part) -> {
+            groups.computeIfAbsent(palette, key -> new ArrayList<>()).addAll(part);
+            for (var t : part) { triangles.addAll(List.of(t.a().vertex(), t.b().vertex(), t.c().vertex())); }
+        });
+        supports.put(face, triangles);
+    }
+
+    /**
+     * The ground's final triangles over a face, as vertex triples, where they are not the face itself: material
+     * subdivision's and water clipping's (sculptedFaces) pieces; null where the ground draws the face whole. A curving
+     * road coat follows them (GpuRoads.write), as a split edge's new point can curve where the whole edge would not.
+     */
+    static Function<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> coatSupports(SculptPlan plan,
+          BoardSurface surface, BoardScene scene, Map<Coords, BoardSurface> surfaces) {
+        Set<BoardSurface.Face> formed = new HashSet<>(plan.formed());
+        Map<BoardSurface, WaterCover> coverage = new IdentityHashMap<>();
+        return face -> {
+            var blended = plan.supports().get(face);
+            if (blended != null || !formed.contains(face)) { return blended; }
+            BoardSurface water = clippingWater(surface, face, scene, surfaces);
+            if (water == null) { return null; }
+            List<MeshPartBuilder.VertexInfo> pieces = new ArrayList<>();
+            coveredPolygons(surface, face, coverage.computeIfAbsent(water, own -> coveringWaters(scene, own, surfaces)),
+                  polygon -> fan(polygon, pieces::addAll));
+            return pieces;
+        };
     }
 
     private void sculpt(Layer solid, Layer overlay, Chunk chunk, BoardScene scene, BoardScene.Tile tile,
@@ -5354,7 +5420,7 @@ final class GpuTerrain implements Disposable {
         // Built for tessellation, a full-detail chunk's triangles that curve take a material of their own
         // (sculptedTriangles).
         boolean split = chunk.tessellated && chunk.lod == TerrainLod.FULL && GpuTessellation.available();
-        blended(solid, plan.blended(), scene, tile, chunk.lavaField, split);
+        blended(solid, plan.blended(), scene, tile, chunk.lavaField, split, surface);
         for (var group : byFamily(surface, formed).entrySet()) {
             Material formedMaterial = magma != null ? magma : sculptMaterial(group.getKey());
             // A frozen lake's banks below frozen land carry that land's ice, so one sheet spans the shore.
@@ -5558,12 +5624,12 @@ final class GpuTerrain implements Disposable {
     /** {@code lava} is the chunk's lava field: cooled banks, the lava's own and those of land beside it, glow at it. */
     private void blended(Layer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
           BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava) {
-        blended(solid, groups, scene, tile, lava, false);
+        blended(solid, groups, scene, tile, lava, false, null);
     }
 
     /** With {@code split}, the triangles that curve (magma's aside) take a material of their own: sculptedTriangles. */
     private void blended(Layer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
-          BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava, boolean split) {
+          BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava, boolean split, BoardSurface surface) {
         for (var group : groups.entrySet()) {
             var palette = group.getKey();
             boolean boundary = palette.first() != palette.base() || palette.second() != palette.base() || palette.third() != palette.base();
@@ -5586,27 +5652,33 @@ final class GpuTerrain implements Disposable {
                     (curves ? curved : plain).add(triangle);
                 }
             }
-            blendedTriangles(solid, material, palette, boundary, plain);
+            blendedTriangles(solid, material, palette, boundary, plain, null);
             if (!curved.isEmpty()) {
-                blendedTriangles(solid, GpuTessellation.curvedCopy(material), palette, boundary, curved);
+                blendedTriangles(solid, GpuTessellation.curvedCopy(material), palette, boundary, curved, surface);
             }
         }
     }
 
     private static void blendedTriangles(Layer solid, Material material, GpuSurfaceBlend.Palette palette,
-          boolean boundary, List<GpuSurfaceBlend.Triangle> triangles) {
+          boolean boundary, List<GpuSurfaceBlend.Triangle> triangles, BoardSurface surface) {
         if (triangles.isEmpty()) { return; }
         solid.addTriangles(material, meshes -> {
             for (var triangle : triangles) {
                 MeshPartBuilder mesh = meshes.get();
-                if (boundary) { triangle.write(mesh, palette); }
-                else { mesh.triangle(triangle.a().vertex(), triangle.b().vertex(), triangle.c().vertex()); }
+                if (boundary) { triangle.write(mesh, palette, surface); }
+                else {
+                    mesh.triangle(GpuTessellation.vertex(mesh, triangle.a().vertex(), surface),
+                          GpuTessellation.vertex(mesh, triangle.b().vertex(), surface),
+                          GpuTessellation.vertex(mesh, triangle.c().vertex(), surface));
+                }
             }
         });
     }
 
+    /** {@code supports}: the ground's final triangles where its coats curve with it (coatSupports), else null. */
     private void roads(Layer overlay, List<RoadPatch> prepared, BoardSurface surface,
-          GpuTextures<BoardScene.Pixels> masks, BoardScene scene, BoardScene.Tile tile) {
+          GpuTextures<BoardScene.Pixels> masks, BoardScene scene, BoardScene.Tile tile,
+          Function<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports) {
         var roadMaps = assets.roadArray();
         for (var preparedPatch : prepared) {
             overlay.route = routeCoat(preparedPatch);
@@ -5641,8 +5713,10 @@ final class GpuTerrain implements Disposable {
             // The coat's own material sets its repeat, as the catalogue gives it: a road's, or the sculpted material
             // it paints, which so meets its own ground at the same scale.
             float coverage = road != null ? assets.roadCoverage("roads/" + road) : assets.sculptCoverage(patch.texture());
+            boolean curves = supports != null && !preparedPatch.flat() && !tile.liquid().volcanic();
+            if (curves) { material = GpuTessellation.curvedCopy(material); }
             overlay.addTriangles(material, meshes -> GpuRoads.write(meshes, preparedPatch.triangles(), patch, mask, surface,
-                  preparedPatch.flat(), vertexCoat, coverage));
+                  preparedPatch.flat(), vertexCoat, coverage, curves, curves ? supports : null));
         }
         overlay.route = false;
     }
@@ -5751,21 +5825,14 @@ final class GpuTerrain implements Disposable {
     }
 
     /** Sculpted faces over shared vertices; shore, unless NaN, is the palette of the water hex they belong to. */
-    private static void sculptedFaces(Supplier<MeshPartBuilder> triangles, BoardSurface surface, List<BoardSurface.Face> faces,
+    static void sculptedFaces(Supplier<MeshPartBuilder> triangles, BoardSurface surface, List<BoardSurface.Face> faces,
           float shore, BoardScene scene, Map<Coords, BoardSurface> surfaces) {
         Map<Vector3, Short> indices = new java.util.IdentityHashMap<>();
         MeshPartBuilder previous = null;
         Function<Vector3, Short> vertex = null;
         Map<BoardSurface, WaterCover> coverage = new java.util.IdentityHashMap<>();
         for (BoardSurface.Face face : faces) {
-            BoardSurface water = openWater(surface.tile) == null ? null : surface;
-            if (water == null && face.landEdge() >= 0) {
-                BoardScene.Tile adjacent = openWater(scene.tile(surface.tile.coords()
-                      .translated(BoardGeometry.edgeDirection(face.landEdge()))));
-                if (adjacent != null) {
-                    water = surfaces.computeIfAbsent(adjacent.coords(), key -> new BoardSurface(scene, adjacent));
-                }
-            }
+            BoardSurface water = clippingWater(surface, face, scene, surfaces);
             if (water != null) {
                 WaterCover waters = coverage.computeIfAbsent(water, own -> coveringWaters(scene, own, surfaces));
                 coveredFace(triangles, surface, face, waters);
@@ -5776,11 +5843,22 @@ final class GpuTerrain implements Disposable {
                 // Cached indices belong to the old mesh, including when wet polygons caused the split.
                 indices.clear();
                 vertex = p -> indices.computeIfAbsent(p,
-                      key -> mesh.vertex(sculptVertex(key, surface.relief.shade(key), shore, surface)));
+                      key -> GpuTessellation.vertex(mesh, sculptVertex(key, surface.relief.shade(key), shore, surface), surface));
                 previous = mesh;
             }
             mesh.triangle(vertex.apply(face.a()), vertex.apply(face.b()), vertex.apply(face.c()));
         }
+    }
+
+    /** The open water whose drawn triangles clip a sculpted face: its own hex's, or the one past its land edge. */
+    private static BoardSurface clippingWater(BoardSurface surface, BoardSurface.Face face, BoardScene scene,
+          Map<Coords, BoardSurface> surfaces) {
+        if (openWater(surface.tile) != null) { return surface; }
+        if (face.landEdge() < 0) { return null; }
+        BoardScene.Tile adjacent = openWater(scene.tile(surface.tile.coords()
+              .translated(BoardGeometry.edgeDirection(face.landEdge()))));
+        return adjacent == null ? null
+              : surfaces.computeIfAbsent(adjacent.coords(), key -> new BoardSurface(scene, adjacent));
     }
 
     /** One drawn water triangle and its clipping planes, derived once per hex for every face it may cover. */
@@ -5952,7 +6030,7 @@ final class GpuTerrain implements Disposable {
 
     private static void coveredFace(Supplier<MeshPartBuilder> triangles, BoardSurface surface, BoardSurface.Face face,
           WaterCover waters) {
-        coveredPolygons(surface, face, waters, polygon -> surfacePolygon(triangles, polygon));
+        coveredPolygons(surface, face, waters, polygon -> surfacePolygon(triangles, polygon, surface));
     }
 
     private static void coveredPolygons(BoardSurface surface, BoardSurface.Face face, WaterCover waters,
@@ -6080,14 +6158,22 @@ final class GpuTerrain implements Disposable {
         return (point.x - origin.x) * nx + (point.y - origin.y) * ny + (point.z - origin.z) * nz;
     }
 
-    private static void surfacePolygon(Supplier<MeshPartBuilder> triangles, List<MeshPartBuilder.VertexInfo> polygon) {
+    private static void surfacePolygon(Supplier<MeshPartBuilder> triangles, List<MeshPartBuilder.VertexInfo> polygon,
+          BoardSurface surface) {
+        fan(polygon, t -> {
+            MeshPartBuilder mesh = triangles.get();
+            mesh.triangle(GpuTessellation.vertex(mesh, t.get(0), surface), GpuTessellation.vertex(mesh, t.get(1), surface),
+                  GpuTessellation.vertex(mesh, t.get(2), surface));
+        });
+    }
+
+    /** A clipped polygon's triangles, as a fan from its first vertex, without the degenerate ones. */
+    private static void fan(List<MeshPartBuilder.VertexInfo> polygon, Consumer<List<MeshPartBuilder.VertexInfo>> triangle) {
         for (int i = 1; i + 1 < polygon.size(); i++) {
             var a = polygon.getFirst();
             var b = polygon.get(i);
             var c = polygon.get(i + 1);
-            if (!GpuSurfaceBlend.degenerate(a.position, b.position, c.position)) {
-                triangles.get().triangle(a, b, c);
-            }
+            if (!GpuSurfaceBlend.degenerate(a.position, b.position, c.position)) { triangle.accept(List.of(a, b, c)); }
         }
     }
 

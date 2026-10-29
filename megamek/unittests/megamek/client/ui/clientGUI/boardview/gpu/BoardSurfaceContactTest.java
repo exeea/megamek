@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -9,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,6 +18,26 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Every ordered surface pair, including within-family roles, constructed edges and volcanic banks. */
 class BoardSurfaceContactTest {
+    @Test
+    void lowBridgeBanksKeepTheirClearanceAcrossHexesAndCachedWater() throws Exception {
+        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        for (var at : List.of(new Coords(6, 7), new Coords(6, 8))) {
+            var surface = new BoardSurface(scene, scene.tile(at));
+            var cached = surface.waterGeometry().surface(scene);
+            for (var bank : List.of(surface, cached)) {
+                assertTrue(bank.fixedTessellation(new Vector3(443.5398f, -576, -1)),
+                      "Both banks preserve the reported bridge contact");
+                assertTrue(bank.fixedTessellation(new Vector3(391.23663f, -576, -1)),
+                      "The shared shore edge stays closed despite its different shading normals");
+                assertTrue(bank.fixedTessellation(new Vector3(415.625f, -612, -18)),
+                      "Submerged bed fans keep the same support as their clipped neighbours");
+            }
+        }
+        var bank = new BoardSurface(scene, scene.tile(6, 7));
+        assertFalse(bank.fixedTessellation(new Vector3(390.24344f, -569.46924f, -.82514054f)),
+              "A bank above its water, away from rigid contacts, retains its curvature");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 0, 2, 5 })
     void exposedPlateausMeetTheirCliffAtTheActualSculptedRim(int family) {

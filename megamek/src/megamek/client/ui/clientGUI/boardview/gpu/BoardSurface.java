@@ -319,6 +319,7 @@ final class BoardSurface {
 
     final BoardScene.Tile tile;
     private final BoardScene scene;
+    private final int boardCutEdges;
     private final BoardSurface[] receivingWater = new BoardSurface[6];
     final List<Face> faces = new ArrayList<>();
     /** Rough cover is part of the drawn mesh; ordinary units may clip it, infantry can seek footing on it. */
@@ -381,6 +382,12 @@ final class BoardSurface {
     private List<Face> reservedRoad = List.of();
     /** {@link #reservedRoad}'s faces, by identity (#carries). */
     private final Set<Face> reservedFaces = Collections.newSetFromMap(new IdentityHashMap<>());
+    /** The engineered ground carrying rigid rails, including a neighbour's track bed. */
+    private List<BoardRoadGrade> railGrades = List.of();
+    /** Canonical passages of nearby rigid bridge decks, shared by both sides of a terrain contact. */
+    private List<BoardBridge.Approach> bridgePassages = List.of();
+    /** Shared water-bank boundaries whose separate meshes can have different shading normals. */
+    private int waterSeamEdges;
     /** The roads around and, on natural ground, its easing into them (Enhanced); null where none reaches. */
     private BoardRoadBank bank;
 
@@ -463,6 +470,7 @@ final class BoardSurface {
         this.scene = scene;
         columns = false;
         tile = scene.tile(geometry.coords());
+        boardCutEdges = boardEdges(scene, tile);
         lod = geometry.lod();
         ramps = geometry.ramps();
         center = BoardGeometry.center(tile.coords(), tile.elevation());
@@ -521,6 +529,7 @@ final class BoardSurface {
         this.columns = columns;
         this.scene = scene;
         this.tile = tile;
+        boardCutEdges = boardEdges(scene, tile);
         center = BoardGeometry.center(tile.coords(), columns ? tile.elevation() : tile.groundLevel());
         for (int edge = 0; edge < 6; edge++) {
             corners[edge] = BoardGeometry.corner(tile.coords(), columns ? tile.elevation() : tile.groundLevel(), edge);
@@ -2502,6 +2511,46 @@ final class BoardSurface {
         return edges;
     }
 
+    /**
+     * Whether tessellation keeps a relief vertex where its mesh puts it (GpuTessellation, a_tessFixed), so every mesh
+     * that meets it there meets it flat: the board's cut, against its flat wall; rail grades and bridge passages, which
+     * their rigid meshes sample; the shared edges of water banks, which are shaded apart; and a liquid hex's ground at
+     * and below its water, whose bed fans and their clipped and material-split neighbours keep one support.
+     */
+    boolean fixedTessellation(Vector3 point) {
+        float tolerance = contactTolerance();
+        if (tile.liquid().present() && point.z <= waterHeight(point.x, point.y) + tolerance) { return true; }
+        for (int edge = 0; edge < 6; edge++) {
+            Vector3 a = moved(edge), b = moved((edge + 1) % 6);
+            if (((boardCutEdges | waterSeamEdges) & 1 << edge) != 0
+                  && BoardRelief.distance(point.x, point.y, a.x, a.y, b.x, b.y) <= tolerance) { return true; }
+        }
+        for (var passage : bridgePassages) {
+            if (passage.obstructs(point, tolerance, 0)) { return true; }
+        }
+        return supportsRail(point, tolerance);
+    }
+
+    /** How near a point lies to a contact to share its decision on both sides. */
+    private static float contactTolerance() { return .001f * BoardGeometry.hexScale(); }
+
+    /** Rail meshes sample these exact planes; their ground and any crossing asphalt must keep that support. */
+    private boolean supportsRail(Vector3 point, float tolerance) {
+        for (var grade : railGrades) {
+            float[] bounds = grade.bounds();
+            if (point.x < bounds[0] - tolerance || point.y < bounds[1] - tolerance
+                  || point.x > bounds[2] + tolerance || point.y > bounds[3] + tolerance) { continue; }
+            if (grade.contains(point.x, point.y)) { return true; }
+            // Include the outline: ground on either side of a shared contact must make the same decision.
+            float[] outline = grade.outline();
+            for (int i = 0; i < outline.length; i += 4) {
+                if (BoardRelief.distance(point.x, point.y, outline[i], outline[i + 1], outline[i + 2], outline[i + 3])
+                      <= tolerance) { return true; }
+            }
+        }
+        return false;
+    }
+
     /** Natural ground eases into the roads around; poured ground is cut clean. */
     private boolean natural() { return tile.surface() != BoardScene.Surface.CONCRETE; }
 
@@ -2673,6 +2722,26 @@ final class BoardSurface {
         return faces.subList(0, faces.size() - rough.size());
     }
 
+    /** Coatings also reach the walkable upper rim, which is emitted with the wall mesh. */
+    List<Face> coatingFaces() {
+        List<Face> result = new ArrayList<>();
+        for (var face : groundFaces()) {
+            if (face.finish() == Finish.TOP || face.finish() == Finish.BED || face.finish() == Finish.SHORE) {
+                result.add(face);
+            }
+        }
+        if (!columns && !tile.liquid().present()) {
+            var finished = wallFaces == null ? walls(scene, BoardGeometry.floor(scene)) : wallFaces;
+            // A road spilling past the plateau keeps its rounded rim, without coating a lower slope or talus.
+            float rim = BoardGeometry.groundZ(tile) - .1f * BoardGeometry.level();
+            for (var face : BoardTacticalGeometry.lying(finished)) {
+                if ((face.finish() == Finish.WALL || face.finish() == Finish.CAP)
+                      && Math.min(face.a().z, Math.min(face.b().z, face.c().z)) >= rim) { result.add(face); }
+            }
+        }
+        return result;
+    }
+
     /** The ground or bed a structure can stand on: loose rocks are no foundation, and under ice the floor is the bed. */
     List<Face> foundation() {
         return faces.stream().filter(f -> f.finish() != Finish.OUTCROP && f.finish() != Finish.DRESSING
@@ -2816,9 +2885,21 @@ final class BoardSurface {
     /** See {@link #shoreShifts}. */
     private void settleRelief() {
         if (columns) { return; }
+        // Cached water geometry also needs the current adjoining rail grades when its query context is rebuilt.
+        railGrades = grades(false).stream().filter(grade -> grade.tile().railExits() != 0).toList();
+        var passages = new ArrayList<BoardBridge.Approach>();
+        for (int d = -1; d < 6; d++) {
+            var source = d < 0 ? tile : scene.neighbor(tile, d);
+            if (BoardBridge.feature(source) != null && BoardBridge.family(source) != BoardBridge.Family.NATURAL) {
+                passages.addAll(BoardBridge.approaches(scene, source));
+            }
+        }
+        bridgePassages = List.copyOf(passages);
         for (int k = 0; k < 6; k++) {
             shoreShifts[k] = tile.backdrop().present() ? new float[2] : relief.shoreShift(k);
             wetCliffs[k] = relief.wetCliff(k);
+            var next = scene.neighbor(tile, BoardGeometry.edgeDirection(k));
+            if (tile.liquid().present() || next != null && next.liquid().present()) { waterSeamEdges |= 1 << k; }
         }
     }
 
