@@ -26,6 +26,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.generator.RandomCallsignGenerator;
 import megamek.client.generator.RandomGenderGenerator;
 import megamek.client.generator.RandomNameGenerator;
+import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.common.Player;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.bays.Bay;
@@ -44,6 +45,8 @@ import megamek.common.interfaces.ForceAssignable;
 import megamek.common.loaders.MapSettings;
 import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.options.OptionsConstants;
+import megamek.common.preference.ClientPreferences;
+import megamek.common.preference.PreferenceManager;
 import megamek.common.strategicBattleSystems.SBFFormationConverter;
 import megamek.common.units.Crew;
 import megamek.common.units.Entity;
@@ -709,6 +712,75 @@ public class LobbyCommands {
             updateCandidates.addAll(C3Util.broadcastChanges(game(), entity));
         }
         sendUpdates(updateCandidates);
+    }
+
+    /**
+     * Adds {@code entities}, read from their unit files, to the game for {@code requested}, as the unit selector
+     * dialog's Add does ({@code MegaMekUnitSelectorDialog}): Clan pilots for Clan units, a regular crew for a
+     * Battlefield Support asset, the skills {@code skills} names, random names when the client generates them, then the
+     * units go to the server over the local connection and the chat says who selected them for whom. The units go to
+     * {@code requested} when they are in the game and the local player may add units for them, else to the local
+     * player, as the dialog's chooser decides.
+     *
+     * @return the player who got the units, or null when there were none to add
+     */
+    public @Nullable Player addUnits(List<Entity> entities, @Nullable Player requested, RequisitionSkills skills) {
+        if (entities.isEmpty()) {
+            return null;
+        }
+        Player local = localPlayer();
+        Player owner = recipient(requested);
+        ClientPreferences preferences = PreferenceManager.getClientPreferences();
+        for (Entity entity : entities) {
+            Crew crew = entity.getCrew();
+            Arrays.fill(crew.getClanPilots(), entity.isClan());
+            if (entity instanceof BattlefieldSupportAsset asset) {
+                asset.setVeteranCrew(false);
+            } else {
+                switch (skills.mode()) {
+                    case RANDOM -> client().getSkillGenerator().setRandomSkills(entity);
+                    case FIXED -> {
+                        for (int slot = 0; slot < crew.getSlotCount(); slot++) {
+                            crew.setGunnery(skills.gunnery(), slot);
+                            crew.setPiloting(skills.piloting(), slot);
+                        }
+                    }
+                    case DEFAULT -> { }
+                }
+            }
+            if (preferences.generateNames()) {
+                for (int slot = 0; slot < crew.getSlotCount(); slot++) {
+                    Gender gender = RandomGenderGenerator.generate();
+                    crew.setGender(gender, slot);
+                    crew.setName(RandomNameGenerator.getInstance().generate(gender, crew.isClanPilot(slot),
+                          owner.getName()), slot);
+                }
+            }
+            entity.setOwner(owner);
+        }
+        client().sendAddEntity(entities);
+        String message = local + " selected " + ((entities.size() == 1) ? "a unit" : entities.size() + " units")
+              + " for player: " + owner.getName();
+        client().sendServerChat(Player.PLAYER_NONE, message);
+        return owner;
+    }
+
+    /**
+     * The player added units go to: {@code requested} when they are still in the game and the local player may add
+     * units for them ({@link UnitRecipients#mayAddUnitsTo}), else the local player.
+     */
+    public Player recipient(@Nullable Player requested) {
+        Player local = localPlayer();
+        if (requested == null || requested.getId() == local.getId()) {
+            return local;
+        }
+        Player current = game().getPlayer(requested.getId());
+        if (current == null || !UnitRecipients.mayAddUnitsTo(local, current, localBots().keySet())) {
+            logger.warn("Units for {} go to {}: they may not be added for them", requested.getName(),
+                  local.getName());
+            return local;
+        }
+        return current;
     }
 
     /**

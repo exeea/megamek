@@ -32,6 +32,10 @@ import megamek.client.Client;
 import megamek.common.Player;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
+import megamek.common.preference.ClientPreferences;
+import megamek.common.preference.PreferenceManager;
+import megamek.common.units.Crew;
+import megamek.common.units.CrewType;
 import megamek.common.units.Entity;
 import megamek.common.util.C3Util;
 import megamek.common.util.C3Util.C3CapacityException;
@@ -326,5 +330,69 @@ class LobbyCommandsTest {
         assertSame(botClient, commands.localBotClient(bot));
         assertNull(commands.localBotClient(local));
         assertNull(commands.localBotClient(enemy));
+    }
+
+    // ---- Requisition ----
+
+    private Entity crewedUnit() {
+        Entity entity = mock(Entity.class);
+        when(entity.getCrew()).thenReturn(new Crew(CrewType.SINGLE));
+        return entity;
+    }
+
+    private void withoutGeneratedNames(Runnable test) {
+        ClientPreferences preferences = PreferenceManager.getClientPreferences();
+        boolean names = preferences.generateNames();
+        preferences.setGenerateNames(false);
+        try {
+            test.run();
+        } finally {
+            preferences.setGenerateNames(names);
+        }
+    }
+
+    @Test
+    void addedUnitsGoToTheServerForTheChosenBot() {
+        withoutGeneratedNames(() -> {
+            Entity first = crewedUnit();
+            Entity second = crewedUnit();
+
+            Player owner = commands.addUnits(List.of(first, second), bot,
+                  new RequisitionSkills(RequisitionSkills.Mode.FIXED, 3, 4));
+
+            assertSame(bot, owner);
+            verify(first).setOwner(bot);
+            verify(second).setOwner(bot);
+            assertEquals(3, first.getCrew().getGunnery());
+            assertEquals(4, first.getCrew().getPiloting());
+            verify(client).sendAddEntity(List.of(first, second));
+            verify(client).sendServerChat(eq(Player.PLAYER_NONE), eq(local + " selected 2 units for player: Bot"));
+        });
+    }
+
+    @Test
+    void addedUnitsKeepTheirFileSkillsByDefault() {
+        withoutGeneratedNames(() -> {
+            Entity unit = crewedUnit();
+            unit.getCrew().setGunnery(2, 0);
+
+            assertSame(local, commands.addUnits(List.of(unit), null, RequisitionSkills.initial(false)));
+            assertEquals(2, unit.getCrew().getGunnery());
+            verify(client).sendServerChat(eq(Player.PLAYER_NONE), eq(local + " selected a unit for player: Local"));
+        });
+    }
+
+    @Test
+    void nothingToAddSendsNothing() {
+        assertNull(commands.addUnits(List.of(), bot, RequisitionSkills.initial(false)));
+        verify(client, never()).sendAddEntity(anyList());
+    }
+
+    @Test
+    void unitsForAPlayerTheyMayNotGoToGoToTheLocalPlayer() {
+        assertSame(bot, commands.recipient(bot));
+        assertSame(local, commands.recipient(null));
+        assertSame(local, commands.recipient(enemy));
+        assertSame(local, commands.recipient(new Player(9, "Gone")));
     }
 }

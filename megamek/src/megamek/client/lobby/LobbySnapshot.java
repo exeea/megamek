@@ -18,6 +18,7 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.common.board.Board;
+import megamek.common.eras.Eras;
 import megamek.common.game.Game;
 import megamek.common.interfaces.IStartingPositions;
 import megamek.common.loaders.MapSettings;
@@ -43,11 +44,12 @@ import megamek.common.units.FighterSquadron;
  * @param forces              the units and formations the local player may see
  * @param battlefield         the map, conditions, rules, victory and auto-resolve as the battlefield column sums them up
  * @param readiness           each side's Battle Value and the warnings to heed before Ready
+ * @param requisition         the game's rules on units and who units may be added for, for the Requisition view
  */
 public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean localReady,
       boolean gameMasterAvailable, List<TeamGroup> teams, List<ChatLine> chat, List<Integer> customZones,
       String mapSummary, String server, LobbyForces forces, LobbyBattlefield battlefield,
-      LobbyReadiness readiness) {
+      LobbyReadiness readiness, LobbyRequisition requisition) {
 
     /** The most chat lines a snapshot carries. */
     public static final int CHAT_LINES = 200;
@@ -57,7 +59,8 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
 
     /** An empty lobby, as shown before the client has its game. */
     public static final LobbySnapshot EMPTY = new LobbySnapshot(Player.PLAYER_NONE, false, false, false, List.of(),
-          List.of(), List.of(), "", "", LobbyForces.EMPTY, LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY);
+          List.of(), List.of(), "", "", LobbyForces.EMPTY, LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY,
+          LobbyRequisition.EMPTY);
 
     public LobbySnapshot {
         teams = List.copyOf(teams);
@@ -68,6 +71,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         Objects.requireNonNull(forces);
         Objects.requireNonNull(battlefield);
         Objects.requireNonNull(readiness);
+        Objects.requireNonNull(requisition);
     }
 
     /** How a player or team stands to the local player. */
@@ -202,7 +206,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
               team.players().stream().map(player -> player.local() ? player.withReady(ready) : player).toList()))
               .toList();
         return new LobbySnapshot(localPlayerId, localGameMaster, ready, gameMasterAvailable, shown, chat,
-              customZones, mapSummary, server, forces, battlefield, readiness);
+              customZones, mapSummary, server, forces, battlefield, readiness, requisition);
     }
     /** @return how many players are in the lobby */
     public int playerCount() {
@@ -333,7 +337,16 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
               mapSummary(client.getMapSettings()), server(client.getHost(), client.getPort()),
               forces, LobbyBattlefield.of(game.getOptions(), game.getPlanetaryConditions(),
               client.getMapSettings(), autoResolve), LobbyReadiness.of(game, local, localBots, forces,
-              client.getMapSettings()));
+              client.getMapSettings()), LobbyRequisition.of(game, local, session.localBots().keySet(), eras()));
+    }
+
+    /** The eras of the timeline as year spans, or none when they cannot be read. */
+    private static List<RequisitionCatalog.YearSpan> eras() {
+        try {
+            return LobbyRequisition.spans(Eras.getEras());
+        } catch (RuntimeException failure) {
+            return List.of();
+        }
     }
 
     /** Where a team goes in the list: the local player's team first, the players on no team last. */
