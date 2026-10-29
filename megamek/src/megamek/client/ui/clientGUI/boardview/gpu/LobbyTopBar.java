@@ -40,15 +40,12 @@ final class LobbyTopBar extends WidgetGroup {
 
         UiButton leave = kit.button("button-secondary", null, Messages.getString("Lobby.leave"), null);
         UiKit.onChange(leave, leaveAction);
-        trailing.add(leave).padRight(space("sm"));
         ready = kit.button("button-primary", null, Messages.getString("Lobby.ready"), null);
         UiKit.onChange(ready, readyAction);
-        // Sized to its wider face, so it never changes width
-        float width = 0;
-        for (String key : new String[] { "Lobby.cancelReady", "Lobby.ready" }) {
-            ready.setText(kit.cased("button", Messages.getString(key)));
-            width = Math.max(width, ready.getPrefWidth());
-        }
+        // A matched pair, as wide as the wider of Leave and Ready's faces, so neither changes width
+        float width = Math.max(kit.faceWidth(leave, Messages.getString("Lobby.leave")),
+              kit.faceWidth(ready, Messages.getString("Lobby.cancelReady"), Messages.getString("Lobby.ready")));
+        trailing.add(leave).minWidth(width).padRight(space("sm"));
         trailing.add(ready).minWidth(width);
 
         addActor(heading);
@@ -77,7 +74,8 @@ final class LobbyTopBar extends WidgetGroup {
               allReady ? Tone.OK : Tone.NORMAL, true));
         List<LobbySnapshot.Side> sides = snapshot.sides();
         if (sides.size() > MAX_SIDE_CHIPS) {
-            chips.add(kit.edgeChip(Messages.getString("Lobby.sides", sides.size()), "neutral")).padLeft(space("sm"));
+            chips.add(kit.chip(Messages.getString("Lobby.sides", sides.size()), Tone.NORMAL, true))
+                  .padLeft(space("sm"));
         } else {
             for (LobbySnapshot.Side side : sides) {
                 chips.add(sideChip(side)).padLeft(space("sm"));

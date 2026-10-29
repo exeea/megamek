@@ -9,6 +9,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbySnapshot.PlayerRow;
@@ -24,8 +25,8 @@ import megamek.client.ui.gdx.UiTextField;
  * briefing room has it.
  */
 final class LobbyPlayersPanel {
-    /** The chat log's height. */
-    static final float CHAT_HEIGHT = 150;
+    /** How many lines of chat show at once. */
+    static final int CHAT_LINES = 7;
 
     private final UiKit kit;
     private final Table panel;
@@ -53,7 +54,10 @@ final class LobbyPlayersPanel {
         holder.top().left();
         holder.add(chatLog).growX().top().left();
         chatScroll = kit.scrollList(holder, true);
-        panel.add(chatScroll).growX().height(CHAT_HEIGHT).padTop(space("xs")).row();
+        Drawable frame = chatScroll.getStyle().background;
+        float chatHeight = CHAT_LINES * chatLog.getStyle().font.getLineHeight() * chatLog.getFontScaleY()
+              + (frame == null ? 0 : frame.getTopHeight() + frame.getBottomHeight());
+        panel.add(chatScroll).growX().height(chatHeight).padTop(space("xs")).row();
         UiTextField input = kit.input("", true);
         input.setMessageText(Messages.getString("Lobby.chatHint"));
         input.setTextFieldListener((field, typed) -> {

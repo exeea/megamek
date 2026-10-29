@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
@@ -16,8 +17,8 @@ import megamek.client.ui.gdx.UiTheme;
  * summary.
  */
 final class LobbyBattlefieldPanel {
-    /** The map card's height. */
-    static final float MAP_HEIGHT = 180;
+    /** The map card's height to its width, a wide screen's. */
+    static final float MAP_ASPECT = 9 / 16f;
 
     private final UiKit kit;
     private final Table panel;
@@ -30,8 +31,8 @@ final class LobbyBattlefieldPanel {
         body.top();
         Table map = new Table();
         map.setBackground(skin.getDrawable("token-card"));
-        map.add(kit.icon("map", DesignTokens.shipped().size().get("icon.lg") * 2, UiTheme.tokenColor("text.muted")));
-        body.add(map).growX().height(MAP_HEIGHT).row();
+        map.add(kit.icon("map", DesignTokens.shipped().size().get("icon.lg"), UiTheme.tokenColor("text.muted")));
+        body.add(map).growX().height(Value.percentWidth(MAP_ASPECT, body)).row();
         mapSummary = kit.typeLabel("", "body", "text.secondary");
         mapSummary.setWrap(true);
         body.add(mapSummary).growX().left().padTop(space("md")).row();
