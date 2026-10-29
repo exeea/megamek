@@ -10,28 +10,18 @@ import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
-import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.format.FormatStyle;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
-import javax.swing.ImageIcon;
-import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationAdapter;
@@ -50,7 +40,6 @@ import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -60,54 +49,28 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
-import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.MMConstants;
-import megamek.SuiteConstants;
 import megamek.Version;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.SplashArt;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Action;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.ConnectRequest;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.HostRequest;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.LoadRequest;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Role;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.ScenarioRequest;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.design.swing.TokenFonts;
-import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
-import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
-import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiListPopup;
 import megamek.client.ui.gdx.UiOptionBar;
-import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
-import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
-import megamek.common.Player;
-import megamek.common.game.Game;
-import megamek.common.game.IGame;
-import megamek.common.icons.Camouflage;
-import megamek.common.interfaces.PlanetaryConditionsUsing;
-import megamek.common.net.NetworkAddresses;
-import megamek.common.options.IBasicOption;
-import megamek.common.options.IOption;
-import megamek.common.planetaryConditions.PlanetaryConditions;
-import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
-import megamek.common.scenario.Scenario;
-import megamek.common.scenario.ScenarioLoader;
 import megamek.common.util.TipOfTheDay;
 import megamek.logging.MMLogger;
 
@@ -119,25 +82,17 @@ import megamek.logging.MMLogger;
  * second.
  */
 final class GpuStartScreen extends ApplicationAdapter {
-    private static final MMLogger LOGGER = MMLogger.create(GpuStartScreen.class);
+    static final MMLogger LOGGER = MMLogger.create(GpuStartScreen.class);
     private static final String TIPS = "megamek.client.TipOfTheDay";
     private static final double TIP_SECONDS = 10;
     private static final int EMBERS = 140;
     private static final float TIP_WIDTH = 360;
     private static final float NOTES_WIDTH = 320;
-    private static final float PORT_WIDTH = 110;
-    /** The Connect page's segment that has a bot join instead of the player. */
-    private static final int AS_BOT = 1;
     /** The narrowest the column gets on the pages that list or describe something. */
     private static final float WIDE_COLUMN = 340;
     /** The least height a list or description keeps when the window is short. */
     private static final float MIN_FILLER = 96;
-    private static final float ROLE_WIDTH = 130;
-    /** A camouflage swatch on the briefing, about a hex's proportions. */
-    private static final int SWATCH_WIDTH = 28;
-    private static final int SWATCH_HEIGHT = 24;
-    private static final DateTimeFormatter SAVED_AT = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM,
-          FormatStyle.SHORT);
+    static final float ROLE_WIDTH = 130;
     private static boolean probed;
 
     private record Hex(double x, double y, double at) { }
@@ -153,12 +108,9 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
-    private enum Page { MAIN, HELP, HOST, CONNECT, LOAD, RESUME, SCENARIOS, BRIEFING }
+    enum Page { MAIN, HELP, HOST, CONNECT, LOAD, RESUME, SCENARIOS, BRIEFING }
 
-    /** A scenario read and its game made for the briefing, with each player's camouflage swatch, or why that failed. */
-    private record Briefing(Scenario scenario, IGame game, List<BufferedImage> swatches, String error) { }
-
-    private final GpuStartWindow window;
+    final GpuStartWindow window;
     private final GUIPreferences preferences;
     private final DesignTokens tokens = DesignTokens.shipped();
     private final java.awt.Color base = awtColor("surface.base");
@@ -169,8 +121,14 @@ final class GpuStartScreen extends ApplicationAdapter {
     private final Random random = new Random(7);
     private final List<float[]> particles = new ArrayList<>();
     private final Matrix4 pixels = new Matrix4();
-    private final List<Actor> column = new ArrayList<>();
-    private final List<Actor> focusable = new ArrayList<>();
+    final List<Actor> column = new ArrayList<>();
+    final List<Actor> focusable = new ArrayList<>();
+    final StartServerInputs inputs = new StartServerInputs(this);
+    final StartHostPage hostPage = new StartHostPage(this);
+    final StartConnectPage connectPage = new StartConnectPage(this);
+    final StartLoadPage loadPage = new StartLoadPage(this);
+    final StartScenarioPage scenarioPage = new StartScenarioPage(this);
+    final StartBriefingPage briefingPage = new StartBriefingPage(this);
     private final List<String> tips;
     private final boolean motion;
     /** The developer switch's page and shot, or null; only the first start window of a run reads it. */
@@ -178,10 +136,10 @@ final class GpuStartScreen extends ApplicationAdapter {
     private boolean shotSaved;
 
     private BufferedImage art;
-    private GpuBoardSkin boardSkin;
+    GpuBoardSkin boardSkin;
     private GpuHudKit hud;
-    private UiKit kit;
-    private Stage stage;
+    UiKit kit;
+    Stage stage;
     private boolean inputBlocked;
     private SpriteBatch batch;
     private ShapeRenderer shapes;
@@ -204,80 +162,16 @@ final class GpuStartScreen extends ApplicationAdapter {
     private Label tipAuthor;
     private int tipIndex;
     private double tipShownAt;
-    private Page page = Page.MAIN;
+    Page page = Page.MAIN;
     /** When the page last changed, in seconds on the clock; the first page slides in with the intro. */
     private double pageShownAt = -1;
     private long start;
     private boolean skipped;
     private boolean settledRate;
-    /**
-     * The Host or Connect page's inputs, kept while it shows so opening its online options or switching to a bot keeps
-     * what was typed. The name and port belong to whichever of the two shows.
-     */
-    private UiTextField nameInput;
-    private UiFormField nameField;
-    private UiButton onlineToggle;
-    private boolean onlineOpen;
-    private UiTextField passwordInput;
-    private UiKit.TokenPassword passwordBox;
-    private UiTextField portInput;
-    private UiFormField portField;
-    private Table passwordRow;
-    private UiChoice registerBox;
-    private UiTextField metaserverInput;
-    private UiFormField metaserverField;
-    private Table addresses;
-    private Label publicAddress;
-    private UiButton hostButton;
-    private UiButton backButton;
-    private UiSegmented roleBar;
-    private UiTextField addressInput;
-    private UiFormField addressField;
-    private Table addressRow;
-    private UiChoice sbfBox;
-    private UiButton connectButton;
     /** Counts pages shown and reads asked for; a background read whose count is no longer current is dropped. */
-    private int generation;
+    int generation;
     /** Set once the screen is disposed, so results that arrive after it are dropped. GPU thread only. */
-    private boolean disposed;
-    /** The Load game page's list, kept while it shows so its scroll stays; and its note, or null. */
-    private Actor saveList;
-    private Label loadNote;
-    private UiButton browseSaves;
-    /** The save the Resume page loads, what it says about itself, and the player the host takes. */
-    private StartSaves.Summary resume;
-    private Table resumeHeader;
-    private UiSelect playAs;
-    private UiFormField playAsField;
-    /** The scenarios, read once per start screen; null until they are. */
-    private List<StartScenarios.Entry> catalog;
-    private int groupIndex;
-    private UiSelect groupSelect;
-    /** What the browser's search field holds; kept while the start screen is open, as the group is. */
-    private String scenarioQuery = "";
-    private UiTextField searchInput;
-    private Table scenarioFilters;
-    private Table scenarioRows;
-    private ScrollPane scenarioList;
-    private UiButton openScenario;
-    /** The briefing's scenario file, the page Back returns to, and the briefing once it's made. */
-    private File briefingFile;
-    private Page briefingBack = Page.SCENARIOS;
-    private Briefing briefing;
-    private Table briefingHeader;
-    private ScrollPane briefingText;
-    private Table playerRows;
-    private final List<UiSelect> roleSelects = new ArrayList<>();
-    /** Each player's camouflage swatch on the briefing, and the textures they show. */
-    private final List<Image> swatches = new ArrayList<>();
-    private final List<Texture> swatchTextures = new ArrayList<>();
-    /** The scenario's own value of each rule, so the briefing can count the ones the player changed. */
-    private final Map<String, Object> ruleBaseline = new HashMap<>();
-    private Table rulesLine;
-    private Label rulesValue;
-    private Table conditionsLine;
-    private Label conditionsValue;
-    private UiButton startButton;
+    boolean disposed;
 
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
         this.window = window;
@@ -378,13 +272,13 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (asked == Page.BRIEFING) {
             // The scenario MM_START_SCENARIO names, or the last one played
             String file = System.getenv("MM_START_SCENARIO");
-            openBriefing(new File(file == null || file.isBlank()
+            briefingPage.openBriefing(new File(file == null || file.isBlank()
                   ? PreferenceManager.getClientPreferences().getLastScenario() : file), Page.SCENARIOS);
         } else if (asked == Page.RESUME) {
             List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
             showPage(Page.LOAD);
             if (!saves.isEmpty()) {
-                readSave(saves.get(0), false);
+                loadPage.readSave(saves.get(0), false);
             }
         } else if (asked != Page.MAIN) {
             showPage(asked);
@@ -393,22 +287,22 @@ final class GpuStartScreen extends ApplicationAdapter {
             pageShownAt = 0;
         }
         if (asked == Page.HOST) {
-            if (probe.has("online") && !onlineOpen) {
-                onlineOpen = true;
-                chevron(onlineToggle, true);
-                fillHostColumn();
+            if (probe.has("online") && !hostPage.onlineOpen) {
+                hostPage.onlineOpen = true;
+                hostPage.chevron(hostPage.onlineToggle, true);
+                hostPage.fillHostColumn();
             }
             if (probe.has("reveal")) {
-                passwordBox.shown(true);
+                inputs.passwordBox.shown(true);
             }
         }
         if (asked == Page.CONNECT) {
             if (probe.has("bot")) {
-                roleBar.select(AS_BOT);
-                fillConnectColumn();
+                connectPage.roleBar.select(StartConnectPage.AS_BOT);
+                connectPage.fillConnectColumn();
             }
             if (probe.has("sbf")) {
-                sbfBox.setChecked(true);
+                connectPage.sbfBox.setChecked(true);
             }
         }
     }
@@ -455,28 +349,28 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     // ---- The menu ----
 
-    private void showPage(Page shown) {
+    void showPage(Page shown) {
         page = shown;
         generation++;
         column.forEach(Actor::remove);
         column.clear();
         if (shown == Page.HOST) {
-            buildHostPage(this::submitHost, Page.MAIN);
-            fillHostColumn();
+            hostPage.buildHostPage(hostPage::submitHost, Page.MAIN);
+            hostPage.fillHostColumn();
         } else if (shown == Page.RESUME) {
-            buildHostPage(this::submitResume, Page.LOAD);
-            buildResume();
-            fillHostColumn();
+            hostPage.buildHostPage(hostPage::submitResume, Page.LOAD);
+            hostPage.buildResume();
+            hostPage.fillHostColumn();
         } else if (shown == Page.CONNECT) {
-            buildConnectPage();
-            fillConnectColumn();
+            connectPage.buildConnectPage();
+            connectPage.fillConnectColumn();
         } else if (shown == Page.LOAD) {
-            buildLoadPage();
-            fillLoadColumn();
+            loadPage.buildLoadPage();
+            loadPage.fillLoadColumn();
         } else if (shown == Page.SCENARIOS) {
-            showScenarios();
+            scenarioPage.showScenarios();
         } else if (shown == Page.BRIEFING) {
-            showBriefing();
+            briefingPage.showBriefing();
         } else {
             List<Actor> items = new ArrayList<>();
             if (shown == Page.MAIN) {
@@ -491,7 +385,7 @@ final class GpuStartScreen extends ApplicationAdapter {
                       () -> window.dispatch(Action.QUICK_LOAD)));
                 // As a dev convenience, Ctrl opens the last scenario's briefing
                 items.add(pageItem("button-secondary", "StartScreen.scenario", () -> showPage(Page.SCENARIOS),
-                      this::lastScenario));
+                      scenarioPage::lastScenario));
                 items.add(pageButton("button-secondary", "StartScreen.connect", Page.CONNECT));
                 items.add(overline("StartScreen.tools"));
                 items.add(item("button-quiet", "StartScreen.mapEditor", Action.MAP_EDITOR, null));
@@ -515,8 +409,8 @@ final class GpuStartScreen extends ApplicationAdapter {
             pageShownAt = clock();
         }
         Actor first = switch (shown) {
-            case HOST, CONNECT -> nameInput;
-            case RESUME -> playAs != null ? playAs : nameInput;
+            case HOST, CONNECT -> inputs.nameInput;
+            case RESUME -> hostPage.playAs != null ? hostPage.playAs : inputs.nameInput;
             default -> null;
         };
         stage.setKeyboardFocus(first);
@@ -529,7 +423,7 @@ final class GpuStartScreen extends ApplicationAdapter {
      * Shows {@code items} in the column, in order, and makes them, then the bottom row, the keyboard's stops. Items
      * already showing stay on the stage, so they keep their keyboard focus and text.
      */
-    private void setColumn(List<Actor> items) {
+    void setColumn(List<Actor> items) {
         for (Actor actor : column) {
             if (!items.contains(actor)) {
                 actor.remove();
@@ -582,7 +476,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         UiButton button = kit.button("button-primary", null, Messages.getString("StartScreen.continue"),
               StartSaves.title(save) + "  \u00b7  " + StartSaves.ago(save.lastModified(), System.currentTimeMillis()));
         leftAligned(button);
-        UiKit.onChange(button, () -> readSave(save, true));
+        UiKit.onChange(button, () -> loadPage.readSave(save, true));
         return button;
     }
 
@@ -594,12 +488,12 @@ final class GpuStartScreen extends ApplicationAdapter {
         return button;
     }
 
-    private UiButton backButton() {
+    UiButton backButton() {
         return backButton(Page.MAIN);
     }
 
     /** Back, to {@code target}. */
-    private UiButton backButton(Page target) {
+    UiButton backButton(Page target) {
         UiButton back = kit.button("button-secondary", "chevron-left", Messages.getString("StartScreen.back"), null);
         leftAligned(back);
         UiKit.onChange(back, () -> showPage(target));
@@ -610,7 +504,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     private Page parent(Page from) {
         return switch (from) {
             case RESUME -> Page.LOAD;
-            case BRIEFING -> briefingBack;
+            case BRIEFING -> briefingPage.briefingBack;
             default -> Page.MAIN;
         };
     }
@@ -621,7 +515,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     }
 
     /** A line of wrapped text in the column, such as a page's status or an error. */
-    private Label note(String text, String role) {
+    Label note(String text, String role) {
         Label note = kit.typeLabel(text, "body", role);
         note.setWrap(true);
         note.setAlignment(Align.left);
@@ -629,7 +523,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     }
 
     /** One line of text that shortens with an ellipsis rather than wrap. */
-    private Label line(String text, String type, String role) {
+    Label line(String text, String type, String role) {
         Label line = kit.typeLabel(text, type, role);
         line.setEllipsis(true);
         return line;
@@ -639,7 +533,7 @@ final class GpuStartScreen extends ApplicationAdapter {
      * Runs {@code work} off the GPU thread, then hands its result to {@code done} on it, unless another page or read
      * has been asked for since.
      */
-    private <T> void background(String name, Supplier<T> work, Consumer<T> done) {
+    <T> void background(String name, Supplier<T> work, Consumer<T> done) {
         int asked = generation;
         // Gdx.app moves to the next native window once this one closes; results stay with this one
         Application app = Gdx.app;
@@ -659,1034 +553,19 @@ final class GpuStartScreen extends ApplicationAdapter {
         return Gdx.input.isKeyPressed(Keys.CONTROL_LEFT) || Gdx.input.isKeyPressed(Keys.CONTROL_RIGHT);
     }
 
-    private static void leftAligned(UiButton button) {
+    static void leftAligned(UiButton button) {
         button.left();
         button.getCells().forEach(cell -> cell.left());
         button.getLabelCell().expandX();
     }
 
-    private Label overline(String key) {
+    Label overline(String key) {
         return kit.roleTypeLabel("overline", Messages.getString(key), "text.muted");
     }
 
-    // ---- The Host page ----
-
-    /** The Host page's inputs, filled from the last game's choices; the main button runs {@code submit}. */
-    private void buildHostPage(Runnable submit, Page back) {
-        ClientPreferences client = PreferenceManager.getClientPreferences();
-        nameInput = field(client.getLastPlayerName());
-        nameField = kit.formField(Messages.getString("MegaMek.GameConnection.name"), nameInput)
-              .helper(Messages.getString("MegaMek.GameConnection.nameHelper"));
-
-        String lastPassword = client.getLastServerPass();
-        onlineOpen = StartHostForm.onlineOpen(lastPassword, client.getLastServerPort());
-        onlineToggle = kit.button("button-quiet", onlineOpen ? "chevron-down" : "chevron-right",
-              Messages.getString("MegaMek.GameConnection.online"), null);
-        leftAligned(onlineToggle);
-        // A section heading: its chevron lines up with the fields under it
-        onlineToggle.padLeft(0);
-        UiKit.onChange(onlineToggle, () -> {
-            onlineOpen = !onlineOpen;
-            chevron(onlineToggle, onlineOpen);
-            fillHostColumn();
-        });
-
-        buildServerInputs(lastPassword, client.getLastServerPort());
-
-        registerBox = kit.check(Messages.getString("MegaMek.GameConnection.register"), false);
-        registerBox.left();
-        UiKit.onChange(registerBox, this::fillHostColumn);
-        metaserverInput = field(client.getMetaServerName());
-        metaserverField = kit.formField(Messages.getString("MegaMek.GameConnection.metaserver"), metaserverInput);
-
-        addresses = addresses();
-        hostButton = kit.button("button-primary", null, Messages.getString("MegaMek.GameConnection.host"), null);
-        leftAligned(hostButton);
-        UiKit.onChange(hostButton, submit);
-        backButton = backButton(back);
-    }
-
-    /** The game's password and port, side by side in {@link #passwordRow}. */
-    private void buildServerInputs(String lastPassword, int lastPort) {
-        UiKit.TokenPassword password = kit.tokenPassword(false);
-        passwordBox = password;
-        passwordInput = password.field;
-        passwordInput.setText(lastPassword == null ? "" : lastPassword);
-        passwordInput.setFocusTraversal(false);
-        UiFormField passwordField = kit.formField(Messages.getString("MegaMek.GameConnection.password"),
-              password).helper(Messages.getString("MegaMek.GameConnection.passwordHelper"));
-        portInput = field(String.valueOf(lastPort));
-        portField = kit.formField(Messages.getString("MegaMek.GameConnection.port"), portInput);
-        passwordRow = new Table();
-        passwordRow.top().left();
-        passwordRow.add(passwordField).growX().minWidth(0).top();
-        passwordRow.add(portField).width(PORT_WIDTH).padLeft(12).top();
-    }
-
-    private UiTextField field(String text) {
-        UiTextField field = kit.input(text == null ? "" : text, false);
-        // The screen moves the keyboard between all its controls, not only between text fields
-        field.setFocusTraversal(false);
-        return field;
-    }
-
-    private void chevron(UiButton button, boolean open) {
-        if (!button.icons.isEmpty() && button.icons.get(0) instanceof Image icon) {
-            icon.setDrawable(boardSkin.skin.getDrawable("icon-" + (open ? "chevron-down" : "chevron-right")));
-        }
-    }
-
-    /** Lays the Host page's column out for the online options' and server browser's current state. */
-    private void fillHostColumn() {
-        boolean resuming = page == Page.RESUME;
-        List<Actor> items = new ArrayList<>();
-        items.add(overline(resuming ? "StartScreen.loadGame" : "StartScreen.newGame"));
-        if (resuming) {
-            items.add(resumeHeader);
-        }
-        items.add(resuming && playAsField != null ? playAsField : nameField);
-        if (resuming && watching()) {
-            items.add(nameField);
-        }
-        items.add(onlineToggle);
-        if (onlineOpen) {
-            items.add(passwordRow);
-            items.add(registerBox);
-            if (registerBox.isChecked()) {
-                items.add(metaserverField);
-            }
-            items.add(addresses);
-        }
-        items.add(hostButton);
-        items.add(backButton);
-        // Keep the title label: a new one would slide in again
-        if (!column.isEmpty() && column.get(0) instanceof Label title) {
-            items.set(0, title);
-        }
-        setColumn(items);
-    }
-
-    /**
-     * The addresses friends type to join: the local one, found at once, and the public one, which is only asked of an
-     * outside service when the player chooses to show it, since it would also show on a stream or a screenshot.
-     */
-    private Table addresses() {
-        Table table = new Table();
-        table.left().top();
-        UiButton show = kit.button("button-quiet-compact", null, Messages.getString("StartScreen.showAddress"),
-              null);
-        // Rows keep the button's height so the page doesn't shift when the address replaces it
-        table.defaults().left().minHeight(show.getPrefHeight()).padBottom(4);
-        Label local = kit.typeLabel(Messages.getString("StartScreen.findingAddress"), "small", "text.primary");
-        table.add(kit.typeLabel(Messages.getString("StartScreen.localAddress"), "small", "text.muted"))
-              .padRight(12);
-        table.add(local).expandX().row();
-        table.add(kit.typeLabel(Messages.getString("StartScreen.publicAddress"), "small", "text.muted"))
-              .padRight(12);
-        publicAddress = kit.typeLabel("", "small", "text.primary");
-        Cell<Actor> publicCell = table.add((Actor) show);
-        UiKit.onChange(show, () -> {
-            publicAddress.setText(Messages.getString("StartScreen.findingAddress"));
-            publicCell.setActor(publicAddress);
-            int at = focusable.indexOf(show);
-            if (at >= 0) {
-                focusable.remove(at);
-            }
-            if (stage.getKeyboardFocus() == show) {
-                stage.setKeyboardFocus(hostButton);
-            }
-            lookUp(NetworkAddresses::publicAddress, publicAddress);
-        });
-        lookUp(NetworkAddresses::localAddress, local);
-        return table;
-    }
-
-    /** Finds an address off the GPU thread, then shows it, or that it wasn't found, in {@code label}. */
-    private void lookUp(Supplier<String> address, Label label) {
-        Application app = Gdx.app;
-        Thread thread = new Thread(() -> {
-            String found = address.get();
-            app.postRunnable(() -> {
-                if (!disposed) {
-                    label.setText(found == null ? Messages.getString("StartScreen.noAddress") : found);
-                }
-            });
-        }, "MegaMek-start-address");
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    /** Checks the Host page; shows what is wrong under the inputs, or asks MegaMek to host the game. */
-    private void submitHost() {
-        String name = nameInput.getText().trim();
-        int port = StartHostForm.port(portInput.getText());
-        nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
-        portField.error(portError(port));
-        if (name.isEmpty()) {
-            stage.setKeyboardFocus(nameInput);
-            return;
-        }
-        if (port < 0) {
-            if (!onlineOpen) {
-                onlineOpen = true;
-                chevron(onlineToggle, true);
-                fillHostColumn();
-            }
-            stage.setKeyboardFocus(portInput);
-            return;
-        }
-        boolean register = registerBox.isChecked();
-        window.host(new HostRequest(name, passwordInput.getText(), port, register,
-              register ? metaserverInput.getText().trim() : ""));
-    }
-
-    /** The port field's error for {@code port}, as {@link StartHostForm#port} reads it, or null when it is fine. */
-    private static String portError(int port) {
-        return port < 0 ? Messages.getString("MegaMek.GameConnection.portError",
-              String.valueOf(MMConstants.MIN_PORT), String.valueOf(MMConstants.MAX_PORT)) : null;
-    }
-
-    // ---- The Connect page ----
-
-    /** The Connect page's inputs, filled from the last game joined; the player joins unless Bot is chosen. */
-    private void buildConnectPage() {
-        ClientPreferences client = PreferenceManager.getClientPreferences();
-        roleBar = kit.tokenSegmented(false, Messages.getString("MegaMek.GameConnection.player"),
-              Messages.getString("MegaMek.GameConnection.bot"));
-        // The segments share the column's width
-        for (Cell<?> cell : roleBar.getCells()) {
-            cell.expandX();
-        }
-        UiKit.onChange(roleBar, this::fillConnectColumn);
-
-        nameInput = field(client.getLastPlayerName());
-        nameField = kit.formField(Messages.getString("MegaMek.GameConnection.name"), nameInput);
-        addressInput = field(client.getLastConnectAddr());
-        addressField = kit.formField(Messages.getString("MegaMek.GameConnection.address"), addressInput);
-        portInput = field(String.valueOf(client.getLastConnectPort()));
-        portField = kit.formField(Messages.getString("MegaMek.GameConnection.port"), portInput);
-        addressRow = new Table();
-        addressRow.top().left();
-        addressRow.add(addressField).growX().minWidth(0).top();
-        addressRow.add(portField).width(PORT_WIDTH).padLeft(12).top();
-
-        sbfBox = kit.check(Messages.getString("MegaMek.GameConnection.sbf"), false);
-        sbfBox.left();
-        connectButton = kit.button("button-primary", null, Messages.getString("MegaMek.GameConnection.connect"),
-              null);
-        leftAligned(connectButton);
-        UiKit.onChange(connectButton, this::submitConnect);
-        backButton = backButton();
-    }
-
-    private boolean asBot() {
-        return roleBar.getSelectedIndex() == AS_BOT;
-    }
-
-    /** Lays the Connect page's column out for the player or a bot; there is no Strategic BattleForce bot. */
-    private void fillConnectColumn() {
-        boolean bot = asBot();
-        nameField.helper(Messages.getString(bot ? "MegaMek.GameConnection.botNameHelper"
-              : "MegaMek.GameConnection.nameHelper"));
-        connectButton.setText(kit.cased("button", Messages.getString(bot ? "MegaMek.GameConnection.connectBot"
-              : "MegaMek.GameConnection.connect")));
-        List<Actor> items = new ArrayList<>();
-        items.add(overline("StartScreen.connect"));
-        items.add(roleBar);
-        items.add(nameField);
-        items.add(addressRow);
-        if (!bot) {
-            items.add(sbfBox);
-        }
-        items.add(connectButton);
-        items.add(backButton);
-        if (!column.isEmpty() && column.get(0) instanceof Label title) {
-            items.set(0, title);
-        }
-        setColumn(items);
-    }
-
-    /** Checks the Connect page; shows what is wrong under the inputs, or asks MegaMek to join the game. */
-    private void submitConnect() {
-        String name = nameInput.getText().trim();
-        String address = addressInput.getText().trim();
-        int port = StartHostForm.port(portInput.getText());
-        nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
-        addressField.error(address.isEmpty() ? Messages.getString("MegaMek.GameConnection.addressError") : null);
-        portField.error(portError(port));
-        Actor wrong = name.isEmpty() ? nameInput : address.isEmpty() ? addressInput : port < 0 ? portInput : null;
-        if (wrong != null) {
-            stage.setKeyboardFocus(wrong);
-            return;
-        }
-        boolean bot = asBot();
-        window.connect(new ConnectRequest(name, address, port, bot, !bot && sbfBox.isChecked()));
-    }
-
-    // ---- The Load game page ----
-
-    /** The saves in MegaMek's save folder, newest first, each a button that reads it. */
-    private void buildLoadPage() {
-        loadNote = null;
-        browseSaves = kit.button("button-quiet", null, Messages.getString("StartScreen.browseSaves"), null);
-        leftAligned(browseSaves);
-        UiKit.onChange(browseSaves, () -> window.chooseFile(new File(MMConstants.SAVEGAME_DIR),
-              Messages.getString("MegaMek.SaveGameDialog.title"), new FileNameExtensionFilter(
-                    Messages.getString("StartScreen.saveFiles"), "sav", "gz"), file -> {
-                  if (page == Page.LOAD) {
-                      readSave(file, false);
-                  }
-              }));
-        List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
-        if (saves.isEmpty()) {
-            saveList = null;
-            loadNote = note(Messages.getString("StartScreen.noSaves"), "text.muted");
-            return;
-        }
-        Table rows = new Table();
-        rows.top().left();
-        rows.defaults().growX().left();
-        for (File save : saves) {
-            UiButton row = kit.button("button-quiet", null, StartSaves.title(save), savedAt(save));
-            leftAligned(row);
-            UiKit.onChange(row, () -> readSave(save, true));
-            // The way to the Resume page's choices for a save that would otherwise load at once
-            UiButton options = kit.button("button-quiet-compact", null,
-                  Messages.getString("StartScreen.saveOptions"), null);
-            UiKit.onChange(options, () -> readSave(save, false));
-            Table line = new Table();
-            line.add(row).growX().minWidth(0);
-            line.add(options).padLeft(4);
-            rows.add(line).row();
-        }
-        saveList = kit.scrollList(rows, true);
-    }
-
-    private void fillLoadColumn() {
-        List<Actor> items = new ArrayList<>();
-        items.add(overline("StartScreen.loadGame"));
-        if (saveList != null) {
-            items.add(saveList);
-        }
-        if (loadNote != null) {
-            items.add(loadNote);
-        }
-        items.add(browseSaves);
-        items.add(backButton());
-        if (!column.isEmpty() && column.get(0) instanceof Label title) {
-            items.set(0, title);
-        }
-        setColumn(items);
-    }
-
-    /** When {@code file} was last written, in the player's locale. */
-    private static String savedAt(File file) {
-        return SAVED_AT.format(Instant.ofEpochMilli(file.lastModified()).atZone(ZoneId.systemDefault()));
-    }
-
-    /**
-     * Reads {@code save} off the GPU thread, then, when {@code quick} and it is the last player's own game against
-     * bots, loads it at once; otherwise opens it on the Resume page, or says on the Load game page why it can't load.
-     */
-    private void readSave(File save, boolean quick) {
-        generation++;
-        if (page == Page.LOAD) {
-            showLoadNote(Messages.getString("StartScreen.readingSave", StartSaves.title(save)), "text.muted");
-        }
-        background("save", () -> StartSaves.read(save), summary -> {
-            ClientPreferences client = PreferenceManager.getClientPreferences();
-            String player = quick ? summary.quickPlayer(client.getLastPlayerName()) : null;
-            if (player != null) {
-                String password = client.getLastServerPass();
-                window.load(new LoadRequest(summary.file(), new HostRequest(player,
-                      password == null ? "" : password, client.getLastServerPort(), false, ""), false,
-                      summary.bots()));
-            } else if (summary.loadable()) {
-                resume = summary;
-                showPage(Page.RESUME);
-            } else {
-                if (page != Page.LOAD) {
-                    showPage(Page.LOAD);
-                }
-                showLoadNote(saveProblem(summary), "status.danger");
-            }
-        });
-    }
-
-    private void showLoadNote(String text, String role) {
-        loadNote = note(text, role);
-        fillLoadColumn();
-    }
-
-    /** Why {@code summary}'s save can't be loaded, for the page to say. */
-    static String saveProblem(StartSaves.Summary summary) {
-        String name = StartSaves.title(summary.file());
-        return switch (summary.problem()) {
-            case NO_VERSION -> Messages.getString("StartScreen.saveNoVersion", name, SuiteConstants.VERSION);
-            case WRONG_VERSION -> Messages.getString("StartScreen.saveWrongVersion", name, summary.version(),
-                  SuiteConstants.VERSION);
-            default -> Messages.getString("StartScreen.saveUnreadable", name);
-        };
-    }
-
-    /**
-     * The Resume page: the Host page for the chosen save, whose name field becomes a choice of the save's players
-     * (the last name played, where the save has it), and whose main button loads it.
-     */
-    private void buildResume() {
-        hostButton.setText(kit.cased("button", Messages.getString("StartScreen.loadGame")));
-        resumeHeader = new Table();
-        resumeHeader.left().top();
-        resumeHeader.defaults().left().growX().minWidth(0);
-        resumeHeader.add(line(StartSaves.title(resume.file()), "body", "text.primary")).row();
-        resumeHeader.add(line(savedAt(resume.file()), "small", "text.muted"));
-        playAs = null;
-        playAsField = null;
-        List<String> players = resume.players();
-        if (!players.isEmpty()) {
-            List<String> choices = new ArrayList<>(players);
-            choices.add(Messages.getString("StartScreen.watch"));
-            playAs = kit.tokenSelect(false, choices.toArray(String[]::new));
-            int last = players.indexOf(PreferenceManager.getClientPreferences().getLastPlayerName());
-            playAs.select(Math.max(last, 0));
-            UiKit.onChange(playAs, this::fillHostColumn);
-            playAsField = kit.formField(Messages.getString("StartScreen.playAs"), playAs)
-                  .helper(Messages.getString("StartScreen.playAsHelper"));
-            // Watching asks for a name, as the briefing does when the host takes no side
-            nameField = kit.formField(Messages.getString("StartScreen.observerName"), nameInput)
-                  .helper(Messages.getString("StartScreen.loadObserverHelper"));
-        }
-    }
-
-    /** Whether the Resume page's host watches the save rather than take one of its players. */
-    private boolean watching() {
-        return playAs != null && playAs.getSelectedIndex() == resume.players().size();
-    }
-
-    /** Checks the Resume page as the Host page; asks MegaMek to host the save as the chosen player, or to watch it. */
-    private void submitResume() {
-        boolean watching = watching();
-        String name = playAs != null && !watching ? playAs.getSelected() : nameInput.getText().trim();
-        int port = StartHostForm.port(portInput.getText());
-        String nameError = null;
-        if (playAs == null || watching) {
-            if (name.isEmpty()) {
-                nameError = Messages.getString("MegaMek.GameConnection.nameError");
-            } else if (watching && resume.players().contains(name)) {
-                nameError = Messages.getString("StartScreen.observerNameTaken");
-            }
-            nameField.error(nameError);
-        }
-        portField.error(portError(port));
-        if (nameError != null) {
-            stage.setKeyboardFocus(nameInput);
-            return;
-        }
-        if (port < 0) {
-            if (!onlineOpen) {
-                onlineOpen = true;
-                chevron(onlineToggle, true);
-                fillHostColumn();
-            }
-            stage.setKeyboardFocus(portInput);
-            return;
-        }
-        boolean register = registerBox.isChecked();
-        List<String> bots = resume.bots().stream().filter(bot -> watching || !bot.equals(name)).toList();
-        window.load(new LoadRequest(resume.file(), new HostRequest(name, passwordInput.getText(), port, register,
-              register ? metaserverInput.getText().trim() : ""), watching, bots));
-    }
-
-    // ---- The scenario browser ----
-
-    /** Shows the scenarios, reading them first the first time. */
-    private void showScenarios() {
-        openScenario = kit.button("button-quiet", null, Messages.getString("StartScreen.openScenario"), null);
-        leftAligned(openScenario);
-        UiKit.onChange(openScenario, () -> window.chooseFile(Configuration.scenariosDir(),
-              Messages.getString("MegaMek.SelectScenarioDialog.title"), new FileNameExtensionFilter(
-                    Messages.getString("StartScreen.scenarioFiles"), SuiteConstants.SCENARIO_EXT.substring(1)),
-              file -> {
-                  if (page == Page.SCENARIOS) {
-                      openBriefing(file, Page.SCENARIOS);
-                  }
-              }));
-        if (catalog != null) {
-            buildScenarioPage();
-            fillScenarioColumn();
-            return;
-        }
-        setColumn(List.of(overline("StartScreen.scenario"),
-              note(Messages.getString("StartScreen.readingScenarios"), "text.muted"), openScenario, backButton()));
-        background("scenarios", StartScenarios::read, entries -> {
-            catalog = entries;
-            buildScenarioPage();
-            fillScenarioColumn();
-        });
-    }
-
-    private void buildScenarioPage() {
-        List<String> groups = StartScenarios.groups(catalog);
-        groupSelect = null;
-        if (groups.size() > 1) {
-            List<String> names = new ArrayList<>();
-            names.add(Messages.getString("StartScreen.allScenarios"));
-            groups.forEach(group -> names.add(groupName(group)));
-            groupSelect = kit.tokenSelect(false, names.toArray(String[]::new));
-            groupIndex = Math.min(groupIndex, names.size() - 1);
-            groupSelect.select(groupIndex);
-            UiKit.onChange(groupSelect, () -> {
-                groupIndex = groupSelect.getSelectedIndex();
-                fillScenarioRows();
-                scenarioList.setScrollY(0);
-                fillScenarioColumn();
-            });
-        } else {
-            groupIndex = 0;
-        }
-        UiKit.TokenSearch search = kit.tokenSearch(Messages.getString("StartScreen.searchScenarios"), false);
-        searchInput = search.field;
-        searchInput.setFocusTraversal(false);
-        searchInput.setText(scenarioQuery);
-        // Only the rows change while typing, so the field keeps the keyboard
-        UiKit.onChange(searchInput, () -> {
-            scenarioQuery = searchInput.getText();
-            fillScenarioRows();
-            scenarioList.setScrollY(0);
-        });
-        scenarioFilters = new Table();
-        scenarioFilters.left().top();
-        scenarioFilters.add(search).growX().minWidth(0);
-        if (groupSelect != null) {
-            scenarioFilters.add(groupSelect).width(ROLE_WIDTH + 30).padLeft(8);
-        }
-        scenarioRows = new Table();
-        scenarioRows.top().left();
-        scenarioRows.defaults().growX().left();
-        scenarioList = kit.scrollList(scenarioRows, true);
-        fillScenarioRows();
-    }
-
-    /** The scenarios of the chosen group, or all of them, that answer the search. */
-    private void fillScenarioRows() {
-        scenarioRows.clearChildren();
-        List<String> groups = StartScenarios.groups(catalog);
-        String group = groupIndex == 0 ? null : groups.get(groupIndex - 1);
-        for (StartScenarios.Entry entry : catalog) {
-            if (group != null && !group.equals(entry.group()) || !StartScenarios.matches(entry, scenarioQuery)) {
-                continue;
-            }
-            List<String> about = new ArrayList<>();
-            if (group == null && groups.size() > 1) {
-                about.add(groupName(entry.group()));
-            }
-            String planet = entry.scenario().getPlanet();
-            if (planet != null && !planet.isBlank()) {
-                about.add(planet.trim());
-            }
-            UiButton row = kit.button("button-quiet", null, entry.name(),
-                  about.isEmpty() ? null : String.join("  \u00b7  ", about));
-            leftAligned(row);
-            UiKit.onChange(row, () -> openBriefing(new File(entry.scenario().getFileName()), Page.SCENARIOS));
-            scenarioRows.add(row).row();
-        }
-        if (!scenarioRows.hasChildren()) {
-            scenarioRows.add(note(Messages.getString("StartScreen.noMatches"), "text.muted")).pad(8);
-        }
-    }
-
-    private void fillScenarioColumn() {
-        List<Actor> items = new ArrayList<>();
-        items.add(overline("StartScreen.scenario"));
-        if (catalog.isEmpty()) {
-            items.add(note(Messages.getString("StartScreen.noScenarios"), "text.muted"));
-        } else {
-            items.add(scenarioFilters);
-            items.add(scenarioList);
-        }
-        items.add(openScenario);
-        items.add(backButton());
-        if (!column.isEmpty() && column.get(0) instanceof Label title) {
-            items.set(0, title);
-        }
-        setColumn(items);
-    }
-
-    /** A group's name as the browser shows it: the scenarios folder's own are the basic ones. */
-    static String groupName(String group) {
-        if (group.isBlank()) {
-            return Messages.getString("StartScreen.basicScenarios");
-        }
-        return group.substring(0, 1).toUpperCase(Locale.ROOT) + group.substring(1);
-    }
-
-    /** Ctrl+Scenario: the last scenario's briefing, or the browser when there is none. */
-    private void lastScenario() {
-        String last = PreferenceManager.getClientPreferences().getLastScenario();
-        if (last == null || last.isBlank() || !new File(last).isFile()) {
-            showPage(Page.SCENARIOS);
-        } else {
-            openBriefing(new File(last), Page.MAIN);
-        }
-    }
-
-    // ---- The briefing ----
-
-    /** Opens the briefing for the scenario in {@code file}; Back returns to {@code back}. */
-    private void openBriefing(File file, Page back) {
-        briefingFile = file;
-        briefingBack = back;
-        briefing = null;
-        showPage(Page.BRIEFING);
-    }
-
-    /** Reads the scenario and makes its game off the GPU thread, then shows the briefing. */
-    private void showBriefing() {
-        File file = briefingFile;
-        setColumn(List.of(overline("StartScreen.briefing"),
-              note(Messages.getString("StartScreen.preparingBriefing"), "text.muted"), backButton(briefingBack)));
-        background("briefing", () -> prepare(file), made -> {
-            briefing = made;
-            if (made.error() == null) {
-                buildBriefing();
-            }
-            fillBriefingColumn();
-            stage.setKeyboardFocus(startButton);
-        });
-    }
-
-    /** Blocks: reads {@code file}'s scenario and makes its game, or says why it couldn't. */
-    private static Briefing prepare(File file) {
-        try {
-            Scenario scenario = new ScenarioLoader(file).load();
-            IGame game = scenario.createGame();
-            List<Player> players = game.getPlayersList();
-            if (!scenario.isSinglePlayer()) {
-                // As the old players dialog did, a multiplayer scenario's sides take the colours in order; a side
-                // still in the default blue camouflage wears its colour, so the briefing's swatches tell them apart
-                PlayerColour[] colours = PlayerColour.values();
-                Camouflage untouched = Camouflage.of(PlayerColour.BLUE);
-                for (int i = 0; i < players.size(); i++) {
-                    Player player = players.get(i);
-                    PlayerColour colour = colours[i % colours.length];
-                    player.setColour(colour);
-                    if (untouched.equals(player.getCamouflage())) {
-                        player.setCamouflage(Camouflage.of(colour));
-                    }
-                }
-            }
-            return new Briefing(scenario, game, players.stream().map(GpuStartScreen::swatch).toList(), null);
-        } catch (Exception ex) {
-            LOGGER.error(ex, "The start screen could not prepare the scenario {}", file);
-            return new Briefing(null, null, List.of(), Messages.getString("StartScreen.briefingFailed",
-                  file.getName(), ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
-        }
-    }
-
-    /** Blocks: a side's camouflage as the briefing shows it, a small rounded patch of it, or of its colour. */
-    private static BufferedImage swatch(Player player) {
-        java.awt.Image camo = null;
-        try {
-            camo = player.getCamouflage().getBaseImage();
-        } catch (RuntimeException ex) {
-            LOGGER.warn("No camouflage image for {}: {}", player.getName(), ex.getMessage());
-        }
-        if (camo != null) {
-            // Waits for an image the toolkit loads in the background
-            camo = new ImageIcon(camo).getImage();
-        }
-        int width = SWATCH_WIDTH * 2;
-        int height = SWATCH_HEIGHT * 2;
-        BufferedImage swatch = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = swatch.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.setClip(new RoundRectangle2D.Float(0, 0, width, height, 10, 10));
-        if (camo != null && camo.getWidth(null) > 0) {
-            g.drawImage(camo, 0, 0, width, height, null);
-        } else {
-            g.setColor(player.getDisplayColour().getColour());
-            g.fillRect(0, 0, width, height);
-        }
-        g.dispose();
-        return swatch;
-    }
-
-    /**
-     * The briefing's parts: its name, where and how it's played, its description, and who plays each side. In a
-     * single-player scenario the host takes the first side and bots the rest; in a multiplayer one each side is the
-     * host's, another person's or a bot's, and the host names the game's password and port.
-     */
-    private void buildBriefing() {
-        Scenario scenario = briefing.scenario();
-        StartScenarios.Entry entry = new StartScenarios.Entry("", scenario);
-        briefingHeader = new Table();
-        briefingHeader.left().top();
-        briefingHeader.defaults().left().growX().minWidth(0);
-        Label title = kit.roleTypeLabel("title", entry.name(), "text.primary");
-        title.setEllipsis(true);
-        briefingHeader.add(title).row();
-        List<String> about = new ArrayList<>();
-        String planet = scenario.getPlanet();
-        if (planet != null && !planet.isBlank()) {
-            about.add(planet.trim());
-        }
-        about.add(Messages.getString(scenario.isSinglePlayer() ? "StartScreen.singlePlayer"
-              : "StartScreen.multiplayer"));
-        briefingHeader.add(line(String.join("  \u00b7  ", about), "small", "text.muted")).padTop(2);
-
-        String description = scenario.getDescription();
-        briefingText = null;
-        if (description != null && !description.isBlank()) {
-            Label text = kit.typeLabel(description.trim(), "body", "text.secondary");
-            text.setWrap(true);
-            text.setAlignment(Align.topLeft);
-            briefingText = kit.scrollList(text);
-        }
-
-        roleSelects.clear();
-        disposeSwatches();
-        playerRows = new Table();
-        playerRows.left().top();
-        playerRows.defaults().left().padBottom(4);
-        List<Player> players = briefing.game().getPlayersList();
-        String[] roles = { Messages.getString("StartScreen.you"), Messages.getString("StartScreen.human"),
-                           Messages.getString("StartScreen.bot") };
-        for (int i = 0; i < players.size(); i++) {
-            playerRows.add(swatchButton(i)).padRight(8);
-            playerRows.add(line(players.get(i).getName(), "body", "text.primary")).growX().minWidth(0);
-            if (scenario.isSinglePlayer()) {
-                playerRows.add(kit.typeLabel(roles[i == 0 ? 0 : 2], "body", "text.muted")).width(ROLE_WIDTH)
-                      .padLeft(12);
-            } else {
-                // Most multiplayer games are played against bots: the host takes the first side, bots the rest
-                UiSelect role = kit.tokenSelect(true, roles);
-                role.select(i == 0 ? Role.YOU.ordinal() : Role.BOT.ordinal());
-                UiKit.onChange(role, () -> roleChosen(role));
-                roleSelects.add(role);
-                playerRows.add(role).width(ROLE_WIDTH).padLeft(12);
-            }
-            playerRows.row();
-        }
-
-        ruleBaseline.clear();
-        if (briefing.game() instanceof Game twGame) {
-            twGame.getOptions().getOptionsList().forEach(option -> ruleBaseline.put(option.getName(),
-                  option.getValue()));
-        }
-        rulesValue = kit.typeLabel("", "body", "text.primary");
-        rulesLine = settingLine("StartScreen.rules", rulesValue,
-              scenario.hasFixedGameOptions() || !(briefing.game() instanceof Game) ? null : this::changeRules);
-        conditionsValue = kit.typeLabel("", "body", "text.primary");
-        conditionsLine = briefing.game() instanceof PlanetaryConditionsUsing
-              ? settingLine("StartScreen.conditions", conditionsValue,
-                    scenario.hasFixedPlanetaryConditions() ? null : this::changeConditions)
-              : null;
-        describeSettings();
-
-        ClientPreferences client = PreferenceManager.getClientPreferences();
-        nameInput = field(client.getLastPlayerName());
-        nameField = kit.formField(Messages.getString("StartScreen.observerName"), nameInput)
-              .helper(Messages.getString("StartScreen.observerHelper"));
-        buildServerInputs(client.getLastServerPass(), client.getLastServerPort());
-        startButton = kit.button("button-primary", null, Messages.getString("StartScreen.startScenario"), null);
-        leftAligned(startButton);
-        UiKit.onChange(startButton, this::submitBriefing);
-    }
-
-    /** A side's camouflage swatch; a click chooses another camouflage for it. */
-    private UiButton swatchButton(int index) {
-        Texture texture = texture(briefing.swatches().get(index), false);
-        swatchTextures.add(texture);
-        Image image = new Image(texture);
-        swatches.add(image);
-        UiButton button = kit.button("button-quiet-compact", null, null, null);
-        button.add(image).size(SWATCH_WIDTH, SWATCH_HEIGHT);
-        UiKit.onChange(button, () -> chooseCamo(index));
-        return button;
-    }
-
-    /** Opens the camouflage chooser for side {@code index}, then shows what was chosen. */
-    private void chooseCamo(int index) {
-        Player player = briefing.game().getPlayersList().get(index);
-        Briefing asked = briefing;
-        window.onSwing(frame -> {
-            CamoChooserDialog dialog = new CamoChooserDialog(frame, player.getCamouflage());
-            try {
-                if (!dialog.showDialog().isConfirmed()) {
-                    return null;
-                }
-                player.setCamouflage(dialog.getSelectedItem());
-                return swatch(player);
-            } finally {
-                dialog.dispose();
-            }
-        }, chosen -> {
-            if (chosen == null || briefing != asked || page != Page.BRIEFING) {
-                return;
-            }
-            Texture texture = texture(chosen, false);
-            swatchTextures.set(index, texture).dispose();
-            swatches.get(index).setDrawable(new TextureRegionDrawable(texture));
-        });
-    }
-
-    private void disposeSwatches() {
-        swatchTextures.forEach(Texture::dispose);
-        swatchTextures.clear();
-        swatches.clear();
-    }
-
-    /**
-     * A line of the briefing's settings: its name, what it holds, and a Change button when the scenario leaves it to
-     * the player, or that the scenario sets it when it doesn't.
-     */
-    private Table settingLine(String key, Label value, Runnable change) {
-        Table line = new Table();
-        line.left();
-        line.add(kit.typeLabel(Messages.getString(key), "body", "text.muted")).width(ROLE_WIDTH - 30).left();
-        value.setEllipsis(true);
-        line.add(value).growX().minWidth(0).left();
-        if (change != null) {
-            UiButton button = kit.button("button-quiet-compact", null, Messages.getString("StartScreen.change"),
-                  null);
-            UiKit.onChange(button, change);
-            line.add(button).padLeft(8);
-        }
-        return line;
-    }
-
-    /** Fills the Rules and Conditions lines from the briefing's game. */
-    private void describeSettings() {
-        Scenario scenario = briefing.scenario();
-        if (scenario.hasFixedGameOptions() || !(briefing.game() instanceof Game twGame)) {
-            rulesValue.setText(Messages.getString("StartScreen.setByScenario"));
-        } else {
-            long changed = twGame.getOptions().getOptionsList().stream()
-                  .filter(option -> !Objects.equals(option.getValue(), ruleBaseline.get(option.getName())))
-                  .count();
-            rulesValue.setText(changed == 0 ? Messages.getString("StartScreen.rulesDefault")
-                  : changed == 1 ? Messages.getString("StartScreen.rulesChangedOne")
-                  : Messages.getString("StartScreen.rulesChanged", changed));
-        }
-        if (conditionsLine != null) {
-            conditionsValue.setText(scenario.hasFixedPlanetaryConditions()
-                  ? Messages.getString("StartScreen.setByScenario")
-                  : conditions(((PlanetaryConditionsUsing) briefing.game()).getPlanetaryConditions()));
-        }
-    }
-
-    /** The conditions in a few words: the light, and whatever else isn't the usual. */
-    static String conditions(PlanetaryConditions conditions) {
-        List<String> parts = new ArrayList<>();
-        parts.add(conditions.getLight().toString());
-        if (!conditions.getWeather().isClear()) {
-            parts.add(conditions.getWeather().toString());
-        }
-        if (!conditions.getWind().isCalm()) {
-            parts.add(conditions.getWind().toString());
-        }
-        if (!conditions.getFog().isFogNone()) {
-            parts.add(conditions.getFog().toString());
-        }
-        if (conditions.getTemperature() != 25) {
-            parts.add(Messages.getString("StartScreen.temperature", conditions.getTemperature()));
-        }
-        if (conditions.getGravity() != 1) {
-            parts.add(Messages.getString("StartScreen.gravity", conditions.getGravity()));
-        }
-        return String.join(", ", parts);
-    }
-
-    /** Opens the game options the scenario leaves open; confirming them sets them on the briefing's game. */
-    private void changeRules() {
-        Briefing asked = briefing;
-        Game game = (Game) briefing.game();
-        Set<String> locked = briefing.scenario().lockedGameOptions();
-        window.onSwing(frame -> {
-            GameOptionsDialog dialog = new GameOptionsDialog(frame, game.getOptions(), false);
-            try {
-                dialog.update(game.getOptions());
-                dialog.setEditable(true);
-                // The options the scenario calls its mission stay as written; the rest are the player's
-                dialog.lockOptions(locked);
-                return dialog.showDialog().isConfirmed() ? List.copyOf(dialog.getOptions()) : null;
-            } finally {
-                dialog.dispose();
-            }
-        }, chosen -> {
-            if (chosen == null || briefing != asked) {
-                return;
-            }
-            for (IBasicOption option : chosen) {
-                IOption rule = game.getOptions().getOption(option.getName());
-                if (rule != null) {
-                    rule.setValue(option.getValue());
-                }
-            }
-            describeSettings();
-        });
-    }
-
-    /** Opens the planetary conditions; confirming them sets them on the briefing's game. */
-    private void changeConditions() {
-        Briefing asked = briefing;
-        PlanetaryConditionsUsing game = (PlanetaryConditionsUsing) briefing.game();
-        PlanetaryConditions current = game.getPlanetaryConditions();
-        window.onSwing(frame -> {
-            PlanetaryConditionsDialog dialog = new PlanetaryConditionsDialog(frame, current);
-            try {
-                return dialog.showDialog() ? dialog.getConditions() : null;
-            } finally {
-                dialog.dispose();
-            }
-        }, chosen -> {
-            if (chosen == null || briefing != asked) {
-                return;
-            }
-            game.setPlanetaryConditions(chosen);
-            describeSettings();
-        });
-    }
-
-    /** A side became {@code chosen}'s choice; the host takes one side at most, so You moves rather than copies. */
-    private void roleChosen(UiSelect chosen) {
-        if (chosen.getSelectedIndex() == Role.YOU.ordinal()) {
-            for (UiSelect other : roleSelects) {
-                if (other != chosen && other.getSelectedIndex() == Role.YOU.ordinal()) {
-                    other.select(Role.HUMAN.ordinal());
-                }
-            }
-        }
-        fillBriefingColumn();
-    }
-
-    private void fillBriefingColumn() {
-        List<Actor> items = new ArrayList<>();
-        items.add(overline("StartScreen.briefing"));
-        if (briefing.error() != null) {
-            items.add(note(briefing.error(), "status.danger"));
-        } else {
-            items.add(briefingHeader);
-            if (briefingText != null) {
-                items.add(briefingText);
-            }
-            items.add(overline("StartScreen.players"));
-            items.add(playerRows);
-            if (!briefing.scenario().isSinglePlayer()) {
-                List<Role> roles = roles();
-                if (!roles.contains(Role.YOU)) {
-                    items.add(nameField);
-                }
-                // Only another person needs the password and port to join
-                if (roles.contains(Role.HUMAN)) {
-                    items.add(passwordRow);
-                }
-            }
-            items.add(rulesLine);
-            if (conditionsLine != null) {
-                items.add(conditionsLine);
-            }
-            items.add(startButton);
-        }
-        items.add(backButton(briefingBack));
-        if (!column.isEmpty() && column.get(0) instanceof Label title) {
-            items.set(0, title);
-        }
-        setColumn(items);
-    }
-
-    /** Who plays each of the scenario's sides, as the briefing shows it. */
-    private List<Role> roles() {
-        int count = briefing.game().getPlayersList().size();
-        List<Role> roles = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            if (briefing.scenario().isSinglePlayer()) {
-                roles.add(i == 0 ? Role.YOU : Role.BOT);
-            } else {
-                roles.add(Role.values()[roleSelects.get(i).getSelectedIndex()]);
-            }
-        }
-        return roles;
-    }
-
-    /** Checks the briefing; asks MegaMek to host the scenario with its sides as chosen. */
-    private void submitBriefing() {
-        if (startButton.isDisabled()) {
-            return;
-        }
-        List<Role> roles = roles();
-        boolean single = briefing.scenario().isSinglePlayer();
-        // Without another person to join, the game takes the default port and no password, as single player does
-        boolean online = !single && roles.contains(Role.HUMAN);
-        int you = roles.indexOf(Role.YOU);
-        String name = you >= 0 ? briefing.game().getPlayersList().get(you).getName() : nameInput.getText().trim();
-        int port = online ? StartHostForm.port(portInput.getText()) : MMConstants.DEFAULT_PORT;
-        if (you < 0) {
-            nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
-        }
-        if (online) {
-            portField.error(portError(port));
-        }
-        if (name.isEmpty()) {
-            stage.setKeyboardFocus(nameInput);
-            return;
-        }
-        if (port < 0) {
-            stage.setKeyboardFocus(portInput);
-            return;
-        }
-        startButton.setDisabled(true);
-        startButton.setText(kit.cased("button", Messages.getString("StartScreen.starting")));
-        window.scenario(new ScenarioRequest(briefing.scenario(), briefing.game(), roles, name,
-              online ? passwordInput.getText() : "", port));
-    }
-
-    /**
-     * The scenario didn't start; MegaMek has said why. Start works again, once the briefing has made its game again when
-     * {@code gameUsed}, keeping the sides' camouflage, the rules and the conditions the player chose.
-     */
+    /** The scenario didn't start; see {@link StartBriefingPage#startFailed}. */
     void startFailed(boolean gameUsed) {
-        if (page != Page.BRIEFING || briefing == null || briefing.error() != null) {
-            return;
-        }
-        if (!gameUsed) {
-            enableStart();
-            return;
-        }
-        Briefing used = briefing;
-        background("briefing", () -> prepare(briefingFile), made -> {
-            if (made.error() != null) {
-                briefing = made;
-                fillBriefingColumn();
-                return;
-            }
-            List<Player> before = used.game().getPlayersList();
-            List<Player> after = made.game().getPlayersList();
-            for (int i = 0; i < Math.min(before.size(), after.size()); i++) {
-                after.get(i).setCamouflage(before.get(i).getCamouflage());
-            }
-            if (used.game() instanceof Game oldGame && made.game() instanceof Game newGame) {
-                for (IOption option : oldGame.getOptions().getOptionsList()) {
-                    IOption rule = newGame.getOptions().getOption(option.getName());
-                    if (rule != null) {
-                        rule.setValue(option.getValue());
-                    }
-                }
-            }
-            if (used.game() instanceof PlanetaryConditionsUsing oldConditions
-                  && made.game() instanceof PlanetaryConditionsUsing newConditions) {
-                newConditions.setPlanetaryConditions(
-                      (PlanetaryConditions) oldConditions.getPlanetaryConditions().clone());
-            }
-            briefing = new Briefing(made.scenario(), made.game(), used.swatches(), null);
-            enableStart();
-        });
-    }
-
-    private void enableStart() {
-        startButton.setDisabled(false);
-        startButton.setText(kit.cased("button", Messages.getString("StartScreen.startScenario")));
+        briefingPage.startFailed(gameUsed);
     }
 
     private Table bottomRow() {
@@ -1826,15 +705,15 @@ final class GpuStartScreen extends ApplicationAdapter {
     /** Whether Enter in a text field sends the page's form. */
     private boolean submitsOnEnter() {
         return page == Page.HOST || page == Page.RESUME || page == Page.CONNECT
-              || page == Page.BRIEFING && briefing != null && briefing.error() == null;
+              || page == Page.BRIEFING && briefingPage.briefing != null && briefingPage.briefing.error() == null;
     }
 
     private void submit() {
         switch (page) {
-            case HOST -> submitHost();
-            case RESUME -> submitResume();
-            case CONNECT -> submitConnect();
-            case BRIEFING -> submitBriefing();
+            case HOST -> hostPage.submitHost();
+            case RESUME -> hostPage.submitResume();
+            case CONNECT -> connectPage.submitConnect();
+            case BRIEFING -> briefingPage.submitBriefing();
             default -> {
             }
         }
@@ -2105,7 +984,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
     }
 
-    private static Texture texture(BufferedImage image, boolean mipMaps) {
+    static Texture texture(BufferedImage image, boolean mipMaps) {
         int width = image.getWidth();
         int height = image.getHeight();
         int[] argb = image.getRGB(0, 0, width, height, null, 0, width);
@@ -2355,6 +1234,6 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (boardSkin != null) {
             boardSkin.dispose();
         }
-        disposeSwatches();
+        briefingPage.disposeSwatches();
     }
 }
