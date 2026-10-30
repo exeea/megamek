@@ -339,8 +339,6 @@ class GpuBattleView extends ApplicationAdapter {
         createBoard();
     }
 
-    private boolean wireframeView() { return tuning.wireframe() && GpuWireframe.supported(); }
-
     private ShaderProgram sprites() {
         if (sprites == null) { sprites = SpriteBatch.createDefaultShader(); }
         return sprites;
@@ -832,9 +830,9 @@ class GpuBattleView extends ApplicationAdapter {
             if (loadingTheme != null) { loadingTheme.dispose(); }
             loadingTheme = null;
         }
-        // The optional views link their own programs as the loading stage does, on the render thread: their first frame
-        // freezes briefly but shows its units and lines, never a frame drawn without them (GpuShaderProvider.UNLINKED).
-        if (!hidden) { GpuGlsl.presenting(!boardCamera.tactical() && !wireframeView()); }
+        // The optional views' own programs link in the background (GpuGlsl.deferral) when they first show: no freeze, and
+        // until linked their draws wait (GpuShaderProvider.UNLINKED).
+        if (!hidden) { GpuGlsl.presenting(true); }
         if (source.isEditor()) { terrain.previewEditorObjects(scene); }
         if (boardPrint == null) {
             var request = source.takePrintRequest();
@@ -972,7 +970,7 @@ class GpuBattleView extends ApplicationAdapter {
         outlined.addAll(markers.outlinedInstances());
         outlined.removeIf(instance -> instance == null || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
-        boolean wireframeView = wireframeView();
+        boolean wireframeView = tuning.wireframe() && GpuWireframe.supported();
         // The units' poses and anchors and the camera are final for this frame. The tuning model follows the camera,
         // which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");

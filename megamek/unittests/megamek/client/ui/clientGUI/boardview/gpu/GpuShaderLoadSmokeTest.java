@@ -199,7 +199,7 @@ class GpuShaderLoadSmokeTest {
     /**
      * With the Tuning panel's Tessellation switch on, Grassland 2 loads fitted, where no chunk has full detail, then
      * zooms to its banks, where chunks refine to full detail and their curving relief tessellates: its programs linked
-     * behind the loading stage, so the zoom links none.
+     * behind the loading stage, so the zoom links none. SMAA and a 75% render resolution saved on also link behind it.
      */
     @Test
     void tessellatedGameCompilesNothingWhenZoomingIn() throws Exception {
@@ -209,7 +209,11 @@ class GpuShaderLoadSmokeTest {
         var fixture = GpuBoardFixture.create(BoardFile.loadSheet(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"),
               false, true));
         boolean saved = GUIPreferences.getInstance().getBoardTessellation();
+        String savedAntiAliasing = GUIPreferences.getInstance().getBoardAntiAliasing();
+        float savedResolution = GUIPreferences.getInstance().getBoardRenderResolution();
         GUIPreferences.getInstance().setBoardTessellation(true);
+        GUIPreferences.getInstance().setBoardAntiAliasing("SMAA");
+        GUIPreferences.getInstance().setBoardRenderResolution(.75f);
         try {
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 int step;
@@ -264,6 +268,9 @@ class GpuShaderLoadSmokeTest {
             }, window());
         } finally {
             GUIPreferences.getInstance().setBoardTessellation(saved);
+            GUIPreferences.getInstance().setBoardAntiAliasing(savedAntiAliasing);
+            GUIPreferences.getInstance().setBoardRenderResolution(savedResolution);
+            BoardCamera.renderScale = 1;
             SwingUtilities.invokeAndWait(fixture.view::close);
         }
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
@@ -515,22 +522,19 @@ class GpuShaderLoadSmokeTest {
         private double longestAt;
         private int frames, loadingAgain;
         // Links while an optional view shows (the Tactical View, the thermal view), which may link on first use.
-        private int optionalCompiles, optionalDeferred, optionalStart = -1, optionalDeferredStart, optionalUnlinked;
+        private int optionalCompiles, optionalDeferred, optionalStart = -1, optionalDeferredStart;
 
         Watch(String name) { this(name, GpuGlsl.compilesAfterLoading(), GpuGlsl.deferredAfterLoading()); }
 
-        /** Every frame an optional view presents is complete: its programs link before it draws, none skips a draw. */
+        /** An optional view's programs link in the background when it first shows; those links are not counted. */
         void optionalView(boolean shows) {
             if (shows) {
                 optionalStart = GpuGlsl.compilesAfterLoading();
                 optionalDeferredStart = GpuGlsl.deferredAfterLoading();
-                optionalUnlinked = GpuShaderProvider.unlinkedDraws();
             } else if (optionalStart >= 0) {
                 optionalCompiles += GpuGlsl.compilesAfterLoading() - optionalStart;
                 optionalDeferred += GpuGlsl.deferredAfterLoading() - optionalDeferredStart;
                 optionalStart = -1;
-                assertEquals(optionalUnlinked, GpuShaderProvider.unlinkedDraws(),
-                      name + ": an optional view presented a frame without draws whose programs still linked");
             }
         }
 
