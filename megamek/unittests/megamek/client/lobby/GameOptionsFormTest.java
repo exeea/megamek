@@ -147,8 +147,11 @@ class GameOptionsFormTest {
 
     @Test
     void coreRulesDisableTheOptionsTheyOverride() {
+        form.text(OptionsConstants.RULES_SYSTEM, OptionsConstants.RULES_TW);
+        // The set has no order, and some of its options also depend on others: take one free of those.
         String overridden = GameOptionsCatalog.CORE_RULES_DISABLED_OPTIONS.stream()
-              .filter(name -> options.getOption(name) != null).findFirst().orElseThrow();
+              .filter(name -> options.getOption(name) != null && form.editable(name))
+              .sorted().findFirst().orElseThrow();
         form.text(OptionsConstants.RULES_SYSTEM, OptionsConstants.RULES_CORE);
         assertFalse(form.totalWarfare());
         assertFalse(form.editable(overridden));
