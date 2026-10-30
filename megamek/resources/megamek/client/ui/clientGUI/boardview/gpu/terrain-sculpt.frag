@@ -357,7 +357,7 @@ void main() {
 #else
                 // One material for tops and walls: tops read the top projection, walls, banks and bedrock the sides.
                 TerrainMaterial material = cliffMaterial(rockProjection, world, face, foot, rim, rock, bed, broad, fine,
-                      region, sediment, sculptFamily, u_sculptTiles, u_sculptLayers, rocky, false);
+                      region, sediment, vec4(sculptFamily), 0, u_sculptTiles, u_sculptLayers, rocky, false);
 #endif
 #endif
                 albedo = material.color;
