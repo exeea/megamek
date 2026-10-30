@@ -110,24 +110,21 @@ class GpuGroundDamageSmokeTest {
                 settle(terrain, frame, scene, camera);
                 List<int[]> images = new ArrayList<>();
                 String prefix = iso ? "iso-" : "top-";
-                for (int pass = 0; pass < 4; pass++) {
-                    terrain.setTerrainWear(pass & 1);
-                    terrain.setCombatScars((pass & 2) != 0);
+                for (int pass = 0; pass < 2; pass++) {
+                    terrain.setCombatScars(pass == 1);
                     frame.render(terrain, camera, scene);
                     images.add(pixels());
-                    String name = prefix + List.of("clean", "wear", "combat", "both").get(pass);
+                    String name = prefix + List.of("worn", "combat").get(pass);
                     GpuReviewFrame.save(new File(output, name + ".png"));
                     if (Boolean.getBoolean("megamek.gpu.measureGroundDamage")
                           && !Boolean.getBoolean("megamek.gpu.measureAccumulatedScars")) {
                         measure(frame, terrain, camera, scene, report, name);
                     }
                 }
-                assertTrue(differences(images.get(0), images.get(1)) > 100, "Ambient wear must be visible");
-                assertTrue(differences(images.get(0), images.get(2)) > 100, "Combat scars must be visible independently");
-                terrain.setTerrainWear(0);
+                assertTrue(differences(images.get(0), images.get(1)) > 100, "Combat scars must be visible");
                 terrain.setCombatScars(false);
                 frame.render(terrain, camera, scene);
-                assertEquals(0, differences(images.get(0), pixels()), "Both disabled restores the original terrain shading");
+                assertEquals(0, differences(images.get(0), pixels()), "Scars off restores the worn terrain shading");
                 assertEquals(marks, damage.marks(), "Camera/refinement and toggles retain the same marks");
             }
             Coords rock = new Coords(12, 13);
@@ -136,11 +133,8 @@ class GpuGroundDamageSmokeTest {
                 camera.camera.zoom = .045f;
                 camera.center(BoardGeometry.center(rock, scene.tile(rock).elevation()));
                 settle(terrain, frame, scene, camera);
-                for (boolean wear : new boolean[] { false, true }) {
-                    terrain.setTerrainWear(wear ? 1 : 0);
-                    frame.render(terrain, camera, scene);
-                    GpuReviewFrame.save(new File(output, "rock-" + (iso ? "iso-" : "top-") + (wear ? "wear" : "clean") + ".png"));
-                }
+                frame.render(terrain, camera, scene);
+                GpuReviewFrame.save(new File(output, "rock-" + (iso ? "iso" : "top") + ".png"));
             }
             assertEquals(GpuGroundDamage.TILE_SIZE, damage.texture().getWidth());
             assertEquals(GpuGroundDamage.TILE_SIZE, damage.texture().getHeight());
@@ -200,7 +194,6 @@ class GpuGroundDamageSmokeTest {
         camera.camera.zoom = .055f;
         camera.center(center);
         settle(terrain, frame, scene, camera);
-        terrain.setTerrainWear(0);
         terrain.setCombatScars(true);
         var coverage = new java.util.HashMap<String, ScarCoverage>();
         for (String[] sample : new String[][] {
@@ -302,7 +295,6 @@ class GpuGroundDamageSmokeTest {
         try {
             terrain.update(scene);
             terrain.setGrass(true);
-            terrain.setTerrainWear(0);
             var camera = new BoardCamera();
             camera.resize(1200, 900);
             camera.setIsometric(false);
@@ -441,13 +433,12 @@ class GpuGroundDamageSmokeTest {
             camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
             settle(terrain, frame, scene, camera);
             for (int repeat = 0; repeat < 3; repeat++) {
-                for (int ordinal = 0; ordinal < 4; ordinal++) {
-                    // Rotate the order between repeats to reduce clock/temperature/order bias.
-                    int mode = (ordinal + repeat) % 4;
-                    terrain.setTerrainWear(mode & 1);
-                    terrain.setCombatScars((mode & 2) != 0);
+                for (int ordinal = 0; ordinal < 2; ordinal++) {
+                    // Alternate the order between repeats to reduce clock/temperature/order bias.
+                    int mode = (ordinal + repeat) % 2;
+                    terrain.setCombatScars(mode == 1);
                     measure(frame, terrain, camera, scene, report, "1000-scars-" + (iso ? "iso-" : "top-")
-                          + List.of("clean", "wear", "combat", "both").get(mode) + "-repeat-" + repeat);
+                          + List.of("worn", "combat").get(mode) + "-repeat-" + repeat);
                 }
             }
         }

@@ -41,7 +41,9 @@ class GpuClassicElevationGradeSmokeTest {
                     var camera = new OrthographicCamera(BoardGeometry.width() * 4, BoardGeometry.width() * 4);
                     camera.near = 1;
                     camera.far = 10000;
-                    for (int level : new int[] { -3, 0, 3 }) {
+                    // Level zero first: its ungraded artwork is the reference the graded levels lift or darken.
+                    double[] flat = new double[2];
+                    for (int level : new int[] { 0, -3, 3 }) {
                         terrain.update(scene(level));
                         assertTrue(terrain.columns());
                         for (boolean angled : new boolean[] { false, true }) {
@@ -50,18 +52,14 @@ class GpuClassicElevationGradeSmokeTest {
                             camera.position.set(center).add(0, angled ? -500 : 0, 1000);
                             camera.lookAt(center);
                             camera.update();
-                            terrain.setElevationGrading(false);
-                            float[] disabled = frame(terrain, output, camera);
-                            terrain.setElevationGrading(true);
-                            float[] enabled = frame(terrain, output, camera);
-                            terrain.setElevationGrading(false);
-                            assertArrayEquals(disabled, frame(terrain, output, camera),
-                                  "Disabling grading restores the exact frame without updating the terrain");
+                            float[] graded = frame(terrain, output, camera);
+                            assertArrayEquals(graded, frame(terrain, output, camera),
+                                  "Grading repeats exactly without updating the terrain");
                             // The center stays on the flat top in both views; walls may cross level zero.
-                            double before = centerLuminance(disabled), after = centerLuminance(enabled);
-                            assertTrue(before > .01, "Sample visible column artwork");
+                            double before = flat[angled ? 1 : 0], after = centerLuminance(graded);
+                            assertTrue(after > .01, "Sample visible column artwork");
                             if (level == 0) {
-                                assertEquals(before, after, "Level-zero artwork stays unchanged");
+                                flat[angled ? 1 : 0] = after;
                             } else {
                                 assertTrue(level > 0 ? after > before * 1.01 : after < before * .99,
                                       "Classic level " + level + " (angled=" + angled + ") must "

@@ -7,11 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -25,7 +23,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Same-process material comparison on natural terrain alone, including a repeatable moving camera. */
+/** Natural terrain alone under a repeatable moving camera: frame timings, picking and material stability in pans. */
 @Tag("on-demand")
 @Tag("gpu-benchmark")
 class GpuTerrainMaterialReviewSmokeTest {
@@ -57,8 +55,6 @@ class GpuTerrainMaterialReviewSmokeTest {
             private Vector3 focus;
             private Ray ray;
             private Coords picked;
-            private String baseline;
-            private String current;
             private int scenario;
             private int frame;
             private long previous;
@@ -71,14 +67,9 @@ class GpuTerrainMaterialReviewSmokeTest {
                         compositor = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                         timings = new GpuStageTimings();
-                        current = GpuShaderSource.read("terrain-materials.glsl");
-                        String source = System.getProperty("megamek.gpu.materialBaseline", "");
-                        baseline = source.isBlank() ? current : Files.readString(Path.of(source));
                         report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append("; ")
                               .append(Gdx.graphics.getBackBufferWidth()).append('x').append(Gdx.graphics.getBackBufferHeight())
-                              .append("; 120 warmup / 480 samples; baseline/current/current/baseline; moving terrain only\n")
-                              .append("Baseline: ").append(source.isBlank() ? "current shader (repeatability)" : source)
-                              .append('\n');
+                              .append("; 120 warmup / 480 samples; top and isometric; moving terrain only\n");
                     } catch (Throwable error) { failure.set(error); Gdx.app.exit(); }
                 });
             }
@@ -122,30 +113,25 @@ class GpuTerrainMaterialReviewSmokeTest {
                             assertNotNull(hit, name);
                             assertEquals(picked, hit.coords(), name + ": preserve shared picking while changing detail");
                             assertEquals(0, terrain.treeGeometryBytes(), "The review must not allocate tree geometry");
-                            if (scenario % 4 < 2) { capture(); }
+                            capture();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), name);
                             frame = 0;
-                            if (++scenario == FAMILIES.size() * 8) { Gdx.app.exit(); }
+                            if (++scenario == FAMILIES.size() * 2) { Gdx.app.exit(); }
                         }
                     } catch (Throwable error) { failure.set(error); Gdx.app.exit(); }
                 });
             }
 
-            private boolean current() { return scenario % 4 == 1 || scenario % 4 == 2; }
-
             private String name() {
-                return FAMILIES.get(scenario / 8).name().toLowerCase(Locale.ROOT)
-                      + (scenario % 8 < 4 ? "-top" : "-iso")
-                      + (current() ? "-current-" : "-baseline-") + scenario % 4;
+                return FAMILIES.get(scenario / 2).name().toLowerCase(Locale.ROOT)
+                      + (scenario % 2 == 0 ? "-top" : "-iso");
             }
 
             private void prepare() throws Exception {
-                var result = manager.apply(Map.of("terrain-materials.glsl", current() ? current : baseline));
-                assertTrue(result.success(), result.message());
-                if (scenario % 8 == 0) {
+                if (scenario % 2 == 0) {
                     if (terrain != null) { terrain.dispose(); }
                     terrain = new GpuTerrain();
-                    var layout = GpuTerrainShowcaseSmokeTest.scene(FAMILIES.get(scenario / 8));
+                    var layout = GpuTerrainShowcaseSmokeTest.scene(FAMILIES.get(scenario / 2));
                     var tiles = layout.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
                           tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), null, null, List.of(),
                           List.of(), tile.liquid(), null, true)).toList();
@@ -159,7 +145,7 @@ class GpuTerrainMaterialReviewSmokeTest {
                 }
                 camera = new BoardCamera();
                 camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                camera.setIsometric(scenario % 8 >= 4);
+                camera.setIsometric(scenario % 2 == 1);
                 camera.center(focus);
                 camera.camera.zoom = BoardRelief.metres(.18f);
                 camera.update();
@@ -210,7 +196,7 @@ class GpuTerrainMaterialReviewSmokeTest {
                 // Close material contact on the same crest, in both gameplay views, without tree features.
                 camera.camera.zoom = .16f;
                 camera.center(BoardGeometry.center(new Coords(8, 5), 2));
-                if (scenario % 8 >= 4) { camera.orbit(30, 12); }
+                if (scenario % 2 == 1) { camera.orbit(30, 12); }
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 compositor.render(terrain, camera, scene);
                 GpuReviewFrame.save(new File(output, name() + "-rim.png"));

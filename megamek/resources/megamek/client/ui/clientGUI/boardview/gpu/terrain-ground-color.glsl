@@ -17,12 +17,11 @@ vec3 groundFields(sampler2D noiseMap, vec3 world) {
     return vec3(texture(noiseMap, world.xy / 700.0).g * .6 + texture(noiseMap, world.xy / 430.0 + .19).b * .4,
           texture(noiseMap, world.xy / 160.0 + .41).b, texture(noiseMap, world.xy / 2600.0 + .73).r);
 }
-uniform float u_elevationGrading; // shared runtime setting, default enabled by GpuTerrain
 
 // The intentional elevation cue operates on completed linear reflectance in [0,1]. It is a presentation
 // treatment, not illumination. Apply after all other pigment gains so no later bound can flatten its detail.
 vec3 levelGrade(vec3 c, float level, float fungus) {
-    if (u_elevationGrading < .5 || level == 0.0) return c;
+    if (level == 0.0) return c;
     level = max(level, mix(-1.5, -6.0, fungus));
     float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0));
     float down = 6.0 * (1.0 - exp(-max(-level, 0.0) / 6.0));

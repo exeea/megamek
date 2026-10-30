@@ -53,8 +53,7 @@ class GpuDirtMaterialsSmokeTest {
                             frame.prepare(terrain, camera, scene);
                             terrain.update(scene);
                             terrain.animate(0, List.of());
-                            for (String mode : List.of("clay", "color", "relief")) {
-                                terrain.setClay(mode.equals("clay"));
+                            for (String mode : List.of("color", "relief")) {
                                 terrain.setNormalMaps(mode.equals("relief"));
                                 for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
                                 GpuReviewFrame.save(new File(output, family + "-" + levels + "-" + mode + ".png"));

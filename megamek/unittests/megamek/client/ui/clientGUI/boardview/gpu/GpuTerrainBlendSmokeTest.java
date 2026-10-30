@@ -47,9 +47,6 @@ class GpuTerrainBlendSmokeTest {
                                 c.getX() < 4 ? BoardScene.Surface.GRASS : BoardScene.Surface.SNOW,
                                 c.getX() < 4 ? 1 : 0, -1, 0));
                     capture(mixedStep, "mixed-step", terrain, frame, camera);
-                    terrain.setClay(true);
-                    capture(mixedStep, "mixed-step-clay", terrain, frame, camera);
-                    terrain.setClay(false);
                     terrain.setNormalMaps(false);
                     capture(mixedStep, "mixed-step-no-normals", terrain, frame, camera);
                     capture(mixed, "mixed-no-normals", terrain, frame, camera);

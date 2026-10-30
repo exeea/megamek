@@ -67,7 +67,6 @@ class GpuSnowColorLodSmokeTest {
             camera.update();
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
-            terrain.setTerrainWear(1);
             for (String scene : List.of("snow", "mixed", "dirt")) {
                 assertTrue(manager.apply(Map.of()).success());
                 terrain.update(scene(scene));
@@ -157,8 +156,8 @@ class GpuSnowColorLodSmokeTest {
         source = replace(source, "void main() {", "uniform vec2 u_snowReview;\nvoid main() {");
         source = replace(source, "terrainMaterialLod(world, face);",
               "terrainMaterialLod(world, face); terrainNormalDetail = u_snowReview.x;");
-        source = replace(source, "if (ground && u_clay < .5 && volcanic < .01) {",
-              "vec3 reviewInput = albedo, reviewGain = vec3(1.0);\nif (ground && u_clay < .5 && volcanic < .01) {");
+        source = replace(source, "if (weathered > 0.0 && volcanic < .01) {",
+              "vec3 reviewInput = albedo, reviewGain = vec3(1.0);\nif (weathered > 0.0 && volcanic < .01) {");
         source = replace(source, "groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, finish);",
               "reviewGain = albedo / max(reviewInput, vec3(.000001));\n"
                     + "groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, finish);");

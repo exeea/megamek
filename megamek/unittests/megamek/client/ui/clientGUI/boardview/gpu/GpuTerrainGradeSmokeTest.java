@@ -27,7 +27,7 @@ import com.badlogic.gdx.utils.BufferUtils;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Optional elevation styling must preserve pigment when disabled and retain bounded texture contrast when enabled. */
+/** Elevation styling keeps level zero's pigment exact and bounded texture contrast at every other level. */
 @Tag("on-demand")
 class GpuTerrainGradeSmokeTest {
     private static final List<String> MATERIALS = List.of("snow", "dirt", "grass", "fungus", "mixed");
@@ -79,10 +79,8 @@ class GpuTerrainGradeSmokeTest {
         for (float[] pigment : pigments) {
             for (float fungus : new float[] { 0, .5f, 1 }) {
                 for (float level : new float[] { -1000, -1, 0, 3, 1000 }) {
-                    var disabled = probe.grade(pigment, level, fungus, false);
-                    var styled = probe.grade(pigment, level, fungus, true);
+                    var styled = probe.grade(pigment, level, fungus);
                     for (int channel = 0; channel < 3; channel++) {
-                        assertEquals(pigment[channel], disabled[channel], "The shared disabled branch is identity");
                         assertTrue(Float.isFinite(styled[channel]) && styled[channel] >= 0 && styled[channel] <= 1,
                               "Completed pigment stays in gamut, including saturated and black/white endpoints");
                         if (level == 0) { assertEquals(pigment[channel], styled[channel], "Level zero is identity"); }
@@ -96,21 +94,21 @@ class GpuTerrainGradeSmokeTest {
             float previous = -1;
             for (int step = 0; step <= 16; step++) {
                 float peak = .9f + step * .098f / 16;
-                float[] styled = probe.grade(new float[] { peak * .85f, peak * .95f, peak }, level, 0, true);
+                float[] styled = probe.grade(new float[] { peak * .85f, peak * .95f, peak }, level, 0);
                 assertTrue(styled[2] > previous, "Bright texture samples must not collapse into a clipped plateau");
                 previous = styled[2];
             }
         }
         var chromatic = new float[] { .125f, .25f, .5f };
         for (float level : new float[] { -0.000001f, 0.000001f }) {
-            var styled = probe.grade(chromatic, level, 1, true);
+            var styled = probe.grade(chromatic, level, 1);
             for (int channel = 0; channel < 3; channel++) {
                 assertEquals(chromatic[channel], styled[channel], halfStep(chromatic[channel]) * 1.01,
                       "The two elevation branches meet continuously at zero");
             }
         }
-        var ordinary = probe.grade(new float[] { .25f, .25f, .25f }, 3, 0, true);
-        var fungal = probe.grade(new float[] { .25f, .25f, .25f }, 3, 1, true);
+        var ordinary = probe.grade(new float[] { .25f, .25f, .25f }, 3, 0);
+        var fungal = probe.grade(new float[] { .25f, .25f, .25f }, 3, 1);
         assertTrue(fungal[0] > ordinary[0] + .005, "Fungus retains its intentionally stronger elevation cue");
     }
 
@@ -119,7 +117,6 @@ class GpuTerrainGradeSmokeTest {
         String expectedRenderer = System.getProperty("megamek.gpu.expectedRenderer");
         if (expectedRenderer != null) { assertEquals(expectedRenderer, renderer); }
         System.out.println("Elevation pigment renderer=" + renderer);
-        assertTrue(GpuTerrain.DEFAULT_ELEVATION_GRADING, "The user-selected default enables elevation styling");
         var outputPath = Path.of(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
               "elevation-pigment");
         Files.createDirectories(outputPath);
@@ -141,21 +138,14 @@ class GpuTerrainGradeSmokeTest {
             camera.viewportHeight = output.scene().getHeight() * BoardRelief.metres(.1f);
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
-            terrain.setTerrainWear(1);
             terrain.setGrass(false); // These 25 shelves measure ground.
-            boolean first = true;
             for (String material : MATERIALS) {
                 for (int level : LEVELS) {
                     terrain.update(scene(material, level));
                     camera.position.set(BoardGeometry.center(BoardSurfaceBlendTest.CENTER, level)).add(0, 0, 5000);
                     camera.update();
                     output.draw(terrain, camera, false);
-                    float[] defaults = first ? read(terrain, output, camera, 1) : null;
-                    float[][] channels = toggleFrames(terrain, output, camera);
-                    if (first) {
-                        assertArrayEquals(defaults, channels[1], "A fresh terrain uses the enabled default");
-                        first = false;
-                    }
+                    float[][] channels = gradeFrames(terrain, output, camera);
                     check(material, level, .25f, channels, rows);
                     Files.writeString(outputPath.resolve("pigment.csv"), rows);
                 }
@@ -168,18 +158,14 @@ class GpuTerrainGradeSmokeTest {
         }
     }
 
-    private static float[][] toggleFrames(GpuTerrain terrain, GpuSceneTestOutput output,
+    /** The completed pigment before grading, the graded pigment and the coverage tags of one terrain build. */
+    private static float[][] gradeFrames(GpuTerrain terrain, GpuSceneTestOutput output,
           OrthographicCamera camera) throws Exception {
-        terrain.setElevationGrading(false);
         float[] completed = read(terrain, output, camera, 0);
-        float[] disabled = read(terrain, output, camera, 1);
-        assertArrayEquals(completed, disabled, "Disabled styling returns the exact completed pigment");
-        float[] coverage = read(terrain, output, camera, 2);
-        terrain.setElevationGrading(true);
         float[] styled = read(terrain, output, camera, 1);
-        terrain.setElevationGrading(false);
-        assertArrayEquals(disabled, read(terrain, output, camera, 1),
-              "Turning grading back off restores the same frame without rebuilding geometry");
+        float[] coverage = read(terrain, output, camera, 2);
+        assertArrayEquals(styled, read(terrain, output, camera, 1),
+              "Grading repeats exactly without rebuilding geometry");
         return new float[][] { completed, styled, coverage };
     }
 
@@ -372,13 +358,13 @@ class GpuTerrainGradeSmokeTest {
             shader = GpuGlsl.compile("Authored pigment and elevation probe", GpuShaderSource.read("atmosphere.vert"), fragment);
         }
 
-        float[] read(float[] pigment) { return read(pigment, 0, 0, 0, false); }
+        float[] read(float[] pigment) { return read(pigment, 0, 0, 0); }
 
-        float[] grade(float[] pigment, float level, float fungus, boolean enabled) {
-            return read(pigment, 1, level, fungus, enabled);
+        float[] grade(float[] pigment, float level, float fungus) {
+            return read(pigment, 1, level, fungus);
         }
 
-        private float[] read(float[] pigment, int mode, float level, float fungus, boolean enabled) {
+        private float[] read(float[] pigment, int mode, float level, float fungus) {
             target.begin();
             try {
                 GpuAtmosphere.screenState();
@@ -387,7 +373,6 @@ class GpuTerrainGradeSmokeTest {
                 shader.setUniformi("u_reviewGrade", mode);
                 shader.setUniformf("u_level", level);
                 shader.setUniformf("u_fungus", fungus);
-                shader.setUniformf("u_elevationGrading", enabled ? 1f : 0f);
                 quad.render(shader, GL20.GL_TRIANGLES);
                 var pixels = BufferUtils.newFloatBuffer(4);
                 Gdx.gl.glReadPixels(0, 0, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixels);

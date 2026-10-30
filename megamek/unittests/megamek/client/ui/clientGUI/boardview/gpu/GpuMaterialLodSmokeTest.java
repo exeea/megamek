@@ -129,14 +129,15 @@ class GpuMaterialLodSmokeTest {
         assertTrue(renderer.contains(expectedRenderer), "Actual renderer must match " + expectedRenderer);
         String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
         // After the material and its cover blend, before the optional biome stage.
-        String begin = "void main() {", boundary = "        // biomeMaskFlag: the board has biomes or liquids of two palettes";
+        String begin = "void main() {";
+        String boundary = "    // biomeMaskFlag: the board has biomes or liquids of two palettes";
         String output = "fragColor = vec4(result, 1.0);";
         for (String anchor : List.of(begin, boundary, output)) {
             assertEquals(1, sculpt.split(java.util.regex.Pattern.quote(anchor), -1).length - 1,
                   "The probe must read the actual completed ordinary material: " + anchor);
         }
         sculpt = sculpt.replace(begin, begin + "\n    vec3 reviewBase = vec3(0.0);\n")
-              .replace(boundary, "        reviewBase = vec3(finish.roughness, materialHeight, grass);\n" + boundary)
+              .replace(boundary, "    reviewBase = vec3(finish.roughness, materialHeight, grass);\n" + boundary)
               .replace(output, "fragColor = natural && (ground || cliff)"
                     + " ? vec4(reviewBase, ground ? .25 : .5) : vec4(0.0, 0.0, 0.0, 1.0);");
         var changed = manager.apply(Map.of("terrain-sculpt.frag", sculpt));

@@ -79,19 +79,18 @@ class GpuBoxCanyonSmokeTest {
                     camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     String name = "box-canyon-" + at.getBoardNum() + (iso ? "-iso-" : "-top-");
-                    for (String mode : List.of("material", "clay", "normal", "contact")) {
+                    for (String mode : List.of("material", "normal", "contact")) {
                         // The uniform-controlled mix retains the full shader interface during diagnostic reloads.
                         String diagnostic = switch (mode) {
                             case "normal" -> source.replace("fragColor = vec4(result, 1.0);",
-                                  "fragColor = vec4(mix(result, face * .5 + .5, step(-.5, u_clay)), 1.0);");
+                                  "fragColor = vec4(mix(result, face * .5 + .5, step(-.5, u_metre)), 1.0);");
                             case "contact" -> source.replace("fragColor = vec4(result, 1.0);",
                                   "fragColor = vec4(mix(result, vec3(clamp(v_diffuseUV.x / 4.0, 0.0, 1.0)),"
-                                        + " step(-.5, u_clay)), 1.0);");
+                                        + " step(-.5, u_metre)), 1.0);");
                             default -> source;
                         };
                         var changed = shaders.apply(Map.of("terrain-sculpt.frag", diagnostic));
                         assertTrue(changed.success(), changed.message());
-                        terrain.setClay(mode.equals("clay"));
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, name + mode + ".png"));
                         if (mode.equals("material") && Boolean.getBoolean("megamek.gpu.measureBoxCanyon")) {

@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
  * Deterministic sculpted-terrain review scene: a connected multi-hex plateau with a concave notch, a tall isolated
  * formation, a one-hex ridge, stepped mixed-elevation junctions, a sunken basin, a lake and woods of every density.
  * Each surface family is captured from a tactical overview, a medium oblique angle, close rim/base views, the woods and
- * one light wood up close, with a neutral clay variant and a grid-free variant. Captures are drawn as on the board, through
+ * one light wood up close, with a grid-free variant. Captures are drawn as on the board, through
  * the atmosphere composite ({@link GpuReviewFrame}), at the hour megamek.gpu.showcase.hour, or at each of the
  * comma-separated megamek.gpu.showcase.hours, whose captures are named with a "-h<hour>" suffix, under the cloud cover
  * megamek.gpu.showcase.clouds (0 to 1, default clear).
@@ -75,25 +75,23 @@ class GpuTerrainShowcaseSmokeTest {
     };
 
     private record View(String name, boolean isometric, float tilt, float rotation, float zoom, Coords focus,
-          int level, boolean clay, float grid) { }
+          int level, float grid) { }
 
     private static final List<View> VIEWS = List.of(
-          new View("overview", false, 0, 0, 1.02f, new Coords(8, 7), 0, false, .8f),
-          new View("oblique", true, 0, 0, .52f, new Coords(7, 5), 1, false, .8f),
-          new View("oblique-nogrid", true, 0, 0, .52f, new Coords(7, 5), 1, false, 1f),
-          new View("oblique-clay", true, 0, 0, .52f, new Coords(7, 5), 1, true, 1f),
-          new View("rim", true, 12, 30, .2f, new Coords(8, 5), 2, false, .8f),
-          new View("rim-clay", true, 12, 30, .2f, new Coords(8, 5), 2, true, 1f),
-          new View("base", true, 22, -40, .22f, new Coords(4, 5), 1, false, .8f),
-          new View("formation", true, 18, 150, .3f, new Coords(12, 4), 2, false, .8f),
-          new View("rough", true, 18, 150, .12f, new Coords(12, 6), 0, false, .8f),
-          new View("rough-ridge", true, 18, 150, .12f, new Coords(12, 4), 5, false, .8f),
-          new View("ridge", true, 10, -100, .32f, new Coords(2, 9), 1, false, .8f),
-          new View("corner", true, 20, 60, .1f, new Coords(12, 4), 3, false, .8f),
-          new View("notch", true, 25, 200, .12f, new Coords(8, 4), 2, false, .8f),
-          new View("junction-top", false, 0, 0, .16f, new Coords(5, 6), 2, false, .8f),
-          new View("woods", true, 14, -20, .24f, new Coords(5, 9), 1, false, .8f),
-          new View("woods-close", true, 22, -20, .09f, new Coords(5, 11), 0, false, .8f));
+          new View("overview", false, 0, 0, 1.02f, new Coords(8, 7), 0, .8f),
+          new View("oblique", true, 0, 0, .52f, new Coords(7, 5), 1, .8f),
+          new View("oblique-nogrid", true, 0, 0, .52f, new Coords(7, 5), 1, 1f),
+          new View("rim", true, 12, 30, .2f, new Coords(8, 5), 2, .8f),
+          new View("base", true, 22, -40, .22f, new Coords(4, 5), 1, .8f),
+          new View("formation", true, 18, 150, .3f, new Coords(12, 4), 2, .8f),
+          new View("rough", true, 18, 150, .12f, new Coords(12, 6), 0, .8f),
+          new View("rough-ridge", true, 18, 150, .12f, new Coords(12, 4), 5, .8f),
+          new View("ridge", true, 10, -100, .32f, new Coords(2, 9), 1, .8f),
+          new View("corner", true, 20, 60, .1f, new Coords(12, 4), 3, .8f),
+          new View("notch", true, 25, 200, .12f, new Coords(8, 4), 2, .8f),
+          new View("junction-top", false, 0, 0, .16f, new Coords(5, 6), 2, .8f),
+          new View("woods", true, 14, -20, .24f, new Coords(5, 9), 1, .8f),
+          new View("woods-close", true, 22, -20, .09f, new Coords(5, 11), 0, .8f));
 
     @Test
     void capturesSculptedTerrainReviewViews() throws Exception {
@@ -167,7 +165,6 @@ class GpuTerrainShowcaseSmokeTest {
                             BoardGeometry.tune(new BoardGeometry.Tuning(1, .7f, 1, 18, view.grid(),
                                   BoardGeometry.DEFAULT_MULTI_HEX_UNIT_SCALE, transitions, padding));
                             terrain.update(scene);
-                            terrain.setClay(view.clay());
                             camera.setIsometric(view.isometric());
                             if (view.rotation() != 0 || view.tilt() != 0) { camera.orbit(view.rotation(), view.tilt()); }
                             camera.camera.zoom = view.zoom();
@@ -200,7 +197,6 @@ class GpuTerrainShowcaseSmokeTest {
                             }
                         }
                     }
-                    terrain.setClay(false);
                     Files.writeString(new File(output, "report.txt").toPath(), report);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {

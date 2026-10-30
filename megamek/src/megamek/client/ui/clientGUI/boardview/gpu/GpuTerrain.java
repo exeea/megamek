@@ -82,8 +82,6 @@ import megamek.logging.MMLogger;
 final class GpuTerrain implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(GpuTerrain.class);
     static final int CHUNK_SIZE = TerrainLod.CHUNK_SIZE;
-    static final float DEFAULT_TERRAIN_WEAR = 1f;
-    static final boolean DEFAULT_ELEVATION_GRADING = true;
     /** A sculpt vertex's kind (terrain-sculpt.frag, dry ground below .125) on a natural bridge's muddy deck top. */
     static final float DECK_MUD_KIND = .1f;
     /** Muddy rock shell; its occlusion byte carries depth below the local top edge for the shader's draining fade. */
@@ -340,8 +338,6 @@ final class GpuTerrain implements Disposable {
                 private final int viewPositionUniform = register("u_viewPosition");
                 private final int perspectiveUniform = register("u_perspective");
                 private final int rainNoiseUniform = register("u_rainNoise");
-                private final int terrainWearUniform = register("u_terrainWear");
-                private final int elevationGradingUniform = register("u_elevationGrading");
                 private final int groundDamageUniform = register("u_groundDamage");
                 private final int groundDamageSizeUniform = register("u_groundDamageSize");
                 private final int groundDamageGridUniform = register("u_groundDamageGrid");
@@ -377,7 +373,6 @@ final class GpuTerrain implements Disposable {
                 private final int wadersUniform = register("u_waders");
                 private final int waderMotionUniform = register("u_waderMotion");
                 private final int levelUniform = register("u_levelHeight");
-                private final int clayUniform = register("u_clay");
                 private final int sculptMetreUniform = register("u_metre");
                 private final int waterLineUniform = register("u_waterLine");
                 private final int biomeHexesUniform = register("u_biomeHexes");
@@ -499,16 +494,13 @@ final class GpuTerrain implements Disposable {
                           * Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale / Math.max(1f, Gdx.graphics.getHeight()));
                     set(gridShadeUniform, BoardGeometry.tuning().gridShade());
                     set(levelUniform, BoardGeometry.level());
-                    set(clayUniform, clay ? 1f : 0f);
-                    set(terrainWearUniform, clay ? 0f : terrainWear);
-                    set(elevationGradingUniform, !clay && elevationGrading ? 1f : 0f);
                     // The Tactical View shows no craters, ground damage or scorch (setFluffHidden). Authored scorch also
                     // shows where combat scars do not (the editor, its previews).
-                    boolean damaged = combatScars && !clay && !fluffHidden && groundDamage.marks() > 0
+                    boolean damaged = combatScars && !fluffHidden && groundDamage.marks() > 0
                           && groundDamage.texture() != null;
                     set(groundDamageSizeUniform, damaged ? groundDamage.width() : 0, damaged ? groundDamage.height() : 0);
                     set(groundDamageGridUniform, groundDamage.tileWorldSize(), (float) groundDamage.tileColumns(), (float) groundDamage.tileRows());
-                    boolean scorched = !clay && !fluffHidden && groundDamage.scorchShown() && groundDamage.texture() != null;
+                    boolean scorched = !fluffHidden && groundDamage.scorchShown() && groundDamage.texture() != null;
                     set(groundScorchUniform, scorched ? 1f : 0f, scorched ? groundDamage.scorchHeat() : 0f);
                     set(sculptMetreUniform, BoardRelief.metres(1));
                     set(waterLineUniform, BoardGeometry.hexScale());
@@ -1108,8 +1100,6 @@ final class GpuTerrain implements Disposable {
     private final GpuGroundDamage groundDamage = new GpuGroundDamage();
     private final GpuSurfaceScars surfaceScars = new GpuSurfaceScars(groundDamage);
     private long scarSurfaceRevision;
-    private float terrainWear = DEFAULT_TERRAIN_WEAR;
-    private boolean elevationGrading = DEFAULT_ELEVATION_GRADING;
     private boolean combatScars = GpuGroundDamage.COMBAT_SCARS;
     /** A board the editor changes, and its samples: any surface may appear, so programs keep the biome stage. */
     private boolean editable;
@@ -1154,8 +1144,6 @@ final class GpuTerrain implements Disposable {
     private boolean normalMaps = true;
     private boolean terrainParallax = true;
     private boolean grass = true;
-    /** Neutral material view: sculpted terrain drops its textures so only geometry, light and occlusion remain. */
-    private boolean clay;
     private boolean waterEffects = true;
     /** This frame's visual gravity, converted from the scenario's g multiplier to metres per second squared. */
     private float gravity = BoardAtmosphere.STANDARD_GRAVITY;
@@ -2289,12 +2277,6 @@ final class GpuTerrain implements Disposable {
         surfaceScars.update(scene);
         groundDamage.impact(scene, impact, this::tacticalSurface, surfaceScars::add);
     }
-
-    /** Test hook: material weathering intensity, independent of combat history and terrain geometry; the game keeps 1. */
-    void setTerrainWear(float intensity) { terrainWear = MathUtils.clamp(intensity, 0f, 1f); }
-
-    /** Test hook: elevation grading, which the game keeps on. */
-    void setElevationGrading(boolean enabled) { elevationGrading = enabled; }
 
     /**
      * Whether combat scars show. On before the board builds (games), it also prepares the plain programs of the objects
@@ -7419,7 +7401,7 @@ final class GpuTerrain implements Disposable {
         boolean fluff = !fluffHidden;
         packKeptProps();
         updateDetail(camera);
-        lavaLighting.update(coverScene, terrain && !clay);
+        lavaLighting.update(coverScene, terrain);
         // Upload before the render context tracks bound texture units for this pass; Classic's ice reads the biomes'.
         biomes.update(coverScene);
         if (terrain) {
@@ -7491,7 +7473,7 @@ final class GpuTerrain implements Disposable {
             prepassed = false;
         }
         batch.begin(camera);
-        if (terrain && fluff && combatScars && !clay) {
+        if (terrain && fluff && combatScars) {
             surfaceScars.render(camera, batch, environment, coverScene.height(), this::scarShown, pageDeadline);
         }
         paintPages.begin(camera);
@@ -7692,11 +7674,9 @@ final class GpuTerrain implements Disposable {
     private void renderSceneryEffects(Camera camera) {
         fungus.begin();
         geysers.begin();
-        if (!clay) {
-            for (Chunk chunk : chunks) {
-                fungus.add(chunk.spores, camera);
-                geysers.add(chunk.geysers, camera);
-            }
+        for (Chunk chunk : chunks) {
+            fungus.add(chunk.spores, camera);
+            geysers.add(chunk.geysers, camera);
         }
         fungus.render(camera, clock, wind);
         geysers.render(camera, clock, gravity, wind, atmosphere == null ? Color.WHITE : atmosphere.groundLight());
@@ -7822,11 +7802,6 @@ final class GpuTerrain implements Disposable {
                 target.render(prop.hoverOpaque, environment);
             }
         }
-    }
-
-    /** Live material preview: neutral clay without textures or decoration, for judging sculpted shapes. */
-    void setClay(boolean enabled) {
-        clay = enabled;
     }
 
     void setWetness(float wetness) {

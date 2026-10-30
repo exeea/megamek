@@ -55,7 +55,6 @@ coverageIn float v_alphaTest;
 #endif
 uniform float u_foliage; // 0 solid, 1 canopy, 2 snow, 3 fungal fruiting body, 4 cyan mycelium
 uniform float u_metre; // world units per metre
-uniform float u_clay;
 uniform float u_foliageProxy; // Exact authored branch-card roles, not all thin tissue.
 // How far a crown's leaf normals spread about its envelope normal, as the GGX alpha^2 it adds (twice the projected
 // normal variance, as antialiasedRoughness adds it). Leaves facing every way over the outward hemisphere are the
@@ -193,7 +192,6 @@ void main() {
 #ifdef impostorMaterialFlag
     snow = cardSurface.a;
 #endif
-    if (u_clay > .5) albedo = toLinear(vec3(.52));
     albedo = wetAlbedo(albedo, u_wetness * (1.0 - snow) * .2);
     albedo = materialReflectance(albedo);
     // Godot's emission: the map times its tint, plus the constant glow.
@@ -212,7 +210,6 @@ void main() {
     if (u_foliage > 3.5) emission = diffuse.rgb * 1.3;
     // Fungal tissue breathes: its glow swells and fades slowly across a colony.
     if (u_foliage > 2.5) emission *= .94 + .06 * sin(u_rainTime * .65 + dot(v_cloudPosition.xy, vec2(.073, .051)));
-    if (u_clay > .5) emission = vec3(0.0);
 #ifdef lightingFlag
     // A plant material of the GLB's own and an impostor card (its plant's baked bark and leaves) take their role's
     // response. Leaves pass their scattering through as thin tissue (below); solid bodies wrap it past the terminator.

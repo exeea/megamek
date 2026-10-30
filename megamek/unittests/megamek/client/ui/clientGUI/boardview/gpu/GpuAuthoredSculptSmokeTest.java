@@ -327,7 +327,7 @@ class GpuAuthoredSculptSmokeTest {
         Mesh mesh = builder.end();
         var terrain = new GpuTerrain();
         try {
-            terrain.setWetness(0); terrain.setTerrainWear(0); terrain.setElevationGrading(false);
+            terrain.setWetness(0);
             // This isolated provider owns the same inactive biome texture as the existing provider fixtures.
             var biomes = GpuTerrain.class.getDeclaredField("biomes"); biomes.setAccessible(true);
             ((GpuBiomeSurface) biomes.get(terrain)).update(null);
