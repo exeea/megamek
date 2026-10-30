@@ -1181,6 +1181,25 @@ its bar, the level's icon (`shield-person` for the Game Master), the sprite fitt
 `slow`. Where the stack sits is still hud-v3's: above the dock with the newest at the bottom. The top centre, the
 newest on top and the hover pause are the developers' work.
 
+## Charts
+
+A chart of values by whole step, such as damage by range, is a **step chart**. Each series is a line that keeps its
+value across its step and turns square into the next. Three guide lines in `border.subtle` sit behind the series: at
+nothing, at half, and at the ceiling. The ceiling rounds up to 1, 2 or 5 times a power of ten above the highest value.
+The guides are labelled in `caption` type and `text.muted`, and the first, middle and last step are labelled under the
+plot. Series draw in the order given, so the one that matters most comes last and sits on top. Each series may set its
+own thickness. A legend sits above the chart: a swatch of each series' color beside its name in `small` type. Take
+series colors from color roles. The Requisition dossier's Damage tab uses `text.muted` at half the `selection.width`
+for maximum damage, `status.warning` at twice it for heat-sustained, and `accent.primary` at that width for expected
+damage. Always put a table of the same numbers below the chart: the lines alone do not give a screen reader, or a
+color-blind reader, the values.
+
+**libGDX.** `UiKit.stepChart()` makes
+[`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java).
+`show(List<UiStepChart.Series>, format)` takes the series and labels the guides with `format`. Each
+`Series(values, color, thickness)` holds the values for steps 1 to n. The chart takes the width its cell gives it; give
+the cell a height. It takes no input. Swing has no step chart yet.
+
 ## Code
 
 | Class | Role |
@@ -1205,6 +1224,7 @@ newest on top and the hover pause are the developers' work.
 | [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
 | [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
+| [`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java) | The libGDX step chart |
 | [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java), [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java), [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java) | The libGDX virtualised list, stepper and filter chip |
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |

@@ -630,6 +630,34 @@ work for Swing, and item 11 is under investigation.
        - MekHQ's `GameThread` and `AtBGameThread` use only the client API (options, map, conditions, `sendDone`), so
          preloaded games and auto-resolve need no lounge panel, and `CommanderGUI` never had one.
        Not checked live: a real MekHQ game, and a second client reconnecting over the network.
+     - L10 ~~Requisition dossier tabs~~. The dossier keeps a slim header (name and details cut with an ellipsis,
+       the full name in a tooltip, BV or PV, Add to force, close) over compact `UiTabs`: Overview, Readout, AS card,
+       Factions and Damage. The tab picked stays from unit to unit; only the tab in view is built, and it is rebuilt
+       only when the unit, its record or the tab's own data change. Once the pointer or keys stay on a unit for
+       130 ms, its full record (`MekSummary` to `Entity`) loads on a thread of its own, the newest unit winning
+       (`RequisitionLoader`); the stat strip keeps its height meanwhile. The data is built away from libGDX in
+       `megamek.client.lobby`:
+       - Overview (`RequisitionDossier`): the sprite beside the stat strip (move, heat, armour bar, weapons), then
+         role, rules level, introduced, source and cost.
+       - Readout (`RequisitionReadout`): the Summary is `EntityReadout`; the TRO is `TROView`'s HTML template
+         flattened to the same heading, label and value rows. Both are kit text in a scroll pane. The token
+         segmented switch between them is remembered as the client preference `RequisitionReadoutTro`.
+       - AS card (`RequisitionAlphaStrike`): built from the summary's Alpha Strike values (type, size, TMM, move,
+         damage S/M/L, OV, armour and structure, specials, PV), so it shows at once. It is a kit-built card: the
+         Java2D `ASCard` leans on Swing's `UIUtil`, so it was not reused.
+       - Factions (`RequisitionFactions`): the Force Generator's (`RATGenerator`) availability for the model, merged
+         per era and read on a second thread. It is shown era by era, each with the factions that field the unit and
+         their rarity. Swing's grid was too wide for the dossier; the faction logos are not shown.
+       - Damage (`RequisitionDamage`, from `DamageProfile`): maximum, expected and heat-sustained damage at gunnery
+         4, or at the adding strip's set gunnery. It shows as a step chart (`UiStepChart`, a new kit piece), then
+         tables by range band and by direction, instead of Swing's radar.
+       The narrow slide-over and the keyboard still work (LEFT and RIGHT move through the tabs). Checks:
+       `RequisitionRowTest`, `RequisitionRecordTest` and `RequisitionFactionsTest`. The on-demand
+       `LobbyDossierTabsSmokeTest` clicks the tabs and the switch, and checks that tabs are built lazily, the
+       debounce, that the tab stays, that the newest load wins, and the keys. The probe's
+       `lobby+requisition+pick+tab=<overview|readout|tro|summary|ascard|factions|damage>` clicks through the Stage,
+       photographed at 2560x1400 and narrow. Not checked live: the Force Generator's first load on a slow disk
+       (the tab shows a loading line until it is done), and very long TRO texts.
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.
