@@ -865,6 +865,22 @@ work for Swing, and item 11 is under investigation.
         `search=<text>` (underscores for spaces) to pick a given unit. Not seen on screen: an era hidden between two
         shown (the units photographed had none), and a capture of the factions reveal mid-way (its data arrives at a
         varying time).
-  7. A settings check across the startup path.
+     - Still open after #34, for a later round once #33 and #34 are merged:
+       - L14 Settings check: the lobby's part of step 7. Every client and GUI preference the old Swing lobby read or
+         wrote is honoured by the libGDX lobby, persists across restarts and appears in the settings dialog where it
+         did before; preferences with no remaining reader are removed.
+       - L15 Unit dialogs in libGDX: unit customization (`CustomMekDialog`, including the multi-unit edit) and the
+         C3 network setup.
+       - L16 Map setup in libGDX: board selection, map size, random map settings, and loading and saving a map
+         setup.
+       - L17 The other lobby dialogs in libGDX: Victory Conditions, the random army, random skills, random names,
+         the load list, the Princess help, the unit readout and the remaining prompts through `SwingLobbyPrompts`.
+       - L18 File choosers: game options, loadouts, unit lists and map setups open the system file dialog (as the
+         start screen does) instead of a Swing chooser.
+       - Live checks still to do: a real MekHQ game, a network reconnect, saving and loading game options and bot
+         presets through the real file chooser, a password-protected game and a second human player.
+       - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
+         retire it once its last user moves.
+  7. A settings check across the startup path (the lobby's part is L14 in step 6).
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.
