@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -234,16 +235,18 @@ public final class RequisitionCatalog {
 
     /**
      * The Commander's own narrowing on top of the game's rules: weight chips, and the Filters drawer's type, tech bases,
-     * rules levels (simple tech levels), roles, canon, record sheet, era and source book. Empty sets leave that filter
-     * open; a null type, era or source takes every one.
+     * rules levels (simple tech levels), roles, canon, record sheet, era and source book, and the advanced search's
+     * criteria. Empty sets leave that filter open; a null type, era or source takes every one.
      */
     public record Filters(Set<Weight> weights, @Nullable ExactType type, Set<TechBase> bases, Set<Integer> levels,
-          Set<UnitRole> roles, Either canon, Either recordSheet, @Nullable YearSpan era, @Nullable String source) {
+          Set<UnitRole> roles, Either canon, Either recordSheet, @Nullable YearSpan era, @Nullable String source,
+          RequisitionAdvancedSearch advanced) {
 
         public static final Filters NONE = new Filters(Set.of(), null, Set.of(), Set.of(), Set.of(), Either.ANY,
-              Either.ANY, null, null);
+              Either.ANY, null, null, RequisitionAdvancedSearch.NONE);
 
         public Filters {
+            Objects.requireNonNull(advanced);
             weights = Set.copyOf(weights);
             bases = Set.copyOf(bases);
             levels = Set.copyOf(levels);
@@ -256,39 +259,43 @@ public final class RequisitionCatalog {
         }
 
         public Filters withWeights(Set<Weight> next) {
-            return new Filters(next, type, bases, levels, roles, canon, recordSheet, era, source);
+            return new Filters(next, type, bases, levels, roles, canon, recordSheet, era, source, advanced);
         }
 
         public Filters withType(@Nullable ExactType next) {
-            return new Filters(weights, next, bases, levels, roles, canon, recordSheet, era, source);
+            return new Filters(weights, next, bases, levels, roles, canon, recordSheet, era, source, advanced);
         }
 
         public Filters withBases(Set<TechBase> next) {
-            return new Filters(weights, type, next, levels, roles, canon, recordSheet, era, source);
+            return new Filters(weights, type, next, levels, roles, canon, recordSheet, era, source, advanced);
         }
 
         public Filters withLevels(Set<Integer> next) {
-            return new Filters(weights, type, bases, next, roles, canon, recordSheet, era, source);
+            return new Filters(weights, type, bases, next, roles, canon, recordSheet, era, source, advanced);
         }
 
         public Filters withRoles(Set<UnitRole> next) {
-            return new Filters(weights, type, bases, levels, next, canon, recordSheet, era, source);
+            return new Filters(weights, type, bases, levels, next, canon, recordSheet, era, source, advanced);
         }
 
         public Filters withCanon(Either next) {
-            return new Filters(weights, type, bases, levels, roles, next, recordSheet, era, source);
+            return new Filters(weights, type, bases, levels, roles, next, recordSheet, era, source, advanced);
         }
 
         public Filters withRecordSheet(Either next) {
-            return new Filters(weights, type, bases, levels, roles, canon, next, era, source);
+            return new Filters(weights, type, bases, levels, roles, canon, next, era, source, advanced);
         }
 
         public Filters withEra(@Nullable YearSpan next) {
-            return new Filters(weights, type, bases, levels, roles, canon, recordSheet, next, source);
+            return new Filters(weights, type, bases, levels, roles, canon, recordSheet, next, source, advanced);
         }
 
         public Filters withSource(@Nullable String next) {
-            return new Filters(weights, type, bases, levels, roles, canon, recordSheet, era, next);
+            return new Filters(weights, type, bases, levels, roles, canon, recordSheet, era, next, advanced);
+        }
+
+        public Filters withAdvanced(RequisitionAdvancedSearch next) {
+            return new Filters(weights, type, bases, levels, roles, canon, recordSheet, era, source, next);
         }
 
         /** These filters without the drawer's, keeping the weight chips. */
@@ -300,7 +307,7 @@ public final class RequisitionCatalog {
         public int drawerCount() {
             return ((type == null) ? 0 : 1) + bases.size() + levels.size() + roles.size()
                   + ((canon == Either.ANY) ? 0 : 1) + ((recordSheet == Either.ANY) ? 0 : 1)
-                  + ((era == null) ? 0 : 1) + ((source == null) ? 0 : 1);
+                  + ((era == null) ? 0 : 1) + ((source == null) ? 0 : 1) + advanced.count();
         }
 
         public boolean allows(MekSummary unit, Rules rules, Category category) {
@@ -336,8 +343,11 @@ public final class RequisitionCatalog {
         }
     }
 
-    /** One unit as the search reads it: its words without case or accents, and the key it sorts by. */
-    private record Entry(MekSummary unit, String text, String sortKey) { }
+    /**
+     * One unit as the search reads it: its words without case or accents, the key it sorts by, and its Battlefield
+     * Support asset form (or null) for the advanced search.
+     */
+    private record Entry(MekSummary unit, String text, String sortKey, @Nullable MekSummary asset) { }
 
     /**
      * The catalogue made ready to search: the units in name order with their search text worked out once, so a search
@@ -396,7 +406,8 @@ public final class RequisitionCatalog {
         List<Entry> entries = new ArrayList<>(all.length);
         for (MekSummary unit : all) {
             if ((unit != null) && !skip.test(unit)) {
-                entries.add(new Entry(unit, searchText(unit, assetOf.apply(unit)), sortKey(unit.getName())));
+                MekSummary asset = assetOf.apply(unit);
+                entries.add(new Entry(unit, searchText(unit, asset), sortKey(unit.getName()), asset));
             }
         }
         entries.sort(Comparator.comparing(Entry::sortKey).thenComparing(entry -> entry.unit().getName()));
@@ -414,7 +425,7 @@ public final class RequisitionCatalog {
         for (Entry entry : index.entries) {
             MekSummary unit = entry.unit();
             if (matches(entry.text(), words) && category.contains(unit.getUnitType()) && rules.allows(unit)
-                  && filters.allows(unit, rules, category)) {
+                  && filters.allows(unit, rules, category) && filters.advanced().matches(unit, entry.asset())) {
                 offered.add(unit);
             }
         }
