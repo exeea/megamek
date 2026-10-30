@@ -109,6 +109,8 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+requisition+hoverrow}: half a second before the shot, puts the pointer on the second result row
  *     at its right end, beside the scroll bar, and logs where the rows and their values end against the bar;
  *     {@code +hoverbar} puts it on the bar instead.</li>
+ *     <li>{@code lobby+requisition+setskills}: clicks the adding strip's Set skills, then the gunnery's +, through the
+ *     stage.</li>
  *     <li>{@code lobby+requisition+pick+tab=name}: once the picked unit's dossier shows, clicks its tab through the
  *     stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s in: {@code overview}, {@code readout}, {@code ascard},
  *     {@code factions} or {@code damage}; {@code tro} clicks Readout, then its TRO switch, and {@code summary} its

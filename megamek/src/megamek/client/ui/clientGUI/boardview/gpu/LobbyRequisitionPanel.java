@@ -15,6 +15,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -22,6 +23,7 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -169,6 +171,11 @@ final class LobbyRequisitionPanel {
     private final Label count;
     private final UiSegmented valueToggle;
     private final UiVirtualList<RequisitionRow> list;
+    /** The widths of the results' columns ({@link RequisitionRow.Column}) and of their value, the same in every row. */
+    private final float[] columnWidths;
+    private final float valueWidth;
+    /** The columns' names over the results, laid out as their rows are. */
+    private final ColumnsRow resultsHeader;
     private final ScrollPane results;
     private final Label resultsNote;
     private final Table dossier = new Table();
@@ -183,6 +190,8 @@ final class LobbyRequisitionPanel {
     private final UiSegmented skillsMode;
     private final UiStepper gunnery;
     private final UiStepper piloting;
+    /** The strip's owner, skills and, when set, the gunnery and piloting steppers, wrapping as one row. */
+    private final HorizontalGroup stripControls = new HorizontalGroup();
     private final Table fixedSkills = new Table();
     private final UiStepper quantity;
     private final UiButton add;
@@ -298,6 +307,8 @@ final class LobbyRequisitionPanel {
         status.add(valueToggle).right();
         body.add(status).growX().pad(space("sm"), space("md"), space("xs"), space("md")).row();
 
+        columnWidths = columnWidths();
+        valueWidth = valueWidth();
         float rowHeight = size("control.lg");
         list = new UiVirtualList<>(kit, rowHeight, ResultRow::new, (row, item) -> ((ResultRow) row).bind(item));
         list.setName("lobby-requisition-results");
@@ -330,6 +341,12 @@ final class LobbyRequisitionPanel {
         Container<Label> note = new Container<>(resultsNote);
         note.top().fillX().padTop(space("xl"));
         resultsStack.add(note);
+        resultsHeader = new ColumnsRow(true);
+        resultsHeader.pad(space("xs"), space("md"), space("xs"), space("md"));
+        resultsHeader.setName("lobby-requisition-columns");
+        Table resultsSide = new Table();
+        resultsSide.add(resultsHeader).growX().minWidth(0).row();
+        resultsSide.add(resultsStack).grow().minWidth(0).minHeight(0);
         dossier.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_PANEL));
         dossier.setName("lobby-requisition-dossier");
         dossier.setVisible(false);
@@ -349,7 +366,7 @@ final class LobbyRequisitionPanel {
         readoutSwitch.setName("lobby-requisition-readout-switch");
         readoutTro = actions.readoutTro();
         buildDossier();
-        split = new Split(resultsStack, dossier);
+        split = new Split(resultsSide, dossier);
         centre.fill();
         centre.setActor(split);
         body.add(centre).grow().minHeight(0).pad(0, space("md"), 0, space("md")).row();
@@ -362,19 +379,16 @@ final class LobbyRequisitionPanel {
             skillsChosen = true;
             skills(skills.withMode(RequisitionSkills.Mode.values()[skillsMode.getSelectedIndex()]));
         });
-        gunnery = kit.stepper(RequisitionSkills.DEFAULT_GUNNERY, RequisitionSkills.MIN_SKILL,
-              RequisitionSkills.MAX_SKILL);
+        gunnery = kit.stepper(Messages.getString("Lobby.requisition.gunnery"), RequisitionSkills.DEFAULT_GUNNERY,
+              RequisitionSkills.MIN_SKILL, RequisitionSkills.MAX_SKILL);
         kit.tip(gunnery, true).getActor().setText(Messages.getString("Lobby.requisition.gunneryTip"));
         UiKit.onChange(gunnery, () -> skills(skills.withGunnery(gunnery.value())));
-        piloting = kit.stepper(RequisitionSkills.DEFAULT_PILOTING, RequisitionSkills.MIN_SKILL,
-              RequisitionSkills.MAX_SKILL);
+        piloting = kit.stepper(Messages.getString("Lobby.requisition.piloting"), RequisitionSkills.DEFAULT_PILOTING,
+              RequisitionSkills.MIN_SKILL, RequisitionSkills.MAX_SKILL);
         kit.tip(piloting, true).getActor().setText(Messages.getString("Lobby.requisition.pilotingTip"));
         UiKit.onChange(piloting, () -> skills(skills.withPiloting(piloting.value())));
-        fixedSkills.add(caption("Lobby.requisition.gunnery")).padLeft(space("sm"));
-        fixedSkills.add(gunnery);
-        fixedSkills.add(caption("Lobby.requisition.piloting")).padLeft(space("xs"));
-        fixedSkills.add(piloting);
-        quantity = kit.stepper(1, 1, LobbyRequisitionController.MAX_QUANTITY);
+        quantity = kit.stepper(Messages.getString("Lobby.requisition.quantity"), 1, 1,
+              LobbyRequisitionController.MAX_QUANTITY);
         kit.tip(quantity, true).getActor().setText(Messages.getString("Lobby.requisition.quantityTip"));
         UiKit.onChange(quantity, this::refreshAdd);
         add = kit.button("button-primary" + UiTheme.COMPACT, "add", Messages.getString("Lobby.requisition.add"),
@@ -402,6 +416,7 @@ final class LobbyRequisitionPanel {
 
     private void valueToggled() {
         showPv = valueToggle.getSelectedIndex() == 1;
+        resultsHeader.value.setText(Messages.getString(showPv ? "Lobby.requisition.pv" : "Lobby.requisition.bv"));
         list.rebind();
         showDossier();
     }
@@ -438,7 +453,7 @@ final class LobbyRequisitionPanel {
             skills = RequisitionSkills.initial(next.randomSkills()).withGunnery(skills.gunnery())
                   .withPiloting(skills.piloting());
             skillsMode.select(skills.mode().ordinal());
-            fixedSkills.setVisible(skills.mode() == RequisitionSkills.Mode.FIXED);
+            showFixedSkills(skills.mode() == RequisitionSkills.Mode.FIXED);
         }
         if (recipientsChanged) {
             refreshOwners();
@@ -1481,17 +1496,19 @@ final class LobbyRequisitionPanel {
             head.add(kit.roleTypeLabel("overline", era.name(), "text.secondary")).left().minWidth(0);
             head.add(kit.typeLabel(era.years(), "caption", "text.muted")).left().padLeft(space("sm"));
             head.add().growX();
-            list.add(head).growX().minWidth(0).padTop(i == 0 ? 0 : space("md")).colspan(2).row();
-            list.add(kit.solid("border.subtle")).growX().height(size("border")).colspan(2).padTop(space("xxs"))
+            list.add(head).growX().minWidth(0).padTop(i == 0 ? 0 : space("md")).colspan(3).row();
+            list.add(kit.solid("border.subtle")).growX().height(size("border")).colspan(3).padTop(space("xxs"))
                   .row();
             for (RequisitionFactions.Faction faction : factions.factions()) {
                 String cell = faction.cells().get(i);
                 if (RequisitionFactions.NONE.equals(cell)) {
                     continue;
                 }
+                // The code is a column of its own, the same x in every era
+                list.add(kit.typeLabel(faction.code(), "body.strong", "text.secondary")).left()
+                      .padRight(space("md")).padTop(space("xxs"));
                 Label name = kit.typeLabel(faction.name(), "body", "text.primary");
                 name.setEllipsis(true);
-                kit.tip(name, true).getActor().setText(faction.name() + " (" + faction.code() + ")");
                 list.add(name).growX().minWidth(0).left().padTop(space("xxs"));
                 list.add(kit.typeLabel(cell, "body", "text.secondary")).right().padLeft(space("md"))
                       .padTop(space("xxs")).row();
@@ -1601,6 +1618,16 @@ final class LobbyRequisitionPanel {
         return (named == null) ? null : dossierTabs.option(named.ordinal());
     }
 
+    /** The adding strip's skills option {@code index} (Default, Random, Set), to click through the stage. */
+    Actor skillsOption(int index) {
+        return skillsMode.option(index);
+    }
+
+    /** The adding strip's gunnery stepper, to click through the stage. */
+    UiStepper gunneryStepper() {
+        return gunnery;
+    }
+
     /** The Readout tab's Summary or TRO switch's option, to click through the stage. */
     Actor readoutOption(boolean tro) {
         return readoutSwitch.option(tro ? 1 : 0);
@@ -1638,27 +1665,30 @@ final class LobbyRequisitionPanel {
 
     // ---- The adding strip ----
 
+    /** The space between the strip's groups, twice that inside a group ({@link UiStepper#gap()}). */
+    private static final float STRIP_GROUP_GAP = space("md");
+
     private Table strip() {
         Table strip = new Table();
         strip.setName("lobby-requisition-strip");
         strip.add(kit.solid("border.subtle")).growX().height(size("border")).colspan(2).padBottom(space("sm")).row();
-        HorizontalGroup controls = chipGroup();
-        controls.space(space("lg"));
+        HorizontalGroup controls = stripControls;
+        // Each group (owner, skills, the steppers) stands the group space from the next, wrapping whole when narrow
+        controls.wrap(true).space(STRIP_GROUP_GAP).wrapSpace(space("xs")).rowLeft();
         controls.addActor(ownerGroup);
         Table skillsGroup = new Table();
-        skillsGroup.add(caption("Lobby.requisition.skills")).padRight(space("sm"));
+        skillsGroup.add(caption("Lobby.requisition.skills")).padRight(UiStepper.gap());
         skillsGroup.add(skillsMode);
-        skillsGroup.add(fixedSkills);
-        fixedSkills.setVisible(false);
         controls.addActor(skillsGroup);
-        Table quantityGroup = new Table();
-        quantityGroup.add(caption("Lobby.requisition.quantity")).padRight(space("xs"));
-        quantityGroup.add(quantity);
-        controls.addActor(quantityGroup);
         strip.add(controls).growX().minWidth(0).left();
-        strip.add(add).right().bottom().width(kit.faceWidth(add, Messages.getString("Lobby.requisition.add"),
+        // The quantity goes with Add at the row's end, a group's space after the skills; a narrow strip wraps the
+        // owner and skills before it
+        Table adding = new Table();
+        adding.add(quantity);
+        adding.add(add).width(kit.faceWidth(add, Messages.getString("Lobby.requisition.add"),
               Messages.getString("Lobby.requisition.addMany", LobbyRequisitionController.MAX_QUANTITY),
-              Messages.getString("Lobby.requisition.added"))).padLeft(space("md")).row();
+              Messages.getString("Lobby.requisition.added"))).padLeft(space("md"));
+        strip.add(adding).right().bottom().padLeft(STRIP_GROUP_GAP).row();
 
         Table addedRow = new Table();
         addedRow.add(totals).left().padRight(space("sm"));
@@ -1677,6 +1707,23 @@ final class LobbyRequisitionPanel {
         addedRow.add(randomArmy).padLeft(space("xs"));
         strip.add(addedRow).growX().minWidth(0).colspan(2).padTop(space("sm"));
         return strip;
+    }
+
+    /** Shows the gunnery and piloting steppers after the skills while they are set, else takes them out of the strip. */
+    private void showFixedSkills(boolean show) {
+        if (show == (fixedSkills.getParent() == stripControls)) {
+            return;
+        }
+        if (fixedSkills.getChildren().isEmpty()) {
+            // Gunnery and piloting fold together, a group's space apart
+            fixedSkills.add(gunnery);
+            fixedSkills.add(piloting).padLeft(STRIP_GROUP_GAP);
+        }
+        if (show) {
+            stripControls.addActor(fixedSkills);
+        } else {
+            fixedSkills.remove();
+        }
     }
 
     private void refreshOwners() {
@@ -1702,14 +1749,14 @@ final class LobbyRequisitionPanel {
         select.select(index);
         UiKit.onChange(select, () -> ownerId = recipients.get(Math.max(0, select.getSelectedIndex())).id());
         kit.tip(select, true).getActor().setText(Messages.getString("Lobby.requisition.ownerTip"));
-        ownerGroup.add(caption("Lobby.requisition.owner")).padRight(space("sm"));
-        ownerGroup.add(select).minWidth(size("dialog.sm") / 3);
+        ownerGroup.add(caption("Lobby.requisition.owner")).padRight(UiStepper.gap());
+        ownerGroup.add(select).minWidth(size("dialog.sm") / 4);
         owner = select;
     }
 
     private void skills(RequisitionSkills next) {
         skills = next;
-        fixedSkills.setVisible(skills.mode() == RequisitionSkills.Mode.FIXED);
+        showFixedSkills(skills.mode() == RequisitionSkills.Mode.FIXED);
         list.rebind();
         showDossier();
     }
@@ -1763,32 +1810,182 @@ final class LobbyRequisitionPanel {
 
     // ---- Rows ----
 
-    /** One result: the sprite, the name over tonnage · type · tech · year, and the Battle or Point Value. */
-    private final class ResultRow extends Table {
-        private final Container<Actor> sprite = new Container<>();
-        private final Label name = kit.roleTypeLabel("name", "", "text.primary");
-        private final Label details = kit.typeLabel("", "small", "text.secondary");
-        private final Label value = kit.typeLabel("", "body.strong", "text.primary");
+    /** The widths of the results' columns: the widest text each can hold, or its name over it. */
+    private float[] columnWidths() {
+        RequisitionRow.Column[] columns = RequisitionRow.Column.values();
+        float[] widths = new float[columns.length];
+        for (RequisitionRow.Column column : columns) {
+            List<String> samples = new ArrayList<>();
+            switch (column) {
+                case MOVE -> samples.add(RequisitionRow.move(88, 88, 88));
+                case ARMOR -> samples.add(NumberFormat.getIntegerInstance().format(8888));
+                case ROLE -> {
+                    for (UnitRole role : UnitRole.values()) {
+                        if (role.hasRole()) {
+                            samples.add(role.toString());
+                        }
+                    }
+                }
+                case LEVEL -> samples.addAll(Arrays.asList(TechConstants.T_SIMPLE_NAMES));
+            }
+            float widest = kit.roleTypeLabel("overline", Messages.getString(column.messageKey()), "text.muted")
+                  .getPrefWidth();
+            Label measure = kit.typeLabel("", COLUMN_TYPE, "text.secondary");
+            for (String sample : samples) {
+                measure.setText(sample);
+                widest = Math.max(widest, measure.getPrefWidth());
+            }
+            widths[column.ordinal()] = (float) Math.ceil(widest);
+        }
+        return widths;
+    }
+
+    /** The value's width: a five-figure Battle Value, so the columns before it stand still from row to row. */
+    private float valueWidth() {
+        Label measure = kit.typeLabel(NumberFormat.getIntegerInstance().format(88888), "body.strong",
+              "text.primary");
+        return (float) Math.ceil(measure.getPrefWidth());
+    }
+
+    /** The type of the results' columns. */
+    private static final String COLUMN_TYPE = "small";
+
+    /**
+     * A row of the results' layout: the sprite, the name over its details, the columns and the value, each column the
+     * same width in every row, so they line up; as the row narrows the last columns go first
+     * ({@link RequisitionLayout#columns}), the name keeping {@link RequisitionLayout#NAME_MIN}. The header over the
+     * results is one, with the columns' names.
+     */
+    private class ColumnsRow extends Table {
+        final Label[] columns = new Label[RequisitionRow.Column.values().length];
+        private final List<Cell<Label>> columnCells = new ArrayList<>();
+        final Label value;
+        private final boolean header;
+        private int shownColumns = -1;
+        private float scrollStrip = -1;
+
+        ColumnsRow(boolean header) {
+            this.header = header;
+            float spriteSize = size("control.md");
+            pad(0, space("md"), 0, space("md"));
+            if (header) {
+                add().width(spriteSize).padRight(space("sm"));
+                add().growX().minWidth(0);
+            } else {
+                add(sprite()).size(spriteSize).padRight(space("sm"));
+                add(lines()).growX().minWidth(0);
+            }
+            for (RequisitionRow.Column column : RequisitionRow.Column.values()) {
+                Label label = header ? kit.roleTypeLabel("overline", Messages.getString(column.messageKey()),
+                      "text.muted") : kit.typeLabel("", COLUMN_TYPE, "text.secondary");
+                label.setEllipsis(true);
+                columns[column.ordinal()] = label;
+                columnCells.add(add(label).left().minWidth(0));
+            }
+            value = header ? kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.bv"), "text.muted")
+                  : kit.typeLabel("", "body.strong", "text.primary");
+            value.setAlignment(Align.right);
+            add(value).width(valueWidth).right().padLeft(COLUMN_GAP);
+            showColumns(0);
+        }
+
+        Actor sprite() {
+            return new Container<>();
+        }
+
+        Actor lines() {
+            return new Table();
+        }
+
+        /** Shows the first {@code count} columns and takes the rest out of the row. */
+        private void showColumns(int count) {
+            if (count == shownColumns) {
+                return;
+            }
+            shownColumns = count;
+            for (int i = 0; i < columnCells.size(); i++) {
+                boolean shown = i < count;
+                columns[i].setVisible(shown);
+                columnCells.get(i).width(shown ? columnWidths[i] : 0).padLeft(shown ? COLUMN_GAP : 0);
+            }
+            invalidate();
+        }
+
+        @Override
+        protected void sizeChanged() {
+            if (!header) {
+                showColumns(columnsFor(getWidth()));
+            }
+            super.sizeChanged();
+        }
+
+        /** How many columns a row {@code rowWidth} wide shows. */
+        private int columnsFor(float rowWidth) {
+            float fixed = 2 * space("md") + size("control.md") + space("sm") + valueWidth + COLUMN_GAP;
+            return RequisitionLayout.columns(rowWidth - fixed, columnWidths, COLUMN_GAP);
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            if (header) {
+                // The header follows the rows: their width, and the scroll bar's strip beside them
+                float strip = Math.max(0, results.getWidth() - list.getWidth());
+                if (strip != scrollStrip) {
+                    scrollStrip = strip;
+                    padRight(space("md") + strip);
+                    invalidate();
+                }
+                showColumns(columnsFor(list.getWidth()));
+            }
+            super.draw(batch, parentAlpha);
+        }
+
+        /** How many columns show, for tests. */
+        int shownColumns() {
+            return shownColumns;
+        }
+    }
+
+    /** The space between the results' columns. */
+    private static final float COLUMN_GAP = space("lg");
+
+    /** One result: the sprite, the name over tonnage · type · tech · year, the columns and the Battle or Point Value. */
+    private final class ResultRow extends ColumnsRow {
+        private Container<Actor> sprite;
+        private Label name;
+        private Label details;
         private final Actor placeholder = kit.icon("unit", size("icon.md"), UiTheme.tokenColor("text.muted"));
         private final Image image = new Image((Drawable) null, Scaling.fit);
 
         ResultRow() {
-            float spriteSize = size("control.md");
-            pad(0, space("md"), 0, space("md"));
-            add(sprite).size(spriteSize).padRight(space("sm"));
+            super(false);
+        }
+
+        @Override
+        Actor sprite() {
+            sprite = new Container<>();
+            return sprite;
+        }
+
+        @Override
+        Actor lines() {
+            name = kit.roleTypeLabel("name", "", "text.primary");
+            details = kit.typeLabel("", "small", "text.secondary");
             Table lines = new Table();
             lines.left().defaults().left();
             name.setEllipsis(true);
             details.setEllipsis(true);
             lines.add(name).growX().minWidth(0).row();
             lines.add(details).growX().minWidth(0);
-            add(lines).growX().minWidth(0);
-            add(value).right().padLeft(space("sm"));
+            return lines;
         }
 
         void bind(RequisitionRow row) {
             name.setText(row.name());
             details.setText(row.details());
+            for (RequisitionRow.Column column : RequisitionRow.Column.values()) {
+                columns[column.ordinal()].setText(column.of(row));
+            }
             value.setText(showPv ? String.valueOf(row.pv())
                   : NumberFormat.getIntegerInstance().format(skills.bv(row.bv())));
             Drawable drawable = sprites.apply(spriteKey(row.unit()));

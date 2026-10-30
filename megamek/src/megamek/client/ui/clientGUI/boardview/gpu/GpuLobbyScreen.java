@@ -31,6 +31,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import com.badlogic.gdx.scenes.scene2d.ui.TooltipManager;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
@@ -129,6 +130,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean clickFoldPending;
     private boolean foldReportPending;
     private int filterClicksPending;
+    /** The {@code +setskills} clicks left: Set, then the gunnery's +. */
+    private int skillClicksPending;
     private String hoverPending;
     /** The developer switch's advanced search steps, from the first; -1 when there are none. */
     private int advancedStep = -1;
@@ -214,6 +217,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         hoverPending = probe.options().contains("hoverbar") ? "bar" : probe.options().contains("hoverrow") ? "row"
               : null;
         advancedStep = probe.options().contains("advanced") ? 0 : -1;
+        skillClicksPending = probe.options().contains("setskills") ? 2 : 0;
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -1107,6 +1111,19 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             GpuLobbyProbeInput.click(stage, requisition.filtersToggle());
             LOGGER.info("The lobby probe's Filters click: the drawer is {}", requisition.drawerOpen() ? "open"
                   : "shut");
+        }
+        if (skillClicksPending > 0 && REQUISITION.equals(centre.showing())
+              && elapsed > PROBE_CLICK_AT + (2 - skillClicksPending) * .5) {
+            skillClicksPending--;
+            GpuLobbyProbeInput.click(stage, skillClicksPending == 1 ? requisition.skillsOption(2)
+                  : requisition.gunneryStepper().up());
+            if (skillClicksPending == 0) {
+                stage.mouseMoved(0, 0);
+                stage.setKeyboardFocus(null);
+                TooltipManager.getInstance().hideAll();
+            }
+            LOGGER.info("The lobby probe's skills click: gunnery {} shown {}", requisition.gunneryStepper().value(),
+                  requisition.gunneryStepper().getStage() != null);
         }
         if (advancedStep >= 0 && REQUISITION.equals(centre.showing()) && elapsed > PROBE_CLICK_AT
               && elapsed > advancedAt) {
