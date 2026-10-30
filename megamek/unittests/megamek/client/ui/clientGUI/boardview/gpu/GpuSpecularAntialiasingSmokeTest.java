@@ -133,7 +133,7 @@ class GpuSpecularAntialiasingSmokeTest {
     }
 
     /**
-     * A switch is a lighting change (GpuEnvironmentLighting.Antialiasing): the terrain stops being ready, so the view
+     * A switch is a lighting change (GpuEnvironmentLighting.antialiasing): the terrain stops being ready, so the view
      * shows its loading stage while the terrain's material and family programs build, and the first frame after draws
      * with the setting. Each lighting configuration builds its own family programs, within twice the capacity over
      * all (GpuFamilyPrograms): the switched one has as many as the load. Switching back finds the first setting's
@@ -320,7 +320,7 @@ class GpuSpecularAntialiasingSmokeTest {
 
     /**
      * Switches the setting and waits, as the loading stage does, until the terrain has rebuilt its programs for it: the
-     * switch is a lighting change (GpuEnvironmentLighting.Antialiasing).
+     * switch is a lighting change (GpuEnvironmentLighting.antialiasing).
      */
     private static void setting(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
           boolean enabled) throws InterruptedException {

@@ -9,7 +9,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
@@ -25,8 +24,7 @@ import com.badlogic.gdx.utils.Disposable;
  * Every visible emitter is binned on the board plane: each grid cell lists the emitters whose reach overlaps it, so a
  * lit pixel evaluates only those (lava-lighting.glsl). An emitter is a point, or a segment such as a beam.
  */
-final class GpuLavaLighting extends Attribute implements Disposable {
-    static final long TYPE = register("boardLavaLighting");
+final class GpuLavaLighting implements Disposable {
     /** Texels per row of the list texture; lava-lighting.glsl addresses it with the same width. */
     private static final int ROW = 1024;
     /** Integers stored as floats stay exact below 2^24, which is also 16384 rows, the common maximum texture height. */
@@ -69,7 +67,7 @@ final class GpuLavaLighting extends Attribute implements Disposable {
     private Texture texture;
     private long uploaded = -1;
 
-    GpuLavaLighting(GpuAssets assets) { super(TYPE); this.assets = assets; }
+    GpuLavaLighting(GpuAssets assets) { this.assets = assets; }
 
     /** Chunk installation replaces the whole derived prop-light snapshot together with its rendered meshes. */
     void setFungus(List<Source> sources) { fungus = List.copyOf(sources); }
@@ -305,7 +303,7 @@ final class GpuLavaLighting extends Attribute implements Disposable {
 
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                var field = attributes.get(GpuLavaLighting.class, TYPE);
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
                 if (field == null) { target.set(id, 0, 0); previous = null; return; }
                 if (field == previous && uploaded == field.revision) return;
                 previous = field;
@@ -317,8 +315,8 @@ final class GpuLavaLighting extends Attribute implements Disposable {
         shader.register("u_lavaLights", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                var field = attributes.get(GpuLavaLighting.class, TYPE);
-                // Without the attribute nothing is fetched, but a stale unit may now hold another sampler type and
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                // Without the lights nothing is fetched, but a stale unit may now hold another sampler type and
                 // invalidate the draw. Unit 0 is outside ModelBatch's binder.
                 if (field != null) { target.set(id, field.texture()); } else { target.set(id, 0); }
             }
@@ -330,28 +328,4 @@ final class GpuLavaLighting extends Attribute implements Disposable {
         if (texture != null) { texture.dispose(); texture = null; }
         uploaded = -1;
     }
-
-    /** Shares the immutable snapshot; the copy uploads and owns its own texture. */
-    @Override
-    public Attribute copy() {
-        var copy = new GpuLavaLighting(assets);
-        copy.tiles = tiles;
-        copy.sources = sources;
-        copy.fungus = fungus;
-        copy.effects = effects;
-        copy.width = width;
-        copy.level = level;
-        copy.binned = binned;
-        copy.list = list;
-        copy.columns = columns;
-        copy.rows = rows;
-        copy.originX = originX;
-        copy.originY = originY;
-        copy.cellsPerUnit = cellsPerUnit;
-        copy.revision = revision;
-        return copy;
-    }
-
-    @Override
-    public int compareTo(Attribute other) { return Long.compare(type, other.type); }
 }

@@ -457,7 +457,7 @@ final class GpuAtmosphere implements Disposable {
         if (clouds == null) { clouds = new GpuClouds(quad); }
         clouds.shadow().enabled = cloudsActive;
         clouds.shadow().reflection = settings.clouds() > 0;
-        terrain.environment().set(clouds.shadow());
+        GpuEnvironmentLighting.required(terrain.environment()).cloudShadow = clouds.shadow();
     }
 
     /**

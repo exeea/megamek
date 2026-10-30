@@ -31,9 +31,11 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     static final float SOURCE_RADIUS_SINE = (float) Math.sin(Math.toRadians(.266));
     /**
      * Geometric specular anti-aliasing (light-model.glsl); the tuning's Display page sets it for the window. It is
-     * compiled in: an environment with this lighting carries {@link Antialiasing} while it is on.
+     * compiled in: a lighting takes it as {@link #antialiasing} when its environment applies it (applyAntialiasing).
      */
     static boolean specularAntialiasing = true;
+    /** The {@link #flags} bits: the features below. */
+    static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, ANTIALIASING = 16;
     private final Color sky = new Color(), horizon = new Color();
     private Texture texture;
     private GpuLightingEnvironment image;
@@ -41,37 +43,94 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     /** The board's sky occlusion by its relief (borrowed), else this lighting's own neutral one (owned, made on use). */
     private GpuSkyVisibility skyVisibility;
     private GpuSkyVisibility neutralSky;
+    /** A copy's original, whose GL resources it uses (copy). */
+    private GpuEnvironmentLighting original;
+    /*
+     * The environment's features that its lit programs compile in or read. They are fields of the lighting, not
+     * attribute types of their own: libGDX has 64 types. A program's key is the environment's mask with these flags
+     * (flags), so a switch is still a lighting change behind the loading stage.
+     */
+    /** Borrowed cloud transmission (GpuClouds owns it): cloudShadowFlag. */
+    GpuCloudShadow cloudShadow;
+    /** The view's ambient occlusion (borrowed): ambientOcclusionFlag (GpuAmbientOcclusion.prefix). */
+    GpuAmbientOcclusion ambientOcclusion;
+    /** The board's local lights (borrowed from its terrain): uniforms only. */
+    GpuLavaLighting lavaLighting;
+    /** The board has biomes (GpuBiomeSurface.mark): biomeMaskFlag. */
+    boolean biomes;
+    /** Specular anti-aliasing as last applied (applyAntialiasing): specularAntialiasingFlag. */
+    boolean antialiasing;
 
     GpuEnvironmentLighting() { super(TYPE); }
+
+    /** The features this lighting carries, as a program key's part beside its environment's mask. */
+    int flags() {
+        return (cloudShadow != null ? CLOUD_SHADOW : 0) | (ambientOcclusion != null ? AMBIENT_OCCLUSION : 0)
+              | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0) | (antialiasing ? ANTIALIASING : 0);
+    }
+
+    /** An environment's (or a draw's combined attributes') lighting, or null. */
+    static GpuEnvironmentLighting of(Attributes attributes) {
+        return attributes == null ? null : attributes.get(GpuEnvironmentLighting.class, TYPE);
+    }
+
+    /** The lighting of an environment that must have one, as every environment with these features does. */
+    static GpuEnvironmentLighting required(Attributes environment) {
+        var lighting = of(environment);
+        if (lighting == null) { throw new IllegalStateException("The environment has no GpuEnvironmentLighting"); }
+        return lighting;
+    }
+
+    /** The features of an environment's lighting, 0 without one (flags). */
+    static int flags(Attributes environment) {
+        var lighting = of(environment);
+        return lighting == null ? 0 : lighting.flags();
+    }
+
+    static GpuCloudShadow cloudShadow(Attributes attributes) {
+        var lighting = of(attributes);
+        return lighting == null ? null : lighting.cloudShadow;
+    }
+
+    static GpuAmbientOcclusion ambientOcclusion(Attributes attributes) {
+        var lighting = of(attributes);
+        return lighting == null ? null : lighting.ambientOcclusion;
+    }
+
+    static GpuLavaLighting lavaLighting(Attributes attributes) {
+        var lighting = of(attributes);
+        return lighting == null ? null : lighting.lavaLighting;
+    }
+
+    /**
+     * Gives a warm-up or rebuild sample's environment (a new environment set from the live one) a copy of its
+     * lighting, so the program it builds keeps the features it was requested with, even if the live lighting changes
+     * meanwhile.
+     */
+    static void freeze(Environment environment) {
+        var lighting = of(environment);
+        if (lighting != null) { environment.set(lighting.copy()); }
+    }
 
     /** The board's sky visibility, which its owner keeps and disposes; the lit programs read it with this lighting. */
     void setSkyVisibility(GpuSkyVisibility sky) { skyVisibility = sky; }
 
     GpuSkyVisibility skyVisibility() {
         if (skyVisibility != null) { return skyVisibility; }
+        if (original != null) { return original.skyVisibility(); }
         if (neutralSky == null) { neutralSky = new GpuSkyVisibility(); }
         return neutralSky;
     }
 
     /**
-     * Marks an environment whose lit programs compile specular anti-aliasing (specularAntialiasingFlag,
-     * GpuCloudShadow.prefix). It is part of the environment's mask, so a switch is a lighting change: shader selection
-     * (DefaultShader.canRender), the terrain's material readiness and its family programs follow it, and the terrain
-     * rebuilds behind its loading stage. It spends one of libGDX's 64 attribute types.
+     * Brings the lit programs of an environment with this lighting in line with the setting
+     * (specularAntialiasingFlag, GpuCloudShadow.prefix). It is a program key's feature (flags), so a switch is a
+     * lighting change: shader selection, the terrain's material readiness and its family programs follow it, and the
+     * terrain rebuilds behind its loading stage.
      */
-    static final class Antialiasing extends Attribute {
-        static final long TYPE = register("boardSpecularAntialiasing");
-
-        Antialiasing() { super(TYPE); }
-
-        @Override public Attribute copy() { return new Antialiasing(); }
-        @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }
-    }
-
-    /** Brings the marker of an environment with this lighting in line with the setting. */
     static void applyAntialiasing(Environment environment) {
-        if (!specularAntialiasing) { environment.remove(Antialiasing.TYPE); }
-        else if (!environment.has(Antialiasing.TYPE)) { environment.set(new Antialiasing()); }
+        var lighting = of(environment);
+        if (lighting != null) { lighting.antialiasing = specularAntialiasing; }
     }
 
     void set(BoardAtmosphere.Lighting lighting) {
@@ -104,6 +163,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
 
     /** The atlas, made with the sky visibility's volume when a program is built, before its setters bind textures. */
     Texture texture() {
+        if (original != null) { return original.texture(); }
         if (GpuSkyVisibility.STRENGTH > 0) { skyVisibility().texture(); }
         if (texture == null) {
             texture = GpuColorTexture.linear(pixels(GpuLightingEnvironment.ATLAS_SIZE, GpuLightingEnvironment.ATLAS_SIZE),
@@ -197,14 +257,21 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         }
     }
 
+    /** The lighting as it is now, features included; its atlas and sky volume stay this lighting's (freeze). */
     @Override public Attribute copy() {
         var copy = new GpuEnvironmentLighting(); copy.sky.set(sky); copy.horizon.set(horizon);
         copy.image = image; copy.imageGain = imageGain; copy.shadowStrength = shadowStrength;
-        // The board's volume, borrowed; without one the copy makes and disposes its own neutral volume.
         copy.skyVisibility = skyVisibility;
+        copy.original = original != null ? original : this;
+        copy.cloudShadow = cloudShadow; copy.ambientOcclusion = ambientOcclusion; copy.lavaLighting = lavaLighting;
+        copy.biomes = biomes; copy.antialiasing = antialiasing;
         return copy;
     }
-    @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }
+    @Override public int hashCode() { return 31 * super.hashCode() + flags(); }
+    @Override public int compareTo(Attribute other) {
+        if (type != other.type) { return Long.compare(type, other.type); }
+        return Integer.compare(flags(), ((GpuEnvironmentLighting) other).flags());
+    }
     @Override public void dispose() {
         if (texture != null) { texture.dispose(); texture = null; }
         if (neutralSky != null) { neutralSky.dispose(); neutralSky = null; }

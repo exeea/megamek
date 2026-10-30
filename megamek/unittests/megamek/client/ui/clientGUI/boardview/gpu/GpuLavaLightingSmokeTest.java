@@ -62,9 +62,12 @@ class GpuLavaLightingSmokeTest {
                     var object = new ModelInstance(model);
                     object.transform.setToTranslation(position);
                     var lights = new GpuLavaLighting(assets);
+                    // Local lights reach a draw through its environment's lighting; this one's sky is black.
+                    var lighting = new GpuEnvironmentLighting();
+                    lighting.lavaLighting = lights;
                     var environment = new Environment();
                     environment.set(ColorAttribute.createAmbientLight(.015f, .015f, .015f, 1));
-                    environment.set(lights);
+                    environment.set(lighting);
                     int[] unlit = draw(surface, batch, object, environment, camera);
                     GpuReviewFrame.save(new File(output, "object-no-spill.png"));
                     lights.update(scene);
@@ -83,10 +86,10 @@ class GpuLavaLightingSmokeTest {
                     lights.update(scene);
                     assertArrayEquals(lit, draw(surface, batch, object, environment, camera),
                           "The same source restores the same light");
-                    environment.remove(GpuLavaLighting.TYPE);
+                    lighting.lavaLighting = null;
                     assertArrayEquals(unlit, draw(surface, batch, object, environment, camera),
                           "An environment without lava resets uniforms");
-                    environment.set(lights);
+                    lighting.lavaLighting = lights;
                     var at = new Coords(3, 2);
                     // A mushroom near the receiving object's visible side, rather than at the edge of its falloff.
                     Vector3 root = position.cpy().add(20, -18, -12);
@@ -107,6 +110,7 @@ class GpuLavaLightingSmokeTest {
                     lights.update(bank(BoardLiquid.Kind.NONE, false));
                     assertArrayEquals(unlit, draw(surface, batch, object, environment, camera),
                           "Retiring props retires their lights");
+                    lighting.dispose();
                     surface.pixels().end();
                     terrain.update(scene);
                     terrain.animate(.5f, List.of());

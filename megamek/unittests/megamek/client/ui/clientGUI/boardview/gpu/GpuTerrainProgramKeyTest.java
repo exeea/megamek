@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * A board without biomes compiles its terrain programs without the biome stage; a board with them keeps it. The
- * presence is part of the terrain environment's mask, which DefaultShader.canRender and the family programs'
- * lighting configuration compare, so the two boards never share a program.
+ * presence is a feature of the terrain environment's lighting (GpuEnvironmentLighting.flags), which the programs'
+ * canRender and the family programs' lighting configuration compare, so the two boards never share a program.
  */
 class GpuTerrainProgramKeyTest {
     @Test
@@ -26,15 +26,18 @@ class GpuTerrainProgramKeyTest {
         assertTrue(GpuBiomeSurface.active(marsh));
 
         var environment = new Environment();
+        environment.set(new GpuEnvironmentLighting());
         var sample = new Renderable();
         sample.environment = environment;
         GpuBiomeSurface.mark(environment, GpuBiomeSurface.active(dry));
-        long dryMask = environment.getMask();
+        int dryFlags = GpuEnvironmentLighting.flags(environment);
         assertEquals("", GpuBiomeSurface.prefix(sample), "The dry board's programs leave the biome stage out");
         GpuBiomeSurface.mark(environment, GpuBiomeSurface.active(marsh));
-        assertNotEquals(dryMask, environment.getMask(), "so the marsh board's programs never draw it");
+        assertNotEquals(dryFlags, GpuEnvironmentLighting.flags(environment),
+              "so the marsh board's programs never draw it");
         assertEquals("#define biomeMaskFlag\n", GpuBiomeSurface.prefix(sample));
         GpuBiomeSurface.mark(environment, GpuBiomeSurface.active(dry));
-        assertEquals(dryMask, environment.getMask(), "A board that loses its biomes returns to the dry programs");
+        assertEquals(dryFlags, GpuEnvironmentLighting.flags(environment),
+              "A board that loses its biomes returns to the dry programs");
     }
 }

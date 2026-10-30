@@ -170,9 +170,8 @@ final class GpuEditorTerrainPreviews implements Disposable {
         atmosphere.configureClouds(terrain, board);
         // The board's lighting configuration, so the samples draw with its programs. Outside the board's opaque pass
         // its occlusion reads visibility 1 (GpuAmbientOcclusion.texture).
-        var occlusion = lender.environment().get(GpuAmbientOcclusion.TYPE);
-        if (occlusion == null) { terrain.environment().remove(GpuAmbientOcclusion.TYPE); }
-        else { terrain.environment().set(occlusion); }
+        GpuEnvironmentLighting.required(terrain.environment()).ambientOcclusion =
+              GpuEnvironmentLighting.ambientOcclusion(lender.environment());
     }
 
     /** The sample renderer goes before the board renderer whose assets it borrows. */

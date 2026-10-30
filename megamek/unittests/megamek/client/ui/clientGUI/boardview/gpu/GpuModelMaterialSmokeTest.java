@@ -137,8 +137,12 @@ class GpuModelMaterialSmokeTest {
                     shadowProjection.setTranslation(0, 0, 0);
                     depth.texture = clear;
                     var projection = new Matrix4().setToScaling(0, 0, 0).setTranslation(.5f, .5f, 0);
-                    environment.set(new GpuCloudShadow(cloud, projection));
+                    // Clouds reach a draw through its environment's lighting; this one's sky is black.
+                    var lighting = new GpuEnvironmentLighting();
+                    lighting.cloudShadow = new GpuCloudShadow(cloud, projection);
+                    environment.set(lighting);
                     int cloudy = red(draw(output, batch, object, camera, environment));
+                    lighting.dispose();
                     assertTrue(cloudy > shadowed + 15 && cloudy < lit - 20,
                           "Cloud transmission dims the direct highlight: " + lit + "/" + cloudy + "/" + shadowed);
                 }

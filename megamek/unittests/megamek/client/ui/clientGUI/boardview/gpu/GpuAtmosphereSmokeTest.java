@@ -319,7 +319,9 @@ class GpuAtmosphereSmokeTest {
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.renderShadows(units);
         atmosphere.prepareClouds(terrain, scene, delta);
-        if (cloudOverride != null) { terrain.environment().set(cloudOverride); }
+        if (cloudOverride != null) {
+            GpuEnvironmentLighting.required(terrain.environment()).cloudShadow = cloudOverride;
+        }
         ScreenUtils.clear(0, 0, 0, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, delta);
         terrain.render(camera.camera);
@@ -409,6 +411,7 @@ class GpuAtmosphereSmokeTest {
         draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
         byte[] daylightDepth = GpuFamilyAssemblyReview.shadowDepth(terrain);
         long mask = terrain.environment().getMask();
+        int flags = GpuEnvironmentLighting.flags(terrain.environment());
         int programs = ShaderProgram.getNumManagedShaderPrograms();
         int families = terrain.familyPrograms().programs();
         var conditions = new PlanetaryConditions();
@@ -421,6 +424,7 @@ class GpuAtmosphereSmokeTest {
             assertZeroDirectionalLight(terrain);
             assertSame(shadow, terrain.environment().shadowMap, "Dark presets retain the same shadow sampler binding");
             assertEquals(mask, terrain.environment().getMask(), "A preset does not change the surface shader mask");
+            assertEquals(flags, GpuEnvironmentLighting.flags(terrain.environment()), "nor the lighting's features");
             assertFalse(terrain.busy(), "A preset must not restart terrain material preparation");
             assertEquals(programs, ShaderProgram.getNumManagedShaderPrograms(), "A preset links no new shader program");
             assertEquals(families, terrain.familyPrograms().programs(), "A preset retains its compiled families");
@@ -516,7 +520,7 @@ class GpuAtmosphereSmokeTest {
             if (screenDirection == null) { screenDirection = screen; }
             assertTrue(screenDirection.epsilonEquals(screen, 0.00001f));
             assertSame(originalShadow, terrain.environment().shadowMap, "Fixed lighting reuses the native shadow map");
-            var cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+            var cloud = GpuEnvironmentLighting.cloudShadow(terrain.environment());
             Vector3 point = BoardGeometry.center(new Coords(2, 2), 0);
             Vector3 alongLight = point.cpy().mulAdd(lighting.direction(), 100);
             Vector3 cloudA = point.cpy().mul(cloud.projection), cloudB = alongLight.cpy().mul(cloud.projection);
@@ -608,7 +612,7 @@ class GpuAtmosphereSmokeTest {
             assertEquals(1, lights.lights.size, "Presets keep a stable directional-light binding");
             if (!moon) { assertZeroDirectionalLight(terrain); }
             assertSame(originalShadow, terrain.environment().shadowMap);
-            var cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+            var cloud = GpuEnvironmentLighting.cloudShadow(terrain.environment());
             assertNotNull(cloud, "Cloud sampler ownership remains stable without a direct light");
             assertEquals(moon, cloud.enabled);
             if (moon) { assertSame(originalShadow, terrain.environment().shadowMap, "Reenabling moonlight reuses its resources"); }
@@ -860,26 +864,28 @@ class GpuAtmosphereSmokeTest {
     /** First clear/cloudy/clear draws must reuse surface programs, before other cloud checks can warm them. */
     private void checkCloudVariantReuse(GpuAtmosphere atmosphere, GpuTerrain terrain, ModelBatch batch,
           ModelInstance tower, BoardCamera camera, BoardScene scene, BoardAtmosphere.Settings clear) {
-        var cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+        var cloud = GpuEnvironmentLighting.cloudShadow(terrain.environment());
         assertNotNull(cloud);
         assertFalse(cloud.enabled);
-        assertFalse(((GpuCloudShadow) cloud.copy()).enabled, "Attribute copies preserve disabled transmission");
         long mask = terrain.environment().getMask();
+        int flags = GpuEnvironmentLighting.flags(terrain.environment());
         int programs = ShaderProgram.getNumManagedShaderPrograms();
         Vector3 ground = BoardGeometry.center(new Coords(1, 3), 0);
         Color clearGround = sample(camera, ground);
         var covered = new BoardAtmosphere.Settings(clear.hour(), 1, clear.fog(), clear.groundLayerHeight(),
               clear.haze(), clear.exposure());
         draw(atmosphere, terrain, batch, List.of(tower), camera, scene, covered, null, 0);
-        assertSame(cloud, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE));
+        assertSame(cloud, GpuEnvironmentLighting.cloudShadow(terrain.environment()));
         assertTrue(cloud.enabled);
         assertEquals(mask, terrain.environment().getMask(), "Cloud cover cannot change the surface shader mask");
+        assertEquals(flags, GpuEnvironmentLighting.flags(terrain.environment()), "nor the lighting's features");
         assertEquals(programs, ShaderProgram.getNumManagedShaderPrograms(),
               "First cloud cover must reuse the programs prepared by the clear frame");
         draw(atmosphere, terrain, batch, List.of(tower), camera, scene, clear, null, 0);
-        assertSame(cloud, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE));
+        assertSame(cloud, GpuEnvironmentLighting.cloudShadow(terrain.environment()));
         assertFalse(cloud.enabled);
         assertEquals(mask, terrain.environment().getMask());
+        assertEquals(flags, GpuEnvironmentLighting.flags(terrain.environment()));
         assertEquals(programs, ShaderProgram.getNumManagedShaderPrograms(), "Clearing clouds reuses those programs");
         assertEquals(clearGround, sample(camera, ground), "Disabled transmission restores the clear surface exactly");
     }
@@ -904,7 +910,7 @@ class GpuAtmosphereSmokeTest {
         camera.fit(scene);
         draw(atmosphere, terrain, batch, tower, camera, scene, broken);
         assertNotNull(atmosphere.depthTexture(), "Cloud shafts must stop at captured opaque depth");
-        GpuCloudShadow cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+        GpuCloudShadow cloud = GpuEnvironmentLighting.cloudShadow(terrain.environment());
         assertNotNull(cloud, "Terrain and units must share the cloud transmission map");
         assertTrue(cloud.enabled);
         var texture = cloud.texture;
@@ -921,7 +927,7 @@ class GpuAtmosphereSmokeTest {
             assertTrue(difference(new Color(sky[y - 1]), new Color(sky[y])) < 0.025f,
                   "The backdrop must have no cloud texture or hard color transitions");
         }
-        assertSame(texture, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE).texture,
+        assertSame(texture, GpuEnvironmentLighting.cloudShadow(terrain.environment()).texture,
               "Animation must reuse the cloud atlas");
         camera.setIsometric(false);
         camera.fit(scene);
@@ -968,7 +974,7 @@ class GpuAtmosphereSmokeTest {
         draw(atmosphere, terrain, batch, tower, camera, scene, BoardAtmosphere.DEFAULTS);
         GpuBoardTestUi.capture(new File(output, "clouds-clear.png"));
         Vector3 ground = BoardGeometry.center(new Coords(1, 3), 0);
-        assertSame(cloud, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE));
+        assertSame(cloud, GpuEnvironmentLighting.cloudShadow(terrain.environment()));
         assertFalse(cloud.enabled, "Clear weather keeps the sampler but bypasses its stale cloudy texels");
         draw(atmosphere, terrain, batch, tower, camera, scene,
               new BoardAtmosphere.Settings(13, 0, 0, 2.5f, 0, 0, BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM));
@@ -979,7 +985,7 @@ class GpuAtmosphereSmokeTest {
         assertEquals(clearVacuum, sample(camera, ground),
               "Vacuum must suppress clouds, haze and weather without changing the same airless surface light");
         assertTrue(atmosphere.lighting().sky().b < 0.01f, "An airless world has no blue atmospheric sky");
-        assertSame(cloud, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE));
+        assertSame(cloud, GpuEnvironmentLighting.cloudShadow(terrain.environment()));
         assertFalse(cloud.enabled, "Vacuum keeps cloud transmission disabled");
         assertSame(depth, atmosphere.depthTexture());
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -1177,11 +1183,11 @@ class GpuAtmosphereSmokeTest {
                       isometric ? "Orbit" : "Top", settings.clouds(), times.get(15), times.get(28)));
                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 if (settings.clouds() > 0) {
-                    var atlas = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+                    var atlas = GpuEnvironmentLighting.cloudShadow(terrain.environment());
                     assertEquals(192, atlas.texture.getWidth(), "Cloud shadows always use the Low budget");
                     var previous = atlas.texture;
                     draw(atmosphere, terrain, batch, units, camera, scene, settings, null, 0);
-                    assertSame(previous, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE).texture,
+                    assertSame(previous, GpuEnvironmentLighting.cloudShadow(terrain.environment()).texture,
                           "Animation and camera changes reuse the fixed atlas");
                 }
                 if (isometric && settings.clouds() == broken.clouds()) {

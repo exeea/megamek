@@ -154,9 +154,9 @@ class GpuVegetationLightingSmokeTest {
                                 fixture.lights.setFungus(List.of(emitter));
                                 fixture.lights.update(plain);
                                 assertArrayEquals(lit, fixture.radiance(camera, stand, level), name + ": restored source");
-                                fixture.environment.remove(GpuLavaLighting.TYPE);
+                                fixture.lighting.lavaLighting = null;
                                 assertArrayEquals(unlit, fixture.radiance(camera, stand, level), name + ": no light field");
-                                fixture.environment.set(fixture.lights);
+                                fixture.lighting.lavaLighting = fixture.lights;
                             }
                         }
                     }
@@ -243,6 +243,8 @@ class GpuVegetationLightingSmokeTest {
         private final GpuTerrain terrain = new GpuTerrain();
         private final GpuAssets assets = new GpuAssets();
         private final GpuLavaLighting lights = new GpuLavaLighting(assets);
+        /** Local lights reach the draws through the environment's lighting; its sky is black. */
+        private final GpuEnvironmentLighting lighting = new GpuEnvironmentLighting();
         private final Environment environment = new Environment();
         private final GpuSceneTestOutput output = new GpuSceneTestOutput();
         private final ModelBatch batch;
@@ -261,7 +263,8 @@ class GpuVegetationLightingSmokeTest {
             });
             environment.set(ColorAttribute.createAmbientLight(.02f, .02f, .02f, 1));
             environment.add(new DirectionalLight().set(.04f, .04f, .04f, -.3f, .4f, -1));
-            environment.set(lights);
+            lighting.lavaLighting = lights;
+            environment.set(lighting);
         }
 
         void draw(BoardCamera camera, GpuTreeInstances.Stand stand, int level) {
@@ -299,7 +302,9 @@ class GpuVegetationLightingSmokeTest {
         }
 
         @Override
-        public void close() { instances.dispose(); terrain.dispose(); assets.dispose(); output.close(); }
+        public void close() {
+            instances.dispose(); lighting.dispose(); terrain.dispose(); assets.dispose(); output.close();
+        }
     }
 
     private static Lwjgl3ApplicationConfiguration configuration() {

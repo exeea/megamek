@@ -38,12 +38,15 @@ final class GpuUnitShader extends DefaultShader {
     private final int damageOpacity = register("u_damageOpacity");
     private final int damageTransform = register("u_damageTransform");
     private final boolean displayOutput;
+    /** The features of the environment lighting this program was built for (GpuCloudShadow.prefix). */
+    private final int environmentFlags;
 
     private GpuUnitShader(Renderable renderable, Config config, boolean displayOutput, boolean encodeOutput) {
         super(renderable, config, GpuGlsl.compile("GPU unit material", GpuCloudShadow.prefix(renderable, config)
                     + "#define sceneUnlitFlag\n" + (encodeOutput ? "#define displayOutputFlag\n" : ""),
               config.vertexShader, displayOutput ? config.fragmentShader : GpuSceneRadiance.fragment(config.fragmentShader)));
         this.displayOutput = displayOutput;
+        environmentFlags = GpuEnvironmentLighting.flags(renderable.environment);
         registerMaterialColors(this, true);
         GpuCloudShadow.register(this);
         GpuEnvironmentLighting.register(this);
@@ -78,6 +81,12 @@ final class GpuUnitShader extends DefaultShader {
                 target.set(id, target.camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
             }
         });
+    }
+
+    /** DefaultShader.canRender compares the environment's mask, which leaves out its lighting's features. */
+    @Override
+    public boolean canRender(Renderable renderable) {
+        return super.canRender(renderable) && GpuEnvironmentLighting.flags(renderable.environment) == environmentFlags;
     }
 
     static DefaultShaderProvider provider() {

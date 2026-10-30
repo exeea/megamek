@@ -141,7 +141,8 @@ class GpuLightingConsistencySmokeTest {
             var environment = new Environment();
             var direction = new DirectionalLight();
             environment.add(direction);
-            environment.set(environmentLight, spill);
+            environmentLight.lavaLighting = spill;
+            environment.set(environmentLight);
             var model = new ModelBuilder().createBox(80, 80, 4,
                   new Material(new GpuLinearColors(), ColorAttribute.createDiffuse(.18f, .24f, .30f, 1),
                         ColorAttribute.createEmissive(0, 0, 0, 1), new BlendingAttribute(1),

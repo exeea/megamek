@@ -173,6 +173,7 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
             if (renderable.environment != null) {
                 sample.environment = new Environment();
                 sample.environment.set(renderable.environment);
+                GpuEnvironmentLighting.freeze(sample.environment);
                 sample.environment.shadowMap = renderable.environment.shadowMap;
             }
             sample.bones = renderable.bones == null ? null : renderable.bones.clone();

@@ -299,7 +299,7 @@ final class GpuTerrain implements Disposable {
                   + (ordinaryFamily != -1 ? " ordinary-" + ordinaryFamily : "")
                   + (renderable.material.has(GpuMagmaShader.TYPE) ? " volcanic" : "")
                   + (GpuIceShader.mode(renderable.material) != 0 ? " ice-" + GpuIceShader.mode(renderable.material) : "")
-                  + (renderable.environment != null && renderable.environment.has(GpuCloudShadow.TYPE) ? " cloud" : "")
+                  + (GpuEnvironmentLighting.cloudShadow(renderable.environment) != null ? " cloud" : "")
                   + (renderable.environment != null && renderable.environment.shadowMap != null ? " shadow" : "")
                   + (GpuTreeInstances.instanced(renderable) ? " instanced" : "")
                   + GpuFamilyPrograms.name(renderable.material, Sculpt.TYPE);
@@ -415,6 +415,7 @@ final class GpuTerrain implements Disposable {
                 private long globalsPass = -1;
                 private final long instances = instanceMask(renderable);
                 private final int iceMode = GpuIceShader.mode(renderable.material);
+                private final int environmentFlags = GpuEnvironmentLighting.flags(renderable.environment);
                 private final VertexAttributes createdLayout = renderable.meshPart.mesh.getVertexAttributes();
                 private final long vertexLayout = GpuSurfaceScars.receiverLayout(createdLayout);
                 private final int textureCoordinates = createdLayout.getTextureCoordinates();
@@ -434,7 +435,8 @@ final class GpuTerrain implements Disposable {
 
                 /**
                  * DefaultShader.canRender without a scar patch's marking and page UV: a receiver's program draws its
-                 * patches (GpuSurfaceScars), and a program first made for a patch draws its receiver.
+                 * patches (GpuSurfaceScars), and a program first made for a patch draws its receiver. The environment's
+                 * mask leaves out its lighting's features (GpuEnvironmentLighting.flags): they are compared here.
                  */
                 private boolean drawsLayout(Renderable other) {
                     VertexAttributes vertices = other.meshPart.mesh.getVertexAttributes();
@@ -445,7 +447,8 @@ final class GpuTerrain implements Disposable {
                           && vertices.getTextureCoordinates() == textureCoordinates
                           && ((mask ^ attributesMask) & ~GpuSurfaceScars.Marking.TYPE) == 0
                           && GpuSurfaceScars.receiverLayout(vertices) == vertexLayout
-                          && (other.environment != null) == lighting;
+                          && (other.environment != null) == lighting
+                          && GpuEnvironmentLighting.flags(other.environment) == environmentFlags;
                 }
 
                 @Override
@@ -952,11 +955,13 @@ final class GpuTerrain implements Disposable {
 
     /**
      * Whether the depth pre-pass draws a category: those of depthPrepass, and all relief while ambient occlusion reads
-     * the pre-pass depth (GpuAmbientOcclusion in the environment, so its switch prepares the twins as a lighting change).
+     * the pre-pass depth (GpuAmbientOcclusion in the environment's lighting, so its switch prepares the twins as a
+     * lighting change).
      */
     private boolean prepasses(Prepass category) {
         return category != null && (depthPrepass.contains(category)
-              || (category == Prepass.RELIEF || category == Prepass.CLIFFS) && environment.has(GpuAmbientOcclusion.TYPE));
+              || (category == Prepass.RELIEF || category == Prepass.CLIFFS)
+                    && environmentLighting.ambientOcclusion != null);
     }
 
     /**
@@ -1218,7 +1223,7 @@ final class GpuTerrain implements Disposable {
     static int prepassDepthFunction = GL20.GL_EQUAL;
     /**
      * Sculpted ground leaves out the biome stage on a board without biomes that the editor does not change
-     * (GpuBiomeSurface.Present). Native checks turn it off to compare frames of the complete programs.
+     * (GpuEnvironmentLighting.biomes). Native checks turn it off to compare frames of the complete programs.
      */
     static boolean pruning = true;
     /**
@@ -1253,6 +1258,7 @@ final class GpuTerrain implements Disposable {
      */
     private int terrainPrograms, terrainProgramsLinked;
     private long terrainMaterialEnvironment = -1;
+    private int terrainMaterialFlags;
     private boolean terrainMaterialShadows;
 
     /** Tiny shared, mipmapped field: mask and sky variation; allocated once, never updated per frame. */
@@ -1384,7 +1390,7 @@ final class GpuTerrain implements Disposable {
         familyPrograms = new GpuFamilyPrograms(!borrowedAssets, Sculpt.TYPE, GpuTerrain::familyVariant);
         assets = borrowedAssets ? borrowed : new GpuAssets();
         lavaLighting = new GpuLavaLighting(assets);
-        environment.set(lavaLighting);
+        environmentLighting.lavaLighting = lavaLighting;
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
     }
 
@@ -2153,6 +2159,7 @@ final class GpuTerrain implements Disposable {
      */
     private boolean sameMaterialConfiguration() {
         return !kindsPending && terrainMaterialEnvironment == environment.getMask()
+              && terrainMaterialFlags == environmentLighting.flags()
               && terrainMaterialShadows == (environment.shadowMap != null);
     }
 
@@ -3246,6 +3253,7 @@ final class GpuTerrain implements Disposable {
         }
         if (terrainMaterialPreparation == null) { terrainMaterialPreparation = new GpuGlsl.Preparation(); }
         terrainMaterialEnvironment = environment.getMask();
+        terrainMaterialFlags = environmentLighting.flags();
         terrainMaterialShadows = environment.shadowMap != null;
         terrainMaterialsReady = true;
         int programs = 0, linked = 0;
@@ -7514,7 +7522,7 @@ final class GpuTerrain implements Disposable {
      */
     private boolean renderPrepass(Camera camera) {
         prepassDraws = 0;
-        if (depthPrepass.isEmpty() && !environment.has(GpuAmbientOcclusion.TYPE)) { return false; }
+        if (depthPrepass.isEmpty() && environmentLighting.ambientOcclusion == null) { return false; }
         for (Renderable part : batch.gathered()) {
             Shader twin = twin(part.shader, part.material);
             if (twin != null) {

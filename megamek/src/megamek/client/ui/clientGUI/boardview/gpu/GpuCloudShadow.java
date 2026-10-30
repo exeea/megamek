@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
@@ -10,9 +9,11 @@ import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.math.Matrix4;
 
-/** Borrowed cloud transmission, shared by every lit surface. GpuClouds owns the texture and updates the projection. */
-final class GpuCloudShadow extends Attribute {
-    static final long TYPE = register("boardCloudShadow");
+/**
+ * Borrowed cloud transmission, shared by every lit surface through its environment's lighting
+ * (GpuEnvironmentLighting.cloudShadow). GpuClouds owns the texture and updates the projection.
+ */
+final class GpuCloudShadow {
     private static final String MAIN = "void main() {";
     final Texture texture;
     final Matrix4 projection;
@@ -21,12 +22,12 @@ final class GpuCloudShadow extends Attribute {
     boolean reflection;
 
     GpuCloudShadow(Texture texture, Matrix4 projection) {
-        super(TYPE);
         this.texture = texture;
         this.projection = projection;
     }
 
     static String prefix(Renderable renderable, DefaultShader.Config config) {
+        var lighting = GpuEnvironmentLighting.of(renderable.environment);
         var diffuse = renderable.material.get(TextureAttribute.class, TextureAttribute.Diffuse);
         return DefaultShader.createPrefix(renderable, config)
               + (diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture) ? "#define linearTextureFlag\n" : "")
@@ -35,11 +36,9 @@ final class GpuCloudShadow extends Attribute {
               + (renderable.material.has(GpuModelMaterial.TYPE) && renderable.material.has(TextureAttribute.Bump)
                     ? "#define modelReliefFlag\n" : "")
               + (RigidGlb.colourSlotted(renderable.meshPart.mesh.getVertexAttributes()) ? "#define colourSlotsFlag\n" : "")
-              + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
-                    ? "#define environmentLightingFlag\n" : "")
-              + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "")
-              + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.Antialiasing.TYPE)
-                    ? "#define specularAntialiasingFlag\n" : "")
+              + (lighting != null ? "#define environmentLightingFlag\n" : "")
+              + (lighting != null && lighting.cloudShadow != null ? "#define cloudShadowFlag\n" : "")
+              + (lighting != null && lighting.antialiasing ? "#define specularAntialiasingFlag\n" : "")
               + GpuAmbientOcclusion.prefix(renderable) + GpuSkyVisibility.prefix(renderable);
     }
 
@@ -47,28 +46,28 @@ final class GpuCloudShadow extends Attribute {
         shader.register("u_cloudEnabled", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                GpuCloudShadow cloud = GpuEnvironmentLighting.cloudShadow(attributes);
                 target.set(id, cloud != null && cloud.enabled ? 1f : 0f);
             }
         });
         shader.register("u_cloudReflection", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                GpuCloudShadow cloud = GpuEnvironmentLighting.cloudShadow(attributes);
                 target.set(id, cloud != null && cloud.reflection ? 1f : 0f);
             }
         });
         shader.register("u_cloudShadow", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                GpuCloudShadow cloud = GpuEnvironmentLighting.cloudShadow(attributes);
                 if (cloud != null) { target.set(id, cloud.texture); }
             }
         });
         shader.register("u_cloudProjection", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                GpuCloudShadow cloud = GpuEnvironmentLighting.cloudShadow(attributes);
                 if (cloud != null) { target.set(id, cloud.projection); }
             }
         });
@@ -93,19 +92,5 @@ final class GpuCloudShadow extends Attribute {
 
     private static String insert(String source, String anchor, String replacement) {
         return GpuShaderSource.replaceOnce(source, anchor, replacement, "cloud");
-    }
-
-    @Override
-    public Attribute copy() {
-        var copy = new GpuCloudShadow(texture, projection);
-        copy.enabled = enabled;
-        copy.reflection = reflection;
-        return copy;
-    }
-
-    @Override
-    public int compareTo(Attribute other) {
-        if (type != other.type) { return Long.compare(type, other.type); }
-        return Integer.compare(texture.getTextureObjectHandle(), ((GpuCloudShadow) other).texture.getTextureObjectHandle());
     }
 }

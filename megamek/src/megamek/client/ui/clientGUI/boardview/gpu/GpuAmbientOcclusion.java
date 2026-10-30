@@ -9,7 +9,6 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Renderable;
@@ -30,17 +29,16 @@ import com.badlogic.gdx.utils.Disposable;
  * Ground-truth ambient occlusion of the opaque scene (ambient-occlusion-horizon.frag), which the lit surfaces apply to
  * their ambient term (ambient-occlusion.glsl). It runs between the depth pre-pass and the opaque colour draws, in the
  * colour stage of {@link GpuTerrain#render(Camera, Runnable, Runnable)}: half-resolution horizons from the pre-pass
- * depth with contact shadows toward the sun (CONTACT_METRES), then two depth-aware blur passes. While this attribute is
- * in the terrain's environment the pre-pass also draws
- * the relief, so the occlusion sees the ground, the trees and the building shells the pre-pass draws (GpuTerrain.twin);
- * other props, and units, neither cast nor receive it.
+ * depth with contact shadows toward the sun (CONTACT_METRES), then two depth-aware blur passes. While the terrain's
+ * lighting carries it (GpuEnvironmentLighting.ambientOcclusion) the pre-pass also draws the relief, so the occlusion
+ * sees the ground, the trees and the building shells the pre-pass draws (GpuTerrain.twin); other props, and units,
+ * neither cast nor receive it.
  * Its presence compiles ambientOcclusionFlag into the lit programs (GpuCloudShadow.prefix), so a switch is a lighting
  * change behind the terrain's loading stage, as specular anti-aliasing is. The occlusion is current from {@link #render}
  * to {@link #end}; other draws read visibility 1. Its targets follow the scene depth's size, so the window and the
- * render resolution. Owns its targets, programs and screen quad; one instance per view, which its copies share.
+ * render resolution. Owns its targets, programs and screen quad; one instance per view.
  */
-final class GpuAmbientOcclusion extends Attribute implements Disposable {
-    static final long TYPE = register("boardAmbientOcclusion");
+final class GpuAmbientOcclusion implements Disposable {
     /**
      * The world radius in metres. The board's sky visibility (GpuSkyVisibility) already hides the sky behind relief a
      * cell or more away, the feet of cliffs and canyon floors, and both darken the same sky light: this keeps to the
@@ -76,31 +74,30 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     private float rangeOrigin;
     private int revision;
 
-    GpuAmbientOcclusion() { super(TYPE); }
-
     /**
-     * Puts this attribute in the environment while {@code enabled}, else removes it and its targets; called before the
-     * frame's terrain is submitted, as material readiness follows the environment.
+     * Gives the environment's lighting this occlusion while {@code enabled}, else takes it away with its targets;
+     * called before the frame's terrain is submitted, as material readiness follows the environment.
      */
     void configure(Environment environment, boolean enabled) {
+        var lighting = GpuEnvironmentLighting.required(environment);
         if (!enabled) {
-            environment.remove(TYPE);
+            lighting.ambientOcclusion = null;
             disposeTargets();
             return;
         }
         if (horizon == null) { createPrograms(); }
-        if (environment.get(TYPE) != this) { environment.set(this); }
+        lighting.ambientOcclusion = this;
     }
 
     /**
      * This frame's occlusion from the scene depth {@code depth}, which the depth pre-pass has just drawn. It runs inside
      * the terrain's opaque batch, through the render context that tracks the bound textures and the state it changes,
-     * and restores the scene target and viewport. Nothing without this attribute in the terrain's environment or without
-     * a pre-pass (the Tactical View, the Classic columns).
+     * and restores the scene target and viewport. Nothing unless the terrain's lighting carries it, or without a
+     * pre-pass (the Tactical View, the Classic columns).
      */
     void render(Camera camera, GpuTerrain terrain, Texture depth) {
         current = false;
-        if (terrain.environment().get(TYPE) != this || !terrain.prepassed()) { return; }
+        if (GpuEnvironmentLighting.ambientOcclusion(terrain.environment()) != this || !terrain.prepassed()) { return; }
         RenderContext context = terrain.renderContext();
         int width = (depth.getWidth() + 1) / 2, height = (depth.getHeight() + 1) / 2;
         if (horizons == null || horizons.getWidth() != width || horizons.getHeight() != height) {
@@ -181,14 +178,14 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     private Texture texture() { return current ? horizons.getColorBufferTexture() : fallback; }
 
     /**
-     * The define that compiles the occlusion into a lit program (ambient-occlusion.glsl) while this attribute is in its
-     * environment. Its sampler would take a 17th texture unit, which macOS does not give a stage
+     * The define that compiles the occlusion into a lit program (ambient-occlusion.glsl) while its environment's
+     * lighting carries it. Its sampler would take a 17th texture unit, which macOS does not give a stage
      * (GpuSamplerBudgetSmokeTest), from sculpted ground with volcanic crust beside the board's sky visibility
      * (GpuSkyVisibility) or ice: that ground draws without it, keeping the board-wide sky occlusion, which a crust patch
      * in deep shade would visibly lack.
      */
     static String prefix(Renderable renderable) {
-        return renderable.environment != null && renderable.environment.has(TYPE)
+        return GpuEnvironmentLighting.ambientOcclusion(renderable.environment) != null
               && !(renderable.material.has(GpuMagmaShader.TYPE)
                     && (GpuSkyVisibility.STRENGTH > 0 || GpuIceShader.mode(renderable.material) != 0))
               ? "#define ambientOcclusionFlag\n" : "";
@@ -199,7 +196,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
         shader.register("u_ambientOcclusion", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                var occlusion = attributes.get(GpuAmbientOcclusion.class, TYPE);
+                var occlusion = GpuEnvironmentLighting.ambientOcclusion(attributes);
                 // Touched every draw: material textures can evict it from the binder's slots.
                 if (occlusion != null) { target.set(id, occlusion.texture()); }
             }
@@ -210,7 +207,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
 
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                var occlusion = attributes.get(GpuAmbientOcclusion.class, TYPE);
+                var occlusion = GpuEnvironmentLighting.ambientOcclusion(attributes);
                 if (occlusion == null || occlusion == uploaded && occlusion.revision == uploadedRevision) { return; }
                 uploaded = occlusion;
                 uploadedRevision = occlusion.revision;
@@ -224,7 +221,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
 
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                var occlusion = attributes.get(GpuAmbientOcclusion.class, TYPE);
+                var occlusion = GpuEnvironmentLighting.ambientOcclusion(attributes);
                 if (occlusion == null || occlusion == uploaded && occlusion.revision == uploadedRevision) { return; }
                 uploaded = occlusion;
                 uploadedRevision = occlusion.revision;
@@ -276,11 +273,4 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
         horizon = null;
         blur = null;
     }
-
-    /** One instance per view: a copy is the same occlusion. */
-    @Override
-    public Attribute copy() { return this; }
-
-    @Override
-    public int compareTo(Attribute other) { return Long.compare(type, other.type); }
 }

@@ -148,14 +148,15 @@ class GpuFungusSmokeTest {
         } finally { pixels.dispose(); }
     }
 
-    /** Toggle just the shared spill-light attribute: emissive meshes, mist, camera and time stay identical. */
+    /** Toggle just the shared spill light: emissive meshes, mist, camera and time stay identical. */
     private static void verifyGroundSpill(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
           BoardScene scene, File output) {
-        var lights = terrain.environment().get(GpuLavaLighting.class, GpuLavaLighting.TYPE);
+        var lighting = GpuEnvironmentLighting.required(terrain.environment());
+        var lights = lighting.lavaLighting;
         Pixmap lit = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         Pixmap unlit = null;
         try {
-            terrain.environment().remove(GpuLavaLighting.TYPE);
+            lighting.lavaLighting = null;
             frame.render(terrain, camera, scene);
             GpuReviewFrame.save(new File(output, "fungus-night-without-spill.png"));
             unlit = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -165,7 +166,7 @@ class GpuFungusSmokeTest {
             }
             assertTrue(brighter > 300, "Fungal light must illuminate surrounding terrain, not only its own mesh");
         } finally {
-            terrain.environment().set(lights);
+            lighting.lavaLighting = lights;
             lit.dispose();
             if (unlit != null) { unlit.dispose(); }
         }

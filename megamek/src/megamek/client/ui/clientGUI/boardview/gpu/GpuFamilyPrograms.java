@@ -137,6 +137,7 @@ final class GpuFamilyPrograms {
     /** A request or a reset since the last search for the next program. */
     private boolean waiting;
     private long environmentMask = -1;
+    private int environmentFlags;
     private boolean shadows;
 
     /**
@@ -173,10 +174,13 @@ final class GpuFamilyPrograms {
      * ones the provider kept from an earlier visit. Returns whether the configuration changed.
      */
     boolean configure(Environment environment) {
-        if (!enabled || environment.getMask() == environmentMask && (environment.shadowMap != null) == shadows) {
+        if (!enabled || environment.getMask() == environmentMask
+              && GpuEnvironmentLighting.flags(environment) == environmentFlags
+              && (environment.shadowMap != null) == shadows) {
             return false;
         }
         environmentMask = environment.getMask();
+        environmentFlags = GpuEnvironmentLighting.flags(environment);
         shadows = environment.shadowMap != null;
         for (Variant variant : variants.values()) {
             variant.mark(false);
@@ -237,7 +241,7 @@ final class GpuFamilyPrograms {
         return changed;
     }
 
-    private List<Object> configuration() { return List.of(environmentMask, shadows); }
+    private List<Object> configuration() { return List.of(environmentMask, environmentFlags, shadows); }
 
     /**
      * The most-drawn variant without a program that the capacity allows (a program the provider already holds costs
@@ -253,7 +257,7 @@ final class GpuFamilyPrograms {
         candidates.sort(Comparator.comparingInt(Variant::weight).reversed()
               .thenComparing(variant -> variant.key.toString()));
         for (Variant variant : candidates) {
-            List<Object> program = List.of(variant.key, environmentMask, shadows);
+            List<Object> program = List.of(variant.key, environmentMask, environmentFlags, shadows);
             Material live = variant.live();
             if (live == null || !built.contains(program) && room() <= 0) { continue; }
             built.add(program);
@@ -263,6 +267,7 @@ final class GpuFamilyPrograms {
             // The configuration it compiles for, even if the terrain's changes before the link finishes.
             variant.sample.environment = new Environment();
             variant.sample.environment.set(environment);
+            GpuEnvironmentLighting.freeze(variant.sample.environment);
             variant.sample.environment.shadowMap = environment.shadowMap;
             variant.sample.meshPart.set("terrain-family-warmup", new Mesh(true, 0, 0, variant.key.attributes()), 0, 0,
                   GL20.GL_TRIANGLES);
@@ -280,14 +285,15 @@ final class GpuFamilyPrograms {
         int free = 0, others = 0;
         for (Variant variant : variants.values()) {
             if (variant.ready || variant.failed || compiling.contains(variant) || variant.live() == null) { continue; }
-            if (built.contains(List.of(variant.key, environmentMask, shadows))) { free++; } else { others++; }
+            if (built.contains(List.of(variant.key, environmentMask, environmentFlags, shadows))) { free++; }
+            else { others++; }
         }
         return compiling.size() + free + Math.min(others, Math.max(0, room()));
     }
 
     /** Programs this configuration may still build: its own capacity, within twice the capacity over all of them. */
     private int room() {
-        long taken = built.stream().filter(program -> program.subList(1, 3).equals(configuration())).count();
+        long taken = built.stream().filter(program -> program.subList(1, 4).equals(configuration())).count();
         return (int) Math.min(capacity - taken, 2L * capacity - built.size());
     }
 

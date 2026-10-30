@@ -57,14 +57,14 @@ final class GpuEditorModelPreviews implements Disposable {
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
     private final List<Renderable> warmup = new ArrayList<>();
     private GpuGlsl.Preparation links;
-    private record Programs(GpuTerrain board, long lighting) { }
+    private record Programs(GpuTerrain board, long lighting, int features) { }
     /** The requested program set is ready once its retained warmup samples are empty. */
     private Programs programs;
 
     /** Asset cards use the imported-model layouts already found by the board's palette preparation. */
     boolean prepare(GpuTerrain board) {
         Environment light = lighting();
-        Programs requested = new Programs(board, light.getMask());
+        Programs requested = new Programs(board, light.getMask(), GpuEnvironmentLighting.flags(light));
         if (requested.equals(programs) && warmup.isEmpty()) { return true; }
         if (links == null) { links = new GpuGlsl.Preparation(); }
         if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }

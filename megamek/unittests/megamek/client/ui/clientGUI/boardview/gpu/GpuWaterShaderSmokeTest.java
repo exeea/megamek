@@ -209,7 +209,7 @@ class GpuWaterShaderSmokeTest {
         try (var output = new SceneOutput()) {
             configureParity(terrain);
             terrain.setWind(BoardAtmosphere.Effects.NONE);
-            terrain.environment().set(cloud);
+            GpuEnvironmentLighting.required(terrain.environment()).cloudShadow = cloud;
             String source = GpuShaderSource.read("water-lighting.glsl");
             String point = ": pointReflectance(normal, light, view, roughness, vec3(.02037));";
             assertEquals(1, source.split(java.util.regex.Pattern.quote(point), -1).length - 1);
@@ -448,7 +448,7 @@ class GpuWaterShaderSmokeTest {
             var settings = new BoardAtmosphere.Settings(13, .65f, 0, 2.5f, 0, 0);
             atmosphere.configure(settings);
             atmosphere.prepareClouds(terrain, scene, 0);
-            var cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+            var cloud = GpuEnvironmentLighting.cloudShadow(terrain.environment());
             assertTrue(cloud.enabled && cloud.reflection);
             Field owner = GpuAtmosphere.class.getDeclaredField("clouds");
             owner.setAccessible(true);
@@ -482,13 +482,12 @@ class GpuWaterShaderSmokeTest {
                   BoardAtmosphere.Effects.NONE, settings.pressure(), settings.temperature(), false);
             atmosphere.configure(night);
             atmosphere.prepareClouds(terrain, scene, 0);
-            assertSame(cloud, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE));
+            assertSame(cloud, GpuEnvironmentLighting.cloudShadow(terrain.environment()));
             assertFalse(cloud.enabled, "No moon casts no cloud shadow");
             assertTrue(cloud.reflection, "The moonless cloud layer remains available to sky reflection");
             assertEquals(0, cloud.projection.val[com.badlogic.gdx.math.Matrix4.M02],
                   "Moonless preparation actually replaces the old directional atlas projection");
             assertEquals(0, cloud.projection.val[com.badlogic.gdx.math.Matrix4.M12]);
-            assertTrue(((GpuCloudShadow) cloud.copy()).reflection);
         } finally { atmosphere.dispose(); }
     }
 

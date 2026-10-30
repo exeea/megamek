@@ -26,8 +26,7 @@ import com.badlogic.gdx.utils.Disposable;
  * A volume over the board from its tops, the hexes' surfaces and the bodies of the structures standing on them: sampled
  * and its horizons searched on a worker when they change, uploaded on the render thread. It rides on
  * the environment's lighting (GpuEnvironmentLighting), which every lit program with that lighting compiles it for, with
- * a neutral volume until the first arrives: libGDX has no attribute type to spare, and no program changes when a volume
- * does. Render state, never game state.
+ * a neutral volume until the first arrives: no program changes when a volume does. Render state, never game state.
  */
 final class GpuSkyVisibility implements Disposable {
     /**

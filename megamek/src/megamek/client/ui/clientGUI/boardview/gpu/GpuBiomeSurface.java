@@ -6,7 +6,6 @@ import java.util.List;
 
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.utils.Disposable;
@@ -23,23 +22,6 @@ final class GpuBiomeSurface implements Disposable {
      * a position the noise moves up to 3 m along each axis. The margin covers float rounding at quarter edges.
      */
     private static final float COVER_REACH = 14, LIQUID_REACH = 5, LIQUID_WANDER = 3, MARGIN = .05f;
-    /**
-     * In a terrain's environment while its sculpted ground compiles the biome stage (biomeMaskFlag): the board is
-     * {@link #active}, or the editor changes it. Without biomes the stage changes nothing. It is part of the
-     * environment's mask, so a board without biomes never shares their programs, and a change is a lighting change
-     * behind the loading stage.
-     */
-    static final class Present extends Attribute {
-        static final long TYPE = register("boardBiomes");
-        private static final Present INSTANCE = new Present();
-
-        private Present() { super(TYPE); }
-
-        @Override public Attribute copy() { return this; }
-
-        @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }
-    }
-
     private List<BoardScene.Tile> previous;
     private int[] pixels;
     private Texture texture;
@@ -68,15 +50,19 @@ final class GpuBiomeSurface implements Disposable {
         return Integer.bitCount(palettes) > 1;
     }
 
-    /** Marks {@code environment} for programs with the biome stage, or without it (Present). */
+    /**
+     * Whether the environment's sculpted ground compiles the biome stage (biomeMaskFlag): the board is {@link #active},
+     * or the editor changes it. Without biomes the stage changes nothing. It is a feature of the environment's lighting
+     * (GpuEnvironmentLighting.flags), so a board without biomes never shares their programs, and a change is a lighting
+     * change behind the loading stage.
+     */
     static void mark(Environment environment, boolean present) {
-        if (present) { environment.set(Present.INSTANCE); }
-        else { environment.remove(Present.TYPE); }
+        GpuEnvironmentLighting.required(environment).biomes = present;
     }
 
     static String prefix(Renderable renderable) {
-        boolean present = renderable.environment != null && renderable.environment.has(Present.TYPE);
-        return present ? "#define biomeMaskFlag\n" : "";
+        var lighting = GpuEnvironmentLighting.of(renderable.environment);
+        return lighting != null && lighting.biomes ? "#define biomeMaskFlag\n" : "";
     }
 
     void update(BoardScene scene) {
