@@ -69,6 +69,11 @@ public class UiReveal extends Table {
         return ease(Math.max(0, Math.min(1, (elapsed - delay(index, step)) / duration)), easing);
     }
 
+    /** How long band {@code index} of this column waits before it starts to show, 0 without motion. */
+    public float delay(int index) {
+        return done ? 0 : delay(index, step);
+    }
+
     /** How long band {@code index} waits, at {@code step} after the one before, up to {@link #STAGGER_CAP}. */
     public static float delay(int index, float step) {
         return Math.min(index, STAGGER_CAP) * step;

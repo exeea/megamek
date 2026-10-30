@@ -326,6 +326,11 @@ public final class UiKit {
         return new UiStepChart(this);
     }
 
+    /** A ring of arcs around a centre picture in the Token v0 look, such as damage by firing arc. */
+    public UiArcDiagram arcDiagram() {
+        return new UiArcDiagram(this);
+    }
+
     /** Equal-size visual choices that fit their content and viewport, with bounded growth when space permits. */
     public UiChoiceGrid choiceGrid(float cardWidth, float gap) {
         return new UiChoiceGrid(cardWidth, gap);
@@ -1068,11 +1073,6 @@ public final class UiKit {
         return new UiFormField(this, label, input);
     }
 
-    /** A token check box (docs/design-system/tokens.md, Choices): for a choice a form confirms. */
-    public UiChoice check(String text, boolean checked) {
-        return new UiChoice(this, UiChoice.Kind.CHECK, text, checked);
-    }
-
     /**
      * Whether {@code input} takes the whole width of its form column, so the right edges of a form's inputs line up:
      * selects, text, search and range inputs, pick lists and rows built of them do; check boxes, radios, switches,
@@ -1094,6 +1094,11 @@ public final class UiKit {
         Cell<Actor> cell = form.add(input).expandX().fill(fillsFormColumn(input) ? 1f : 0f, 0f).minWidth(0).left();
         form.row();
         return cell;
+    }
+
+    /** A token check box (docs/design-system/tokens.md, Choices): for a choice a form confirms. */
+    public UiChoice check(String text, boolean checked) {
+        return new UiChoice(this, UiChoice.Kind.CHECK, text, checked);
     }
 
     /** A token radio button; put it in a {@link #radioGroup} with the others of its choice. */
