@@ -1073,6 +1073,19 @@ vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float 
     return pigment;
 }
 
+// A second role's reads (cliffMaterial): one per projection at the base repeat, without parallax, from one of its layers
+// in maps.
+// Its finish and emission maps take the same reads, the finish only while the normal detail lasts (as rockTexel).
+// Its normal is rockNormal's at the same single scale (t 0), also without parallax.
+vec4 secondTexel(sampler2DArray maps, float layer, float tile, MaterialProjection p, bool sides) {
+    tile = sampledTile(tile);
+    vec4 top = !sides || p.lying > 0.0 ? materialTexel(maps, layer, p.top / tile, p.topGradient / tile) : vec4(0.0);
+    if (!sides) return top;
+    vec4 pigment = mix(materialTexel(maps, layer, p.y / tile + .37, p.yGradient / tile),
+          materialTexel(maps, layer, p.x / tile, p.xGradient / tile), p.side);
+    return p.lying > 0.0 ? mix(pigment, top, p.lying) : pigment;
+}
+
 // The matching world normal and cavity from the normal/AO array; a top uses the same two reads as its colour.
 vec4 rockNormal(float layer, float tile, MaterialProjection p, vec3 face, bool sides, float variation,
       bool translated) {
@@ -1271,13 +1284,12 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     float variationA = dot(isFirst, variations);
     bool translatedA = dot(isFirst, translated) > .5;
     Finish surfaceA, surfaceB;
-    MaterialProjection pa = relievedProjection(layerA, tileA, p, sides, variationA, translatedA), pb = pa;
+    MaterialProjection pa = relievedProjection(layerA, tileA, p, sides, variationA, translatedA);
     vec4 a = rockTexel(layerA, tileA, pa, sides, variationA, translatedA, surfaceA);
     vec4 b = a;
     surfaceB = surfaceA;
     float share = 0.0;
-    float layerB = layerA, tileB = tileA, variationB = variationA;
-    bool translatedB = translatedA;
+    float layerB = layerA, tileB = tileA;
     // Height blend (materialWeights): where both are wanted, the layer whose relief stands higher shows.
     float wa = first + a.a * .38 * 4.0 * first * (1.0 - first);
     float width = materialBlendWidth();
@@ -1288,10 +1300,13 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     if ((!single || bankBlend > 0.0) && (second > .02 || dust > 0.0) && reaches) {
         layerB = dot(isSecond, vec4(layers.x, layers.w, layers.y, layers.z)) * .5;
         tileB = dot(isSecond, vec4(tiles.x, tiles.w, tiles.y, tiles.z));
-        variationB = dot(isSecond, variations);
-        translatedB = dot(isSecond, translated) > .5;
-        pb = relievedProjection(layerB, tileB, p, sides, variationB, translatedB);
-        b = rockTexel(layerB, tileB, pb, sides, variationB, translatedB, surfaceB);
+        b = secondTexel(u_terrainLayers, layerB, tileB, p, sides);
+        int materialB = int(layerB + .5);
+        vec4 authored = u_finishSurface[materialB], e = u_finishEmission[materialB];
+        float grain = authored.a >= 0.0 ? terrainNormalDetail : 0.0;
+        vec3 mappedB = grain > 0.0 ? secondTexel(FINISH_LAYERS, authored.a, tileB, p, sides).rgb : authored.rgb;
+        vec3 emitted = e.a >= 0.0 ? toLinear(secondTexel(FINISH_LAYERS, e.a, tileB, p, sides).rgb) : vec3(0.0);
+        surfaceB = finishOf(mix(authored.rgb, mappedB, grain), u_finishGlow[materialB] + e.rgb * emitted);
         float wb = second + b.a * .38 * 4.0 * second * (1.0 - second);
         float ka = max(wa - max(wa, wb) + width, 0.0), kb = max(wb - max(wa, wb) + width, 0.0);
         share = kb / max(ka + kb, .00001);
@@ -1305,7 +1320,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         if (dust > 0.0) share = isFirst.x > .5 ? share * (1.0 - dust) : share + dust * (1.0 - share);
     }
     vec4 na = rockNormal(layerA, tileA, pa, face, sides, variationA, translatedA);
-    vec4 nb = share > 0.0 ? rockNormal(layerB, tileB, pb, face, sides, variationB, translatedB) : na;
+    vec4 nb = share > 0.0 ? rockNormal(layerB, tileB, p, face, sides, 0.0, false) : na;
     vec4 roleShare = isFirst * (1.0 - share) + isSecond * share;
     TerrainMaterial result;
     result.color = mix(a.rgb, b.rgb, share);
