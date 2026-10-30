@@ -65,9 +65,7 @@ final class GpuProgramCache {
     private static final int MAGIC = 0x4D4D5042, VERSION = 1, HEADER = 20;
     /**
      * Intel's own shader cache on Windows. Once a file there reaches {@link #INTEL_CACHE_CAP}, the driver stores
-     * nothing more, and with ambient occlusion every launch compiles again at the board's first draws (11-16 s on Iris
-     * Xe): that work is not in the program binaries kept here. The loading stage tells the player (GpuBattleView);
-     * only the player clears the folder.
+     * nothing more. The loading stage tells the player to clears the folder.
      */
     static final Path INTEL_CACHE = Path.of(System.getProperty("user.home"), "AppData", "LocalLow", "Intel",
           "ShaderCache");
