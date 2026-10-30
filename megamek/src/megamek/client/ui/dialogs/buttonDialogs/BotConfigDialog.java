@@ -33,15 +33,9 @@
  */
 package megamek.client.ui.dialogs.buttonDialogs;
 
-import static megamek.common.units.Terrains.BLDG_CF;
-import static megamek.common.units.Terrains.BLDG_ELEV;
 import static megamek.common.units.Terrains.BRIDGE;
-import static megamek.common.units.Terrains.BRIDGE_CF;
-import static megamek.common.units.Terrains.BRIDGE_ELEV;
 import static megamek.common.units.Terrains.BUILDING;
 import static megamek.common.units.Terrains.FUEL_TANK;
-import static megamek.common.units.Terrains.FUEL_TANK_CF;
-import static megamek.common.units.Terrains.FUEL_TANK_MAGN;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -80,6 +74,7 @@ import megamek.client.bot.princess.CardinalEdge;
 import megamek.client.bot.princess.CombatPosture;
 import megamek.client.bot.princess.PrincessException;
 import megamek.client.generator.RandomCallsignGenerator;
+import megamek.client.lobby.BotSetupForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.MMToggleButton;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -90,7 +85,6 @@ import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.ScalingPopup;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.util.UIUtil.*;
-import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -99,7 +93,6 @@ import megamek.common.internationalization.I18n;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
-import megamek.common.units.IBuilding;
 import megamek.logging.MMLogger;
 import megamek.server.ServerBoardHelper;
 
@@ -1182,26 +1175,7 @@ public class BotConfigDialog extends AbstractButtonDialog
      * @return String with building information if there is any building there
      */
     static String buildingInfoIfPresent(Coords coords, Board board) {
-        final Hex hex = board.getHex(coords);
-        final IBuilding bldg = board.getBuildingAt(coords);
-        String content = "";
-        if (hex.containsTerrain(BUILDING)) {
-            content += Messages.getString("BotConfigDialog.hexListBldg",
-                  bldg.getBuildingType().toString(),
-                  IBuilding.className(bldg.getBldgClass()),
-                  hex.terrainLevel(BLDG_ELEV),
-                  hex.terrainLevel(BLDG_CF));
-        } else if (hex.containsTerrain(FUEL_TANK)) {
-            content += Messages.getString("BotConfigDialog.hexListFuel",
-                  hex.terrainLevel(FUEL_TANK_CF),
-                  hex.terrainLevel(FUEL_TANK_MAGN));
-        } else {
-            content += Messages.getString("BotConfigDialog.hexListBrdg",
-                  bldg.getBuildingType().toString(),
-                  hex.terrainLevel(BRIDGE_ELEV),
-                  hex.terrainLevel(BRIDGE_CF));
-        }
-        return content;
+        return BotSetupForm.buildingInfo(coords, board);
     }
 
     @Override
