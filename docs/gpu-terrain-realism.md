@@ -120,12 +120,7 @@ backgrounds. This does not change emission or lens effects in the live board vie
 
 | Control | Default | Effect |
 | --- | --- | --- |
-| `GpuTerrain.DEFAULT_ELEVATION_GRADING` | On | Elevation styling through a shared uniform, without a terrain rebuild or shader recompile. |
-| `GpuTerrain.DEFAULT_TERRAIN_WEAR` | 1 | Full-strength ambient weathering. |
 | `GpuGroundDamage.COMBAT_SCARS` | `true` | Source constant for [combat scars](gpu-terrain-materials.md#combat-scars), independent of ambient wear. |
-
-`GpuTerrain.setClay`, used by the native reviews, isolates geometry and light from
-materials and turns wear and grading off.
 
 Elevation grading leaves level zero unchanged. Uphill, one scalar exposure curve
 keeps RGB ratios and bright texture variation; valleys darken and warm, and fungus
@@ -252,22 +247,20 @@ and conditions.
 .\gradlew.bat :megamek:gpuBoardBenchmark --tests '*GpuTerrainRealismSmokeTest' '-Dmegamek.gpu.realismBoards=forest,canyon,lake,lava,fungus'
 ```
 
-`GpuTerrainMaterialReviewSmokeTest` compares a saved `terrain-materials.glsl` with
-the current shader on sand, desert and volcanic terrain, alternating
-baseline/current/current/baseline during a deterministic pan and zoom. It checks
+`GpuTerrainMaterialReviewSmokeTest` pans and zooms deterministically over sand,
+desert and volcanic terrain, top and isometric. It times the moving frames, checks
 that pans keep aligned material pixels stable and captures gameplay scales and
-crest close-ups. Without the property, both variants use the current shader, which
-checks repeatability.
+crest close-ups.
 
 ```powershell
-.\gradlew.bat :megamek:gpuBoardBenchmark --tests '*GpuTerrainMaterialReviewSmokeTest' '-Dmegamek.gpu.materialBaseline=C:/path/to/before-terrain-materials.glsl'
+.\gradlew.bat :megamek:gpuBoardBenchmark --tests '*GpuTerrainMaterialReviewSmokeTest'
 ```
 
-`GpuBoxCanyonSmokeTest` captures material, clay, normal, contact-distance and albedo
+`GpuBoxCanyonSmokeTest` captures material, normal, contact-distance and albedo
 views of the notched Box Canyon plateau tops; `megamek.gpu.measureBoxCanyon=true`
-adds timings. `GpuGroundDamageSmokeTest` checks ambient wear and combat scars
-independently; `megamek.gpu.measureGroundDamage=true` times their four
-combinations, and `megamek.gpu.measureAccumulatedScars=true` times LRM20 bursts
+adds timings. `GpuGroundDamageSmokeTest` checks combat scars over the worn
+ground; `megamek.gpu.measureGroundDamage=true` times both, and
+`megamek.gpu.measureAccumulatedScars=true` times LRM20 bursts
 that leave 1000 scars.
 
 ```powershell
@@ -276,7 +269,7 @@ that leave 1000 scars.
 ```
 
 `GpuTerrainShowcaseSmokeTest` renders a deterministic plateau, notch, formation,
-ridge, basin, lake and woods for each surface family, textured and in clay;
+ridge, basin, lake and woods for each surface family;
 `megamek.gpu.showcase.families` (default `SAND,GRASS`) and
 `megamek.gpu.showcase.hours` choose families and times.
 

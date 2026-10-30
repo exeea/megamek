@@ -161,11 +161,11 @@ Specular anti-aliasing (`light-model.glsl`, Display tab, on by default) adds the
 alpha², at most .18: once per pixel, from the screen derivatives of the final shading normal (sculpted ground and
 models include their mapped detail; foliage, roads and water use their base normal before any discard), plus
 water's footprint term. It is
-compiled in (`specularAntialiasingFlag`); off, its helpers are constants. An environment with the board's lighting
-carries `GpuEnvironmentLighting.Antialiasing` while it is on, so a switch is a lighting change: terrain materials
-and family programs rebuild behind the loading stage, while water, plant, prop and unit programs compile at their
-first draw, from the program cache after the first time. Movement and editor ghosts, lit without the board's
-environment lighting, never compile it.
+compiled in (`specularAntialiasingFlag`); off, its helpers are constants. The board's environment lighting carries
+it while it is on (`GpuEnvironmentLighting.antialiasing`, part of every program key), so a switch is a lighting
+change: terrain materials and family programs rebuild behind the loading stage, while water, plant, prop and unit
+programs compile at their first draw, from the program cache after the first time. Movement and editor ghosts, lit
+without the board's environment lighting, never compile it.
 See [Filament's image-based lighting](https://google.github.io/filament/Filament.html#lighting/imagebasedlights)
 and the [energy-coupled matte model](https://diglib.eg.org/bitstream/handle/10.2312/egs20011003/short16.pdf).
 
@@ -338,9 +338,15 @@ edges also give steep derivative normals. With a smaller allowance, blades in
 hollows below the lowest level lost their fog and flickered as dark specks in
 wind (`GpuGrassFogSmokeTest`).
 
-Sun shafts sample the cloud field and captured geometry depth along the light
-direction. They reuse the scene depth rather than drawing the board into a
-second camera-depth pass. The composite combines scene color, fog, shafts,
+Sun shafts sample the cloud field and the sun's shadow map along the light
+direction: air reads lit unless the map holds a surface more than one world unit
+nearer the sun (`GEOMETRY_SHADOW_BIAS`). The map (`GpuShadowLight`, a 16-bit
+depth texture) measures height across the casters' slab, 0 a world unit above the
+highest caster and 1 a world unit below the lowest; depth clamping keeps casters
+outside the slab. A light lower than the world-fixed sun ever is (only Fixed
+sun/moon) keeps depth along the light instead.
+Shafts reuse the scene depth rather than drawing the board into a second
+camera-depth pass. The composite combines scene color, fog, shafts,
 grading, exposure and glare, then restores scene depth for later draws.
 Weather particles and tactical/UI passes must retain the intended depth/order.
 
@@ -368,8 +374,10 @@ do not count.
   searches 16 horizons to 300 m for each cell of a volume up to two levels above the highest top (half-level
   layers, at most 64) and stores, for each quarter of the compass, a level receiver's share of that quarter's sky, the
   mean cos² of the horizon's elevation; the render thread uploads it as an RGBA8 3D texture. A cell inside the ground
-  searches from the lowest top around it, so behind a wall's foot it holds the foot's shade and filtering there does
-  not pull in the open sky on top.
+  or a structure searches from the lowest floor around it (a hex's surface, or a structure's top where its body covers
+  the cell's centre, without the half cell of reach), so behind a wall's foot it holds the foot's shade and filtering
+  there does not pull in the open sky on top, under a roof away from its edges it holds the roof's values, and an
+  alley that reach fills holds its floor's shade.
 - The sky light (`skyLight`): a surface reads the volume one cell out along its normal, so a wall reads the air in
   front of it. Level ground takes the four quarters' shares. A face weighs the quarters it faces, and converts each
   share to the horizon h it stands for (cos h = √share) and to a vertical face's share, 1 − (2h + sin 2h) / π: a wall
@@ -384,11 +392,11 @@ do not count.
   mirrors the walls' shade rather than black or the open sky.
 
 Sunlit ground changes by a few percent; shade deep in canyons, in streets and at the feet of walls, lit by the sky
-alone, darkens most. The volume rides on the environment's `GpuEnvironmentLighting` (libGDX's 64 attribute types are
-all taken), whose lit programs compile it while `STRENGTH` is above 0, with a neutral volume until the first upload;
-its strength is a uniform, so a new volume changes no program. Sculpted ground with both ice and volcanic crust
-draws without it (the sampler budget); other volcanic crust keeps it and draws without the screen-space ambient
-occlusion instead.
+alone, darkens most. The volume rides on the environment's `GpuEnvironmentLighting`, as the clouds, ambient
+occlusion, local lights, biomes and specular anti-aliasing do. Its lit programs compile it while `STRENGTH` is above
+0, with a neutral volume until the first upload; its strength is a uniform, so a new volume changes no program.
+Sculpted ground with both ice and volcanic crust draws without it (the sampler budget); other volcanic crust keeps it
+and draws without the screen-space ambient occlusion instead.
 
 The strength was chosen from `GpuDepthCuesSmokeTest` captures of Crystalline Canyon on NVIDIA; the passes are not
 timed on Iris Xe. Board prints (`GpuBoardPrint`) never draw the haze: only the battle view sets the cues. They do

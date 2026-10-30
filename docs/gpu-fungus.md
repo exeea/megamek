@@ -51,7 +51,7 @@ scatter light counts. Emission color and reach follow the actual placed model:
 warm lips/gills and cyan hanging mycelium light the nearby terrain and ordinary
 objects. The existing diffuse-area approximation does not cast obstacle shadows;
 it retains lava's response. Lights install and retire with their terrain chunks,
-and native fungal prop lights are omitted from Tactical View and clay inspection.
+and native fungal prop lights are omitted from Tactical View.
 
 `GpuFungus` derives emitter anchors once from the installed large cover prop bounds
 when a chunk is assembled. Each occupied hex receives one broad, low pink cloud,

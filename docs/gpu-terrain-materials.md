@@ -132,8 +132,7 @@ has its own recess/crest colour response and balance between grain-height wear
 and chipped mineral edges. It does not place independent slash shapes on the map.
 This is ordinary terrain material construction in `terrain-materials.glsl`:
 cover erosion participates in layer blending, then pigment wear applies before
-lighting. Both run at full strength (`GpuTerrain.DEFAULT_TERRAIN_WEAR`); clay
-mode turns them off.
+lighting. Both always run at full strength.
 It includes the broad pale exposed-rock patches on desert hardpan, the related
 mineral exposure in other families, rim abrasion and worn organic cover. The rock
 of cliff walls outside the desert, lunar, Martian and fungal families also weathers
@@ -623,7 +622,6 @@ Per-level grading belongs to the terrain material path and changes continuously 
 cliffs. Final exposure and highlight treatment belong to `GpuAtmosphere`'s composite.
 Rain response uses the shared surface helpers; snow retains its separate handling.
 
-The clay view in `GpuTerrain.setClay` helps isolate geometry/light from materials.
 The normal/relief toggle controls material detail. `GpuBoardTuning` and
 `TerrainSettings` carry geometry settings through capture/build/install so displayed
 frames do not mix results from different settings.
@@ -873,8 +871,8 @@ Single-scale sand and cap colour/height samples use their explicit texture
 gradients and mipmaps without the extra fade toward the texture's overall mean.
 Resolved ripples and fractures therefore survive normal gameplay zoom; normal
 detail still fades with projected size. Two-scale materials keep their colour
-averaging. `GpuTerrainMaterialReviewSmokeTest` compares this shading with a saved
-baseline during a deterministic pan and zoom; see
+averaging. `GpuTerrainMaterialReviewSmokeTest` checks its stability during a
+deterministic pan and zoom; see
 [native reviews](gpu-terrain-realism.md#native-reviews).
 
 The [board asset format](../../mm-data/data/models/board/README.md) owns dimensions,

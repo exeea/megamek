@@ -25,13 +25,15 @@ inserted into a larger program, so editing a helper can affect several materials
 | `ocean-spectrum.frag`, `ocean-fft.frag`, `ocean-water-finish.frag`, `ocean-lava-finish.frag` | Wave spectrum, inverse FFT and mode-specific output; `GpuOcean`. |
 | `cloud-shadow.glsl` | Direct-light cloud attenuation; `GpuCloudShadow` inserts it into receiving programs. |
 | `atmosphere-fog.frag`, `atmosphere-composite.frag` | Fog/shafts and final scene composition; `GpuAtmosphere` assembles their helpers. |
+| `smaa-*.frag`, `fsr-easu.frag`, `fsr-rcas.frag` | The window's SMAA 1x on the composite at the render resolution, then below 100% FSR 1 (EASU, RCAS) to the window's pixels with the scene depth; `GpuSmaa`, `GpuFsr`. |
 | `weather-particles.vert`, `weather-particles.frag`, `weather-rain.glsl`, `weather-snow.glsl`, `weather-hail.glsl` | Shared precipitation programs with per-kind motion/shape; `GpuWeatherParticles`. |
 | `effects.vert`, `particles.frag`, `particles-smoke.glsl`, `particles-fire.glsl`, `particles-jet.glsl` | Batched combat/terrain effects; `GpuEffectBatch` selects and assembles each appearance. |
 | `terrain-effects.vert`, `terrain-effects.frag`, `terrain-effects-composite.frag` | Persistent terrain fire/smoke volumes and their reduced-resolution composite; `GpuTerrainEffects`. |
+| `model.vert`, `depth.vert`, `unlit.frag` | libGDX 1.14.2's model, depth and unlit stages in core-profile GLSL, kept here. `GpuUnitShader`, `GpuTerrain` and `GpuThermalUnits` extend `model.vert`; shadow casters, the wireframe view and unit outlines extend `depth.vert`; `GpuUnitShader.unlitProvider` draws the tactical pages, fire control and route markers with `model.vert` and `unlit.frag`. |
 | `shadow-depth.frag` | Shadow depth/cutout behavior; `GpuTerrain` configures the provider and `GpuTreeInstances` supplies instanced transforms. |
 | `tessellation-control.glsl`, `tessellation-evaluation.glsl`, `tessellation-shape.glsl` | Sculpted relief's Phong tessellation (`GpuTessellation`): each edge's split, each point and normal of the patch, and how far each kind of vertex rounds. |
 
-Unit materials are configured by `GpuUnitShader`: libGDX's vertex stage with linear colours, our
+Unit materials are configured by `GpuUnitShader`: the `model.vert` vertex stage with linear colours, our
 `model.frag` fragment stage, normal maps and per-unit material inputs. Imported model materials fill a
 `Surface` in `model-surface.glsl`, with factors/maps carried by `GpuModelMaterial`, and are lit by
 `shadeSurface` like the terrain. Roughness/metalness and normal/AO channels are linear data.
@@ -40,7 +42,8 @@ coordinates. The same model path is used for ordinary imported buildings and
 props. Custom terrain, foliage and water programs retain their own surface
 composition. See the [model material contract](unit-models.md).
 Do not assume every program starts from a standalone vertex file: some extend
-the libGDX source with injected attributes and functions.
+`model.vert` or `depth.vert` with injected attributes and functions. libGDX's
+SpriteBatch and ShapeRenderer stages still draw the 2D HUD.
 libGDX binds only the instance attributes of the renderable a material program was
 created for, and `DefaultShader.canRender` does not compare them. `GpuTerrain`
 therefore also matches the instance layout: crop rows, which carry a row span,
@@ -107,19 +110,32 @@ stage also links the plain program of each object drawn instanced. The editor's 
 so they draw with the board's programs; on NVIDIA they match the samples without it bit for
 bit (`GpuExactProgramsSmokeTest`). Sculpted ground leaves out the biome stage (biomes,
 tundra, mixed liquids) on a board without biomes that the editor does not change
-(`GpuBiomeSurface.Present`, part of the environment's mask): the frames stay bit-identical,
+(`GpuEnvironmentLighting.biomes`, part of every program key): the frames stay bit-identical,
 and on NVIDIA a one-family program links in 0.9 s instead of 1.9 s. Ground, water and magma
 programs link behind the loading stage with the sculpt programs. The frames after a loading
 stage still draw under it, so that their programs link first: the board as it will show
-and, unless the board makes its entrance, its Tactical View and a close view of its centre;
-the effects of play (weapons, missiles, explosions, flares, fire and smoke, splashes, jump
-jets, spores, geysers, weather, heat, hex masks, ECM fields) link with the first of them
-(`GpuBattleView.warmUp`). Without the parallel compiler, a program requested for a
+and, unless the board makes its entrance, a close view of its centre;
+the brief effects of play (weapons, missiles, explosions, TAG beams, jump jets, heat, hex
+masks, range walls and labels, routes and their pulse) link with the first of them
+(`GpuBattleView.warmUp`), and those of the board where it has them: hex fire and smoke,
+splashes, spores and geysers (the editor's always). Lasting effects link when they first
+show: the board's weather, pilot flames and ECM fields in those frames; star shells, the
+deployment tint and another weather once they appear. Fire and smoke a board gains later link
+as a nuke launches or a scheduled one goes off, before its burning hexes arrive; other new
+fire or smoke when it appears. Without the parallel compiler, a program requested for a
 framebuffer object links on a context that never draws (`GpuGlsl.linkOffscreen`), since
 Intel would compile it again at its first scene draw and keep that variant in its binary.
 The game's units not on the board (`BoardSource.reserveUnits`) stand in the middle of each
-of those frames, and the last draws the thermal view with SMAA, whose programs stay when it
-is off; every loading stage, a lighting switch's too, probes again. The editor's board also
+of those frames; every loading stage, a lighting switch's too, probes again. Optional views
+and settings are not probed: the Tactical View, the thermal (wireframe) view, SMAA and a
+render resolution below 100% link their own programs when they first show, without a
+loading stage. Saved on, SMAA and the render resolution link behind the loading stage, since
+those frames draw with them. What they share with the board is already linked, and the program cache
+serves the links of earlier runs. On a cold cache Grassland 3's Tactical View links one
+unit-material program, its thermal view three wireframe and three thermal-unit programs,
+SMAA three and FSR two. The views' programs link in the background (`after-loading-deferred`):
+no frame freezes, and until they are linked their draws wait. SMAA and FSR link on the render
+thread when switched on later, holding that frame (`GpuShaderLoadSmokeTest`). The editor's board also
 prepares the palette's kinds while it loads (`GpuEditorTerrainPreviews.kinds`: each preview,
 preset and look but buildings' designs, apart on clear ground; frozen land and its border
 both ways) and the wave simulations. `GpuMapHud.prepare` also warms the palette's own
@@ -134,9 +150,10 @@ Once the board shows, a material program still missing links in the same prepara
 complete. `-Dmegamek.gpu.shaderTiming=true` logs a compile that held a frame as
 `after-loading` (`after-loading-offscreen` for those renderers), one linked so as
 `after-loading-deferred`; `GpuShaderLoadSmokeTest` asserts no late synchronous or deferred
-links and no returning loading stage for a game (late deployments, SMAA, thermal view)
-and for the editor (every Assets category, a search, strokes of lava, water, ice, scorch
-and a car, followed by a specular-AA switch and fresh model/junction previews). Such links still
+links and no returning loading stage for a game (late deployments, SMAA, a 75% render resolution; the Tactical
+View and the thermal view may link their own programs, but bring back no loading stage)
+and for the editor (every Assets category, a search, strokes of lava, water, ice, scorch,
+a car and the board's first building, followed by a specular-AA switch and fresh model/junction previews). Such links still
 cost frames: NVIDIA reports a parallel link complete, then holds its first status query for
 about half the link (5–150 ms for an object's program, 5–8 s for a sculpt program), and
 first draws a program loaded from the cache slowly (3.5 s for the ice card's sculpt program);
@@ -178,7 +195,15 @@ many cliffs, with that empty stage: a chunk's walls (each relief triangle's area
 outer sides left out) must cover more than 0.45 of its hexes' area (`GpuTerrain.cliffWalls`), measured where its meshes
 are prepared. Such a chunk marks its relief materials (`Ground.cliffs`, `Prepass.CLIFFS`), so their draws stay apart
 from other chunks' in shared pages and batches and use the same programs. Their colour draws then test `GL_EQUAL`
-without writing depth, so hidden leaves and ground are not shaded. Each pre-passed generic program has a depth twin with
+without writing depth, so hidden leaves and ground are not shaded. It draws building shells too, the walls and roofs of
+buildings and fuel tanks other than kit buildings: their surfaces carry `GpuModelMaterial.occluder`, so each of their
+draws takes its program's objects twin (`Prepass.OBJECTS`), which links behind the loading stage, while a hex is at least
+16 pixels wide on screen (`TreeLod.PREPASS_OBJECTS`, ±10 %); further out they draw as before and keep their twins, so a
+zoom links nothing. Ambient occlusion sees the shells only while they are pre-passed, so ground occlusion beside
+buildings changes slightly across that gate. Every other prop stays out, also where it shares a shell's program: kit buildings' instanced
+modules, walls, industrial structures, steel structures, rubble, fortifications and placed objects. With every object's
+program twinned, the pre-pass took 5 ms in Valencia City's middle view and 16 to 18 ms in its fitted view on an Iris Xe,
+for 1 to 1.5 ms of colour shading saved. Each pre-passed generic program has a depth twin with
 the same prefix and vertex stage, which its family programs share. Twins are programs beside the colour programs,
 outside the family programs' capacity, and link behind the loading stage with the generic programs, every tree detail
 level included. Every terrain vertex stage declares `gl_Position` invariant, and a cutout's vertex stage also the alpha
@@ -191,7 +216,9 @@ frames are bit-identical with and without the pre-pass; on an Iris Xe, `GL_EQUAL
 edges and tufts (5 to 2133 of a 1080p view's 2.07 million) and on cliff relief (0 to 5). On an Iris Xe at 1080p the 40
 by 40 forest's middle view draws in 32 ms instead of 53.5 ms; the cliff chunks take the Box Canyon's middle view from
 19.2 to 13.5 ms and the calibration board's from 22.2 to 20.7 ms, leave the Jotun Mountains' unchanged within its
-rounds' spread of about 1 ms, and the 48 by 48 city and Grassland 3 have none. Grass and the crops' plants stay out: they
+rounds' spread of about 1 ms, and the 48 by 48 city and Grassland 3 have none. The building shells save 5.2 to 6.7 ms in
+the 48 by 48 city's middle view (two processes; rounds 2.7 to 8.2 ms) and 0.8 to 1.6 ms in Valencia City's, for 0.1 to
+0.4 ms of pre-pass; in the city's fitted view (29-pixel hexes) about 0.5 ms, within its rounds' spread of 3 ms. Grass and the crops' plants stay out: they
 shade about 1.55 fragments per visible pixel, and on an Iris Xe their twins saved about 1 ms on the Farmland board's views
 and cost about 1 ms on Mesa City's grass. `GpuDepthPrepassSmokeTest` checks the
 parity and shader edits; `GpuDepthPrepassBenchmarkSmokeTest` times it.
@@ -207,9 +234,10 @@ passes (`ambient-occlusion-blur.frag`) that remove its 4 by 4 rotation pattern. 
 marches contact shadows: eight jittered steps toward the sun or moon over 2 m of the pre-pass depth, an occluder taken
 as 1 m deep, for the small occluders the shadow map is too coarse for; none without a direct light, and they fade out
 where the sun grazes the surface, whose own facets the march would meet. Lit programs read
-both with `screenOcclusion()` (`ambient-occlusion.glsl`; `shadeSurface` multiplies the sky's occlusion by the first and
-the sun's visibility by the second), which upsamples them against the fragment's own depth: surfaces the pre-pass does
-not draw (units; buildings and props unless the pre-pass's objects category is on)
+both with `screenOcclusion()` (`ambient-occlusion.glsl`; `shadeSurface` takes the lower of the first and the sky's
+geometric occlusion, then a texture's finer occlusion, and multiplies the sun's visibility by the second), which
+upsamples them against the fragment's own depth: surfaces the pre-pass does
+not draw (units, props other than building shells, and the shells while a hex is under 16 pixels)
 read 1, as does every draw after the units (water, transparent effects). Its environment attribute compiles
 `ambientOcclusionFlag` into the lit programs, so a switch rebuilds them behind the loading stage; without it the accessor
 is the constant 1 and the frames are bit-identical to those without the feature. Sculpted ground with volcanic crust
@@ -219,10 +247,15 @@ the one a crust patch in deep shade would visibly lack.
 Its two RGBA16F targets (visibility, camera distance, contact visibility) follow the scene's size; in an orthographic view the distance is stored less the orbit pivot's depth (`GpuAmbientOcclusion.rangeOrigin`), since that camera stands about 10,000 units back, and the sky is clamped to 60,000. `GpuAmbientOcclusionSmokeTest` checks it and, with
 `-Dmegamek.gpu.measureAmbientOcclusion=true`, times it.
 
-Sun shadows on sculpted ground and trees (`sculptShadow`, `surface-lighting.glsl`) widen with the distance to what
-casts them, as the sun's half-degree disc does: four comparison taps over a three-texel disk find a shadow at all
-(a pixel they find lit is done), the same taps 3 m and 15 m nearer the sun tell how far its caster stands, and the
-twelve-tap disk then spans half the penumbra, from half a texel to three. No second sampler reads raw depth. On
+Sun shadows filter the shadow map with one tent (`shadowTent`, `surface-lighting.glsl`): a separable tent of a half
+width in texels, read as bilinear comparisons at positions whose weights make it exact, so it is smooth in position
+and width with no noise pattern. Models and other surfaces take it a texel and a half wide in four comparisons
+(`surfaceVisibility`). On sculpted ground and trees (`sculptShadow`) it widens with the distance to what casts the
+shadow, as the sun's half-degree disc does, from one texel to three, in nine comparisons. The widest tent reads six by
+six texels, nine blocks of two by two: the centre and its four edges lit, against the highest depth any tent compares
+there, is lit (the corners, a fifth of the widest tent's weight, unseen); all nine shadowed against the lowest is the
+umbra, exactly, without the tent. Elsewhere the same five blocks at the receiver's depth and 3 m and 15 m nearer the sun
+tell how far the caster stands. No second sampler reads raw depth. On
 sculpted ground the lookup rises with the visible grain (its height map, `RELIEF_METRES` deep), so raised grains break
 a shadow's edge, and the cavity shades hollows first where the sun grazes. Its lookup also shifts across the light by
 up to `FRAY_METRES` (a quarter metre) in 0.1 to 0.3 m tufts of the rain-noise texture, as grass, clods and stones fray
@@ -234,10 +267,27 @@ off by default). The switch is part of the build, as the 3D Graphics are: a swit
 loading stage, and with it off the meshes and programs are the untessellated ones. Its triangles span 1 to 2 m on banks
 and cliffs; the smooth normals of its shading hid them, while its silhouettes and the shadow map showed them. Each
 triangle becomes a Phong patch (Boubekeur and Alexa 2008) through those normals, rounded by the kind its vertex colour
-gives (`tessellation-shape.glsl`): soil and turf fully, as creep rounds them; a cliff by its height, a bank of up to two
-levels as soil and from three as rock (`terrain-rockiness.glsl`, as its shading decides), which barely rounds, so its
-faces stay planes and only its corners soften (fully rounded, a mesa and a pillar bulged like cushions); built panels
-and plants not at all. The colour alone decides, so the shadow pass rounds alike.
+gives (`tessellation-shape.glsl`): soil and turf fully, as creep rounds them; a cliff by its rockiness (its green
+vertex channel, as its shading decides: a bank of up to two levels as soil, from three as rock), which barely rounds,
+so its faces stay planes and only its corners soften (fully rounded, a mesa and a pillar bulged like cushions); built
+panels and plants not at all. Contact distances (the texture coordinates) keep the shared rims and feet fixed even where
+the adjoining material or shading normal changes. Everything else that must stay where its mesh puts it comes as one
+input, `a_tessFixed` (`BoardSurface.fixedTessellation`), added to the curved layouts and resolved after water clipping
+and material subdivision: the board's cut, against its flat wall; rail grades, whose planes `BoardRail.layout` samples;
+built bridge passages (`BoardBridge.approaches`); the shared edges of water banks, shaded apart on either side; and a
+liquid hex's ground at and below its water, so bed fans and their clipped neighbours keep one support.
+
+Road coatings at full detail tessellate with their support: they borrow its control positions, normals, colour, contact
+distances and fixed input (`GpuRoads.TESSELLATED_VERTICES`) and add their clearance only after evaluation, so the curved
+ground never rises through the pavement. Where the ground clips a supporting face at the water or splits it for its
+material blend, the coat takes those final triangles (`GpuTerrain.coatSupports`), as a split edge's new point can curve
+where the whole edge would not. Coats on volcanic hexes and on bridge decks stay flat, as their support does.
+Coatings also cover the walkable upper rim faces emitted with a slope (`BoardSurface.coatingFaces`, within the upper
+tenth of a step), so a road end spilling onto a rim keeps its pavement in both modes. The curving coats' programs link
+behind the loading stage in the game as in the editor.
+
+Material subdivision (`GpuSurfaceBlend`) splits an edge where one triangle's blend needs it, at a point on the straight
+edge; where its neighbour leaves that edge whole and curves it, a hairline gap can open between them.
 
 Only what shows passes through the stages. Built with the switch on, a full-detail chunk (the detail levels below it
 draw a facet a few pixels across) puts its sculpted triangles that curve, those with an edge whose Phong curve rises

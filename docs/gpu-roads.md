@@ -168,7 +168,7 @@ world-anchored fields:
 Ruts, cracks and potholes fill first in rain. Markings flake and dull on weathered stretches. Across a junction's hub
 (`BoardRoad.wearHub`, carried in the length of the mask's heading) turning traffic wears the surface evenly, and
 the lane-bound and oriented marks (oil drip, kerb grit, joint and transverse cracks, skids) give way. Wear never
-lowers the roughness, so worn asphalt does not glint in the sun. The Weathering setting scales all of it; at zero, roads stay new. Features are
+lowers the roughness, so worn asphalt does not glint in the sun. Features are
 placed per 8 m world cell and use the heading only symmetrically, so neighbouring hexes agree whichever way their paths
 run.
 

@@ -260,7 +260,7 @@ clipping (`coveredPolygons`, `splitCovered`), 11% in `GpuRoads.mask` and 10% in
   neighbour lookup. `BoardConcrete.distance` chooses the nearest edge on squared
   offsets and calls `Math.hypot` once instead of six times.
 - **Water clipping.** Each drawn water triangle's plane and edge normals are derived
-  once per hex (`WaterTop`) and binned on a grid (`WaterCover`), so a face tests the
+  once per hex (`WaterTop`) and binned on a grid (`GpuWaterCover`), so a face tests the
   few triangles near it, in the original application order. `splitCovered` takes its
   plane as floats, `GpuSurfaceBlend.degenerate` replaces the per-triangle `Vector3`
   cross products, and `appendPolygon` no longer streams.
@@ -580,8 +580,9 @@ resources cannot outlive that chunk.
 
 ## Shadows, depth and animated fields
 
-`GpuTerrain` can reuse a static terrain shadow when coverage, light direction and
-terrain are unchanged. Moving units are drawn over the retained terrain shadow.
+`GpuTerrainShadows`, which `GpuTerrain` owns and casts into, can reuse a static
+terrain shadow when coverage, light direction and terrain are unchanged. Moving
+units are drawn over the retained terrain shadow.
 Both color and depth attachments must be restored: retaining only color leaves
 incorrect depth for moving casters. Terrain changes, shader changes and unsuitable
 shadow-camera coverage invalidate the cache. A camera refinement does not: the
@@ -592,10 +593,25 @@ from 60 to 20-22 per 600 frames (every refined chunk drew one before) and their 
 time from 116 to 72-78 ms; frame-time percentiles moved less than the run-to-run
 spread.
 
+Only the changed units' footprints are restored from the cache: each unit's light-space
+bounds mark 64-texel tiles, before and after it moved or posed anew, and the marked
+row runs are copied back (`restoreTiles`), then every unit is drawn again. The whole
+map is copied where it holds another cache's terrain, past half its tiles or past 32
+runs. In `GpuMixedUnitBenchmarkSmokeTest` on an Iris Xe (two rounds, 2026-10-29) the
+geometry shadows' GPU median fell from 0.56-0.69 to 0.17-0.21 ms with 64 units, from
+1.14-1.52 to 0.69-1.16 ms with 256 and from 4.1-4.8 to 4.05 ms with 512.
+
 `GpuAtmosphere` reuses the captured scene depth for fog, shafts and composition.
 `GpuEffectDepth` supplies depth to effects that need it. These are distinct from
 the light's shadow map. An animated cloud field changes direct illumination
 without requiring a new geometry shadow.
+
+Below 100% render resolution the composite and SMAA run at the scene's size and FSR 1
+(`GpuFsr`: EASU, then RCAS at one stop) scales up to the window. On an Iris Xe at
+1920 x 1080 (`GpuRenderResolutionSmokeTest.compositeAndSmaaTimings`, ABAB, 2026-10-29)
+the composite stage costs 0.4-0.8 ms more than the former bilinear scale-up (70% with
+SMAA 1.37 -> 1.80 ms, 80% without 0.86 -> 1.68 ms); 100% is unchanged. It buys detail,
+not time: at 75% it is visibly sharper than the bilinear scale-up.
 
 Wind, water waves, cloud motion and most lighting changes update existing uniforms
 or textures. Grass and plant buffers depend only on the installed plants of their
@@ -931,7 +947,7 @@ editor's objects into prop pages stays rejected):
   - Shadows: the shadow pass applies the rule whenever it redraws; a crossing alone
     does not redraw it, as for tree levels and scatter. A forced redraw would drop
     the cached board-wide shadow map on every zoom-out to the overview, which the
-    `renderShadows` comments record at 220–530 ms on the Iris Xe. Hidden objects are
+    `GpuTerrainShadows.render` comments record at 220–530 ms on the Iris Xe. Hidden objects are
     at most about 3 px, and so are the shadows that wait for the next redraw.
 - **One GPU mesh per recolourable model.** The editor drew a mesh copy per colour set
   (`GpuAssets.model(name, colours)`), so 18 car colours were 18 instanced draws per

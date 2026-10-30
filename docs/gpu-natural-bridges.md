@@ -91,15 +91,48 @@ sides, it keeps near the hex edge instead, as the lip of the hollow the banks co
 cliff turns a corner onto such a lower side, the rim follows it to just inside that corner rather than cutting
 across (`BoardNaturalBridge.shoulder`), unless the bank's wide mouth already reaches past the corner.
 
+A lone span (no joined natural neighbour) with a free end is an overhang: a thick slab of the cliffs' beds rather
+than an arch (Kozice 2609). A free end is an exit with no bank or joined span beyond it and no ground within a level of
+the deck beside it, so its rock runs out over open space (`BoardNaturalBridge.free`, `overhang`). Its free ends reach
+the hex edge, as the deck does; its other sides stop just inside the hex, except where it roots in a bank or enters a
+higher cliff. The outline breaks into blocks along the rock's two vertical joint sets, as large as the family's joints
+(`BoardRelief.jointScale`). The caprock and the bed under it stand flush in the front face with a bed line between
+them; the beds below step back towards the banks, so the underside climbs in treads. The beds follow the cliffs'
+bedding planes (`BoardRelief.bedPlane`), and in Enhanced graphics the side faces take the cliffs' bed colours
+(`BoardRelief.bed`). Full detail draws four beds, medium two, coarse and distant one. A span left beside a collapsed
+one, its rubble beyond an exit (`Board.collapseBuilding`), is never an overhang, whatever its other exits: it keeps its
+arch.
+
 Only the exposed rim erodes. Mouths, joints and closed corners keep the plane they share, and the erosion
 fades in over the first few metres of exposed rim. The top's spokes carry the rim heights inwards blended
 around the centre (exact at the rim), so a span stepping to a joint one level away, or climbing to a bank
 above it, curves smoothly instead of folding into thin wedges; towards a bank the slope reaches the bank's
 height at the hex edge, where its cliff stands, rather than only inside the bank.
 
+A deck ramps up to a bank one level above it unless the board marks the bank's side towards the span a cliff top
+(`CLIFF_TOP`). There the rock enters the bank's wall at deck height, its corners beside the bank too, and so does a
+corner joined spans share beside a bank marked towards either of them. Ground two or more levels above the deck is
+always such a wall to the span (`BoardBridge.bank`), although the ground itself draws a step of up to two levels as an
+incline unless it is marked (`BoardRim`).
+
+A ramp is one plane rising towards its bank: the mouth's spokes and the free rim beside it take that plane all the way
+in, fading out within 60 degrees of a mouth or corner lying below it, which keeps its own height
+(`BoardNaturalBridge.reach`); at the rim the mouth keeps the bank's own top. Its spokes' inner rings keep the radii of a
+spoke ending at the hex edge, so the fan never folds between a long mouth spoke and a short free one.
+
 At a level bank, the walking surface keeps the bank's height through the entrance rather than eroding
-below its lip. The bank owns the top inside its actual scalloped outline; bridge top facets are clipped
-there, avoiding coplanar overlap. The supported passage uses upward bank normals, as does the rest of
+below its lip. The bank owns the top inside its actual scalloped outline wherever the span's top lies on the bank's
+level; those top facets are clipped there, avoiding coplanar overlap. Where the span's top climbs above that level
+over the bank, towards a higher bank beside it (Kozice 2609 between 2610 and 2510, 1013 between 0914 and 1014), it
+stays whole over the bank, so the top never ends in an open cut above the bank's top. Each top edge is divided once
+where it crosses the bank's level or the outline of its top, and every face sharing that edge takes the same point:
+the walls below the rim, and a joined span across the joint, which also divides the shared edge at its own banks'
+level. The clipping runs the bank's outline through those points, so a shallow crossing cannot drift along the edge.
+So the shell keeps no T-junction, and the rise meets the bank's top exactly on its level. A bank's island inside a
+clipped piece joins the piece's outline along a bridge, as earcut joins holes, or at the point where it touches the
+outline; should none be found (a failed assertion in tests), the piece's triangles overlapping the island are dropped,
+leaving a gap rather than rock over the bank. `BoardBankClip` holds this clipping.
+The supported passage uses upward bank normals, as does the rest of
 the bank's edge on a side whose corner the span closes (`BoardNaturalBridge.BankJoin`), while the adjacent
 exposed cliff retains its rounding. The buried rock shell remains separate from the bank. Removing the
 bridge rebuilds the neighbouring terrain and restores its exposed edge; the surface cache key also
