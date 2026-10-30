@@ -987,8 +987,20 @@ owner sets the width (`dialog.sm`) and adds the body and the footer, centred, th
 other and at least 88, the main one first. `UiModal.fadeIn(seconds)` fades the layer in over `fast` when it opens; its
 scrim is already `surface.scrim`. `new UiConfirmation(kit, name, dismissed, UiTheme.TOKEN)` puts the confirmation
 beside its trigger in the token popover: a `status.warning` icon, the question in `body.strong` over `text.secondary`
-detail, then compact danger and secondary buttons with the focus on Cancel. The dialog keys and `GpuModalDialog` are
-still the developers' work.
+detail, then compact danger and secondary buttons with the focus on Cancel.
+
+`UiDialog` puts these together for a dialog with a form: `new UiDialog(kit, title, cancel).width("dialog.md")` makes
+the `UiModal` layer (the `surface.scrim`, which takes every click and key, a click on it not dismissing) and the card,
+`body()` is a table in a vertical-only scroll pane under the title, `primary`, `secondary` and `cancelButton` add the
+centred footer buttons in that order, and `tool` adds compact secondary buttons at the footer's leading end (such as
+Reset or Refresh). The card is the width token or the window less `xxxl` on each side, whichever is narrower, and at
+most the window's height less `xxxl` on each side, the body scrolling. `show(stage, motion)` fades it in over `fast`
+(at once without motion), focuses the first field, else the primary button, and `close()` gives the focus back. Keys:
+Enter presses the focused button or else the primary (a disabled primary does nothing), Space the focused button,
+Escape and the close button run `cancel`, and Tab and Shift+Tab cycle through the card's enabled buttons, fields,
+selects and sliders only, scrolling the body to the focused one. Actions added to `layer()` before `show` are dropped,
+as showing restarts its fade; put per-frame work on an actor of its own. The lobby opens these only through
+`LobbyNativeDialogs` (camo and player settings so far). `GpuModalDialog` on the board is still the developers' work.
 
 ## Status cards
 
