@@ -107,8 +107,12 @@ final class GpuMaterialCache {
     private static final int SETTLE_FRAMES = 30;
     /** The base tiles' texel, metres: the close view's pixel, whose material every page holds averaged. */
     static final float CLOSE_PIXEL = Float.parseFloat(System.getProperty("megamek.gpu.materialCacheClosePixel", ".1"));
-    /** The finest view pixel (metres, its shorter axis) the cache serves: closer views draw directly. */
-    static final float MIN_PIXEL_METRES = Float.parseFloat(System.getProperty("megamek.gpu.materialCachePixel", ".15"));
+    /**
+     * The finest view pixel (metres, its shorter axis) the cache serves: closer views draw directly. Its own texel, so
+     * level tops are never magnified; an override below {@link #CLOSE_PIXEL} would magnify level 0.
+     */
+    static final float MIN_PIXEL_METRES = Float.parseFloat(System.getProperty("megamek.gpu.materialCachePixel",
+          Float.toString(CLOSE_PIXEL)));
     /**
      * Each level's sharpening, the separable kernel (-a, 1 + 2a, -a): the trilinear read's own blur taken back, so the
      * read matches the plain average of a pixel's footprint. Colour, height, cavity and relief; the normals' sums,
