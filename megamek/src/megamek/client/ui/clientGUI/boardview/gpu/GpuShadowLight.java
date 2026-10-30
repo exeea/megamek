@@ -34,7 +34,7 @@ final class GpuShadowLight extends DirectionalShadowLight {
     /** Caches copy only depth, with exactly the light's attachment format and normal framebuffer ownership. */
     static FrameBuffer depthBuffer(int width, int height) {
         var builder = new GLFrameBuffer.FrameBufferBuilder(width, height);
-        builder.addDepthTextureAttachment(GL30.GL_DEPTH_COMPONENT24, GL20.GL_UNSIGNED_INT);
+        builder.addDepthTextureAttachment(GL30.GL_DEPTH_COMPONENT16, GL20.GL_UNSIGNED_SHORT);
         return new DepthBuffer(builder);
     }
 

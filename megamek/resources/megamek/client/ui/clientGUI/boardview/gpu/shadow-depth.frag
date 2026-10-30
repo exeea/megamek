@@ -42,13 +42,14 @@ void main() {
     vec2 bent = abs(change - drift);
     vec2 axes = max(abs(change) + .5 * bent, 1.5 * bent);
     float bias = axes.x + axes.y;
-    float depth = min(1.0, v_depth + bias + 0.000001);
+    // Plus one step of the 16-bit map, which rounds what it stores: a face square to the light keeps its own depth.
+    float depth = min(1.0, v_depth + bias + 1.0 / 65535.0);
 #endif
 #if defined(diffuseTextureFlag) && defined(blendedFlag)
     if (texture(u_diffuseTexture, v_texCoords0).a < u_alphaTest) discard;
 #endif
 #ifdef PackedDepthFlag
-    // PackedDepthFlag is libGDX's vertex-depth selector; the framebuffer stores only D24 now.
+    // PackedDepthFlag is libGDX's vertex-depth selector; the framebuffer stores only D16 now.
     gl_FragDepth = depth;
 #endif
 }

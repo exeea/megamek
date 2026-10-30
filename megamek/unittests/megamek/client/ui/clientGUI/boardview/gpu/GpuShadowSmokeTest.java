@@ -426,7 +426,7 @@ class GpuShadowSmokeTest {
         assertEquals(GL20.GL_LINEAR, value.get(0));
         Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, value);
         assertEquals(GL20.GL_LINEAR, value.get(0));
-        assertEquals(GL30.GL_DEPTH_COMPONENT24, org.lwjgl.opengl.GL11.glGetTexLevelParameteri(
+        assertEquals(GL30.GL_DEPTH_COMPONENT16, org.lwjgl.opengl.GL11.glGetTexLevelParameteri(
               GL20.GL_TEXTURE_2D, 0, org.lwjgl.opengl.GL11.GL_TEXTURE_INTERNAL_FORMAT));
     }
 
