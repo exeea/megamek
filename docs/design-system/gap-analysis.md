@@ -577,8 +577,8 @@ work for Swing, and item 11 is under investigation.
        150 ms. Adding goes through `LobbyCommands.addUnits`, the dialog's own path (Clan pilots, the asset crew,
        names, `sendAddEntity` and the chat line). Timings on this machine: the first open waits for the unit cache,
        about 1.9 to 2 s (10,920 units); afterwards the full list filters in about 45 ms and "Atlas" in 2 to 3 ms.
-       Not ported, being Swing-bound: the TRO readout, Alpha Strike card, factions and damage tabs, and the advanced
-       search. Probes: `lobby+requisition`, with `+atlas`, `+filters` and `+pick`. Not yet checked live: adding,
+       Not ported, being Swing-bound: the TRO readout, Alpha Strike card, factions and damage tabs (since L10), and the
+       advanced search (since L11). Probes: `lobby+requisition`, with `+atlas`, `+filters` and `+pick`. Not yet checked live: adding,
        taking back, the owner switch, the keyboard, the dossier's slide and the Sources buttons. MekHQ, MegaMekLab
        and the main menu's unit browser keep `AbstractUnitSelectorDialog`.
      - L8 ~~Dialogs~~. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load
@@ -658,6 +658,45 @@ work for Swing, and item 11 is under investigation.
        `lobby+requisition+pick+tab=<overview|readout|tro|summary|ascard|factions|damage>` clicks through the Stage,
        photographed at 2560x1400 and narrow. Not checked live: the Force Generator's first load on a slow disk
        (the tab shows a loading line until it is done), and very long TRO texts.
+     - L11 ~~Requisition advanced search~~. The old unit selector's Advanced search (Total Warfare, Alpha Strike and
+       Battlefield Support) is rebuilt in libGDX rather than opening the Swing dialog. The matching the Swing panels
+       held moved out of them into toolkit-free filters, `ASSearchFilter` and `BFSSearchFilter`, which the panels now
+       fill and use, so the dialog behaves as before for MekHQ and MegaMekLab; Total Warfare reuses
+       `MekSearchFilter` (`allowingAll()` is new). `RequisitionAdvancedSearch` in `megamek.client.lobby` is the
+       immutable criteria (field to value: range, level, flag, picks, movement, minimums, equipment expression), with
+       its labels and tag texts; it builds the three filters, and `RequisitionCatalog`'s `Filters` carries it, so
+       the results and their count honour it. In the Filters drawer, "Advanced search…" (with " · N" while
+       criteria are at work) opens `LobbyAdvancedSearchView` in the results' place, under the toolbar and tags; Done,
+       Back or Escape (after the drawer) shows the results again. It was picked over a drawer because the criteria
+       need the full centre: the view has its title, the live count of matching units, Clear (the tab's criteria)
+       and Done over compact `UiTabs` (Total Warfare, Alpha Strike, Battlefield Support), then the tab's titled
+       blocks laid out in as many columns as fit (`control.lg` × 8 each, at most three: two at 2560x1400, one narrow),
+       in a vertical scroll. The controls are kit only: `UiRangeInput` for from–to numbers, selects, Any/Yes/No
+       segmented flags, filter chips for short choices, `UiPickList` for long ones (quirks, specials, engines,
+       cockpits), All/Any segmented where the filter supports both, steppers, and the equipment editor (a search over
+       the weapons and equipment with their groups, ≥ or <, a count, Add, AND, OR, brackets, Undo and Clear; the
+       expression only applies once it is complete). Covered: Total Warfare walk, run, jump, tonnage, year, BV,
+       armour level, unit type, tech base and level, motive, armour, structure, engine, cockpit and gyro types,
+       quirks and weapon quirks, the unit flags (omni, military, industrial, Clan engine, patchwork, support vehicle,
+       mounted infantry, water only, Franken-Mek, official, invalid, failed equipment, the doomed environments) and
+       the equipment expression; Alpha Strike unit type, role, size, TMM, move (mode and range), armour, structure,
+       threshold, damage S/M/L/E, OV, PV and specials; Battlefield Support all of its panel's (type, move mode, MP,
+       TMM, skill, damage, damage per hit and hits, long range, artillery, specials and the minimum counts). Each
+       criterion shows as a removable tag beside the drawer's, counts in the Filters button, and goes with Reset
+       and Clear filters; a new game gets a new lobby and so none, as the dialog. Same-named Inner Sphere and Clan
+       equipment is told apart by its base and internal name. Left out, being costly or rare: tank turrets, lower
+       arms and hands, transport bays, doors and carried units, source text, rules references, MUL ID, a separate
+       quirk-exclude mode (a quirk chip switches to must-not-have instead), the equipment table's tech and unit-type
+       filtering, and saved searches. Kit: `UiRangeInput`, `UiPickList` and the select list's type-ahead. Checks:
+       `RequisitionAdvancedSearchTest`, `AdvancedSearchParityTest` (the Swing panels and the lobby model agree on
+       representative criteria), and the on-demand `LobbyAdvancedSearchSmokeTest` and `UiPickListSmokeTest`, which
+       click the real actors. Probe `lobby+requisition+advanced` (`+as`, `+equip`) clicks Filters, Advanced search
+       and the walk field through the Stage: 6,533 units, then 2,857 with walk ≥ 5, then 50 with Alpha Strike size 4
+       or 481 with one PPC; photographed at 2560x1400 and 1100x800. Not checked live: every control on the Battlefield
+       Support tab, the expression's brackets, and very long pick lists on a slow machine. The Swing dialog's own
+       quirks stay: its saved Alpha Strike damage choices do not come back (`ASDamage` has no `equals`),
+       `MekSearchFilter`'s copy constructor copies only some fields, and its weapon-quirk exclusion reads the
+       include list.
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.

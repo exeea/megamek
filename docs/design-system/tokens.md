@@ -498,6 +498,13 @@ dial and hex pickers (`UiAngleDial`, `UiHexSides`) only recolour: `style("token"
 and text.primary on hover). The hub keeps hud-v3's mint ring, `selection.width` (2) wide, and the needle stops at it,
 so the value inside sits on a plain base. The `hud` and `hud-search` field styles stay as hud-v3 draws them today.
 
+**Range input.** [`UiRangeInput`](../../megamek/src/megamek/client/ui/gdx/UiRangeInput.java), from
+`UiKit.rangeInput(minText, maxText)`, is a from–to pair for whole numbers: two compact `input` fields `control.lg` × 2
+(96) wide, their placeholders in `text.muted`, an en dash between them in `text.secondary`, `xs` (4) apart, left
+aligned. Only digits are taken, six at most; an empty end is open. The fields' own `ChangeEvent`s stop at the range,
+which fires one per edit instead, so a listener on a block that holds several controls hears each edit once.
+`min()` and `max()` read the ends (null when open); `set(min, max)` fires nothing.
+
 ## Choices
 
 Check box, radio button and switch, with the label on the right. A click on the indicator or its label flips it. Both
@@ -639,6 +646,17 @@ select; `select(i)` from code fires none, and `placeholder(text)` shows the plac
 `focused` and `opened` freeze those states for the gallery. hud-v3's own `UiKit.select(text, inline, true)` takes the
 Token v0 look: the `token-select` style is the input box with a `text.secondary` chevron, and `token-select-inline` a
 dotted `border.control` underline that turns `border.strong` on hover.
+
+- **Type-ahead.** While the list is open, printable keys build a prefix and the first row that starts with it,
+  ignoring case, becomes active; a pause of a second (`UiListPopup.TYPE_AHEAD_MS`) starts a new prefix, and a space
+  counts only inside one. Enter then chooses the row. This makes long lists (equipment, quirks) usable from the keys.
+- **Pick list.** [`UiPickList`](../../megamek/src/megamek/client/ui/gdx/UiPickList.java), from
+  `UiKit.pickList(placeholder, items, excludes)`, picks several values from a list too long for chips: a compact select
+  showing its placeholder, and the picks below it, `xs` (4) apart and wrapping, as acting chips with an `icon.sm`
+  close glyph. Choosing an item adds it as a must-have and puts the placeholder back. With `excludes`, a click on a
+  chip switches it between must-have (`NORMAL` tone) and must-not-have (`BAD` tone); without, it removes it, and the
+  close glyph always removes it. One `ChangeEvent` per change; `picks()` is the index to must-have map and
+  `set(picks)` fires nothing. Use filter chips while there are ten choices or fewer.
 
 ## Lists and trees
 
