@@ -175,15 +175,32 @@ final class GpuMaterialCache {
 
     // ---- Tops: which faces and materials ----
 
-    /** A sculpt material whose level tops are cached: plain natural ground, not blended, volcanic, iced or concrete. */
+    /**
+     * A sculpt material whose level tops are cached: natural ground, alone or blended with other natural covers; not
+     * volcanic, iced or concrete. A blend's live layers take its covers' plain proportions (terrain-sculpt.frag), so
+     * covers whose live effects follow the height-blended weights stay direct: sand (its windows onto the substrate),
+     * fungus (the level grade) and lunar ground (its regolith light). Bounce light, rain, wind and ground damage follow
+     * the mixture rather than each patch.
+     */
     static boolean cacheable(Material material) {
-        if (!SPLIT || GpuTessellation.curved(material) || material.has(GpuSurfaceBlend.TYPE)) {
-            return false;
-        }
+        if (!SPLIT || GpuTessellation.curved(material)) { return false; }
         var sculpt = (FloatAttribute) material.get(GpuTerrain.Sculpt.TYPE);
-        return sculpt != null && sculpt.value != BoardScene.Surface.CONCRETE.ordinal()
-              && sculpt.value < BoardSurfaceBlend.CRUST && !material.has(GpuMagmaShader.TYPE)
-              && !material.has(GpuIceShader.TYPE);
+        if (sculpt == null || !natural(sculpt.value) || material.has(GpuMagmaShader.TYPE)
+              || material.has(GpuIceShader.TYPE)) { return false; }
+        var blend = (GpuSurfaceBlend) material.get(GpuSurfaceBlend.TYPE);
+        if (blend != null) {
+            for (float family : blend.families) {
+                if (!natural(family) || family == BoardScene.Surface.SAND.ordinal()
+                      || family == BoardScene.Surface.FUNGUS.ordinal() || family == BoardScene.Surface.LUNAR.ordinal()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean natural(float family) {
+        return family != BoardScene.Surface.CONCRETE.ordinal() && family < BoardSurfaceBlend.CRUST;
     }
 
     /** The material a chunk's cache tops draw in: the same attributes, so the same programs, under its own id. */
@@ -217,16 +234,23 @@ final class GpuMaterialCache {
     }
 
     /**
-     * Whether no biome, deck mud or liquid is in the hex or beside it: the biome stage reaches 14 m past a hex
-     * (GpuBiomeSurface), less than a neighbour's width.
+     * Whether the biome stage leaves the hex as the material is: no liquid in it, no biome or deck mud in it or beside
+     * it (their cover reaches 14 m past a hex, less than a neighbour's width), and beside it no molten or frozen liquid
+     * and water of one palette at most (GpuBiomeSurface.aqueous: one palette changes nothing on dry ground).
      */
     private static boolean uncovered(BoardScene scene, BoardScene.Tile tile) {
+        if (tile.liquid().present()) { return false; }
+        int palettes = 0;
         for (int direction = -1; direction < 6; direction++) {
             var near = direction < 0 ? tile : scene.neighbor(tile, direction);
-            if (near != null && (BoardBiome.kind(near) != BoardScene.Biome.NONE || near.deckMud()
-                  || near.liquid().present())) { return false; }
+            if (near == null) { continue; }
+            if (BoardBiome.kind(near) != BoardScene.Biome.NONE || near.deckMud()) { return false; }
+            if (near.liquid().present()) {
+                if (!GpuBiomeSurface.aqueous(near)) { return false; }
+                palettes |= 1 << GpuWaterShader.palette(near.liquid());
+            }
         }
-        return true;
+        return Integer.bitCount(palettes) < 2;
     }
 
     /** A top as this frame draws it on terrain page {@code page}: its cached twin once its pages can be read. */
@@ -281,6 +305,11 @@ final class GpuMaterialCache {
             copied.clear();
             return;
         }
+        invalidate(changed);
+    }
+
+    /** The pages any level holds of {@code changed} (world units) rebuild, serving their old content meanwhile. */
+    void invalidate(BoundingBox changed) {
         if (!changed.isValid()) { return; }
         for (int at = 0; at <= root; at++) {
             // A page reaches its gutter beyond its interior, and its sharpening one texel more.
@@ -725,13 +754,14 @@ final class GpuMaterialCache {
     /**
      * Step {@code step} of page (x, y) of {@code at}, into {@code layer}: the whole page copied from its sixteen
      * children when they are built, else one of its tiles rendered, reduced and copied into the page's three levels,
-     * then sharpened after the last. True after the last step.
+     * then sharpened after the last (GpuPageCache.Filler). A tile whose tops drew a program that still links leaves
+     * the page to start over.
      */
-    private boolean fill(int at, int x, int y, int layer, int step) {
+    private int fill(int at, int x, int y, int layer, int step) {
         if (step == 0 && copiable(at, x, y)) {
             copyChildren(at, x, y, layer);
             copied.add(new PageKey(at, x, y));
-            return true;
+            return GpuPageCache.DONE;
         }
         // An exact level averages 2^at x 2^at base tiles at the close view's texel; a coarse one is one multisampled
         // render at its own. Every tile is world-aligned on the page's grid, gutters included.
@@ -742,20 +772,22 @@ final class GpuMaterialCache {
         int last = sub + LEVELS - 1;
         // A coarse page may lie far from the view (the root): touches then tests every chunk's tops.
         if (touches(minX, minY, minX + tile, minY + tile)) {
+            int unlinked = GpuShaderProvider.unlinkedDraws();
             fillTexel = texel;
             try {
                 if (at >= COARSE) { renderCoarse(minX, minY, tile, last); } else { renderTile(minX, minY, tile, last); }
             } finally {
                 fillTexel = CLOSE_PIXEL;
             }
+            if (GpuShaderProvider.unlinkedDraws() != unlinked) { return GpuPageCache.AGAIN; }
         } else {
             clearTile(last);
         }
         copyTile(layer, sub, i, j);
-        if (step < side * side - 1) { return false; }
+        if (step < side * side - 1) { return GpuPageCache.MORE; }
         sharpen(layer);
         copied.remove(new PageKey(at, x, y));
-        return true;
+        return GpuPageCache.DONE;
     }
 
     /**

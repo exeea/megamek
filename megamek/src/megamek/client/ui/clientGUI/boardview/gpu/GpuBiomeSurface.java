@@ -43,11 +43,18 @@ final class GpuBiomeSurface implements Disposable {
         int palettes = 0;
         for (var tile : scene.tiles()) {
             if (BoardBiome.kind(tile) != BoardScene.Biome.NONE || tile.deckMud()) { return true; }
-            if (tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()) {
-                palettes |= 1 << GpuWaterShader.palette(tile.liquid());
-            }
+            if (aqueous(tile)) { palettes |= 1 << GpuWaterShader.palette(tile.liquid()); }
         }
         return Integer.bitCount(palettes) > 1;
+    }
+
+    /**
+     * Water the stage mixes by its palette: present, neither molten nor frozen. A palette reaches at most
+     * {@code LIQUID_REACH + LIQUID_WANDER} (about 9 m) beyond its hex, so only two palettes among a hex and its
+     * neighbours can change that hex's fragments.
+     */
+    static boolean aqueous(BoardScene.Tile tile) {
+        return tile.liquid().present() && !tile.liquid().molten() && !tile.frozen();
     }
 
     /**
@@ -77,9 +84,7 @@ final class GpuBiomeSurface implements Disposable {
                 // dry/frozen/molten tiles), B is the ice shown (1 frozen land, 2 frozen water, 3 detected black ice),
                 // A is elevation + 64.
                 int color = kind.ordinal() << 24;
-                if (tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()) {
-                    color |= (GpuWaterShader.palette(tile.liquid()) + 1) << 16;
-                }
+                if (aqueous(tile)) { color |= (GpuWaterShader.palette(tile.liquid()) + 1) << 16; }
                 boolean ice = tile.frozen() || tile.blackIce();
                 color |= (!tile.frozen() ? tile.blackIce() ? 3 : 0 : tile.liquid().present() ? 2 : 1) << 8;
                 anyIce |= ice;

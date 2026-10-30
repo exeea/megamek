@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.graphics.GL20;
@@ -162,9 +163,11 @@ class GpuRoadSourceTest {
                 if (!BoardRoad.rendered(tile) || !surface.relief.sculpted()) { continue; }
                 var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), TerrainLod.FULL,
                       surfaces);
-                // The ground as drawn: the blend plan's triangles, and the other sculpted faces as their mesh writes them.
+                // The ground as drawn: the blend plan's triangles (its cache tops too), and the other sculpted faces as
+                // their mesh writes them.
                 Map<List<Vector3>, List<Corner>> ground = new HashMap<>();
-                for (var group : plan.blended().values()) {
+                for (var group : Stream.concat(plan.blended().values().stream(),
+                      plan.blendedTops().values().stream()).toList()) {
                     for (var t : group) {
                         List<Corner> corners = new ArrayList<>();
                         for (var v : List.of(t.a().vertex(), t.b().vertex(), t.c().vertex())) {

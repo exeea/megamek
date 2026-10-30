@@ -1838,6 +1838,8 @@ final class GpuTerrain implements Disposable {
         /** The ground material cache's tops (GpuMaterialCache.top), not in terrainRenderables, and their bounds. */
         final Array<Renderable> topRenderables = new Array<>();
         final BoundingBox topBounds = new BoundingBox();
+        /** Whether tops of theme-boundary hexes are among them: their covers follow this detail's sampling. */
+        boolean blendedTops;
         GpuTerrainDepth depthTerrain;
         /** Packed and instanced cosmetic cover share one visibility decision in every pass. */
         final List<ModelInstance> scatter = new ArrayList<>();
@@ -3237,7 +3239,15 @@ final class GpuTerrain implements Disposable {
                         GpuSurfaceBlend.ordinaryFamily(sample.material), waterMode(sample.material),
                         flowingMagma(sample.material))
                   && sample.meshPart.mesh.getVertexAttributes().equals(attributes)
-                  && Objects.equals(sample.meshPart.mesh.getInstancedAttributes(), instances)) { return; }
+                  && Objects.equals(sample.meshPart.mesh.getInstancedAttributes(), instances)) {
+                // One sample stands for its programs. A blend the cache draws takes the place of one it cannot (sand),
+                // so the variant's cache programs link behind the loading stage too.
+                if (!GpuMaterialCache.cacheable(sample.material) && GpuMaterialCache.cacheable(material)) {
+                    sample.material = new Material(material);
+                    terrainMaterialsReady = false;
+                }
+                return;
+            }
         }
         Renderable sample = new Renderable();
         sample.material = new Material(material);
@@ -3368,8 +3378,12 @@ final class GpuTerrain implements Disposable {
     private void replaceDetail(int index, Chunk next) {
         scarSurfaceRevision++;
         Chunk old = chunks.set(index, next);
-        // Level tops are the same at every detail: the cache keeps its pages and forgets only the old materials.
+        // Level tops of one family are the same at every detail: the cache keeps their pages and forgets only the old
+        // materials. A theme boundary's covers follow each detail's sampling, so its tops' pages rebuild.
         materialCache.retireTwins();
+        if (old.blendedTops || next.blendedTops) {
+            materialCache.invalidate(new BoundingBox(old.topBounds).ext(next.topBounds));
+        }
         editorPropsInstalled = true;
         Chunk evicted = detailCache.remove(index);
         if (evicted != null) { evicted.dispose(); }
@@ -5105,6 +5119,7 @@ final class GpuTerrain implements Disposable {
           List<BoardSurface.Face> formed, List<BoardSurface.Face> bed,
           Map<Vector3, Vector3> bedNormals,
           Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> blended,
+          Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> blendedTops,
           Map<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports) { }
 
     static SculptPlan prepareSculpt(BoardScene scene, BoardScene.Tile tile, BoardSurface surface, float floor,
@@ -5127,6 +5142,8 @@ final class GpuTerrain implements Disposable {
         Map<Vector3, Vector3> bedNormals = wallNormals(bed);
         bed = surface.renderBed(bed);
         Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups = new LinkedHashMap<>();
+        // Dry level tops in groups of their own, which the ground material cache can draw (blended).
+        Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> tops = new LinkedHashMap<>();
         Map<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports = new HashMap<>();
         float spacing = GpuSurfaceBlend.spacing(lod);
         var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
@@ -5152,7 +5169,8 @@ final class GpuTerrain implements Disposable {
             var waters = GpuWaterCover.coveringWaters(scene, surface, surfaces);
             for (var face : blended) {
                 boolean cliff = surface.relief.shade(face.a()).kind() != BoardRelief.Kind.GROUND;
-                blendFace(groups, supports, face, pieces -> GpuWaterCover.coveredPolygons(surface, face, waters,
+                var target = !cliff && GpuMaterialCache.top(surface, face, scene, surfaces) ? tops : groups;
+                blendFace(target, supports, face, pieces -> GpuWaterCover.coveredPolygons(surface, face, waters,
                       polygon -> GpuSurfaceBlend.appendPolygon(pieces, BoardSurfaceBlend.family(tile), polygon,
                             p -> cliff ? sampler.sampleCliff(p.x, p.y, p.z) : sampler.sample(p.x, p.y, p.z), spacing)));
             }
@@ -5208,7 +5226,7 @@ final class GpuTerrain implements Disposable {
             }
             bed.clear();
         }
-        return new SculptPlan(walls, ground, formed, bed, bedNormals, groups, supports);
+        return new SculptPlan(walls, ground, formed, bed, bedNormals, groups, tops, supports);
     }
 
     /** Appends one face's blended triangles to {@code groups}, keeping their vertices as its {@code supports} too. */
@@ -5257,7 +5275,9 @@ final class GpuTerrain implements Disposable {
         // Built for tessellation, a full-detail chunk's triangles that curve take a material of their own
         // (sculptedTriangles).
         boolean split = chunk.tessellated && chunk.lod == TerrainLod.FULL && GpuTessellation.available();
-        blended(solid, plan.blended(), scene, tile, chunk.lavaField, split, surface);
+        blended(solid, plan.blended(), scene, tile, chunk.lavaField, split, surface, false);
+        blended(solid, plan.blendedTops(), scene, tile, chunk.lavaField, split, surface, true);
+        if (!plan.blendedTops().isEmpty()) { chunk.blendedTops = true; }
         for (var group : byFamily(surface, formed).entrySet()) {
             Material formedMaterial = magma != null ? magma : sculptMaterial(group.getKey());
             // A frozen lake's banks below frozen land carry that land's ice, so one sheet spans the shore.
@@ -5478,12 +5498,16 @@ final class GpuTerrain implements Disposable {
     /** {@code lava} is the chunk's lava field: cooled banks, the lava's own and those of land beside it, glow at it. */
     private void blended(GpuTerrainLayer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
           BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava) {
-        blended(solid, groups, scene, tile, lava, false, null);
+        blended(solid, groups, scene, tile, lava, false, null, false);
     }
 
-    /** With {@code split}, the triangles that curve (magma's aside) take a material of their own: sculptedTriangles. */
+    /**
+     * With {@code split}, the triangles that curve (magma's aside) take a material of their own: sculptedTriangles.
+     * {@code tops}: dry level tops (GpuMaterialCache.top), which the ground material cache draws where it can.
+     */
     private void blended(GpuTerrainLayer solid, Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups,
-          BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava, boolean split, BoardSurface surface) {
+          BoardScene scene, BoardScene.Tile tile, GpuWaterShader.Field lava, boolean split, BoardSurface surface,
+          boolean tops) {
         for (var group : groups.entrySet()) {
             var palette = group.getKey();
             boolean boundary = palette.first() != palette.base() || palette.second() != palette.base() || palette.third() != palette.base();
@@ -5506,7 +5530,8 @@ final class GpuTerrain implements Disposable {
                     (curves ? curved : plain).add(triangle);
                 }
             }
-            blendedTriangles(solid, material, palette, boundary, plain, null);
+            blendedTriangles(solid, tops && GpuMaterialCache.cacheable(material) ? GpuMaterialCache.top(material)
+                  : material, palette, boundary, plain, null);
             if (!curved.isEmpty()) {
                 blendedTriangles(solid, GpuTessellation.curvedCopy(material), palette, boundary, curved, surface);
             }

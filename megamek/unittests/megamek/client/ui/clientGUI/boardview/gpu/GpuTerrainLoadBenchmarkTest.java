@@ -19,6 +19,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 import java.util.zip.CRC32C;
 
 import com.badlogic.gdx.math.Vector3;
@@ -168,7 +169,8 @@ class GpuTerrainLoadBenchmarkTest {
                 GpuTerrain.Prepared prepared = results.set(done++, null).join();
                 triangles += digest(out, prepared);
                 for (var sculpt : prepared.sculpts().entrySet()) {
-                    long count = sculpt.getValue().blended().values().stream().mapToLong(List::size).sum();
+                    long count = sculpt.getValue().blended().values().stream().mapToLong(List::size).sum()
+                          + sculpt.getValue().blendedTops().values().stream().mapToLong(List::size).sum();
                     largest.put(count * 100_000 + sculpt.getKey().getX() * 300 + sculpt.getKey().getY(), sculpt.getKey());
                     if (largest.size() > 5) { largest.pollFirstEntry(); }
                 }
@@ -249,7 +251,8 @@ class GpuTerrainLoadBenchmarkTest {
                     vector(out, key);
                     vector(out, sculpt.bedNormals().get(key));
                 }
-                for (var group : sculpt.blended().entrySet()) {
+                for (var group : Stream.concat(sculpt.blended().entrySet().stream(),
+                      sculpt.blendedTops().entrySet().stream()).toList()) {
                     var palette = group.getKey();
                     out.writeInt(palette.base());
                     out.writeInt(palette.first());

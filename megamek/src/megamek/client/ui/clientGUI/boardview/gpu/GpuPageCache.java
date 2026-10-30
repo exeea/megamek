@@ -38,10 +38,15 @@ import org.lwjgl.opengl.GL33;
  * last content whole, while it rebuilds in a spare layer that replaces it on the last step.
  */
 final class GpuPageCache implements Disposable {
-    /** Builds step {@code step} of a page in its layer; true once that was the last. */
+    /**
+     * Builds step {@code step} of a page in its layer: {@link #DONE} after the last, {@link #MORE} before it, or
+     * {@link #AGAIN} when the step could not draw everything (a program still links): the page then starts over.
+     */
     interface Filler {
-        boolean fill(int level, int x, int y, int layer, int step);
+        int fill(int level, int x, int y, int layer, int step);
     }
+
+    static final int MORE = 0, DONE = 1, AGAIN = 2;
 
     /** Which pages of a table's window a coarser ready page may stand in for while they build. */
     interface StandIns {
@@ -287,16 +292,22 @@ final class GpuPageCache implements Disposable {
                               : page.layer < 0 && (page.layer = take(page)) < 0) { break; }
                         int query = GL15.glGenQueries();
                         GL15.glBeginQuery(GL33.GL_TIME_ELAPSED, query);
-                        boolean complete;
+                        int result;
                         try {
-                            complete = filler.fill(page.level, page.x, page.y, aside ? page.spare : page.layer,
+                            result = filler.fill(page.level, page.x, page.y, aside ? page.spare : page.layer,
                                   page.step++);
                         } finally {
                             GL15.glEndQuery(GL33.GL_TIME_ELAPSED);
                             queries.add(new int[] { query, page.level });
                         }
+                        if (result == AGAIN) {
+                            // Not ready on what it could not draw: it starts over on a later frame.
+                            page.step = 0;
+                            credit -= estimate;
+                            break;
+                        }
                         // Ready only after the last step: a layer handed over keeps no readiness of its last page.
-                        if (complete) {
+                        if (result == DONE) {
                             if (aside) {
                                 layers[page.layer] = null;
                                 free.add(page.layer);

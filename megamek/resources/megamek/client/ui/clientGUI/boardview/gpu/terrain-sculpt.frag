@@ -410,6 +410,14 @@ void main() {
     finish = Finish(sqrt(sqrt(filteredAlpha2(cachedDetail.z, meanLength))), 0.0, 0.0, vec3(0.0));
     // A natural top matches its slope at the same height, as the evaluator sets it.
     if (natural && !shore) level = v_cloudPosition.z / u_levelHeight;
+#ifdef terrainBlendFlag
+    // The live layers take the covers' plain proportions (blendCovers' starting weights) where the fill resolved their
+    // height-blended patches: bounce light, rain response, grass and sand follow the mixture, not each patch.
+    vec4 proportions = max(v_coverWeights, vec4(0.0));
+    proportions *= step(vec4(.02), proportions);
+    materialCoverage = proportions / max(dot(proportions, vec4(1.0)), .00001);
+    coverEffects(materialCoverage, sediment, grass, sand, bounce, response, rainCover);
+#endif
 #else
     vec4 detail = vec4(0.0, 0.0, 1.0, 1.0);
     if (natural) {
