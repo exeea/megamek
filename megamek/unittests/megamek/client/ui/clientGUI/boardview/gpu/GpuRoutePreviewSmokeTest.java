@@ -38,7 +38,7 @@ class GpuRoutePreviewSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override public void create() {
                 var terrain = new GpuTerrain();
-                var preview = new GpuEditorPreview();
+                var preview = new GpuEditorPreview(null);
                 var settings = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
                       0, 0, new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 0));
                 var frame = new GpuReviewFrame(settings);

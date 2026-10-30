@@ -83,7 +83,7 @@ final class GpuTactical implements Disposable {
     private static final VertexAttributes INKED_VERTICES = new VertexAttributes(VertexAttribute.Position(),
           VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0));
     private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Tactical pages", GpuUnitShader::unlitProvider));
-    private ShapeRenderer rulerShapes;
+    private final ShapeRenderer rulerShapes;
     /** Luminance differs as well as hue; the blocked section also has a dash pattern. */
     static final int RULER_CLEAR = 0x64D8A2FF;
     static final int RULER_BLOCKED = 0xD84959FF;
@@ -121,24 +121,28 @@ final class GpuTactical implements Disposable {
     }
 
     GpuTactical(float outlineSpeed) {
-        this(outlineSpeed, null, null);
+        this(outlineSpeed, null, null, null);
     }
 
     GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain) {
-        this(OUTLINE_SCROLL_SPEED, terrain, null);
+        this(OUTLINE_SCROLL_SPEED, terrain, null, null);
     }
 
-    /** The labels draw with the view's sprite program ({@code sprites}), which their batch does not own. */
-    GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain, ShaderProgram sprites) {
-        this(OUTLINE_SCROLL_SPEED, terrain, sprites);
+    /**
+     * The labels and the ruler draw with the view's sprite and shape programs ({@code sprites}, {@code shapes}), which
+     * their batch and renderer do not own.
+     */
+    GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain, ShaderProgram sprites, ShaderProgram shapes) {
+        this(OUTLINE_SCROLL_SPEED, terrain, sprites, shapes);
     }
 
-    // Without a shared program the text batch compiles and owns libGDX's own.
+    // Without shared programs the text batch and the ruler compile and own libGDX's own.
     private GpuTactical(float outlineSpeed, Function<Coords, BoardTacticalGeometry.Surface> terrain,
-          ShaderProgram sprites) {
+          ShaderProgram sprites, ShaderProgram shapes) {
         this.outlineSpeed = outlineSpeed;
         this.terrain = terrain;
         textBatch = new SpriteBatch(1000, sprites);
+        rulerShapes = new ShapeRenderer(5000, shapes);
         wallMaterial.set(new DepthTestAttribute(GL20.GL_LEQUAL, 0, COPLANAR_DEPTH_FAR, false));
     }
 
@@ -636,7 +640,6 @@ final class GpuTactical implements Disposable {
             camera.project(end, 0, 0, camera.viewportWidth, camera.viewportHeight);
             camera.project(split, 0, 0, camera.viewportWidth, camera.viewportHeight);
         }
-        if (rulerShapes == null) { rulerShapes = new ShapeRenderer(); }
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         rulerShapes.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, camera.viewportWidth, camera.viewportHeight));
         rulerShapes.begin(ShapeRenderer.ShapeType.Filled);
@@ -753,7 +756,7 @@ final class GpuTactical implements Disposable {
 
     @Override
     public void dispose() {
-        if (rulerShapes != null) { rulerShapes.dispose(); rulerShapes = null; }
+        rulerShapes.dispose();
         hexMasks.dispose();
         deploymentTint.dispose();
         electronicWarfare.dispose();

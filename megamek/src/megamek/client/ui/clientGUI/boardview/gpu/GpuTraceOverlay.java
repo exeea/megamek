@@ -8,6 +8,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.Disposable;
@@ -50,12 +51,18 @@ final class GpuTraceOverlay implements Disposable {
         }
     }
 
+    /** The view's sprite program, which {@link #batch} does not own. */
+    private final ShaderProgram sprites;
     private SpriteBatch batch;
     private Texture texture;
     /** The file {@link #texture} holds, or that failed to load, in which case the texture is null. */
     private String loaded;
     /** How far the image has faded in: 0 hidden, 1 shown. */
     private float shown;
+
+    GpuTraceOverlay(ShaderProgram sprites) {
+        this.sprites = sprites;
+    }
 
     /** The only view in which the image fits the hexes: straight down, within {@link #TILT_TOLERANCE}. */
     static boolean topView(BoardCamera camera) {
@@ -79,7 +86,7 @@ final class GpuTraceOverlay implements Disposable {
             return;
         }
         if (batch == null) {
-            batch = new SpriteBatch(1);
+            batch = new SpriteBatch(1, sprites);
         }
         Rectangle area = bounds(settings, texture.getWidth(), texture.getHeight());
         // Over the terrain, units and effects at every height; the markers, grid and labels drawn later stay above it.

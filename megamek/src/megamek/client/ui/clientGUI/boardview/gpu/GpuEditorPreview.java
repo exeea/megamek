@@ -33,6 +33,7 @@ import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -119,7 +120,7 @@ final class GpuEditorPreview implements Disposable {
     private CompletableFuture<List<GpuTerrain.RouteChange>> comparing;
     private boolean stale;
     private FrameBuffer ghostLayer;
-    private SpriteBatch composite;
+    private final SpriteBatch composite;
     private final Matrix4 projection = new Matrix4();
     private final IntBuffer viewport = BufferUtils.newIntBuffer(4), framebuffer = BufferUtils.newIntBuffer(1);
     /** What the ghost layer draws: the route pieces, then {@link #objects}. */
@@ -132,7 +133,9 @@ final class GpuEditorPreview implements Disposable {
     private final List<BoundingBox> outlines = new ArrayList<>();
     private final Vector3 labelPoint = new Vector3();
 
-    GpuEditorPreview() {
+    /** The ghost layer's composite draws with the view's sprite program, which its batch does not own. */
+    GpuEditorPreview(ShaderProgram sprites) {
+        composite = new SpriteBatch(1, sprites);
         light.set(new ColorAttribute(ColorAttribute.AmbientLight, .65f, .65f, .65f, 1));
         light.add(new DirectionalLight().set(.5f, .5f, .5f, -.4f, .3f, -1));
     }
@@ -346,7 +349,6 @@ final class GpuEditorPreview implements Disposable {
             if (ghostLayer != null) { ghostLayer.dispose(); }
             ghostLayer = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, true);
         }
-        if (composite == null) { composite = new SpriteBatch(1); }
         try {
             ghostLayer.begin();
             Gdx.gl.glDisable(GpuLinearOverlay.FRAMEBUFFER_SRGB);
@@ -565,6 +567,6 @@ final class GpuEditorPreview implements Disposable {
         batch.dispose();
         blend.dispose();
         if (ghostLayer != null) { ghostLayer.dispose(); }
-        if (composite != null) { composite.dispose(); }
+        composite.dispose();
     }
 }

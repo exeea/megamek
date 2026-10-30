@@ -35,6 +35,7 @@ import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.ImmediateModeRenderer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
@@ -101,7 +102,7 @@ final class GpuBoardOverlay implements Disposable {
     private final ModelBatch ghostBatch = new ModelBatch(GpuShaderManager.provider("Movement ghosts", GpuUnitShader::linearDisplayProvider),
           (camera, renderables) -> { });
     /** Draws the marks every frame, GpuBattleView draws its selection bands. */
-    private final ShapeRenderer shapes = new ShapeRenderer();
+    private final ShapeRenderer shapes;
     private final BoardSurface.Cache surfaces = new BoardSurface.Cache();
     /** Light for the 3D ghost: enough ambient to keep it bright, one light from above to show its shape. */
     private final Environment ghostLight = new Environment();
@@ -160,7 +161,14 @@ final class GpuBoardOverlay implements Disposable {
      */
     private record Band(float inset, float width, Color color) { }
 
+    // Without a shared program the shape renderer compiles and owns libGDX's own.
     GpuBoardOverlay() {
+        this(null);
+    }
+
+    /** The marks draw with the view's shape program, which their renderer does not own. */
+    GpuBoardOverlay(ShaderProgram program) {
+        shapes = new ShapeRenderer(5000, program);
         ghostLight.set(new ColorAttribute(ColorAttribute.AmbientLight, .6f, .6f, .6f, 1));
         ghostLight.add(new DirectionalLight().set(.5f, .5f, .5f, -.4f, .3f, -1));
     }

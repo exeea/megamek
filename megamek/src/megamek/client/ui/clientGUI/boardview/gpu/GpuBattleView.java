@@ -194,6 +194,8 @@ class GpuBattleView extends ApplicationAdapter {
      * it: the view disposes it after them.
      */
     private ShaderProgram sprites;
+    /** libGDX's shape program, shared in the same way by the view's lines, the board overlay and the ruler. */
+    private ShaderProgram shapes;
     private ShapeRenderer lines;
     private ShapeRenderer tethers;
     private ShaderProgram tetherShader;
@@ -344,6 +346,12 @@ class GpuBattleView extends ApplicationAdapter {
         return sprites;
     }
 
+    private ShaderProgram shapes() {
+        // ShapeRenderer's own: colours, no normals or texture coordinates.
+        if (shapes == null) { shapes = ImmediateModeRenderer20.createDefaultShader(false, true, 0); }
+        return shapes;
+    }
+
     private void createLoadingStage() {
         GpuGlsl.presenting(false);
         if (loadingStage != null) { return; }
@@ -422,7 +430,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (source.isEditor()) { editorBadges = new GpuEditorBadges(); }
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>(false, true);
-        overlay = new GpuBoardOverlay();
+        overlay = new GpuBoardOverlay(shapes());
         // One skin for the window: the loading screen's, when it showed, becomes the HUD's (M1 row 1). The loading
         // screen borrows it again while the terrain builds.
         theme = loadingTheme == null ? new GpuBoardSkin() : loadingTheme;
@@ -484,16 +492,16 @@ class GpuBattleView extends ApplicationAdapter {
         offscreenLinks = new GpuGlsl.Preparation();
         GpuGlsl.linkOffscreen(offscreenLinks);
         fireControl = new GpuFireControl(sprites());
-        tactical = new GpuTactical(terrain::tacticalSurface, sprites());
+        tactical = new GpuTactical(terrain::tacticalSurface, sprites(), shapes());
         atmosphere = new GpuAtmosphere();
         unitVisibility = new GpuUnitVisibility();
         wireframe = new GpuWireframe();
         unitBatch = new ModelBatch(GpuShaderManager.provider("Units", GpuUnitShader::provider), new GpuOpaqueSorter());
         hexText = new GpuHexText();
         hexGrid = new GpuHexGrid();
-        traceOverlay = new GpuTraceOverlay();
-        editorPreview = new GpuEditorPreview();
-        lines = new ShapeRenderer();
+        traceOverlay = new GpuTraceOverlay(sprites());
+        editorPreview = new GpuEditorPreview(sprites());
+        lines = new ShapeRenderer(5000, shapes());
         tetherShader = GpuShaderManager.program(() -> GpuGlsl.compile("Scene tethers", "",
               GpuShaderSource.read("scene-lines.vert"), GpuShaderSource.read("scene-lines.frag")), shader -> {
                   tetherShader = shader;
@@ -832,7 +840,8 @@ class GpuBattleView extends ApplicationAdapter {
             var request = source.takePrintRequest();
             if (request != null) {
                 boardPrint = new GpuBoardPrint(request, terrain, theme.skin.getFont("default-font"),
-                      theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT), atmosphereSettings, tuning.atmosphereOptions());
+                      theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT), atmosphereSettings, tuning.atmosphereOptions(),
+                      sprites());
             }
         }
         if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
@@ -3414,7 +3423,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (annotationBatch != null) {
             annotationBatch.dispose();
         }
-        // After every batch that draws with it: the loading stage's, the HUD's, fire control's and the tactical layer's.
+        // After every batch that draws with it: the loading stage's, the HUD's and the scene renderers'.
         if (sprites != null) { sprites.dispose(); }
         if (editorBadges != null) { editorBadges.dispose(); }
         if (unitTextures != null) {
@@ -3427,6 +3436,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (overlay != null) {
             overlay.dispose();
         }
+        // After the lines, the tactical layer and the overlay.
+        if (shapes != null) { shapes.dispose(); }
         if (source != null) {
             source.close();
         }

@@ -21,6 +21,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.Messages;
 import megamek.common.planetaryConditions.Atmosphere;
@@ -59,6 +60,8 @@ final class GpuBoardPrint implements Disposable {
     private final GpuSkyVisibility skyVisibility = new GpuSkyVisibility();
     private GpuHexText text;
     private GpuHexGrid grid;
+    /** The view's sprite program, which {@link #batch} does not own. */
+    private final ShaderProgram sprites;
     private SpriteBatch batch;
     private FrameBuffer target;
     private GpuPrintJpeg jpeg;
@@ -73,7 +76,7 @@ final class GpuBoardPrint implements Disposable {
     private boolean finished, cancelled;
 
     GpuBoardPrint(Request request, GpuTerrain lender, BitmapFont font, BitmapFont outline,
-          BoardAtmosphere.Settings conditions, GpuAtmosphere.Options lightingOptions) {
+          BoardAtmosphere.Settings conditions, GpuAtmosphere.Options lightingOptions, ShaderProgram sprites) {
         this.request = request;
         this.lender = lender;
         this.font = font;
@@ -81,6 +84,7 @@ final class GpuBoardPrint implements Disposable {
         lighting = lightingOnly(conditions);
         vacuum = conditions.pressure().isVacuum();
         this.lightingOptions = lightingOptions;
+        this.sprites = sprites;
     }
 
     /** Keep the chosen sun/moon and exposure, with clear, dry air and no animated weather or cloud shadows. */
@@ -182,7 +186,7 @@ final class GpuBoardPrint implements Disposable {
         atmosphere.setTransparentBackground(!atmosphere.spaceBackdrop(scene));
         text = new GpuHexText();
         grid = new GpuHexGrid();
-        batch = new SpriteBatch();
+        batch = new SpriteBatch(1000, sprites);
         batch.setBlendFunctionSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA, GL20.GL_ONE,
               GL20.GL_ONE_MINUS_SRC_ALPHA);
         zoomX = BoardGeometry.width() / HEX_WIDTH_PIXELS;

@@ -56,7 +56,7 @@ class GpuTraceOverlayTest {
     @Test
     void theImageFadesOutWhenTheCameraTiltsAndInWhenItReturns() {
         BoardCamera camera = topView();
-        GpuTraceOverlay overlay = new GpuTraceOverlay();
+        GpuTraceOverlay overlay = new GpuTraceOverlay(null);
         // No file: the fade runs, and nothing is loaded or drawn.
         var settings = new GpuTraceOverlay.Settings(true, "", 200, 100, 0, 0);
         try {
