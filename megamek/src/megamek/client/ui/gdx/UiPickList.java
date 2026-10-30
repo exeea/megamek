@@ -57,7 +57,7 @@ public final class UiPickList extends Table {
         });
         chips.wrap(true).space(tokens.space().get("sm")).wrapSpace(tokens.space().get("xs")).rowLeft();
         top().left();
-        add(select).left().minWidth(tokens.size().get("dialog.sm") / 3).row();
+        add(select).growX().left().minWidth(tokens.size().get("dialog.sm") / 3).row();
         add(chips).growX().minWidth(0).left().padTop(tokens.space().get("xs"));
         chips.setVisible(false);
     }

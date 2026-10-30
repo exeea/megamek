@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -254,7 +255,14 @@ final class LobbyBotSetupView {
         });
         Table switches = new Table();
         switches.top().left().defaults().left();
-        switches.add(kit.formField(colonless("BotConfigDialog.postureLabel"), posture)).row();
+        // The posture lines up with the presets column's inputs above it
+        Cell<?> postureCell = switches.add(kit.formField(colonless("BotConfigDialog.postureLabel"), posture));
+        if (stacked) {
+            postureCell.growX();
+        } else {
+            postureCell.width(size("dialog.sm") / 2);
+        }
+        switches.row();
         Table checks = new Table();
         checks.left().defaults().left();
         List<Flag> presetFlags = form.presetFlags();
@@ -277,11 +285,11 @@ final class LobbyBotSetupView {
         retreat.add(flag(Flag.FORCED_WITHDRAWAL));
         retreat.add(kit.typeLabel(Messages.getString("BotConfigDialog.retreatEdgeLabel"), "body", "text.secondary"))
               .padLeft(space("md"));
-        retreat.add(retreatEdge).padLeft(space("sm")).row();
+        retreat.add(retreatEdge).fillX().padLeft(space("sm")).row();
         retreat.add(flag(Flag.AUTO_FLEE)).padTop(space("sm"));
         retreat.add(kit.typeLabel(Messages.getString("BotConfigDialog.homeEdgeLabel"), "body", "text.secondary"))
               .padLeft(space("md")).padTop(space("sm"));
-        retreat.add(fleeEdge).padLeft(space("sm")).padTop(space("sm")).row();
+        retreat.add(fleeEdge).fillX().padLeft(space("sm")).padTop(space("sm")).row();
         content.add(retreat).colspan(2).left().padTop(space("sm")).row();
         return content;
     }

@@ -299,11 +299,8 @@ final class LobbyAdvancedSearchView {
             }
             Label label = kit.typeLabel(RequisitionAdvancedSearch.label(field), "small", "text.secondary");
             label.setWrap(true);
-            table.add(label).top().padTop(space("sm")).padRight(space("md"))
-                  .width(size("control.lg") * 2.5f);
-            boolean fills = !(control instanceof UiSelect || control instanceof UiSegmented
-                  || control instanceof UiRangeInput);
-            table.add(control).expandX().fill(fills ? 1f : 0f, 0f).minWidth(0).left().padTop(space("xs")).row();
+            UiKit.formRow(table, label, control, size("control.lg") * 2.5f).padTop(space("xs"));
+            table.getCell(label).padTop(space("sm"));
         }
         return table;
     }
@@ -466,9 +463,9 @@ final class LobbyAdvancedSearchView {
         Table row = new Table();
         row.left();
         row.add(caption("Lobby.requisition.advanced.from.label")).padRight(space("xs"));
-        row.add(from).minWidth(size("control.lg") * 1.5f);
+        row.add(from).growX().uniformX().minWidth(size("control.lg") * 1.5f);
         row.add(caption("Lobby.requisition.advanced.to.label")).padLeft(space("md")).padRight(space("xs"));
-        row.add(to).minWidth(size("control.lg") * 1.5f);
+        row.add(to).growX().uniformX().minWidth(size("control.lg") * 1.5f);
         return row;
     }
 
@@ -501,8 +498,8 @@ final class LobbyAdvancedSearchView {
         UiKit.onChange(span, changed);
         Table table = new Table();
         table.left().defaults().left();
-        table.add(mode).minWidth(size("control.lg") * 2).row();
-        table.add(span).padTop(space("xs"));
+        table.add(mode).growX().minWidth(size("control.lg") * 2).row();
+        table.add(span).growX().padTop(space("xs"));
         return table;
     }
 
@@ -547,10 +544,10 @@ final class LobbyAdvancedSearchView {
         show[0].run();
         table.left().defaults().left();
         Table row = new Table();
-        row.add(which).minWidth(size("dialog.sm") / 3);
+        row.add(which).growX().minWidth(size("dialog.sm") / 3);
         row.add(amount).padLeft(space("sm"));
         row.add(add).padLeft(space("sm"));
-        table.add(row).row();
+        table.add(row).growX().row();
         table.add(tags).growX().minWidth(0).padTop(space("xs"));
         return table;
     }

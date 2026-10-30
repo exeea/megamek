@@ -25,10 +25,11 @@ public final class UiRangeInput extends Table {
         low = end(kit, minText);
         high = end(kit, maxText);
         left();
-        add(low).width(width);
+        // Each end keeps its width alone, and the two share the width of a form column that fills
+        add(low).prefWidth(width).minWidth(width / 2).growX().uniformX();
         add(kit.typeLabel("\u2013", "body", "text.muted")).padLeft(tokens.space().get("xs"))
               .padRight(tokens.space().get("xs"));
-        add(high).width(width);
+        add(high).prefWidth(width).minWidth(width / 2).growX().uniformX();
     }
 
     private UiTextField end(UiKit kit, String placeholder) {

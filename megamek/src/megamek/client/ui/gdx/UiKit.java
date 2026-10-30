@@ -18,6 +18,7 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
+import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -1070,6 +1071,29 @@ public final class UiKit {
     /** A token check box (docs/design-system/tokens.md, Choices): for a choice a form confirms. */
     public UiChoice check(String text, boolean checked) {
         return new UiChoice(this, UiChoice.Kind.CHECK, text, checked);
+    }
+
+    /**
+     * Whether {@code input} takes the whole width of its form column, so the right edges of a form's inputs line up:
+     * selects, text, search and range inputs, pick lists and rows built of them do; check boxes, radios, switches,
+     * segmented controls, buttons, chips, steppers and number inputs keep their own width.
+     */
+    public static boolean fillsFormColumn(Actor input) {
+        return !(input instanceof Button || input instanceof UiOptionBar || input instanceof HorizontalGroup
+              || input instanceof UiStepper || input instanceof UiNumber);
+    }
+
+    /**
+     * Adds a labelled row to {@code form}: {@code label} on the left, {@code labelWidth} wide and at the input's top,
+     * and {@code input} beside it, across the rest of the column when {@link #fillsFormColumn} says so. Every kit form
+     * built of these rows lines up its inputs' right edges.
+     */
+    public static Cell<Actor> formRow(Table form, Actor label, Actor input, float labelWidth) {
+        float gap = DesignTokens.shipped().space().get("md");
+        form.add(label).width(labelWidth).top().left().padRight(gap);
+        Cell<Actor> cell = form.add(input).expandX().fill(fillsFormColumn(input) ? 1f : 0f, 0f).minWidth(0).left();
+        form.row();
+        return cell;
     }
 
     /** A token radio button; put it in a {@link #radioGroup} with the others of its choice. */

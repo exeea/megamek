@@ -871,11 +871,12 @@ final class LobbyRequisitionPanel {
             int index = sourceSelect.getSelectedIndex();
             setFilters(filters.withSource(index <= 0 ? null : sources.get(index - 1)));
         });
-        HorizontalGroup selects = chipGroup();
-        selects.addActor(labelled("Lobby.requisition.drawer.role", roleSelect));
-        selects.addActor(labelled("Lobby.requisition.drawer.era", eraSelect));
-        selects.addActor(labelled("Lobby.requisition.drawer.source", sourceSelect));
-        selects.space(space("lg"));
+        // Three equal shares of the drawer's width, so the selects' right edges line up with the rows above
+        Table selects = new Table();
+        selects.defaults().growX().uniformX().minWidth(0);
+        selects.add(labelled("Lobby.requisition.drawer.role", roleSelect));
+        selects.add(labelled("Lobby.requisition.drawer.era", eraSelect)).padLeft(space("lg"));
+        selects.add(labelled("Lobby.requisition.drawer.source", sourceSelect)).padLeft(space("lg"));
         drawer.add(selects).growX().minWidth(0).colspan(2).padTop(space("sm")).row();
 
         UiButton reset = kit.button("button-quiet" + UiTheme.COMPACT, "undo",
@@ -900,7 +901,7 @@ final class LobbyRequisitionPanel {
     private Table labelled(String key, UiSelect select) {
         Table cell = new Table();
         cell.add(kit.roleTypeLabel("overline", Messages.getString(key), "text.muted")).padRight(space("sm"));
-        cell.add(select).minWidth(size("dialog.sm") / 3);
+        cell.add(select).growX().minWidth(0);
         return cell;
     }
 
