@@ -3,9 +3,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -26,6 +29,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
@@ -35,6 +39,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.RequisitionAlphaStrike;
 import megamek.client.lobby.RequisitionCatalog;
 import megamek.client.lobby.RequisitionCatalog.Category;
 import megamek.client.lobby.RequisitionCatalog.Either;
@@ -42,18 +47,23 @@ import megamek.client.lobby.RequisitionCatalog.ExactType;
 import megamek.client.lobby.RequisitionCatalog.Filters;
 import megamek.client.lobby.RequisitionCatalog.TechBase;
 import megamek.client.lobby.RequisitionCatalog.Weight;
+import megamek.client.lobby.RequisitionDamage;
 import megamek.client.lobby.RequisitionDossier;
+import megamek.client.lobby.RequisitionFactions;
+import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionRow;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.lobby.RequisitionVisit;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFilterChip;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
+import megamek.client.ui.gdx.UiStepChart;
 import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTabs;
 import megamek.client.ui.gdx.UiTextField;
@@ -98,7 +108,28 @@ final class LobbyRequisitionPanel {
 
         /** Runs one of the forces' other sources of units: a unit list file or the random army. */
         void source(LobbyForcesPanel.Command command);
+
+        /** Reads {@code unit}'s full record away from the GPU thread and hands it back on it; the newest wins. */
+        default void load(MekSummary unit, Consumer<RequisitionRecord> done) { }
+
+        /** Reads {@code unit}'s availability by faction and era away from the GPU thread and hands it back on it. */
+        default void factions(MekSummary unit, Consumer<RequisitionFactions> done) { }
+
+        /** Whether the dossier's Readout shows the TRO rather than the summary (a client preference). */
+        default boolean readoutTro() {
+            return false;
+        }
+
+        /** Keeps whether the dossier's Readout shows the TRO. */
+        default void readoutTro(boolean tro) { }
     }
+
+    /** The pause on a unit before its full record is read. */
+    static final float LOAD_DELAY = .13f;
+    /** The Damage tab's curves: maximum, sustained over the turns, and expected. */
+    private static final String MAXIMUM_ROLE = "text.muted";
+    private static final String SUSTAINED_ROLE = "status.warning";
+    private static final String EXPECTED_ROLE = "accent.primary";
 
     private final UiKit kit;
     private final Actions actions;
@@ -171,6 +202,23 @@ final class LobbyRequisitionPanel {
     private boolean pickFirst;
     private final Set<MekSummary> spriteWanted = new LinkedHashSet<>();
     private final Set<String> spriteAsked = new java.util.HashSet<>();
+    private final Label dossierName;
+    private final Label dossierDetails;
+    private final Label dossierValueLabel;
+    private final Label dossierValue;
+    private final UiButton dossierAdd;
+    private final UiTabs dossierTabs;
+    private final Container<Actor> tabBody = new Container<>();
+    private final UiSegmented readoutSwitch;
+    private final Map<RequisitionDossier.Tab, Built> built = new EnumMap<>(RequisitionDossier.Tab.class);
+    private RequisitionDossier.Tab tab = RequisitionDossier.Tab.OVERVIEW;
+    private boolean readoutTro;
+    private @Nullable RequisitionDossier shown;
+    private @Nullable RequisitionRecord record;
+    private @Nullable RequisitionFactions factions;
+    private boolean factionsAsked;
+    private TextTooltip nameTip;
+    private float recordDue = -1;
 
     LobbyRequisitionPanel(UiKit kit, Actions actions, Function<String, Drawable> sprites, boolean motion) {
         this.kit = kit;
@@ -271,6 +319,22 @@ final class LobbyRequisitionPanel {
         dossier.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_PANEL));
         dossier.setName("lobby-requisition-dossier");
         dossier.setVisible(false);
+        dossierName = kit.roleTypeLabel("title", "", "text.primary");
+        dossierDetails = kit.typeLabel("", "small", "text.secondary");
+        dossierValueLabel = kit.roleTypeLabel("overline", "", "text.muted");
+        dossierValue = kit.typeLabel("", "title", "text.primary");
+        dossierAdd = kit.button("button-primary" + UiTheme.COMPACT, "add",
+              Messages.getString("Lobby.requisition.addToForce"), null);
+        String[] tabNames = new String[RequisitionDossier.Tab.values().length];
+        for (RequisitionDossier.Tab each : RequisitionDossier.Tab.values()) {
+            tabNames[each.ordinal()] = Messages.getString(each.messageKey());
+        }
+        dossierTabs = kit.tokenTabs(true, tabNames);
+        readoutSwitch = kit.tokenSegmented(true, Messages.getString("Lobby.requisition.readout.summary"),
+              Messages.getString("Lobby.requisition.readout.tro"));
+        readoutSwitch.setName("lobby-requisition-readout-switch");
+        readoutTro = actions.readoutTro();
+        buildDossier();
         split = new Split(resultsStack, dossier);
         body.add(split).grow().minHeight(0).pad(0, space("md"), 0, space("md")).row();
 
@@ -549,6 +613,9 @@ final class LobbyRequisitionPanel {
         if (addedShown >= 0 && clock >= addedShown) {
             addedShown = -1;
             refreshAdd();
+        }
+        if (recordDue >= 0 && clock >= recordDue) {
+            loadRecord();
         }
         for (RequisitionRow row : list.inView()) {
             String key = spriteKey(row.unit());
@@ -860,7 +927,14 @@ final class LobbyRequisitionPanel {
     // ---- The dossier ----
 
     private void pick(MekSummary unit, boolean open) {
-        picked = unit;
+        if (unit != picked) {
+            picked = unit;
+            record = null;
+            factions = null;
+            factionsAsked = false;
+            built.clear();
+            recordDue = clock + LOAD_DELAY;
+        }
         refreshAdd();
         if (open) {
             openDossier(true);
@@ -876,78 +950,180 @@ final class LobbyRequisitionPanel {
         split.opened(opening);
     }
 
-    private void showDossier() {
-        dossier.clearChildren();
-        dossier.setVisible(dossierOpen && picked != null);
-        if (!dossier.isVisible()) {
-            return;
-        }
-        RequisitionDossier shown = RequisitionDossier.of(picked);
+    /** The dossier's fixed header and its tabs, built once; the unit's values and the tab's body come later. */
+    private void buildDossier() {
         dossier.top().pad(space("md"));
-
         Table head = new Table();
         Table names = new Table();
         names.left().defaults().left();
-        Label name = kit.roleTypeLabel("title", shown.name(), "text.primary");
-        name.setEllipsis(true);
-        kit.tip(name, true).getActor().setText(shown.name());
-        names.add(name).growX().minWidth(0).row();
-        Label details = kit.typeLabel(shown.details(), "small", "text.secondary");
-        details.setEllipsis(true);
-        names.add(details).growX().minWidth(0).padTop(space("xxs"));
+        dossierName.setEllipsis(true);
+        nameTip = kit.tip(dossierName, true);
+        names.add(dossierName).growX().minWidth(0).row();
+        dossierDetails.setEllipsis(true);
+        names.add(dossierDetails).growX().minWidth(0).padTop(space("xxs"));
         head.add(names).growX().minWidth(0);
-        Label value = kit.typeLabel(valueText(shown.bv(), shown.pv()), "title", "text.primary");
-        head.add(value).right().padLeft(space("md"));
+        Table value = new Table();
+        value.right().defaults().right();
+        value.add(dossierValueLabel).row();
+        value.add(dossierValue);
+        head.add(value).padLeft(space("md"));
+        dossierAdd.setName("lobby-requisition-dossier-add");
+        UiKit.onChange(dossierAdd, this::add);
+        head.add(dossierAdd).width(kit.faceWidth(dossierAdd, Messages.getString("Lobby.requisition.addToForce"),
+              Messages.getString("Lobby.requisition.added"))).padLeft(space("md"));
         UiButton close = kit.button("button-icon" + UiTheme.COMPACT, "close", null, null);
         kit.tip(close, true).getActor().setText(Messages.getString("Lobby.requisition.closeDossier"));
         UiKit.onChange(close, () -> openDossier(false));
         head.add(close).top().padLeft(space("xs"));
-        dossier.add(head).growX().minWidth(0).row();
+        dossier.add(head).growX().minWidth(0).minHeight(Value.prefHeight).row();
 
-        UiButton addToForce = kit.button("button-primary" + UiTheme.COMPACT, "add",
-              Messages.getString("Lobby.requisition.addToForce"), null);
-        UiKit.onChange(addToForce, this::add);
-        dossier.add(addToForce).left().padTop(space("sm")).row();
+        dossierTabs.setName("lobby-requisition-dossier-tabs");
+        UiKit.onChange(dossierTabs, () -> showTab(RequisitionDossier.Tab.values()[dossierTabs.getSelectedIndex()]));
+        dossier.add(kit.scrollStrip(dossierTabs)).growX().minWidth(0).minHeight(dossierTabs.getPrefHeight())
+              .padTop(space("sm")).row();
+        tabBody.fill().top();
+        tabBody.setName("lobby-requisition-dossier-body");
+        dossier.add(tabBody).grow().minHeight(0).padTop(space("md"));
 
+        readoutSwitch.select(readoutTro ? 1 : 0);
+        kit.tip(readoutSwitch, true).getActor().setText(Messages.getString("Lobby.requisition.readout.tip"));
+        UiKit.onChange(readoutSwitch, () -> {
+            readoutTro = readoutSwitch.getSelectedIndex() == 1;
+            actions.readoutTro(readoutTro);
+            showTab(tab);
+        });
+    }
+
+    /** Shows the picked unit in the dossier's header and the picked tab's body, built only when it changed. */
+    private void showDossier() {
+        dossier.setVisible(dossierOpen && picked != null);
+        if (!dossier.isVisible()) {
+            return;
+        }
+        shown = RequisitionDossier.of(picked);
+        dossierName.setText(shown.name());
+        nameTip.getActor().setText(shown.name());
+        dossierDetails.setText(shown.details());
+        dossierValueLabel.setText(kit.cased("overline", Messages.getString(showPv ? "Lobby.requisition.pv"
+              : "Lobby.requisition.bv")));
+        dossierValue.setText(showPv ? String.valueOf(shown.pv())
+              : NumberFormat.getIntegerInstance().format(skills.bv(shown.bv())));
+        showTab(tab);
+    }
+
+    /** Shows {@code next}'s body, building it only when what it shows has changed since it was last built. */
+    private void showTab(RequisitionDossier.Tab next) {
+        tab = next;
+        if (dossierTabs.getSelectedIndex() != next.ordinal()) {
+            dossierTabs.select(next.ordinal());
+        }
+        if (!dossier.isVisible() || picked == null || shown == null) {
+            return;
+        }
+        if (next == RequisitionDossier.Tab.FACTIONS) {
+            askFactions();
+        }
+        List<Object> key = Arrays.asList(picked, record, switch (next) {
+            case OVERVIEW -> sprites.apply(spriteKey(picked)) != null;
+            case READOUT -> readoutTro;
+            case FACTIONS -> factions;
+            case DAMAGE -> gunnery();
+            case AS_CARD -> null;
+        });
+        Built made = built.get(next);
+        if (made == null || !made.key().equals(key)) {
+            made = new Built(key, switch (next) {
+                case OVERVIEW -> overview();
+                case READOUT -> readout();
+                case AS_CARD -> scrolled(asCard());
+                case FACTIONS -> factionsTab();
+                case DAMAGE -> damage();
+            });
+            built.put(next, made);
+        }
+        if (tabBody.getActor() != made.actor()) {
+            tabBody.setActor(made.actor());
+        }
+    }
+
+    /** One tab's body and what it was built from. */
+    private record Built(List<Object> key, Actor actor) { }
+
+    /** The gunnery of the Damage tab: the adding strip's when it sets skills, else 4. */
+    private int gunnery() {
+        return skills.mode() == RequisitionSkills.Mode.FIXED ? skills.gunnery() : RequisitionSkills.DEFAULT_GUNNERY;
+    }
+
+    /** GPU thread: once the Commander has stopped on a unit for a moment, loads its full record. */
+    private void loadRecord() {
+        recordDue = -1;
+        MekSummary unit = picked;
+        if (unit == null) {
+            return;
+        }
+        actions.load(unit, loaded -> {
+            if (loaded.unit() == picked) {
+                record = loaded;
+                showDossier();
+            }
+        });
+        if (tab == RequisitionDossier.Tab.FACTIONS) {
+            askFactions();
+        }
+    }
+
+    /** Asks for the picked unit's availability once the Commander has stopped on it. */
+    private void askFactions() {
+        MekSummary unit = picked;
+        if (factionsAsked || unit == null || recordDue >= 0) {
+            return;
+        }
+        factionsAsked = true;
+        actions.factions(unit, read -> {
+            if (unit == picked) {
+                factions = read;
+                showTab(tab);
+            }
+        });
+    }
+
+    private ScrollPane scrolled(Actor content) {
+        ScrollPane scroll = kit.scrollList(content, true, false);
+        scroll.setFadeScrollBars(false);
+        return scroll;
+    }
+
+    private Label note(String key) {
+        Label note = kit.typeLabel(Messages.getString(key), "body", "text.muted");
+        note.setWrap(true);
+        return note;
+    }
+
+    private Actor noteTab(String key) {
+        Table table = new Table();
+        table.top().left();
+        table.add(note(key)).growX().minWidth(0).left();
+        return table;
+    }
+
+    /** Overview: the sprite beside the stat strip, then role, rules level, introduced, source and cost. */
+    private Actor overview() {
         Table content = new Table();
         content.top().left();
-        Table overview = new Table();
+        Table top = new Table();
+        top.top().left();
         float spriteSize = size("control.lg") * 2;
         Drawable drawable = sprites.apply(spriteKey(picked));
         Actor sprite = (drawable == null) ? kit.icon("unit", size("icon.lg"), UiTheme.tokenColor("text.muted"))
               : new Image(drawable, Scaling.fit);
-        overview.add(sprite).size(spriteSize).top().padRight(space("md"));
-        HorizontalGroup stats = new HorizontalGroup();
-        stats.wrap(true).space(space("lg")).wrapSpace(space("sm")).rowLeft();
-        stats.addActor(stat("Lobby.requisition.stat.move", shown.movement()));
-        stats.addActor(stat("Lobby.requisition.stat.armor", String.valueOf(shown.armor())));
-        stats.addActor(stat("Lobby.requisition.stat.structure", String.valueOf(shown.structure())));
-        stats.addActor(stat("Lobby.requisition.bv", NumberFormat.getIntegerInstance().format(skills.bv(shown.bv()))));
-        stats.addActor(stat("Lobby.requisition.pv", String.valueOf(shown.pv())));
-        if (!shown.cost().isEmpty()) {
-            stats.addActor(stat("Lobby.requisition.stat.cost", shown.cost()));
+        top.add(sprite).size(spriteSize).top().padRight(space("md"));
+        RequisitionDossier.Stats stats = shown.stats();
+        if (record != null && record.entity() != null) {
+            stats = stats.with(record.entity());
         }
-        overview.add(stats).growX().minWidth(0).top();
-        content.add(overview).growX().minWidth(0).row();
+        top.add(statStrip(stats)).growX().minWidth(0).top();
+        content.add(top).growX().minWidth(0).row();
 
-        content.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.armament"), "text.muted"))
-              .left().padTop(space("lg")).row();
-        if (shown.weapons().isEmpty()) {
-            content.add(kit.typeLabel(Messages.getString("Lobby.requisition.noWeapons"), "body", "text.muted"))
-                  .left().padTop(space("xs")).row();
-        }
-        for (RequisitionDossier.Line line : shown.weapons()) {
-            Table row = new Table();
-            row.left();
-            row.add(kit.typeLabel(line.count() + " ×", "body", "text.secondary")).width(size("control.md")).left();
-            Label weapon = kit.typeLabel(line.name(), "body", "text.primary");
-            weapon.setEllipsis(true);
-            row.add(weapon).growX().minWidth(0);
-            content.add(row).growX().minWidth(0).padTop(space("xxs")).row();
-        }
-
-        content.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.facts"), "text.muted"))
-              .left().padTop(space("lg")).row();
         Table facts = new Table();
         facts.left().defaults().left();
         for (RequisitionDossier.Fact fact : shown.facts()) {
@@ -957,9 +1133,57 @@ final class LobbyRequisitionPanel {
             factValue.setWrap(true);
             facts.add(factValue).growX().minWidth(0).padTop(space("xxs")).row();
         }
-        content.add(facts).growX().minWidth(0).padTop(space("xs")).row();
-        ScrollPane scroll = kit.scrollList(content, true, false);
-        dossier.add(scroll).grow().minHeight(0).padTop(space("md"));
+        content.add(facts).growX().minWidth(0).padTop(space("lg")).row();
+        return scrolled(content);
+    }
+
+    /**
+     * The stat strip, as the force cards' (gap analysis 7.3): move, heat, armor and structure as one bar with their
+     * numbers, then the weapons. A Mek's heat shows a dash until its record has loaded, in the same room.
+     */
+    private Table statStrip(RequisitionDossier.Stats stats) {
+        Table strip = new Table();
+        strip.top().left();
+        HorizontalGroup numbers = new HorizontalGroup();
+        numbers.wrap(true).space(space("lg")).wrapSpace(space("sm")).rowLeft();
+        numbers.addActor(stat("Lobby.requisition.stat.move", stats.move()));
+        if (stats.heat() != RequisitionDossier.NO_HEAT) {
+            numbers.addActor(stat("Lobby.requisition.stat.heat", stats.heat() == RequisitionDossier.HEAT_PENDING
+                  ? "\u2013" : String.valueOf(stats.heat())));
+        }
+        Table armor = stat("Lobby.requisition.stat.armor", Messages.getString("Lobby.requisition.stat.armorValue",
+              stats.armor(), stats.structure()));
+        armor.row();
+        armor.add(armorBar(stats)).width(size("control.lg") * 2).height(space("xs")).padTop(space("xxs"));
+        kit.tip(armor, true).getActor().setText(Messages.getString("Lobby.requisition.stat.armorTip", stats.armor(),
+              stats.structure()));
+        numbers.addActor(armor);
+        strip.add(numbers).growX().minWidth(0).left().row();
+        Table weapons = new Table();
+        weapons.left().defaults().left();
+        weapons.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.stat.weapons"),
+              "text.muted")).row();
+        Label list = kit.typeLabel(stats.weapons().isEmpty() ? Messages.getString("Lobby.requisition.noWeapons")
+              : stats.weapons(), "body", stats.weapons().isEmpty() ? "text.muted" : "text.primary");
+        list.setWrap(true);
+        weapons.add(list).growX().minWidth(0);
+        strip.add(weapons).growX().minWidth(0).left().padTop(space("sm"));
+        return strip;
+    }
+
+    /** Armor beside structure, each its share of the bar, filled as far as it is left. */
+    private Actor armorBar(RequisitionDossier.Stats stats) {
+        Table bar = new Table();
+        int total = stats.armorMax() + stats.structureMax();
+        if (total <= 0) {
+            bar.add(kit.solid("border.subtle")).grow();
+            return bar;
+        }
+        float armorShare = (float) stats.armorMax() / total;
+        bar.add(kit.solid(stats.armor() < stats.armorMax() ? "status.warning" : "text.secondary")).growY()
+              .width(Value.percentWidth(armorShare, bar));
+        bar.add(kit.solid("text.muted")).grow().padLeft(space("xxs"));
+        return bar;
     }
 
     private Table stat(String key, String value) {
@@ -970,10 +1194,342 @@ final class LobbyRequisitionPanel {
         return stat;
     }
 
-    private String valueText(int bv, int pv) {
-        return showPv ? Messages.getString("Lobby.requisition.pvValue", pv)
-              : Messages.getString("Lobby.requisition.bvValue", NumberFormat.getIntegerInstance()
-              .format(skills.bv(bv)));
+    /** Readout: the Summary or TRO switch, kept as a preference, over the readout's rows. */
+    private Actor readout() {
+        Table content = new Table();
+        content.top().left();
+        content.add(readoutSwitch).left().row();
+        Actor body;
+        if (record == null) {
+            body = noteTab("Lobby.requisition.record.loading");
+        } else if (record.entity() == null) {
+            body = noteTab("Lobby.requisition.record.failed");
+        } else {
+            body = scrolled(readoutRows(readoutTro ? record.tro() : record.summary()));
+        }
+        content.add(body).grow().minHeight(0).padTop(space("sm"));
+        return content;
+    }
+
+    /** The readout's rows in the kit's type: titles, labelled lines, tables in columns, text. */
+    private Table readoutRows(List<EntityReadout.Row> rows) {
+        Table content = new Table();
+        content.top().left();
+        Table run = null;
+        for (EntityReadout.Row row : rows) {
+            boolean table = row.kind() == EntityReadout.Row.Kind.TABLE_HEADER
+                  || row.kind() == EntityReadout.Row.Kind.TABLE_ROW;
+            if (!table && run != null) {
+                content.add(run).growX().minWidth(0).left().row();
+                run = null;
+            }
+            switch (row.kind()) {
+                case TITLE -> content.add(wrapped(String.join(" ", row.cells()), "body.strong", "text.primary"))
+                      .growX().minWidth(0).padTop(space("sm")).row();
+                case SPACE -> content.add().height(space("sm")).row();
+                case LABELED -> {
+                    Table line = new Table();
+                    line.left().top();
+                    String label = row.cells().isEmpty() ? "" : row.cells().get(0);
+                    String value = String.join(" ", row.cells().subList(Math.min(1, row.cells().size()),
+                          row.cells().size()));
+                    line.add(kit.typeLabel(label, "body", "text.secondary")).top().left().padRight(space("md"));
+                    line.add(wrapped(value, "body", "text.primary")).growX().minWidth(0).top();
+                    content.add(line).growX().minWidth(0).padTop(space("xxs")).row();
+                }
+                case TABLE_HEADER, TABLE_ROW -> {
+                    if (run == null) {
+                        run = new Table();
+                        run.top().left();
+                    }
+                    boolean header = row.kind() == EntityReadout.Row.Kind.TABLE_HEADER;
+                    for (String cell : row.cells()) {
+                        run.add(wrapped(cell, header ? "small" : "body", header ? "text.muted" : "text.primary"))
+                              .growX().minWidth(0).left().top().padRight(space("sm")).padTop(space("xxs"));
+                    }
+                    run.row();
+                }
+                case TEXT -> content.add(wrapped(String.join(" ", row.cells()), "body", "text.primary"))
+                      .growX().minWidth(0).padTop(space("xxs")).row();
+            }
+        }
+        if (run != null) {
+            content.add(run).growX().minWidth(0).left().row();
+        }
+        return content;
+    }
+
+    private Label wrapped(String text, String type, String role) {
+        Label label = kit.typeLabel(text, type, role);
+        label.setWrap(true);
+        return label;
+    }
+
+    /** AS card: the Alpha Strike card's values on a card of the kit's, read from the catalogue at once. */
+    private Actor asCard() {
+        RequisitionAlphaStrike card = RequisitionAlphaStrike.of(picked);
+        if (card == null) {
+            return noteTab("Lobby.requisition.as.none");
+        }
+        Table face = kit.card();
+        face.top().left();
+        face.pad(space("md"));
+        Table head = new Table();
+        Label name = kit.roleTypeLabel("title", card.name(), "text.primary");
+        name.setEllipsis(true);
+        head.add(name).growX().minWidth(0).left();
+        Table pv = new Table();
+        pv.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.as.pv"), "text.muted")).right()
+              .row();
+        pv.add(kit.typeLabel(String.valueOf(card.pv()), "title", "accent.primary")).right();
+        head.add(pv).right().padLeft(space("md"));
+        face.add(head).growX().minWidth(0).row();
+        face.add(kit.typeLabel(Messages.getString("Lobby.requisition.as.skill", card.skill()), "small",
+              "text.secondary")).left().row();
+
+        HorizontalGroup values = new HorizontalGroup();
+        values.wrap(true).space(space("lg")).wrapSpace(space("sm")).rowLeft();
+        values.addActor(stat("Lobby.requisition.as.type", card.type()));
+        values.addActor(stat("Lobby.requisition.as.size", String.valueOf(card.size())));
+        if (!card.tmm().isEmpty()) {
+            values.addActor(stat("Lobby.requisition.as.tmm", card.tmm()));
+        }
+        values.addActor(stat("Lobby.requisition.as.move", card.move()));
+        if (!card.role().isEmpty()) {
+            values.addActor(stat("Lobby.requisition.as.role", card.role()));
+        }
+        face.add(values).growX().minWidth(0).left().padTop(space("md")).row();
+
+        if (!card.damage().isEmpty()) {
+            face.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.as.damage"), "text.muted"))
+                  .left().padTop(space("md")).row();
+            Table damage = new Table();
+            damage.left();
+            for (RequisitionAlphaStrike.Cell cell : card.damage()) {
+                damage.add(asBox(cell.label(), cell.value())).padRight(space("sm"));
+            }
+            if (!card.overheat().isEmpty()) {
+                damage.add(asBox(Messages.getString("Lobby.requisition.as.overheat"), card.overheat()))
+                      .padLeft(space("md"));
+            }
+            face.add(damage).left().padTop(space("xs")).row();
+        }
+
+        Table body = new Table();
+        body.left().defaults().left();
+        body.add(stat("Lobby.requisition.as.armor", String.valueOf(card.armor()))).padRight(space("lg"));
+        body.add(stat("Lobby.requisition.as.structure", String.valueOf(card.structure()))).padRight(space("lg"));
+        if (!card.threshold().isEmpty()) {
+            body.add(stat("Lobby.requisition.as.threshold", card.threshold()));
+        }
+        face.add(body).left().padTop(space("md")).row();
+
+        if (!card.arcs().isEmpty()) {
+            face.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.as.arcs"), "text.muted"))
+                  .left().padTop(space("md")).row();
+            Table arcs = new Table();
+            arcs.left().defaults().left().top();
+            for (RequisitionAlphaStrike.Cell arc : card.arcs()) {
+                arcs.add(kit.typeLabel(arc.label(), "body", "text.secondary")).padRight(space("md"))
+                      .padTop(space("xxs"));
+                arcs.add(wrapped(arc.value(), "body", "text.primary")).growX().minWidth(0).padTop(space("xxs"))
+                      .row();
+            }
+            face.add(arcs).growX().minWidth(0).padTop(space("xs")).row();
+        }
+        if (!card.specials().isEmpty()) {
+            face.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.as.specials"),
+                  "text.muted")).left().padTop(space("md")).row();
+            face.add(wrapped(card.specials(), "body", "text.primary")).growX().minWidth(0).padTop(space("xxs"))
+                  .row();
+        }
+        Table content = new Table();
+        content.top().left();
+        content.add(face).growX().minWidth(0).maxWidth(size("dialog.sm"));
+        content.add().growX();
+        return content;
+    }
+
+    /** One of the AS card's damage boxes: the range over its value. */
+    private Table asBox(String label, String value) {
+        Table box = new Table();
+        box.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_FRAME));
+        box.pad(space("xs"), space("md"), space("xs"), space("md"));
+        box.add(kit.roleTypeLabel("overline", label, "text.muted")).row();
+        box.add(kit.typeLabel(value, "body.strong", "text.primary"));
+        return box;
+    }
+
+    /** Factions: the unit's availability by era, each era's factions under it, read away from the GPU thread. */
+    private Actor factionsTab() {
+        if (factions == null) {
+            return noteTab("Lobby.requisition.factions.loading");
+        }
+        if (factions.factions().isEmpty()) {
+            return noteTab("Lobby.requisition.factions.none");
+        }
+        Table list = new Table();
+        list.top().left();
+        for (int i = 0; i < factions.eras().size(); i++) {
+            RequisitionFactions.EraColumn era = factions.eras().get(i);
+            Table head = new Table();
+            head.left();
+            head.add(kit.roleTypeLabel("overline", era.name(), "text.secondary")).left().minWidth(0);
+            head.add(kit.typeLabel(era.years(), "caption", "text.muted")).left().padLeft(space("sm"));
+            head.add().growX();
+            list.add(head).growX().minWidth(0).padTop(i == 0 ? 0 : space("md")).colspan(2).row();
+            list.add(kit.solid("border.subtle")).growX().height(size("border")).colspan(2).padTop(space("xxs"))
+                  .row();
+            for (RequisitionFactions.Faction faction : factions.factions()) {
+                String cell = faction.cells().get(i);
+                if (RequisitionFactions.NONE.equals(cell)) {
+                    continue;
+                }
+                Label name = kit.typeLabel(faction.name(), "body", "text.primary");
+                name.setEllipsis(true);
+                kit.tip(name, true).getActor().setText(faction.name() + " (" + faction.code() + ")");
+                list.add(name).growX().minWidth(0).left().padTop(space("xxs"));
+                list.add(kit.typeLabel(cell, "body", "text.secondary")).right().padLeft(space("md"))
+                      .padTop(space("xxs")).row();
+            }
+        }
+        return scrolled(list);
+    }
+
+    /** Damage: the curves by range at the strip's gunnery, the ranges they hold over, and each direction. */
+    private Actor damage() {
+        if (record == null) {
+            return noteTab("Lobby.requisition.record.loading");
+        }
+        if (record.entity() == null) {
+            return noteTab("Lobby.requisition.record.failed");
+        }
+        RequisitionDamage damage = RequisitionDamage.of(record.entity(), gunnery());
+        if (!damage.hasWeapons()) {
+            return noteTab("Lobby.requisition.damage.none");
+        }
+        Table content = new Table();
+        content.top().left();
+        content.add(kit.roleTypeLabel("overline", Messages.getString(damage.capital()
+              ? "Lobby.requisition.damage.titleCapital" : "Lobby.requisition.damage.title", damage.gunnery()),
+              "text.muted")).left().row();
+        Table legend = new Table();
+        legend.left();
+        legend.add(swatch(MAXIMUM_ROLE, "Lobby.requisition.damage.maximum")).padRight(space("lg"));
+        legend.add(swatch(EXPECTED_ROLE, "Lobby.requisition.damage.expected")).padRight(space("lg"));
+        legend.add(swatch(SUSTAINED_ROLE, "Lobby.requisition.damage.sustained"));
+        kit.tip(legend, true).getActor().setText(Messages.getString("Lobby.requisition.damage.legendTip"));
+        content.add(legend).left().padTop(space("xs")).row();
+        UiStepChart chart = kit.stepChart();
+        chart.setName("lobby-requisition-damage-chart");
+        float line = size("selection.width");
+        chart.show(List.of(
+              new UiStepChart.Series(floats(damage.maximum()), UiTheme.tokenColor(MAXIMUM_ROLE), line / 2),
+              new UiStepChart.Series(floats(damage.sustained()), UiTheme.tokenColor(SUSTAINED_ROLE), line * 2),
+              new UiStepChart.Series(floats(damage.expected()), UiTheme.tokenColor(EXPECTED_ROLE), line)),
+              RequisitionDamage::format);
+        content.add(chart).growX().minWidth(0).height(space("xxxl") * 5).padTop(space("sm")).row();
+
+        content.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.damage.ranges"),
+              "text.muted")).left().padTop(space("lg")).row();
+        Table bands = new Table();
+        bands.top().left();
+        header(bands, "Lobby.requisition.damage.range", "Lobby.requisition.damage.maximum",
+              "Lobby.requisition.damage.expected", "Lobby.requisition.damage.sustained");
+        for (RequisitionDamage.Band band : damage.bands()) {
+            cells(bands, band.ranges(), RequisitionDamage.format(band.maximum()),
+                  RequisitionDamage.format(band.expected()), RequisitionDamage.format(band.sustained()));
+        }
+        content.add(bands).growX().minWidth(0).padTop(space("xs")).row();
+
+        content.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.damage.directions"),
+              "text.muted")).left().padTop(space("lg")).row();
+        Table directions = new Table();
+        directions.top().left();
+        header(directions, "Lobby.requisition.damage.direction", "Lobby.requisition.damage.maxAverage",
+              "Lobby.requisition.damage.short", "Lobby.requisition.damage.medium", "Lobby.requisition.damage.long",
+              "Lobby.requisition.damage.reach");
+        for (RequisitionDamage.Direction direction : damage.directions()) {
+            cells(directions, direction.name(), RequisitionDamage.format(direction.maximumAverage()),
+                  RequisitionDamage.format(direction.shortAverage()),
+                  RequisitionDamage.format(direction.mediumAverage()),
+                  RequisitionDamage.format(direction.longAverage()), String.valueOf(direction.reach()));
+        }
+        content.add(directions).growX().minWidth(0).padTop(space("xs")).row();
+        return scrolled(content);
+    }
+
+    private Table swatch(String role, String key) {
+        Table swatch = new Table();
+        swatch.add(kit.solid(role)).size(space("md"), space("xxs") * 2).padRight(space("xs"));
+        swatch.add(kit.typeLabel(Messages.getString(key), "small", "text.secondary"));
+        return swatch;
+    }
+
+    private void header(Table table, String... keys) {
+        for (String key : keys) {
+            Label label = kit.typeLabel(Messages.getString(key), "small", "text.muted");
+            label.setEllipsis(true);
+            table.add(label).growX().uniformX().minWidth(0).left().padRight(space("sm"));
+        }
+        table.row();
+    }
+
+    private void cells(Table table, String... values) {
+        for (String value : values) {
+            table.add(kit.typeLabel(value, "body", "text.primary")).growX().uniformX().minWidth(0).left()
+                  .padRight(space("sm")).padTop(space("xxs"));
+        }
+        table.row();
+    }
+
+    private static float[] floats(double[] values) {
+        float[] floats = new float[values.length];
+        for (int i = 0; i < values.length; i++) {
+            floats[i] = (float) values[i];
+        }
+        return floats;
+    }
+
+    /** For the developer switch: the dossier tab named {@code key}'s button, to click through the stage. */
+    @Nullable Actor dossierTab(String key) {
+        RequisitionDossier.Tab named = RequisitionDossier.Tab.of(key);
+        return (named == null) ? null : dossierTabs.option(named.ordinal());
+    }
+
+    /** The Readout tab's Summary or TRO switch's option, to click through the stage. */
+    Actor readoutOption(boolean tro) {
+        return readoutSwitch.option(tro ? 1 : 0);
+    }
+
+    /** The dossier tab in view. */
+    RequisitionDossier.Tab dossierTab() {
+        return tab;
+    }
+
+    /** Whether the Readout tab shows the TRO. */
+    boolean readoutTro() {
+        return readoutTro;
+    }
+
+    /** The dossier's tab body now shown, for tests. */
+    @Nullable Actor dossierBody() {
+        return tabBody.getActor();
+    }
+
+    /** Whether the picked unit's full record has loaded. */
+    boolean recordLoaded() {
+        return record != null;
+    }
+
+    /** Whether the dossier shows. */
+    boolean dossierOpen() {
+        return dossierOpen;
+    }
+
+    /** Whether the dossier shows and has finished sliding in. */
+    boolean dossierSettled() {
+        return dossierOpen && !dossier.hasActions();
     }
 
     // ---- The adding strip ----
@@ -1060,8 +1616,10 @@ final class LobbyRequisitionPanel {
             add.setText(kit.cased("button", copies > 1
                   ? Messages.getString("Lobby.requisition.addMany", copies)
                   : Messages.getString("Lobby.requisition.add")));
+            dossierAdd.setText(kit.cased("button", Messages.getString("Lobby.requisition.addToForce")));
         }
         add.setDisabled(picked == null || requisition.recipients().isEmpty());
+        dossierAdd.setDisabled(add.isDisabled());
     }
 
     private void add() {
@@ -1074,6 +1632,7 @@ final class LobbyRequisitionPanel {
               .forEach(self -> visit.sentFor(self.id()));
         actions.add(picked, quantity.value(), to, skills);
         add.setText(kit.cased("button", Messages.getString("Lobby.requisition.added")));
+        dossierAdd.setText(kit.cased("button", Messages.getString("Lobby.requisition.added")));
         addedShown = clock + ADDED_FOR;
     }
 

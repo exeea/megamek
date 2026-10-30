@@ -76,17 +76,47 @@ class RequisitionRowTest {
         atlas.setWalkMp(3);
         atlas.setRunMp(5);
         atlas.setTotalArmor(304);
+        atlas.setTotalInternal(152);
         atlas.setCost(9_626_000);
         RequisitionDossier dossier = RequisitionDossier.of(atlas, name -> null);
-        assertEquals(304, dossier.armor());
-        assertTrue(dossier.movement().contains("3"));
-        assertTrue(dossier.cost().contains("9"));
+        assertEquals(304, dossier.stats().armor());
+        assertEquals(152, dossier.stats().structure());
+        assertEquals("3 / 5", dossier.stats().move());
+        assertEquals(RequisitionDossier.HEAT_PENDING, dossier.stats().heat(), "a Mek's heat waits for its record");
         List<String> values = dossier.facts().stream().map(RequisitionDossier.Fact::value).toList();
         assertTrue(values.contains("3025"));
-        assertEquals(3, dossier.facts().size(), "weight, tech and year; no role, level or source");
+        assertTrue(values.stream().anyMatch(value -> value.contains("9")), "the cost");
+        assertEquals(2, dossier.facts().size(), "year and cost; no role, rules level or source");
 
         atlas.setSource("TRO:3025");
-        assertEquals(4, RequisitionDossier.facts(atlas).size());
+        assertEquals(3, RequisitionDossier.facts(atlas).size());
+        atlas.setJumpMp(2);
+        assertEquals("3 / 5 / 2", RequisitionDossier.stats(atlas, name -> null).move());
+    }
+
+    @Test
+    void theStripNamesTheMostNumerousWeaponsFirst() {
+        assertEquals("4 ML \u00B7 2 SRM 6 \u00B7 AC/20",
+              RequisitionDossier.strip(List.of(new RequisitionDossier.Line("AC/20", 1),
+                    new RequisitionDossier.Line("ML", 4), new RequisitionDossier.Line("SRM 6", 2))));
+        assertEquals("", RequisitionDossier.strip(List.of()));
+    }
+
+    @Test
+    void aVehicleHasNoHeat() {
+        MekSummary truck = RequisitionCatalogTest.unit("Truck", "", UnitType.TANK, 3000,
+              TechConstants.T_INTRO_BOX_SET);
+        assertEquals(RequisitionDossier.NO_HEAT, RequisitionDossier.stats(truck, name -> null).heat());
+    }
+
+    @Test
+    void aTabIsFoundByItsKey() {
+        for (RequisitionDossier.Tab tab : RequisitionDossier.Tab.values()) {
+            assertEquals(tab, RequisitionDossier.Tab.of(tab.key()));
+            assertTrue(megamek.client.ui.Messages.getString(tab.messageKey()).indexOf('!') < 0, tab.messageKey());
+        }
+        assertEquals(RequisitionDossier.Tab.AS_CARD, RequisitionDossier.Tab.of("ascard"));
+        assertEquals(null, RequisitionDossier.Tab.of("nothing"));
     }
 
     private static WeaponType weapon(String name) {

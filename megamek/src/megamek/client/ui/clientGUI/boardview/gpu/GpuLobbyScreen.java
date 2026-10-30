@@ -19,6 +19,7 @@ import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -34,6 +35,9 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.RequisitionFactions;
+import megamek.client.lobby.RequisitionLoader;
+import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.Messages;
@@ -88,6 +92,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private LobbyCentre centre;
     private LobbyRequisitionPanel requisition;
     private ExecutorService searchThread;
+    /** The dossier's full records and availabilities, each read on its own thread where the newest unit wins. */
+    private ExecutorService recordThread;
+    private RequisitionLoader records;
+    private ExecutorService factionThread;
+    private RequisitionLoader factionLoader;
     private RequisitionSearch search;
     /** The Requisition's sprites by catalogue unit, the least recently shown first. */
     private final LinkedHashMap<String, TextureRegionDrawable> requisitionSprites = new LinkedHashMap<>(64, .75f,
@@ -102,6 +111,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean clickCompactPending;
     private int filterClicksPending;
     private String hoverPending;
+    /** The dossier tab the developer switch clicks, and how many of its clicks are done. */
+    private String tabPending;
+    private int tabStep;
     /** The units' sprites by their window's key, and each shown unit's. */
     private final Map<String, Texture> spriteTextures = new HashMap<>();
     private final Map<Integer, Drawable> spriteDrawables = new HashMap<>();
@@ -185,6 +197,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             if (probe.options().contains("pick")) {
                 requisition.probePick();
             }
+            tabPending = probe.tab();
         }
         if (!probe.sized()) {
             return;
@@ -213,6 +226,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return thread;
         });
         search = new RequisitionSearch(RequisitionSearch::fromCache, searchThread);
+        recordThread = daemon("Requisition record");
+        records = new RequisitionLoader(recordThread);
+        factionThread = daemon("Requisition factions");
+        factionLoader = new RequisitionLoader(factionThread);
         requisition = new LobbyRequisitionPanel(kit, requisitionActions(), requisitionSprites::get, motion);
         rail = kit.rail(Messages.getString("Lobby.battlefield"), "map");
         rail.setProgrammaticChangeEvents(false);
@@ -436,7 +453,44 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             public void source(LobbyForcesPanel.Command command) {
                 window.forcesCommand(command);
             }
+
+            @Override
+            public void load(MekSummary unit, Consumer<RequisitionRecord> done) {
+                records.load(() -> RequisitionRecord.read(unit, LobbyRequisitionController.FILES::read),
+                      record -> GpuHost.post(() -> {
+                          if (stage != null) {
+                              done.accept(record);
+                          }
+                      }));
+            }
+
+            @Override
+            public void factions(MekSummary unit, Consumer<RequisitionFactions> done) {
+                factionLoader.load(() -> RequisitionFactions.of(unit), read -> GpuHost.post(() -> {
+                    if (stage != null) {
+                        done.accept(read);
+                    }
+                }));
+            }
+
+            @Override
+            public boolean readoutTro() {
+                return preferences.getRequisitionReadoutTro();
+            }
+
+            @Override
+            public void readoutTro(boolean tro) {
+                preferences.setRequisitionReadoutTro(tro);
+            }
         };
+    }
+
+    private static ExecutorService daemon(String name) {
+        return Executors.newSingleThreadExecutor(work -> {
+            Thread thread = new Thread(work, name);
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     /** Opens the Requisition in the forces' place, afresh unless it shows already. */
@@ -642,6 +696,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             LOGGER.info("The lobby probe's Filters click: the drawer is {}", requisition.drawerOpen() ? "open"
                   : "shut");
         }
+        if (tabPending != null && REQUISITION.equals(centre.showing()) &&         requisition.dossierSettled()
+              && elapsed > PROBE_CLICK_AT + tabStep * .5) {
+            probeTab();
+        }
         if (hoverPending != null && elapsed > probe.shotAt() - .5 && !requisition.resultsList().items().isEmpty()) {
             ScrollPane pane = requisition.resultsPane();
             UiVirtualList<?> list = requisition.resultsList();
@@ -655,6 +713,26 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                   at == null ? "nothing" : at[0] + "," + at[1]);
             hoverPending = null;
             requisition.probeMeasure();
+        }
+    }
+
+    /** The developer switch's dossier tab clicks: the tab, then for {@code tro} or {@code summary} the switch. */
+    private void probeTab() {
+        boolean readoutSwitch = "tro".equals(tabPending) || "summary".equals(tabPending);
+        Actor target = (readoutSwitch && tabStep == 0) ? requisition.dossierTab("readout")
+              : readoutSwitch ? requisition.readoutOption("tro".equals(tabPending))
+              : requisition.dossierTab(tabPending);
+        if (target == null) {
+            LOGGER.error("The lobby probe has no dossier tab called {}", tabPending);
+            tabPending = null;
+            return;
+        }
+        GpuLobbyProbeInput.click(stage, target);
+        LOGGER.info("The lobby probe's dossier click on {}: the {} tab shows, readout {}", tabPending,
+              requisition.dossierTab().key(), requisition.readoutTro() ? "TRO" : "summary");
+        tabStep++;
+        if (!readoutSwitch || tabStep > 1) {
+            tabPending = null;
         }
     }
 
@@ -687,8 +765,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         spriteTextures.clear();
         requisitionSprites.values().forEach(sprite -> sprite.getRegion().getTexture().dispose());
         requisitionSprites.clear();
-        if (searchThread != null) {
-            searchThread.shutdownNow();
+        for (ExecutorService thread : new ExecutorService[] { searchThread, recordThread, factionThread }) {
+            if (thread != null) {
+                thread.shutdownNow();
+            }
         }
         if (mapTexture != null) {
             mapTexture.dispose();

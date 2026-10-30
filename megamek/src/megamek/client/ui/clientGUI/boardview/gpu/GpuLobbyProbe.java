@@ -102,6 +102,10 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+requisition+hoverrow}: half a second before the shot, puts the pointer on the second result row
  *     at its right end, beside the scroll bar, and logs where the rows and their values end against the bar;
  *     {@code +hoverbar} puts it on the bar instead.</li>
+ *     <li>{@code lobby+requisition+pick+tab=name}: once the picked unit's dossier shows, clicks its tab through the
+ *     stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s in: {@code overview}, {@code readout}, {@code ascard},
+ *     {@code factions} or {@code damage}; {@code tro} clicks Readout, then its TRO switch, and {@code summary} its
+ *     Summary switch.</li>
  *     <li>{@code lobby+dialog=name}: opens a Swing dialog as the lobby's control would once the shot's time comes, and
  *     saves a photograph of the window and its dialogs, taken from the screen only when the dialog is in front,
  *     instead of the frame buffer, which has no Swing dialogs; the
@@ -131,6 +135,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final int FORMED = 2;
     private static final double FORM_WAIT = 20;
     private static final String DIALOG_OPTION = "dialog=";
+    private static final String TAB_OPTION = "tab=";
     /** How long a probed dialog has to show, and then to close, before the probe looks. */
     private static final int DIALOG_WAIT_MS = 2500;
     private static final int FRONT_WAIT_MS = 700;
@@ -404,6 +409,16 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 LOGGER.error(failure, "The lobby probe could not load {}", file);
             }
         }
+    }
+
+    /** The dossier tab {@code lobby+requisition+pick+tab=name} clicks, or null. */
+    String tab() {
+        for (String option : options) {
+            if (option.startsWith(TAB_OPTION)) {
+                return option.substring(TAB_OPTION.length());
+            }
+        }
+        return null;
     }
 
     /** The dialog {@code lobby+dialog=name} opens over the lobby, or null. */
