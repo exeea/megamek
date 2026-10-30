@@ -7,6 +7,7 @@ import java.util.List;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -63,9 +64,26 @@ public final class UiMenuList extends Table {
         UiButton row = kit.menuRow(style, text, detail, checked, group);
         row.setDisabled(!enabled);
         UiKit.onChange(row, action);
-        items.add(row);
-        add(row).growX().minHeight(itemHeight).row();
+        item(row).growX().minHeight(itemHeight).row();
         return row;
+    }
+
+    /** Adds an existing button to the keyboard order; the caller lays out its cell, for example in a grid. */
+    public Cell<UiButton> item(UiButton button) {
+        items.add(button);
+        return add(button);
+    }
+
+    @Override
+    public void clearChildren(boolean unfocus) {
+        highlight(null);
+        items.clear();
+        super.clearChildren(unfocus);
+    }
+
+    /** The keyboard's highlighted item, or null before a navigation key is pressed. */
+    public UiButton highlighted() {
+        return highlighted;
     }
 
     /** A hairline between two groups of items. */
@@ -111,16 +129,21 @@ public final class UiMenuList extends Table {
 
     /**
      * Highlights {@code row}, an enabled item of this list, as the keys do, and keeps it in view when the list scrolls.
-     * A view that rebuilds its list keeps the keyboard's place this way; any other actor is ignored.
+     * A view that rebuilds its list keeps the keyboard's place this way; null clears the highlight, and any other
+     * actor is ignored.
      */
     public void highlight(UiButton row) {
-        if (!items.contains(row) || row.isDisabled()) {
+        if (row != null && (!items.contains(row) || row.isDisabled())) {
             return;
         }
         if (highlighted != null) {
             highlighted.pressed(false);
         }
-        highlighted = row.pressed(true);
+        highlighted = row;
+        if (row == null) {
+            return;
+        }
+        row.pressed(true);
         if (getParent() instanceof ScrollPane scroll) {
             validate();
             // ScrollPane.scrollTo measures the rectangle's y at its top edge (libGDX 1.14.2).

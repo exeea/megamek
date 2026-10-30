@@ -657,6 +657,7 @@ final class GpuHud implements GpuBoardHud {
         // Help, Menu or Players dialog and the tuning panel's choice list: the dialog's step closes it with them.
         boolean inDialog = focus != null && state.dialog != GpuHudState.Dialog.NONE && focus.isDescendantOf(dialogs);
         if (focus != null && !inDialog && !focus.isDescendantOf(contextMenu.actor())
+              && !focus.isDescendantOf(dock.drawer().actor())
               && !focus.isDescendantOf(recordSheet.overlay())) {
             stage.setKeyboardFocus(null);
         } else if (contextMenu.back() || dock.drawer().close()) {
@@ -1161,9 +1162,12 @@ final class GpuHud implements GpuBoardHud {
         // The More panel, sized to its commands: right of the dock, up to the chat button, or up to the right column
         // while one of its panels reaches down beside the dock. It takes the columns that room holds, no more than the
         // dock's height needs, and grows upward from the dock's bottom when they need more rows. Without room for one
-        // column there, it lies above the dock at the dock's height, at most the dock's width, over the hint line.
+        // column there, it lies above the dock, at most the dock's width, and grows upward over the hint line.
         GpuMoreDrawer drawer = dock.drawer();
         drawerSlot.setVisible(shown(dockSlot));
+        if (!drawerSlot.isVisible()) {
+            drawer.close();
+        }
         boolean rightColumn = shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) || shown(solutionSlot);
         float drawerX = dockSlot.getX() + dockSlot.getWidth() + STACK;
         float drawerRight = rightColumn ? bandRight + gap : width - gap - chatWidth - STACK;
@@ -1175,8 +1179,10 @@ final class GpuHud implements GpuBoardHud {
             place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, GpuMoreDrawer.width(columns),
                   drawerHeight);
         } else {
-            float aboveHeight = Math.max(0, Math.min(dockHeight, dockTop - STACK - gap));
-            int columns = Math.max(1, Math.min(GpuMoreDrawer.columnsIn(dockWidth), drawer.columnsAt(aboveHeight)));
+            float room = Math.max(0, dockTop - STACK - gap);
+            int columns = Math.max(1, Math.min(GpuMoreDrawer.columnsIn(dockWidth),
+                  drawer.columnsAt(Math.min(dockHeight, room))));
+            float aboveHeight = Math.min(Math.max(dockHeight, drawer.height(columns)), room);
             place(drawerSlot, dockSlot.getX(), dockTop - STACK - aboveHeight, GpuMoreDrawer.width(columns),
                   aboveHeight);
         }

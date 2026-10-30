@@ -10,11 +10,13 @@ import java.util.List;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.logging.MMLogger;
 
@@ -44,7 +46,8 @@ final class GpuMoreDrawer {
     private final Table panel;
     private final Label title;
     private final Table head = new Table();
-    private final Table grid = new Table();
+    private final UiMenuList grid;
+    private final ScrollPane scroll;
     /** The commands the grid shows, by id, label and shortcut: a frame that changes none of them keeps the buttons. */
     private List<String> shownKeys = List.of();
     private List<BoardScene.Command> commands = List.of();
@@ -55,6 +58,8 @@ final class GpuMoreDrawer {
 
     GpuMoreDrawer(UiKit ui) {
         this.ui = ui;
+        grid = new UiMenuList(ui);
+        grid.setName("dock-more-commands");
         slide.setName("dock-more-drawer");
         // The dock's frame and padding (#dock padding 9 12 8, inside the rails and side borders).
         panel = ui.panel();
@@ -70,7 +75,8 @@ final class GpuMoreDrawer {
         head.add(close).padLeft(8);
         panel.add(head).growX().minHeight(26).padBottom(GAP).row();
         grid.top().left();
-        ScrollPane scroll = ui.scrollList(grid);
+        scroll = ui.scrollList(grid);
+        scroll.setName("dock-more-scroll");
         panel.add(scroll).grow().minHeight(0);
         slide.addActor(panel);
         slide.setVisible(false);
@@ -130,6 +136,11 @@ final class GpuMoreDrawer {
         slide.reveal = 0;
         slide.setVisible(true);
         show(more);
+        grid.highlight(null);
+        scroll.setScrollY(0);
+        if (slide.getStage() != null) {
+            slide.getStage().setKeyboardFocus(grid);
+        }
         LOGGER.info("More panel opened {} the dock: {}x{} units, {} usable commands in {} columns",
               above ? "above" : "beside", Math.round(slide.getWidth()), Math.round(slide.getHeight()),
               commands.size(), columns);
@@ -141,6 +152,15 @@ final class GpuMoreDrawer {
             return false;
         }
         open = false;
+        Stage stage = slide.getStage();
+        if (stage != null) {
+            if (stage.getKeyboardFocus() != null && stage.getKeyboardFocus().isDescendantOf(slide)) {
+                stage.setKeyboardFocus(null);
+            }
+            if (stage.getScrollFocus() != null && stage.getScrollFocus().isDescendantOf(slide)) {
+                stage.setScrollFocus(null);
+            }
+        }
         return true;
     }
 
@@ -179,6 +199,7 @@ final class GpuMoreDrawer {
 
     /** The grid's buttons in as many columns as the panel's width holds. */
     private void rebuild() {
+        String highlighted = grid.highlighted() == null ? null : grid.highlighted().getName();
         grid.clearChildren();
         columns = columns(slide.getWidth());
         if (commands.isEmpty()) {
@@ -187,6 +208,7 @@ final class GpuMoreDrawer {
         }
         for (int index = 0; index < commands.size(); index++) {
             BoardScene.Command command = commands.get(index);
+            String id = command.id();
             UiButton button = ui.button("hud", null, command.label(), null);
             button.setName("dock-more-" + command.id());
             button.getLabel().setEllipsis(true);
@@ -194,17 +216,20 @@ final class GpuMoreDrawer {
             if (command.shortcut() != null && !command.shortcut().isEmpty()) {
                 ui.tip(button).getActor().setText(command.shortcut());
             }
-            onChange(button, () -> choose(command));
+            onChange(button, () -> choose(id));
             boolean first = index % columns == 0;
             if (first && index > 0) {
                 grid.row();
             }
-            grid.add(button).growX().uniformX().minWidth(0).height(BUTTON).padLeft(first ? 0 : GAP)
+            grid.item(button).growX().uniformX().minWidth(0).height(BUTTON).padLeft(first ? 0 : GAP)
                   .padTop(index < columns ? 0 : GAP);
         }
         // A short last row keeps its buttons at the grid's column width.
         for (int index = commands.size() % columns; index > 0 && index < columns; index++) {
             grid.add().growX().uniformX().padLeft(GAP);
+        }
+        if (highlighted != null) {
+            grid.highlight(grid.findActor(highlighted));
         }
     }
 
@@ -213,9 +238,14 @@ final class GpuMoreDrawer {
         return Math.max(1, columnsIn(width));
     }
 
-    private void choose(BoardScene.Command command) {
-        close();
-        if (command.enabled()) {
+    /** Buttons may outlive a unit or turn; resolve their action from the latest snapshot when invoked. */
+    private void choose(String id) {
+        if (!open) {
+            return;
+        }
+        BoardScene.Command command = commands.stream().filter(item -> item.id().equals(id)).findFirst().orElse(null);
+        if (command != null && command.enabled()) {
+            close();
             command.action().run();
         }
     }
@@ -241,9 +271,9 @@ final class GpuMoreDrawer {
                 float step = delta / SLIDE;
                 reveal = open ? Math.min(1, reveal + step) : Math.max(0, reveal - step);
                 invalidate();
-                if (reveal == 0) {
-                    setVisible(false);
-                }
+            }
+            if (!open && reveal == 0) {
+                setVisible(false);
             }
         }
 

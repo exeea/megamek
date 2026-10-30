@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import com.badlogic.gdx.Application;
@@ -54,9 +55,11 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.clientGUI.BoardGraphics;
@@ -930,6 +933,153 @@ class GpuHudInputTest {
 
     private boolean press(int key, int awt, int modifiers) {
         return hud.keyDown(key, awt, modifiers);
+    }
+
+    @Test
+    void moreRunsTheLatestCommandAfterAnUpdateAndAfterReopening() {
+        List<String> ran = new ArrayList<>();
+        updateMore(List.of(extra("extra", () -> ran.add("old"))));
+        change("dock-more");
+        UiButton button = hud.stage.getRoot().findActor("dock-more-extra");
+        updateMore(List.of(extra("extra", () -> ran.add("updated"))));
+        assertSame(button, hud.stage.getRoot().findActor("dock-more-extra"), "unchanged captions keep their buttons");
+        change("dock-more-extra");
+        assertEquals(List.of("updated"), ran);
+        // The closing animation still draws the buttons, but they must no longer execute commands.
+        change("dock-more-extra");
+        assertEquals(List.of("updated"), ran);
+
+        updateMore(List.of(extra("extra", () -> ran.add("reopened"))));
+        change("dock-more");
+        change("dock-more-extra");
+        assertEquals(List.of("updated", "reopened"), ran);
+    }
+
+    @Test
+    void moreDoesNotRunACommandThatBecameUnavailable() {
+        AtomicInteger ran = new AtomicInteger();
+        updateMore(List.of(extra("extra", ran::incrementAndGet)));
+        change("dock-more");
+        Actor oldButton = hud.stage.getRoot().findActor("dock-more-extra");
+        updateMore(List.of(new BoardScene.Command("extra", "extra", "", false, false, List.of(),
+              ran::incrementAndGet)));
+        assertNull(hud.stage.getRoot().findActor("dock-more-extra"));
+        oldButton.fire(new ChangeListener.ChangeEvent());
+        assertEquals(0, ran.get(), "a detached button cannot run its old action");
+    }
+
+    @Test
+    void moreKeepsKeyboardNavigationAndTheLatestActionAcrossRebuilds() {
+        List<String> ran = new ArrayList<>();
+        BoardScene.Command first = extra("first", () -> ran.add("first"));
+        BoardScene.Command last = extra("last", () -> ran.add("old"));
+        updateMore(List.of(first, last));
+        change("dock-more");
+        assertSame(hud.stage.getRoot().findActor("dock-more-commands"), hud.stage.getKeyboardFocus());
+        assertTrue(press(Input.Keys.DOWN, KeyEvent.VK_DOWN, 0));
+        assertTrue(press(Input.Keys.UP, KeyEvent.VK_UP, 0));
+        assertTrue(hud.stage.getRoot().<UiButton>findActor("dock-more-last").isChecked(), "Up wraps to the last item");
+        assertTrue(press(Input.Keys.HOME, KeyEvent.VK_HOME, 0));
+        assertTrue(hud.stage.getRoot().<UiButton>findActor("dock-more-first").isChecked());
+        assertTrue(press(Input.Keys.END, KeyEvent.VK_END, 0));
+        updateMore(List.of(last, first, extra("new", () -> ran.add("new"))));
+        assertTrue(hud.stage.getRoot().<UiButton>findActor("dock-more-last").isChecked(),
+              "reordering the grid preserves the highlighted command");
+        assertTrue(press(Input.Keys.DOWN, KeyEvent.VK_DOWN, 0));
+        assertTrue(hud.stage.getRoot().<UiButton>findActor("dock-more-first").isChecked());
+        updateMore(List.of(extra("last", () -> ran.add("latest"))));
+        assertTrue(press(Input.Keys.DOWN, KeyEvent.VK_DOWN, 0));
+        assertTrue(press(Input.Keys.ENTER, KeyEvent.VK_ENTER, 0));
+        assertEquals(List.of("latest"), ran, "removed buttons are not kept in the keyboard order");
+        assertFalse(hud.state.chatOpen, "Enter chooses the command instead of opening chat");
+        assertNull(hud.stage.getKeyboardFocus());
+    }
+
+    @Test
+    void moreClosesOnOneEscapeAndReleasesFocusWhenHidden() {
+        List<BoardScene.Command> commands = List.of(extra("extra", () -> { }));
+        updateMore(commands);
+        change("dock-more");
+        assertTrue(escape());
+        assertNull(hud.stage.getKeyboardFocus());
+        hud.stage.act(1);
+        assertFalse(hud.stage.getRoot().findActor("dock-more-drawer").isVisible());
+        verify(moves, never()).clearRoute();
+
+        change("dock-more");
+        assertNotNull(hud.stage.getKeyboardFocus());
+        change("dock-more-close");
+        assertNull(hud.stage.getKeyboardFocus());
+        change("dock-more");
+        hud.state.overview = true;
+        updateMore(commands);
+        assertNull(hud.stage.getKeyboardFocus(), "a drawer covered by the overview cannot keep the keyboard");
+        assertTrue(escape());
+        assertFalse(hud.state.overview, "the hidden drawer must not consume the overview's Esc");
+    }
+
+    @Test
+    void moreGrowsIntoAvailableSpaceAndScrollsOnlyWhenTheWindowIsFull() {
+        for (int[] size : new int[][] { { 900, 600 }, { 1280, 720 }, { 1920, 1080 } }) {
+            hud.resize(size[0], size[1], 1);
+            for (int count : new int[] { 8, 12, 40 }) {
+                List<BoardScene.Command> commands = IntStream.range(0, count)
+                      .mapToObj(index -> extra("extra" + index, () -> { })).toList();
+                updateMore(commands);
+                change("dock-more");
+                updateMore(commands);
+                hud.stage.act(1);
+                validateLayout(hud.stage.getRoot());
+                Actor drawer = hud.stage.getRoot().findActor("dock-more-drawer");
+                Actor slot = drawer.getParent();
+                ScrollPane scroll = hud.stage.getRoot().findActor("dock-more-scroll");
+                String context = size[0] + "x" + size[1] + ", " + count + " commands";
+                float gap = GpuHud.Metrics.of(size[0], size[1]).gap();
+                assertTrue(slot.getY() >= gap - .5f, context);
+                assertTrue(slot.getTop() <= size[1] - gap + .5f, context);
+                if (count < 40 || size[0] == 1920) {
+                    assertEquals(0, scroll.getMaxY(), .5f, "all commands fit without scrolling: " + context);
+                } else {
+                    assertTrue(scroll.getMaxY() > 0, "a panel taller than the window remains scrollable: " + context);
+                    assertEquals(size[1] - gap, slot.getTop(), .5f, "use all free height before scrolling");
+                    assertTrue(press(Input.Keys.END, KeyEvent.VK_END, 0));
+                    assertTrue(scroll.getScrollY() > 0, "keyboard navigation reveals the last command");
+                }
+                change("dock-more");
+                hud.stage.act(1);
+            }
+        }
+    }
+
+    private static BoardScene.Command extra(String id, Runnable action) {
+        return new BoardScene.Command(id, id, "", true, false, List.of(), action);
+    }
+
+    /** A movement frame with the supplied overflow commands, settled as after the HUD's layout and draw. */
+    private void updateMore(List<BoardScene.Command> commands) {
+        BoardScene scene = mock(BoardScene.class);
+        when(scene.commands()).thenReturn(commands);
+        GpuBoardSource.Frame frame = frame(status(3, GamePhase.MOVEMENT, true, FIRST, 0,
+              unit(FIRST, OWN, true, true)), panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), scene);
+        for (int pass = 0; pass < 3; pass++) {
+            hud.update(frame, GpuHud.HudView.EMPTY, null, preferences());
+            validateLayout(hud.stage.getRoot());
+        }
+    }
+
+    private void change(String name) {
+        Actor actor = hud.stage.getRoot().findActor(name);
+        assertNotNull(actor, name);
+        actor.fire(new ChangeListener.ChangeEvent());
+    }
+
+    private static void validateLayout(Actor actor) {
+        if (actor instanceof Layout layout) {
+            layout.validate();
+        }
+        if (actor instanceof Group group) {
+            group.getChildren().forEach(GpuHudInputTest::validateLayout);
+        }
     }
 
     private boolean escape() {

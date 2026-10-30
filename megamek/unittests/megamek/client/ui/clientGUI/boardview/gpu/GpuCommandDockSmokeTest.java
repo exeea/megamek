@@ -24,12 +24,10 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -49,7 +47,6 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
-import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
@@ -72,7 +69,7 @@ import org.junit.jupiter.api.Test;
  * the states no shot shows (hold, auto-declare, confirmations, read-only drafts, generic phases, More), inside the
  * window and clear of the columns and the hint line at 900 x 600, 1280 x 720 and 1920 x 1080; and each button running
  * the command of its variant. The services are mocks that record the commands, phase commands record their ids, the
- * playback history plays scripted events, and More opens in the context menu's popover. The weapon declaration also
+ * playback history plays scripted events, and More opens in the dock's drawer. The weapon declaration also
  * runs over the real FiringDisplay with its fire orders (GpuFiringFixture, scripted turns).
  */
 @Tag("on-demand")
@@ -123,7 +120,7 @@ class GpuCommandDockSmokeTest {
     /** A round's log and the combat events the board plays for it. */
     private record Round(GpuReportLog.Snapshot log, List<BoardScene.Animation> events) { }
 
-    /** The dock under test, its HUD state, the harness camera and the context menu that shows its More. */
+    /** The dock under test, its HUD state, the harness camera and the context menu for its select lists. */
     private record Dock(GpuCommandDock dock, GpuHudState state, BoardCamera camera, GpuContextMenu menu) {
         Group root() {
             return (Group) dock.actor();
@@ -134,8 +131,8 @@ class GpuCommandDockSmokeTest {
             return actor != null ? actor : dock.confirmation().actor().findActor(name);
         }
 
-        UiPopover popover() {
-            return ((Group) menu.actor()).findActor("context-menu-popover");
+        Group drawer() {
+            return (Group) dock.drawer().actor();
         }
     }
 
@@ -226,13 +223,13 @@ class GpuCommandDockSmokeTest {
             Dock firingMore = dock(hud, weapons(2, true, true));
             show(hud, firingMore, weapons(2, true, true));
             click(hud, firingMore.find("dock-more"));
-            hud.draw();
+            show(hud, firingMore, weapons(2, true, true));
             hud.capture("g6-more-firing").dispose();
-            // More above its button, in the context menu's popover.
+            // More in the dock's drawer.
             Dock more = dock(hud, movement(atlasRoute(), ATLAS));
             show(hud, more, movement(atlasRoute(), ATLAS));
             click(hud, more.find("dock-more"));
-            hud.draw();
+            show(hud, more, movement(atlasRoute(), ATLAS));
             hud.capture("g6-more-movement").dispose();
 
             // Shot 15 at 1280 x 720: the weapons dock at the narrow width.
@@ -398,7 +395,8 @@ class GpuCommandDockSmokeTest {
                   .map(BoardScene.Command::label).toList());
             ran.clear();
             click(hud, button(dock, "dock-more"));
-            click(hud, item(dock.popover(), "Flip Arms"));
+            show(hud, dock, weapons);
+            click(hud, dock.drawer().findActor("dock-more-fireFlipArms"));
             assertEquals(List.of("fireFlipArms"), ran);
 
             // Physical: an unavailable option cannot be chosen; a kick declares alone, both punches together; the
@@ -579,25 +577,22 @@ class GpuCommandDockSmokeTest {
     }
 
     @Test
-    void moreOpensInTheContextMenuAboveItsButton() {
+    void moreOpensInTheDrawerWithOnlyUsableCommands() {
         GpuHudTestStage.run(hud -> {
             Shot plan = movement(atlasRoute(), ATLAS);
             Dock dock = dock(hud, plan);
             show(hud, dock, plan);
             UiButton more = button(dock, "dock-more");
             click(hud, more);
-            UiPopover popover = dock.popover();
-            assertTrue(popover.isVisible());
+            show(hud, dock, plan);
+            Group drawer = dock.drawer();
+            assertTrue(drawer.isVisible());
             // The panel's movement controls and unit record no longer appear in More.
-            assertEquals(List.of("MORE MOVEMENT", "Go Prone", "Hull Down", "unavailable"), texts(popover));
-            // r1 2: More opens above its button, 150 to its left.
-            Rectangle button = GpuHudTestStage.bounds(more);
-            Rectangle area = GpuHudTestStage.bounds(popover);
-            assertEquals(button.x - 150, area.x, .01f);
-            assertEquals(button.y + button.height + 8, area.y, .01f);
-            click(hud, item(popover, "Go Prone"));
+            assertEquals(List.of("MORE MOVEMENT", "X", "GO PRONE"), texts(drawer));
+            hud.capture("g6-more-drawer-movement").dispose();
+            click(hud, drawer.findActor("dock-more-moveGoProne"));
             assertEquals(List.of("moveGoProne"), ran);
-            assertFalse(popover.isVisible(), "choosing an item closes the menu");
+            assertFalse(dock.dock().drawer().isOpen(), "choosing an item closes the drawer");
             assertEquals(List.of("Hull Down"), dock.dock().more().commands().stream()
                   .map(BoardScene.Command::label).toList());
             ran.clear();
@@ -607,9 +602,10 @@ class GpuCommandDockSmokeTest {
             dock = dock(hud, none);
             show(hud, dock, none);
             click(hud, button(dock, "dock-more"));
-            assertEquals(List.of("MORE", "Atlas", "Unit record", "Dodge", "Lay explosives", "unavailable"),
-                  texts(dock.popover()));
-            click(hud, item(dock.popover(), "Dodge"));
+            show(hud, dock, none);
+            assertEquals(List.of("MORE", "X", "UNIT RECORD", "DODGE"), texts(dock.drawer()));
+            hud.capture("g6-more-drawer-physical").dispose();
+            click(hud, dock.drawer().findActor("dock-more-dodge"));
             assertEquals(List.of("dodge"), ran);
         });
     }
@@ -1368,6 +1364,8 @@ class GpuCommandDockSmokeTest {
         hud.window.clearChildren();
         Container<Actor> slot = new Container<>(dock.dock().actor()).bottom().fillX();
         hud.window.addActor(slot);
+        Actor drawer = dock.drawer();
+        hud.window.addActor(drawer);
         Actor menu = dock.menu().actor();
         menu.setBounds(0, 0, hud.width(), hud.height());
         hud.window.addActor(menu);
@@ -1383,6 +1381,11 @@ class GpuCommandDockSmokeTest {
         dock.menu().update(inputs);
         slot.setBounds(x, metrics.gap(), width, slot.getPrefHeight());
         slot.validate();
+        // This component harness gives the drawer two columns beside the dock. GpuHudInputTest checks the HUD's
+        // actual placement and overflow at narrow and wide window sizes.
+        drawer.setBounds(slot.getX() + slot.getWidth() + HINT_GAP, slot.getY(), GpuMoreDrawer.width(2),
+              Math.max(slot.getHeight(), dock.dock().drawer().height(2)));
+        drawer.act(.2f);
         dock.dock().layoutConfirmation(hud.width(), hud.height());
         hud.draw();
     }
@@ -1480,21 +1483,11 @@ class GpuCommandDockSmokeTest {
         List<String> texts = new ArrayList<>();
         if (actor instanceof Label label && label.getText().length() > 0) {
             texts.add(label.getText().toString());
-        } else if (actor instanceof Table table) {
+        } else if (actor instanceof Table table && table.getCells().notEmpty()) {
             table.getCells().forEach(cell -> texts.addAll(texts(cell.getActor())));
         } else if (actor instanceof Group group) {
             group.getChildren().forEach(child -> texts.addAll(texts(child)));
         }
         return texts;
-    }
-
-    /** The popover's item whose caption is {@code text}. */
-    private static UiButton item(Actor actor, String text) {
-        UiButton found = actor instanceof UiButton button && text.contentEquals(button.getText()) ? button : null;
-        if (found == null && actor instanceof Group group) {
-            found = Stream.of(group.getChildren().toArray(Actor.class)).map(child -> item(child, text))
-                  .filter(Objects::nonNull).findFirst().orElse(null);
-        }
-        return found;
     }
 }
