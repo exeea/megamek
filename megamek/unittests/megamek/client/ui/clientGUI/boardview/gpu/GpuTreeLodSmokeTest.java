@@ -113,6 +113,9 @@ class GpuTreeLodSmokeTest {
                               new Vector3(0, 0, -1)));
                         int nearCount = 0;
                         int nearShadowCount = 0;
+                        int nearDepthCount = 0;
+                        int shadowLevel = 0;
+                        float shadowZoom = 0;
                         for (int level : new int[] { 0, 1, 2, 3, 0, 3, 2, 1, 0 }) {
                             camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
@@ -130,33 +133,41 @@ class GpuTreeLodSmokeTest {
                                       draws - profiler.getDrawCalls(), alone, profiler.getDrawCalls());
                             }
                             int colorCount = colour(profiler, terrain, camera);
+                            int depthCount = count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth));
                             if (level == 0) {
                                 nearCount = colorCount;
                                 nearShadowCount = shadowCount;
+                                nearDepthCount = depthCount;
                             }
                             assertEquals(3 * (triangles[0] - triangles[level]), nearCount - colorCount, name);
-                            assertEquals(3 * (triangles[0] - triangles[level]), nearShadowCount - shadowCount,
-                                  "Shadow uses the selected tree geometry: " + name);
-                            assertEquals(shadowCount, count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth)));
+                            assertEquals(3 * (triangles[0] - triangles[level]), nearDepthCount - depthCount,
+                                  "Depth uses the selected tree geometry: " + name);
+                            // The map's own level follows its texel, which grows and shrinks with the view's zoom.
+                            int drawn = drawnLevel(nearShadowCount - shadowCount, triangles);
+                            assertTrue(drawn >= 0, "Shadow draws one level of the tree: " + name);
+                            assertTrue(camera.camera.zoom > shadowZoom ? drawn >= shadowLevel : drawn <= shadowLevel,
+                                  "Shadow detail falls as the map's texel grows: " + name);
+                            shadowLevel = drawn;
+                            shadowZoom = camera.camera.zoom;
                             assertEquals(nearHit, terrain.hit(scene, new Ray(new Vector3(center).add(0, 0, 1000),
                                   new Vector3(0, 0, -1))), "Picking remains stable across detail levels");
                             terrain.animate(0, List.of(unit), 0);
                             assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)),
                                   "Trees must stay in the opaque pass when a unit enters");
                             assertEquals(colorCount, colour(profiler, terrain, camera));
-                            assertEquals(shadowCount,
+                            assertEquals(depthCount,
                                   count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth)));
                         }
                         // An occupied tree stays opaque through both LoD thresholds, including camera depth
-                        // for the unit outline. The same selected geometry casts its shadow.
+                        // for the unit outline. Its shadow is one whole level of the tree.
                         for (int level : new int[] { 1, 2, 3, 0 }) {
                             camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
                             terrain.refreshShadows();
-                            assertEquals(nearShadowCount - 3 * (triangles[0] - triangles[level]),
-                                  count(profiler, () -> terrain.renderShadows(camera.camera, List.of())));
+                            assertTrue(drawnLevel(nearShadowCount
+                                  - count(profiler, () -> terrain.renderShadows(camera.camera, List.of())), triangles) >= 0);
                             assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)));
-                            assertEquals(nearShadowCount - 3 * (triangles[0] - triangles[level]),
+                            assertEquals(nearDepthCount - 3 * (triangles[0] - triangles[level]),
                                   count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth)));
                             assertEquals(0, count(profiler, () -> terrain.renderShadows(camera.camera, List.of())),
                                   "An unchanged camera and scene must reuse the shadow map");
@@ -520,6 +531,17 @@ class GpuTreeLodSmokeTest {
         GpuTerrain.depthPrepass = EnumSet.noneOf(GpuTerrain.Prepass.class);
         try { return count(profiler, () -> terrain.render(camera.camera)); }
         finally { GpuTerrain.depthPrepass = prepass; }
+    }
+
+    /**
+     * The level whose geometry a pass leaves out against the near level ({@code fewer} vertices fewer), or -1 when none:
+     * the shadow map draws one whole level of its own, chosen by its texel (GpuTerrain.renderDepth).
+     */
+    static int drawnLevel(int fewer, int[] triangles) {
+        for (int level = 0; level < triangles.length; level++) {
+            if (fewer == 3 * (triangles[0] - triangles[level])) { return level; }
+        }
+        return -1;
     }
 
     private static int count(GLProfiler profiler, Runnable draw) {

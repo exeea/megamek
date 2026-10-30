@@ -75,6 +75,7 @@ class GpuShadowCacheSmokeTest {
             terrain.refreshShadows();
             terrain.renderShadows(camera.camera, List.of());
             byte[] stationary = depth(terrain);
+            assertCastersIgnoreTheCameraZoom(terrain, camera);
             for (int pan = 0; pan < 5; pan++) {
                 camera.pan(1, 0);
                 profiler.reset();
@@ -169,4 +170,32 @@ class GpuShadowCacheSmokeTest {
     }
 
     private static byte[] depth(GpuTerrain terrain) { return GpuFamilyAssemblyReview.shadowDepth(terrain); }
+
+    /**
+     * The map's trees take their detail from its texel, not from the camera: a zoom that changes the view's tree levels
+     * changes none of the map's depth at the same projection.
+     */
+    private static void assertCastersIgnoreTheCameraZoom(GpuTerrain terrain, BoardCamera camera) throws Exception {
+        var detail = GpuTerrain.class.getDeclaredMethod("updateDetail", Camera.class);
+        detail.setAccessible(true);
+        byte[] before = depth(terrain);
+        int levels = treeLevels(terrain);
+        float zoom = camera.camera.zoom;
+        camera.camera.zoom = zoom / 8;
+        camera.update();
+        detail.invoke(terrain, camera.camera);
+        assertTrue(treeLevels(terrain) < levels, "The zoom brings the view's trees nearer levels");
+        fullPass(terrain, List.of());
+        assertArrayEquals(before, depth(terrain), "The camera's tree levels do not reach the map");
+        camera.camera.zoom = zoom;
+        camera.update();
+        detail.invoke(terrain, camera.camera);
+    }
+
+    /** The sum of the chunks' tree levels the view chose. */
+    private static int treeLevels(GpuTerrain terrain) throws ReflectiveOperationException {
+        int sum = 0;
+        for (Object chunk : (List<?>) field(terrain, "chunks")) { sum += (int) field(chunk, "treeLod"); }
+        return sum;
+    }
 }

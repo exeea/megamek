@@ -90,6 +90,11 @@ class GpuShrubSmokeTest {
                         assertTrue(triangles[0] <= 480 && triangles[1] <= 240 && triangles[2] <= 96 && triangles[3] <= 12);
                         camera.center(BoardGeometry.center(new Coords(0, 0), 0).add(0, 0, 9));
                         int nearColour = 0, nearDepth = 0;
+                        // The map's near level: so close that its texel resolves the shrub fully.
+                        camera.camera.zoom = diameter / 400;
+                        camera.update();
+                        terrain.refreshShadows();
+                        int nearShadow = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
                         for (int lod : new int[] { 0, 1, 2, 3, 0 }) {
                             camera.camera.zoom = diameter * Gdx.graphics.getBackBufferHeight()
                                   / Gdx.graphics.getHeight() / GpuTreeLodSmokeTest.PIXELS[lod];
@@ -104,7 +109,9 @@ class GpuShrubSmokeTest {
                             if (lod == 0) { nearColour = colour; nearDepth = depthCount; }
                             assertEquals(3 * (triangles[0] - triangles[lod]), nearColour - colour, family);
                             assertEquals(3 * (triangles[0] - triangles[lod]), nearDepth - depthCount, family);
-                            assertEquals(depthCount, shadow, "Shadows and depth use the same shrub LOD");
+                            // The map draws one whole level of its own, chosen by its texel (GpuTerrain.renderDepth).
+                            assertTrue(GpuTreeLodSmokeTest.drawnLevel(nearShadow - shadow, triangles) >= 0,
+                                  "Shadows draw one shrub level: " + family);
                         }
                     }
                     profiler.disable();

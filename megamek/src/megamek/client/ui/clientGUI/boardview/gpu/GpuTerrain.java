@@ -1003,9 +1003,9 @@ final class GpuTerrain implements Disposable {
     GpuFamilyPrograms familyPrograms() { return familyPrograms; }
 
     /**
-     * Redraw the shadow map at the next pass, as terrain, light and shader changes do. Tree, scatter and building
-     * level changes do not: the map keeps the previous level's silhouette, which differs by about a texel, until
-     * the camera movement that changed the level refits the shadow.
+     * Redraw the shadow map at the next pass, as terrain, light and shader changes do. The camera's level changes do
+     * not: the map's trees and scatter take their levels from its texel (renderDepth), and a building's or the scatter's
+     * visibility change waits, with the previous silhouette, for the camera movement that changed it to refit the shadow.
      */
     void refreshShadows() { shadowMap.invalidate(); }
 
@@ -7904,15 +7904,21 @@ final class GpuTerrain implements Disposable {
             trees.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
             // What the Tactical View hides casts nothing there (setFluffHidden).
             boolean fluff = !fluffHidden;
-            // A shadow map whose texel spans half a metre or more cannot resolve leaves: its trees cast the shadow of
-            // their second decimated level at most. Alpha-tested foliage drawn into such a map at the near level was
-            // fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
-            int coarsest = shadows && camera.viewportWidth / GpuTerrainShadows.SHADOW_RESOLUTION >= BoardRelief.metres(.5f) ? 2 : 0;
+            // The shadow map takes its casters' detail from its own texel, not from the camera's pixels: trees and
+            // scatter at the level their size in texels needs (TreeLod's thresholds), and scatter only where the map
+            // resolves it, as well as where the view shows it. A map's casters are then the same wherever the view
+            // moves at one texel size. A map whose texel spans half a metre or more cannot resolve leaves: its trees
+            // cast the shadow of their second decimated level at most. Alpha-tested foliage drawn into such a map at the
+            // near level was fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
+            float texels = shadows ? GpuTerrainShadows.SHADOW_RESOLUTION / Math.min(camera.viewportWidth, camera.viewportHeight) : 0;
+            int coarsest = shadows && 1 / texels >= BoardRelief.metres(.5f) ? 2 : 0;
             for (Chunk chunk : chunks) {
                 boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
-                boolean scatterVisible = includeScatter && fluff && visible && chunk.scatterVisible;
-                trees.add(chunk.trees(fluff), Math.max(chunk.treeLod, coarsest), visible);
-                trees.add(chunk.scatterStand, Math.max(chunk.treeLod, coarsest), scatterVisible);
+                boolean scatterVisible = includeScatter && fluff && visible && chunk.scatterVisible
+                      && (!shadows || chunk.scatterDiameter * texels >= 2);
+                int level = shadows ? Math.max(TreeLod.level(chunk.treeDiameter * texels, 0), coarsest) : chunk.treeLod;
+                trees.add(chunk.trees(fluff), level, visible);
+                trees.add(chunk.scatterStand, level, scatterVisible);
                 if (visible) {
                     Hidden hidden = hidden(chunk);
                     if (hidden.ground() != null) { renderRetained(hidden.ground(), pass, null); }
@@ -7966,8 +7972,8 @@ final class GpuTerrain implements Disposable {
         }
         detailPixelsPerUnit = pixelsPerUnit;
         // Small placed objects hide while a hex is under TreeLod.SMALL_OBJECTS pixels; perspective views keep them, like
-        // grass. A crossing alone does not redraw the shadow map, like a tree level: the objects and their shadows are
-        // at most a few pixels, and a forced redraw would drop the cached board-wide shadow on every zoom-out.
+        // grass. A crossing alone does not redraw the shadow map: the objects and their shadows are at most a few
+        // pixels, and a forced redraw would drop the cached board-wide shadow on every zoom-out.
         smallHidden = smallObjects && !perspective && TreeLod.level(TreeLod.SMALL_OBJECTS,
               BoardGeometry.width() * pixelsPerUnit, smallHidden ? 1 : 0) == 1;
         Vector3 nearest = new Vector3();
@@ -7980,7 +7986,7 @@ final class GpuTerrain implements Disposable {
                 pixelsPerUnit = BoardCamera.pixelsPerUnit(camera, nearest);
             }
             float scatterPixels = chunk.scatterDiameter * pixelsPerUnit;
-            // Scatter this small casts a shadow under a texel: its appearance waits for the next refit, like trees'.
+            // Scatter this small casts a shadow under a texel: its appearance waits for the next refit.
             chunk.scatterVisible = scatterPixels >= (chunk.scatterVisible ? 2 : 3);
             boolean packedLevels = false, objectLevels = false;
             for (Prop prop : chunk.cutaways) {
@@ -7998,11 +8004,8 @@ final class GpuTerrain implements Disposable {
                 scarSurfaceRevision++;
                 chunk.cacheDecorations();
             }
-            // Largest tree wins: smaller neighbors may retain extra detail, never lose it early.
-            // A level change alone does not redraw the shadow map: the next refit, which the camera movement that
-            // changed the level brings within a few frames, draws the new level, and until then the map holds the
-            // previous level's silhouette, which differs by less than a texel. Redrawing on every change drew every
-            // chunk and tree again, 220-530 ms per change on an Intel Iris Xe on MesaCity 1 while orbiting.
+            // Largest tree wins: smaller neighbors may retain extra detail, never lose it early. The shadow map chooses
+            // its own levels from its texel (renderDepth).
             chunk.treeLod = TreeLod.level(chunk.treeDiameter * pixelsPerUnit, chunk.treeLod);
         }
     }
