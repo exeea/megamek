@@ -10,7 +10,6 @@ void main() {
     vec3 face = normalize(v_normal);
     if (!gl_FrontFacing) face = -face;
     vec3 position = v_cloudPosition / u_metre;
-    terrainMaterialLod(position, face);
     vec3 eye = -viewDirection();
     vec2 current = vec2(0.0);
     float shore = .4, bank = 1.0;

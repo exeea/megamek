@@ -17,12 +17,10 @@ vec4 biomePlanar(sampler2DArray maps, float map, MaterialProjection p, float mix
     float tile = u_biomeSoilTile;
     vec4 near = biomeTexel(maps, map, p.top / tile, p.topGradient / tile);
     // Relief: the first repeat only.
-    if (normalMap) return vec4(mix(near.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail), near.a);
+    if (normalMap) return vec4(near.rgb * 2.0 - 1.0, near.a);
     vec4 far = mixer > 0.0 ? biomeTexel(maps, map, TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37))
           : near;
-    vec4 pigment = mix(near, far, mixer);
-    return farDetail > 0.0 ? mix(pigment,
-          biomeTexel(maps, map, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail) : pigment;
+    return mix(near, far, mixer);
 }
 vec4 biomePlanar(float map, MaterialProjection p, float mixer, bool normalMap) {
     if (normalMap) return biomePlanar(u_terrainData, (map - 1.0) * .5, p, mixer, true);
@@ -149,9 +147,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         color = mix(color, mix(earth, crop, canopy * planted * .95), amount);
         finish = mixFinish(finish, planarFinish(u_biomeSoilLayer, projection.top, projection.topGradient, u_biomeSoilTile,
               broad), amount);
-        if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+        if (u_normalMaps > .5) {
             vec3 soilNormal = upNormal(biomePlanar(u_biomeSoilLayer + 1.0, projection, broad, true).rgb, face);
-            soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
             normal = normalize(mix(normal, soilNormal, amount));
         }
         normal = normalize(normal + vec3(direction * sin(row * 6.2831853) * .3 * visible * cover.x * tilled, 0.0));
@@ -218,9 +215,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float area = dot(worldDx, cross(worldDy, face));
         vec3 gradient = (cross(worldDy, face) * dot(bumpGradient, worldDx.xy)
               + cross(face, worldDx) * dot(bumpGradient, worldDy.xy)) / max(abs(area), .00001) * sign(area);
-        if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+        if (u_normalMaps > .5) {
             vec3 soilNormal = biomeSoilNormal(projection, face, broad);
-            soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
             normal = normalize(mix(normal, soilNormal, wetland * (1.0 - sand)));
         }
         normal = normalize(normal - gradient * wetland * (1.0 - bare));
@@ -260,8 +256,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
             finish = mixFinish(finish, packedTopFinish(u_mudMaterial.x, uv), amount);
             finish.roughness = roughness;
             cavity = mix(cavity, surface.y, amount);
-            if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-                normal = normalize(mix(normal, upNormal(detail, face), amount * terrainNormalDetail));
+            if (u_normalMaps > .5) {
+                normal = normalize(mix(normal, upNormal(detail, face), amount));
             }
             // Only the authored shallow basins have a water film; the same wet clods remain rough on both surfaces.
             float puddle = (1.0 - smoothstep(.14, .20, mud.a)) * smoothstep(.94, .995, face.z);

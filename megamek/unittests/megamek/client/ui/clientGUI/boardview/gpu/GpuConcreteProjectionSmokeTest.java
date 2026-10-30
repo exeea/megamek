@@ -71,7 +71,7 @@ class GpuConcreteProjectionSmokeTest {
               uniform vec2 u_direction;
               uniform float u_slope;
               uniform int u_mode;
-              const float u_metre = 1.0, u_levelHeight = 6.0, u_normalMaps = 1.0, terrainNormalDetail = 1.0;
+              const float u_metre = 1.0, u_levelHeight = 6.0, u_normalMaps = 1.0;
               const vec4 u_sculptTiles = vec4(8.0), u_sculptLayers = vec4(0.0);
               const mat2 TURN = mat2(1.0);
               """ + GpuShaderSource.read("terrain-projection.glsl") + roughness + concrete + """

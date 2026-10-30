@@ -256,9 +256,7 @@ class GpuMagmaSmokeTest {
             String probe = GpuShaderSource.replaceOnce(source, "void main() {", """
                   void main() {
                       vec3 world = v_cloudPosition / u_metre, face = normalize(v_normal);
-                      terrainMaterialLod(world, face);
                       pixelMetres = max(length(dFdx(world)), length(dFdy(world)));
-                      farDetail = 0.0;
                       vec3 color = vec3(.2), normal = face, bounce = vec3(0.0);
                       float cavity = 1.0, relief = 1.0, height = .5, grass = 0.0, sand = 0.0;
                       float response = 0.0, rainCover = 0.0, volcanic;
@@ -530,7 +528,7 @@ class GpuMagmaSmokeTest {
             List<String> required = List.of("terrain-magma.glsl", "magma-solid.glsl", "magma-flow.glsl",
                   "magma-lighting.glsl", "terrain-magma-solid.frag", "terrain-magma-flow.frag", "terrain-materials.glsl");
             List<String> sources = new ArrayList<>(required);
-            sources.addAll(List.of("terrain-sculpt.frag", "lava-lighting.glsl", "terrain-detail.glsl", "liquid-flow.glsl"));
+            sources.addAll(List.of("terrain-sculpt.frag", "lava-lighting.glsl", "liquid-flow.glsl"));
             for (String name : sources) {
                 File source = new File(baseline, "megamek/resources/megamek/client/ui/clientGUI/boardview/gpu/" + name);
                 if (!source.exists() && !required.contains(name)) { continue; }

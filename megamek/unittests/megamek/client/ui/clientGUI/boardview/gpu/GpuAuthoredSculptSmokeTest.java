@@ -171,7 +171,7 @@ class GpuAuthoredSculptSmokeTest {
                   if (u_authoredSculptReview == 3) value = reviewSnow;
                   if (u_authoredSculptReview == 4) value = vec3(reviewWeight, tint, 0.0);
                   if (u_authoredSculptReview == 5) value = vec3(materialHeight, finish.roughness, cavity);
-                  if (u_authoredSculptReview == 6) value = vec3(bark.a, barkNormal.a, terrainNormalDetail);
+                  if (u_authoredSculptReview == 6) value = vec3(bark.a, barkNormal.a, 0.0);
                   if (u_authoredSculptReview == 7) value = normal * .5 + .5;
                   if (u_authoredSculptReview == 8) value = upNormal(barkNormal.rgb, face) * .5 + .5;
                   if (u_authoredSculptReview == 9) value = reviewSnowInputs;
@@ -239,7 +239,6 @@ class GpuAuthoredSculptSmokeTest {
                 assertEquals(fields[6][at], fields[5][at], .001f, "Mulch retains authored height");
                 assertEquals(mulchRoughness, fields[5][at + 1], .001f, "Mulch uses its authored scalar roughness");
                 assertEquals(fields[6][at + 1], fields[5][at + 2], .001f, "Mulch retains aligned authored AO");
-                assertEquals(1, fields[6][at + 2], 0, "The close view must fully resolve the authored normal and AO");
                 for (int channel = 0; channel < 3; channel++) {
                     assertEquals(fields[8][at + channel], fields[7][at + channel], .001f,
                           "Mulch normal uses the same world scale and projection as its pigment");

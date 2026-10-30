@@ -115,8 +115,7 @@ final class GpuShaderSource {
         return switch (marker) {
             case "PARTICLE_APPEARANCE" -> read("particles-smoke.glsl", choices, path) + "\n"
                   + read("particles-fire.glsl", choices, path) + "\n" + read("particles-jet.glsl", choices, path);
-            case "terrain-projection-functions" -> read("terrain-detail.glsl", choices, path)
-                  + read("terrain-projection.glsl", choices, path);
+            case "terrain-projection-functions" -> read("terrain-projection.glsl", choices, path);
             case "BOARD_HEX" -> BOARD_HEX;
             // Selection comments and structural insertion points are not file includes.
             default -> null;
@@ -213,7 +212,6 @@ final class GpuShaderSource {
             functions += read("terrain-biome.glsl");
         }
         if (source.contains("// magma-solid-functions") || source.contains("// magma-flow-functions")) {
-            functions += read("terrain-detail.glsl");
             functions += magma(source.contains("// magma-flow-functions"));
             functions += read("magma-lighting.glsl");
         }

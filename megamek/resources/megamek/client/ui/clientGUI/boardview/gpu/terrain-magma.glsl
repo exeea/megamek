@@ -28,7 +28,6 @@ vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax);
 vec3 magmaEmission(vec2 heat, float strength);
 #endif
 float magmaRepeatMetres();
-float magmaDistantRoughness();
 // The metres one repeat of the actual texture covers.
 float magmaTileMetres() { return magmaRepeatMetres() * u_magmaCoverage; }
 
@@ -51,22 +50,18 @@ float magmaBankHeat(vec2 position) {
 }
 
 Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, bool relief) {
-    vec4 distantSurface = vec4(.5, magmaDistantRoughness(), TERRAIN_DISTANT_CAVITY, 0.0);
-    vec4 surface = distantSurface;
+    vec4 surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
     vec3 normal = vec3(0.0, 0.0, 1.0);
-    if (terrainSurfaceDetail > 0.0) surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
-    if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-        // Relief and normals share the authored height, but vanish before distant shading skips their maps.
-        vec2 parallax = eye.xy / max(abs(eye.z), .35) * surface.a * .1 * (12.0 / magmaTileMetres())
-              * terrainNormalDetail;
-        if (relief && dot(parallax, parallax) > 0.0) {
+    if (u_normalMaps > .5) {
+        // Relief and normals share the authored height. The surface's roughness mips carry the normals' spread
+        // (GpuAssets.mipmaps). A relief that moves at most half a pixel moves nothing visible: it costs no reads.
+        vec2 parallax = eye.xy / max(abs(eye.z), .35) * surface.a * .1 * (12.0 / magmaTileMetres());
+        if (relief && dot(parallax, parallax) >= max(dot(dx, dx), dot(dy, dy))) {
             uv = magmaRelief(uv, dx, dy, surface, parallax);
             surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
         }
-        normal = mix(normal, (magmaTexel(MAGMA_NORMAL, uv, dx, dy).rgb * 255.0 - 128.0) / 127.0,
-              terrainNormalDetail);
+        normal = (magmaTexel(MAGMA_NORMAL, uv, dx, dy).rgb * 255.0 - 128.0) / 127.0;
     }
-    surface = mix(distantSurface, surface, terrainSurfaceDetail);
     vec4 heat = magmaTexel(MAGMA_HEAT, uv, dx, dy);
 #ifdef magmaEmissionMapFlag
     // PTEX owns the emitted spectrum and its coverage; one raw filtered sample supplies canonical radiance.

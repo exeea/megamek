@@ -25,11 +25,11 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Mapped material response near the camera; distant rendering must become independent of fine detail maps. */
+/** Mapped material response: normal maps, dry reflection, plateau outcrops and fungal pigment; authored roughness. */
 @Tag("on-demand")
 class GpuMaterialLodSmokeTest {
     @Test
-    void distantMaterialsIgnoreDetailMapsButKeepTheirColourAndHeat() {
+    void materialsUseTheirDetailMapsAndKeepTheirColourAndHeat() {
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(960, 720);
@@ -43,6 +43,106 @@ class GpuMaterialLodSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Material LOD", failure.get()); }
+    }
+
+    /** The ground's rule: a far pixel shows the close view (GpuMaterialCache.CLOSE_PIXEL) averaged into it. */
+    @Test
+    void farGroundAveragesTheCloseView() { averages(false); }
+
+    /** The same rule where the material cache draws the far ground from its pages. */
+    @Test
+    void farCachedGroundAveragesTheCloseView() { averages(true); }
+
+    private static void averages(boolean cached) {
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(960, 720);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var manager = new GpuShaderManager();
+                try { manager.run(() -> checkAveraging(cached)); }
+                catch (Throwable error) { failure.set(error); }
+                finally { manager.close(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Far ground averages the close view", failure.get()); }
+    }
+
+    /**
+     * Each family's close frame (0.1 m a pixel) against the central eighth of a frame eight times coarser, in the board
+     * view's own frame, whose warmed programs the material cache needs. The close frame is finer than the cache draws.
+     */
+    private static void checkAveraging(boolean cached) {
+        var failures = new ArrayList<String>();
+        // The cache never draws concrete (GpuMaterialCache.cacheable): it stays in the direct run only.
+        var materials = cached ? List.of("grass", "dirt", "sand", "rock", "snow", "desert")
+              : List.of("grass", "dirt", "sand", "rock", "snow", "desert", "concrete");
+        for (String material : materials) {
+            var terrain = new GpuTerrain();
+            var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+            // No lens vignette: the close frame is measured whole and the far one at its centre.
+            int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+            frame.atmosphere().setPrintTile(0, 0, width, height, width, height);
+            try {
+                var camera = new BoardCamera();
+                BoardScene scene = scene(material);
+                GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                // The ground alone: grass blades and small objects have their own levels of detail.
+                terrain.setGrass(false);
+                terrain.setSmallObjects(false);
+                terrain.setMaterialCache(cached);
+                camera.setIsometric(false);
+                double close = meanLuminance(terrain, frame, camera, scene, .1f, 1, false);
+                double far = meanLuminance(terrain, frame, camera, scene, .8f, 8, cached);
+                System.out.printf(Locale.ROOT, "%s%s: close %.5f far %.5f (%+.2f%%)%n", material, cached ? " cached" : "",
+                      close, far, 100 * (far - close) / close);
+                if (Math.abs(far - close) > close * .05) {
+                    failures.add(material + ": a far pixel shows the close view averaged");
+                }
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            } catch (InterruptedException interrupted) {
+                throw new IllegalStateException(interrupted);
+            } finally {
+                frame.dispose();
+                terrain.dispose();
+            }
+        }
+        assertTrue(failures.isEmpty(), String.join("\n", failures));
+    }
+
+    /** The mean linear luminance of the central 1/k of the frame at {@code footprint} metres a pixel. */
+    private static double meanLuminance(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
+          float footprint, int k, boolean cached) throws InterruptedException {
+        camera.camera.zoom = footprint * BoardGeometry.width() / 30;
+        camera.center(BoardGeometry.center(new Coords(3, 3), 0));
+        GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+        for (int i = 0; cached && i < 600 && !terrain.materialCacheComplete(); i++) {
+            terrain.refine(camera.camera);
+            frame.render(terrain, camera, scene);
+        }
+        assertTrue(!cached || terrain.materialCacheComplete(), "The material cache fills: " + terrain.materialCacheReport());
+        frame.render(terrain, camera, scene);
+        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+        var pixels = com.badlogic.gdx.graphics.Pixmap.createFromFrameBuffer(0, 0, width, height);
+        try {
+            var data = pixels.getPixels();
+            int w = width / k, h = height / k, x0 = (width - w) / 2, y0 = (height - h) / 2;
+            double sum = 0;
+            for (int y = y0; y < y0 + h; y++) {
+                for (int x = x0; x < x0 + w; x++) {
+                    int at = (y * width + x) * 4;
+                    sum += .2126 * linear(data.get(at) & 255) + .7152 * linear(data.get(at + 1) & 255)
+                          + .0722 * linear(data.get(at + 2) & 255);
+                }
+            }
+            return sum / (w * h);
+        } finally { pixels.dispose(); }
+    }
+
+    private static double linear(int code) {
+        double value = code / 255.0;
+        return value <= .04045 ? value / 12.92 : Math.pow((value + .055) / 1.055, 2.4);
     }
 
     @Test
@@ -149,8 +249,10 @@ class GpuMaterialLodSmokeTest {
             terrain.update(roughnessScene());
             var center = BoardGeometry.center(new Coords(3, 3), 1);
             var camera = new OrthographicCamera();
-            camera.viewportWidth = Gdx.graphics.getBackBufferWidth() * BoardRelief.metres(.09f);
-            camera.viewportHeight = Gdx.graphics.getBackBufferHeight() * BoardRelief.metres(.09f);
+            // Finer than the close view (GpuMaterialCache.CLOSE_PIXEL), whose mips hold plain means as the height's do;
+            // coarser ones widen the roughness by the normals' spread (GpuAssets.mipmaps).
+            camera.viewportWidth = Gdx.graphics.getBackBufferWidth() * BoardRelief.metres(.05f);
+            camera.viewportHeight = Gdx.graphics.getBackBufferHeight() * BoardRelief.metres(.05f);
             camera.near = 1; camera.far = 3000;
             var report = new ArrayList<Map<String, Object>>();
             for (boolean angled : new boolean[] { false, true }) {
@@ -164,7 +266,7 @@ class GpuMaterialLodSmokeTest {
                     float[] pixels = surface.linearPixels();
                     render(surface, terrain, camera);
                     assertArrayEquals(pixels, surface.linearPixels(), "Frozen provider output must repeat exactly");
-                    int ground = 0, cliff = 0, mixed = 0;
+                    int ground = 0, cliff = 0, mixed = 0, apart = 0;
                     float minimum = 1, maximum = 0, maxError = 0;
                     var levels = new java.util.HashSet<Integer>();
                     // Binary/half-valued dyadic mips: at most one R8 code, one half step for each output,
@@ -182,8 +284,9 @@ class GpuMaterialLodSmokeTest {
                         if (pixels[i + 3] == .25f) { ground++; } else { cliff++; }
                         if (pixels[i + 2] > .05f && pixels[i + 2] < .95f) { mixed++; }
                         assertTrue(pixels[i] >= 0 && pixels[i] <= 1, "Raw authored roughness stays bounded");
-                        assertEquals(pixels[i + 1], pixels[i], tolerance,
-                              "Independent roughness array follows actual height projection/mix at pixel " + i / 4);
+                        // Where a projection reads past the close level (steep and grazing faces), the normals'
+                        // spread widens the roughness mips (GpuAssets.mipmaps): only those few may part.
+                        if (Math.abs(pixels[i + 1] - pixels[i]) > tolerance) { apart++; }
                         if (reference != null) {
                             for (int channel = 0; channel < 4; channel++) {
                                 assertEquals(reference[i + channel], pixels[i + channel], 0,
@@ -195,11 +298,14 @@ class GpuMaterialLodSmokeTest {
                         levels.add(Math.round(pixels[i] * 255));
                     }
                     assertTrue(ground > 100 && mixed > 100, "Actual ground and mixed grass/rock must be visible");
+                    assertTrue(apart <= .001 * (ground + cliff),
+                          "Independent roughness array follows actual height projection/mix: " + apart + " of " + (ground + cliff));
                     assertTrue(!angled || cliff > 100, "The angled frame must contain actual projected cliff samples");
                     assertTrue(maximum - minimum > .25 && levels.size() > 16,
                           "The authored map must remain spatial, not a scalar/average fallback");
                     report.add(Map.of("angled", angled, "normalMaps", normals, "ground", ground, "cliff", cliff,
                           "mixed", mixed, "min", minimum, "max", maximum, "levels", levels.size(), "maxError", maxError));
+                    System.out.println("Spatial roughness apart: " + apart + " of " + (ground + cliff));
                     String destination = System.getProperty("megamek.gpu.screenshots");
                     if (destination != null && reference == null) {
                         File image = new File(destination, "spatial-roughness/" + (angled ? "angled" : "top") + ".png");
@@ -256,7 +362,6 @@ class GpuMaterialLodSmokeTest {
                   "desert", "mars", "volcano", "tropical", "crust", "lava")) {
                 assertTrue(manager.apply(Map.of()).success());
                 terrain.update(scene(material));
-                double closeDifference = 0;
                 for (float footprint : new float[] { .1f, .8f, 2f }) {
                     camera.viewportWidth = Gdx.graphics.getBackBufferWidth() * BoardRelief.metres(footprint);
                     camera.viewportHeight = Gdx.graphics.getBackBufferHeight() * BoardRelief.metres(footprint);
@@ -272,14 +377,13 @@ class GpuMaterialLodSmokeTest {
                           && footprint < 1f) {
                         checkPlateauOutcrops(surface, manager, terrain, camera, original, material, footprint, outcropFailures);
                     }
-                    var changed = manager.apply(changedMaps(false));
+                    var changed = manager.apply(changedMaps());
                     assertTrue(changed.success(), changed.message());
                     byte[] altered = render(surface, terrain, camera);
                     String description = material + " at " + footprint + " m/pixel";
                     double difference = difference(original, altered);
                     System.out.println(description + ": detail-map difference " + difference);
                     if (footprint < .2f) {
-                        closeDifference = difference;
                         // Molten emission dominates its reflected light; even a large normal change is subtle.
                         assertTrue(difference > .001, description + " still uses its normal map");
                         if (!material.equals("crust") && !material.equals("lava")) {
@@ -291,16 +395,6 @@ class GpuMaterialLodSmokeTest {
                             assertTrue(difference(original, render(surface, terrain, camera)) > .001,
                                   description + " reflects light even when dry");
                         }
-                    } else if (footprint < 1f) {
-                        // Small stone sides retain cliff detail after the surrounding flat top stops sampling.
-                        assertTrue(difference < closeDifference * .1, description + " removes ground detail first");
-                    } else {
-                        assertArrayEquals(original, altered, description + " must not use its fine normals/AO");
-                    }
-                    if (footprint == 2f && (material.equals("crust") || material.equals("lava"))) {
-                        changed = manager.apply(changedMaps(true));
-                        assertTrue(changed.success(), changed.message());
-                        assertArrayEquals(original, render(surface, terrain, camera), description + " skips surface maps too");
                     }
                 }
             }
@@ -446,10 +540,10 @@ class GpuMaterialLodSmokeTest {
         return pixels;
     }
 
-    private static Map<String, String> changedMaps(boolean surfaces) {
+    private static Map<String, String> changedMaps() {
         var result = new HashMap<String, String>();
         // C1 separates color and numerical arrays. Perturb only actual normal/AO reads, retaining their
-        // projection, coverage and LOD branches; odd semantic IDs no longer pass through color helpers.
+        // projection and coverage branches; odd semantic IDs no longer pass through color helpers.
         for (String file : List.of("terrain-materials.glsl", "terrain-sculpt.frag")) {
             String source = GpuShaderSource.readDisk(file);
             String changed = source.replaceAll(
@@ -473,8 +567,7 @@ class GpuMaterialLodSmokeTest {
         String magmaSample = "vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) {";
         assertTrue(magma.contains(magmaSample), "Volcanic numerical-map diagnostic must be installed");
         result.put("terrain-magma.glsl", magma.replace(magmaSample, magmaSample
-              + " if (map == MAGMA_NORMAL) return vec4(.95, .05, .65, .1);"
-              + (surfaces ? " if (map == MAGMA_SURFACE) return vec4(.1, .1, .1, .1);" : "")));
+              + " if (map == MAGMA_NORMAL) return vec4(.95, .05, .65, .1);"));
         return result;
     }
 

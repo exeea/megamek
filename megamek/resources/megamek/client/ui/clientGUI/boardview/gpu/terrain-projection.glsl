@@ -12,29 +12,20 @@ float heightBlend(float lower, float upper, float want) {
     return wb / (wa + wb);
 }
 
-// How far ground detail has faded towards its average colour: from about 18 cm per pixel, where a map's repeats
-// would start to beat against each other, to 60 cm; a fifth of the detail remains. Set once per fragment in main().
-float farDetail;
-
 // Stable semantic IDs retain even colour / odd normal numbering. Each storage array is compact by role.
 // Separate colour and normal helpers keep sampler selection out of varying fragment branches.
 vec4 mapTexel(sampler2D map, vec2 uv) { return texture(map, uv); }
 vec4 mapTexel(float layer, vec2 uv) { return texture(u_terrainLayers, vec3(uv, layer * .5)); }
 vec4 normalTexel(float layer, vec2 uv) { return texture(u_terrainData, vec3(uv, (layer - 1.0) * .5)); }
-// The map's average colour: its last mip level.
-vec4 mapAverage(sampler2D map, vec2 uv) { return texture(map, uv, 12.0); }
-vec4 mapAverage(float layer, vec2 uv) { return texture(u_terrainLayers, vec3(uv, layer * .5), 12.0); }
 
 // A map on the ground plane at two repeats, mixed by a broad field, so no period shows. p is in metres with +V
-// pointing to world -Y, as the maps are authored. From afar it settles to the map's average (its last mip level).
+// pointing to world -Y, as the maps are authored.
 vec4 planar(sampler2D map, vec2 p, float tile, float mixer) {
-    vec4 near = mix(mapTexel(map, p / tile), mapTexel(map, TURN * p / (tile * 2.37) + .31), mixer);
-    return farDetail > 0.0 ? mix(near, mapAverage(map, p / tile), farDetail) : near;
+    return mix(mapTexel(map, p / tile), mapTexel(map, TURN * p / (tile * 2.37) + .31), mixer);
 }
 
 vec4 planar(float map, vec2 p, float tile, float mixer) {
-    vec4 near = mix(mapTexel(map, p / tile), mapTexel(map, TURN * p / (tile * 2.37) + .31), mixer);
-    return farDetail > 0.0 ? mix(near, mapAverage(map, p / tile), farDetail) : near;
+    return mix(mapTexel(map, p / tile), mapTexel(map, TURN * p / (tile * 2.37) + .31), mixer);
 }
 
 // A height for the parallax (terrain-materials.glsl, relieved): one trilinear read at the level an isotropic filter
@@ -63,8 +54,7 @@ float planarHeight(float map, vec2 p, mat2 gradient, float tile, float mixer) {
 vec4 planarNormal(vec4 near, vec4 far, float mixer) {
     vec3 a = near.rgb * 2.0 - 1.0, b = far.rgb * 2.0 - 1.0;
     b = normalize(vec3(b.xy * TURN / 2.37, b.z));
-    vec4 result = vec4(mix(a, b, mixer), mix(near.a, far.a, mixer));
-    return mix(result, vec4(0.0, 0.0, 1.0, result.a), farDetail);
+    return vec4(mix(a, b, mixer), mix(near.a, far.a, mixer));
 }
 
 vec4 planarNormal(sampler2D map, vec2 p, float tile, float mixer) {

@@ -3,7 +3,6 @@
 // Retain the solid fissures' existing emission; the thermal calibration applies to liquid only.
 const vec3 MAGMA_CRACK_RADIANCE = vec3(.25, .022, .0015);
 float magmaRepeatMetres() { return 12.0; }
-float magmaDistantRoughness() { return .85; }
 vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax) {
     // Measure the relief ray in screen pixels with the projection's full Jacobian. A grazing, anisotropic
     // footprint must not lose its resolved direction merely because its other direction is strongly minified.

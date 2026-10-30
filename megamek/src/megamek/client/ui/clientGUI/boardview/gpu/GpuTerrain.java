@@ -277,6 +277,7 @@ final class GpuTerrain implements Disposable {
                   + "#define VOLCANIC_CRUST_FAMILY " + BoardSurfaceBlend.CRUST + ".0\n"
                   + "#define VOLCANIC_BANK_FAMILY " + BoardSurfaceBlend.BANK + ".0\n"
                   + "#define FOOT_METRES " + BoardSurfaceBlend.FOOT_METRES + "\n"
+                  + "#define CLOSE_PIXEL " + GpuMaterialCache.CLOSE_PIXEL + "\n"
                   + GpuIceShader.prefix(renderable.material)
                   + (renderable.material.has(GpuBiomeVegetation.Kind.TYPE) ? "#define biomeVegetationFlag\n" : "")
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? "#define terrainBlendFlag\n" : "")
@@ -571,10 +572,6 @@ final class GpuTerrain implements Disposable {
                         float[] relief = finishArrays.relief();
                         if (relief.length > 0 && program.hasUniform("u_finishRelief[0]")) {
                             program.setUniform2fv("u_finishRelief[0]", relief, 0, relief.length);
-                        }
-                        float[] distant = finishArrays.distant();
-                        if (distant.length > 0 && program.hasUniform("u_finishDistant[0]")) {
-                            program.setUniform2fv("u_finishDistant[0]", distant, 0, distant.length);
                         }
                     }
                     if (program.hasUniform("u_roadRelief[0]")) {

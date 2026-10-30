@@ -58,7 +58,6 @@ class GpuSurfaceProjectionSmokeTest {
                   } else {
                       vec2 q = TURN * p / 2.37 + .31;
                       vec3 normal = normalize(vec3(-.7 * cos(q.x * 6.2831853), -.4 * sin(q.y * 6.2831853), 1.0));
-                      farDetail = 0.0;
                       vec4 texel = vec4(normal * .5 + .5, 1.0);
                       fragColor = vec4(planarNormal(texel, texel, 1.0).rgb * .5 + .5, 1.0);
                   }

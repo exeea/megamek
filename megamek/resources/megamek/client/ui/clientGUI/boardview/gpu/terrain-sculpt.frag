@@ -317,17 +317,10 @@ void main() {
 #endif
     // A scar patch's draw shades only where its image covers the receiver (scar-material.glsl).
     if (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }
-    terrainMaterialLod(world, face);
-    // The area a pixel covers, as a length: a tilted view's foreshortening alone does not remove the detail.
-    float footprint = sqrt(length(worldDx.xy) * length(worldDy.xy));
-    farDetail = .8 * smoothstep(.18, .6, footprint);
     pixelMetres = max(max(length(worldDx), length(worldDy)), 1e-4);
 #ifdef materialFillFlag
-    // The close view's material at every texel: its full detail and none of the fades that stand in for distance. The
-    // maps are still read at the texel, and the pyramid averages the rest. No parallax: it depends on the view.
-    terrainNormalDetail = 1.0;
-    terrainSurfaceDetail = 1.0;
-    farDetail = 0.0;
+    // The close view's material at every texel. The maps are still read at the texel, and the pyramid averages the rest.
+    // No parallax: it depends on the view.
     pixelMetres = u_cacheClosePixel;
 #endif
     // Depth below this water hex's level, in metres, and height above its water, which lies u_waterLine lower.
@@ -506,11 +499,11 @@ void main() {
             float wear = max(rim * .55, foot * .75) * (1.0 - rock) * smoothstep(.35, .7, fine);
             albedo = mix(albedo, worn(albedo, top.a, wear), 1.0 - w);
         }
-        if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && !steep) {
+        if (u_normalMaps > .5 && !steep) {
             vec4 topNormal = family(4.0)
                   ? translatedTexel(u_terrainData, u_sculptLayers.x * .5, qTop / u_sculptTiles.x, concreteGradient, concreteVariation)
                   : planarNormal(u_sculptLayers.x + 1.0, qTop, u_sculptTiles.x, broad);
-            if (family(4.0)) topNormal.rgb = mix(topNormal.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail);
+            if (family(4.0)) topNormal.rgb = topNormal.rgb * 2.0 - 1.0;
             detail = mix(topNormal,
                   planarNormal(u_sculptLayers.y + 1.0, qRubble, u_sculptTiles.y, fine), w);
         }
@@ -532,7 +525,7 @@ void main() {
             albedo = mulch.rgb;
             materialHeight = mulch.a;
             finish = planarFinish(u_treePitMaterial.x, p, groundGradient, u_treePitMaterial.y, fine);
-            if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+            if (u_normalMaps > .5) {
                 vec4 detail = planarNormal(u_treePitMaterial.x + 1.0, p, u_treePitMaterial.y, fine);
                 normal = upNormal(detail.rgb, face);
                 cavity = detail.a;
@@ -563,7 +556,7 @@ void main() {
         float crown = smoothstep(.45, .85, face.z);
         if (crown > 0.0) wall = mix(wall, planar(u_sculptLayers.z, p, u_sculptTiles.z, fine), crown);
         albedo = wall.rgb;
-        if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+        if (u_normalMaps > .5) {
             normal = wallNormal(u_sculptLayers.z + 1.0, uvx, uvy, face, side);
             cavity = mix(normalTexel(u_sculptLayers.z + 1.0, uvy).a, normalTexel(u_sculptLayers.z + 1.0, uvx).a, side) * .5 + .5;
             if (crown > 0.0) {
@@ -591,7 +584,7 @@ void main() {
             float w = heightBlend(wall.a, top.a, ledge);
             albedo = mix(albedo, groundTone(top.rgb, world, broad, fine, region, 0.0, 0.0), w);
             finish = mixFinish(finish, planarFinish(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad), w);
-            if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+            if (u_normalMaps > .5) {
                 normal = normalize(mix(normal, upNormal(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad).rgb, face), w));
             }
         }
@@ -602,7 +595,7 @@ void main() {
             albedo *= mix(vec3(1.0), toLinear(vec3(.9, .97, .82)), moss * .22);
         }
     }
-    if (ground && !natural && u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+    if (ground && !natural && u_normalMaps > .5) {
         normal = upNormal(detail.rgb, face);
         cavity = detail.a * .6 + .4;
     }
@@ -613,13 +606,6 @@ void main() {
     if (shore && !natural && family(4.0) && face.z < .6) {
         concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
               albedo, normal, occlusion, cavity, finish);
-    }
-    // Natural materials fade within rockNormal (materialNormal in volcanic programs); slab and rock kit paths share
-    // this final fade.
-    // Vertex/contact occlusion remains separate, so losing fine pores does not remove cliff-foot shading.
-    if (!natural && !plant && u_normalMaps > .5) {
-        normal = normalize(mix(face, normal, terrainNormalDetail));
-        cavity = mix(TERRAIN_DISTANT_CAVITY, cavity, terrainNormalDetail);
     }
 #ifdef terrainBlendFlag
     if ((ground || cliff) && !rocky) {
@@ -695,35 +681,40 @@ void main() {
         // Follow the final material weights, including sand windows and authored mixtures. Reuse the blended
         // relief once; no extra maps or stamped motifs. Wetland pools suppress dry surface abrasion.
 #ifndef materialCachedFlag
-        if (terrainNormalDetail > 0.0) {
-            vec4 wear = terrainWear(fields, materialHeight, cavity, face, normal);
+        vec4 wear = terrainWear(fields, materialHeight, cavity, face, normal);
 #ifdef terrainBlendFlag
-            vec3 pigment = materialWeathering(coverFamilies.x, wear, fields, cavity) * materialCoverage.x
-                  + materialWeathering(coverFamilies.y, wear, fields, cavity) * materialCoverage.y
-                  + materialWeathering(coverFamilies.z, wear, fields, cavity) * materialCoverage.z
-                  + materialWeathering(coverFamilies.w, wear, fields, cavity) * materialCoverage.w;
+        vec3 pigment = materialWeathering(coverFamilies.x, wear, fields, cavity) * materialCoverage.x
+              + materialWeathering(coverFamilies.y, wear, fields, cavity) * materialCoverage.y
+              + materialWeathering(coverFamilies.z, wear, fields, cavity) * materialCoverage.z
+              + materialWeathering(coverFamilies.w, wear, fields, cavity) * materialCoverage.w;
 #else
-            vec3 pigment = materialWeathering(sculptFamily, wear, fields, cavity);
+        vec3 pigment = materialWeathering(sculptFamily, wear, fields, cavity);
 #endif
-            // Snow's authored RGB already contains its cool granular crust. Do not add a second microscopic
-            // color treatment that disappears with normal LOD. Keep the original wear response for roughness.
-            vec3 colorPigment = pigment;
+        // Snow's authored RGB already contains its cool granular crust. Do not add a second microscopic
+        // color treatment. Keep the original wear response for roughness.
+        vec3 colorPigment = pigment;
 #ifdef terrainBlendFlag
-            float snowCoverage = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - 5.0)));
-            if (snowCoverage > 0.0) colorPigment -= materialWeathering(5.0, wear, fields, cavity) * snowCoverage;
+        float snowCoverage = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - 5.0)));
+        if (snowCoverage > 0.0) colorPigment -= materialWeathering(5.0, wear, fields, cavity) * snowCoverage;
 #else
-            if (family(5.0)) colorPigment = vec3(0.0);
+        if (family(5.0)) colorPigment = vec3(0.0);
 #endif
-            float wearStrength = exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65) * weathered;
-            pigment *= wearStrength;
-            albedo *= authoredPigmentGain(vec3(1.0) + colorPigment * wearStrength);
-            finish.roughness = mix(finish.roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
-        }
+        float wearStrength = exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65) * weathered;
+        pigment *= wearStrength;
+        albedo *= authoredPigmentGain(vec3(1.0) + colorPigment * wearStrength);
+        finish.roughness = mix(finish.roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
 #endif
 #ifndef materialFillFlag
         if (ground) groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, finish);
 #endif
     }
+#ifndef materialCachedFlag
+    // The close view shades its own pixel's normals by their mean direction, the reference every zoom averages: the
+    // relief counts from there, over the octave in which the reads start to average close pixels. Finer, their
+    // filtering alone would shorten them. The fill, at the close pixel, stores the close view's: none; the cache's
+    // mean normal length carries the averaged relief.
+    relief = mix(1.0, relief, clamp(log2(pixelMetres / CLOSE_PIXEL), 0.0, 1.0));
+#endif
 #ifdef materialFillFlag
     // The fill stores the canonical material, premultiplied by full coverage, and stops before the live layers.
     vec3 unitNormal = normalize(normal);
@@ -761,10 +752,10 @@ void main() {
             coverFinish(finish, deposit.coverage);
             finish.roughness = roughness;
             cavity = mix(cavity, ao, deposit.coverage);
-            if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && top > 0.0) {
+            if (u_normalMaps > .5 && top > 0.0) {
                 detail = normalize(vec3(detail.xy * deposit.detail, detail.z));
                 normal = normalize(mix(normal, upNormal(detail, face),
-                      deposit.coverage * smoothstep(.12, .75, severity) * top * terrainNormalDetail));
+                      deposit.coverage * smoothstep(.12, .75, severity) * top));
             }
             // Only a nuclear blast heats the sparse fused fissures. Painted glass is always cold.
             float heat = u_groundScorch.y;
@@ -820,7 +811,7 @@ void main() {
     // detail fades into that horizon (terminatorShadow), never steps to dark at it; a scattering material keeps the
     // light it wraps past the horizon (shadeSurface), which this visibility would scale too.
     bool smoothSupport = cliff && !panel;
-    // Where distance flattens natural relief, its share of the sun comes off here, so far zoom keeps its tone.
+    // The share of the sun that relief finer than the pixel turns away comes off here, so zoom keeps the tone.
     // The shadow is looked up on the visible relief, about RELIEF_METRES deep, not the smooth mesh, so raised grains
     // catch the light at a shadow's edge. Hollows stay on the mesh: pushed into it they would shade themselves under
     // any sun; shadeSurface shades them by the cavity (micro-shadowing).
@@ -831,7 +822,8 @@ void main() {
     vec2 fray = (texture(u_rainNoise, tufts / 19.2 + .31).gb - .5 + .5 * (texture(u_rainNoise, tufts / 6.4 + .67).rg - .5))
           * (2.0 * FRAY_METRES / 1.5);
     Surface surface = opaqueSurface(albedo, normal, smoothSupport ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light, u_metre, lift, fray) * sunOnRelief(relief, dot(face, light))
+          sculptShadow(receiver, light, u_metre, lift, fray)
+                * sunOnRelief(relief, dot(face, light))
                 * (smoothSupport && finish.scatter <= 0.0 ? terminatorShadow(face, normal, light) : 1.0));
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.
     metallicShare(surface, clamp(finish.metallic, 0.0, 1.0));

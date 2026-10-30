@@ -45,15 +45,13 @@ vec4 tundraTexel(sampler2DArray maps, float layer, float tile, MaterialProjectio
     return top;
 }
 
-// A mat's authored finish from its colour's reads. Roughness, metallic and scattering fade out with the normal detail,
-// to the map's means; emission keeps its map at every distance.
+// A mat's authored finish from its colour's reads: roughness, metallic and scattering, and emission.
 Finish tundraFinish(float layer, float tile, MaterialProjection p, float variation, bool scales) {
     int material = int(layer * .5);
     vec4 surface = u_finishSurface[material], emission = u_finishEmission[material];
     Finish texel = meanFinish(material);
-    if (surface.a >= 0.0 && terrainNormalDetail > 0.0) {
-        vec3 mapped = tundraTexel(FINISH_LAYERS, surface.a, tile, p, variation, scales).rgb;
-        texel = finishOf(mix(surface.rgb, mapped, terrainNormalDetail), texel.emission);
+    if (surface.a >= 0.0) {
+        texel = finishOf(tundraTexel(FINISH_LAYERS, surface.a, tile, p, variation, scales).rgb, texel.emission);
     }
     if (emission.a >= 0.0) {
         texel.emission += emission.rgb * toLinear(tundraTexel(FINISH_LAYERS, emission.a, tile, p, variation, scales).rgb);
@@ -126,17 +124,17 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
         treated += pigment * kinds[i];
         mappedFinish = addFinish(mappedFinish,
               tundraFinish(u_tundraLayers[i], u_tundraTiles[i], projection, mixer, carpet), kinds[i]);
-        if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+        if (u_normalMaps > .5) {
             vec4 n = carpet ? tundraTexel(u_tundraCarpetData, carpetLayer, u_tundraTiles[i], projection, mixer, true)
                   : tundraTexel(u_terrainData, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, mixer, false);
-            vec3 relief = upNormal(mix(n.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail), face);
+            vec3 relief = upNormal(n.rgb * 2.0 - 1.0, face);
 #ifdef volcanicFlag
             if (projection.lying < 1.0) {
                 relief = normalize(mix(wallNormal(n, n, face, projection.side), relief, projection.lying));
             }
 #endif
-            mappedNormal += normalize(mix(face, relief, terrainNormalDetail)) * kinds[i];
-            mappedCavity += mix(TERRAIN_DISTANT_CAVITY, mix(.55, 1.0, n.a), terrainNormalDetail) * kinds[i];
+            mappedNormal += relief * kinds[i];
+            mappedCavity += mix(.55, 1.0, n.a) * kinds[i];
         }
     }
     amount *= mix(1.0, concreteLichen / max(kinds.x + kinds.w, .0001), concrete);
@@ -145,7 +143,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     amount *= 1.0 - remnant;
     color = mix(color, treated, amount);
     finish = mixFinish(finish, mappedFinish, amount);
-    if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+    if (u_normalMaps > .5) {
         normal = normalize(mix(normal, normalize(mappedNormal), amount));
         cavity = mix(cavity, mappedCavity, amount);
     }

@@ -158,7 +158,10 @@ final class GpuAssets implements Disposable {
               molten ? GpuMaterialMaps.Layout.MOLTEN_HEAT : GpuMaterialMaps.Layout.CRUST_HEAT)) {
             layers.add(layer(name, layout));
         }
-        MaterialArrays maps = repeatingArray(layers, 4);
+        // The surface's roughness (G) widens by its normal's spread in the mips. One repeat spans magmaRepeatMetres()
+        // (magma-flow.glsl, magma-solid.glsl) times the texture's coverage.
+        MaterialArrays maps = repeatingArray(layers, 4, List.of(),
+              List.of(new Spread(0, 1, 1, (molten ? 24 : 12) * coverage(name))));
         magmas.put(molten, maps);
         return maps;
     }
@@ -254,13 +257,11 @@ final class GpuAssets implements Disposable {
      * without a map), and its constant glow. The sculpt maps set the array's grid, which the road materials' maps take;
      * road materials keep their roughness in their own surface map, so theirs is sent as its mean alone. {@code relief}
      * is each sculpted surface's heightmap parallax (GpuMaterialMaps.ModelFinish): its depth along U and V in UV units,
-     * zero without a heightmap; the road materials take theirs from {@link #roadRelief}. {@code distant} is each
-     * sculpted surface where distance flattens its maps: the mean occlusion of its normal/AO layer and the length of its
-     * mean tangent normal, read once from the layer's smallest mip. {@code maps} is the sculpt data array, which the asset
-     * owner disposes with the sculpt arrays.
+     * zero without a heightmap; the road materials take theirs from {@link #roadRelief}. Each sculpted surface's surface
+     * layer widens its roughness in the mips by the spread of its normal/AO layer ({@link Spread}). {@code maps} is the
+     * sculpt data array, which the asset owner disposes with the sculpt arrays.
      */
-    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow, float[] relief,
-          float[] distant) { }
+    record FinishArrays(TextureArray maps, float[] surface, float[] tint, float[] glow, float[] relief) { }
 
     FinishArrays finishArrays(List<String> materials, int firstRoad) {
         if (terrainArrays == null) {
@@ -340,36 +341,24 @@ final class GpuAssets implements Disposable {
                 emissions.add(new Layer(size[0], size[1], () -> GpuColorTexture.decode(map)));
             }
         }
-        // The finish layers follow one normal/AO layer per sculpted surface in the data array.
+        // The finish layers follow one normal/AO layer per sculpted surface in the data array. A surface's roughness (R)
+        // widens by its normal's spread in the mips, as mud's and scorch's own (B) does.
+        var spreads = new ArrayList<Spread>();
         for (int index = 0; index < count; index++) {
             surface[index * 4 + 3] = surfaceLayers[index] < 0 ? -1 : firstRoad + surfaceLayers[index];
             tint[index * 4 + 3] = emissionLayers[index] < 0 ? -1 : firstRoad + surfaces.size() + emissionLayers[index];
+            if (index >= firstRoad) { continue; }
+            float tile = sculptTile(names.get(index));
+            if (surfaceLayers[index] >= 0) { spreads.add(new Spread(index, firstRoad + surfaceLayers[index], 0, tile)); }
+            if (GpuMaterialMaps.PACKED_ROUGHNESS.contains(materials.get(index))) {
+                spreads.add(new Spread(index, index, 2, tile));
+            }
         }
         var finishes = new ArrayList<>(surfaces);
         finishes.addAll(emissions);
-        MaterialArrays arrays = repeatingArray(layers, 2, finishes);
+        MaterialArrays arrays = repeatingArray(layers, 2, finishes, spreads);
         return new TerrainArrays(List.copyOf(materials), arrays,
-              new FinishArrays(arrays.data(), surface, tint, glow, relief, distantMeans(arrays.data(), firstRoad)));
-    }
-
-    /**
-     * The first {@code count} layers of a raw data array at its smallest mip, the mean of each layer: per layer its
-     * mean occlusion (alpha) and the length of its mean tangent normal (RGB).
-     */
-    private static float[] distantMeans(TextureArray data, int count) {
-        int level = 31 - Integer.numberOfLeadingZeros(Math.max(data.getWidth(), data.getHeight()));
-        var texels = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(data.getDepth() * 4);
-        data.bind();
-        org.lwjgl.opengl.GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, level, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE,
-              texels);
-        float[] distant = new float[count * 2];
-        for (int layer = 0; layer < count; layer++) {
-            float x = (texels.get(layer * 4) & 255) / 127.5f - 1, y = (texels.get(layer * 4 + 1) & 255) / 127.5f - 1;
-            float z = (texels.get(layer * 4 + 2) & 255) / 127.5f - 1;
-            distant[layer * 2] = (texels.get(layer * 4 + 3) & 255) / 255f;
-            distant[layer * 2 + 1] = (float) Math.sqrt(x * x + y * y + z * z);
-        }
-        return distant;
+              new FinishArrays(arrays.data(), surface, tint, glow, relief));
     }
 
     private static Pixmap rgbaPixmap(byte[] rgba, int width, int height) {
@@ -511,11 +500,14 @@ final class GpuAssets implements Disposable {
      * largest layer's grid, so a material exported larger keeps its detail; smaller layers are resampled to it.
      */
     private static MaterialArrays repeatingArray(List<Layer> layers, int maps) {
-        return repeatingArray(layers, maps, List.of());
+        return repeatingArray(layers, maps, List.of(), List.of());
     }
 
-    /** As {@link #repeatingArray(List, int)}, with {@code extra} data layers after the sets' own. */
-    private static MaterialArrays repeatingArray(List<Layer> layers, int maps, List<Layer> extra) {
+    /**
+     * As {@link #repeatingArray(List, int)}, with {@code extra} data layers after the sets' own and the roughness the
+     * data array's normals widen in its mips ({@code spreads}, by data layer).
+     */
+    private static MaterialArrays repeatingArray(List<Layer> layers, int maps, List<Layer> extra, List<Spread> spreads) {
         if (layers.isEmpty() || maps < 2 || layers.size() % maps != 0) {
             throw new IllegalArgumentException("Incomplete repeating material arrays");
         }
@@ -536,7 +528,7 @@ final class GpuAssets implements Disposable {
         TextureArray color = null, numeric = null;
         try {
             color = repeatingArray(new MaterialArrayData(colors, width, height, true));
-            numeric = repeatingArray(new MaterialArrayData(data, width, height, false));
+            numeric = repeatingArray(new MaterialArrayData(data, width, height, false, spreads));
             return new MaterialArrays(color, numeric);
         } catch (RuntimeException failure) {
             if (numeric != null) { numeric.dispose(); }
@@ -583,23 +575,303 @@ final class GpuAssets implements Disposable {
         }
     }
 
-    /** A single storage domain; source bytes are unchanged unless the existing grid requires resizing. */
+    /**
+     * Roughness that a normal layer's spread widens in the mips of a data array ({@link #mipmaps}): channel
+     * {@code channel} of layer {@code target}, both data layer indices, for a normal whose repeat spans {@code tile}
+     * metres. A normal layer that is its own target holds X and Y only, with its roughness in B
+     * ({@link GpuMaterialMaps.Layout#NORMAL_ROUGHNESS}).
+     */
+    record Spread(int normal, int target, int channel, float tile) { }
+
+    /**
+     * The mip level the close view ({@link GpuMaterialCache#CLOSE_PIXEL}, the look every zoom averages) reads of a
+     * {@code width}-texel map repeating every {@code tile} metres: the finer of the two its trilinear filter blends, so
+     * every coarser level carries all the spread the close view averages.
+     */
+    static int closeLevel(int width, float tile) {
+        return Math.max(0, (int) Math.floor(Math.log(GpuMaterialCache.CLOSE_PIXEL * width / tile) / Math.log(2) + 1e-4));
+    }
+
+    /**
+     * The GGX alpha^2 (roughness^4, light-model.glsl) that unit normals averaging to length l add to their own mean: a
+     * von Mises-Fisher lobe of concentration kappa = l (3 - l^2) / (1 - l^2) adds 1 / (2 kappa), and normals that cancel
+     * read fully rough, as the ground material cache widens its alpha^2 (filteredAlpha2, terrain-sculpt.frag).
+     * Agreement within the float sums' rounding (1e-6, finer than two neighbouring 8-bit normals) adds nothing: the
+     * fourth root would turn it into visible roughness on a smooth surface.
+     */
+    static float spreadAlpha2(float l) {
+        if (l >= .999999f) { return 0; }
+        float l2 = l * l;
+        return (1 - l2) / Math.max(2 * l * (3 - l2), 1e-6f);
+    }
+
+    /** A byte as a value in [0, 1], as GGX alpha^2 (roughness^4) and as a signed tangent normal component. */
+    private static final float[] UNIT = new float[256], ALPHA2 = new float[256], SIGNED = new float[256];
+
+    static {
+        for (int code = 0; code < 256; code++) {
+            UNIT[code] = code / 255f;
+            ALPHA2[code] = UNIT[code] * UNIT[code] * UNIT[code] * UNIT[code];
+            SIGNED[code] = code / 127.5f - 1;
+        }
+    }
+
+    /**
+     * The mip levels below 0 of one unit of a data array's layers, level 0 being the layers themselves (width by height
+     * RGBA8 texels). Every channel holds the exact means of level 0 over its texels, reduced level by level. Where
+     * {@code roughness} names a layer's roughness channel (-1 for none), layer 0 is the unit's normal: tangent X, Y and
+     * Z in RGB, or X and Y alone where it names layer 0's own B (Z rebuilt). Up to the close view's level {@code close}
+     * ({@link #closeLevel}) the normal is its unit normals' mean direction and the roughness its plain mean, as the
+     * close view has always shaded them. Above it, the levels average the close level's unit normals, unnormalised (the length
+     * is their agreement; X and Y alone stay renormalised, as a shader rebuilds Z), and its roughness as alpha^2, which
+     * those normals' spread widens ({@link #spreadAlpha2}): the close view averaged.
+     */
+    static List<List<ByteBuffer>> mipmaps(List<ByteBuffer> layers, int width, int height, int[] roughness, int close) {
+        int count = layers.size();
+        boolean normal = Arrays.stream(roughness).anyMatch(channel -> channel >= 0), packed = roughness[0] >= 0;
+        int normalChannels = normal ? (packed ? 2 : 3) : 0;
+        // Level 1 straight from level 0's bytes, each later level from the one before; the channels the normal writes
+        // keep no means of their own.
+        float[][] means = new float[count * 4][], normals = new float[0][];
+        boolean even = width % 2 == 0 && height % 2 == 0;
+        for (int layer = 0; layer < count; layer++) {
+            byte[] texels = new byte[width * height * 4];
+            layers.get(layer).get(0, texels);
+            if (layer == 0 && normal) {
+                normals = even ? halvedNormals(texels, width, height, packed) : unitNormals(texels, width * height, packed);
+                for (int axis = 0; !even && axis < 3; axis++) { normals[axis] = halved(normals[axis], width, height); }
+            }
+            for (int channel = layer == 0 ? normalChannels : 0; channel < 4; channel++) {
+                float[] decode = channel == roughness[layer] && close == 0 ? ALPHA2 : UNIT;
+                means[layer * 4 + channel] = even ? halved(texels, channel, width, height, decode)
+                      : halved(decoded(texels, channel, decode), width, height);
+            }
+        }
+        var mipmaps = new ArrayList<List<ByteBuffer>>();
+        for (int layer = 0; layer < count; layer++) { mipmaps.add(new ArrayList<>()); }
+        for (int level = 1, w = Math.max(1, width >> 1), h = Math.max(1, height >> 1); ; level++) {
+            boolean averaged = level > close;
+            float[] lengths = normal ? lengths(normals) : null;
+            for (int layer = 0; layer < count; layer++) {
+                byte[] bytes = new byte[w * h * 4];
+                for (int channel = 0; channel < 4; channel++) {
+                    if (layer == 0 && channel < normalChannels) {
+                        encodeNormal(normals[channel], packed || !averaged ? lengths : null, bytes, channel);
+                    } else if (channel == roughness[layer] && averaged) {
+                        encodeRoughness(means[layer * 4 + channel], lengths, bytes, channel);
+                    } else {
+                        encode(means[layer * 4 + channel], bytes, channel);
+                    }
+                }
+                mipmaps.get(layer).add(com.badlogic.gdx.utils.BufferUtils.newByteBuffer(bytes.length).put(bytes).flip());
+            }
+            if (w == 1 && h == 1) { return mipmaps; }
+            if (level == close) {
+                // The close view's level: its unit normals and its roughness as alpha^2 are what the coarser levels average.
+                for (int texel = 0; normal && texel < lengths.length; texel++) {
+                    float scale = lengths[texel] > 1e-6f ? 1 / lengths[texel] : 0;
+                    for (float[] axis : normals) { axis[texel] *= scale; }
+                }
+                for (int layer = 0; layer < count; layer++) {
+                    if (roughness[layer] < 0) { continue; }
+                    float[] values = means[layer * 4 + roughness[layer]];
+                    for (int texel = 0; texel < values.length; texel++) {
+                        values[texel] = values[texel] * values[texel] * values[texel] * values[texel];
+                    }
+                }
+            }
+            for (int index = 0; index < means.length; index++) {
+                if (means[index] != null) { means[index] = halved(means[index], w, h); }
+            }
+            for (int axis = 0; axis < normals.length; axis++) { normals[axis] = halved(normals[axis], w, h); }
+            w = Math.max(1, w >> 1);
+            h = Math.max(1, h >> 1);
+        }
+    }
+
+    /** One channel's level 1 from level 0's RGBA bytes: the mean of each 2 by 2 texels' decoded values. */
+    private static float[] halved(byte[] texels, int channel, int width, int height, float[] decode) {
+        int halfWidth = Math.max(1, width >> 1), halfHeight = Math.max(1, height >> 1);
+        float[] half = new float[halfWidth * halfHeight];
+        for (int y = 0; y < halfHeight; y++) {
+            int row0 = Math.min(2 * y, height - 1) * width, row1 = Math.min(2 * y + 1, height - 1) * width;
+            for (int x = 0; x < halfWidth; x++) {
+                int x0 = Math.min(2 * x, width - 1), x1 = Math.min(2 * x + 1, width - 1);
+                half[y * halfWidth + x] = .25f * (decode[texels[(row0 + x0) * 4 + channel] & 255]
+                      + decode[texels[(row0 + x1) * 4 + channel] & 255] + decode[texels[(row1 + x0) * 4 + channel] & 255]
+                      + decode[texels[(row1 + x1) * 4 + channel] & 255]);
+            }
+        }
+        return half;
+    }
+
+    /** The mean unit normal of each 2 by 2 texels of a normal layer's RGB (or RG, Z rebuilt) bytes: level 1. */
+    private static float[][] halvedNormals(byte[] texels, int width, int height, boolean packed) {
+        int halfWidth = Math.max(1, width >> 1), halfHeight = Math.max(1, height >> 1);
+        float[][] half = new float[3][halfWidth * halfHeight];
+        for (int y = 0; y < halfHeight; y++) {
+            int row0 = Math.min(2 * y, height - 1) * width, row1 = Math.min(2 * y + 1, height - 1) * width;
+            for (int x = 0; x < halfWidth; x++) {
+                int x0 = Math.min(2 * x, width - 1), x1 = Math.min(2 * x + 1, width - 1);
+                int at = y * halfWidth + x;
+                addUnitNormal(texels, row0 + x0, packed, half, at);
+                addUnitNormal(texels, row0 + x1, packed, half, at);
+                addUnitNormal(texels, row1 + x0, packed, half, at);
+                addUnitNormal(texels, row1 + x1, packed, half, at);
+            }
+        }
+        return half;
+    }
+
+    /** A quarter of one texel's unit normal, added to the sums at {@code at}. */
+    private static void addUnitNormal(byte[] texels, int texel, boolean packed, float[][] sums, int at) {
+        float x = SIGNED[texels[texel * 4] & 255], y = SIGNED[texels[texel * 4 + 1] & 255];
+        float z = packed ? (float) Math.sqrt(Math.max(0, 1 - x * x - y * y)) : SIGNED[texels[texel * 4 + 2] & 255];
+        float length = (float) Math.sqrt(x * x + y * y + z * z);
+        float scale = length > 0 ? .25f / length : 0;
+        sums[0][at] += x * scale;
+        sums[1][at] += y * scale;
+        sums[2][at] += z * scale;
+    }
+
+    /** One channel of RGBA bytes, decoded. */
+    private static float[] decoded(byte[] texels, int channel, float[] decode) {
+        float[] values = new float[texels.length / 4];
+        for (int texel = 0; texel < values.length; texel++) { values[texel] = decode[texels[texel * 4 + channel] & 255]; }
+        return values;
+    }
+
+    /** Each texel's unit normal from a normal layer's RGB (or RG, Z rebuilt) bytes. */
+    private static float[][] unitNormals(byte[] texels, int count, boolean packed) {
+        float[][] normals = new float[3][count];
+        for (int texel = 0; texel < count; texel++) {
+            addUnitNormal(texels, texel, packed, normals, texel);
+            for (float[] axis : normals) { axis[texel] *= 4; }
+        }
+        return normals;
+    }
+
+    /**
+     * One array's next mip level: each texel the mean of the 2 by 2 texels it covers. Along an odd side each covers its
+     * share of the texels (2.5 of 5), so every level keeps the mean of level 0.
+     */
+    private static float[] halved(float[] source, int width, int height) {
+        int halfWidth = Math.max(1, width >> 1), halfHeight = Math.max(1, height >> 1);
+        if (width % 2 != 0 || height % 2 != 0) {
+            return resampled(resampled(source, width, height, halfWidth, true), halfWidth, height, halfHeight, false);
+        }
+        float[] half = new float[halfWidth * halfHeight];
+        for (int y = 0; y < halfHeight; y++) {
+            int row0 = Math.min(2 * y, height - 1) * width, row1 = Math.min(2 * y + 1, height - 1) * width;
+            for (int x = 0; x < halfWidth; x++) {
+                int x0 = Math.min(2 * x, width - 1), x1 = Math.min(2 * x + 1, width - 1);
+                half[y * halfWidth + x] = .25f * (source[row0 + x0] + source[row0 + x1] + source[row1 + x0] + source[row1 + x1]);
+            }
+        }
+        return half;
+    }
+
+    /** A box filter along one side, to {@code size} texels: each the area-weighted mean of the texels it covers. */
+    private static float[] resampled(float[] source, int width, int height, int size, boolean across) {
+        int length = across ? width : height, lines = across ? height : width;
+        float[] target = new float[across ? size * height : width * size];
+        double scale = (double) length / size;
+        for (int line = 0; line < lines; line++) {
+            for (int out = 0; out < size; out++) {
+                double start = out * scale, end = start + scale, sum = 0;
+                for (int in = (int) start; in < Math.min(length, (int) Math.ceil(end)); in++) {
+                    float value = across ? source[line * width + in] : source[in * width + line];
+                    sum += value * (Math.min(end, in + 1) - Math.max(start, in));
+                }
+                target[across ? line * size + out : out * width + line] = (float) (sum / scale);
+            }
+        }
+        return target;
+    }
+
+    private static float[] lengths(float[][] normals) {
+        float[] lengths = new float[normals[0].length];
+        for (int texel = 0; texel < lengths.length; texel++) {
+            lengths[texel] = (float) Math.sqrt(normals[0][texel] * normals[0][texel] + normals[1][texel] * normals[1][texel]
+                  + normals[2][texel] * normals[2][texel]);
+        }
+        return lengths;
+    }
+
+    private static void encode(float[] means, byte[] level, int channel) {
+        for (int texel = 0; texel < means.length; texel++) { level[texel * 4 + channel] = toByte(means[texel] * 255); }
+    }
+
+    /** Signed components, renormalised by {@code lengths} where given. */
+    private static void encodeNormal(float[] components, float[] lengths, byte[] level, int channel) {
+        for (int texel = 0; texel < components.length; texel++) {
+            float component = components[texel];
+            if (lengths != null) { component = lengths[texel] > 1e-6f ? component / lengths[texel] : 0; }
+            level[texel * 4 + channel] = toByte(component * 127.5f + 127.5f);
+        }
+    }
+
+    private static void encodeRoughness(float[] alpha2, float[] lengths, byte[] level, int channel) {
+        for (int texel = 0; texel < alpha2.length; texel++) {
+            float widened = Math.min(1, alpha2[texel] + spreadAlpha2(lengths[texel]));
+            level[texel * 4 + channel] = toByte((float) Math.sqrt(Math.sqrt(widened)) * 255);
+        }
+    }
+
+    private static byte toByte(float value) { return (byte) Math.round(Math.clamp(value, 0f, 255f)); }
+
+    /**
+     * A single storage domain; source bytes are unchanged unless the existing grid requires resizing. A data array with
+     * {@link Spread}s builds its own mips ({@link #mipmaps}); any other array has the driver generate them.
+     */
     private static final class MaterialArrayData implements TextureArrayData {
         /**
-         * Layers decoded, packed and resized ahead of their upload: enough to keep the common pool busy while the GL
-         * thread uploads in layer order, few enough to bound the pixels held at once.
+         * Units decoded, packed and resized ahead of their upload: enough to keep the common pool busy while the GL
+         * thread uploads in unit order, few enough to bound the pixels held at once.
          */
         private static final int AHEAD = Math.max(2, 2 * ForkJoinPool.getCommonPoolParallelism());
         private final List<Supplier<Pixmap>> files;
         private final int width, height;
-        private final boolean color;
+        private final boolean color, mipmaps;
+        /**
+         * The layers prepared together (a normal with the layers whose roughness it widens), their roughness channels and
+         * the normal's close level ({@link #closeLevel}).
+         */
+        private final List<int[]> units = new ArrayList<>(), roughness = new ArrayList<>();
+        private final List<Integer> close = new ArrayList<>();
         private boolean prepared;
 
         MaterialArrayData(List<Supplier<Pixmap>> files, int width, int height, boolean color) {
+            this(files, width, height, color, List.of());
+        }
+
+        MaterialArrayData(List<Supplier<Pixmap>> files, int width, int height, boolean color, List<Spread> spreads) {
             this.files = List.copyOf(files);
             this.width = width;
             this.height = height;
             this.color = color;
+            mipmaps = !spreads.isEmpty();
+            boolean[] grouped = new boolean[files.size()];
+            spreads.forEach(spread -> grouped[spread.target()] = spread.target() != spread.normal());
+            for (int layer = 0; layer < files.size(); layer++) {
+                if (grouped[layer]) { continue; }
+                var unit = new ArrayList<>(List.of(layer));
+                var channels = new ArrayList<>(List.of(-1));
+                int level = 0;
+                for (Spread spread : spreads) {
+                    if (spread.normal() != layer) { continue; }
+                    level = closeLevel(width, spread.tile());
+                    if (spread.target() == layer) {
+                        channels.set(0, spread.channel());
+                    } else {
+                        unit.add(spread.target());
+                        channels.add(spread.channel());
+                    }
+                }
+                units.add(unit.stream().mapToInt(Integer::intValue).toArray());
+                roughness.add(channels.stream().mapToInt(Integer::intValue).toArray());
+                close.add(level);
+            }
         }
 
         @Override public boolean isPrepared() { return prepared; }
@@ -614,52 +886,75 @@ final class GpuAssets implements Disposable {
         @Override
         public void consumeTextureArrayData() {
             // libGDX's allocator shares internal/input enums; specify the sized storage here.
-            Gdx.gl30.glTexImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, color ? GL30.GL_SRGB8_ALPHA8 : GL30.GL_RGBA8,
-                  width, height, getDepth(), 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, (java.nio.Buffer) null);
+            int levels = mipmaps ? 32 - Integer.numberOfLeadingZeros(Math.max(width, height)) : 1;
+            for (int level = 0; level < levels; level++) {
+                Gdx.gl30.glTexImage3D(GL30.GL_TEXTURE_2D_ARRAY, level, color ? GL30.GL_SRGB8_ALPHA8 : GL30.GL_RGBA8,
+                      Math.max(1, width >> level), Math.max(1, height >> level), getDepth(), 0, GL20.GL_RGBA,
+                      GL20.GL_UNSIGNED_BYTE, (java.nio.Buffer) null);
+            }
             prepared = false;
         }
 
-        /** One layer's pixels and their upload, which may borrow them. */
-        private record Prepared(Pixmap pixels, ByteBuffer upload) { }
+        /** One layer's pixels and the uploads of its mip levels, level 0 first, which may borrow them. */
+        private record Prepared(Pixmap pixels, List<ByteBuffer> levels) { }
 
-        private Prepared prepare(Supplier<Pixmap> file) {
-            var pixels = file.get();
+        private List<Prepared> prepare(int[] unit, int[] channels, int level) {
+            var pixels = new ArrayList<Pixmap>();
             try {
-                return new Prepared(pixels, GpuColorTexture.arrayPixels(pixels, width, height, color));
-            } catch (RuntimeException | Error failure) { pixels.dispose(); throw failure; }
+                var layers = new ArrayList<ByteBuffer>();
+                for (int layer : unit) {
+                    pixels.add(files.get(layer).get());
+                    layers.add(GpuColorTexture.arrayPixels(pixels.get(pixels.size() - 1), width, height, color));
+                }
+                var mips = mipmaps ? GpuAssets.mipmaps(layers, width, height, channels, level) : null;
+                var prepared = new ArrayList<Prepared>();
+                for (int index = 0; index < unit.length; index++) {
+                    var levels = new ArrayList<>(List.of(layers.get(index)));
+                    if (mips != null) { levels.addAll(mips.get(index)); }
+                    prepared.add(new Prepared(pixels.get(index), levels));
+                }
+                return prepared;
+            } catch (RuntimeException | Error failure) { pixels.forEach(Pixmap::dispose); throw failure; }
         }
 
         /**
-         * The caller has an owned TextureArray handle and releases it if source decoding fails. Layers decode, pack
-         * and resize on the common pool; only their uploads, in layer order, stay on this GL thread.
+         * The caller has an owned TextureArray handle and releases it if source decoding fails. Units decode, pack,
+         * resize and build their mips on the common pool; only their uploads, in unit order, stay on this GL thread.
          */
         void upload() {
-            var ahead = new ArrayDeque<CompletableFuture<Prepared>>();
+            var ahead = new ArrayDeque<CompletableFuture<List<Prepared>>>();
             int next = 0;
             var oldAlignment = com.badlogic.gdx.utils.BufferUtils.newIntBuffer(1);
             Gdx.gl.glGetIntegerv(GL20.GL_UNPACK_ALIGNMENT, oldAlignment);
             Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
             try {
-                for (int layer = 0; layer < files.size(); layer++) {
-                    for (; next < files.size() && ahead.size() < AHEAD; next++) {
-                        var file = files.get(next);
-                        ahead.add(pooled(() -> prepare(file)));
+                for (int[] unit : units) {
+                    for (; next < units.size() && ahead.size() < AHEAD; next++) {
+                        int[] layers = units.get(next), channels = roughness.get(next);
+                        int level = close.get(next);
+                        ahead.add(pooled(() -> prepare(layers, channels, level)));
                     }
                     var prepared = joined(ahead.remove());
                     try {
-                        Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
-                              GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, prepared.upload());
+                        for (int index = 0; index < unit.length; index++) {
+                            var levels = prepared.get(index).levels();
+                            for (int level = 0; level < levels.size(); level++) {
+                                Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, level, 0, 0, unit[index],
+                                      Math.max(1, width >> level), Math.max(1, height >> level), 1, GL20.GL_RGBA,
+                                      GL20.GL_UNSIGNED_BYTE, levels.get(level));
+                            }
+                        }
                     } finally {
-                        Reference.reachabilityFence(prepared.upload());
-                        prepared.pixels().dispose();
+                        Reference.reachabilityFence(prepared);
+                        prepared.forEach(layer -> layer.pixels().dispose());
                     }
                 }
             } finally {
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, oldAlignment.get(0));
-                // After a failure, the layers still on their way are released as they arrive.
-                ahead.forEach(pending -> pending.thenAccept(prepared -> prepared.pixels().dispose()));
+                // After a failure, the units still on their way are released as they arrive.
+                ahead.forEach(pending -> pending.thenAccept(prepared -> prepared.forEach(layer -> layer.pixels().dispose())));
             }
-            Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);
+            if (!mipmaps) { Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY); }
         }
     }
 

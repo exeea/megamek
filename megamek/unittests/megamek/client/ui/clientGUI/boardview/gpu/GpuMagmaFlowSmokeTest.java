@@ -56,7 +56,7 @@ class GpuMagmaFlowSmokeTest {
               uniform vec3 u_face, u_right, u_up;
               uniform vec2 u_current;
               const float u_normalMaps = 0.0;
-              """ + GpuShaderSource.read("terrain-detail.glsl") + GpuShaderSource.magma(true) + """
+              """ + GpuShaderSource.magma(true) + """
               void main() {
                   vec3 world = vec3(7.0, -5.0, 3.0) + (u_right * v_position.x + u_up * v_position.y) * 6.0;
                   vec4 waves = vec4(0.0);
@@ -64,8 +64,6 @@ class GpuMagmaFlowSmokeTest {
                       waves = texture(u_magmaOcean, world.xy * u_magmaOceanScale);
                       world.xy -= waves.zw * .30;
                   }
-                  terrainNormalDetail = 0.0;
-                  terrainSurfaceDetail = 1.0;
                   Volcanic material = magmaSurface(world, u_face, u_face,
                         magmaDrift(u_face, u_current, 1.0, waves), 1.0, waves);
                   // Independent channels catch a moving heat layer detached from the visible cooling skin.

@@ -426,6 +426,69 @@ class GpuBoardMaterialsTest {
         assertTrue((wide[0] & 255) < 128 && (wide[3] & 255) > 128, "The ends keep their texels' sides");
     }
 
+    @Test
+    void mipsAverageLevelZeroAndWidenRoughnessByTheNormalsSpread() {
+        // Opposed 45 degree normals average to (0, 0, .7071): their spread is (1 - .5) / (2 .7071 (3 - .5)) = .1414 of
+        // alpha^2. The roughness texels 0 and 1 average to alpha^2 .5. Metallic, scattering and occlusion keep plain means.
+        int tilt = (int) Math.round(.70710678 * 127.5 + 127.5), against = 255 - tilt;
+        var normal = rgba(tilt, 128, tilt, 40, against, 128, tilt, 200, tilt, 128, tilt, 40, against, 128, tilt, 200);
+        var finish = rgba(0, 10, 0, 255, 255, 30, 0, 255, 0, 10, 0, 255, 255, 30, 0, 255);
+        var level = GpuAssets.mipmaps(List.of(normal, finish), 2, 2, new int[] { -1, 0 }, 0);
+        assertEquals(1, level.get(0).size(), "A 2x2 layer has one level below 0");
+        assertTexel(level.get(0).get(0), 128, 128, (int) Math.round(.70710678 * 127.5 + 127.5), 120,
+              "The normal keeps the unnormalised mean of its unit normals");
+        double alpha2 = Math.min(1, .5 + GpuAssets.spreadAlpha2(.70710678f));
+        assertTexel(level.get(1).get(0), (int) Math.round(Math.pow(alpha2, .25) * 255), 20, 0, 255,
+              "Roughness is the mean alpha^2 plus the normals' spread");
+        assertEquals(.1414, GpuAssets.spreadAlpha2(.70710678f), .0001);
+        // An odd side shares its middle texel: 5 texels average to their mean, not to the first four's.
+        var odd = GpuAssets.mipmaps(List.of(rgba(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255)), 5, 1,
+              new int[] { -1 }, 0).get(0);
+        assertEquals(2, odd.size(), "5x1 has 2x1 and 1x1 below it");
+        assertTexel(odd.get(1), 51, 51, 51, 51, "The last level is the mean of all five texels");
+        // Up to the close view's level the mips shade as the close view does: the mean direction, the plain mean roughness.
+        var close = GpuAssets.mipmaps(List.of(normal, finish), 2, 2, new int[] { -1, 0 }, 1);
+        assertTexel(close.get(0).get(0), 128, 128, 255, 120, "At the close level the normal is renormalised");
+        assertTexel(close.get(1).get(0), 128, 20, 0, 255, "At the close level roughness is its plain mean");
+        // The same normals as X and Y alone (roughness 0 in B) keep their direction renormalised: straight up.
+        var packed = GpuAssets.mipmaps(List.of(rgba(tilt, 128, 0, 40, against, 128, 0, 200, tilt, 128, 0, 40,
+              against, 128, 0, 200)), 2, 2, new int[] { 2 }, 0);
+        assertTexel(packed.get(0).get(0), 128, 128, (int) Math.round(Math.pow(GpuAssets.spreadAlpha2(.70710678f), .25) * 255),
+              120, "A packed normal keeps its mean direction and widens its own roughness");
+        // Every level averages level 0's unit normals, not the renormalised level above it.
+        var random = new Random(7);
+        int[] texels = new int[16 * 4];
+        double[] sum = new double[3];
+        for (int texel = 0; texel < 16; texel++) {
+            double x = random.nextGaussian() * .5, y = random.nextGaussian() * .5, z = 1, length = Math.sqrt(x * x + y * y + 1);
+            double[] unit = { x / length, y / length, z / length };
+            for (int axis = 0; axis < 3; axis++) {
+                texels[texel * 4 + axis] = (int) Math.round(unit[axis] * 127.5 + 127.5);
+                sum[axis] += texels[texel * 4 + axis] / 127.5 - 1;
+            }
+            texels[texel * 4 + 3] = 255;
+        }
+        var smooth = new int[16 * 4];
+        java.util.Arrays.fill(smooth, 255);
+        var deep = GpuAssets.mipmaps(List.of(rgba(texels), rgba(smooth)), 4, 4, new int[] { -1, 0 }, 0).get(0);
+        assertEquals(2, deep.size());
+        assertTexel(deep.get(1), (int) Math.round(sum[0] / 16 * 127.5 + 127.5), (int) Math.round(sum[1] / 16 * 127.5 + 127.5),
+              (int) Math.round(sum[2] / 16 * 127.5 + 127.5), 255, "The last level averages all 16 texels of level 0");
+    }
+
+    private static java.nio.ByteBuffer rgba(int... values) {
+        var buffer = java.nio.ByteBuffer.allocate(values.length);
+        for (int value : values) { buffer.put((byte) value); }
+        return buffer.flip();
+    }
+
+    private static void assertTexel(java.nio.ByteBuffer level, int r, int g, int b, int a, String message) {
+        int[] expected = { r, g, b, a };
+        for (int channel = 0; channel < 4; channel++) {
+            assertEquals(expected[channel], level.get(channel) & 255, 1, message + ", channel " + channel);
+        }
+    }
+
     /** A 2x1 sculpt material whose ORM holds the given roughness (G) and metal (B) texels; features are tres lines. */
     private GpuAssets.AuthoredFinish finish(Path folder, int[] roughness, int[] metal, String... features)
           throws Exception {

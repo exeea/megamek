@@ -6,7 +6,6 @@ uniform float u_magmaOceanScale;
 const float MAGMA_CYCLE = 4.0;
 // The molten pattern spans larger, readable rafts. Solid crust retains its authored 12 m repeat.
 float magmaRepeatMetres() { return 24.0; }
-float magmaDistantRoughness() { return .85; }
 // BoardFlow already slows lava to a quarter of water's speed. This keeps its ordinary reach near 2.4 m/s at 1g.
 const float MAGMA_CURRENT_SPEED = 3.2;
 
