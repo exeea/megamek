@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -720,11 +721,21 @@ public final class RequisitionAdvancedSearch {
             if (coolantPod != null) {
                 all.add(coolantPod);
             }
+            List<EquipmentType> kept = new ArrayList<>();
+            Map<String, Integer> named = new HashMap<>();
             for (EquipmentType type : all) {
                 if (((type instanceof WeaponType) || (type instanceof MiscType)) && seen.add(type.getInternalName())) {
-                    types.add(new EquipmentChoice(type.getInternalName(), type.getName(),
-                          (type instanceof WeaponType) ? EquipmentGroup.WEAPON : EquipmentGroup.EQUIPMENT));
+                    kept.add(type);
+                    named.merge(type.getName(), 1, Integer::sum);
                 }
+            }
+            for (EquipmentType type : kept) {
+                // The Inner Sphere and Clan versions often share a name, which the dialog's table tells apart
+                String label = (named.get(type.getName()) > 1) ? Messages.getString(
+                      "Lobby.requisition.advanced.equipmentBase", type.getName(),
+                      type.isClan() ? "Clan" : "IS", type.getInternalName()) : type.getName();
+                types.add(new EquipmentChoice(type.getInternalName(), label,
+                      (type instanceof WeaponType) ? EquipmentGroup.WEAPON : EquipmentGroup.EQUIPMENT));
             }
             types.sort(Comparator.comparing(EquipmentChoice::label, String.CASE_INSENSITIVE_ORDER)
                   .thenComparing(EquipmentChoice::key));

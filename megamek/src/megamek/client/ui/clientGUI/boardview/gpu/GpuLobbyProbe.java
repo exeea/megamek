@@ -99,6 +99,10 @@ import org.lwjgl.glfw.GLFW;
  *     {@value GpuLobbyScreen#PROBE_CLICK_AT} s in; with {@code +formations} it does so in the formations view.</li>
  *     <li>{@code lobby+requisition+clickfilters}: clicks the Requisition's Filters button through the stage at the same
  *     time, opening the drawer; {@code +closefilters} clicks it again a second later, shutting it.</li>
+ *     <li>{@code lobby+requisition+advanced}: through the stage, opens the Filters drawer, clicks Advanced search,
+ *     types 5 in the Total Warfare walk minimum and logs the matching count before and after; {@code +as} then
+ *     switches to the Alpha Strike tab and clicks the size 4 chip, and {@code +equip} adds the first weapon found for
+ *     "PPC" to the equipment expression instead, each logging the count again.</li>
  *     <li>{@code lobby+requisition+hoverrow}: half a second before the shot, puts the pointer on the second result row
  *     at its right end, beside the scroll bar, and logs where the rows and their values end against the bar;
  *     {@code +hoverbar} puts it on the bar instead.</li>

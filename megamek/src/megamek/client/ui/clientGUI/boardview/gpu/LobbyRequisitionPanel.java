@@ -39,6 +39,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionAlphaStrike;
 import megamek.client.lobby.RequisitionCatalog;
 import megamek.client.lobby.RequisitionCatalog.Category;
@@ -164,6 +165,11 @@ final class LobbyRequisitionPanel {
     private final Label resultsNote;
     private final Table dossier = new Table();
     private final Split split;
+    /** Holds the results and the dossier, or the advanced search in their place. */
+    private final Container<Actor> centre = new Container<>();
+    private @Nullable LobbyAdvancedSearchView advanced;
+    private boolean advancedOpen;
+    private @Nullable UiButton advancedButton;
     private final Table ownerGroup = new Table();
     private UiSelect owner;
     private final UiSegmented skillsMode;
@@ -336,7 +342,9 @@ final class LobbyRequisitionPanel {
         readoutTro = actions.readoutTro();
         buildDossier();
         split = new Split(resultsStack, dossier);
-        body.add(split).grow().minHeight(0).pad(0, space("md"), 0, space("md")).row();
+        centre.fill();
+        centre.setActor(split);
+        body.add(centre).grow().minHeight(0).pad(0, space("md"), 0, space("md")).row();
 
         skillsMode = kit.tokenSegmented(true, Messages.getString("Lobby.requisition.skills.default"),
               Messages.getString("Lobby.requisition.skills.random"),
@@ -496,11 +504,15 @@ final class LobbyRequisitionPanel {
         showResult();
     }
 
-    /** One Escape step: shuts the drawer, then the dossier; true when one was open. */
+    /** One Escape step: shuts the drawer, then the advanced search, then the dossier; true when one was open. */
     boolean back() {
         if (drawerOpen) {
             filtersButton.setChecked(false);
             drawer(false);
+            return true;
+        }
+        if (advancedOpen) {
+            openAdvanced(false);
             return true;
         }
         if (dossierOpen) {
@@ -571,6 +583,9 @@ final class LobbyRequisitionPanel {
         resultsNote.setVisible(none);
         count.setText(Messages.getString("Lobby.requisition.count",
               NumberFormat.getIntegerInstance().format(result.rows().size())));
+        if (advanced != null) {
+            advanced.matches(result.rows().size());
+        }
         if (picked != null) {
             int index = indexOf(picked);
             if (index >= 0) {
@@ -714,6 +729,9 @@ final class LobbyRequisitionPanel {
             chip.getColor().a = weighs ? 1 : .4f;
         }
         int at = filters.drawerCount();
+        if (advancedOpen && advanced != null) {
+            advanced.sync(filters.advanced());
+        }
         String label = Messages.getString("Lobby.requisition.filters");
         filtersButton.setText(kit.cased("button", (at > 0) ? label + " · " + at : label));
         filtersButton.setChecked(drawerOpen);
@@ -822,7 +840,17 @@ final class LobbyRequisitionPanel {
               Messages.getString("Lobby.requisition.reset"), null);
         reset.setDisabled(filters.drawerCount() == 0);
         UiKit.onChange(reset, () -> setFilters(filters.withoutDrawer()));
-        drawer.add(reset).colspan(2).left().padTop(space("sm"));
+        int criteria = filters.advanced().count();
+        String open = Messages.getString("Lobby.requisition.advanced.open");
+        advancedButton = kit.button("button-quiet" + UiTheme.COMPACT, "tune",
+              criteria > 0 ? open + " \u00b7 " + criteria : open, null);
+        advancedButton.setName("lobby-requisition-advanced-open");
+        kit.tip(advancedButton, true).getActor().setText(Messages.getString("Lobby.requisition.advanced.openTip"));
+        UiKit.onChange(advancedButton, () -> openAdvanced(true));
+        Table buttons = new Table();
+        buttons.add(advancedButton);
+        buttons.add(reset).padLeft(space("sm"));
+        drawer.add(buttons).colspan(2).left().padTop(space("sm"));
         UiFilterChip.sameWidth(chips);
         drawerHolder.setActor(drawer);
     }
@@ -908,11 +936,76 @@ final class LobbyRequisitionPanel {
         if (filters.source() != null) {
             row.addActor(tag(filters.source(), filters.withSource(null)));
         }
+        RequisitionAdvancedSearch criteria = filters.advanced();
+        for (RequisitionAdvancedSearch.Field field : criteria.values().keySet()) {
+            row.addActor(tag(criteria.describe(field), filters.withAdvanced(criteria.without(field))));
+        }
         UiButton clear = kit.button("button-quiet" + UiTheme.COMPACT, null,
               Messages.getString("Lobby.requisition.clear"), null);
         UiKit.onChange(clear, () -> setFilters(filters.withoutDrawer()));
         row.addActor(clear);
         return row;
+    }
+
+    /** Shows the advanced search in the results' place, or the results again; opening it shuts the drawer. */
+    void openAdvanced(boolean open) {
+        if (open == advancedOpen) {
+            return;
+        }
+        advancedOpen = open;
+        if (open) {
+            if (advanced == null) {
+                advanced = new LobbyAdvancedSearchView(kit, new LobbyAdvancedSearchView.Host() {
+                    @Override
+                    public RequisitionAdvancedSearch criteria() {
+                        return filters.advanced();
+                    }
+
+                    @Override
+                    public void criteria(RequisitionAdvancedSearch next) {
+                        setFilters(filters.withAdvanced(next));
+                    }
+
+                    @Override
+                    public void done() {
+                        openAdvanced(false);
+                    }
+                });
+            }
+            advanced.sync(filters.advanced());
+            if (result != null) {
+                advanced.matches(result.rows().size());
+            }
+            centre.setActor(advanced.actor());
+            if (drawerOpen) {
+                drawer(false);
+            }
+        } else {
+            centre.setActor(split);
+            Stage stage = body.getStage();
+            if (stage != null) {
+                stage.setKeyboardFocus(search);
+            }
+        }
+    }
+
+    /** The advanced search, once it has been opened; a probe and a test reach its controls. */
+    @Nullable LobbyAdvancedSearchView advancedView() {
+        return advanced;
+    }
+
+    boolean advancedOpen() {
+        return advancedOpen;
+    }
+
+    /** The drawer's Advanced search button, while the drawer is open. */
+    @Nullable UiButton drawerAdvancedButton() {
+        return drawerOpen ? advancedButton : null;
+    }
+
+    /** The advanced criteria at work, for the probe's log. */
+    String probeCriteria() {
+        return filters.advanced().values().keySet().stream().map(filters.advanced()::describe).toList().toString();
     }
 
     private Button tag(String text, Filters without) {

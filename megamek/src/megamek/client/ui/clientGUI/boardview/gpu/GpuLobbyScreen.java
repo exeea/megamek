@@ -35,6 +35,7 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionFactions;
 import megamek.client.lobby.RequisitionLoader;
 import megamek.client.lobby.RequisitionRecord;
@@ -47,6 +48,7 @@ import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiRangeInput;
 import megamek.client.ui.gdx.UiVirtualList;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.loaders.MekSummary;
@@ -111,6 +113,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean clickCompactPending;
     private int filterClicksPending;
     private String hoverPending;
+    /** The developer switch's advanced search steps, from the first; -1 when there are none. */
+    private int advancedStep = -1;
+    private double advancedAt;
     /** The dossier tab the developer switch clicks, and how many of its clicks are done. */
     private String tabPending;
     private int tabStep;
@@ -177,6 +182,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
               ? 1 : 0;
         hoverPending = probe.options().contains("hoverbar") ? "bar" : probe.options().contains("hoverrow") ? "row"
               : null;
+        advancedStep = probe.options().contains("advanced") ? 0 : -1;
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -696,6 +702,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             LOGGER.info("The lobby probe's Filters click: the drawer is {}", requisition.drawerOpen() ? "open"
                   : "shut");
         }
+        if (advancedStep >= 0 && REQUISITION.equals(centre.showing()) && elapsed > PROBE_CLICK_AT
+              && elapsed > advancedAt) {
+            probeAdvanced(probe, elapsed);
+        }
         if (tabPending != null && REQUISITION.equals(centre.showing()) &&         requisition.dossierSettled()
               && elapsed > PROBE_CLICK_AT + tabStep * .5) {
             probeTab();
@@ -713,6 +723,70 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                   at == null ? "nothing" : at[0] + "," + at[1]);
             hoverPending = null;
             requisition.probeMeasure();
+        }
+    }
+
+    /**
+     * The developer switch's advanced search, a step each half second through the stage: Filters, Advanced search, a
+     * walk of at least 5 typed in, then the Alpha Strike size 4 chip or a PPC in the equipment expression; the count
+     * of matching units is logged at each step.
+     */
+    private void probeAdvanced(GpuLobbyProbe probe, double elapsed) {
+        int found = requisition.resultsList().items().size();
+        advancedAt = elapsed + .6;
+        LobbyAdvancedSearchView view = requisition.advancedView();
+        switch (advancedStep++) {
+            case 0 -> GpuLobbyProbeInput.click(stage, requisition.filtersToggle());
+            case 1 -> {
+                GpuLobbyProbeInput.click(stage, requisition.drawerAdvancedButton());
+                LOGGER.info("The lobby probe opened the advanced search: {}", requisition.advancedOpen());
+            }
+            case 2 -> {
+                Actor walk = view == null ? null : view.control(RequisitionAdvancedSearch.Field.WALK);
+                if (walk instanceof UiRangeInput range) {
+                    LOGGER.info("The lobby probe's advanced search before: {} units", found);
+                    GpuLobbyProbeInput.click(stage, range.minField());
+                    stage.keyTyped('5');
+                } else {
+                    LOGGER.error("The lobby probe found no walk range");
+                    advancedStep = -1;
+                }
+            }
+            case 3 -> {
+                LOGGER.info("The lobby probe's advanced search after walk >= 5: {} units, criteria {}", found,
+                      requisition.probeCriteria());
+                if (probe.options().contains("as") && view != null) {
+                    GpuLobbyProbeInput.click(stage, view.tabs().option(1));
+                } else if (probe.options().contains("equip") && view != null && view.equipmentEditor() != null) {
+                    LobbyAdvancedSearchView.EquipmentEditor editor = view.equipmentEditor();
+                    view.reveal(editor.addButton());
+                    GpuLobbyProbeInput.click(stage, editor.find().field);
+                    for (char each : "PPC".toCharArray()) {
+                        stage.keyTyped(each);
+                    }
+                } else {
+                    advancedStep = -1;
+                }
+            }
+            case 4 -> {
+                if (probe.options().contains("as") && view != null
+                      && view.control(RequisitionAdvancedSearch.Field.AS_SIZE)
+                      instanceof com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup sizes) {
+                    GpuLobbyProbeInput.click(stage, sizes.getChildren().get(3));
+                } else if (view != null && view.equipmentEditor() != null) {
+                    LobbyAdvancedSearchView.EquipmentEditor editor = view.equipmentEditor();
+                    editor.list().select(0, true);
+                    view.reveal(editor.addButton());
+                    GpuLobbyProbeInput.click(stage, editor.addButton());
+                    LOGGER.info("The lobby probe's equipment expression: {}", editor.expression().getText());
+                }
+            }
+            default -> {
+                LOGGER.info("The lobby probe's advanced search after the second criterion: {} units, criteria {}; "
+                      + "{} columns {} wide", found, requisition.probeCriteria(), view == null ? 0 : view.columns(),
+                      view == null ? 0 : view.actor().getWidth());
+                advancedStep = -1;
+            }
         }
     }
 
