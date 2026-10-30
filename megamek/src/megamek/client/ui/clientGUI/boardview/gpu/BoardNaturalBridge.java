@@ -1,11 +1,12 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static megamek.client.ui.clientGUI.boardview.gpu.BoardBankClip.footprint;
+import static megamek.client.ui.clientGUI.boardview.gpu.BoardBankClip.outsideBanks;
 import static megamek.client.ui.clientGUI.boardview.gpu.BoardBridge.triangle;
 
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
-import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -125,7 +126,8 @@ final class BoardNaturalBridge {
             var points = new ArrayList<Rim>();
             corners.add(points);
             if (closes(scene, tile, d)) {
-                var tongue = corner(scene, tile, d, center, mouths, Math.max(reaches[d], reaches[(d + 1) % 6]), points);
+                var tongue = corner(scene, tile, d, center, mouths, Math.max(reaches[d], reaches[(d + 1) % 6]), points,
+                      surfaces, lod);
                 if (tongue != null) { tongues.add(tongue); }
             } else {
                 shoulder(scene, tile, d, center, mouths, points);
@@ -256,7 +258,7 @@ final class BoardNaturalBridge {
             facing(facets, new Vector3(deep), bottom[rings][mouth], under, Part.SIDE, outward);
         }
         return BoardBridge.shape(fullHex ? deck.surface() : shell(deck.surface()), level,
-              outsideBanks(facets, new Area(bankTops)));
+              fullHex ? facets : outsideBanks(scene, tile, facets, new Area(bankTops), level * BoardGeometry.level()));
     }
 
     /**
@@ -366,7 +368,7 @@ final class BoardNaturalBridge {
     private static boolean natural(BoardScene.Tile tile) { return BoardBridge.family(tile) == BoardBridge.Family.NATURAL; }
 
     /** A joined natural span: the two rock shells continue into each other. */
-    private static boolean joined(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
+    static boolean joined(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         return BoardBridge.connected(tile, next, direction) && natural(next);
     }
 
@@ -401,7 +403,7 @@ final class BoardNaturalBridge {
               && (!joined(tile, second, (d + 1) % 6) || rests(scene, second, (d + 4) % 6));
     }
 
-    private static float deck(BoardScene.Tile tile) { return tile.elevation() + BoardBridge.feature(tile).elevation(); }
+    static float deck(BoardScene.Tile tile) { return tile.elevation() + BoardBridge.feature(tile).elevation(); }
 
     /**
      * The part of a closed corner beyond the hex corner {@code vertex}: the rock runs on along the joint's edge to
@@ -415,7 +417,7 @@ final class BoardNaturalBridge {
      * their tops meet exactly; beside ground the joint's edge runs on into that ground's rounded-off corner (the result).
      */
     private static Tongue corner(BoardScene scene, BoardScene.Tile tile, int d, Vector3 center, List<List<Rim>> mouths,
-          float reach, List<Rim> points) {
+          float reach, List<Rim> points, Map<Coords, BoardSurface> surfaces, TerrainLod lod) {
         int e = (d + 1) % 6;
         var first = scene.tile(tile.coords().translated(d));
         var second = scene.tile(tile.coords().translated(e));
@@ -440,7 +442,24 @@ final class BoardNaturalBridge {
             float depth = Math.max(trim(mouths.get(d), false, ray, center), trim(mouths.get(e), true, ray, center));
             float seat = radius + Math.min(Math.max(reach, depth - radius), BoardRelief.metres(CORNER_DEPTH));
             vertex.set(center.x, center.y, 0).mulAdd(ray, seat);
-            vertex.z = (support(tile, first, d) + support(tile, second, e)) / 2;
+            float atFirst = support(tile, first, d), atSecond = support(tile, second, e);
+            vertex.z = (atFirst + atSecond) / 2;
+            if (atFirst != atSecond) {
+                // Between grounds of different heights the slope joining them runs through the corner: the rock meets
+                // it there, rather than standing out of it at their mean height.
+                float slope = Float.NEGATIVE_INFINITY;
+                for (var ground : List.of(first, second)) {
+                    var surface = surfaces.computeIfAbsent(ground.coords(), c -> new BoardSurface(scene, ground, lod));
+                    List<BoardSurface.Face> faces;
+                    synchronized (surface) { faces = surface.walls(scene, BoardGeometry.floor(scene), surfaces); }
+                    slope = Math.max(slope, BoardSurface.sampleHeight(surface.foundation(), vertex.x, vertex.y,
+                          Float.NEGATIVE_INFINITY));
+                    slope = Math.max(slope, BoardSurface.sampleHeight(faces, vertex.x, vertex.y, Float.NEGATIVE_INFINITY));
+                }
+                if (Float.isFinite(slope)) {
+                    vertex.z = Math.clamp(slope, Math.min(atFirst, atSecond), Math.max(atFirst, atSecond));
+                }
+            }
             points.add(new Rim(vertex, -1, true, false, radius / seat));
             return null;
         }
@@ -538,7 +557,7 @@ final class BoardNaturalBridge {
     }
 
     /** Which side of the line through {@code origin} along {@code line} the point lies, in the plane. */
-    private static float side(Vector3 line, Vector3 origin, Vector3 point) {
+    static float side(Vector3 line, Vector3 origin, Vector3 point) {
         return line.x * (point.y - origin.y) - line.y * (point.x - origin.x);
     }
 
@@ -546,69 +565,6 @@ final class BoardNaturalBridge {
     private static float support(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         if (!BoardBridge.bank(tile, next, direction)) { return deck(tile) * BoardGeometry.level(); }
         return next.elevation() * BoardGeometry.level() - (next.elevation() == deck(tile) ? 0 : BoardRelief.metres(.025f));
-    }
-
-    /** The bank owns its top. Keep the buried shell, but never submit two coplanar walking surfaces. */
-    private static List<Facet> outsideBanks(List<Facet> facets, Area banks) {
-        if (banks.isEmpty()) { return facets; }
-        var result = new ArrayList<Facet>(facets.size());
-        for (var face : facets) {
-            if (face.part() != Part.TOP && face.part() != Part.RIM) { result.add(face); continue; }
-            var path = footprint(face.a(), face.b(), face.c());
-            if (!banks.intersects(path.getBounds2D())) { result.add(face); continue; }
-            var remaining = new Area(path);
-            var overlap = new Area(remaining);
-            overlap.intersect(banks);
-            if (overlap.isEmpty()) { result.add(face); continue; }
-            remaining.subtract(banks);
-            for (var clipped : clippedTop(remaining)) {
-                for (var point : List.of(clipped.a(), clipped.b(), clipped.c())) {
-                    point.z = face.a().z - (face.normal().x * (point.x - face.a().x)
-                          + face.normal().y * (point.y - face.a().y)) / face.normal().z;
-                }
-                triangle(result, clipped.a(), clipped.b(), clipped.c(), face.part());
-            }
-        }
-        return result;
-    }
-
-    /** Ordinary bank cuts have one outline; keep its ears instead of splitting every triangle into horizontal strips. */
-    private static List<BoardSurface.Face> clippedTop(Area area) {
-        var contours = new ArrayList<List<Vector3>>();
-        List<Vector3> contour = null;
-        float[] point = new float[6];
-        for (var path = area.getPathIterator(null); !path.isDone(); path.next()) {
-            int type = path.currentSegment(point);
-            if (type == PathIterator.SEG_MOVETO) { contour = new ArrayList<>(); contours.add(contour); }
-            if (type == PathIterator.SEG_MOVETO || type == PathIterator.SEG_LINETO) {
-                contour.add(new Vector3(point[0], point[1], 0));
-            }
-        }
-        // A scalloped bank can leave several separate pieces of one triangle. Triangulate each outline directly;
-        // horizontal strips are only necessary if a piece contains a hole.
-        for (var outer : contours) {
-            var path = new Path2D.Float();
-            path.moveTo(outer.getFirst().x, outer.getFirst().y);
-            for (var p : outer) { path.lineTo(p.x, p.y); }
-            path.closePath();
-            for (var inner : contours) {
-                if (inner != outer && path.contains(inner.getFirst().x, inner.getFirst().y)) {
-                    return BoardTacticalGeometry.flat(area, -1).stream().map(face -> new BoardSurface.Face(
-                          face.a(), face.b(), face.c(), BoardSurface.Finish.TOP)).toList();
-                }
-            }
-        }
-        var result = new ArrayList<BoardSurface.Face>();
-        for (var points : contours) {
-            if (points.size() >= 3) { BoardSurface.polygon(points.toArray(Vector3[]::new), BoardSurface.Finish.TOP, result); }
-        }
-        return result;
-    }
-
-    private static Path2D footprint(Vector3 a, Vector3 b, Vector3 c) {
-        var path = new Path2D.Float();
-        path.moveTo(a.x, a.y); path.lineTo(b.x, b.y); path.lineTo(c.x, c.y); path.closePath();
-        return path;
     }
 
     private static float mouthWidth(float x, float y, boolean bank) {
