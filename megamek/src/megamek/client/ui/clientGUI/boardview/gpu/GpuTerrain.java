@@ -734,8 +734,8 @@ final class GpuTerrain implements Disposable {
             result.register("u_biomeLod", new BaseShader.LocalSetter() {
                 @Override
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                    FloatAttribute lod = attributes.get(FloatAttribute.class, GpuBiomeVegetation.Kind.LOD);
-                    if (lod != null) { target.set(id, lod.value); }
+                    var kind = attributes.get(GpuBiomeVegetation.Kind.class, GpuBiomeVegetation.Kind.TYPE);
+                    if (kind != null) { target.set(id, kind.value); }
                 }
             });
             result.register("u_groundResponse", new BaseShader.LocalSetter() {
@@ -3832,7 +3832,7 @@ final class GpuTerrain implements Disposable {
                     // material, so authored frames never swap its shader; every fall's spray shares it.
                     spray = new Material(fall);
                     spray.id = fall.id + ":spray";
-                    spray.remove(GpuLiquidShader.Frame.TYPE | GpuLiquidShader.Frame.BLEND);
+                    spray.remove(GpuLiquidShader.Frame.TYPE);
                     spray.set(new BlendingAttribute(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA, 1),
                           sheet.spray());
                 }
@@ -5742,10 +5742,10 @@ final class GpuTerrain implements Disposable {
         texture.textureDescription.texture = frame;
         texture.offsetU = offsetU;
         texture.offsetV = offsetV;
-        TextureAttribute next = liquid.material().get(TextureAttribute.class, GpuLiquidShader.Frame.TYPE);
+        GpuLiquidShader.Frame next = liquid.material().get(GpuLiquidShader.Frame.class, GpuLiquidShader.Frame.TYPE);
         if (next != null) {
             next.textureDescription.texture = frames.frames().get((index + 1) % frames.frames().size());
-            liquid.material().get(FloatAttribute.class, GpuLiquidShader.Frame.BLEND).value = frames.blend(liquidTime, index);
+            next.blend = frames.blend(liquidTime, index);
         }
         if (emission != null) {
             emission.textureDescription.texture = frame;
@@ -5780,7 +5780,7 @@ final class GpuTerrain implements Disposable {
         material.id = (falling ? "falls:" : "liquid:") + liquid.kind() + ":"
               + (procedural ? liquid.theme() : source.base() + ":" + source.foam() + ":" + source.tone());
         if (liquidShaderAnimation && !procedural) {
-            material.set(new GpuLiquidShader.Frame(texture), new FloatAttribute(GpuLiquidShader.Frame.BLEND, 0));
+            material.set(new GpuLiquidShader.Frame(texture));
         }
         if (!liquid.molten()) {
             // Premultiplied: the shader adds reflected and scattered light and removes only what the column absorbs.

@@ -191,7 +191,7 @@ final class GpuWaterPages implements Disposable {
     static Material cutMaterial(Material original) {
         Material material = new Material(original);
         material.id = original.id + ":cut";
-        material.remove(GpuLiquidShader.Frame.TYPE | GpuLiquidShader.Frame.BLEND);
+        material.remove(GpuLiquidShader.Frame.TYPE);
         material.set(original.get(GpuWaterShader.class, GpuWaterShader.TYPE).cut());
         return material;
     }

@@ -46,15 +46,15 @@ import megamek.common.board.Coords;
 final class GpuBiomeVegetation implements Disposable {
     /**
      * Sedge, with its finish: its material's (GpuAssets.authoredFinish) as the means of its maps, since its artwork is
-     * composited at run time; the emission is the constant glow plus the map's mean times its tint.
+     * composited at run time; the emission is the constant glow plus the map's mean times its tint. The value is the
+     * batch's level of detail.
      */
     static final class Kind extends FloatAttribute {
         static final long TYPE = register("boardBiomeVegetation");
-        static final long LOD = register("boardBiomeVegetationLod");
         final float[] surface, glow;
 
-        Kind() {
-            super(TYPE);
+        Kind(int lod) {
+            super(TYPE, lod);
             var finish = GpuAssets.authoredFinish(GpuMaterialMaps.board("vegetation/marsh-sedge"));
             surface = finish.surface().clone();
             glow = finish.glow().clone();
@@ -64,14 +64,14 @@ final class GpuBiomeVegetation implements Disposable {
             }
         }
 
-        private Kind(float[] surface, float[] glow) {
-            super(TYPE);
+        private Kind(float lod, float[] surface, float[] glow) {
+            super(TYPE, lod);
             this.surface = surface;
             this.glow = glow;
         }
 
         @Override
-        public Kind copy() { return new Kind(surface, glow); }
+        public Kind copy() { return new Kind(value, surface, glow); }
 
         @Override
         public int hashCode() { return 31 * (31 * super.hashCode() + Arrays.hashCode(surface)) + Arrays.hashCode(glow); }
@@ -485,7 +485,7 @@ final class GpuBiomeVegetation implements Disposable {
 
     private static Material material(int lod, Texture texture) {
         return new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE),
-              new Kind(), new FloatAttribute(Kind.LOD, lod), TextureAttribute.createDiffuse(texture));
+              new Kind(lod), TextureAttribute.createDiffuse(texture));
     }
 
     private static VertexAttribute instanceAttribute() {

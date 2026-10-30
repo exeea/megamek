@@ -17,7 +17,6 @@ import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
@@ -280,7 +279,7 @@ final class GpuTilesetTerrain {
         Material material = material(frame);
         material.remove(Grading.TYPE);
         material.id = "column-liquid:" + key;
-        material.set(new GpuLiquidShader.Frame(frame), new FloatAttribute(GpuLiquidShader.Frame.BLEND, 0));
+        material.set(new GpuLiquidShader.Frame(frame));
         if (!key.liquid().molten()) {
             material.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA,
                   key.falling() ? .8f : GpuWaterShader.SURFACE_OPACITY));

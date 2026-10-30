@@ -31,7 +31,6 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
@@ -220,7 +219,9 @@ class GpuTerrainSubmissionSmokeTest {
                 assertTrue(shader.program.hasAttribute("a_instance0"), "Exercise the actual instanced prop program");
 
                 part.material = part.material.copy();
-                part.material.set(new GpuLiquidShader.Frame(next), new FloatAttribute(GpuLiquidShader.Frame.BLEND, .25f));
+                var frame = new GpuLiquidShader.Frame(next);
+                frame.blend = .25f;
+                part.material.set(frame);
                 shader = checkTerrainFactorDraw(batch, camera, target, part, factor,
                       factor * (linearSample * .75f + .25f) * GpuSceneRadiance.SCALE,
                       "generic animated liquid; linear=" + linear);
