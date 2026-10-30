@@ -824,6 +824,22 @@ work for Swing, and item 11 is under investigation.
          random skills, random names and the load list dialogs, the Princess help, the unit read-out and other
          unit-action prompts through `SwingLobbyPrompts`, and every file chooser (game options, loadouts, unit
          lists, map setups).
+      - Review fixes after L10–L13 (the user's review):
+        - Players: "+ Add on a new team" reads "Add a new team" (the + icon stays).
+        - Requisition strip: Qty sits right before Add at the strip's right end, on one row with For, Skills and the
+          G and P steppers when it fits, which wrap in narrow windows. `UiStepper` takes a caption with equal `xs` gaps, groups `md` apart.
+        - Filter chips (weights and the Filters drawer): the check's reserve is kept at both ends, so labels are
+          centred; a group is as wide as its widest label (Assault fits), and the search field gives up width.
+        - Forces unit cards: a wide card shows a second block (movement, armor and structure, heat sinks, weapons cut
+          at three with "+n" and a tooltip) from `LobbyUnit.Sheet`; it drops when narrow; compact rows stay one line.
+        - Requisition results: aligned columns (move, armor, role, rules level) between the name and the BV, under a
+          header, dropping right to left as the list narrows (`RequisitionRow.Column`), virtualised as before.
+        - Dossier Readout: every table shares column widths, the first wide enough for "Center Torso (rear)"; long
+          fluff (Overview, Capabilities, Deployment, History) shows as an overline heading over full-width text; the
+          blocks reveal in sequence with `UiReveal` on a unit's first show (`RequisitionReadout.blocks`).
+        - AS card: MegaMek's own `ASCard` drawing, rendered off the GPU thread at the pixels the tab takes and
+          redrawn when they change (`RequisitionCardImage`), with the kit card while it draws or if it fails.
+        - Factions: the abbreviation is its own column (no tooltip), and an open era reads "3150–".
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.
