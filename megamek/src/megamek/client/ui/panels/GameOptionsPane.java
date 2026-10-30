@@ -43,6 +43,7 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -65,25 +66,14 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.settings.*;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
-import megamek.common.MMRandom;
 import megamek.common.options.IOption;
 import megamek.common.options.OptionsConstants;
-import megamek.common.weapons.bayWeapons.capital.CapitalMissileBayWeapon;
-import megamek.logging.MMLogger;
 
 /** Searchable settings-tree presentation for metadata-backed game option groups. */
 public class GameOptionsPane extends JPanel {
-    private static final MMLogger LOGGER = MMLogger.create(GameOptionsPane.class);
     private static final int START_HEIGHT = 800;
     private static final int HEADER_IMAGE_SIZE = 80;
     private static final int LANDING_HEADER_IMAGE_SIZE = 200;
-    private static final int MAX_BRIDGE_CF = 1_000;
-    private static final int MAX_GHOST_TARGET_PENALTY = 10;
-    private static final int MAX_WOODS_BURN_DOWN_CF = 100;
-    private static final int MAX_ARTILLERY_AUTOHIT_HEXES = 100;
-    private static final int MAX_ARTILLERY_MAP_AREA_HEXES = 100_000;
-    private static final int MAX_EXTERNAL_HEAT = 100;
-    private static final int MAX_LANCE_SIZE = 100;
     private static final int IMPORTANT_ICON = 0xE002;
     private static final int ADVANCED_ICON = 0xE8B8;
     private static final int UNOFFICIAL_ICON = 0xEA4B;
@@ -98,89 +88,6 @@ public class GameOptionsPane extends JPanel {
           getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.legend.unofficial"));
     private static final SettingsBadge LEGACY_BADGE = new SettingsBadge(LEGACY_ICON, null,
           getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.legend.legacy"));
-    private static final Set<String> UNOFFICIAL_OPTIONS = Set.of(
-          OptionsConstants.BASE_INFANTRY_DAMAGE_HEAT,
-          OptionsConstants.ADVANCED_COMBAT_FULL_ROTOR_HITS,
-          OptionsConstants.ADVANCED_SINGLE_BLIND_BOTS,
-          OptionsConstants.UNOFFICIAL_BRIDGE_REPAIR_ENGINEERS,
-          OptionsConstants.ADVANCED_INCLUSIVE_SENSOR_RANGE,
-          OptionsConstants.ADVANCED_SENSORS_DETECT_ALL,
-          OptionsConstants.ADVANCED_MAG_SCAN_NO_HILLS,
-          OptionsConstants.ADVANCED_WOODS_BURN_DOWN,
-          OptionsConstants.ADVANCED_NO_IGNITE_CLEAR,
-          OptionsConstants.ADVANCED_EXTREME_TEMPERATURE_SURVIVAL,
-          OptionsConstants.ADVANCED_ARMED_MEKWARRIORS,
-          OptionsConstants.ADVANCED_PILOTS_VISUAL_RANGE_ONE,
-          OptionsConstants.ADVANCED_PILOTS_CANNOT_SPOT,
-          OptionsConstants.ADVANCED_METAL_CONTENT,
-          OptionsConstants.ADVANCED_BA_GRAB_BARS,
-          OptionsConstants.ADVANCED_ALTERNATE_MASC,
-          OptionsConstants.ADVANCED_ALTERNATE_MASC_ENHANCED,
-          OptionsConstants.UNOFFICIAL_BACKHOE_CLEARS_RUBBLE,
-          OptionsConstants.ADVANCED_COMBAT_HOT_LOAD_IN_GAME,
-          OptionsConstants.ADVANCED_COMBAT_KIND_RAPID_AC,
-          OptionsConstants.ADVANCED_COMBAT_MULTI_USE_AMS,
-          OptionsConstants.ADVANCED_COMBAT_NO_TAC,
-          OptionsConstants.ADVANCED_COMBAT_VTOL_STRAFING,
-          OptionsConstants.ADVANCED_COMBAT_VEHICLES_SAFE_FROM_INFERNOS,
-          OptionsConstants.ADVANCED_COMBAT_PROTOMEKS_SAFE_FROM_INFERNOS,
-          OptionsConstants.ADVANCED_COMBAT_INDIRECT_ALWAYS_POSSIBLE,
-          OptionsConstants.ADVANCED_COMBAT_INCREASED_AC_DMG,
-          OptionsConstants.ADVANCED_COMBAT_UNJAM_UAC,
-          OptionsConstants.ADVANCED_COMBAT_TAC_OPS_UAC_TWO_ROLLS,
-          OptionsConstants.ADVANCED_COMBAT_CLUBS_PUNCH,
-          OptionsConstants.ADVANCED_COMBAT_ON_MAP_PREDESIGNATE,
-          OptionsConstants.ADVANCED_COMBAT_MAP_AREA_PREDESIGNATE,
-          OptionsConstants.ADVANCED_COMBAT_NUM_HEXES_PREDESIGNATE,
-          OptionsConstants.ADVANCED_COMBAT_FOREST_FIRES_NO_SMOKE,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_UNOFF_NO_IMMOBILE_VEHICLES,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_EJECTED_PILOTS_FLEE,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_AUTO_ABANDON_UNIT,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_NO_HOVER_CHARGE,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_NO_PRE_MOVE_VIBRA,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_FALLS_END_MOVEMENT,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_PSR_JUMP_HEAVY_WOODS,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_NO_NIGHT_MOVE_PEN,
-          OptionsConstants.ADVANCED_AERO_RULES_STRATOPS_AA_FIRE,
-          OptionsConstants.ADVANCED_AERO_RULES_STRATOPS_BEARINGS_ONLY_VELOCITY,
-          OptionsConstants.ADVANCED_AERO_RULES_RETURN_FLYOVER,
-          OptionsConstants.ADVANCED_AERO_RULES_CLIMB_OUT,
-          OptionsConstants.ADVANCED_AERO_RULES_AA_MOVE_MOD,
-          OptionsConstants.ADVANCED_AERO_RULES_SINGLE_NO_CAP,
-          OptionsConstants.ADVANCED_AERO_RULES_ALLOW_LARGE_SQUADRONS,
-          OptionsConstants.ADVANCED_AERO_RULES_AERO_SANITY,
-          OptionsConstants.ADVANCED_AERO_RULES_AERO_ARTILLERY_MUNITIONS,
-          OptionsConstants.ADVANCED_AERO_RULES_CRASHED_DROPSHIPS_SURVIVE,
-          OptionsConstants.ADVANCED_AERO_RULES_EXPANDED_KF_DRIVE_DAMAGE,
-          OptionsConstants.UNOFFICIAL_ADV_ATMOSPHERIC_CONTROL,
-          OptionsConstants.INIT_INF_MOVE_EVEN,
-          OptionsConstants.INIT_INF_DEPLOY_EVEN,
-          OptionsConstants.INIT_INF_MOVE_LATER,
-          OptionsConstants.INIT_INF_MOVE_MULTI,
-          OptionsConstants.INIT_PROTOMEKS_MOVE_EVEN,
-          OptionsConstants.INIT_PROTOMEKS_MOVE_LATER,
-          OptionsConstants.INIT_PROTOMEKS_MOVE_MULTI,
-          OptionsConstants.INIT_INF_PROTO_MOVE_MULTI,
-          OptionsConstants.INIT_SIMULTANEOUS_DEPLOYMENT,
-          OptionsConstants.INIT_SIMULTANEOUS_TARGETING,
-          OptionsConstants.INIT_SIMULTANEOUS_FIRING,
-          OptionsConstants.INIT_SIMULTANEOUS_PHYSICAL,
-          OptionsConstants.RPG_INDIVIDUAL_INITIATIVE,
-          OptionsConstants.RPG_COMMAND_INIT,
-          OptionsConstants.RPG_TOUGHNESS,
-          OptionsConstants.RPG_CONDITIONAL_EJECTION,
-          OptionsConstants.RPG_BEGIN_SHUTDOWN,
-          OptionsConstants.ADVANCED_COMBAT_MAX_EXTERNAL_HEAT,
-          OptionsConstants.ADVANCED_COMBAT_CASE_PILOT_DAMAGE,
-          OptionsConstants.ADVANCED_COMBAT_NO_FORCED_PRIMARY_TARGETS);
-    private static final Set<String> LEGACY_OPTIONS = Set.of(
-          OptionsConstants.ADVANCED_GHOST_TARGET_MODE,
-          OptionsConstants.ADVANCED_GHOST_TARGET_MAX,
-          OptionsConstants.ADVANCED_ASSAULT_DROP,
-          OptionsConstants.ADVANCED_PARATROOPERS,
-          OptionsConstants.ADVANCED_MAX_TECH_MOVEMENT_MODS,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_AUTO_ABANDON_UNIT,
-          OptionsConstants.RPG_RPG_GUNNERY);
     private static final Map<String, String> PAGE_FACTION_LOGOS = Map.ofEntries(
           Map.entry("basic", "logo_federated_suns.png"),
           Map.entry("gameMaster", "logo_star_league.png"),
@@ -294,50 +201,20 @@ public class GameOptionsPane extends JPanel {
     private static void configureSettingsDependencies(
           Map<String, DialogOptionComponentYPanel> componentsByName) {
         // the victory dependents (a threshold behind its master switch) share their table with the lobby dialog
-        VictoryOptionLayout.dependencies().forEach((dependentOptionName, masterOptionName) ->
-              configureEditableDependency(componentsByName, dependentOptionName, masterOptionName));
-        configureEditableDependency(componentsByName, OptionsConstants.ADVANCED_WOODS_BURN_DOWN_AMOUNT,
-              OptionsConstants.ADVANCED_WOODS_BURN_DOWN);
-        configureEditableDependency(componentsByName,
-              OptionsConstants.ADVANCED_GROUND_MOVEMENT_MEK_LANCE_MOVEMENT_NUMBER,
-              OptionsConstants.ADVANCED_GROUND_MOVEMENT_MEK_LANCE_MOVEMENT);
-        configureEditableDependency(componentsByName,
-              OptionsConstants.ADVANCED_GROUND_MOVEMENT_VEHICLE_LANCE_MOVEMENT_NUMBER,
-              OptionsConstants.ADVANCED_GROUND_MOVEMENT_VEHICLE_LANCE_MOVEMENT);
-        configureEditableDependency(componentsByName,
-              OptionsConstants.ADVANCED_ALTERNATE_MASC_ENHANCED,
-              OptionsConstants.ADVANCED_ALTERNATE_MASC);
-        configureEditableDependency(componentsByName,
-              OptionsConstants.ADVANCED_AERO_RULES_CLIMB_OUT,
-              OptionsConstants.ADVANCED_AERO_RULES_RETURN_FLYOVER);
-
-        DialogOptionComponentYPanel infantryAndProtoMekGroupSize = componentsByName.get(
-              OptionsConstants.INIT_INF_PROTO_MOVE_MULTI);
-        DialogOptionComponentYPanel moveMultipleInfantry = componentsByName.get(
-              OptionsConstants.INIT_INF_MOVE_MULTI);
-        DialogOptionComponentYPanel moveMultipleProtoMeks = componentsByName.get(
-              OptionsConstants.INIT_PROTOMEKS_MOVE_MULTI);
-        if (infantryAndProtoMekGroupSize != null && moveMultipleInfantry != null
-              && moveMultipleProtoMeks != null) {
-            infantryAndProtoMekGroupSize.setEditableWhenAnySelected(
-                  moveMultipleInfantry, moveMultipleProtoMeks);
-        }
-
-        DialogOptionComponentYPanel assaultDrop = componentsByName.get(OptionsConstants.ADVANCED_ASSAULT_DROP);
-        DialogOptionComponentYPanel paratroopers = componentsByName.get(OptionsConstants.ADVANCED_PARATROOPERS);
-        if (assaultDrop != null && paratroopers != null) {
-            paratroopers.setEditableWhenSelected(assaultDrop);
-        }
-    }
-
-    private static void configureEditableDependency(
-          Map<String, DialogOptionComponentYPanel> componentsByName,
-          String dependentOptionName, String controllingOptionName) {
-        DialogOptionComponentYPanel dependent = componentsByName.get(dependentOptionName);
-        DialogOptionComponentYPanel controlling = componentsByName.get(controllingOptionName);
-        if (dependent != null && controlling != null) {
-            dependent.setEditableWhenSelected(controlling);
-        }
+        GameOptionsCatalog.editableWhenAny().forEach((dependentOptionName, controllingOptionNames) -> {
+            DialogOptionComponentYPanel dependent = componentsByName.get(dependentOptionName);
+            DialogOptionComponentYPanel[] controlling = controllingOptionNames.stream()
+                  .map(componentsByName::get)
+                  .toArray(DialogOptionComponentYPanel[]::new);
+            if (dependent == null || Arrays.stream(controlling).anyMatch(Objects::isNull)) {
+                return;
+            }
+            if (controlling.length == 1) {
+                dependent.setEditableWhenSelected(controlling[0]);
+            } else {
+                dependent.setEditableWhenAnySelected(controlling);
+            }
+        });
     }
 
     /** @return the ordered badges explained by the Game Options legend */
@@ -534,51 +411,21 @@ public class GameOptionsPane extends JPanel {
         }
 
         private static void configureSettingsControl(DialogOptionComponentYPanel component) {
-            // the victory numbers share their bounds with the lobby's Victory Conditions dialog
-            int[] victoryBounds = VictoryOptionLayout.boundsFor(component.getOption().getName());
-            if (victoryBounds != null) {
-                component.useIntegerSpinner(victoryBounds[0], victoryBounds[1]);
+            String optionName = component.getOption().getName();
+            Map<Integer, String> integerChoices = GameOptionsCatalog.integerChoices(optionName);
+            if (!integerChoices.isEmpty()) {
+                component.useIntegerChoice(integerChoices);
                 return;
             }
-            switch (component.getOption().getName()) {
-                case OptionsConstants.BASE_TURN_TIMER_TARGETING,
-                     OptionsConstants.BASE_TURN_TIMER_MOVEMENT,
-                     OptionsConstants.BASE_TURN_TIMER_FIRING,
-                     OptionsConstants.BASE_TURN_TIMER_PHYSICAL -> component.useIntegerSpinner(0);
-                case OptionsConstants.BASE_DUMPING_FROM_ROUND,
-                     OptionsConstants.BASE_MAX_NUMBER_ROUND_SAVES -> component.useIntegerSpinner(1);
-                case OptionsConstants.BASE_RNG_TYPE -> component.useIntegerChoice(rngTypeChoices());
-                case OptionsConstants.BASE_BRIDGE_CF -> component.useIntegerSpinner(0, MAX_BRIDGE_CF);
-                case OptionsConstants.ADVANCED_GHOST_TARGET_MAX ->
-                    component.useIntegerSpinner(0, MAX_GHOST_TARGET_PENALTY);
-                case OptionsConstants.ADVANCED_WOODS_BURN_DOWN_AMOUNT ->
-                    component.useIntegerSpinner(1, MAX_WOODS_BURN_DOWN_CF);
-                case OptionsConstants.ADVANCED_COMBAT_NUM_HEXES_PREDESIGNATE ->
-                    component.useIntegerSpinner(0, MAX_ARTILLERY_AUTOHIT_HEXES);
-                case OptionsConstants.ADVANCED_COMBAT_MAP_AREA_PREDESIGNATE ->
-                    component.useIntegerSpinner(1, MAX_ARTILLERY_MAP_AREA_HEXES);
-                case OptionsConstants.ADVANCED_COMBAT_MAX_EXTERNAL_HEAT ->
-                    component.useIntegerSpinner(0, MAX_EXTERNAL_HEAT);
-                case OptionsConstants.ADVANCED_GROUND_MOVEMENT_MEK_LANCE_MOVEMENT_NUMBER ->
-                    component.useIntegerSpinner(1, MAX_LANCE_SIZE);
-                case OptionsConstants.ADVANCED_GROUND_MOVEMENT_VEHICLE_LANCE_MOVEMENT_NUMBER ->
-                    component.useIntegerSpinner(1, MAX_LANCE_SIZE);
-                case OptionsConstants.ADVANCED_AERO_RULES_STRATOPS_BEARINGS_ONLY_VELOCITY ->
-                    component.useIntegerSpinner(CapitalMissileBayWeapon.CAPITAL_MISSILE_MIN_VELOCITY,
-                          CapitalMissileBayWeapon.CAPITAL_MISSILE_MAX_VELOCITY);
-                case OptionsConstants.INIT_INF_PROTO_MOVE_MULTI ->
-                    component.useIntegerSpinner(1, MAX_LANCE_SIZE);
-                default -> {
-                }
+            int[] bounds = GameOptionsCatalog.integerBounds(optionName);
+            if (bounds == null) {
+                return;
             }
-        }
-
-        private static Map<Integer, String> rngTypeChoices() {
-            Map<Integer, String> choices = new LinkedHashMap<>();
-            choices.put(MMRandom.R_SUN, getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.rngType.sunRandom"));
-            choices.put(MMRandom.R_CRYPTO, getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.rngType.cryptoRandom"));
-            choices.put(MMRandom.R_POOL36, getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.rngType.pool36Random"));
-            return choices;
+            if (bounds[1] == Integer.MAX_VALUE) {
+                component.useIntegerSpinner(bounds[0]);
+            } else {
+                component.useIntegerSpinner(bounds[0], bounds[1]);
+            }
         }
 
         private static void addCheckBoxes(SettingsFormPanel content, List<JCheckBox> checkBoxes) {
@@ -648,7 +495,7 @@ public class GameOptionsPane extends JPanel {
 
     private static List<SettingsBadge> optionBadges(IOption option) {
         List<SettingsBadge> badges = new ArrayList<>();
-        if (hasShortLabel(option) || hasDetails(option)) {
+        if (GameOptionsCatalog.isImportant(option)) {
             badges.add(IMPORTANT_BADGE);
         }
         if (isUnofficialOption(option)) {
@@ -660,58 +507,38 @@ public class GameOptionsPane extends JPanel {
         return badges;
     }
 
-    private static boolean hasShortLabel(IOption option) {
-        return TEXT.containsKey(shortLabelKey(option));
-    }
-
     private static String optionDisplayName(IOption option) {
-        String displayName = hasShortLabel(option) ? TEXT.getText(shortLabelKey(option)) : option.getDisplayableName();
-        if (isUnofficialOption(option) || isLegacyOption(option)) {
-            displayName = stripCategoryMarker(displayName);
-        }
-        return displayName.replaceFirst("(?i)^\\(Legacy(?:\\s+MaxTech)?\\)\\s*", "")
-              .replaceFirst("(?i)\\s*\\(Legacy(?:\\s+only)?\\)\\s*", " ")
-              .replaceFirst("(?i)\\s*\\[Legacy]\\s*", " ")
-              .trim();
+        return GameOptionsCatalog.displayName(option);
     }
 
     static String stripCategoryMarker(String displayName) {
-        return displayName.replaceFirst("^\\([^)]*\\)\\s*", "")
-              .replaceFirst("(?i)^(?:Unofficial|Legacy):\\s*", "");
-    }
-
-    private static String shortLabelKey(IOption option) {
-        return "GameOptionsDialog.option." + option.getName() + ".shortName";
+        return GameOptionsCatalog.stripCategoryMarker(displayName);
     }
 
     private static boolean hasDetails(IOption option) {
-        return TEXT.containsKey(detailsKey(option));
-    }
-
-    private static String detailsKey(IOption option) {
-        return "GameOptionsDialog.option." + option.getName() + ".details";
+        return GameOptionsCatalog.hasDetails(option);
     }
 
     /** @return whether the option is classified as an unofficial rule by stable option name */
     public static boolean isUnofficialOption(IOption option) {
-        return UNOFFICIAL_OPTIONS.contains(option.getName());
+        return GameOptionsCatalog.isUnofficial(option.getName());
     }
 
     static Set<String> unofficialOptionNames() {
-        return UNOFFICIAL_OPTIONS;
+        return GameOptionsCatalog.UNOFFICIAL_OPTIONS;
     }
 
     /** @return whether the option is classified as a legacy rule by stable option name */
     public static boolean isLegacyOption(IOption option) {
-        return LEGACY_OPTIONS.contains(option.getName());
+        return GameOptionsCatalog.isLegacy(option.getName());
     }
 
     private static String sectionTitle(String sectionId) {
-        return getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.section." + sectionId + ".title");
+        return GameOptionsCatalog.sectionTitle(sectionId);
     }
 
     private static String sectionSummary(String sectionId) {
-        return getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.section." + sectionId + ".summary");
+        return GameOptionsCatalog.sectionSummary(sectionId);
     }
 
     static String sectionId(String groupId, String optionName) {
@@ -758,13 +585,7 @@ public class GameOptionsPane extends JPanel {
     }
 
     static String rulesSystemDescriptionKey(Object value) {
-        if (OptionsConstants.RULES_TW.equals(value)) {
-            return "GameOptionsDialog.page.landing.rulesSystem.totalWarfare";
-        }
-        if (!OptionsConstants.RULES_CORE.equals(value)) {
-            LOGGER.debug("Unknown rules system '{}'; showing Core rules guidance.", value);
-        }
-        return "GameOptionsDialog.page.landing.rulesSystem.core";
+        return GameOptionsCatalog.rulesSystemDescriptionKey(value);
     }
 
     private record OptionRow(DialogOptionComponentYPanel component, IOption option, String searchableText,
@@ -776,7 +597,7 @@ public class GameOptionsPane extends JPanel {
             String displayName = optionDisplayName(option);
             component.setSettingsPresentation(displayName, optionBadges(option));
             if (hasDetails(option)) {
-                component.setSettingsHelpText(TEXT.getText(detailsKey(option)));
+                component.setSettingsHelpText(GameOptionsCatalog.details(option));
             }
             JComponent supplementalContent = OptionsConstants.RULES_SYSTEM.equals(option.getName())
                   ? rulesSystemDescription(component)
