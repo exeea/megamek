@@ -927,6 +927,14 @@ public final class UiKit {
     }
 
     /**
+     * A count badge standing beside a title ({@link UiCountBadge}), such as the unread lines on a folded chat's header;
+     * a badge on a button's corner is {@link UiButton#badge}. Zero hides it.
+     */
+    public UiCountBadge countBadge(int count) {
+        return new UiCountBadge(skin, count);
+    }
+
+    /**
      * The status chip's geometry: {@code icon.sm} plus {@code xxs} above and below, 20 high whatever the type's line
      * height; {@code xs} before an icon or {@code md} before the text, {@code md} after it; small type, cased as
      * {@link #CHIP_CASE}.
