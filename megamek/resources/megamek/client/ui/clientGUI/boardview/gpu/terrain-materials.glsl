@@ -1136,6 +1136,11 @@ float familyDust(vec4 palette, int slot) {
     return 0.0;
 }
 
+// cliffMaterial's world noise at the fragment's point, read once however many roles and covers evaluate it there
+// (blendCovers, blendCliff): pockets, the turf lip's fray and the wall streaks, each in its own domain; negative
+// while unread.
+float cliffPockets = -1.0, cliffFray = -1.0, cliffStreak = -1.0;
+
 // The projection's gradients must come from before the caller's varying branches; the noise reads use explicit LOD.
 TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim,
       float rock, float hardness, float broad, float fine, float region, float sediment, vec4 palette, int slot,
@@ -1159,7 +1164,10 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     cliffFamily(palette, slot, ramp, trim, kind);
     bool fungus = isFamily(palette, slot, FUNGUS_FAMILY);
     float up = clamp(face.z, 0.0, 1.0);
-    float pockets = textureLod(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57, 0.0).g;
+    if (cliffPockets < 0.0) {
+        cliffPockets = textureLod(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57, 0.0).g;
+    }
+    float pockets = cliffPockets;
     float variation = broad * .4 + fine * .25 + pockets * .35;
     float foot = exp(-max(aboveFoot, 0.0) / (1.5 + 6.0 * variation));
     float rim = 1.0 - smoothstep(.1, 1.0 + 2.0 * broad, belowRim);
@@ -1187,7 +1195,10 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         // A meadow's two-level bank keeps a ragged turf lip and broken turf on its intermediate shoulder.
         float levelMetres = u_levelHeight / u_metre;
         float twoLevels = 1.0 - smoothstep(.05, .3, abs((aboveFoot + belowRim) / levelMetres - 2.0));
-        float fray = textureLod(u_rainNoise, (world.xy + world.z * vec2(.29, .41)) / 28.0 + .217, 0.0).r;
+        if (cliffFray < 0.0) {
+            cliffFray = textureLod(u_rainNoise, (world.xy + world.z * vec2(.29, .41)) / 28.0 + .217, 0.0).r;
+        }
+        float fray = cliffFray;
         float lipDepth = levelMetres * (mix(.2, .65, fine * .45 + pockets * .55) + .14 * (fray - .5));
         float lip = 1.0 - smoothstep(.05, lipDepth, belowRim);
         float middle = abs(aboveFoot / levelMetres - 1.0 - (pockets - .5) * .18);
@@ -1342,10 +1353,13 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         // The streaks are upright stripes about .6 m wide and 6 m long in the side projections' frames, blended as the
         // rock's own maps are (p.side), with explicit gradients: they hold still on curved faces and fade with distance.
         vec2 stretch = vec2(1.0 / 40.0, 1.0 / 400.0);
-        float streak = mix(
-              textureGrad(u_rainNoise, p.y * stretch + .41, p.yGradient[0] * stretch, p.yGradient[1] * stretch).r,
-              textureGrad(u_rainNoise, p.x * stretch + .41, p.xGradient[0] * stretch, p.xGradient[1] * stretch).r,
-              p.side);
+        if (cliffStreak < 0.0) {
+            cliffStreak = mix(
+                  textureGrad(u_rainNoise, p.y * stretch + .41, p.yGradient[0] * stretch, p.yGradient[1] * stretch).r,
+                  textureGrad(u_rainNoise, p.x * stretch + .41, p.xGradient[0] * stretch, p.xGradient[1] * stretch).r,
+                  p.side);
+        }
+        float streak = cliffStreak;
         // Upright faces only: a sloping shoulder would stretch them sideways.
         float streaks = smoothstep(.5, .8, streak) * (1.0 - smoothstep(0.0, .6 * faceHeight + 4.0, max(belowRim, 0.0)))
               * (1.0 - smoothstep(.3, .7, up));
