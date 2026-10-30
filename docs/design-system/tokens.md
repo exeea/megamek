@@ -1000,9 +1000,18 @@ Enter presses the focused button or else the primary (a disabled primary does no
 Escape and the close button run `cancel`, and Tab and Shift+Tab cycle through the card's enabled buttons, fields,
 selects and sliders only, scrolling the body to the focused one. Actions added to `layer()` before `show` are dropped,
 as showing restarts its fade; put per-frame work on an actor of its own. The lobby opens these only through
-`LobbyNativeDialogs` (camo, player settings, bot setup and a plain message so far); the bot setup and a message stack over
-another dialog, which gets its focus back when the top one closes. `GpuModalDialog` on the board is still the
-developers' work.
+`LobbyNativeDialogs` (camo, player settings, bot setup, planetary conditions, game options, a confirmation and a plain
+message); the bot setup, a confirmation and a message stack over another dialog, which gets its focus back when the top
+one closes. A confirmation (`LobbyNativeDialogs.confirm`) is a `dialog.sm` card with the question as body text and
+OK/Cancel. The planetary conditions are a `dialog.md` card with captioned sections on one two-column grid, the `md`
+gutter split between the columns so they line up from section to section, and check boxes under a blank label so they
+sit on the fields' line. The game options are the one larger dialog: `dialog.lg + dialog.sm` wide (1220, or the
+window less `xxxl` margins), a 260 navigation column (search, match count, the group tree, the unofficial and legacy
+switches, the password) beside a page shown in a scroll pane whose height follows the window (between 280 and 760),
+the navigation stacking above the page below a 720 body; an option is its control with its tooltip, then its marks as
+non-interactive chips (Important and Unofficial and Legacy in `NORMAL`, Changed in `OK`, shown while it differs), and an
+advanced page's title carries a `status.warning` chip; text and number options are at most 320 wide; Defaults, Save
+and Load are footer tools. `GpuModalDialog` on the board is still the developers' work.
 
 ## Status cards
 

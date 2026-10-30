@@ -714,7 +714,7 @@ work for Swing, and item 11 is under investigation.
        clicks the fold through the Stage, then the player and both bots chat: 2 unread, the own line not counted;
        photographed at 2560x1400 and narrow. Not checked live: the kept filters across a real restart (unit tested
        only).
-     - L13 Lobby dialogs to libGDX, one at a time (step 6's `LobbyDialogs` list, most used first).
+     - L13 ~~Lobby dialogs to libGDX~~, one at a time (step 6's `LobbyDialogs` list, most used first).
        - L13a ~~Camo picker and player settings~~. Kit: `UiDialog`, the token dialog surface every later port
          reuses: a `UiModal` layer on `surface.scrim` (no dismissal on the scrim: a form wants an answer) holding
          the `UiKit.dialog` card (title, close button, a vertical-only scrolling body, a footer of leading tools and
@@ -783,7 +783,47 @@ work for Swing, and item 11 is under investigation.
          the Stage: COWARDLY, the pirate switch, bravery to 10, a unit and a hex, then OK; the log shows the
          existing bot with those settings and the chat line, or the new bot on a new team (3) with them,
          photographed at 2560x1400 and 900x700.
-       - L13c Planetary conditions and game options (to come).
+       - L13c ~~Planetary conditions and game options~~. `LobbyConditionsView` (model `PlanetaryConditionsForm`)
+         replaces the Swing `PlanetaryConditionsDialog` in the lobby: the general section (temperature, gravity,
+         light, atmospheric pressure, taint, EMI, terrain affected by weather), the weather section (weather, wind,
+         wind direction, fog, blowing sand) and the dynamic wind section (shifting direction and strength, the
+         strength's range), with the Swing dialog's dependent-field rules (a vacuum clears and locks the weather,
+         wind, taint, fog and sand; trace or thin air the weather and fog; storms force their wind; blowing sand
+         raises the wind to a moderate gale; the range only while the strength shifts and clamped to it) and its
+         validation messages, shown live on the field and disabling OK; OK sends through
+         `Client.sendPlanetaryConditions`. `LobbyGameOptionsView` (model `GameOptionsForm` over a new toolkit-free
+         `GameOptionsCatalog`, which the Swing `GameOptionsPane`/`GameOptionsPresentation` now share) replaces the
+         Swing `GameOptionsDialog`: a `dialog.lg + dialog.sm` card with the search (narrowing the group tree, a
+         match count), the group tree (categories and pages, the landing page with the rules system's guidance),
+         the unofficial and legacy switches (hiding asks first, as Swing does), the password, and on the right the
+         chosen page: its sections and every option type (boolean check box, choice select, int, float and string
+         fields) with its tooltip and its Important, Unofficial, Legacy and Changed chips, the rules system's
+         description, and the Swing dialog's enabling rules between options; Defaults, Save and Load (the Swing
+         file chooser; load into a copy that shows as changes), then OK, which sends the changed options through
+         `Client.sendGameOptions` and saves them with `GameOptions.saveOptions` as Swing does; the BA grab bars option
+         sets the units' grab bars as it changes, as in Swing. A server change of the options reloads the open dialog (the edits dropped,
+         the search and password kept), as `ClientGUI.gameSettingsChange` does for Swing. Choices: one page shown
+         at a time in a scroll pane rather than a `UiVirtualList` (which takes the focus from text fields); numbers
+         are checked and a bad one disables OK and Save, where Swing sent it; the victory options are left to the
+         Victory Conditions dialog, as in the Swing lobby; the important mark is a chip. Known gap: a bad number on
+         a page not shown is not flagged in the tree. Both are routed through `LobbyNativeDialogs` from the
+         battlefield column's Change buttons, the menus and the `lobby+dialog=conditions`/`gameoptions` probes;
+         the Swing dialogs stay for the start screen, the game, MekHQ and MegaMekLab (whose API did not change;
+         `GameOptionsDialog` only gains a static `selectGameOptionsFile`). Checks: `PlanetaryConditionsFormTest`,
+         `GameOptionsFormTest`, `LobbyPackageToolkitFreeTest`, `LobbyDialogEntryPointsTest` (no
+         `PlanetaryConditionsDialog`/`GameOptionsDialog` in `GpuLobbyWindow`), the Swing panel tests, and the
+         on-demand `LobbyNativeDialogsSmokeTest` (the weather and a vacuum chosen with the pointer and keys, the
+         weather locked, 500 degrees disabling OK, then OK sending; a search, a page click, the double blind check
+         box marking Changed, hiding the unofficial rules asking, then OK sending only that option). Probes click
+         through the Stage: light two down and weather one down, then OK, and the snapshot's battlefield reads
+         "Full Moon Night · Light Rain"; a search for double blind, its page and check box, then OK, and the server
+         echo shows the Double blind rules chip; photographed at 2560x1400 and 1100x800.
+       - L13 is done for the lobby's own dialogs. Still Swing in the lobby, as follow-ups: unit customization
+         (`CustomMekDialog`, including the multi-unit edit), C3 network setup, map setup (board selection, map
+         size, random map settings, load and save map setup), the Victory Conditions dialog, the random army,
+         random skills, random names and the load list dialogs, the Princess help, the unit read-out and other
+         unit-action prompts through `SwingLobbyPrompts`, and every file chooser (game options, loadouts, unit
+         lists, map setups).
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.
