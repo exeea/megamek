@@ -909,21 +909,30 @@ public final class UiKit {
      * A compact whole-number stepper ({@link UiStepper}): − {@code value} +, within {@code min} and {@code max}.
      */
     public UiStepper stepper(int value, int min, int max) {
-        return new UiStepper(this, value, min, max);
+        return new UiStepper(this, null, value, min, max);
+    }
+
+    /**
+     * A stepper as {@link #stepper(int, int, int)} led by {@code caption} in small text.secondary, the caption, the
+     * buttons and the value all {@link UiStepper#gap()} apart: one group, which stands a larger space from the next.
+     */
+    public UiStepper stepper(String caption, int value, int min, int max) {
+        return new UiStepper(this, caption, value, min, max);
     }
 
     /**
      * A filter chip ({@link UiFilterChip}): a control, so {@code control.sm} high like the compact buttons, fields and
-     * selects beside it, with {@code lg} padding at its sides and the status chip's type; toggling on a click, on it
-     * fills in the accent's pressed tint and a check leads its text. The view reads {@code isChecked()} on its change.
+     * selects beside it, in the status chip's type; at each end it keeps {@code md}, {@code icon.sm} and {@code xs}, so
+     * its text is centred; toggling on a click, on it fills in the accent's pressed tint and a check shows in its
+     * leading room. The view reads {@code isChecked()} on its change.
      */
     public UiFilterChip filterChip(String text) {
         DesignTokens tokens = DesignTokens.shipped();
         float iconSize = tokens.size().get("icon.sm");
         float vertical = (tokens.size().get("control.sm") - iconSize) / 2;
         return new UiFilterChip(skin, icon("check", iconSize, UiTheme.tokenColor("accent.primary")),
-              typeLabel(cased(CHIP_CASE, text), "small", "text.secondary"), iconSize, vertical, space("lg"),
-              space("xs"), space("lg"));
+              typeLabel(cased(CHIP_CASE, text), "small", "text.secondary"), iconSize, vertical, space("md"),
+              space("xs"));
     }
 
     /**

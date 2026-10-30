@@ -5,41 +5,73 @@ import java.util.List;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
+import com.badlogic.gdx.utils.Align;
 
 /**
- * A filter chip ({@link UiTheme#TOKEN_FILTER_CHIP}): a chip that toggles a filter on and off, control.sm high. At rest it is the
- * neutral chip with text.secondary; on, it fills in the accent's pressed tint, its text turns text.primary and a check
- * shows in the room the chip always keeps for it, so turning it on never resizes it. {@link #sameWidth(List)} gives a
- * group one width, so the chips line up. Made by {@link UiKit#filterChip(String)}.
+ * A filter chip ({@link UiTheme#TOKEN_FILTER_CHIP}): a chip that toggles a filter on and off, control.sm high. At rest it
+ * is the neutral chip with text.secondary; on, it fills in the accent's pressed tint, its text turns text.primary and a
+ * check shows in its leading padding. The chip keeps the check's room at both ends, so its text stands centred on the
+ * whole chip, checked or not, and turning it on never resizes it or moves the text. {@link #sameWidth(List)} gives a
+ * group the width of its widest text plus both reserves, so the chips line up with every text centred. Made by
+ * {@link UiKit#filterChip(String)}.
  */
 public final class UiFilterChip extends Button {
     private final UiKit.Icon check;
     private final Label text;
     private final Color on;
     private final Color off;
+    private final float iconSize;
+    private final float side;
     private float width;
     private boolean shownChecked;
 
     /**
-     * The chip pads {@code vertical} above and below, {@code side} before the check and after the text, and
-     * {@code iconGap} between them.
+     * The chip pads {@code vertical} above and below; at each end it keeps {@link #reserve} ({@code side}, the check's
+     * {@code iconSize} and {@code iconGap}), the check standing {@code side} in from the leading edge.
      */
-    UiFilterChip(Skin skin, UiKit.Icon check, Label text, float iconSize, float vertical, float side, float iconGap,
-          float textGap) {
+    UiFilterChip(Skin skin, UiKit.Icon check, Label text, float iconSize, float vertical, float side, float iconGap) {
         super(skin, UiTheme.TOKEN_FILTER_CHIP);
         this.check = check;
         this.text = text;
+        this.iconSize = iconSize;
+        this.side = side;
         on = UiTheme.tokenColor("text.primary");
         off = UiTheme.tokenColor("text.secondary");
         setProgrammaticChangeEvents(false);
-        pad(vertical, side, vertical, textGap);
-        add(check).size(iconSize).padRight(iconGap);
-        add(text).height(iconSize).expandX().left();
+        float reserve = reserve(iconSize, side, iconGap);
+        pad(vertical, reserve, vertical, reserve);
+        text.setAlignment(Align.center);
+        add(text).height(iconSize).expandX().fillX();
+        // The check is no cell: it stands in the leading reserve, so the text keeps the chip's centre
+        addActor(check);
+        check.setSize(iconSize, iconSize);
         shownChecked = !isChecked();
         show();
+    }
+
+    /** What a chip keeps at each end: the check's room and its spaces, {@code side + iconSize + iconGap}. */
+    static float reserve(float iconSize, float side, float iconGap) {
+        return side + iconSize + iconGap;
+    }
+
+    @Override
+    public void layout() {
+        super.layout();
+        check.setBounds(side, Math.round((getHeight() - iconSize) / 2), iconSize, iconSize);
+    }
+
+    /** The chip's text label, for tests. */
+    Label label() {
+        return text;
+    }
+
+    /** The check, for tests. */
+    Actor checkMark() {
+        return check;
     }
 
     /** Gives {@code chips} the width of the widest, so a group lines up in columns. */
