@@ -52,6 +52,16 @@ class RequisitionFactionsTest {
     }
 
     @Test
+    void theLastEraIsAnOpenRange() {
+        List<Era> eras = Eras.getEras();
+        Era last = eras.get(eras.size() - 1);
+        assertTrue(last.isLastEra());
+        assertEquals(last.start().getYear() + "\u2013", RequisitionFactions.years(last));
+        Era first = eras.get(0);
+        assertEquals("\u2013" + first.end().getYear(), RequisitionFactions.years(first));
+    }
+
+    @Test
     void noAvailabilityIsAnEmptyTable() {
         assertSame(RequisitionFactions.EMPTY, RequisitionFactions.of(Set.of("FW"), Eras.getEras(), Set.of(3025),
               SOURCE));

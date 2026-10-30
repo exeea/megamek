@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.lobby;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -176,10 +177,11 @@ public record RequisitionFactions(List<EraColumn> eras, List<Faction> factions) 
         return new RequisitionFactions(columns, factions);
     }
 
-    /** An era's years, as "3050–3061", or "3151–" for one that has not ended. */
+    /** An era's years, as "3050–3061", "3151–" for one that has not ended or "–2005" for the first. */
     static String years(Era era) {
-        String start = (era.start() == null) ? "" : Integer.toString(era.start().getYear());
-        String end = (era.end() == null) ? "" : Integer.toString(era.end().getYear());
+        String start = ((era.start() == null) || era.start().equals(LocalDate.MIN)) ? ""
+              : Integer.toString(era.start().getYear());
+        String end = ((era.end() == null) || era.isLastEra()) ? "" : Integer.toString(era.end().getYear());
         return start + "\u2013" + end;
     }
 }
