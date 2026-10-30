@@ -697,6 +697,23 @@ work for Swing, and item 11 is under investigation.
        quirks stay: its saved Alpha Strike damage choices do not come back (`ASDamage` has no `equals`),
        `MekSearchFilter`'s copy constructor copies only some fields, and its weapon-quirk exclusion reads the
        include list.
+     - L12 ~~Chat fold and kept filters~~. The chat docked under the players gets a header (Chat, a count badge and,
+       folded, the latest line cut with an ellipsis) and a fold chevron at the end of the input row, as the
+       reference's `ChatDock` (6.5): folded, only the header and the input stay and the players list takes the
+       height; the input row never moves, so neither does the button. Lines that arrive while folded tint the title
+       `accent.primary` and count on the badge until the chat opens; as in the reference, everything but the local
+       player's own lines counts, server and MegaMek notices included. The fold state is the client preference
+       `LobbyChatFolded`. `ChatFold` in `megamek.client.lobby` is the toolkit-free state (the first snapshot is
+       taken as read; new lines are found by overlap, so the 200-line cap does not miscount). Requisition keeps its
+       weights, tech bases and rules levels as the preference `RequisitionFilters` (reference 7.2, format
+       `W:…;B:…;L:…`, `Filters.kept()` and `withKept()`): saved on each user change, restored when Requisition
+       opens (levels the game does not offer and unknown names are dropped), cleared by Reset and Clear filters;
+       type, canon, record sheet, roles, era, source and the advanced search reset each game. Kit: `UiCountBadge`
+       (`UiKit.countBadge`). Checks: `ChatFoldTest`, `RequisitionCatalogTest` (round trip and bad input), and the
+       on-demand `LobbyFoldAndFiltersSmokeTest`, which clicks the fold and a weight chip. Probe `lobby+chat+fold`
+       clicks the fold through the Stage, then the player and both bots chat: 2 unread, the own line not counted;
+       photographed at 2560x1400 and narrow. Not checked live: the kept filters across a real restart (unit tested
+       only).
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.

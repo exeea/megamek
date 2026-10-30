@@ -1144,7 +1144,8 @@ error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `T
 under the pointer and `tint.pressed` fills it pressed or checked, so checking it for a moment lights it (the lobby's
 warning chips, which a blocked Ready lights for 700 ms). All three set their text in upper case, as the `overline` role in either [presentation](#presentation-mode). A
 button in a token style (`button-*`) draws `UiButton.badge` as the count badge, in the `token-badge` face and frame
-with its ring in `surface.panel`, and `UiButton.dot` as the dot; hud-v3's buttons keep the amber pill. About 25 calls in
+with its ring in `surface.panel`, and `UiButton.dot` as the dot; `UiKit.countBadge(count)` (`UiCountBadge`) is the
+same badge on its own, beside a title (the lobby chat's unread lines), hidden at 0 but keeping its height; hud-v3's buttons keep the amber pill. About 25 calls in
 the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips (`UiKit.chip(text, tone)`), also
 in capitals. hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
 they take the filter chip's look: `token-pill`, `token-pill-over` and `token-pill-on` in `GpuBoardSkin`, with the
