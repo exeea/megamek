@@ -203,7 +203,10 @@ final class GpuMoreDrawer {
         grid.clearChildren();
         columns = columns(slide.getWidth());
         if (commands.isEmpty()) {
-            grid.add(ui.label(text("GpuBoard.hud.dock.moreNone"), "hud-small", 11.5f, Color.WHITE)).left();
+            Label empty = ui.label(text("GpuBoard.hud.dock.moreNone"), "hud-small", 11.5f, Color.WHITE);
+            empty.setName("dock-more-empty");
+            empty.setWrap(true);
+            grid.add(empty).growX().minWidth(0).left();
             return;
         }
         for (int index = 0; index < commands.size(); index++) {
@@ -288,6 +291,12 @@ final class GpuMoreDrawer {
                 panel.setBounds(0, -hidden * getHeight(), getWidth(), getHeight());
             } else {
                 panel.setBounds(-hidden * getWidth(), 0, getWidth(), getHeight());
+            }
+            if (open && panel.needsLayout()) {
+                // Reflow changes the viewport and scroll limits. Restore the selection only after they settle.
+                panel.validate();
+                grid.highlight(grid.highlighted());
+                scroll.updateVisualScroll();
             }
         }
 

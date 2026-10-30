@@ -48,6 +48,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
@@ -69,6 +70,7 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Player;
@@ -931,10 +933,6 @@ class GpuHudInputTest {
         assertEquals(-1, hud.state.armedWeapon);
     }
 
-    private boolean press(int key, int awt, int modifiers) {
-        return hud.keyDown(key, awt, modifiers);
-    }
-
     @Test
     void moreRunsTheLatestCommandAfterAnUpdateAndAfterReopening() {
         List<String> ran = new ArrayList<>();
@@ -1051,18 +1049,125 @@ class GpuHudInputTest {
         }
     }
 
+    @Test
+    void moreStaysClearOfTheMinimapWhenContactsAreHidden() {
+        hud.resize(1280, 720, 1);
+        GpuBoardSource.UiPreferences prefs = with(preferences(), Map.of("contactsEnabled", false));
+        for (int count : new int[] { 4, 12, 40 }) {
+            List<BoardScene.Command> commands = IntStream.range(0, count)
+                  .mapToObj(index -> extra("extra" + index, () -> { })).toList();
+            updateMore(commands, prefs);
+            change("dock-more");
+            updateMore(commands, prefs);
+            hud.stage.act(1);
+            validateLayout(hud.stage.getRoot());
+            Rectangle drawer = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("dock-more-drawer"));
+            Actor minimap = hud.stage.getRoot().findActor("minimap");
+            assertTrue(minimap.ascendantsVisible());
+            assertFalse(drawer.overlaps(GpuHudTestStage.bounds(minimap)), count + " commands overlap the minimap");
+            if (count == 4) {
+                Rectangle dock = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("command-dock"));
+                assertTrue(drawer.x >= dock.x + dock.width, "short drawers still fit beside the dock");
+            }
+            change("dock-more");
+            hud.stage.act(1);
+        }
+    }
+
+    @Test
+    void moreDismissesForDialogsAndCanTakeKeyboardFocusAgain() {
+        when(source.players()).thenReturn(mock(GpuPlayers.class));
+        AtomicInteger ran = new AtomicInteger();
+        List<BoardScene.Command> commands = List.of(extra("extra", ran::incrementAndGet));
+        for (GpuHudState.Dialog dialog : List.of(GpuHudState.Dialog.HELP, GpuHudState.Dialog.MENU,
+              GpuHudState.Dialog.PLAYERS)) {
+            updateMore(commands);
+            change("dock-more");
+            assertTrue(press(Input.Keys.DOWN, KeyEvent.VK_DOWN, 0));
+            hud.state.dialog = dialog;
+            updateMore(commands);
+            hud.stage.act(1);
+            assertFalse(hud.stage.getRoot().findActor("dock-more-drawer").isVisible(), dialog.toString());
+            assertTrue(escape());
+            updateMore(commands);
+            assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog);
+            change("dock-more");
+            assertSame(hud.stage.getRoot().findActor("dock-more-commands"), hud.stage.getKeyboardFocus());
+            assertTrue(press(Input.Keys.DOWN, KeyEvent.VK_DOWN, 0));
+            assertTrue(press(Input.Keys.ENTER, KeyEvent.VK_ENTER, 0));
+        }
+        assertEquals(3, ran.get());
+    }
+
+    @Test
+    void moreKeepsTheHighlightedCommandVisibleWhenTheWindowShrinks() {
+        List<BoardScene.Command> commands = IntStream.range(0, 40)
+              .mapToObj(index -> extra("extra" + index, () -> { })).toList();
+        updateMore(commands);
+        change("dock-more");
+        updateMore(commands);
+        hud.stage.act(1);
+        validateLayout(hud.stage.getRoot());
+        assertTrue(press(Input.Keys.END, KeyEvent.VK_END, 0));
+        for (int[] size : new int[][] { { 1280, 900 }, { 1280, 720 }, { 900, 600 } }) {
+            hud.resize(size[0], size[1], 1);
+            updateMore(commands);
+            ScrollPane scroll = hud.stage.getRoot().findActor("dock-more-scroll");
+            // A draw updates the widget's position from the visual scroll amount; layout does the same without GL.
+            scroll.updateVisualScroll();
+            scroll.layout();
+            UiMenuList grid = hud.stage.getRoot().findActor("dock-more-commands");
+            Actor selected = hud.stage.getRoot().findActor("dock-more-extra39");
+            assertSame(selected, grid.highlighted());
+            Rectangle viewport = GpuHudTestStage.bounds(scroll);
+            Rectangle selectedBounds = GpuHudTestStage.bounds(selected);
+            assertTrue(selectedBounds.y >= viewport.y - .5f
+                  && selectedBounds.y + selectedBounds.height <= viewport.y + viewport.height + .5f,
+                  size[0] + "x" + size[1] + ": " + selectedBounds + " outside " + viewport);
+        }
+        ScrollPane scroll = hud.stage.getRoot().findActor("dock-more-scroll");
+        scroll.setScrollY(0);
+        updateMore(commands);
+        assertEquals(0, scroll.getScrollY(), .5f, "ordinary updates must not undo manual scrolling");
+    }
+
+    @Test
+    void moreWrapsTheEmptyMessageWithinItsViewport() {
+        hud.resize(1280, 720, 1);
+        updateMore(List.of());
+        change("dock-more");
+        updateMore(List.of());
+        hud.stage.act(1);
+        validateLayout(hud.stage.getRoot());
+        Label empty = hud.stage.getRoot().findActor("dock-more-empty");
+        assertNotNull(empty);
+        assertEquals(UiKit.text("GpuBoard.hud.dock.moreNone"), empty.getText().toString());
+        ScrollPane scroll = hud.stage.getRoot().findActor("dock-more-scroll");
+        Rectangle viewport = GpuHudTestStage.bounds(scroll);
+        Rectangle message = GpuHudTestStage.bounds(empty);
+        assertTrue(message.x >= viewport.x - .5f && message.x + message.width <= viewport.x + viewport.width + .5f
+              && message.y >= viewport.y - .5f && message.y + message.height <= viewport.y + viewport.height + .5f,
+              message + " outside " + viewport);
+        assertTrue(empty.getGlyphLayout().width <= empty.getWidth() + .5f, "all text fits horizontally");
+        assertTrue(empty.getGlyphLayout().height <= empty.getHeight() + .5f, "wrapped lines fit vertically");
+    }
+
     private static BoardScene.Command extra(String id, Runnable action) {
         return new BoardScene.Command(id, id, "", true, false, List.of(), action);
     }
 
     /** A movement frame with the supplied overflow commands, settled as after the HUD's layout and draw. */
     private void updateMore(List<BoardScene.Command> commands) {
+        updateMore(commands, preferences());
+    }
+
+    private void updateMore(List<BoardScene.Command> commands, GpuBoardSource.UiPreferences prefs) {
         BoardScene scene = mock(BoardScene.class);
         when(scene.commands()).thenReturn(commands);
         GpuBoardSource.Frame frame = frame(status(3, GamePhase.MOVEMENT, true, FIRST, 0,
               unit(FIRST, OWN, true, true)), panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), scene);
         for (int pass = 0; pass < 3; pass++) {
-            hud.update(frame, GpuHud.HudView.EMPTY, null, preferences());
+            hud.update(frame, GpuHud.HudView.EMPTY, null, prefs);
             validateLayout(hud.stage.getRoot());
         }
     }
@@ -1084,6 +1189,10 @@ class GpuHudInputTest {
 
     private boolean escape() {
         return press(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE, 0);
+    }
+
+    private boolean press(int key, int awt, int modifiers) {
+        return hud.keyDown(key, awt, modifiers);
     }
 
     private void click(Coords coords, int unitId, int modifiers) {

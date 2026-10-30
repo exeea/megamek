@@ -1165,18 +1165,24 @@ final class GpuHud implements GpuBoardHud {
         // column there, it lies above the dock, at most the dock's width, and grows upward over the hint line.
         GpuMoreDrawer drawer = dock.drawer();
         drawerSlot.setVisible(shown(dockSlot));
-        if (!drawerSlot.isVisible()) {
+        if (!drawerSlot.isVisible() || isModal()) {
             drawer.close();
         }
         boolean rightColumn = shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) || shown(solutionSlot);
         float drawerX = dockSlot.getX() + dockSlot.getWidth() + STACK;
         float drawerRight = rightColumn ? bandRight + gap : width - gap - chatWidth - STACK;
-        int besideColumns = GpuMoreDrawer.columnsIn(drawerRight - drawerX);
+        int besideColumns = Math.min(GpuMoreDrawer.columnsIn(drawerRight - drawerX), drawer.columnsAt(dockHeight));
+        // A short drawer can fit below the minimap, but a taller one must fit to its left or above the dock.
+        if (besideColumns > 0 && shown(minimapSlot)
+              && overlapsHorizontally(minimapSlot, drawerX, GpuMoreDrawer.width(besideColumns))
+              && gap + Math.max(dockHeight, drawer.height(besideColumns)) + STACK > minimapSlot.getY()) {
+            besideColumns = Math.min(besideColumns,
+                  GpuMoreDrawer.columnsIn(minimapSlot.getX() - drawerX - STACK));
+        }
         drawer.above(besideColumns == 0);
         if (besideColumns > 0) {
-            int columns = Math.min(besideColumns, drawer.columnsAt(dockHeight));
-            float drawerHeight = Math.min(Math.max(dockHeight, drawer.height(columns)), dockTop + dockHeight - gap);
-            place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, GpuMoreDrawer.width(columns),
+            float drawerHeight = Math.min(Math.max(dockHeight, drawer.height(besideColumns)), dockTop + dockHeight - gap);
+            place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, GpuMoreDrawer.width(besideColumns),
                   drawerHeight);
         } else {
             float room = Math.max(0, dockTop - STACK - gap);
