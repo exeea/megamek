@@ -63,6 +63,15 @@ final class GpuProgramCache {
     private static final Pattern ENTRY = Pattern.compile("[0-9a-f]{64}\\.bin");
     private static final Pattern PARTIAL = Pattern.compile("[0-9a-f]{64}-\\d+\\.tmp");
     private static final int MAGIC = 0x4D4D5042, VERSION = 1, HEADER = 20;
+    /**
+     * Intel's own shader cache on Windows. Once a file there reaches {@link #INTEL_CACHE_CAP}, the driver stores
+     * nothing more, and with ambient occlusion every launch compiles again at the board's first draws (11-16 s on Iris
+     * Xe): that work is not in the program binaries kept here. The loading stage tells the player (GpuBattleView);
+     * only the player clears the folder.
+     */
+    static final Path INTEL_CACHE = Path.of(System.getProperty("user.home"), "AppData", "LocalLow", "Intel",
+          "ShaderCache");
+    static final long INTEL_CACHE_CAP = 512L << 20;
     private final Path directory;
     private final String driver;
     private final int[] formats;
@@ -100,6 +109,15 @@ final class GpuProgramCache {
               + GL11.glGetString(GL11.GL_RENDERER) + '\n' + GL11.glGetString(GL11.GL_VERSION) + '\n' + KEY_SALT, formats);
         cache.prune();
         return cache;
+    }
+
+    /** Whether a file in {@code folder} has reached {@code cap} bytes; false when it cannot be read. Only reads sizes. */
+    static boolean full(Path folder, long cap) {
+        try (var files = Files.list(folder)) {
+            return files.anyMatch(file -> file.toFile().length() >= cap);
+        } catch (IOException | RuntimeException unreadable) {
+            return false;
+        }
     }
 
     /** The directory the property names, else {@code standard}. */

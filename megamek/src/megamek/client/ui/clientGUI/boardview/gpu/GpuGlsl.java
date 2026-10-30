@@ -91,6 +91,8 @@ final class GpuGlsl {
     private static final ThreadLocal<Preparation> PREPARING = new ThreadLocal<>();
     /** The render thread's program binaries, opened by {@link #detect()}; null caches nothing. Tests replace it. */
     static GpuProgramCache programCache;
+    /** Whether Intel's own shader cache is full ({@link GpuProgramCache#INTEL_CACHE}): read once the context exists. */
+    private static boolean intelCacheFull;
     /** Whether a board view shows its board rather than its loading stage (GpuBattleView). */
     private static volatile boolean presenting;
     /** Programs compiled from source while a board showed that held the render thread: none should. */
@@ -731,7 +733,15 @@ final class GpuGlsl {
         // Machine-specific state belongs with MegaMek's other written settings.
         programCache = GpuProgramCache.open(
               GpuProgramCache.directory(new File(Configuration.configDir(), "gpu-program-cache").toPath()));
+        String vendor = GL11.glGetString(GL11.GL_VENDOR);
+        boolean intel = vendor != null && vendor.toLowerCase(Locale.ROOT).contains("intel");
+        // Before any loading stage: one small folder's listing, about a millisecond.
+        intelCacheFull = SharedLibraryLoader.os == Os.Windows && intel
+              && GpuProgramCache.full(GpuProgramCache.INTEL_CACHE, GpuProgramCache.INTEL_CACHE_CAP);
     }
+
+    /** Whether Intel's own shader cache has filled up; false on other drivers and systems. */
+    static boolean intelCacheFull() { return intelCacheFull; }
 
     /** The GLSL version for an OpenGL context version: the same version, capped, never below {@link #MINIMUM}. */
     static int select(int major, int minor, int cap) {

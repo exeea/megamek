@@ -101,6 +101,18 @@ class GpuProgramCacheTest {
         assertFalse(Files.exists(oldest), "The least recently used entry exceeds the capacity");
     }
 
+    @Test
+    void intelsCacheIsFullOnceOneOfItsFilesReachesTheCap() throws IOException {
+        assertFalse(GpuProgramCache.full(directory.resolve("absent"), 16), "A missing folder is not full");
+        assertFalse(GpuProgramCache.full(directory, 16), "Nor is an empty one");
+        Files.write(directory.resolve("small"), new byte[15]);
+        Files.write(directory.resolve("other"), new byte[15]);
+        assertFalse(GpuProgramCache.full(directory, 16), "Files below the cap, even together over it");
+        Files.write(directory.resolve("capped"), new byte[16]);
+        assertTrue(GpuProgramCache.full(directory, 16), "One file at the cap");
+        assertTrue(Files.exists(directory.resolve("capped")), "Checking changes nothing");
+    }
+
     /** A file named like an entry of the digit, with the suffix, size and last use. */
     private Path file(char digit, String suffix, int size, Instant used) throws IOException {
         Path file = directory.resolve(String.valueOf(digit).repeat(64) + suffix);

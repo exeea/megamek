@@ -389,6 +389,16 @@ class GpuBattleView extends ApplicationAdapter {
         content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
         content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900)
               .height(loadingLabel.getStyle().font.getLineHeight() * 2).row();
+        if (GpuGlsl.intelCacheFull()) {
+            // The player clears the driver's folder; MegaMek only reads its file sizes.
+            var notice = new Label(Messages.getString("GpuBoard.intelShaderCacheFull", GpuProgramCache.INTEL_CACHE),
+                  skin);
+            notice.setName("board-loading-notice");
+            notice.setWrap(true);
+            notice.setAlignment(Align.center);
+            notice.setColor(UiTheme.AMBER);
+            content.add(notice).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(6).row();
+        }
         // The header keeps the top and the progress the bottom; the honeycomb centers in the space between and shrinks
         // its hexes to fit. The tasks keep room for every worker, so a change in their count never moves a row.
         content.add(loadingGrid).width(Value.percentWidth(.9f, content)).growY().padTop(14).row();
