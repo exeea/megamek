@@ -7,11 +7,13 @@ import java.util.function.Predicate;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.g3d.Environment;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.IntArray;
 
 /**
  * Small ranges shared by nearby chunks: opaque terrain, and authored paint, whose equal numbered draws
@@ -27,6 +29,9 @@ final class GpuTerrainPages implements Disposable {
     private final boolean perspective;
     private final Map<Integer, GpuMeshPage> pages = new HashMap<>();
     private final Array<Renderable> separate = new Array<>();
+    private final IntArray separatePages = new IntArray();
+    // Copies of parts drawn in another material this frame (render with materials): sources are never changed.
+    private final GpuRenderableCopies copies = new GpuRenderableCopies();
     private boolean enabled = true, active;
     private long rebuilds;
 
@@ -38,6 +43,8 @@ final class GpuTerrainPages implements Disposable {
     void begin(Camera camera) {
         active = enabled && (perspective || camera.projection.val[Matrix4.M33] != 0);
         separate.clear();
+        separatePages.clear();
+        copies.clear();
         if (active) { pages.values().forEach(GpuMeshPage::begin); }
     }
 
@@ -56,27 +63,45 @@ final class GpuTerrainPages implements Disposable {
                 page.add(part, visible);
             } else if (visible) {
                 separate.add(part);
+                separatePages.add(pageId);
             }
         }
+    }
+
+    /** The material a part of a page draws in this frame (the ground material cache's twin, GpuMaterialCache). */
+    interface Materials {
+        Material of(int page, Material material);
     }
 
     /** Pages merge until {@code deadline} (System.nanoTime); meanwhile their sources draw as GpuMeshPage describes. */
     void render(ModelBatch batch, Environment environment, long deadline) {
-        if (active) {
-            for (GpuMeshPage page : pages.values()) {
-                if (page.advance(deadline)) { rebuilds++; }
-                page.render(batch, environment);
-            }
-        }
-        submit(batch, environment, separate);
+        render(batch, environment, deadline, null);
     }
 
-    private static void submit(ModelBatch batch, Environment environment, Array<Renderable> parts) {
-        for (Renderable part : parts) {
-            part.shader = null;
-            part.environment = environment;
-            batch.render(part);
+    /**
+     * As render, each draw in the material {@code materials} gives it for its page, decided at this final submission:
+     * merged meshes, partial runs and unmerged sources alike.
+     */
+    void render(ModelBatch batch, Environment environment, long deadline, Materials materials) {
+        if (active) {
+            for (var entry : pages.entrySet()) {
+                GpuMeshPage page = entry.getValue();
+                if (page.advance(deadline)) { rebuilds++; }
+                int id = entry.getKey();
+                page.forEachVisible(part -> submit(batch, environment, part, materials, id));
+            }
         }
+        for (int i = 0; i < separate.size; i++) {
+            submit(batch, environment, separate.get(i), materials, separatePages.get(i));
+        }
+    }
+
+    private void submit(ModelBatch batch, Environment environment, Renderable part, Materials materials, int page) {
+        part.shader = null;
+        part.environment = environment;
+        Material material = materials == null ? part.material : materials.of(page, part.material);
+        if (material != part.material) { part = copies.of(part, material); }
+        batch.render(part);
     }
 
     long rebuilds() { return rebuilds; }
@@ -86,5 +111,7 @@ final class GpuTerrainPages implements Disposable {
         pages.values().forEach(GpuMeshPage::dispose);
         pages.clear();
         separate.clear();
+        separatePages.clear();
+        copies.clear();
     }
 }

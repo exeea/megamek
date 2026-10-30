@@ -128,6 +128,15 @@ final class GpuTerrain implements Disposable {
     private final GpuTerrainBatch terrainBatch = new GpuTerrainBatch(material -> material.has(Ground.TYPE)
           && !material.has(GpuLiquidShader.Frame.TYPE) && !material.has(GpuWaterShader.TYPE), this::shaderGroup);
     private final GpuTerrainPages terrainPages = new GpuTerrainPages(terrainBatch::eligible);
+    /** The ground material cache's tops (GpuMaterialCache) in shared draws of their own, which switch programs. */
+    private final GpuTerrainPages topPages = new GpuTerrainPages(terrainBatch::eligible);
+    private final GpuMaterialCache materialCache = new GpuMaterialCache();
+    /** The cache's fill programs (TerrainShaders with fill) and their batch, made with the first fill program. */
+    private ModelBatch fillBatch;
+    /** A fill's draws: copies of the tops in their generic materials (GpuMaterialCache.fillMaterial). */
+    private final GpuRenderableCopies fillCopies = new GpuRenderableCopies();
+    /** Whether the installed chunks hold cache tops the cache draws (cachesGround): their programs link in the warm-up. */
+    private boolean cacheTops;
     /** Authored paint of nearby chunks in shared draws: each chunk numbers its paint draws in painter order. */
     private final GpuTerrainPages paintPages = new GpuTerrainPages(part -> true);
     private final GpuWaterPages waterPages = new GpuWaterPages();
@@ -154,6 +163,8 @@ final class GpuTerrain implements Disposable {
      */
     private final class TerrainShaders extends DefaultShaderProvider {
         private final boolean depthOnly;
+        /** The ground material cache's fill programs (GpuMaterialCache): the sculpt evaluator alone, into its pages. */
+        private final boolean fill;
         /**
          * A solid surface twin's fragment stage, read while the provider is built: the shader editor tracks the files a
          * provider reads then, so an edit of it rebuilds the twins.
@@ -162,11 +173,14 @@ final class GpuTerrain implements Disposable {
 
         // A scar patch draws with its receiver's program (GpuSurfaceScars): every vertex stage forwards the patch's
         // page UV, and the sculpt and model fragment stages draw the patch.
-        TerrainShaders(boolean depthOnly) {
+        TerrainShaders(boolean depthOnly) { this(depthOnly, false); }
+
+        TerrainShaders(boolean depthOnly, boolean fill) {
             super(GpuSurfaceScars.vertex(invariantPosition(GpuCloudShadow.vertex(GpuUnitShader.linearVertex(
                         GpuShaderSource.read("model.vert"))))),
                   GpuSurfaceScars.fragment(GpuCloudShadow.fragment(GpuUnitShader.fragment())));
             this.depthOnly = depthOnly;
+            this.fill = fill;
             depthFragment = depthOnly ? GpuShaderSource.read("terrain-depth.frag") : null;
         }
 
@@ -303,6 +317,15 @@ final class GpuTerrain implements Disposable {
                   + GpuFamilyPrograms.name(renderable.material, Sculpt.TYPE);
             // From the colour program's stages: the prefix is also the vertex stage's, which a twin shares.
             prefix += GpuShaderSource.finishPrefix(FINISHES.size(), SCULPT_LAYERS.size(), chosen.vertexShader, fragment);
+            // The ground material cache (GpuMaterialCache): a fill program, or a cache top's cached-lit twin.
+            boolean cached = !depthOnly && !fill && GpuMaterialCache.isCached(renderable.material);
+            if (fill) {
+                prefix += "#define materialFillFlag\n";
+                shaderName += " cache-fill";
+            } else if (cached) {
+                prefix += "#define materialCachedFlag\n";
+                shaderName += " cached";
+            }
             if (depthOnly) {
                 // A cutout's twin returns after its alpha test (GpuGlsl.source moves the version line above the define);
                 // a solid surface's twin has an empty fragment stage.
@@ -320,7 +343,7 @@ final class GpuTerrain implements Disposable {
                 }
             }
             // The pre-pass draws twin by twin (renderPrepass): a twin sorts with no program.
-            Shader group = depthOnly ? null : familyGroup(renderable, shaders);
+            Shader group = depthOnly || fill ? null : familyGroup(renderable, shaders);
             DefaultShader result = new DefaultShader(renderable, chosen,
                   GpuGlsl.compile(shaderName, prefix + GpuFamilyPrograms.defines(renderable.material, Sculpt.TYPE),
                         tessellated ? GpuTessellation.vertex(chosen.vertexShader) : chosen.vertexShader, fragment)) {
@@ -420,6 +443,7 @@ final class GpuTerrain implements Disposable {
                     // libGDX binds only the instance attributes of the renderable a shader was created for (instanceMask).
                     // Family programs (GpuFamilyPrograms) first: the provider's scan rejects them cheaply.
                     return GpuFamilyPrograms.draws(families, baseAliases, other.material, Sculpt.TYPE)
+                          && GpuMaterialCache.isCached(other.material) == cached
                           && sameMaterialVariant(other.material, iceMode, linearTexture, ordinaryFamily, waterMode,
                                 flowingMagma)
                           // A shadow map changes the compiled samplers without changing the environment's mask.
@@ -709,6 +733,8 @@ final class GpuTerrain implements Disposable {
             GpuModelLight.register(result, () -> clock);
             GpuBuildingCutaway.register(result);
             GpuSurfaceScars.register(result);
+            if (fill) { materialCache.registerFill(result); }
+            if (cached) { materialCache.registerCached(result); }
             GpuLiquidShader.register(result);
             GpuMagmaShader.register(result, rainNoise);
             // Upload before drawing: creating ice maps from a uniform setter disturbs the active texture bindings.
@@ -919,10 +945,13 @@ final class GpuTerrain implements Disposable {
      * Null for a generic program.
      */
     private Shader familyGroup(Renderable renderable, Iterable<Shader> programs) {
-        if (!renderable.material.has(GpuFamilyPrograms.Constants.TYPE)) { return null; }
+        boolean cached = GpuMaterialCache.isCached(renderable.material);
+        if (!renderable.material.has(GpuFamilyPrograms.Constants.TYPE) && !cached) { return null; }
         Renderable generic = new Renderable().set(renderable);
         generic.material = new Material(renderable.material);
         generic.material.remove(GpuFamilyPrograms.Constants.TYPE);
+        // A cached-lit program (GpuMaterialCache) sorts, and takes part in the pre-pass, as its top's generic program.
+        if (cached) { generic.material.id = ""; }
         for (Shader program : programs) {
             if (program.canRender(generic)) { return shaderGroup(program); }
         }
@@ -1809,6 +1838,9 @@ final class GpuTerrain implements Disposable {
         final Map<Coords, TileMesh> tileMeshes = new HashMap<>();
         final List<ModelInstance> opaque = new ArrayList<>();
         Array<Renderable> terrainRenderables;
+        /** The ground material cache's tops (GpuMaterialCache.top), not in terrainRenderables, and their bounds. */
+        final Array<Renderable> topRenderables = new Array<>();
+        final BoundingBox topBounds = new BoundingBox();
         GpuTerrainDepth depthTerrain;
         /** Packed and instanced cosmetic cover share one visibility decision in every pass. */
         final List<ModelInstance> scatter = new ArrayList<>();
@@ -2176,7 +2208,8 @@ final class GpuTerrain implements Disposable {
     boolean ready(BoardScene scene) {
         return (materialsReady() || !familySession && sameMaterialConfiguration()) && coverScene != null
               && sameBoard(coverScene, scene) && installedColumns == columns && atlasColumns == columns
-              && installedTessellation == tessellation && !familiesPending();
+              && installedTessellation == tessellation && !familiesPending()
+              && (materialCache.prewarmed() || !materialsReady());
     }
 
     int buildProgress() {
@@ -2277,6 +2310,13 @@ final class GpuTerrain implements Disposable {
         surfaceScars.update(scene);
         groundDamage.impact(scene, impact, this::tacticalSurface, surfaceScars::add);
     }
+
+    /** Test hook: the ground material cache on or off (GpuMaterialCache), with its state for reports. */
+    void setMaterialCache(boolean enabled) { materialCache.setEnabled(enabled); }
+
+    boolean materialCacheComplete() { return materialCache.complete(); }
+
+    String materialCacheReport() { return materialCache.report(); }
 
     /**
      * Whether combat scars show. On before the board builds (games), it also prepares the plain programs of the objects
@@ -2658,6 +2698,12 @@ final class GpuTerrain implements Disposable {
                 terrainBatch.clear();
             }
             familySession = familyPrograms.pending() > 0;
+        }
+        // The ground material cache's first view builds behind the loading stage (ready), once the board and every
+        // program are in.
+        if (requested == null && rebuild == null && materialsReady()) {
+            materialCache.prewarm(camera, !installedColumns && !fluffHidden, this::drawCacheTops,
+                  () -> cacheChunks(camera));
         }
         // While opening/replacing a board or switching the graphics (both behind the loading stage), use more of the
         // loading frame for uploads instead of stretching each chunk's handoffs over several frames. An editor change
@@ -3057,9 +3103,12 @@ final class GpuTerrain implements Disposable {
         scarSurfaceRevision++;
         BoardScene scene = rebuild.request.scene();
         UpdatePlan plan = rebuild.plan;
+        // An edit's rebuilt chunks, old and new: the ground material cache refills only what they reach.
+        BoundingBox rebuilt = new BoundingBox().inf();
         if (plan.all()) {
             propBatch.dispose();
             terrainPages.dispose();
+            topPages.dispose();
             paintPages.dispose();
             waterPages.dispose();
             retiredChunks.addAll(chunks);
@@ -3069,7 +3118,11 @@ final class GpuTerrain implements Disposable {
         } else {
             rebuild.replacements.forEach((index, next) -> {
                 if (next.paintOnlyUpdate) { installPaint(chunks.get(index), next); retiredChunks.add(next); }
-                else { retiredChunks.add(chunks.set(index, next)); }
+                else {
+                    Chunk old = chunks.set(index, next);
+                    rebuilt.ext(old.bounds).ext(next.bounds);
+                    retiredChunks.add(old);
+                }
             });
         }
         coverScene = scene;
@@ -3101,6 +3154,15 @@ final class GpuTerrain implements Disposable {
         terrainBatch.clear();
         pickingSurfaces.clear();
         detailPixelsPerUnit = Float.NaN;
+        // The ground material cache refills what a build changed before the new relief draws, the whole board after a
+        // load, which also takes the view's storage.
+        materialCache.retireTwins();
+        BoundingBox board = new BoundingBox().inf();
+        for (Chunk chunk : chunks) { board.ext(chunk.bounds); }
+        materialCache.rebuilt(board, plan.all() ? null : rebuilt, BoardRelief.metres(1));
+        if (plan.all()) {
+            materialCache.allocate(cachesGround() && chunks.stream().anyMatch(chunk -> !chunk.topRenderables.isEmpty()));
+        }
         hasCutaways = chunks.stream().anyMatch(chunk -> !chunk.cutaways.isEmpty());
         Set<GpuBuilding.Assembly> liveBuildings = new HashSet<>();
         Set<Model> liveIndustrial = new HashSet<>();
@@ -3241,7 +3303,9 @@ final class GpuTerrain implements Disposable {
         int programs = 0, linked = 0;
         for (Renderable sample : terrainMaterialSamples) {
             boolean twinned = prepasses(prepass(sample.material));
-            programs += (twinned ? 2 : 1) + (editable ? 1 : 0);
+            // A variant whose tops the ground material cache draws also links its generic cached-lit and fill programs.
+            boolean cacheable = cacheTops && GpuMaterialCache.cacheable(sample.material);
+            programs += (twinned ? 2 : 1) + (editable ? 1 : 0) + (cacheable ? 2 : 0);
             // Beside interactive frames (an edit, the editor's samples) the rest wait once a frame spent its budget.
             if (GpuGlsl.overBudget()) { continue; }
             long start = System.nanoTime();
@@ -3256,12 +3320,34 @@ final class GpuTerrain implements Disposable {
                 try { depthBatch.getShaderProvider().getShader(sample); }
                 finally { sample.shader = colourShader; }
             });
+            boolean cachedLit = colour && cacheable && terrainMaterialPreparation.run(() -> cacheProgram(sample,
+                  GpuMaterialCache.cachedTwin(sample.material), sample.environment, batch.getShaderProvider()));
+            boolean fills = colour && cacheable && terrainMaterialPreparation.run(() -> cacheProgram(sample,
+                  materialCache.fillMaterial(sample.material), null, fillShaders()));
             GpuGlsl.spent(System.nanoTime() - start);
-            linked += (colour ? 1 : 0) + (twin ? 1 : 0) + (cast ? 1 : 0);
+            linked += (colour ? 1 : 0) + (twin ? 1 : 0) + (cast ? 1 : 0) + (cachedLit ? 1 : 0) + (fills ? 1 : 0);
         }
         if (linked < programs) { terrainMaterialsReady = false; }
         terrainPrograms = programs;
         terrainProgramsLinked = linked;
+    }
+
+    /** Links the program {@code provider} gives a warm-up sample drawn in {@code material} under {@code light}. */
+    private static void cacheProgram(Renderable sample, Material material, Environment light, ShaderProvider provider) {
+        Renderable draw = new Renderable().set(sample);
+        draw.shader = null;
+        draw.material = material;
+        draw.environment = light;
+        provider.getShader(draw);
+    }
+
+    /** The ground material cache's fill programs and their batch (drawCacheTops). */
+    private ShaderProvider fillShaders() {
+        if (fillBatch == null) {
+            fillBatch = new ModelBatch(GpuShaderManager.provider("Terrain cache fill",
+                  () -> new TerrainShaders(false, true)), new GpuOpaqueSorter());
+        }
+        return fillBatch.getShaderProvider();
     }
 
     /** A warm-up sample's depth twin, from the twin provider: never the colour program the sample suggests. */
@@ -3285,6 +3371,8 @@ final class GpuTerrain implements Disposable {
     private void replaceDetail(int index, Chunk next) {
         scarSurfaceRevision++;
         Chunk old = chunks.set(index, next);
+        // Level tops are the same at every detail: the cache keeps its pages and forgets only the old materials.
+        materialCache.retireTwins();
         editorPropsInstalled = true;
         Chunk evicted = detailCache.remove(index);
         if (evicted != null) { evicted.dispose(); }
@@ -4715,6 +4803,20 @@ final class GpuTerrain implements Disposable {
                 }
             }
             chunk.terrainRenderables = GpuTerrainDepth.snapshot(chunk.opaque);
+            // Cache tops draw on terrain pages of their own (topPages): their draws switch programs.
+            chunk.topRenderables.clear();
+            chunk.topBounds.inf();
+            for (int i = chunk.terrainRenderables.size - 1; i >= 0; i--) {
+                Renderable part = chunk.terrainRenderables.get(i);
+                if (!GpuMaterialCache.isTop(part.material)) { continue; }
+                chunk.terrainRenderables.removeIndex(i);
+                chunk.topRenderables.add(part);
+                if (part.meshPart.size > 0) {
+                    chunk.topBounds.ext(part.meshPart.mesh.calculateBoundingBox(new BoundingBox(), part.meshPart.offset,
+                          part.meshPart.size).mul(part.worldTransform));
+                }
+            }
+            chunk.topRenderables.reverse();
             chunk.scatterRenderables = GpuTerrainDepth.snapshot(chunk.scatter);
             chunk.waterRenderables = GpuTerrainDepth.snapshot(chunk.water);
             chunk.beyondRenderables.clear();
@@ -4727,8 +4829,13 @@ final class GpuTerrain implements Disposable {
             }
             // Ground, water and magma draw these materials as they are. An editor also retains the other actual parts,
             // including grass: palette cards may draw any of them after the loading stage.
-            for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.scatterRenderables, chunk.waterRenderables,
-                  chunk.beyondRenderables)) {
+            if (!chunk.topRenderables.isEmpty() && !cacheTops && cachesGround()) {
+                // Their cached-lit and fill programs link in the warm-up too.
+                cacheTops = true;
+                terrainMaterialsReady = false;
+            }
+            for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.topRenderables,
+                  chunk.scatterRenderables, chunk.waterRenderables, chunk.beyondRenderables)) {
                 for (Renderable part : layer) {
                     if (editable || part.material.has(Sculpt.TYPE) || part.material.has(Pit.TYPE)
                           || part.material.has(GpuBackdrop.TYPE)
@@ -4748,7 +4855,9 @@ final class GpuTerrain implements Disposable {
                 }
             }
             // The ground switches to family programs as they become ready; scatter and water keep generic ones.
-            for (Renderable part : chunk.terrainRenderables) {
+            Array<Renderable> opaqueParts = new Array<>(chunk.terrainRenderables);
+            opaqueParts.addAll(chunk.topRenderables);
+            for (Renderable part : opaqueParts) {
                 familyPrograms.request(part.material, part.meshPart.size, part.meshPart.mesh.getVertexAttributes());
                 // Built for tessellation, the curving copy draws once its chunk refines to full detail: its family
                 // program builds in the loading stage's session too, from a copy kept for it, as its other programs
@@ -5201,8 +5310,20 @@ final class GpuTerrain implements Disposable {
                 (curves ? curved : plain).add(face);
             }
         }
-        if (!plain.isEmpty()) {
-            solid.addTriangles(material, mesh -> sculptedFaces(mesh, surface, plain, shore, scene, surfaces));
+        List<BoardSurface.Face> rest = plain;
+        // Dry level tops in a material of their own, which the ground material cache can draw (GpuMaterialCache).
+        if (Float.isNaN(shore) && GpuMaterialCache.cacheable(material)) {
+            List<BoardSurface.Face> tops = new ArrayList<>();
+            rest = new ArrayList<>();
+            for (var face : plain) { (GpuMaterialCache.top(surface, face, scene, surfaces) ? tops : rest).add(face); }
+            if (!tops.isEmpty()) {
+                solid.addTriangles(GpuMaterialCache.top(material),
+                      mesh -> sculptedFaces(mesh, surface, tops, shore, scene, surfaces));
+            }
+        }
+        List<BoardSurface.Face> direct = rest;
+        if (!direct.isEmpty()) {
+            solid.addTriangles(material, mesh -> sculptedFaces(mesh, surface, direct, shore, scene, surfaces));
         }
         if (!curved.isEmpty()) {
             solid.addTriangles(GpuTessellation.curvedCopy(material),
@@ -7373,32 +7494,105 @@ final class GpuTerrain implements Disposable {
         if (fluffHidden) { chunks.forEach(Chunk::keptProps); }
     }
 
+    /**
+     * The ground material cache's fill of one page (GpuMaterialCache.Tops): the cache tops reaching the world
+     * rectangle, in their generic materials, drawn from {@code camera} with the fill programs, unlit.
+     */
+    private void drawCacheTops(Camera camera, float minX, float minY, float maxX, float maxY) {
+        fillShaders();
+        shadingPass++;
+        fillBatch.begin(camera);
+        try {
+            for (Chunk chunk : chunks) {
+                BoundingBox bounds = chunk.topBounds;
+                if (chunk.topRenderables.isEmpty() || bounds.max.x < minX || bounds.min.x > maxX || bounds.max.y < minY
+                      || bounds.min.y > maxY) { continue; }
+                for (Renderable part : chunk.topRenderables) {
+                    if (part.meshPart.size == 0) { continue; }
+                    Renderable copy = fillCopies.of(part, materialCache.fillMaterial(part.material));
+                    copy.shader = null;
+                    copy.environment = null;
+                    fillBatch.render(copy);
+                }
+            }
+        } finally {
+            fillBatch.end();
+            fillCopies.clear();
+        }
+    }
+
+    /**
+     * Whether the ground material cache draws this terrain's level tops: the view's own terrain (prints and previews
+     * borrow its assets and draw directly), with every sculpted surface a plain dielectric. The cache keeps no emission
+     * (a map or a constant glow), metallic or scattering, map or factor (their means are zero only where every texel
+     * is).
+     */
+    private boolean cachesGround() {
+        if (!GpuMaterialCache.ENABLED || borrowedAssets) { return false; }
+        var finish = assets.finishArrays(FINISHES, SCULPT_LAYERS.size());
+        for (int material = 0; material < SCULPT_LAYERS.size(); material++) {
+            if (finish.tint()[material * 4 + 3] >= 0 || finish.glow()[material * 3] != 0
+                  || finish.glow()[material * 3 + 1] != 0 || finish.glow()[material * 3 + 2] != 0
+                  || finish.surface()[material * 4 + 1] != 0 || finish.surface()[material * 4 + 2] != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Each chunk's cache tops for this frame of the ground material cache, with whether {@code camera} sees them. */
+    private void cacheChunks(Camera camera) {
+        for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
+            Chunk chunk = chunks.get(chunkIndex);
+            if (!chunk.topRenderables.isEmpty()) {
+                materialCache.chunk(terrainPage(chunkIndex), chunk.topBounds,
+                      camera.frustum.boundsInFrustum(chunk.topBounds));
+            }
+        }
+    }
+
+    /** The terrain page of a chunk: a fixed square of {@link GpuTerrainPages#CHUNKS_PER_PAGE} chunks a side. */
+    private int terrainPage(int chunkIndex) {
+        int size = GpuTerrainPages.CHUNKS_PER_PAGE, rows = (chunkRows + size - 1) / size;
+        return chunkIndex / chunkRows / size * rows + chunkIndex % chunkRows / size;
+    }
+
     /** The prop page of a chunk: a fixed square of {@link GpuPropBatch#CHUNKS_PER_PAGE} chunks a side. */
     private int propPage(int chunkIndex) {
         int size = GpuPropBatch.CHUNKS_PER_PAGE, rows = (chunkRows + size - 1) / size;
         return chunkIndex / chunkRows / size * rows + chunkIndex % chunkRows / size;
     }
 
-    /** The opaque world. */
+    /** The opaque world, for another camera than the view's (a print): its tops draw directly. */
     void render(Camera camera) {
-        render(camera, null, null);
+        render(camera, null, null, false);
     }
 
     /**
-     * The opaque world with a benchmark's stage boundaries: {@code prepassStage} runs after the frame's preparation and
-     * gather, {@code colourStage} after the depth pre-pass, before the colour draws.
+     * The view's opaque world, with a benchmark's stage boundaries: {@code prepassStage} runs after the frame's
+     * preparation and gather, {@code colourStage} after the depth pre-pass, before the colour draws. The view's camera
+     * drives the ground material cache (GpuMaterialCache).
      */
     void render(Camera camera, Runnable prepassStage, Runnable colourStage) {
+        render(camera, prepassStage, colourStage, true);
+    }
+
+    private void render(Camera camera, Runnable prepassStage, Runnable colourStage, boolean view) {
         // A changed lighting configuration returns every surface to its generic program before anything draws.
         if (familyPrograms.configure(environment)) {
             terrainBatch.clear();
             startFamilySession();
         }
-        shadingPass++;
         // Cosmetic relief layers are Enhanced-only. Routes belong to both graphics modes.
         boolean terrain = !installedColumns;
         // What the Tactical View hides (setFluffHidden).
         boolean fluff = !fluffHidden;
+        // The ground material cache fills the pages this view needs before anything draws (its own passes). Its
+        // programs draw only when the warm-up linked every program of this lighting, the direct ones included.
+        materialCache.begin(camera, view && terrain && fluff && materialsReady(), this::drawCacheTops);
+        cacheChunks(camera);
+        materialCache.end();
+        shadingPass++;
         packKeptProps();
         updateDetail(camera);
         lavaLighting.update(coverScene, terrain);
@@ -7414,7 +7608,7 @@ final class GpuTerrain implements Disposable {
         trees.begin(GpuTreeInstances.Pass.COLOUR);
         propBatch.begin();
         terrainPages.begin(camera);
-        int terrainPageRows = (chunkRows + GpuTerrainPages.CHUNKS_PER_PAGE - 1) / GpuTerrainPages.CHUNKS_PER_PAGE;
+        topPages.begin(camera);
         for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
             Chunk chunk = chunks.get(chunkIndex);
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
@@ -7422,9 +7616,9 @@ final class GpuTerrain implements Disposable {
             Hidden hidden = hidden(chunk);
             boolean packed = !hidden.props();
             // The 3D relief, or the Classic columns, in the chunk's opaque layer.
-            int page = chunkIndex / chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE * terrainPageRows
-                  + chunkIndex % chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE;
+            int page = terrainPage(chunkIndex);
             terrainPages.add(chunk.terrainRenderables, page, visible && hidden.ground() == null);
+            topPages.add(chunk.topRenderables, page, visible && hidden.ground() == null);
             if (visible && hidden.ground() != null) { renderRetained(hidden.ground(), batch, environment); }
             int propPage = propPage(chunkIndex);
             // Hover/occupancy changes only this chunk's presentation, not its static page membership.
@@ -7457,6 +7651,8 @@ final class GpuTerrain implements Disposable {
         long pageDeadline = System.nanoTime() + GpuMeshPage.BUILD_NANOS;
         propBatch.render(batch, environment, pageDeadline);
         terrainPages.render(batch, environment, pageDeadline);
+        // A page's tops take their cached twins once the cache has filled every page under them.
+        topPages.render(batch, environment, pageDeadline, materialCache::material);
         // The depth pre-pass: hidden colour fragments then fail the depth test before they shade. Not in the Tactical View
         // or on the Classic columns. The gather, the draw order and both flushes stay as they were.
         if (prepassStage != null) { prepassStage.run(); }
@@ -7493,8 +7689,7 @@ final class GpuTerrain implements Disposable {
             }
             if (chunk.paintRenderables == null) { chunk.paintRenderables = GpuTerrainDepth.snapshot(chunk.authoredPaint); }
             Array<Renderable> paint = hidden(chunk).paint();
-            paintPages.add(chunk.paintRenderables, chunkIndex / chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE * terrainPageRows
-                  + chunkIndex % chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE, visible && fluff && paint == null);
+            paintPages.add(chunk.paintRenderables, terrainPage(chunkIndex), visible && fluff && paint == null);
             if (visible && fluff && paint != null) { renderRetained(paint, batch, environment); }
         }
         if (lifts != null) { lifts.renderOverlays(batch, environment, fluff); }
@@ -7714,11 +7909,13 @@ final class GpuTerrain implements Disposable {
 
     /** Live shading preview; changing it needs no geometry, atlas or shadow rebuild. */
     void setNormalMaps(boolean enabled) {
+        if (normalMaps != enabled) { materialCache.invalidateAll(); }
         normalMaps = enabled;
     }
 
     /** The sculpted terrain's heightmap parallax (terrain-materials.glsl), apart from the normal maps. */
     void setTerrainParallax(boolean enabled) {
+        if (terrainParallax != enabled) { materialCache.invalidateAll(); }
         terrainParallax = enabled;
     }
 
@@ -8081,6 +8278,8 @@ final class GpuTerrain implements Disposable {
         fungus.dispose();
         geysers.dispose();
         terrainPages.dispose();
+        topPages.dispose();
+        materialCache.dispose();
         paintPages.dispose();
         waterPages.dispose();
         trees.dispose();
@@ -8092,6 +8291,8 @@ final class GpuTerrain implements Disposable {
         decals.dispose();
         batch.dispose();
         if (prepassShaders != null) { prepassShaders.dispose(); }
+        // Its provider holds the fill programs only (GpuMaterialCache), which it disposes with it.
+        if (fillBatch != null) { fillBatch.dispose(); }
         environmentLighting.dispose();
         lavaLighting.dispose();
         depthBatch.dispose();

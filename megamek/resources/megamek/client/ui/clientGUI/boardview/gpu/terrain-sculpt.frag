@@ -66,6 +66,61 @@ uniform vec4 u_coverResponses;
 uniform vec4 u_coverTiles0, u_coverTiles1, u_coverTiles2, u_coverTiles3;
 uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
 #endif
+// The ground material cache (GpuMaterialCache): a fill program (materialFillFlag) writes the canonical material of a top
+// as the close view shows it (the evaluator, lunar craters and ambient weathering) into world-aligned base tiles, whose
+// exact averages make the pages of a mip pyramid; a cached-lit program (materialCachedFlag) reads it there instead and
+// runs only the live layers and the lighting. Without either flag the program evaluates the material itself (direct).
+#ifdef materialFillFlag
+// The fill's other targets; fragColor takes the colour and material height. Every value is a plain sum's term, so the
+// pyramid's means and the reads' filtering stay exact averages: the unit normal (XY biased to 0..1) with the coverage,
+// and the intrinsic GGX alpha^2 (roughness^4, light-model.glsl). Cached ground has no metallic or scattering.
+layout(location = 1) out vec4 fillMoments; // normal XYZ, coverage
+layout(location = 2) out vec4 fillDetail;  // cavity, relief, alpha^2
+uniform float u_cacheClosePixel; // metres: the close view's pixel, the base tiles' texel
+#endif
+#ifdef materialCachedFlag
+// One texture-array layer per page. Every value is premultiplied by the coverage (the moments' alpha: 1 where a top
+// was drawn, 0 elsewhere), which averaging and filtering carry along, so dividing by it keeps empty texels out.
+uniform sampler2DArray u_cacheColour;
+uniform sampler2DArray u_cacheMoments;
+uniform sampler2DArray u_cacheDetail;
+// GpuPageCache's page table: the window of pages of the level the frame reads, each entry its layer, four to an ivec4.
+layout(std140) uniform MaterialCachePages {
+    vec4 cacheGrid;   // the window's first corner (metres), a page's interior (metres), its texels with both gutters
+    vec4 cacheWindow; // pages across and down, gutter texels
+    ivec4 cachePages[1020];
+};
+
+// The cached material at a world point (metres): colour and height; the mean of the unit normals (its length l is
+// their agreement); cavity, relief and their mean alpha^2. The page's own mips are the close view's material averaged
+// (colour, height, cavity and relief sharpened so the trilinear read lands on the plain average): they filter it
+// trilinearly and anisotropically from this pixel's derivatives.
+vec4 cachedMaterial(vec3 world, vec3 worldDx, vec3 worldDy, out vec3 meanNormal, out vec3 detail) {
+    vec2 cell = (world.xy - cacheGrid.xy) / cacheGrid.z;
+    ivec2 page = clamp(ivec2(floor(cell)), ivec2(0), ivec2(cacheWindow.xy) - 1);
+    int index = page.y * int(cacheWindow.x) + page.x;
+    float interior = cacheGrid.w - 2.0 * cacheWindow.z;
+    vec3 uv = vec3((cacheWindow.z + fract(cell) * interior) / cacheGrid.w, float(cachePages[index >> 2][index & 3]));
+    // Explicit gradients: a quad that straddles two pages keeps its footprint.
+    float scale = interior / (cacheGrid.z * cacheGrid.w);
+    vec2 dx = worldDx.xy * scale, dy = worldDy.xy * scale;
+    vec4 moments = textureGrad(u_cacheMoments, uv, dx, dy);
+    float coverageScale = 1.0 / max(moments.a, 1e-4);
+    meanNormal = vec3(moments.xy * 2.0 - moments.a, moments.z) * coverageScale;
+    detail = textureGrad(u_cacheDetail, uv, dx, dy).xyz * coverageScale;
+    return textureGrad(u_cacheColour, uv, dx, dy) * coverageScale;
+}
+
+// The GGX alpha^2 of texels whose unit normals average to length l: their own mean alpha^2 plus their spread, which a
+// von Mises-Fisher lobe of concentration kappa = l (3 - l^2) / (1 - l^2) adds as 1 / (2 kappa) (Unity's
+// CommonMaterial.hlsl, TextureNormalVariance: alpha^2 += 2 variance, variance = 1 / (4 kappa)). Normals that cancel out
+// (l near 0) read fully rough.
+float filteredAlpha2(float alpha2, float l) {
+    float l2 = l * l;
+    float spread = l2 < 1.0 ? (1.0 - l2) / max(2.0 * l * (3.0 - l2), 1e-6) : 0.0;
+    return clamp(alpha2 + spread, 0.0, 1.0);
+}
+#endif
 
 // terrain-ground-color-functions
 
@@ -264,6 +319,14 @@ void main() {
     float footprint = sqrt(length(worldDx.xy) * length(worldDy.xy));
     farDetail = .8 * smoothstep(.18, .6, footprint);
     pixelMetres = max(max(length(worldDx), length(worldDy)), 1e-4);
+#ifdef materialFillFlag
+    // The close view's material at every texel: its full detail and none of the fades that stand in for distance. The
+    // maps are still read at the texel, and the pyramid averages the rest. No parallax: it depends on the view.
+    terrainNormalDetail = 1.0;
+    terrainSurfaceDetail = 1.0;
+    farDetail = 0.0;
+    pixelMetres = u_cacheClosePixel;
+#endif
     // Depth below this water hex's level, in metres, and height above its water, which lies u_waterLine lower.
     float depth = waterCovered ? (level * u_levelHeight - v_cloudPosition.z) / u_metre : -1.0;
     float above = waterCovered ? u_waterLine / u_metre - depth : 99.0;
@@ -336,6 +399,22 @@ void main() {
     float biomePool = 0.0, biomeDamp = 0.0;
     // Cliffs grade continuously with height.
     if (cliff) level = v_cloudPosition.z / u_levelHeight;
+#ifdef materialCachedFlag
+    // The canonical material the fill wrote for this top (cachedMaterial); the layers after it stay live.
+    vec3 meanNormal, cachedDetail;
+    vec4 cachedColour = cachedMaterial(world, worldDx, worldDy, meanNormal, cachedDetail);
+    albedo = cachedColour.rgb;
+    materialHeight = cachedColour.a;
+    float meanLength = length(meanNormal);
+    normal = meanLength > 1e-4 ? meanNormal / meanLength : vec3(0.0, 0.0, 1.0);
+    cavity = cachedDetail.x;
+    // The texels' sun is their relief times their normal's: averaged, it is the mean relief times the mean normal,
+    // whose length the normalised normal leaves out (sunOnRelief takes it back).
+    relief = cachedDetail.y * meanLength;
+    finish = Finish(sqrt(sqrt(filteredAlpha2(cachedDetail.z, meanLength))), 0.0, 0.0, vec3(0.0));
+    // A natural top matches its slope at the same height, as the evaluator sets it.
+    if (natural && !shore) level = v_cloudPosition.z / u_levelHeight;
+#else
     vec4 detail = vec4(0.0, 0.0, 1.0, 1.0);
     if (natural) {
         float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
@@ -550,15 +629,19 @@ void main() {
               rainCover, finish, volcanic, materialCoverage);
     }
 #endif
+#endif
     lunar = family(LUNAR_FAMILY) ? 1.0 : 0.0;
 #ifdef terrainBlendFlag
     if (ground || cliff) lunar = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - LUNAR_FAMILY)));
 #endif
+#ifndef materialCachedFlag
     // Lunar ground keeps its impact craters, on level faces of its actual share of the cover.
     if (ground && !shore && face.z > .85 && lunar > 0.0) {
         lunarCraters(world, pixelMetres, stepClear, stepGradient, lunar * smoothstep(.85, .97, face.z), albedo,
               normal, cavity);
     }
+#endif
+#ifndef materialFillFlag
     // biomeMaskFlag: the board has biomes or liquids of two palettes (GpuBiomeSurface); without them this stage
     // finds no cover and leaves everything as it is.
 #ifdef biomeMaskFlag
@@ -578,6 +661,7 @@ void main() {
               * sin(dot(world.xy, vec2(-gust.y, gust.x)) * .21 - u_rainTime * .7);
         normal = normalize(normal + vec3(gust * sway * .12 * u_wind.z * grass, 0.0));
     }
+#endif
     if (waterCovered) {
         // Damp sediment stops short of the patchy dry bank, following the same already-sampled fields.
         float dampMargin = shore && natural ? bankMargin * .65 : .12;
@@ -607,6 +691,7 @@ void main() {
     if (weathered > 0.0 && volcanic < .01) {
         // Follow the final material weights, including sand windows and authored mixtures. Reuse the blended
         // relief once; no extra maps or stamped motifs. Wetland pools suppress dry surface abrasion.
+#ifndef materialCachedFlag
         if (terrainNormalDetail > 0.0) {
             vec4 wear = terrainWear(fields, materialHeight, cavity, face, normal);
 #ifdef terrainBlendFlag
@@ -631,8 +716,20 @@ void main() {
             albedo *= authoredPigmentGain(vec3(1.0) + colorPigment * wearStrength);
             finish.roughness = mix(finish.roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
         }
+#endif
+#ifndef materialFillFlag
         if (ground) groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, finish);
+#endif
     }
+#ifdef materialFillFlag
+    // The fill stores the canonical material, premultiplied by full coverage, and stops before the live layers.
+    vec3 unitNormal = normalize(normal);
+    float alpha = finish.roughness * finish.roughness;
+    fragColor = vec4(albedo, materialHeight);
+    fillMoments = vec4(unitNormal.xy * .5 + .5, max(unitNormal.z, 0.0), 1.0);
+    fillDetail = vec4(cavity, relief, alpha * alpha, 1.0);
+    return;
+#endif
     if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, finish);
     // Scorch replaces material before rain, grid and elevation grade. Severity zero takes no material samples.
     if (u_groundScorch.x > 0.0 && volcanic < 1.0) {
