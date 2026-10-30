@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +16,9 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.RequisitionDossier;
 import megamek.client.lobby.RequisitionFactions;
@@ -25,6 +28,7 @@ import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.gdx.UiStepChart;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.common.alphaStrike.ASUnitType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.loaders.MekSummary;
@@ -111,6 +115,59 @@ class LobbyDossierTabsSmokeTest {
     }
 
     @Test
+    void theAsCardShowsMegaMeksCardAtItsPixelsOrTheKitsCardWhenItCannotBeDrawn() throws Exception {
+        EquipmentType.initializeTypes();
+        Entity atlas = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
+        UiTestStage.run(ui -> {
+            DossierActions actions = new DossierActions(atlas);
+            actions.cardFails = true;
+            LobbyRequisitionPanel requisition = new LobbyRequisitionPanel(ui.kit, actions, key -> null, false);
+            Table body = requisition.body();
+            ui.window.addActor(body);
+            body.setBounds(20, 20, 1400, 900);
+            requisition.opened(LobbyForces.EMPTY);
+            requisition.probePick();
+            run(ui, .05f);
+            click(ui, requisition.dossierTab("ascard"));
+            run(ui, .05f);
+            assertTrue(actions.cardWidth > 0, "the card is asked for at the pixels it takes");
+            assertEquals(null, picture(requisition.dossierBody()), "a card that cannot be drawn shows none");
+            assertTrue(text(requisition.dossierBody()).contains("52"), "the kit's card stays with the PV");
+
+            actions.cardFails = false;
+            actions.cardWidth = 0;
+            requisition.resultsList().select(1, true);
+            run(ui, .05f);
+            Image picture = picture(requisition.dossierBody());
+            assertNotNull(picture, "the next unit's card shows MegaMek's drawing");
+            int width = ((TextureRegionDrawable) picture.getDrawable()).getRegion().getTexture().getWidth();
+            assertEquals(actions.cardWidth, width, "drawn at the pixels it takes");
+            assertEquals(width, picture.getWidth() * ui.stage.getViewport().getScreenWidth() / ui.stage.getWidth(), 2,
+                  "and shown at them");
+            int asked = actions.cardWidth;
+            run(ui, .05f);
+            assertEquals(asked, actions.cardWidth, "it is not drawn again while its size holds");
+            requisition.dispose();
+            body.remove();
+        });
+    }
+
+    private static Image picture(Actor actor) {
+        if (actor instanceof Image image && image.getDrawable() instanceof TextureRegionDrawable) {
+            return image;
+        }
+        if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                Image found = picture(child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
     void theStepChartsGuidesRoundUp() {
         assertEquals(1, UiStepChart.ceiling(0));
         assertEquals(1, UiStepChart.ceiling(1));
@@ -159,6 +216,7 @@ class LobbyDossierTabsSmokeTest {
     private static MekSummary unit(String model) {
         MekSummary unit = new MekSummary();
         unit.setChassis("Atlas");
+        unit.setClanChassisName("");
         unit.setModel(model);
         unit.setName("Atlas " + model);
         unit.setUnitType(UnitType.getTypeName(UnitType.MEK));
@@ -172,6 +230,8 @@ class LobbyDossierTabsSmokeTest {
         unit.setTotalInternal(152);
         unit.setTechBase("Inner Sphere");
         unit.setLevel("A");
+        unit.setAsUnitType(ASUnitType.BM);
+        unit.setSize(4);
         return unit;
     }
 
@@ -182,6 +242,8 @@ class LobbyDossierTabsSmokeTest {
         int loads;
         int factionsAsked;
         boolean tro;
+        int cardWidth;
+        boolean cardFails;
 
         DossierActions(Entity atlas) {
             this.atlas = atlas;
@@ -204,6 +266,12 @@ class LobbyDossierTabsSmokeTest {
         public void factions(MekSummary unit, Consumer<RequisitionFactions> done) {
             factionsAsked++;
             done.accept(RequisitionFactions.EMPTY);
+        }
+
+        @Override
+        public void asCardImage(MekSummary unit, int width, Consumer<BufferedImage> done) {
+            cardWidth = width;
+            done.accept(cardFails ? null : GpuLobbyScreen.asCardPicture(unit, width));
         }
 
         @Override

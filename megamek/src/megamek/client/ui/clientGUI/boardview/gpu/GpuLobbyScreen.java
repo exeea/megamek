@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.HashMap;
@@ -63,6 +64,7 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiRangeInput;
 import megamek.client.ui.gdx.UiVirtualList;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.alphaStrike.cardDrawer.ASCard;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.OptionsConstants;
@@ -115,6 +117,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private RequisitionLoader records;
     private ExecutorService factionThread;
     private RequisitionLoader factionLoader;
+    /** The dossier's Alpha Strike card pictures, drawn on their own thread where the newest wins. */
+    private ExecutorService cardThread;
+    private RequisitionLoader cardLoader;
     private RequisitionSearch search;
     /** The Requisition's sprites by catalogue unit, the least recently shown first. */
     private final LinkedHashMap<String, TextureRegionDrawable> requisitionSprites = new LinkedHashMap<>(64, .75f,
@@ -278,6 +283,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         records = new RequisitionLoader(recordThread);
         factionThread = daemon("Requisition factions");
         factionLoader = new RequisitionLoader(factionThread);
+        cardThread = daemon("Requisition card");
+        cardLoader = new RequisitionLoader(cardThread);
         requisition = new LobbyRequisitionPanel(kit, requisitionActions(), requisitionSprites::get, motion);
         rail = kit.rail(Messages.getString("Lobby.battlefield"), "map");
         rail.setProgrammaticChangeEvents(false);
@@ -537,6 +544,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
+            public void asCardImage(MekSummary unit, int width, Consumer<BufferedImage> done) {
+                cardLoader.load(() -> asCardPicture(unit, width), image -> GpuHost.post(() -> {
+                    if (stage != null) {
+                        done.accept(image);
+                    }
+                }));
+            }
+
+            @Override
             public boolean readoutTro() {
                 return (window.probe() != null) ? probeReadoutTro : preferences.getRequisitionReadoutTro();
             }
@@ -564,6 +580,24 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 }
             }
         };
+    }
+
+    /**
+     * Any thread: {@code unit}'s Alpha Strike card as MegaMek draws it, {@code width} pixels wide in the card font the
+     * Commander chose, or null when it cannot be drawn. The drawing is Java2D into an image, safe without a screen.
+     */
+    static @Nullable BufferedImage asCardPicture(MekSummary unit, int width) {
+        try {
+            ASCard card = ASCard.createCard(unit);
+            String font = GUIPreferences.getInstance().getAsCardFont();
+            if ((font != null) && !font.isBlank()) {
+                card.setFont(Font.decode(font));
+            }
+            return card.getCardImage(width);
+        } catch (RuntimeException | LinkageError failed) {
+            LOGGER.warn(failed, "The Requisition could not draw the AS card of {}", unit.getName());
+            return null;
+        }
     }
 
     private static ExecutorService daemon(String name) {
@@ -1299,7 +1333,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         spriteTextures.clear();
         requisitionSprites.values().forEach(sprite -> sprite.getRegion().getTexture().dispose());
         requisitionSprites.clear();
-        for (ExecutorService thread : new ExecutorService[] { searchThread, recordThread, factionThread }) {
+        if (requisition != null) {
+            requisition.dispose();
+        }
+        for (ExecutorService thread : new ExecutorService[] { searchThread, recordThread, factionThread, cardThread }) {
             if (thread != null) {
                 thread.shutdownNow();
             }

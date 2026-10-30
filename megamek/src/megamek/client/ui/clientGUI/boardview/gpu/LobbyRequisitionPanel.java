@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.image.BufferedImage;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -15,6 +16,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.math.Vector2;
@@ -35,6 +37,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
 import jakarta.annotation.Nullable;
@@ -43,6 +46,7 @@ import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionAlphaStrike;
+import megamek.client.lobby.RequisitionCardImage;
 import megamek.client.lobby.RequisitionCatalog;
 import megamek.client.lobby.RequisitionCatalog.Category;
 import megamek.client.lobby.RequisitionCatalog.Either;
@@ -119,6 +123,14 @@ final class LobbyRequisitionPanel {
 
         /** Reads {@code unit}'s availability by faction and era away from the GPU thread and hands it back on it. */
         default void factions(MekSummary unit, Consumer<RequisitionFactions> done) { }
+
+        /**
+         * Draws {@code unit}'s Alpha Strike card {@code width} pixels wide away from the GPU thread and hands it back on
+         * it, or null when it could not be drawn; the newest asked for wins.
+         */
+        default void asCardImage(MekSummary unit, int width, Consumer<BufferedImage> done) {
+            done.accept(null);
+        }
 
         /** Whether the dossier's Readout shows the TRO rather than the summary (a client preference). */
         default boolean readoutTro() {
@@ -236,6 +248,8 @@ final class LobbyRequisitionPanel {
     private final Container<Actor> tabBody = new Container<>();
     private final UiSegmented readoutSwitch;
     private final Map<RequisitionDossier.Tab, Built> built = new EnumMap<>(RequisitionDossier.Tab.class);
+    /** The AS card tab's picture, while one is built. */
+    private @Nullable AsCardView cardView;
     private RequisitionDossier.Tab tab = RequisitionDossier.Tab.OVERVIEW;
     private boolean readoutTro;
     private @Nullable RequisitionDossier shown;
@@ -1053,7 +1067,7 @@ final class LobbyRequisitionPanel {
             record = null;
             factions = null;
             factionsAsked = false;
-            built.clear();
+            forgetBuilt();
             recordDue = clock + LOAD_DELAY;
         }
         refreshAdd();
@@ -1144,19 +1158,21 @@ final class LobbyRequisitionPanel {
         if (next == RequisitionDossier.Tab.FACTIONS) {
             askFactions();
         }
-        List<Object> key = Arrays.asList(picked, record, switch (next) {
-            case OVERVIEW -> sprites.apply(spriteKey(picked)) != null;
-            case READOUT -> readoutTro;
-            case FACTIONS -> factions;
-            case DAMAGE -> gunnery();
-            case AS_CARD -> null;
-        });
+        // The AS card is drawn from the catalogue alone, so a record read later does not draw it again
+        List<Object> key = Arrays.asList(picked, (next == RequisitionDossier.Tab.AS_CARD) ? null : record,
+              switch (next) {
+                  case OVERVIEW -> sprites.apply(spriteKey(picked)) != null;
+                  case READOUT -> readoutTro;
+                  case FACTIONS -> factions;
+                  case DAMAGE -> gunnery();
+                  case AS_CARD -> null;
+              });
         Built made = built.get(next);
         if (made == null || !made.key().equals(key)) {
             made = new Built(key, switch (next) {
                 case OVERVIEW -> overview();
                 case READOUT -> readout();
-                case AS_CARD -> scrolled(asCard());
+                case AS_CARD -> scrolled(asCardTab());
                 case FACTIONS -> factionsTab();
                 case DAMAGE -> damage();
             });
@@ -1165,6 +1181,20 @@ final class LobbyRequisitionPanel {
         if (tabBody.getActor() != made.actor()) {
             tabBody.setActor(made.actor());
         }
+    }
+
+    /** Drops the built tab bodies, freeing the AS card's picture. */
+    private void forgetBuilt() {
+        built.clear();
+        if (cardView != null) {
+            cardView.dispose();
+            cardView = null;
+        }
+    }
+
+    /** Frees what the view holds on the GPU: the AS card's picture. */
+    void dispose() {
+        forgetBuilt();
     }
 
     /** One tab's body and what it was built from. */
@@ -1469,6 +1499,101 @@ final class LobbyRequisitionPanel {
         Label label = kit.typeLabel(text, type, role);
         label.setWrap(true);
         return label;
+    }
+
+    /**
+     * AS card: MegaMek's own Alpha Strike card, drawn away from the GPU thread at the pixels it takes; the kit's card
+     * of its values shows until it is drawn and stays when it cannot be.
+     */
+    private Actor asCardTab() {
+        if (cardView != null) {
+            cardView.dispose();
+            cardView = null;
+        }
+        if (RequisitionAlphaStrike.of(picked) == null) {
+            return asCard();
+        }
+        cardView = new AsCardView(picked, asCard());
+        return cardView;
+    }
+
+    /**
+     * The AS card's picture, filling the tab's width at the card's aspect; it shows {@code fallback} until the
+     * picture is drawn and asks for it again, at the new size, whenever its pixel width changes.
+     */
+    private final class AsCardView extends Container<Actor> {
+        private final MekSummary unit;
+        private final Actor fallback;
+        private @Nullable Texture texture;
+        private int drawn;
+        private int asked;
+        private boolean failed;
+        private boolean disposed;
+
+        AsCardView(MekSummary unit, Actor fallback) {
+            super(fallback);
+            this.unit = unit;
+            this.fallback = fallback;
+            top().left().fillX();
+        }
+
+        @Override
+        public float getPrefHeight() {
+            if (texture == null) {
+                return super.getPrefHeight();
+            }
+            return getWidth() * texture.getHeight() / texture.getWidth();
+        }
+
+        @Override
+        public float getPrefWidth() {
+            return (texture == null) ? super.getPrefWidth() : 0;
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            int wanted = RequisitionCardImage.pixels(getWidth(), UiTheme.pixelScale(batch));
+            if (!failed && !disposed && RequisitionCardImage.redraw(drawn, asked, wanted)) {
+                asked = wanted;
+                actions.asCardImage(unit, wanted, image -> shown(image, wanted));
+            }
+            super.draw(batch, parentAlpha);
+        }
+
+        private void shown(@Nullable BufferedImage image, int width) {
+            if (disposed || (asked != width)) {
+                return;
+            }
+            asked = 0;
+            if (image == null) {
+                failed = true;
+                return;
+            }
+            Texture next = GpuStartScreen.texture(image, false);
+            if (texture != null) {
+                texture.dispose();
+            }
+            texture = next;
+            drawn = width;
+            if (getActor() == fallback) {
+                Image picture = new Image(next);
+                picture.setScaling(Scaling.fit);
+                picture.setAlign(Align.top);
+                setActor(picture);
+            } else if (getActor() instanceof Image picture) {
+                picture.setDrawable(new TextureRegionDrawable(next));
+            }
+            fill();
+            invalidateHierarchy();
+        }
+
+        void dispose() {
+            disposed = true;
+            if (texture != null) {
+                texture.dispose();
+                texture = null;
+            }
+        }
     }
 
     /** AS card: the Alpha Strike card's values on a card of the kit's, read from the catalogue at once. */
