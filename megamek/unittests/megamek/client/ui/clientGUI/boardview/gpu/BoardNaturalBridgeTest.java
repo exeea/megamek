@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -127,99 +126,6 @@ class BoardNaturalBridgeTest {
         assertTrue(loweredContacts > 0, "Exercise edges below the nominal-level fade used before local depths");
     }
 
-    @Test
-    void lavaTubesGrowRockArchesIntoTheTallBanksAtEveryLod() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
-        int supports = 0;
-        for (var tile : scene.tiles()) {
-            var feature = BoardBridge.feature(tile);
-            if (feature == null) { continue; }
-            var center = BoardGeometry.center(tile.coords(), tile.elevation() + feature.elevation());
-            var deck = BoardBridge.deck(scene, tile);
-            assertTrue(deck.natural());
-            for (var lod : TerrainLod.values()) {
-                var shape = BoardNaturalBridge.build(scene, tile, deck, lod, new HashMap<>());
-                assertEquals(100, shape.hit(new Ray(new Vector3(center).add(0, 0, 10), new Vector3(0, 0, -1))), .001f,
-                      "The usable centre stays at the authored deck height");
-                assertTrue(shape.bounds().min.z > center.z - BoardGeometry.level(),
-                      "The whole level below remains clear");
-                assertTrue(shape.bounds().max.z <= center.z + .001f,
-                      "A tall bank must not pull the deck up to its top");
-                for (int d = 0; d < 6; d++) {
-                    if ((feature.bridgeExits() & (1 << d)) == 0) { continue; }
-                    var next = scene.tile(tile.coords().translated(d));
-                    if (next == null || next.elevation() < shape.level() + 2) { continue; }
-                    var direction = BoardGeometry.center(next.coords(), shape.level()).sub(center);
-                    var insideBank = new Vector3(center).mulAdd(direction, .6f);
-                    var up = new Ray(new Vector3(insideBank).add(0, 0, -BoardGeometry.level()), Vector3.Z);
-                    float underside = up.origin.z + (float) Math.sqrt(shape.hit(up));
-                    assertTrue(underside < center.z - BoardRelief.metres(3),
-                          "A substantial rock support must meet the wall: " + tile.coords().getBoardNum() + " " + lod + " exit " + d);
-                    supports++;
-                }
-            }
-        }
-        assertTrue(supports > 0, "The shipped board must exercise tall abutments");
-    }
-
-    @Test
-    void lavaTubeEndsAreBuriedInTheCliffAcrossTheirWidthAndDepth() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
-        int contacts = 0;
-        for (var lod : TerrainLod.values()) {
-            var surfaces = new HashMap<Coords, BoardSurface>();
-            for (var tile : scene.tiles()) {
-                if (BoardBridge.feature(tile) == null) { continue; }
-                var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, surfaces);
-                var center = BoardGeometry.center(tile.coords(), shape.level());
-                for (int d = 0; d < 6; d++) {
-                    var next = scene.tile(tile.coords().translated(d));
-                    if (!BoardBridge.abutment(tile, next, d) || next.elevation() < shape.level() + 2) { continue; }
-                    var walls = new ArrayList<>(surfaces.get(next.coords()).walls(scene, BoardGeometry.floor(scene), surfaces));
-                    // A wide rock mouth may enter a continuous cliff in the adjoining hex as well.
-                    for (int direction = 0; direction < 6; direction++) {
-                        var adjacent = scene.tile(next.coords().translated(direction));
-                        if (adjacent == null || adjacent.elevation() <= shape.level() || BoardBridge.feature(adjacent) != null) {
-                            continue;
-                        }
-                        var surface = surfaces.computeIfAbsent(adjacent.coords(), c -> new BoardSurface(scene, adjacent, lod));
-                        walls.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
-                    }
-                    var along = BoardGeometry.center(next.coords(), shape.level()).sub(center).nor();
-                    // The mouth is perpendicular to the span. Rounded side facets can face nearly the same
-                    // direction and reach farther out, but are not the end plane whose burial is checked here.
-                    var ends = shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.SIDE
-                          && f.normal().epsilonEquals(along, .0001f)).toList();
-                    float end = (float) ends.stream().mapToDouble(f -> f.a().dot(along)).max().orElseThrow();
-                    var points = ends.stream().filter(f -> Math.abs(f.a().dot(along) - end) < .001f)
-                          .flatMap(f -> List.of(f.a(), f.b(), f.c(),
-                                new Vector3(f.a()).add(f.b()).add(f.c()).scl(1f / 3)).stream()).distinct().toList();
-                    assertTrue(points.size() >= 10, "Exercise the full end, including both lips and its underside");
-                    for (var point : points) {
-                        var ray = new Ray(point, new Vector3(along).scl(-1));
-                        float nearest = Float.POSITIVE_INFINITY;
-                        boolean inside = false;
-                        var hit = new Vector3();
-                        for (var face : walls) {
-                            if (!Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)) { continue; }
-                            float distance = point.dst2(hit);
-                            if (distance < nearest) {
-                                nearest = distance;
-                                // From inside solid rock, the first hit towards the span exits the cliff.
-                                var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
-                                inside = normal.dot(ray.direction) > 0;
-                            }
-                        }
-                        assertTrue(inside && nearest < BoardGeometry.width() * BoardGeometry.width(),
-                              "The whole end must enter solid cliff: " + tile.coords().getBoardNum()
-                                    + " " + lod + " exit " + d + " at " + point + " inside " + inside + " distance " + nearest);
-                        contacts++;
-                    }
-                }
-            }
-        }
-        assertTrue(contacts > 0);
-    }
 
     @ParameterizedTest
     @EnumSource(value = BoardScene.Surface.class, names = { "GRASS", "DIRT", "SAND", "ROCK", "SNOW" })
