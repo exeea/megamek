@@ -2,6 +2,7 @@
 package megamek.client.lobby;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -39,6 +40,26 @@ class RequisitionRowTest {
         assertEquals(100, row.tons());
         assertTrue(row.details().contains("100"));
         assertTrue(row.details().contains("3025"));
+    }
+
+    @Test
+    void aRowCarriesItsColumns() {
+        MekSummary atlas = RequisitionCatalogTest.mek("Atlas", "AS7-D");
+        atlas.setWalkMp(3);
+        atlas.setRunMp(5);
+        atlas.setTotalArmor(304);
+        atlas.setTechLevel(" Standard ");
+        RequisitionRow row = RequisitionRow.of(atlas);
+        assertEquals("3/5", RequisitionRow.Column.MOVE.of(row));
+        assertEquals("304", RequisitionRow.Column.ARMOR.of(row));
+        assertEquals("", RequisitionRow.Column.ROLE.of(row));
+        assertEquals("Standard", RequisitionRow.Column.LEVEL.of(row));
+        assertEquals("4/6/4", RequisitionRow.move(4, 6, 4));
+        atlas.setTotalArmor(0);
+        assertEquals("", RequisitionRow.of(atlas).armor());
+        for (RequisitionRow.Column column : RequisitionRow.Column.values()) {
+            assertFalse(megamek.client.ui.Messages.getString(column.messageKey()).startsWith("!"));
+        }
     }
 
     @Test

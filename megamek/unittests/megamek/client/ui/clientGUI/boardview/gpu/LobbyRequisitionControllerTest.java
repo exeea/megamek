@@ -100,6 +100,17 @@ class LobbyRequisitionControllerTest {
     }
 
     @Test
+    void theResultsColumnsGoFromTheLastAsTheRowNarrows() {
+        float[] widths = { 60, 40, 80, 70 };
+        float all = RequisitionLayout.NAME_MIN + 4 * 10 + 60 + 40 + 80 + 70;
+        assertEquals(4, RequisitionLayout.columns(all, widths, 10));
+        assertEquals(3, RequisitionLayout.columns(all - 1, widths, 10));
+        assertEquals(1, RequisitionLayout.columns(RequisitionLayout.NAME_MIN + 70 + 49, widths, 10));
+        assertEquals(0, RequisitionLayout.columns(RequisitionLayout.NAME_MIN + 69, widths, 10));
+        assertEquals(0, RequisitionLayout.columns(0, widths, 10));
+    }
+
+    @Test
     void theDossierDocksBesideTheResultsOrOverThem() {
         RequisitionLayout.Dock shut = RequisitionLayout.dock(1200, false, 16);
         assertEquals(new RequisitionLayout.Dock(1200, 1200, 0, false), shut);

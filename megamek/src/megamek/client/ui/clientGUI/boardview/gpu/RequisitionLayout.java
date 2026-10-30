@@ -12,6 +12,8 @@ final class RequisitionLayout {
     static final float DOSSIER_MIN = 440;
     static final float RESULTS_MIN = 320;
     static final float OVERLAY_EDGE = 160;
+    /** The least a result's name keeps before its columns give way. */
+    static final float NAME_MIN = 200;
 
     /**
      * The places of the results and the dossier.
@@ -38,5 +40,23 @@ final class RequisitionLayout {
         }
         float edge = Math.min(OVERLAY_EDGE, width / 3);
         return new Dock(width, edge, width - edge, true);
+    }
+
+    /**
+     * How many of a result row's columns, {@code widths} wide in their order and each {@code gap} after what comes
+     * before it, fit in {@code room}, the row's width less its sprite, value and paddings, while the name keeps
+     * {@link #NAME_MIN}: the first ones that fit, the rest going from the last.
+     */
+    static int columns(float room, float[] widths, float gap) {
+        float left = room - NAME_MIN;
+        int count = 0;
+        for (float width : widths) {
+            left -= gap + width;
+            if (left < 0) {
+                break;
+            }
+            count++;
+        }
+        return count;
     }
 }
