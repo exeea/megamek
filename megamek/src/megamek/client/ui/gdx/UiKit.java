@@ -1098,6 +1098,22 @@ public final class UiKit {
         return new UiSelect(this, compact ? UiSelect.Kind.COMPACT : UiSelect.Kind.REGULAR, items);
     }
 
+    /**
+     * A whole-number span ({@link UiRangeInput}): two compact digit-only inputs with {@code minText} and
+     * {@code maxText} as their placeholders; an empty end is open.
+     */
+    public UiRangeInput rangeInput(String minText, String maxText) {
+        return new UiRangeInput(this, minText, maxText);
+    }
+
+    /**
+     * Picks from a long list ({@link UiPickList}): a compact select showing {@code placeholder} that adds
+     * {@code items} as removable chips; with {@code excludes}, a click switches a chip between must-have and must-not.
+     */
+    public UiPickList pickList(String placeholder, java.util.List<String> items, boolean excludes) {
+        return new UiPickList(this, placeholder, items, excludes);
+    }
+
     /** An inline token select: text with a dotted underline, for a value inside a sentence or a dense row. */
     public UiSelect tokenSelectInline(String... items) {
         return new UiSelect(this, UiSelect.Kind.INLINE, items);
