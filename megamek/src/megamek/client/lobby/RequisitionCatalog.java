@@ -2,7 +2,10 @@
 package megamek.client.lobby;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -10,6 +13,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import jakarta.annotation.Nullable;
 import megamek.common.TechConstants;
@@ -308,6 +312,61 @@ public final class RequisitionCatalog {
             return ((type == null) ? 0 : 1) + bases.size() + levels.size() + roles.size()
                   + ((canon == Either.ANY) ? 0 : 1) + ((recordSheet == Either.ANY) ? 0 : 1)
                   + ((era == null) ? 0 : 1) + ((source == null) ? 0 : 1) + advanced.count();
+        }
+
+        /**
+         * The filters kept as a preference from game to game, the weights, tech bases and rules levels, as one line
+         * such as {@code W:LIGHT,HEAVY;B:CLAN;L:1,2}, which {@link #withKept} reads back.
+         */
+        public String kept() {
+            return "W:" + names(weights) + ";B:" + names(bases) + ";L:"
+                  + levels.stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
+        }
+
+        private static String names(Set<? extends Enum<?>> values) {
+            return values.stream().sorted().map(Enum::name).collect(Collectors.joining(","));
+        }
+
+        /**
+         * These filters with the weights, tech bases and rules levels {@code kept} names, as {@link #kept} wrote
+         * them; the rest stay. Levels outside {@code offered}, the game's, and names this version no longer knows are
+         * dropped; a null or blank line keeps nothing.
+         */
+        public Filters withKept(@Nullable String kept, Collection<Integer> offered) {
+            Set<Weight> keptWeights = EnumSet.noneOf(Weight.class);
+            Set<TechBase> keptBases = EnumSet.noneOf(TechBase.class);
+            Set<Integer> keptLevels = new HashSet<>();
+            for (String part : (kept == null) ? new String[0] : kept.split(";")) {
+                int colon = part.indexOf(':');
+                if (colon < 0) {
+                    continue;
+                }
+                String key = part.substring(0, colon).strip();
+                for (String item : part.substring(colon + 1).split(",")) {
+                    String name = item.strip();
+                    if (name.isEmpty()) {
+                        continue;
+                    }
+                    try {
+                        switch (key) {
+                            case "W" -> keptWeights.add(Weight.valueOf(name));
+                            case "B" -> keptBases.add(TechBase.valueOf(name));
+                            case "L" -> {
+                                int level = Integer.parseInt(name);
+                                if (offered.contains(level)) {
+                                    keptLevels.add(level);
+                                }
+                            }
+                            default -> {
+                                // A part a later version added
+                            }
+                        }
+                    } catch (IllegalArgumentException ignored) {
+                        // A choice this version doesn't know is dropped
+                    }
+                }
+            }
+            return withWeights(keptWeights).withBases(keptBases).withLevels(keptLevels);
         }
 
         public boolean allows(MekSummary unit, Rules rules, Category category) {

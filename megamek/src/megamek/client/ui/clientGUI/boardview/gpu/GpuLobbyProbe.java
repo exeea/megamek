@@ -84,6 +84,9 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+rail}: opens the folded battlefield from its rail.</li>
  *     <li>{@code lobby+menu}: opens the first bot's player menu (the first player's without bots) before the shot.</li>
  *     <li>{@code lobby+chat}: has the player and each bot say a line in the chat as they join.</li>
+ *     <li>{@code lobby+fold}: clicks the chat's fold button through the stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s
+ *     in, keeping the client's fold preference as it was, then has the player and each bot say a line
+ *     {@value #FOLD_CHAT_AT} s in, so the folded header counts the bots' lines on its badge.</li>
  *     <li>{@code lobby+formations}: puts the player's first units in a formation and a sub-formation, and shows the
  *     forces as formations.</li>
  *     <li>{@code lobby+compact}: shows the forces as compact rows.</li>
@@ -138,6 +141,8 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     /** The formation steps of {@code lobby+formations}: a lance, then a sub-formation inside it. */
     private static final int FORMED = 2;
     private static final double FORM_WAIT = 20;
+    /** When {@code lobby+fold}'s player and bots chat, in seconds: after the screen has folded the chat. */
+    static final double FOLD_CHAT_AT = 3;
     private static final String DIALOG_OPTION = "dialog=";
     private static final String TAB_OPTION = "tab=";
     /** How long a probed dialog has to show, and then to close, before the probe looks. */
@@ -252,6 +257,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         double readyAt = shot == null ? READY_AFTER : starts ? shotAt + READY_AFTER : Math.max(0, shotAt - READY_AFTER);
         boolean[] readied = { !starts && !options.contains("ready") };
         int[] formed = { options.contains("formations") ? 0 : FORMED };
+        boolean[] foldChatted = { !options.contains("fold") };
         Timer timer = new Timer(POLL_MS, null);
         timer.addActionListener(event -> {
             // The bots join after the player, who gets the first player id as when they are added by hand
@@ -297,7 +303,15 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                     client.sendDone(true);
                 }
             }
-            if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED) {
+            if (joined[0] && waiting.isEmpty() && !foldChatted[0] && elapsed >= FOLD_CHAT_AT) {
+                foldChatted[0] = true;
+                String line = Messages.getString("Lobby.probeFoldChat");
+                client.sendChat(line);
+                gui.getLocalBots().values().forEach(bot -> bot.sendChat(line));
+                LOGGER.info("The lobby probe's player and {} bots chat while the chat is folded",
+                      gui.getLocalBots().size());
+            }
+            if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED && foldChatted[0]) {
                 timer.stop();
             }
         });

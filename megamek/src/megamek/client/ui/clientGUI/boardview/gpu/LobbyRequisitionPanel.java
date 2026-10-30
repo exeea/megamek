@@ -123,6 +123,14 @@ final class LobbyRequisitionPanel {
 
         /** Keeps whether the dossier's Readout shows the TRO. */
         default void readoutTro(boolean tro) { }
+
+        /** The kept weights, tech bases and rules levels ({@code Filters.kept()}, a client preference). */
+        default String keptFilters() {
+            return "";
+        }
+
+        /** Keeps the weights, tech bases and rules levels as {@code Filters.kept()} wrote them. */
+        default void keptFilters(String kept) { }
     }
 
     /** The pause on a unit before its full record is read. */
@@ -411,6 +419,8 @@ final class LobbyRequisitionPanel {
         forces = current;
         visit = RequisitionVisit.of(current);
         added = List.of();
+        filters = filters.withKept(actions.keptFilters(), requisition.rules().levels());
+        refreshFilters();
         refreshAdded();
         runSearch();
         Stage stage = body.getStage();
@@ -672,6 +682,7 @@ final class LobbyRequisitionPanel {
 
     private void setFilters(Filters next) {
         filters = next;
+        actions.keptFilters(next.kept());
         refreshFilters();
         runSearch();
     }

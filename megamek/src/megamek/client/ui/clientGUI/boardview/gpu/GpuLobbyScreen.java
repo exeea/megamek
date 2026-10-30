@@ -111,6 +111,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean unitMenuPending;
     /** The developer switch's clicks and pointer, run through the stage once their time comes. */
     private boolean clickCompactPending;
+    private boolean clickFoldPending;
+    private boolean foldReportPending;
     private int filterClicksPending;
     private String hoverPending;
     /** The developer switch's advanced search steps, from the first; -1 when there are none. */
@@ -178,6 +180,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         menuPending = probe.options().contains("menu");
         unitMenuPending = probe.options().contains("unitmenu");
         clickCompactPending = probe.options().contains("clickcompact");
+        clickFoldPending = probe.options().contains("fold");
+        foldReportPending = clickFoldPending;
         filterClicksPending = probe.options().contains("closefilters") ? 2 : probe.options().contains("clickfilters")
               ? 1 : 0;
         hoverPending = probe.options().contains("hoverbar") ? "bar" : probe.options().contains("hoverrow") ? "row"
@@ -221,7 +225,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         boolean motion = !preferences.getReduceMotion();
         topBar = new LobbyTopBar(kit, window::leave, window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
-        players = new LobbyPlayersPanel(kit, playerActions());
+        players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
         battlefield = new LobbyBattlefieldPanel(kit, battlefieldActions());
         battlefield.map(null, LobbyBattlefieldPanel.MAP_ASPECT, true);
@@ -386,6 +390,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             public void addBot(int team) {
                 window.addBot(team);
             }
+
+            @Override
+            public void chatOpen(boolean open) {
+                preferences.setLobbyChatFolded(!open);
+            }
         };
     }
 
@@ -487,6 +496,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public void readoutTro(boolean tro) {
                 preferences.setRequisitionReadoutTro(tro);
+            }
+
+            @Override
+            public String keptFilters() {
+                return preferences.getRequisitionFilters();
+            }
+
+            @Override
+            public void keptFilters(String kept) {
+                preferences.setRequisitionFilters(kept);
             }
         };
     }
@@ -693,6 +712,21 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             clickCompactPending = false;
             GpuLobbyProbeInput.click(stage, forces.compactToggle());
             LOGGER.info("The lobby probe's compact click: compact rows {}", forces.compact() ? "on" : "off");
+        }
+        if (clickFoldPending && elapsed > PROBE_CLICK_AT) {
+            clickFoldPending = false;
+            boolean kept = preferences.getLobbyChatFolded();
+            if (players.chatOpen()) {
+                GpuLobbyProbeInput.click(stage, players.chatFoldButton());
+            }
+            preferences.setLobbyChatFolded(kept);
+            LOGGER.info("The lobby probe's fold click: the chat is {}", players.chatOpen() ? "open" : "folded");
+        }
+        if (foldReportPending && elapsed > probe.shotAt() - .5) {
+            foldReportPending = false;
+            LOGGER.info("The lobby probe's folded chat: {} unread, badge {} shown {}, latest \"{}\"",
+                  players.chatUnread(), players.chatBadge().count(), players.chatBadge().isVisible(),
+                  players.chatLatest());
         }
         if (filterClicksPending > 0 && REQUISITION.equals(centre.showing())
               && elapsed > PROBE_CLICK_AT + (filterClicksPending == 1 && probe.options().contains("closefilters")

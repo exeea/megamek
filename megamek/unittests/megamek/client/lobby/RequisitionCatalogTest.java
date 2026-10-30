@@ -3,6 +3,7 @@ package megamek.client.lobby;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -238,6 +239,54 @@ class RequisitionCatalogTest {
         assertEquals(4, filters.drawerCount());
         assertEquals(Filters.NONE.withWeights(Set.of(Weight.HEAVY, Weight.ASSAULT)), filters.withoutDrawer());
         assertEquals(0, filters.withoutDrawer().drawerCount());
+    }
+
+    @Test
+    void theWeightsBasesAndLevelsAreKeptAndReadBack() {
+        Filters filters = Filters.NONE.withWeights(Set.of(Weight.HEAVY, Weight.LIGHT))
+              .withBases(Set.of(TechBase.CLAN))
+              .withLevels(Set.of(TechConstants.T_SIMPLE_STANDARD, TechConstants.T_SIMPLE_INTRO))
+              .withCanon(Either.YES)
+              .withRecordSheet(Either.NO)
+              .withType(ExactType.VTOL);
+        String kept = filters.kept();
+        assertEquals("W:LIGHT,HEAVY;B:CLAN;L:" + TechConstants.T_SIMPLE_INTRO + "," + TechConstants.T_SIMPLE_STANDARD,
+              kept);
+
+        Filters read = Filters.NONE.withKept(kept,
+              List.of(TechConstants.T_SIMPLE_INTRO, TechConstants.T_SIMPLE_STANDARD));
+        assertEquals(Set.of(Weight.LIGHT, Weight.HEAVY), read.weights());
+        assertEquals(Set.of(TechBase.CLAN), read.bases());
+        assertEquals(Set.of(TechConstants.T_SIMPLE_INTRO, TechConstants.T_SIMPLE_STANDARD), read.levels());
+        // Canon, record sheet, type and the advanced search start afresh each game
+        assertEquals(Either.ANY, read.canon());
+        assertEquals(Either.ANY, read.recordSheet());
+        assertNull(read.type());
+        assertEquals(kept, read.kept());
+    }
+
+    @Test
+    void readingKeptFiltersKeepsTheRestAndDropsWhatNoLongerFits() {
+        Filters current = Filters.NONE.withCanon(Either.YES).withWeights(Set.of(Weight.MEDIUM));
+        Filters read = current.withKept("W:ASSAULT,ULTRA;B:IS,NOPE;L:" + TechConstants.T_SIMPLE_INTRO + ","
+              + TechConstants.T_SIMPLE_UNOFFICIAL + ",x;Z:1;junk", List.of(TechConstants.T_SIMPLE_INTRO));
+        assertEquals(Set.of(Weight.ASSAULT), read.weights());
+        assertEquals(Set.of(TechBase.IS), read.bases());
+        assertEquals(Set.of(TechConstants.T_SIMPLE_INTRO), read.levels());
+        assertEquals(Either.YES, read.canon());
+
+        Filters nothing = current.withKept(null, List.of());
+        assertTrue(nothing.weights().isEmpty());
+        assertEquals(Either.YES, nothing.canon());
+        assertEquals("W:;B:;L:", Filters.NONE.kept());
+        assertEquals(Filters.NONE, Filters.NONE.withKept(Filters.NONE.kept(), List.of(1, 2, 3)));
+    }
+
+    @Test
+    void clearingTheDrawerClearsTheKeptBasesAndLevels() {
+        Filters filters = Filters.NONE.withWeights(Set.of(Weight.LIGHT)).withBases(Set.of(TechBase.MIXED))
+              .withLevels(Set.of(TechConstants.T_SIMPLE_ADVANCED));
+        assertEquals("W:LIGHT;B:;L:", filters.withoutDrawer().kept());
     }
 
     // ---- The index and the search ----

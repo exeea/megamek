@@ -16,6 +16,7 @@ import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -23,6 +24,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
+import megamek.client.lobby.ChatFold;
 import megamek.client.lobby.ChatHistory;
 import megamek.client.lobby.ChatLine;
 import megamek.client.lobby.LobbySnapshot;
@@ -32,6 +34,7 @@ import megamek.client.lobby.LobbySnapshot.TeamGroup;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiCountBadge;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
@@ -48,7 +51,9 @@ import megamek.common.board.Board;
  * them) and ready state; its menu, from its menu button or a right click, holds the Swing lobby's player actions,
  * enabled as there: the local player may configure only themselves and their bots. A double click on such a card opens
  * its player settings. The chat input sends on Enter, as the chat box does (commands such as /who included), and calls
- * back earlier lines with Up and Down.
+ * back earlier lines with Up and Down. The fold button at the input's end folds the chat to its header, which then shows
+ * the latest line; lines from others tint the header and count on its badge until the chat opens again. The input row
+ * stays at the column's foot either way, so the button never moves under the pointer.
  */
 final class LobbyPlayersPanel {
     /** How many lines of chat show at once. */
@@ -83,6 +88,9 @@ final class LobbyPlayersPanel {
         void replaceWithBot(int id);
 
         void addBot(int team);
+
+        /** Keeps whether the chat dock is open or folded (a client preference). */
+        default void chatOpen(boolean open) { }
     }
 
     private final UiKit kit;
@@ -95,6 +103,14 @@ final class LobbyPlayersPanel {
     private final ScrollPane chatScroll;
     private final UiTextField input;
     private final ChatHistory history = new ChatHistory();
+    private final ChatFold chat;
+    private final Label chatTitle;
+    private final UiCountBadge chatBadge;
+    private final Label chatPreview;
+    private final Cell<ScrollPane> chatCell;
+    private final float chatHeight;
+    private final UiButton foldButton;
+    private final Label foldTip;
     private final UiPopover menu;
     private final UiPopover submenu;
     /** Each shown player's menu button, by player id. */
@@ -104,9 +120,10 @@ final class LobbyPlayersPanel {
     private boolean followChat = true;
     private int chatEndFrames;
 
-    LobbyPlayersPanel(UiKit kit, Actions actions) {
+    LobbyPlayersPanel(UiKit kit, Actions actions, boolean chatOpen) {
         this.kit = kit;
         this.actions = actions;
+        chat = new ChatFold(chatOpen);
         menu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
         menu.setName("lobby-player-menu");
         submenu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
@@ -122,15 +139,25 @@ final class LobbyPlayersPanel {
 
         panel.add(new Image(kit.skin.getDrawable("token-divider"))).growX().height(size("border"))
               .padTop(space("md")).row();
-        panel.add(kit.caption(Messages.getString("Lobby.chat"), true)).left().padTop(space("sm")).row();
+        chatTitle = kit.caption(Messages.getString("Lobby.chat"), true);
+        chatBadge = kit.countBadge(0);
+        chatPreview = kit.typeLabel("", "small", "text.muted");
+        chatPreview.setEllipsis(true);
+        Table chatHeader = new Table();
+        chatHeader.add(chatTitle).left();
+        chatHeader.add(chatBadge).padLeft(space("xs"));
+        chatHeader.add(chatPreview).growX().minWidth(0).left().padLeft(space("sm"));
+        panel.add(chatHeader).growX().left().padTop(space("sm")).row();
         chatList.top().left();
         chatScroll = kit.scrollList(chatList, true);
+        chatScroll.setName("lobby-chat-log");
         chatScroll.addAction(forever(run(this::keepChatAtEnd)));
         Label sample = kit.typeLabel("", "body", "text.secondary");
         Drawable frame = chatScroll.getStyle().background;
-        float chatHeight = CHAT_LINES * sample.getStyle().font.getLineHeight() * sample.getFontScaleY()
+        chatHeight = CHAT_LINES * sample.getStyle().font.getLineHeight() * sample.getFontScaleY()
               + (frame == null ? 0 : frame.getTopHeight() + frame.getBottomHeight());
-        panel.add(chatScroll).growX().height(chatHeight).padTop(space("xs")).row();
+        chatCell = panel.add(chatScroll).growX().height(chatHeight).padTop(space("xs"));
+        chatCell.row();
         input = kit.input("", true);
         input.setMessageText(Messages.getString("Lobby.chatHint"));
         input.setTextFieldListener((field, typed) -> {
@@ -154,7 +181,16 @@ final class LobbyPlayersPanel {
                 return true;
             }
         });
-        panel.add(input).growX().padTop(space("sm"));
+        input.setName("lobby-chat-input");
+        foldButton = kit.button("button-icon" + UiTheme.COMPACT, "chevron-down", null, null);
+        foldButton.setName("lobby-chat-fold");
+        foldTip = kit.tip(foldButton, true).getActor();
+        UiKit.onChange(foldButton, () -> openChat(!chat.open()));
+        Table inputRow = new Table();
+        inputRow.add(input).growX();
+        inputRow.add(foldButton).padLeft(space("xs"));
+        panel.add(inputRow).growX().padTop(space("sm"));
+        refreshChatFold();
     }
 
     private static float space(String name) {
@@ -203,6 +239,9 @@ final class LobbyPlayersPanel {
         }
         if (before == null || !before.chat().equals(snapshot.chat())) {
             fillChat(snapshot);
+            // Until the lobby knows the local player, its chat is what was said before it opened
+            chat.show(snapshot.chat(), before == null || before.localPlayerId() == Player.PLAYER_NONE);
+            refreshChatFold();
         }
     }
 
@@ -505,6 +544,64 @@ final class LobbyPlayersPanel {
     }
 
     // ---- The chat ----
+
+    /**
+     * Opens the chat's log, which clears its unread count and brings it to its latest line, or folds it to the header
+     * and the input line, the players taking the freed height; the client keeps the choice.
+     */
+    void openChat(boolean open) {
+        if (open == chat.open()) {
+            return;
+        }
+        chat.open(open);
+        actions.chatOpen(open);
+        refreshChatFold();
+        if (open) {
+            chatEndFrames = END_FRAMES;
+        }
+    }
+
+    boolean chatOpen() {
+        return chat.open();
+    }
+
+    int chatUnread() {
+        return chat.unread();
+    }
+
+    UiButton chatFoldButton() {
+        return foldButton;
+    }
+
+    UiCountBadge chatBadge() {
+        return chatBadge;
+    }
+
+    /** The folded header's latest line. */
+    String chatLatest() {
+        return chatPreview.getText().toString();
+    }
+
+    /** Shows the log or folds it away, and the header's tint, badge and latest line, and the fold button's face. */
+    private void refreshChatFold() {
+        boolean open = chat.open();
+        chatScroll.setVisible(open);
+        chatCell.height(open ? chatHeight : 0).padTop(open ? space("xs") : 0);
+        chatPreview.setVisible(!open);
+        ChatLine latest = chat.latest();
+        chatPreview.setText(latest == null ? "" : latest.kind() == ChatLine.Kind.PLAYER
+              ? Messages.getString("Lobby.chat.line", latest.sender(), latest.text()) : latest.text());
+        chatBadge.count(chat.unread());
+        Label.LabelStyle titleStyle = chatTitle.getStyle();
+        titleStyle.fontColor = UiTheme.tokenColor(chat.unread() > 0 ? "accent.primary" : "text.muted");
+        chatTitle.setStyle(titleStyle);
+        ((Image) foldButton.icons.getFirst()).setDrawable(kit.skin.getDrawable(open ? "icon-chevron-down"
+              : "icon-chevron-up"));
+        String tip = Messages.getString(open ? "Lobby.chat.fold" : "Lobby.chat.open");
+        foldTip.setText(chat.unread() > 0 ? Messages.getString("Lobby.chat.withUnread", tip,
+              Messages.getString("Lobby.chat.unread", chat.unread())) : tip);
+        panel.invalidateHierarchy();
+    }
 
     private void fillChat(LobbySnapshot snapshot) {
         float bottom = chatScroll.getMaxY() - chatScroll.getScrollY();
