@@ -98,7 +98,7 @@ class RequisitionSkillsTest {
 
     static LobbyUnit unit(int id, int owner, double tons, int bv) {
         return new LobbyUnit(id, owner, "Unit " + id, "", "", tons, bv, "", "", "", List.of(), 0,
-              LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, true, false);
+              LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, true, false, null);
     }
 
     static LobbyForces forces(LobbyUnit... units) {

@@ -15,6 +15,7 @@ import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.RequisitionDossier;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.design.DesignTokens;
@@ -53,6 +54,36 @@ class LobbyTogglesSmokeTest {
             click(ui, forces.compactToggle());
             assertFalse(forces.compact(), "a second click turns them off");
             assertFalse(forces.compactToggle().isChecked());
+            panel.remove();
+        });
+    }
+
+    @Test
+    void aWideCardShowsItsSheetAndANarrowOneOrACompactRowDoesNot() {
+        UiTestStage.run(ui -> {
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, new NoForcesActions(), id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            LobbyUnit.Sheet sheet = new LobbyUnit.Sheet(4, 6, 0, 208, 107, 10, 20,
+                  List.of(new RequisitionDossier.Line("Medium Laser", 2), new RequisitionDossier.Line("PPC", 1)));
+            LobbyUnit unit = new LobbyUnit(1, 1, "Unit 1", "50 t", "Medium", 50, 1000, "1,000", "", "", List.of(), 0,
+                  LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, true, false, sheet);
+            forces.show(new LobbyForces(List.of(unit), List.of(new LobbyForces.Owner(1, "Owner", true, true, false, false,
+                  1000, 50, List.of(1))), List.of(), List.of(), List.of(), -1));
+            ui.draw();
+            Actor block = panel.findActor("lobby-unit-sheet");
+            assertTrue(block != null && block.isVisible() && block.getWidth() > 0, "a wide card shows its sheet: " + (block == null ? "none" : block.isVisible() + " " + block.getWidth() + " in " + block.getParent().getWidth()));
+
+            panel.setWidth(360);
+            panel.validate();
+            ui.draw();
+            block = panel.findActor("lobby-unit-sheet");
+            assertFalse(block.isVisible(), "a narrow card leaves its sheet out");
+
+            panel.setWidth(900);
+            forces.compact(true);
+            ui.draw();
+            assertEquals(null, panel.findActor("lobby-unit-sheet"), "a compact row stays one line");
             panel.remove();
         });
     }
@@ -130,7 +161,7 @@ class LobbyTogglesSmokeTest {
 
     private static LobbyUnit unit(int id) {
         return new LobbyUnit(id, 1, "Unit " + id, "", "", 50, 1000, "", "", "", List.of(), 0, LobbyUnit.Link.NONE,
-              false, null, Force.NO_FORCE, true, false);
+              false, null, Force.NO_FORCE, true, false, null);
     }
 
     private static LobbyForces forces(LobbyUnit... units) {

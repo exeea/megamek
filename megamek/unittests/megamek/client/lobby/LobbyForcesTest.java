@@ -243,7 +243,7 @@ class LobbyForcesTest {
         LobbyUnit card = new LobbyUnit(1, 1, "A", "", "", 0, 0, "", "", "", List.of(
               new LobbyUnit.Tag("a", Tone.FLAVOUR), new LobbyUnit.Tag("b", Tone.DANGER),
               new LobbyUnit.Tag("c", Tone.SETUP), new LobbyUnit.Tag("d", Tone.WARNING)), 7,
-              LobbyUnit.Link.C3, false, null, Force.NO_FORCE, true, true);
+              LobbyUnit.Link.C3, false, null, Force.NO_FORCE, true, true, null);
 
         LobbyUnit.Shown shown = card.shown(LobbyUnit.MAX_TAGS);
 

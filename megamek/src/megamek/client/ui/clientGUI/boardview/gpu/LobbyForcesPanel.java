@@ -536,7 +536,8 @@ final class LobbyForcesPanel {
                 }
                 lines.add(chips).left().minWidth(0).padTop(space("xs"));
             }
-            card.add(lines).growX().minWidth(0).top();
+            card.add(new CardBody(lines, (unit.sheet() == null) ? null : sheet(unit.sheet()))).growX().minWidth(0)
+                  .top();
         }
 
         Table side = new Table();
@@ -579,6 +580,94 @@ final class LobbyForcesPanel {
             dragAndDrop.addTarget(dropTarget(card, Target.unit(unit.id())));
         }
         return card;
+    }
+
+    /** The most weapons a card's sheet names before "+n"; its tooltip lists them all. */
+    static final int SHEET_WEAPONS = 3;
+
+    /** A wide card's second block: movement, armor and structure, heat sinks and weapons, each under its name. */
+    private Table sheet(LobbyUnit.Sheet sheet) {
+        Table block = new Table();
+        block.setName("lobby-unit-sheet");
+        block.top().left().defaults().left();
+        sheetRow(block, "Lobby.card.move", sheet.move(), null);
+        sheetRow(block, "Lobby.card.armor", sheet.protection(), null);
+        if (!sheet.heat().isEmpty()) {
+            sheetRow(block, "Lobby.card.heat.sinks", sheet.heat(), null);
+        }
+        if (!sheet.weapons().isEmpty()) {
+            sheetRow(block, "Lobby.card.weapons", sheet.weaponsSummary(SHEET_WEAPONS), sheet.weaponsAll());
+        }
+        return block;
+    }
+
+    private void sheetRow(Table block, String key, String value, @Nullable String tip) {
+        block.add(kit.roleTypeLabel("overline", Messages.getString(key), "text.muted")).padRight(space("sm"))
+              .padTop(space("xxs"));
+        Label text = kit.typeLabel(value, "small", "text.secondary");
+        text.setEllipsis(true);
+        if (tip != null) {
+            kit.tip(text, true).getActor().setText(tip);
+        }
+        block.add(text).growX().minWidth(0).padTop(space("xxs")).row();
+    }
+
+    /**
+     * A card's text with its sheet beside it while the card has room for both: the text keeps {@link #textMin()} and
+     * the sheet at most {@link #sheetMax()}; on a narrower card the sheet steps out of the row.
+     */
+    private final class CardBody extends Table {
+        private final @Nullable Table sheet;
+        private final @Nullable Cell<Table> sheetCell;
+        private boolean shown = true;
+
+        CardBody(Table lines, @Nullable Table sheet) {
+            top().left();
+            add(lines).growX().minWidth(0).top();
+            this.sheet = sheet;
+            sheetCell = (sheet == null) ? null : add(sheet).top().left().minWidth(0);
+            showSheet(false);
+        }
+
+        private float sheetWidth() {
+            return (sheet == null) ? 0 : Math.min(sheet.getPrefWidth(), sheetMax());
+        }
+
+        private void showSheet(boolean show) {
+            if (sheet == null || sheetCell == null || show == shown) {
+                return;
+            }
+            shown = show;
+            sheet.setVisible(show);
+            sheetCell.width(show ? sheetWidth() : 0).padLeft(show ? space("xl") : 0);
+            invalidate();
+        }
+
+        @Override
+        protected void sizeChanged() {
+            showSheet(sheetFits(getWidth(), textMin(), space("xl"), sheetWidth()));
+            super.sizeChanged();
+        }
+
+        /** Whether the sheet shows, for tests. */
+        boolean sheetShown() {
+            return shown;
+        }
+    }
+
+    /** Whether a card's body {@code width} wide holds its text at {@code textMin} and, {@code gap} on, its sheet. */
+    static boolean sheetFits(float width, float textMin, float gap, float sheetWidth) {
+        return sheetWidth > 0 && width >= textMin + gap + sheetWidth;
+    }
+
+    /** The least a card's text keeps before its sheet steps aside. */
+    private static float textMin() {
+        return size("dialog.sm") * 5 / 8;
+    }
+
+    /** The most a card's sheet takes; a longer weapons line ellipsizes. */
+    private static float sheetMax() {
+        return size("dialog.sm") * 3 / 4;
     }
 
     private Actor sprite(LobbyUnit unit, float spriteSize) {

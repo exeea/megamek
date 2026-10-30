@@ -85,7 +85,7 @@ class LobbyReadinessTest {
 
     private static LobbyUnit unit(int id, int owner, String name, LobbyUnit.Tone nameTone, LobbyUnit.Tag... tags) {
         return new LobbyUnit(id, owner, name, "", "", 0, 0, "", "", "", Arrays.asList(tags), 0, LobbyUnit.Link.NONE,
-              false, nameTone, Force.NO_FORCE, true, false);
+              false, nameTone, Force.NO_FORCE, true, false, null);
     }
 
     private static LobbyForces forces(LobbyUnit... units) {

@@ -4,8 +4,11 @@ package megamek.client.lobby;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import jakarta.annotation.Nullable;
 import megamek.SuiteOptions;
@@ -13,6 +16,7 @@ import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.board.Board;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
 import megamek.common.interfaces.IStartingPositions;
 import megamek.common.loaders.MapSettings;
@@ -55,10 +59,11 @@ import megamek.common.util.CrewSkillSummaryUtil;
  * @param forceId     the formation the unit is in, or {@link megamek.common.force.Force#NO_FORCE}
  * @param editable    whether the local player may configure the unit
  * @param c3          whether the unit has any C3 system
+ * @param sheet       movement, protection, heat sinks and weapons, for a wide card's second block; null when hidden
  */
 public record LobbyUnit(int id, int ownerId, String name, String details, String weightClass, double tons, int bv,
       String bvText, String pilot, String skills, List<Tag> tags, int depth, Link link, boolean hidden,
-      @Nullable Tone nameTone, int forceId, boolean editable, boolean c3) {
+      @Nullable Tone nameTone, int forceId, boolean editable, boolean c3, @Nullable Sheet sheet) {
 
     /** The most tags a full card shows before folding the rest into "+n". */
     public static final int MAX_TAGS = 3;
@@ -95,6 +100,91 @@ public record LobbyUnit(int id, int ownerId, String name, String details, String
         public Tag {
             Objects.requireNonNull(text);
             Objects.requireNonNull(tone);
+        }
+    }
+
+    /**
+     * What a wide card shows beside its text: the unit's movement, its armor and structure, its heat sinks and its
+     * weapons.
+     *
+     * @param walk         walking (cruising, safe thrust) points
+     * @param run          running (flank, maximum thrust) points
+     * @param jump         jumping points, 0 without
+     * @param armor        armor points at full
+     * @param structure    internal structure points at full
+     * @param heatSinks    how many heat sinks, or {@link #NO_HEAT} for a unit without heat
+     * @param heatCapacity the heat they sink each turn
+     * @param weapons      the weapons and how many of each, most numerous first
+     */
+    public record Sheet(int walk, int run, int jump, int armor, int structure, int heatSinks, int heatCapacity,
+          List<RequisitionDossier.Line> weapons) {
+
+        /** {@link #heatSinks()} of a unit that does not track heat. */
+        public static final int NO_HEAT = -1;
+
+        public Sheet {
+            List<RequisitionDossier.Line> sorted = new ArrayList<>(weapons);
+            sorted.sort(Comparator.comparingInt(RequisitionDossier.Line::count).reversed());
+            weapons = List.copyOf(sorted);
+        }
+
+        /** The sheet of {@code entity}, at its full armor and its own movement. */
+        public static Sheet of(Entity entity) {
+            Map<String, Integer> counts = new LinkedHashMap<>();
+            for (WeaponMounted weapon : entity.getWeaponList()) {
+                counts.merge(weapon.getType().getName(), 1, Integer::sum);
+            }
+            List<RequisitionDossier.Line> lines = new ArrayList<>();
+            counts.forEach((weapon, count) -> lines.add(new RequisitionDossier.Line(weapon, count)));
+            int sinks = NO_HEAT;
+            if (entity instanceof Mek mek) {
+                sinks = mek.heatSinks();
+            } else if (entity instanceof Aero aero) {
+                sinks = aero.getHeatSinks();
+            }
+            return new Sheet(entity.getOriginalWalkMP(), entity.getOriginalRunMP(), entity.getOriginalJumpMP(),
+                  Math.max(0, entity.getTotalOArmor()), Math.max(0, entity.getTotalOInternal()), sinks,
+                  (sinks == NO_HEAT) ? 0 : entity.getHeatCapacity(), lines);
+        }
+
+        /** "4 / 6 / 3", or "4 / 6" without jump. */
+        public String move() {
+            return (jump > 0) ? Messages.getString("Lobby.requisition.moveJump", walk, run, jump)
+                  : Messages.getString("Lobby.requisition.move", walk, run);
+        }
+
+        /** "304 · IS 152": the armor and the internal structure. */
+        public String protection() {
+            return Messages.getString("Lobby.card.protection", number(armor), number(structure));
+        }
+
+        /** "10 · 20 / turn": how many heat sinks and what they sink; empty for a unit without heat. */
+        public String heat() {
+            return (heatSinks == NO_HEAT) ? "" : Messages.getString("Lobby.card.heatSinks", heatSinks, heatCapacity);
+        }
+
+        /**
+         * The first {@code max} weapons, most numerous first, as "2× LRM 5, ER Small Laser", and "+n" for those left
+         * out; empty without weapons.
+         */
+        public String weaponsSummary(int max) {
+            List<String> parts = new ArrayList<>();
+            for (int i = 0; i < Math.min(max, weapons.size()); i++) {
+                parts.add(weapon(weapons.get(i)));
+            }
+            String summary = String.join(", ", parts);
+            int left = weapons.size() - parts.size();
+            return (left > 0) ? summary + " " + Messages.getString("Lobby.card.more", left) : summary;
+        }
+
+        /** Every weapon, one to a line, for the summary's tooltip. */
+        public String weaponsAll() {
+            return weapons.stream().map(Sheet::weapon).collect(Collectors.joining("\n"));
+        }
+
+        private static String weapon(RequisitionDossier.Line line) {
+            return (line.count() > 1) ? Messages.getString("Lobby.card.weaponCount", line.count(), line.name())
+                  : line.name();
         }
     }
 
@@ -146,7 +236,7 @@ public record LobbyUnit(int id, int ownerId, String name, String details, String
         boolean hidden = hides(game, local, entity.getOwner());
         if (hidden) {
             return new LobbyUnit(entity.getId(), entity.getOwnerId(), blindDescription(entity), "", "", 0, 0, "",
-                  "", "", List.of(), 0, Link.NONE, true, null, entity.getForceId(), editable, false);
+                  "", "", List.of(), 0, Link.NONE, true, null, entity.getForceId(), editable, false, null);
         }
         List<Tag> tags = new ArrayList<>();
         problems(entity, game, medium, tags);
@@ -163,7 +253,7 @@ public record LobbyUnit(int id, int ownerId, String name, String details, String
         return new LobbyUnit(entity.getId(), entity.getOwnerId(), entity.getShortNameRaw(), details(entity),
               entity.getWeightClassName(), entity.getWeight(), bv, number(bv), pilot(entity), skills(entity, game),
               tags, carried > 0 ? carried : networked, link, false, nameTone, entity.getForceId(), editable,
-              entity.hasAnyC3System());
+              entity.hasAnyC3System(), Sheet.of(entity));
     }
 
     /** What a blind drop lets an enemy see of {@code entity}: its kind and weight class, as the Swing lobby words it. */
