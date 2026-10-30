@@ -4034,7 +4034,8 @@ final class GpuTerrain implements Disposable {
                     // A cap has art only where a bank of the span's surface abuts it; else the arch shows its rock.
                     TextureRegion cap = chunk.columns && GpuTilesetTerrain.naturalBridgeArt(scene, tile, deck) != null
                           ? this.ground.region(new GroundSlot(tile.coords(), true)) : null;
-                    naturalBridge(solid, bridgeShape, tile.deckMud(), cap != null);
+                    naturalBridge(solid, bridgeShape, tile.deckMud(), cap != null,
+                          !chunk.columns && BoardNaturalBridge.overhang(scene, tile));
                     if (cap != null) { GpuTilesetTerrain.naturalBridgeTop(tile, bridgeShape, cap, solid::add); }
                 } else { builtBridge(solid, bridgeShape, deck, scene, tile); }
                 solid.route = false;
@@ -5235,13 +5236,16 @@ final class GpuTerrain implements Disposable {
 
     /**
      * Use the ordinary terrain materials and chunk batches; the shell has no per-bridge GPU resource. A muddy deck's
-     * ({@code mud}) top carries {@link #DECK_MUD_KIND}; mud drains over its rim and down the adjacent rock shell.
+     * ({@code mud}) top carries {@link #DECK_MUD_KIND}; mud drains over its rim and down the adjacent rock shell. An
+     * overhang's sides ({@code beds}) are shaded as the cliffs' beds.
      */
-    private void naturalBridge(GpuTerrainLayer solid, BoardBridge.Shape shape, boolean mud, boolean artTop) {
+    private void naturalBridge(GpuTerrainLayer solid, BoardBridge.Shape shape, boolean mud, boolean artTop,
+          boolean beds) {
         float metre = BoardRelief.metres(1);
         var mudDepth = mud ? naturalMudDepth(shape) : Map.<Vector3, Float>of();
         var normals = wallNormals(shape.facets().stream().map(face ->
               new BoardSurface.Face(face.a(), face.b(), face.c(), BoardSurface.Finish.WALL, -1)).toList());
+        int family = shape.surface().ordinal();
         solid.addTriangles(sculptMaterial(shape.surface()), meshes -> {
             for (var face : shape.facets()) {
                 if (artTop && face.part() == BoardBridge.Part.TOP) { continue; }
@@ -5259,7 +5263,8 @@ final class GpuTerrain implements Disposable {
                           top || soffit ? (shape.level() + 64) / 255f : 1,
                           top ? mud ? DECK_MUD_KIND : 0 : soffit ? 1
                                 : draining ? DECK_MUD_RIM_KIND : .5f,
-                          top ? .6f : .55f);
+                          // An overhang's sides take the hardness of the cliffs' bed at each height.
+                          top ? .6f : beds && !soffit ? BoardRelief.bed(p, family) : .55f);
                     points[i++] = vertex(p, normals.get(p), top ? Math.max(.02f, 2.5f - below * 6) : above,
                           top ? 99 : below, data);
                 }

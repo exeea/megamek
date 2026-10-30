@@ -12,12 +12,15 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
+import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.units.Terrain;
@@ -678,6 +681,123 @@ class BoardNaturalBridgeTest {
                 assertEquals((exits & (1 << d)) != 0, Float.isFinite(hit), "Only authored exits may reach a hex edge");
             }
         }
+    }
+
+    /**
+     * A lone span with a free end is an overhang, a thick slab of beds rooted in its banks: Kozice 2609, whose exits
+     * towards 2608 and 2709 lead out over open water. Joined spans, and spans whose exits all lead into ground or a pit
+     * between banks, keep their arch: Kozice 1012 and 1013, and every span of Lava Tubes 1.
+     */
+    @Test
+    void freeEndsMakeALoneSpanAnOverhang() throws Exception {
+        var kozice = GpuRoadSourceTest.scene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board");
+        var overhang = kozice.tile(new Coords(25, 8));
+        assertTrue(BoardNaturalBridge.free(kozice, overhang, 0) && BoardNaturalBridge.free(kozice, overhang, 1),
+              "2609 runs out over the water towards 2608 and 2709");
+        assertTrue(BoardNaturalBridge.overhang(kozice, overhang), "2609 is an overhang");
+        for (var hex : List.of(new Coords(9, 11), new Coords(9, 12))) {
+            assertFalse(BoardNaturalBridge.overhang(kozice, kozice.tile(hex)), "A joined arch: " + hex.getBoardNum());
+        }
+        var tubes = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        for (var tile : tubes.tiles()) {
+            var deck = BoardBridge.deck(tubes, tile);
+            if (deck != null && deck.natural()) {
+                assertFalse(BoardNaturalBridge.overhang(tubes, tile),
+                      "Its exits lead into a pit: " + tile.coords().getBoardNum());
+            }
+        }
+    }
+
+    /**
+     * The game collapses a bridge hex at a time and leaves its rubble (Board.collapseBuilding). A span left beside that
+     * rubble keeps its arch: neither hex of the Kozice arch becomes an overhang once the other falls, nor does 1012
+     * when it also has an exit of its own ({@code extra}) running out over the valley towards 0913.
+     */
+    @ParameterizedTest
+    @CsvSource({ "1012, 1013, -1", "1013, 1012, -1", "1012, 1013, 4" })
+    void aSpanLeftBesideACollapseNeverBecomesAnOverhang(String kept, String lost, int extra) throws Exception {
+        var board = "Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board";
+        var keep = new Coords(Integer.parseInt(kept.substring(0, 2)) - 1, Integer.parseInt(kept.substring(2)) - 1);
+        var gone = new Coords(Integer.parseInt(lost.substring(0, 2)) - 1, Integer.parseInt(lost.substring(2)) - 1);
+        Consumer<Board> exit = edited -> {
+            if (extra >= 0) { edited.getHex(keep).getTerrain(Terrains.BRIDGE).setExit(extra, true); }
+        };
+        if (extra >= 0) {
+            var whole = GpuRoadSourceTest.scene(board, exit);
+            assertTrue(BoardNaturalBridge.free(whole, whole.tile(keep), extra),
+                  "The added exit runs out over the valley");
+        }
+        // A game converts its board when it loads it; the collapse comes later.
+        var broken = GpuRoadSourceTest.scene(board, edited -> {
+            exit.accept(edited);
+            BoardSceneryLayouts.convert(edited);
+            edited.collapseBuilding(gone);
+        });
+        assertTrue(BoardBridge.feature(broken.tile(gone)) == null && BoardBridge.feature(broken.tile(keep)) != null,
+              "The game's own collapse takes the one hex");
+        assertFalse(BoardNaturalBridge.overhang(broken, broken.tile(keep)), "No overhang: " + kept);
+    }
+
+    /**
+     * A deck ramping up to a higher bank is one plane rising towards it, its free edges climbing with it: no top facet
+     * of Kozice 2609 (ramping to the level-3 mesa 2510) or of the 1012/1013 arch (to its level-5 banks) is steeper than
+     * 60 degrees at any detail, where a fan of spokes of very different lengths used to fold into a dark slot.
+     */
+    @ParameterizedTest
+    @CsvSource({ "2609", "1012", "1013" })
+    void rampsRiseWithoutFolds(String hex) throws Exception {
+        var scene = GpuRoadSourceTest.scene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board");
+        var tile = scene.tile(new Coords(Integer.parseInt(hex.substring(0, 2)) - 1,
+              Integer.parseInt(hex.substring(2)) - 1));
+        for (var lod : TerrainLod.values()) {
+            var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, new HashMap<>());
+            for (var face : shape.facets()) {
+                if (face.part() != BoardBridge.Part.TOP && face.part() != BoardBridge.Part.RIM) { continue; }
+                assertTrue(face.normal().z >= .5f, "No fold in the top: " + hex + " " + lod + " " + face);
+            }
+        }
+    }
+
+    /**
+     * Two joined spans enter a bank one level above their decks that marks a cliff top towards both: each mouth enters
+     * the wall at deck height, and so does the corner they share beside it, at every detail, rather than rising to the
+     * bank's top between them as a blade.
+     */
+    @Test
+    void aJoinedCornerBesideAMarkedCliffTopStaysAtTheDeck() {
+        var south = CENTER;
+        var north = south.translated(0);
+        var cliff = south.translated(1);
+        // The ground at level 2, the decks one level above it, level banks at both ends and the marked bank at 4.
+        var scene = BoardBridgeTypeTest.typed(BoardSurfaceBlendTest.scene(c -> c.equals(south)
+              ? BoardBridgeSlopeTest.bridge(c, 2, 1, 1 | 2 | 8)
+              : c.equals(north) ? BoardBridgeSlopeTest.bridge(c, 2, 1, 1 | 4 | 8)
+              : c.equals(cliff) ? cliffTop(BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0, 4, BoardScene.Surface.ROCK),
+                    (1 << 4) | (1 << 5))
+              : BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0,
+                    c.equals(south.translated(3)) || c.equals(north.translated(0)) ? 3 : 2, BoardScene.Surface.ROCK)),
+              HexAppearance.NATURAL_BRIDGE);
+        float deck = 3 * BoardGeometry.level() + BoardRelief.metres(.05f);
+        for (var lod : TerrainLod.values()) {
+            for (var hex : List.of(south, north)) {
+                var tile = scene.tile(hex);
+                var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, new HashMap<>());
+                for (var face : shape.facets()) {
+                    if (face.part() != BoardBridge.Part.TOP && face.part() != BoardBridge.Part.RIM) { continue; }
+                    for (var p : List.of(face.a(), face.b(), face.c())) {
+                        assertTrue(p.z <= deck, "No blade above the deck: " + hex.getBoardNum() + " " + lod + " " + p);
+                    }
+                }
+            }
+        }
+    }
+
+    /** The tile marking its sides in {@code exits} as cliff tops (CLIFF_TOP), as the board stores them. */
+    private static BoardScene.Tile cliffTop(BoardScene.Tile t, int exits) {
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
+              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
+              t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), exits, t.bare(), t.groundCover(),
+              t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance());
     }
 
     /**

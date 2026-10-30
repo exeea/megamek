@@ -26,6 +26,8 @@ final class BoardNaturalBridge {
 
     /** How far, in metres, a corner joint's edge runs on into the ground's corner, past its rounded-off cliff. */
     private static final float CORNER_DEPTH = 9;
+    /** The rubble a collapsed span leaves, as its terrain layout draws it ({@link #broken}). */
+    private static final String RUBBLE = "scenery/rubble/";
     /** Radians over which the deck's centre blends the rim heights its spokes carry (see {@link #blend}). */
     private static final float BLEND = .6f;
     /**
@@ -65,17 +67,20 @@ final class BoardNaturalBridge {
         var bankTops = new Path2D.Float();
         float[] reaches = new float[6];
         var mouths = new ArrayList<List<Rim>>();
+        boolean slab = !fullHex && overhang(scene, tile);
         for (int d = 0; d < 6 && !fullHex; d++) {
             var gate = BoardGeometry.center(tile.coords().translated(d), level).sub(center).scl(.5f);
             float length = gate.len();
             var along = new Vector3(gate).nor();
             var mouth = new ArrayList<Rim>();
             mouths.add(mouth);
-            if ((exits & (1 << d)) == 0) {
+            if ((exits & (1 << d)) == 0 || slab && free(scene, tile, d)) {
                 // A free side narrows to the arch's waist. Between two supports dropping into a hollow beyond it,
-                // it is the lip the banks continue around, so it keeps near the hex edge instead of pinching in.
+                // it is the lip the banks continue around, so it keeps near the hex edge instead of pinching in. An
+                // overhang's free end is a side of its slab too.
                 float wander = noise((center.x + gate.x) * .45f, (center.y + gate.y) * .45f);
-                float waist = drops(scene, tile, d, (d + 5) % 6) && drops(scene, tile, d, (d + 1) % 6)
+                float waist = slab ? slabEdge(scene, tile, d, wander)
+                      : drops(scene, tile, d, (d + 5) % 6) && drops(scene, tile, d, (d + 1) % 6)
                       ? .86f + .08f * wander : .38f + .16f * wander;
                 mouth.add(new Rim(new Vector3(center).mulAdd(along, length * waist), -1, false, false));
                 continue;
@@ -109,8 +114,11 @@ final class BoardNaturalBridge {
                 var point = new Vector3(center).add(gate).mulAdd(across, width * (1 - 2f * i / sections));
                 if (bank && BoardBridge.bank(tile, next, d)) {
                     float[] settled = ground.relief.settle(point.x, point.y, BoardRelief.metres(.7f));
-                    point.set(settled[0], settled[1], BoardSurface.sampleHeight(contact, settled[0], settled[1],
-                          BoardGeometry.groundZ(next)) - (levelBanks[d] ? 0 : BoardRelief.metres(.025f)));
+                    // The deck ramps to the bank's top, unless the board marks that side a cliff top: there the rock
+                    // enters the bank's wall at the deck's height.
+                    point.set(settled[0], settled[1], cliff(next, d) ? center.z
+                          : BoardSurface.sampleHeight(contact, settled[0], settled[1], BoardGeometry.groundZ(next))
+                                - (levelBanks[d] ? 0 : BoardRelief.metres(.025f)));
                 } else if (joined) {
                     point.z = BoardBridge.edgeElevation(tile, next, d) * BoardGeometry.level();
                 }
@@ -131,6 +139,13 @@ final class BoardNaturalBridge {
                 if (tongue != null) { tongues.add(tongue); }
             } else {
                 shoulder(scene, tile, d, center, mouths, points);
+                if (slab && points.isEmpty() && open(scene, tile, d) && open(scene, tile, (d + 1) % 6)) {
+                    // Between two of an overhang's own edges its slab reaches out towards the hex corner.
+                    var vertex = BoardGeometry.corner(tile.coords(), 0, Math.floorMod(1 - d, 6));
+                    var point = new Vector3(center).lerp(vertex, .8f + .14f * noise(vertex.x * .3f, vertex.y * .3f));
+                    point.z = center.z;
+                    points.add(new Rim(point, -1, false, false));
+                }
             }
         }
         var outline = new ArrayList<Rim>();
@@ -149,7 +164,30 @@ final class BoardNaturalBridge {
         // Wide neighboring mouths can cross their directional sectors. Order their points around the centre
         // before rounding so the radial shell never doubles back over an adjacent branch.
         outline.sort(Comparator.comparingDouble(edge -> Math.atan2(edge.point().y - center.y, edge.point().x - center.x)));
+        // A ramp up to a bank is one plane rising towards it, across the whole rock: its free edges climb with the
+        // deck beside the mouth, so no wedge of rock stands between the ramp and the side. It gives way to any lower
+        // mouth or corner, whose rock keeps its height.
+        float[] ramps = new float[6];
+        for (int d = 0; d < 6 && !fullHex; d++) {
+            var mouth = mouths.get(d);
+            if (mouth.isEmpty() || mouth.getFirst().exit() != d) { continue; }
+            float rise = 0;
+            for (var rim : mouth) { rise += rim.point().z - center.z; }
+            rise /= mouth.size();
+            if (rise < BoardRelief.metres(.5f)) { continue; }
+            ramps[d] = rise;
+        }
+        for (int d = 0; d < 6; d++) {
+            for (var edge : outline) {
+                if (ramps[d] == 0 || edge.contact()) { continue; }
+                var point = edge.point();
+                float lift = reach(tile, outline, center, point, d, ramps[d]);
+                point.z = Math.max(point.z, center.z + (plane(tile, center, point, d, ramps[d]) - center.z) * lift);
+            }
+        }
         int edgeSteps = fullHex ? 1 : lod == TerrainLod.FULL ? 5 : lod == TerrainLod.MEDIUM ? 3 : lod == TerrainLod.COARSE ? 2 : 1;
+        if (slab) { edgeSteps = Math.min(edgeSteps, lod == TerrainLod.FULL ? 3 : 2); }
+        float soft = BoardRelief.jointScale(shell(deck.surface()).ordinal());
         var rim = new ArrayList<Rim>();
         var seams = new ArrayList<Seam>();
         for (int i = 0; i < outline.size(); i++) {
@@ -169,6 +207,10 @@ final class BoardNaturalBridge {
             int steps = seam == Seam.OPEN ? edgeSteps : 1;
             rim.add(a);
             seams.add(seam);
+            if (slab) {
+                jointed(rim, seams, outline, i, steps, center, soft);
+                continue;
+            }
             for (int j = 1; j < steps; j++) {
                 float t = j / (float) steps;
                 var point = curve(outline, i, t, center);
@@ -180,7 +222,38 @@ final class BoardNaturalBridge {
                 seams.add(Seam.OPEN);
             }
         }
+        // Only an anchor's rock, or a joined span's, reaches past an overhang's own hex edges; its authored free ends
+        // reach them, as the deck does, and stop there.
+        for (var edge : rim) {
+            if (!slab || edge.contact()) { continue; }
+            var point = edge.point();
+            for (int d = 0; d < 6; d++) {
+                var beyond = scene.tile(tile.coords().translated(d));
+                if (anchors(scene, tile, d) || BoardBridge.connected(tile, beyond, d) || wall(tile, beyond)) {
+                    continue;
+                }
+                float share = BoardGeometry.share(tile.coords(), d, point.x, point.y);
+                float limit = (exits & (1 << d)) != 0 ? 1 : .97f;
+                if (share > limit) {
+                    float z = point.z;
+                    point.sub(center).scl(limit / share).add(center);
+                    point.z = z;
+                }
+            }
+        }
         float[] exposure = exposure(rim);
+        // How much of each ramp's plane each spoke takes (its own mouth and the free rim, never another mouth), and how
+        // far its inner rings draw in with the ramp's.
+        float[][] lifts = new float[6][rim.size()];
+        float[] drawn = new float[rim.size()];
+        for (int d = 0; d < 6; d++) {
+            for (int i = 0; i < rim.size() && ramps[d] > 0; i++) {
+                var edge = rim.get(i);
+                float weight = reach(tile, outline, center, edge.point(), d, ramps[d]);
+                drawn[i] = Math.max(drawn[i], weight);
+                if (!edge.contact() || edge.exit() == d) { lifts[d][i] = weight; }
+            }
+        }
         int rings = lod == TerrainLod.FULL ? 5 : lod == TerrainLod.MEDIUM ? 4 : lod == TerrainLod.COARSE ? 3 : 1;
         if (fullHex) { rings = Math.max(2, rings); }
         var facets = new ArrayList<Facet>();
@@ -193,23 +266,42 @@ final class BoardNaturalBridge {
             for (int i = 0; i < rim.size(); i++) {
                 var edge = rim.get(i);
                 float exposed = blended[2][i];
-                var point = new Vector3(center).lerp(edge.point(), t);
+                // A ramp's spoke reaching into its bank keeps its inner rings at the radii of a spoke ending at the hex
+                // edge, so the fan's triangles never stretch across very different radii into a twisted, steep facet.
+                float spoke = Vector2.dst(center.x, center.y, edge.point().x, edge.point().y);
+                float at = r == rings || fullHex ? t
+                      : t * (1 + (Math.min(1, BoardGeometry.width() / 2 / spoke) - 1) * drawn[i]);
+                var point = new Vector3(center).lerp(edge.point(), at);
                 point.z = fullHex ? center.z + (edge.point().z - center.z) * Math.max(0, 2 * t - 1)
-                      : center.z + (blended[0][i] - center.z) * Math.min(1, t / blended[1][i]);
+                      : center.z + (blended[0][i] - center.z) * Math.min(1, at / blended[1][i]);
                 // Only the exposed rim erodes. Every contact keeps the plane its bank, joined span or end shares, and
                 // the erosion fades in along the rim, so neighbouring spokes never step against each other.
                 point.z -= exposed * Math.min(BoardRelief.metres(1.4f), space * .16f) * t * (1 - t)
                       * (.3f + .7f * noise(point.x * .35f, point.y * .35f));
-                point.z -= exposed * Math.min(BoardRelief.metres(1.3f), space * .16f) * t * t
-                      * (.6f + .4f * noise(point.x, point.y));
+                // An overhang's caprock keeps a firmer edge over open space; beside a bank it tucks under the lip.
+                float round = slab
+                      ? Math.min(BoardRelief.metres(.9f + .4f * anchoring(scene, tile, point)), space * .14f)
+                      : Math.min(BoardRelief.metres(1.3f), space * .16f);
+                point.z -= exposed * round * t * t * (.6f + .4f * noise(point.x, point.y));
+                // A ramp is one plane rising towards its bank: its mouth's spokes and the free spokes beside them take
+                // it all the way in, so neighbouring spokes of different lengths meet without a fold. The rim keeps
+                // the mouth's contacts on the bank's own top.
+                for (int d = 0; d < 6; d++) {
+                    if (lifts[d][i] > 0 && (r < rings || !edge.contact())) {
+                        float ramp = plane(tile, center, point, d, ramps[d]);
+                        point.z = Math.max(point.z, center.z + (ramp - center.z) * lifts[d][i]);
+                    }
+                }
                 top[r][i] = point;
-                bottom[r][i] = new Vector3(point).add(0, 0, -thickness(scene, tile, space, point));
-                if (exposed > 0) {
+                bottom[r][i] = new Vector3(point).add(0, 0, -thickness(scene, tile, space, point, slab));
+                if (exposed > 0 && !slab) {
                     var inward = new Vector3(center).sub(point); inward.z = 0; inward.nor();
                     bottom[r][i].mulAdd(inward, BoardRelief.metres(.8f) * t * t * t * t * exposed);
                 }
             }
         }
+        Vector3[][] layers = slab
+              ? beds(scene, tile, deck, lod, rim, exposure, center, top[rings], bottom, soft) : null;
         for (int i = 0; i < rim.size(); i++) {
             int n = (i + 1) % rim.size();
             var seam = seams.get(i);
@@ -224,6 +316,10 @@ final class BoardNaturalBridge {
             }
             // A joined span builds the other side of a shared edge: no internal wall.
             if (seam == Seam.JOINT) { continue; }
+            if (slab) {
+                bedFaces(facets, layers, i, n);
+                continue;
+            }
             // Broad broken strata define the close silhouette; the shared normal maps supply small fissures.
             int beds = fullHex ? 0 : lod == TerrainLod.FULL ? STRATA.length : lod == TerrainLod.MEDIUM ? 1 : 0;
             var a = top[rings][i];
@@ -249,7 +345,7 @@ final class BoardNaturalBridge {
         for (var tongue : tongues) {
             int corner = rim.indexOf(tongue.vertex()), mouth = rim.indexOf(tongue.mouth());
             var deep = tongue.deep();
-            var under = new Vector3(deep).add(0, 0, -thickness(scene, tile, space, deep));
+            var under = new Vector3(deep).add(0, 0, -thickness(scene, tile, space, deep, slab));
             var outward = new Vector3(deep).add(tongue.mouth().point()).scl(.5f).sub(tongue.vertex().point());
             outward.z = 0;
             facing(facets, top[rings][corner], new Vector3(deep), top[rings][mouth], Part.TOP, Vector3.Z);
@@ -277,9 +373,10 @@ final class BoardNaturalBridge {
 
     /**
      * The rock's depth below a top point: a thin crown, thickening where banks anchor it and kept clear of the last whole
-     * level below; joined spans weigh their own anchors and room across their shared edge, so both agree there.
+     * level below; joined spans weigh their own anchors and room across their shared edge, so both agree there. An
+     * overhang's {@code slab} is thicker.
      */
-    private static float thickness(BoardScene scene, BoardScene.Tile tile, float space, Vector3 point) {
+    private static float thickness(BoardScene scene, BoardScene.Tile tile, float space, Vector3 point, boolean slab) {
         float anchored = anchoring(scene, tile, point), room = space;
         for (int d = 0; d < 6; d++) {
             var next = scene.tile(tile.coords().translated(d));
@@ -290,8 +387,12 @@ final class BoardNaturalBridge {
             float nextLevel = (next.elevation() + BoardBridge.feature(next).elevation()) * BoardGeometry.level();
             room = Math.min(room, space + (clearance(next, nextLevel) - space) * join);
         }
-        float crown = Math.min(BoardRelief.metres(2.7f) * (.82f + .3f * noise(point.x * .35f, point.y * .35f)), room * .43f);
-        float spring = Math.min(BoardRelief.metres(5.3f), room * .79f);
+        // An overhang is a thick slab of beds, most of the room it may take above the level kept clear below.
+        float crown = slab
+              ? Math.min(BoardRelief.metres(3.8f) * (.88f + .24f * noise(point.x * .35f, point.y * .35f)), room * .62f)
+              : Math.min(BoardRelief.metres(2.7f) * (.82f + .3f * noise(point.x * .35f, point.y * .35f)), room * .43f);
+        float spring = slab ? Math.min(BoardRelief.metres(6), room * .86f)
+              : Math.min(BoardRelief.metres(5.3f), room * .79f);
         return (crown + (spring - crown) * anchored) * (.93f + .1f * noise(point.x, point.y));
     }
 
@@ -383,6 +484,229 @@ final class BoardNaturalBridge {
         return joined(tile, next, direction) || BoardBridge.abutment(tile, next, direction);
     }
 
+    /**
+     * The span is an overhang: a lone span with a free end, neither joined to a span nor left beside one that collapsed
+     * ({@link #broken}). Its rock is a thick slab of the cliffs' beds, rooted wide in its banks; every other span keeps
+     * its arch.
+     */
+    static boolean overhang(BoardScene scene, BoardScene.Tile tile) {
+        int exits = BoardBridge.feature(tile).bridgeExits();
+        boolean loose = false;
+        for (int d = 0; d < 6; d++) {
+            var next = scene.tile(tile.coords().translated(d));
+            if (BoardBridge.connected(tile, next, d) || (exits & (1 << d)) != 0 && broken(next)) { return false; }
+            loose |= free(scene, tile, d);
+        }
+        return loose;
+    }
+
+    /**
+     * The exit in {@code direction} is a free end: neither ground nor a span lies beyond it, and no cliff rises beside
+     * it on either side, so the rock runs out over open space. An exit into a pit between banks is none; one off the
+     * board's edge runs out over the void beyond.
+     */
+    static boolean free(BoardScene scene, BoardScene.Tile tile, int direction) {
+        var next = scene.tile(tile.coords().translated(direction));
+        if ((BoardBridge.feature(tile).bridgeExits() & (1 << direction)) == 0
+              || BoardBridge.abutment(tile, next, direction) || BoardBridge.connected(tile, next, direction)) {
+            return false;
+        }
+        for (int side : new int[] { 1, 5 }) {
+            var beside = scene.tile(tile.coords().translated((direction + side) % 6));
+            if (beside != null && !beside.liquid().present() && BoardBridge.feature(beside) == null
+                  && beside.elevation() >= deck(tile) - 1) { return false; }
+        }
+        return true;
+    }
+
+    /**
+     * Where a span was and collapsed: no deck, but the rubble the game leaves there (Board.collapseBuilding), as its
+     * terrain layout draws it. A span left standing beside it keeps its form: it never becomes an overhang.
+     */
+    private static boolean broken(BoardScene.Tile tile) {
+        return tile != null && BoardBridge.feature(tile) == null
+              && tile.features().stream().anyMatch(feature -> feature.asset().startsWith(RUBBLE));
+    }
+
+    /** The side in {@code direction} is one of an overhang's own edges: no exit, or a free end. */
+    private static boolean open(BoardScene scene, BoardScene.Tile tile, int direction) {
+        return (BoardBridge.feature(tile).bridgeExits() & (1 << direction)) == 0 || free(scene, tile, direction);
+    }
+
+    /** The exit in {@code direction} rests on a bank or cliff. */
+    private static boolean anchors(BoardScene scene, BoardScene.Tile tile, int direction) {
+        return BoardBridge.abutment(tile, scene.tile(tile.coords().translated(direction)), direction);
+    }
+
+    /** The bank in {@code direction} marks its side towards the span as a cliff top: a wall there, not a ramp. */
+    private static boolean cliff(BoardScene.Tile bank, int direction) {
+        return (bank.cliffTopExits() & (1 << ((direction + 3) % 6))) != 0;
+    }
+
+    /**
+     * How much of the plane of ramp {@code d}, rising {@code rise} to its bank, the rock towards {@code point} takes:
+     * all of it away from any other fixed edge below the plane (a mouth or corner the plane would bury), fading out
+     * within 60 degrees of one, so the rock there keeps that edge's height.
+     */
+    private static float reach(BoardScene.Tile tile, List<Rim> outline, Vector3 center, Vector3 point, int d,
+          float rise) {
+        double angle = Math.atan2(point.y - center.y, point.x - center.x), gap = Math.PI;
+        for (var fixed : outline) {
+            var p = fixed.point();
+            if (fixed.contact() && fixed.exit() != d
+                  && p.z < plane(tile, center, p, d, rise) - BoardRelief.metres(.5f)) {
+                double delta = Math.abs(angle - Math.atan2(p.y - center.y, p.x - center.x));
+                gap = Math.min(gap, Math.min(delta, 2 * Math.PI - delta));
+            }
+        }
+        return BoardRelief.smooth((float) (gap / (Math.PI / 3)));
+    }
+
+    /** Ramp {@code d}'s plane over {@code point}: the deck at the centre, {@code rise} above it at the hex edge. */
+    private static float plane(BoardScene.Tile tile, Vector3 center, Vector3 point, int d, float rise) {
+        return center.z + rise * Math.clamp(BoardGeometry.share(tile.coords(), d, point.x, point.y), 0, 1);
+    }
+
+    /** Solid ground beyond, rising above the deck: a cliff whose wall an overhang may enter below its top. */
+    private static boolean wall(BoardScene.Tile tile, BoardScene.Tile beyond) {
+        return beyond != null && !beyond.liquid().present() && BoardBridge.feature(beyond) == null
+              && beyond.elevation() > deck(tile);
+    }
+
+    /**
+     * How far an overhang's own edge in direction {@code d} reaches, as a share of the inradius: into a higher cliff's
+     * wall; to the hex edge at an authored free end, where the deck leads on; wide beside a bank at or above its deck
+     * that it roots in (unless facing higher ground) and over a hollow the banks continue around; else a little short
+     * of it.
+     */
+    private static float slabEdge(BoardScene scene, BoardScene.Tile tile, int d, float wander) {
+        var beyond = scene.tile(tile.coords().translated(d));
+        if (wall(tile, beyond)) { return 1.06f + .04f * wander; }
+        if ((BoardBridge.feature(tile).bridgeExits() & (1 << d)) != 0) { return 1; }
+        boolean rooted = false;
+        for (int side : new int[] { 5, 1 }) {
+            int e = (d + side) % 6;
+            rooted |= anchors(scene, tile, e) && scene.tile(tile.coords().translated(e)).elevation() >= deck(tile);
+        }
+        return rooted && (beyond == null || beyond.elevation() <= deck(tile))
+              || drops(scene, tile, d, (d + 5) % 6) && drops(scene, tile, d, (d + 1) % 6) ? .8f + .18f * wander
+              : .62f + .18f * wander;
+    }
+
+    /**
+     * An overhang's outline from {@code outline}'s point {@code i} to the next, in {@code steps} blocks broken along
+     * the rock's two vertical joint sets: now and then the edge follows one set, then the other, the corner cut back by
+     * weathering; most blocks stand nearly in line, scaled by the family's joint size ({@code soft}).
+     */
+    private static void jointed(List<Rim> rim, List<Seam> seams, List<Rim> outline, int i, int steps, Vector3 center,
+          float soft) {
+        var a = outline.get(i);
+        var b = outline.get((i + 1) % outline.size());
+        float angle = (float) Math.PI / 2 * noise(center.x * .05f + 11, center.y * .05f);
+        float jx = (float) Math.cos(angle), jy = (float) Math.sin(angle);
+        var from = a.point();
+        for (int j = 1; j <= steps && steps > 1; j++) {
+            float t = j / (float) steps;
+            // A fixed contact keeps its place; the blocks grow away from it.
+            float free = (a.contact() ? BoardRelief.smooth(2 * t) : 1)
+                  * (b.contact() ? BoardRelief.smooth(2 - 2 * t) : 1);
+            var to = b.point();
+            if (j < steps) {
+                to = curve(outline, i, t, center);
+                var outward = new Vector3(to).sub(center); outward.z = 0; outward.nor();
+                float wander = noise(to.x * .31f + 5, to.y * .31f) - .5f;
+                to.mulAdd(outward, BoardRelief.metres(1.6f) * wander * free * soft);
+            }
+            float x = to.x - from.x, y = to.y - from.y;
+            float along = x * jx + y * jy, across = y * jx - x * jy;
+            boolean touches = a.contact() && j == 1 || b.contact() && j == steps;
+            if (!touches && noise(to.x * .37f - 7, to.y * .37f) > .7f
+                  && Math.min(Math.abs(along), Math.abs(across)) > BoardRelief.metres(.8f)) {
+                boolean first = noise(from.x * 1.3f, from.y * 1.3f) > .5f;
+                var corner = new Vector3(from).lerp(to, .5f);
+                corner.x += ((first ? from.x + jx * along : from.x - jy * across) - corner.x) * .45f;
+                corner.y += ((first ? from.y + jy * along : from.y + jx * across) - corner.y) * .45f;
+                rim.add(new Rim(corner, -1, false, false));
+                seams.add(Seam.OPEN);
+            }
+            if (j < steps) {
+                rim.add(new Rim(to, -1, false, false));
+                seams.add(Seam.OPEN);
+            }
+            from = to;
+        }
+    }
+
+    /**
+     * An overhang's beds at each outline point, from the caprock's edge ({@code edge}) down: the caprock and the bed
+     * under it stand flush in its front face, a bed line between them, and the beds below step back towards the
+     * anchors, so the underside climbs in treads. Their planes follow the cliffs' own bedding. The last bed's edge
+     * becomes the underside's ({@code bottom}).
+     */
+    private static Vector3[][] beds(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck, TerrainLod lod,
+          List<Rim> rim, float[] exposure, Vector3 center, Vector3[] edges, Vector3[][] bottom, float soft) {
+        int family = shell(deck.surface()).ordinal(), rings = bottom.length - 1;
+        float[] shares = lod == TerrainLod.FULL ? new float[] { .3f, .58f, .8f, 1 }
+              : lod == TerrainLod.MEDIUM ? new float[] { .5f, 1 } : new float[] { 1 };
+        int layers = shares.length, flush = Math.max(1, Math.min(2, layers - 1));
+        Vector3[][] beds = new Vector3[layers + 1][rim.size()];
+        for (int i = 0; i < rim.size(); i++) {
+            var edge = edges[i];
+            float depth = edge.z - bottom[rings][i].z;
+            var inward = new Vector3(center).sub(edge); inward.z = 0;
+            float room = inward.len() * .55f;
+            inward.nor();
+            float free = exposure[i] * (1.15f - anchoring(scene, tile, edge));
+            beds[0][i] = edge;
+            for (int k = 1; k <= layers; k++) {
+                var p = new Vector3(edge);
+                float share = shares[k - 1];
+                p.z = edge.z - depth * share;
+                if (k < layers) {
+                    p.z = Math.clamp(BoardRelief.bedPlane(p, family, 2), edge.z - depth * (share + .08f),
+                          edge.z - depth * (share - .08f));
+                }
+                // Most beds stand nearly flush with the one above, a few a little proud or set back.
+                float jut = noise(edge.x * .9f + 9 * k, edge.y * .9f) - .5f;
+                float recess = k == 1 ? 0 : BoardRelief.metres(.25f + 4.8f * jut * jut * jut) * free * soft;
+                if (k > flush) {
+                    recess += BoardRelief.metres(2.5f) * (k - flush) * free
+                          * (.7f + .6f * noise(edge.x * .5f + 3 * k, edge.y * .5f));
+                }
+                beds[k][i] = p.mulAdd(inward, Math.min(recess, room));
+            }
+            bottom[rings][i] = beds[layers][i];
+        }
+        // The underside runs in from the last bed's edge.
+        for (int r = 1; r < rings; r++) {
+            float t = .8f * r / (rings - 1);
+            for (int i = 0; i < rim.size(); i++) {
+                float z = bottom[r][i].z;
+                bottom[r][i] = new Vector3(center).lerp(beds[layers][i], t);
+                bottom[r][i].z = z;
+            }
+        }
+        return beds;
+    }
+
+    /**
+     * An overhang's side from outline point i to n: each bed's face, and the tread under each bed the next leaves,
+     * wound as the walls and the underside around them.
+     */
+    private static void bedFaces(List<Facet> facets, Vector3[][] beds, int i, int n) {
+        for (int k = 1; k < beds.length; k++) {
+            // From the plane above it down to its own: under the caprock, that plane is where the bed above ends.
+            var a = k == 1 ? beds[0][i] : new Vector3(beds[k][i].x, beds[k][i].y, beds[k - 1][i].z);
+            var b = k == 1 ? beds[0][n] : new Vector3(beds[k][n].x, beds[k][n].y, beds[k - 1][n].z);
+            triangle(facets, a, beds[k][i], beds[k][n], Part.SIDE);
+            triangle(facets, a, beds[k][n], b, Part.SIDE);
+            if (k > 1) {
+                triangle(facets, a, beds[k - 1][n], beds[k - 1][i], Part.SOFFIT);
+                triangle(facets, a, b, beds[k - 1][n], Part.SOFFIT);
+            }
+        }
+    }
+
     /** Beyond the free side {@code open} the ground lies below the support in {@code beside}: its cliff turns there. */
     private static boolean drops(BoardScene scene, BoardScene.Tile tile, int open, int beside) {
         var low = scene.tile(tile.coords().translated(open));
@@ -469,8 +793,11 @@ final class BoardNaturalBridge {
         var line = new Vector3(vertex).sub(far).nor();
         var deep = new Vector3(line).scl(BoardRelief.metres(CORNER_DEPTH)).add(vertex);
         int across = joinsFirst ? (d + 2) % 6 : (d + 5) % 6;
-        if (BoardBridge.bank(tile, ground, joinsFirst ? e : d) && BoardBridge.bank(span, ground, across)) {
-            // A bank both spans rest on: the shared edge climbs or falls from the joint's mouth to its top.
+        int towards = joinsFirst ? e : d;
+        // A bank both spans rest on: the shared edge climbs or falls from the joint's mouth to its top. A bank
+        // marking a cliff top towards either span is a wall both enter at the joint's height.
+        if (BoardBridge.bank(tile, ground, towards) && BoardBridge.bank(span, ground, across)
+              && !cliff(ground, towards) && !cliff(ground, across)) {
             boolean level = deck(tile) == ground.elevation() && deck(span) == ground.elevation();
             vertex.z = ground.elevation() * BoardGeometry.level() - (level ? 0 : BoardRelief.metres(.025f));
         } else {
@@ -561,9 +888,14 @@ final class BoardNaturalBridge {
         return line.x * (point.y - origin.y) - line.y * (point.x - origin.x);
     }
 
-    /** The height at which the span rests on ground: a bank's top, else its own deck in a taller cliff. */
+    /**
+     * The height at which the span rests on ground: a bank's top, else its own deck in a taller cliff or a bank whose
+     * side towards it the board marks a cliff top.
+     */
     private static float support(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
-        if (!BoardBridge.bank(tile, next, direction)) { return deck(tile) * BoardGeometry.level(); }
+        if (!BoardBridge.bank(tile, next, direction) || cliff(next, direction)) {
+            return deck(tile) * BoardGeometry.level();
+        }
         return next.elevation() * BoardGeometry.level() - (next.elevation() == deck(tile) ? 0 : BoardRelief.metres(.025f));
     }
 

@@ -2447,8 +2447,18 @@ final class BoardRelief {
         return z / bedding + .8f * gradient(x / 30, y / 30) + .2f * gradient(x / 7 + 3.1f, y / 7 - 1.7f);
     }
 
+    /** The height of the bedding plane nearest a world point, each bed split into {@code split} layers. */
+    static float bedPlane(Vector3 p, int family, int split) {
+        float m = metres(1), b = ROCKS[family].bedding();
+        float u = bedding(p.x / m, p.y / m, p.z / m, b) * split;
+        return p.z + (Math.round(u) - u) * b / split * m;
+    }
+
+    /** The family's joint blocks against the coarsest cliffs': finer jointing breaks rock into smaller blocks. */
+    static float jointScale(int family) { return Math.min(1, ROCKS[family].cellWidth() / 7.5f); }
+
     /** Hardness in [0, 1] of the bed holding a world point: the colour of the same bed whose ledge stands out. */
-    private static float bed(Vector3 p, int family) {
+    static float bed(Vector3 p, int family) {
         float m = metres(1);
         return hash((int) Math.floor(bedding(p.x / m, p.y / m, p.z / m, ROCKS[family].bedding())) * 17 + 3, 91);
     }
