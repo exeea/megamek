@@ -22,6 +22,8 @@ import megamek.logging.MMLogger;
  * columns for a fixed-width font.
  */
 public final class RequisitionReadout {
+    /** How long a labelled value may run before its row is a text section. */
+    public static final int SECTION_LENGTH = 80;
     private static final MMLogger LOGGER = MMLogger.create(RequisitionReadout.class);
     private static final Pattern TOKEN = Pattern.compile("<(/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>|<!--.*?-->|([^<]+)",
           Pattern.DOTALL);
@@ -50,6 +52,63 @@ public final class RequisitionReadout {
             LOGGER.warn(failure, "The TRO of {} could not be made", entity.getShortName());
             return List.of();
         }
+    }
+
+    /**
+     * Whether {@code row} is a text section rather than a labelled line: a {@code LABELED} row whose value runs on (a
+     * break in it, or longer than {@link #SECTION_LENGTH}), as the fluff's Overview, Capabilities or History. A section
+     * shows its label as a heading over its text at full width.
+     */
+    public static boolean isSection(Row row) {
+        if (row.kind() != Kind.LABELED || row.cells().size() < 2) {
+            return false;
+        }
+        String value = row.cells().get(1);
+        return value.indexOf('\n') >= 0 || value.length() > SECTION_LENGTH;
+    }
+
+    /**
+     * {@code rows} in blocks that a view reveals one after another: a block starts at a title, a text section, a
+     * table's first row (or a header after a table's rows) or the row after a space, once the block before holds
+     * more than titles and spaces (so a heading stays with what it heads).
+     */
+    public static List<List<Row>> blocks(List<Row> rows) {
+        List<List<Row>> blocks = new ArrayList<>();
+        List<Row> block = new ArrayList<>();
+        boolean content = false;
+        Row previous = null;
+        for (Row row : rows) {
+            boolean table = isTable(row);
+            boolean starts = row.kind() == Kind.TITLE || isSection(row)
+                  || (table && (previous == null || !isTable(previous)
+                        || (row.kind() == Kind.TABLE_HEADER && previous.kind() == Kind.TABLE_ROW)))
+                  || (previous != null && previous.kind() == Kind.SPACE);
+            if (starts && content) {
+                blocks.add(block);
+                block = new ArrayList<>();
+                content = false;
+            }
+            block.add(row);
+            content |= row.kind() != Kind.TITLE && row.kind() != Kind.SPACE;
+            previous = row;
+        }
+        if (!block.isEmpty()) {
+            blocks.add(block);
+        }
+        return blocks;
+    }
+
+    /** How many of {@code cells} count: up to the last that holds more than blanks. */
+    public static int filledCells(List<String> cells) {
+        int count = cells.size();
+        while (count > 0 && cells.get(count - 1).isBlank()) {
+            count--;
+        }
+        return count;
+    }
+
+    /** Whether {@code row} is a table's header or row. */    public static boolean isTable(Row row) {
+        return row.kind() == Kind.TABLE_HEADER || row.kind() == Kind.TABLE_ROW;
     }
 
     /**

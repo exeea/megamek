@@ -114,7 +114,7 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+requisition+pick+tab=name}: once the picked unit's dossier shows, clicks its tab through the
  *     stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s in: {@code overview}, {@code readout}, {@code ascard},
  *     {@code factions} or {@code damage}; {@code tro} clicks Readout, then its TRO switch, and {@code summary} its
- *     Summary switch.</li>
+ *     Summary switch. With {@code +scroll=percent} it scrolls the tab that far down half a second before the shot.</li>
  *     <li>{@code lobby+dialog=name}: opens a Swing dialog as the lobby's control would once the shot's time comes, and
  *     saves a photograph of the window and its dialogs, taken from the screen only when the dialog is in front,
  *     instead of the frame buffer, which has no Swing dialogs; the
@@ -155,6 +155,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     static final double FOLD_CHAT_AT = 3;
     private static final String DIALOG_OPTION = "dialog=";
     private static final String TAB_OPTION = "tab=";
+    private static final String SCROLL_OPTION = "scroll=";
     /** How long a probed dialog has to show, and then to close, before the probe looks. */
     private static final int DIALOG_WAIT_MS = 2500;
     private static final int FRONT_WAIT_MS = 700;
@@ -447,6 +448,20 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             }
         }
         return null;
+    }
+
+    /** How far down {@code lobby+requisition+pick+scroll=percent} scrolls the dossier tab, 0 to 1, or -1. */
+    float scroll() {
+        for (String option : options) {
+            if (option.startsWith(SCROLL_OPTION)) {
+                try {
+                    return Math.max(0, Math.min(1, Integer.parseInt(option.substring(SCROLL_OPTION.length())) / 100f));
+                } catch (NumberFormatException ignored) {
+                    return -1;
+                }
+            }
+        }
+        return -1;
     }
 
     /** The dialogs {@code lobby+dialog=name} opens on the stage, the lobby's libGDX dialogs. */

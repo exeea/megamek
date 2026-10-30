@@ -53,6 +53,7 @@ import megamek.client.lobby.RequisitionCatalog.Weight;
 import megamek.client.lobby.RequisitionDamage;
 import megamek.client.lobby.RequisitionDossier;
 import megamek.client.lobby.RequisitionFactions;
+import megamek.client.lobby.RequisitionReadout;
 import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionRow;
 import megamek.client.lobby.RequisitionSearch;
@@ -64,6 +65,7 @@ import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFilterChip;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiReveal;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiStepChart;
@@ -1330,52 +1332,137 @@ final class LobbyRequisitionPanel {
         return content;
     }
 
-    /** The readout's rows in the kit's type: titles, labelled lines, tables in columns, text. */
+    /**
+     * The readout's rows in the kit's type, block by block, each fading in after the one before the first time the
+     * readout shows (gap analysis, Review fixes): the unit's name, headings in overline, labelled lines, text sections
+     * as a heading over their text at full width, and tables whose columns line up across every table of the readout.
+     */
     private Table readoutRows(List<EntityReadout.Row> rows) {
-        Table content = new Table();
-        content.top().left();
-        Table run = null;
-        for (EntityReadout.Row row : rows) {
-            boolean table = row.kind() == EntityReadout.Row.Kind.TABLE_HEADER
-                  || row.kind() == EntityReadout.Row.Kind.TABLE_ROW;
-            if (!table && run != null) {
-                content.add(run).growX().minWidth(0).left().row();
-                run = null;
-            }
-            switch (row.kind()) {
-                case TITLE -> content.add(wrapped(String.join(" ", row.cells()), "body.strong", "text.primary"))
-                      .growX().minWidth(0).padTop(space("sm")).row();
-                case SPACE -> content.add().height(space("sm")).row();
-                case LABELED -> {
-                    Table line = new Table();
-                    line.left().top();
-                    String label = row.cells().isEmpty() ? "" : row.cells().get(0);
-                    String value = String.join(" ", row.cells().subList(Math.min(1, row.cells().size()),
-                          row.cells().size()));
-                    line.add(kit.typeLabel(label, "body", "text.secondary")).top().left().padRight(space("md"));
-                    line.add(wrapped(value, "body", "text.primary")).growX().minWidth(0).top();
-                    content.add(line).growX().minWidth(0).padTop(space("xxs")).row();
+        float[] columns = readoutColumns(rows);
+        UiReveal content = new UiReveal(motion);
+        boolean first = true;
+        for (List<EntityReadout.Row> rowsOfBlock : RequisitionReadout.blocks(rows)) {
+            Table block = new Table();
+            block.top().left();
+            Table run = null;
+            EntityReadout.Row previous = null;
+            for (EntityReadout.Row row : rowsOfBlock) {
+                if (!RequisitionReadout.isTable(row) && run != null) {
+                    block.add(run).growX().minWidth(0).left().row();
+                    run = null;
                 }
-                case TABLE_HEADER, TABLE_ROW -> {
-                    if (run == null) {
-                        run = new Table();
-                        run.top().left();
+                String text = String.join(" ", row.cells());
+                switch (row.kind()) {
+                    case TITLE -> {
+                        if (first) {
+                            block.add(wrapped(text, "body.strong", "text.primary")).growX().minWidth(0).row();
+                        } else {
+                            block.add(heading(text)).growX().minWidth(0).padTop(space("md")).row();
+                        }
                     }
-                    boolean header = row.kind() == EntityReadout.Row.Kind.TABLE_HEADER;
-                    for (String cell : row.cells()) {
-                        run.add(wrapped(cell, header ? "small" : "body", header ? "text.muted" : "text.primary"))
-                              .growX().minWidth(0).left().top().padRight(space("sm")).padTop(space("xxs"));
+                    case SPACE -> {
+                        if (previous == null || previous.kind() != EntityReadout.Row.Kind.TITLE || first) {
+                            block.add().height(space("sm")).row();
+                        }
                     }
-                    run.row();
+                    case LABELED -> {
+                        String label = row.cells().isEmpty() ? "" : row.cells().get(0);
+                        String value = String.join(" ", row.cells().subList(Math.min(1, row.cells().size()),
+                              row.cells().size()));
+                        if (RequisitionReadout.isSection(row)) {
+                            block.add(heading(label)).growX().minWidth(0).padTop(space("md")).row();
+                            block.add(wrapped(value, "body", "text.primary")).growX().minWidth(0)
+                                  .padTop(space("xs")).row();
+                        } else {
+                            Table line = new Table();
+                            line.left().top();
+                            line.add(kit.typeLabel(label, "body", "text.secondary")).top().left()
+                                  .padRight(space("md"));
+                            line.add(wrapped(value, "body", "text.primary")).growX().minWidth(0).top();
+                            block.add(line).growX().minWidth(0).padTop(space("xxs")).row();
+                        }
+                    }
+                    case TABLE_HEADER, TABLE_ROW -> {
+                        if (run == null) {
+                            run = new Table();
+                            run.top().left();
+                        }
+                        tableRow(run, row, columns);
+                    }
+                    case TEXT -> block.add(wrapped(text, "body", "text.primary")).growX().minWidth(0)
+                          .padTop(space("xxs")).row();
                 }
-                case TEXT -> content.add(wrapped(String.join(" ", row.cells()), "body", "text.primary"))
-                      .growX().minWidth(0).padTop(space("xxs")).row();
+                first = false;
+                previous = row;
             }
-        }
-        if (run != null) {
-            content.add(run).growX().minWidth(0).left().row();
+            if (run != null) {
+                block.add(run).growX().minWidth(0).left().row();
+            }
+            content.band(block);
         }
         return content;
+    }
+
+    /** A readout heading: a title over a table or a text section, in overline. */
+    private Label heading(String text) {
+        Label heading = kit.roleTypeLabel("overline", text, "text.muted");
+        heading.setWrap(true);
+        return heading;
+    }
+
+    /**
+     * One row of a readout table: its cells up to the last that holds anything, each but the last as wide as its
+     * column is across the readout, so every table's columns line up; the last runs to the edge.
+     */
+    private void tableRow(Table run, EntityReadout.Row row, float[] columns) {
+        boolean header = row.kind() == EntityReadout.Row.Kind.TABLE_HEADER;
+        int count = RequisitionReadout.filledCells(row.cells());
+        for (int i = 0; i < count; i++) {
+            Label cell = wrapped(row.cells().get(i), header ? "small" : "body", header ? "text.muted" : "text.primary");
+            Cell<Label> placed = run.add(cell).left().top().padTop(space("xxs"));
+            if (i < count - 1) {
+                placed.width(columns[i]).padRight(space("md"));
+            } else {
+                placed.growX().minWidth(0);
+            }
+        }
+        run.row();
+    }
+
+    /**
+     * The widths of the readout tables' columns, shared by every table: each column as wide as its widest cell that
+     * is not the last of its row, the first at least as wide as "Center Torso (rear)" so a location never wraps, and
+     * none wider than a quarter of a small dialog (the first, nearly half), past which a cell wraps.
+     */
+    private float[] readoutColumns(List<EntityReadout.Row> rows) {
+        float location = textWidth(Messages.getString("Lobby.requisition.readout.widestLocation"), "body");
+        List<Float> widths = new ArrayList<>();
+        widths.add(location);
+        for (EntityReadout.Row row : rows) {
+            if (!RequisitionReadout.isTable(row)) {
+                continue;
+            }
+            int count = RequisitionReadout.filledCells(row.cells());
+            String type = row.kind() == EntityReadout.Row.Kind.TABLE_HEADER ? "small" : "body";
+            for (int i = 0; i < count - 1; i++) {
+                float width = textWidth(row.cells().get(i), type);
+                if (i < widths.size()) {
+                    widths.set(i, Math.max(widths.get(i), width));
+                } else {
+                    widths.add(width);
+                }
+            }
+        }
+        float[] columns = new float[widths.size()];
+        for (int i = 0; i < columns.length; i++) {
+            float cap = (i == 0) ? Math.max(location, size("dialog.sm") * 0.45f) : size("dialog.sm") / 4;
+            columns[i] = (float) Math.ceil(Math.min(widths.get(i), cap));
+        }
+        return columns;
+    }
+
+    private float textWidth(String text, String type) {
+        return kit.typeLabel(text, type, "text.primary").getPrefWidth();
     }
 
     private Label wrapped(String text, String type, String role) {
@@ -1631,6 +1718,25 @@ final class LobbyRequisitionPanel {
     /** The Readout tab's Summary or TRO switch's option, to click through the stage. */
     Actor readoutOption(boolean tro) {
         return readoutSwitch.option(tro ? 1 : 0);
+    }
+
+    /** The scroll pane of the dossier tab in view, the innermost first, or null. */
+    @Nullable
+    ScrollPane dossierScroll() {
+        return innermostScroll(tabBody.getActor());
+    }
+
+    @Nullable
+    private static ScrollPane innermostScroll(@Nullable Actor actor) {
+        if (actor instanceof WidgetGroup group) {
+            for (Actor child : group.getChildren()) {
+                ScrollPane inner = innermostScroll(child);
+                if (inner != null) {
+                    return inner;
+                }
+            }
+        }
+        return (actor instanceof ScrollPane scroll) ? scroll : null;
     }
 
     /** The dossier tab in view. */

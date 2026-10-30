@@ -92,6 +92,51 @@ class RequisitionRecordTest {
         assertEquals("a b", RequisitionReadout.clean("  a \u00A0\n b  "));
     }
 
+    @Test
+    void aLongLabelledValueIsASection() {
+        assertTrue(RequisitionReadout.isSection(new Row(Kind.LABELED, List.of("Overview", "x".repeat(81)))));
+        assertTrue(RequisitionReadout.isSection(new Row(Kind.LABELED, List.of("History", "One.\nTwo."))));
+        assertFalse(RequisitionReadout.isSection(new Row(Kind.LABELED, List.of("Mass", "100 tons"))));
+        assertFalse(RequisitionReadout.isSection(new Row(Kind.TEXT, List.of("x".repeat(81)))));
+    }
+
+    @Test
+    void theRowsGoInBlocksThatKeepAHeadingWithWhatItHeads() {
+        Row title = new Row(Kind.TITLE, List.of("Atlas AS7-D"));
+        Row mass = new Row(Kind.LABELED, List.of("Mass", "100 tons"));
+        Row tech = new Row(Kind.LABELED, List.of("Tech", "IS"));
+        Row space = new Row(Kind.SPACE, List.of());
+        Row armor = new Row(Kind.TITLE, List.of("Armor"));
+        Row header = new Row(Kind.TABLE_HEADER, List.of("Location", "Armor"));
+        Row torso = new Row(Kind.TABLE_ROW, List.of("Center Torso (rear)", "14"));
+        Row weapons = new Row(Kind.TABLE_HEADER, List.of("Weapons", "Loc"));
+        Row overview = new Row(Kind.LABELED, List.of("Overview", "One.\nTwo."));
+        List<List<Row>> blocks = RequisitionReadout.blocks(List.of(title, mass, tech, space, armor, header, torso,
+              weapons, overview));
+        assertEquals(List.of(List.of(title, mass, tech, space), List.of(armor, header, torso), List.of(weapons),
+              List.of(overview)), blocks);
+        assertTrue(RequisitionReadout.blocks(List.of()).isEmpty());
+        assertEquals(List.of(List.of(title, header, torso)), RequisitionReadout.blocks(List.of(title, header, torso)),
+              "a title stays with the table it heads");
+    }
+
+    @Test
+    void aTableRowCountsItsCellsUpToTheLastFilled() {
+        assertEquals(3, RequisitionReadout.filledCells(List.of("", "Internal", "Armor", "", " ")));
+        assertEquals(0, RequisitionReadout.filledCells(List.of("", "")));
+    }
+
+    @Test
+    void theAtlasReadoutHasItsFluffAsSectionsAndItsTablesInBlocks() {
+        List<Row> summary = RequisitionReadout.summary(atlas);
+        assertTrue(summary.stream().anyMatch(row -> RequisitionReadout.isSection(row)
+              && row.cells().get(0).equals("Overview")), "the overview is a section");
+        List<List<Row>> blocks = RequisitionReadout.blocks(summary);
+        assertTrue(blocks.size() > 5, "the readout reveals in several blocks");
+        assertEquals(summary, blocks.stream().flatMap(List::stream).toList(), "the blocks keep every row in order");
+    }
+
+
     // ---- The AS card ----
 
     @Test

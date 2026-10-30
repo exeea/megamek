@@ -139,6 +139,12 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     /** The dossier tab the developer switch clicks, and how many of its clicks are done. */
     private String tabPending;
     private int tabStep;
+    /** How far down the developer switch keeps the dossier tab scrolled before the shot, 0 to 1; -1 when it doesn't. */
+    private float scrollPending = -1;
+    private boolean scrollLogged;
+    /** The Requisition's kept filters and readout switch while the developer switch runs, kept from the Commander's. */
+    private String probeFilters = "";
+    private boolean probeReadoutTro;
     /** The units' sprites by their window's key, and each shown unit's. */
     private final Map<String, Texture> spriteTextures = new HashMap<>();
     private final Map<Integer, Drawable> spriteDrawables = new HashMap<>();
@@ -239,6 +245,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 requisition.probePick();
             }
             tabPending = probe.tab();
+        scrollPending = probe.scroll();
         }
         if (!probe.sized()) {
             return;
@@ -531,22 +538,30 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
             @Override
             public boolean readoutTro() {
-                return preferences.getRequisitionReadoutTro();
+                return (window.probe() != null) ? probeReadoutTro : preferences.getRequisitionReadoutTro();
             }
 
             @Override
             public void readoutTro(boolean tro) {
-                preferences.setRequisitionReadoutTro(tro);
+                if (window.probe() != null) {
+                    probeReadoutTro = tro;
+                } else {
+                    preferences.setRequisitionReadoutTro(tro);
+                }
             }
 
             @Override
             public String keptFilters() {
-                return preferences.getRequisitionFilters();
+                return (window.probe() != null) ? probeFilters : preferences.getRequisitionFilters();
             }
 
             @Override
             public void keptFilters(String kept) {
-                preferences.setRequisitionFilters(kept);
+                if (window.probe() != null) {
+                    probeFilters = kept;
+                } else {
+                    preferences.setRequisitionFilters(kept);
+                }
             }
         };
     }
@@ -1132,6 +1147,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (tabPending != null && REQUISITION.equals(centre.showing()) &&         requisition.dossierSettled()
               && elapsed > PROBE_CLICK_AT + tabStep * .5) {
             probeTab();
+        }
+        if (scrollPending >= 0 && elapsed > probe.shotAt() - .5 && requisition.dossierScroll() != null) {
+            ScrollPane pane = requisition.dossierScroll();
+            pane.layout();
+            pane.setScrollPercentY(scrollPending);
+            pane.updateVisualScroll();
+            if (!scrollLogged) {
+                LOGGER.info("The lobby probe scrolls the dossier tab to {} of {}", scrollPending, pane.getMaxY());
+                scrollLogged = true;
+            }
         }
         if (hoverPending != null && elapsed > probe.shotAt() - .5 && !requisition.resultsList().items().isEmpty()) {
             ScrollPane pane = requisition.resultsPane();
