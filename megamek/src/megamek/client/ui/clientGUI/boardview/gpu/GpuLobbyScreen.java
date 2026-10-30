@@ -240,7 +240,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
         if (probe.options().contains("requisition")) {
             openRequisition();
-            if (probe.options().contains("atlas")) {
+            if (probe.search() != null) {
+                requisition.probeSearch(probe.search());
+            } else if (probe.options().contains("atlas")) {
                 requisition.probeSearch("Atlas");
             }
             if (probe.options().contains("filters")) {

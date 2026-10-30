@@ -9,6 +9,7 @@ import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -37,6 +38,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
+import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
@@ -66,9 +68,11 @@ import megamek.client.lobby.RequisitionVisit;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.entityreadout.EntityReadout;
+import megamek.client.ui.gdx.UiArcDiagram;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFilterChip;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiReveal;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
@@ -151,6 +155,8 @@ final class LobbyRequisitionPanel {
 
     /** The pause on a unit before its full record is read. */
     static final float LOAD_DELAY = .13f;
+    /** The most of a Factions row the ratings take, so the name keeps the rest. */
+    private static final float RATINGS_SHARE = .45f;
     /** The Damage tab's curves: maximum, sustained over the turns, and expected. */
     private static final String MAXIMUM_ROLE = "text.muted";
     private static final String SUSTAINED_ROLE = "status.warning";
@@ -243,7 +249,6 @@ final class LobbyRequisitionPanel {
     private final Label dossierDetails;
     private final Label dossierValueLabel;
     private final Label dossierValue;
-    private final UiButton dossierAdd;
     private final UiTabs dossierTabs;
     private final Container<Actor> tabBody = new Container<>();
     private final UiSegmented readoutSwitch;
@@ -370,8 +375,6 @@ final class LobbyRequisitionPanel {
         dossierDetails = kit.typeLabel("", "small", "text.secondary");
         dossierValueLabel = kit.roleTypeLabel("overline", "", "text.muted");
         dossierValue = kit.typeLabel("", "title", "text.primary");
-        dossierAdd = kit.button("button-primary" + UiTheme.COMPACT, "add",
-              Messages.getString("Lobby.requisition.addToForce"), null);
         String[] tabNames = new String[RequisitionDossier.Tab.values().length];
         for (RequisitionDossier.Tab each : RequisitionDossier.Tab.values()) {
             tabNames[each.ordinal()] = Messages.getString(each.messageKey());
@@ -1103,10 +1106,6 @@ final class LobbyRequisitionPanel {
         value.add(dossierValueLabel).row();
         value.add(dossierValue);
         head.add(value).padLeft(space("md"));
-        dossierAdd.setName("lobby-requisition-dossier-add");
-        UiKit.onChange(dossierAdd, this::add);
-        head.add(dossierAdd).width(kit.faceWidth(dossierAdd, Messages.getString("Lobby.requisition.addToForce"),
-              Messages.getString("Lobby.requisition.added"))).padLeft(space("md"));
         UiButton close = kit.button("button-icon" + UiTheme.COMPACT, "close", null, null);
         kit.tip(close, true).getActor().setText(Messages.getString("Lobby.requisition.closeDossier"));
         UiKit.onChange(close, () -> openDossier(false));
@@ -1165,7 +1164,7 @@ final class LobbyRequisitionPanel {
                   case OVERVIEW -> sprites.apply(spriteKey(picked)) != null;
                   case READOUT -> readoutTro;
                   case FACTIONS -> factions;
-                  case DAMAGE -> gunnery();
+                  case DAMAGE -> List.of(gunnery(), sprites.apply(spriteKey(picked)) != null);
                   case AS_CARD -> null;
               });
         Built made = built.get(next);
@@ -1700,37 +1699,69 @@ final class LobbyRequisitionPanel {
         if (factions.factions().isEmpty()) {
             return noteTab("Lobby.requisition.factions.none");
         }
-        Table list = new Table();
-        list.top().left();
+        // The code is a column of its own, as wide as the widest code, at the same x in every era
+        float codeWidth = 0;
+        for (RequisitionFactions.Faction faction : factions.factions()) {
+            codeWidth = Math.max(codeWidth, kit.typeLabel(faction.code(), "body.strong", "text.secondary")
+                  .getPrefWidth());
+        }
+        UiReveal list = new UiReveal(motion);
         for (int i = 0; i < factions.eras().size(); i++) {
             RequisitionFactions.EraColumn era = factions.eras().get(i);
+            Table band = new Table();
+            band.top().left();
             Table head = new Table();
             head.left();
             head.add(kit.roleTypeLabel("overline", era.name(), "text.secondary")).left().minWidth(0);
             head.add(kit.typeLabel(era.years(), "caption", "text.muted")).left().padLeft(space("sm"));
             head.add().growX();
-            list.add(head).growX().minWidth(0).padTop(i == 0 ? 0 : space("md")).colspan(3).row();
-            list.add(kit.solid("border.subtle")).growX().height(size("border")).colspan(3).padTop(space("xxs"))
+            band.add(head).growX().minWidth(0).colspan(3).row();
+            band.add(kit.solid("border.subtle")).growX().height(size("border")).colspan(3).padTop(space("xxs"))
                   .row();
             for (RequisitionFactions.Faction faction : factions.factions()) {
-                String cell = faction.cells().get(i);
-                if (RequisitionFactions.NONE.equals(cell)) {
+                List<String> ratings = RequisitionFactions.ratings(faction.cells().get(i));
+                if (ratings.isEmpty()) {
                     continue;
                 }
-                // The code is a column of its own, the same x in every era
-                list.add(kit.typeLabel(faction.code(), "body.strong", "text.secondary")).left()
-                      .padRight(space("md")).padTop(space("xxs"));
+                band.add(kit.typeLabel(faction.code(), "body.strong", "text.secondary")).width(codeWidth).left()
+                      .top().padRight(space("lg")).padTop(space("xs"));
                 Label name = kit.typeLabel(faction.name(), "body", "text.primary");
                 name.setEllipsis(true);
-                list.add(name).growX().minWidth(0).left().padTop(space("xxs"));
-                list.add(kit.typeLabel(cell, "body", "text.secondary")).right().padLeft(space("md"))
-                      .padTop(space("xxs")).row();
+                band.add(name).growX().minWidth(0).left().top().padTop(space("xs"));
+                ratingChips(band, ratings);
             }
+            list.band(band).padTop(i == 0 ? 0 : space("lg"));
         }
+        list.setName("lobby-requisition-factions");
         return scrolled(list);
     }
 
-    /** Damage: the curves by range at the strip's gunnery, the ranges they hold over, and each direction. */
+    /**
+     * A faction's ratings in one era, as token chips that wrap, right-aligned, within at most {@link #RATINGS_SHARE}
+     * of {@code band}'s width, so they never run into the name.
+     */
+    private void ratingChips(Table band, List<String> ratings) {
+        HorizontalGroup chips = new HorizontalGroup();
+        chips.wrap().rowRight().right().space(space("xxs")).wrapSpace(space("xxs"));
+        float natural = 0;
+        for (String rating : ratings) {
+            Actor chip = kit.chip(rating, UiKit.Tone.NORMAL, true);
+            chips.addActor(chip);
+            natural += (chip instanceof Layout layout) ? layout.getPrefWidth() : chip.getWidth();
+        }
+        float wanted = natural + space("xxs") * (ratings.size() - 1);
+        band.add(chips).width(new Value() {
+            @Override
+            public float get(@Nullable Actor context) {
+                return Math.min(wanted, band.getWidth() * RATINGS_SHARE);
+            }
+        }).right().top().padLeft(space("md")).padTop(space("xs")).row();
+    }
+
+    /**
+     * Damage, as a targeting display: the curves by range at the strip's gunnery over the short, medium and long
+     * bands, a tile per band and the expected damage by firing arc around the unit, shown one after another.
+     */
     private Actor damage() {
         if (record == null) {
             return noteTab("Lobby.requisition.record.loading");
@@ -1742,55 +1773,104 @@ final class LobbyRequisitionPanel {
         if (!damage.hasWeapons()) {
             return noteTab("Lobby.requisition.damage.none");
         }
-        Table content = new Table();
-        content.top().left();
-        content.add(kit.roleTypeLabel("overline", Messages.getString(damage.capital()
+        UiReveal content = new UiReveal(motion);
+        Table head = new Table();
+        head.left();
+        head.add(kit.roleTypeLabel("overline", Messages.getString(damage.capital()
               ? "Lobby.requisition.damage.titleCapital" : "Lobby.requisition.damage.title", damage.gunnery()),
               "text.muted")).left().row();
         Table legend = new Table();
         legend.left();
-        legend.add(swatch(MAXIMUM_ROLE, "Lobby.requisition.damage.maximum")).padRight(space("lg"));
         legend.add(swatch(EXPECTED_ROLE, "Lobby.requisition.damage.expected")).padRight(space("lg"));
-        legend.add(swatch(SUSTAINED_ROLE, "Lobby.requisition.damage.sustained"));
+        legend.add(swatch(SUSTAINED_ROLE, "Lobby.requisition.damage.sustained")).padRight(space("lg"));
+        legend.add(swatch(MAXIMUM_ROLE, "Lobby.requisition.damage.maximum"));
         kit.tip(legend, true).getActor().setText(Messages.getString("Lobby.requisition.damage.legendTip"));
-        content.add(legend).left().padTop(space("xs")).row();
+        head.add(legend).left().padTop(space("xs"));
+        content.band(head).left();
+
         UiStepChart chart = kit.stepChart();
         chart.setName("lobby-requisition-damage-chart");
         float line = size("selection.width");
         chart.show(List.of(
-              new UiStepChart.Series(floats(damage.maximum()), UiTheme.tokenColor(MAXIMUM_ROLE), line / 2),
-              new UiStepChart.Series(floats(damage.sustained()), UiTheme.tokenColor(SUSTAINED_ROLE), line * 2),
-              new UiStepChart.Series(floats(damage.expected()), UiTheme.tokenColor(EXPECTED_ROLE), line)),
+              new UiStepChart.Series(floats(damage.maximum()), UiTheme.tokenColor(MAXIMUM_ROLE), line / 2,
+                    UiStepChart.Style.CEILING),
+              new UiStepChart.Series(floats(damage.expected()), UiTheme.tokenColor(EXPECTED_ROLE), line,
+                    UiStepChart.Style.AREA),
+              new UiStepChart.Series(floats(damage.sustained()), UiTheme.tokenColor(SUSTAINED_ROLE), line)),
               RequisitionDamage::format);
-        content.add(chart).growX().minWidth(0).height(space("xxxl") * 5).padTop(space("sm")).row();
-
-        content.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.damage.ranges"),
-              "text.muted")).left().padTop(space("lg")).row();
-        Table bands = new Table();
-        bands.top().left();
-        header(bands, "Lobby.requisition.damage.range", "Lobby.requisition.damage.maximum",
-              "Lobby.requisition.damage.expected", "Lobby.requisition.damage.sustained");
-        for (RequisitionDamage.Band band : damage.bands()) {
-            cells(bands, band.ranges(), RequisitionDamage.format(band.maximum()),
-                  RequisitionDamage.format(band.expected()), RequisitionDamage.format(band.sustained()));
+        RequisitionDamage.Band[] bands = RequisitionDamage.Band.values();
+        int[] starts = new int[bands.length];
+        String[] ticks = new String[bands.length];
+        for (int i = 0; i < bands.length; i++) {
+            starts[i] = bands[i].from();
+            ticks[i] = Messages.getString("Lobby.requisition.damage." + bands[i].name().toLowerCase(Locale.ROOT)
+                  + "Tick");
         }
-        content.add(bands).growX().minWidth(0).padTop(space("xs")).row();
+        chart.bands(starts, ticks);
+        chart.sweep(motion, content.delay(1));
+        content.band(chart).height(space("xxxl") * 5).padTop(space("sm"));
 
-        content.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.damage.directions"),
-              "text.muted")).left().padTop(space("lg")).row();
-        Table directions = new Table();
-        directions.top().left();
-        header(directions, "Lobby.requisition.damage.direction", "Lobby.requisition.damage.maxAverage",
-              "Lobby.requisition.damage.short", "Lobby.requisition.damage.medium", "Lobby.requisition.damage.long",
-              "Lobby.requisition.damage.reach");
-        for (RequisitionDamage.Direction direction : damage.directions()) {
-            cells(directions, direction.name(), RequisitionDamage.format(direction.maximumAverage()),
-                  RequisitionDamage.format(direction.shortAverage()),
-                  RequisitionDamage.format(direction.mediumAverage()),
-                  RequisitionDamage.format(direction.longAverage()), String.valueOf(direction.reach()));
+        Table tiles = new Table();
+        tiles.setName("lobby-requisition-damage-tiles");
+        for (RequisitionDamage.RangeBand band : damage.ranges()) {
+            float gap = tiles.getCells().isEmpty() ? 0 : space("sm");
+            tiles.add(rangeTile(band)).growX().uniformX().minWidth(0).padLeft(gap);
         }
-        content.add(directions).growX().minWidth(0).padTop(space("xs")).row();
+        content.band(tiles).padTop(space("lg"));
+
+        List<RequisitionDamage.RangeBand> ranges = damage.ranges();
+        Table arcs = new Table();
+        arcs.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.damage.arcs"), "text.muted"))
+              .left().growX().minWidth(0);
+        String[] bandNames = new String[ranges.size()];
+        for (int i = 0; i < bandNames.length; i++) {
+            bandNames[i] = ranges.get(i).band().label();
+        }
+        UiOptionBar bandSwitch = kit.tokenSegmented(true, bandNames);
+        bandSwitch.setName("lobby-requisition-damage-arc-band");
+        arcs.add(bandSwitch).right().row();
+        String[] names = damage.directions().stream().map(RequisitionDamage.Direction::name).toArray(String[]::new);
+        float peak = 0;
+        for (RequisitionDamage.RangeBand band : ranges) {
+            for (double value : damage.arcs(band.band())) {
+                peak = Math.max(peak, (float) value);
+            }
+        }
+        Drawable sprite = sprites.apply(spriteKey(picked));
+        UiArcDiagram diagram = kit.arcDiagram().centre((sprite != null) ? new Image(sprite, Scaling.fit)
+              : new Container<>(kit.icon("unit", size("icon.lg"), UiTheme.tokenColor("text.muted"))));
+        diagram.setName("lobby-requisition-damage-arcs");
+        float arcPeak = peak;
+        Runnable showArcs = () -> diagram.show(names,
+              floats(damage.arcs(ranges.get(bandSwitch.getSelectedIndex()).band())), arcPeak,
+              RequisitionDamage::format);
+        showArcs.run();
+        diagram.reveal(motion, content.delay(3));
+        UiKit.onChange(bandSwitch, showArcs);
+        arcs.add(diagram).colspan(2).growX().minWidth(0).height(space("xxxl") * 7).padTop(space("sm"));
+        content.band(arcs).padTop(space("lg"));
         return scrolled(content);
+    }
+
+    /** One range band's tile: its name and hexes, the expected damage large, the maximum and heat-sustained small. */
+    private Table rangeTile(RequisitionDamage.RangeBand band) {
+        Table tile = new Table();
+        tile.setBackground(kit.skin.getDrawable("token-card"));
+        tile.pad(space("sm"), space("md"), space("sm"), space("md"));
+        tile.left();
+        Table top = new Table();
+        top.add(kit.roleTypeLabel("overline", band.band().label(), "text.secondary")).left().growX().minWidth(0);
+        top.add(kit.typeLabel(Messages.getString("Lobby.requisition.damage.hexes", band.ranges()), "caption",
+              "text.muted")).right();
+        tile.add(top).growX().minWidth(0).row();
+        tile.add(kit.typeLabel(RequisitionDamage.format(band.expected()), "display", EXPECTED_ROLE)).left()
+              .padTop(space("xxs")).row();
+        Label detail = kit.typeLabel(Messages.getString("Lobby.requisition.damage.tileDetail",
+              RequisitionDamage.format(band.maximum()), RequisitionDamage.format(band.sustained())), "small",
+              "text.secondary");
+        detail.setEllipsis(true);
+        tile.add(detail).left().growX().minWidth(0);
+        return tile;
     }
 
     private Table swatch(String role, String key) {
@@ -1799,24 +1879,6 @@ final class LobbyRequisitionPanel {
         swatch.add(kit.typeLabel(Messages.getString(key), "small", "text.secondary"));
         return swatch;
     }
-
-    private void header(Table table, String... keys) {
-        for (String key : keys) {
-            Label label = kit.typeLabel(Messages.getString(key), "small", "text.muted");
-            label.setEllipsis(true);
-            table.add(label).growX().uniformX().minWidth(0).left().padRight(space("sm"));
-        }
-        table.row();
-    }
-
-    private void cells(Table table, String... values) {
-        for (String value : values) {
-            table.add(kit.typeLabel(value, "body", "text.primary")).growX().uniformX().minWidth(0).left()
-                  .padRight(space("sm")).padTop(space("xxs"));
-        }
-        table.row();
-    }
-
     private static float[] floats(double[] values) {
         float[] floats = new float[values.length];
         for (int i = 0; i < values.length; i++) {
@@ -1999,10 +2061,8 @@ final class LobbyRequisitionPanel {
             add.setText(kit.cased("button", copies > 1
                   ? Messages.getString("Lobby.requisition.addMany", copies)
                   : Messages.getString("Lobby.requisition.add")));
-            dossierAdd.setText(kit.cased("button", Messages.getString("Lobby.requisition.addToForce")));
         }
         add.setDisabled(picked == null || requisition.recipients().isEmpty());
-        dossierAdd.setDisabled(add.isDisabled());
     }
 
     private void add() {
@@ -2015,7 +2075,6 @@ final class LobbyRequisitionPanel {
               .forEach(self -> visit.sentFor(self.id()));
         actions.add(picked, quantity.value(), to, skills);
         add.setText(kit.cased("button", Messages.getString("Lobby.requisition.added")));
-        dossierAdd.setText(kit.cased("button", Messages.getString("Lobby.requisition.added")));
         addedShown = clock + ADDED_FOR;
     }
 

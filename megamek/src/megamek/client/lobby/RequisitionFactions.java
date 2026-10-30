@@ -17,8 +17,8 @@ import megamek.common.loaders.MekSummary;
 
 /**
  * The Requisition dossier's Factions tab (gap analysis 7.3): how available a unit is to each faction in each era, as
- * the unit selector's availability table shows it, read from the Force Generator's data. Only the eras from the first
- * to the last that have any availability show; a faction without the unit in an era shows "-". Reading the data waits
+ * the unit selector's availability table shows it, read from the Force Generator's data. Only the eras where some faction
+ * has the unit show; a faction without the unit in an era shows "-". Reading the data waits
  * for the Force Generator to load and loads every era's year once, so this runs away from the GPU thread.
  *
  * @param eras     the eras shown, in order
@@ -38,11 +38,22 @@ public record RequisitionFactions(List<EraColumn> eras, List<Faction> factions) 
     /** One era's column: its name and its years. */
     public record EraColumn(String name, String years) { }
 
-    /** One faction's row: its name and code, and its availability in each era shown. */
+    /**
+     * One faction's row: its name and code, and its availability in each era shown, one rating a line when the
+     * faction's sub-commands differ (as "Very Rare (B)" over "Rare (D)").
+     */
     public record Faction(String name, String code, List<String> cells) {
         public Faction {
             cells = List.copyOf(cells);
         }
+    }
+
+    /** The ratings in one era's {@code cell}, one per line, without blanks; none for {@link #NONE}. */
+    public static List<String> ratings(String cell) {
+        if (NONE.equals(cell)) {
+            return List.of();
+        }
+        return cell.lines().map(String::trim).filter(line -> !line.isEmpty()).toList();
     }
 
     public RequisitionFactions {
@@ -136,25 +147,23 @@ public record RequisitionFactions(List<EraColumn> eras, List<Faction> factions) 
                         inEra.add(year);
                     }
                 }
-                String text = inEra.isEmpty() ? "" : source.merged(code, inEra).replace('\n', ' ').trim();
+                String text = inEra.isEmpty() ? "" : source.merged(code, inEra).trim();
                 hasData[i] |= !text.isEmpty();
                 row.add(text);
             }
             table.add(row);
         }
-        int first = -1;
-        int last = -1;
+        List<Integer> shown = new ArrayList<>();
         for (int i = 0; i < hasData.length; i++) {
             if (hasData[i]) {
-                first = (first < 0) ? i : first;
-                last = i;
+                shown.add(i);
             }
         }
-        if (first < 0) {
+        if (shown.isEmpty()) {
             return EMPTY;
         }
         List<EraColumn> columns = new ArrayList<>();
-        for (int i = first; i <= last; i++) {
+        for (int i : shown) {
             Era era = eras.get(i);
             columns.add(new EraColumn(era.name().replace('\n', ' '), years(era)));
         }
@@ -166,7 +175,7 @@ public record RequisitionFactions(List<EraColumn> eras, List<Faction> factions) 
                 continue;
             }
             List<String> cells = new ArrayList<>();
-            for (int i = first; i <= last; i++) {
+            for (int i : shown) {
                 cells.add(row.get(i).isEmpty() ? NONE : row.get(i));
             }
             FactionRecord faction = source.faction(code);

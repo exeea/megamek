@@ -95,7 +95,8 @@ import org.lwjgl.glfw.GLFW;
  *     zones.</li>
  *     <li>{@code lobby+autoresolve}: turns on the client setting that shows auto-resolve, and opens its settings in
  *     the battlefield.</li>
- *     <li>{@code lobby+requisition}: opens the Requisition view; with {@code +atlas} it searches for "Atlas", with
+ *     <li>{@code lobby+requisition}: opens the Requisition view; with {@code +atlas} it searches for "Atlas" and with
+ *     {@code +search=text} for the text, an underscore for each space; with
  *     {@code +filters} it opens the Filters drawer and with {@code +pick} it picks the first result, showing its
  *     dossier.</li>
  *     <li>{@code lobby+clickcompact}: clicks the forces' compact rows toggle through the stage, as a pointer would,
@@ -156,6 +157,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final String DIALOG_OPTION = "dialog=";
     private static final String TAB_OPTION = "tab=";
     private static final String SCROLL_OPTION = "scroll=";
+    private static final String SEARCH_OPTION = "search=";
     /** How long a probed dialog has to show, and then to close, before the probe looks. */
     private static final int DIALOG_WAIT_MS = 2500;
     private static final int FRONT_WAIT_MS = 700;
@@ -445,6 +447,16 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         for (String option : options) {
             if (option.startsWith(TAB_OPTION)) {
                 return option.substring(TAB_OPTION.length());
+            }
+        }
+        return null;
+    }
+
+    /** What {@code lobby+requisition+search=text} searches for, an underscore for each space, or null. */
+    String search() {
+        for (String option : options) {
+            if (option.startsWith(SEARCH_OPTION)) {
+                return option.substring(SEARCH_OPTION.length()).replace('_', ' ');
             }
         }
         return null;

@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -16,16 +17,22 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import megamek.client.lobby.LobbyForces;
+import megamek.client.lobby.LobbyRequisition;
+import megamek.client.lobby.RequisitionCatalog;
 import megamek.client.lobby.RequisitionDossier;
 import megamek.client.lobby.RequisitionFactions;
 import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionRow;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.ui.gdx.UiArcDiagram;
+import megamek.client.ui.gdx.UiOptionBar;
+import megamek.client.ui.gdx.UiReveal;
 import megamek.client.ui.gdx.UiStepChart;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.alphaStrike.ASUnitType;
@@ -39,7 +46,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Clicks the Requisition dossier's tabs and its Readout switch through the stage, as a pointer would: only the tab in
- * view is built, the full record comes once the pick has rested, and the tab picked stays from unit to unit.
+ * view is built, the full record comes once the pick has rested, and the tab picked stays from unit to unit; the
+ * Damage tab's chart, tiles and arcs, the Factions tab's era reveal and rating chips, and the strip's single ADD.
  */
 @Tag("on-demand")
 class LobbyDossierTabsSmokeTest {
@@ -152,6 +160,104 @@ class LobbyDossierTabsSmokeTest {
         });
     }
 
+    @Test
+    void theDamageTabIsATargetingDisplayAndTheStripsAddIsTheOnlyAdd() throws Exception {
+        EquipmentType.initializeTypes();
+        Entity atlas = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
+        UiTestStage.run(ui -> {
+            DossierActions actions = new DossierActions(atlas);
+            LobbyRequisitionPanel requisition = new LobbyRequisitionPanel(ui.kit, actions, key -> null, true);
+            Table body = requisition.body();
+            ui.window.addActor(body);
+            body.setBounds(20, 20, 1400, 900);
+            requisition.show(new LobbyRequisition(RequisitionCatalog.Rules.OPEN,
+                  List.of(new LobbyRequisition.Recipient(1, "Probe", true, false)), false, List.of()),
+                  LobbyForces.EMPTY);
+            requisition.opened(LobbyForces.EMPTY);
+            requisition.probePick();
+            run(ui, LobbyRequisitionPanel.LOAD_DELAY * 2);
+            assertNull(body.findActor("lobby-requisition-dossier-add"), "the dossier's header has no add of its own");
+            click(ui, body.findActor("lobby-requisition-add"));
+            assertEquals(1, actions.added, "the strip's ADD adds the picked unit");
+
+            click(ui, requisition.dossierTab("damage"));
+            Group page = (Group) requisition.dossierBody();
+            UiStepChart chart = page.findActor("lobby-requisition-damage-chart");
+            assertNotNull(chart);
+            assertTrue(chart.progress() < 1, "the chart sweeps in");
+            Table tiles = page.findActor("lobby-requisition-damage-tiles");
+            assertEquals(3, tiles.getCells().size, "a tile for each of short, medium and long");
+            assertTrue(text(tiles).contains("SHORT") || text(tiles).toUpperCase().contains("SHORT"));
+            UiArcDiagram arcs = page.findActor("lobby-requisition-damage-arcs");
+            assertEquals(6, arcs.arcs(), "an arc for each firing direction");
+            run(ui, 3);
+            assertEquals(1, chart.progress(), 1e-6, "the sweep ends");
+            assertEquals(1, arcs.shown(0), 1e-6, "the arcs reveal");
+            float front = arcs.fill(0);
+            assertTrue(front > 0, "the Atlas fires forward at short range");
+            UiOptionBar band = page.findActor("lobby-requisition-damage-arc-band");
+            click(ui, band.option(2));
+            assertEquals(2, band.getSelectedIndex());
+            assertEquals(front, arcs.fill(0), 1e-6, "the fill glides from where it was");
+            run(ui, 1);
+            assertTrue(arcs.fill(0) < front, "less of it reaches the long band");
+            requisition.dispose();
+            body.remove();
+        });
+    }
+
+    @Test
+    void theFactionsRevealEraByEraWithTheirRatingsAsChips() throws Exception {
+        EquipmentType.initializeTypes();
+        Entity atlas = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
+        UiTestStage.run(ui -> {
+            DossierActions actions = new DossierActions(atlas);
+            actions.factions = new RequisitionFactions(
+                  List.of(new RequisitionFactions.EraColumn("Succession Wars", "2781\u20133049"),
+                        new RequisitionFactions.EraColumn("Clan Invasion", "3050\u20133061")),
+                  List.of(new RequisitionFactions.Faction("Kell Hounds", "MERC.KH",
+                              List.of("Very Rare (B)\nVery Rare (C)\nRare (D)\nRare (F)", "Common (A)")),
+                        new RequisitionFactions.Faction("Lyran Commonwealth", "LA", List.of("", "Rare (C)"))));
+            LobbyRequisitionPanel requisition = new LobbyRequisitionPanel(ui.kit, actions, key -> null, true);
+            Table body = requisition.body();
+            ui.window.addActor(body);
+            body.setBounds(20, 20, 1400, 900);
+            requisition.opened(LobbyForces.EMPTY);
+            requisition.probePick();
+            run(ui, LobbyRequisitionPanel.LOAD_DELAY * 2);
+            click(ui, requisition.dossierTab("factions"));
+            UiReveal list = body.findActor("lobby-requisition-factions");
+            assertNotNull(list);
+            assertFalse(list.done(), "the eras reveal one after another");
+            assertTrue(list.shown(0) >= list.shown(1));
+            run(ui, 2);
+            assertTrue(list.done());
+            String shown = text(list).toUpperCase(java.util.Locale.ROOT);
+            for (String rating : List.of("VERY RARE (B)", "VERY RARE (C)", "RARE (D)", "RARE (F)")) {
+                assertTrue(shown.contains(rating + "\n"), "each rating is a chip of its own: " + rating);
+            }
+            List<HorizontalGroup> chips = new ArrayList<>();
+            groups(list, chips);
+            assertFalse(chips.isEmpty());
+            for (HorizontalGroup group : chips) {
+                assertTrue(group.getWidth() <= group.getParent().getWidth() / 2,
+                      "the chips keep to their share of the row");
+            }
+            requisition.dispose();
+            body.remove();
+        });
+    }
+
+    private static void groups(Actor actor, List<HorizontalGroup> found) {
+        if (actor instanceof HorizontalGroup group) {
+            found.add(group);
+        } else if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                groups(child, found);
+            }
+        }
+    }
+
     private static Image picture(Actor actor) {
         if (actor instanceof Image image && image.getDrawable() instanceof TextureRegionDrawable) {
             return image;
@@ -244,6 +350,8 @@ class LobbyDossierTabsSmokeTest {
         boolean tro;
         int cardWidth;
         boolean cardFails;
+        int added;
+        RequisitionFactions factions = RequisitionFactions.EMPTY;
 
         DossierActions(Entity atlas) {
             this.atlas = atlas;
@@ -265,7 +373,7 @@ class LobbyDossierTabsSmokeTest {
         @Override
         public void factions(MekSummary unit, Consumer<RequisitionFactions> done) {
             factionsAsked++;
-            done.accept(RequisitionFactions.EMPTY);
+            done.accept(factions);
         }
 
         @Override
@@ -286,6 +394,7 @@ class LobbyDossierTabsSmokeTest {
 
         @Override
         public void add(MekSummary unit, int quantity, int ownerId, RequisitionSkills skills) {
+            added += quantity;
         }
 
         @Override

@@ -170,19 +170,28 @@ class RequisitionRecordTest {
         }
         RequisitionDamage better = RequisitionDamage.of(atlas, 2);
         assertTrue(better.expected()[0] > damage.expected()[0], "a better gunner hits more");
-        List<RequisitionDamage.Band> bands = damage.bands();
-        assertEquals(1, bands.get(0).from());
-        assertEquals(21, bands.get(bands.size() - 1).to());
+        List<RequisitionDamage.RangeBand> ranges = damage.ranges();
+        assertEquals(3, ranges.size(), "the reach of 21 runs into the long band");
+        assertEquals(1, ranges.get(0).from());
+        assertEquals(RequisitionDamage.SHORT_END, ranges.get(0).to());
+        assertEquals(21, ranges.get(2).to());
+        double[] front = damage.arcs(RequisitionDamage.Band.SHORT);
+        assertEquals(6, front.length);
+        assertTrue(front[0] > front[3], "the Atlas fires more to the front than to the rear");
     }
 
     @Test
-    void bandsHoldTheRangesWhereTheValuesStay() {
-        List<RequisitionDamage.Band> bands = RequisitionDamage.bands(new double[] { 5, 5, 5.01, 2 },
-              new double[] { 3, 3, 3, 1 }, new double[] { 1, 1, 1, 1 });
-        assertEquals(2, bands.size());
-        assertEquals("1\u20133", bands.get(0).ranges());
-        assertEquals("4", bands.get(1).ranges());
-        assertTrue(RequisitionDamage.bands(new double[0], new double[0], new double[0]).isEmpty());
+    void rangeBandsAverageEachCurveWithinTheReach() {
+        List<RequisitionDamage.RangeBand> ranges = RequisitionDamage.ranges(
+              new double[] { 6, 6, 6, 6, 6, 6, 6, 2, 2, 4 }, new double[] { 3, 3, 3, 3, 3, 3, 3, 1, 1, 1 },
+              new double[] { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 });
+        assertEquals(2, ranges.size(), "a reach of 10 has no long band");
+        assertEquals(RequisitionDamage.Band.MEDIUM, ranges.get(1).band());
+        assertEquals("8\u201310", ranges.get(1).ranges());
+        assertEquals(6, ranges.get(0).maximum(), 1e-9);
+        assertEquals(8 / 3.0, ranges.get(1).maximum(), 1e-9);
+        assertEquals(1, ranges.get(1).expected(), 1e-9);
+        assertTrue(RequisitionDamage.ranges(new double[0], new double[0], new double[0]).isEmpty());
     }
 
     @Test
