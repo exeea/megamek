@@ -23,7 +23,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Files;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import megamek.common.Configuration;
 import org.junit.jupiter.api.Test;
@@ -216,7 +215,7 @@ class GpuShaderReloadTest {
 
     private static Stream<Arguments> shaderFiles() {
         return Stream.of("resources", "megamek/resources").flatMap(root -> Stream.of("light-model.glsl",
-              "color-space.glsl", "tree-instances.glsl", "water-spray.glsl", "cloud-surface.glsl",
+              "color-space.glsl", "model.vert", "tree-instances.glsl", "water-spray.glsl", "cloud-surface.glsl",
               "model.frag", "model-surface.glsl", "model-colour-slots.glsl",
               "road-mask.vert", "terrain-blend.vert",
               "ground-surface.glsl", "water-uniforms.glsl", "water-lighting.glsl", "water-pool.glsl", "water-interactions.glsl",
@@ -263,6 +262,6 @@ class GpuShaderReloadTest {
     }
 
     private static String unitVertex() {
-        return GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader());
+        return GpuUnitShader.linearVertex(GpuShaderSource.read("model.vert"));
     }
 }

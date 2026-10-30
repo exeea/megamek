@@ -27,8 +27,10 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -55,8 +57,8 @@ final class GpuFireControl implements Disposable {
     private static final long TEXTURED_ATTRIBUTES = ATTRIBUTES | VertexAttributes.Usage.TextureCoordinates;
     /** Beam width as a fraction of its offset from the hex edge. */
     private static final float FRAME_RATIO = 0.6f;
-    private final ModelBatch batch = new ModelBatch();
-    private final SpriteBatch labelBatch = new SpriteBatch();
+    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Fire control", GpuUnitShader::unlitProvider));
+    private final SpriteBatch labelBatch;
     private final GpuTextures<String> labelTextures = new GpuTextures<>(true);
     private final Map<String, BoardScene.Pixels> labelImages = new HashMap<>();
     private final Matrix4 labelMatrix = new Matrix4();
@@ -75,6 +77,18 @@ final class GpuFireControl implements Disposable {
     private boolean hidden;
     private GpuBattleStatus.Snapshot status;
     private GpuFireOrders.Snapshot fire;
+
+    /** The labels draw with the view's sprite program ({@code sprites}), which their batch does not own. */
+    GpuFireControl(ShaderProgram sprites) {
+        labelBatch = new SpriteBatch(1000, sprites);
+    }
+
+    /** The unlit programs of range frames and firing lines, and of the textured range faces, behind the loading stage. */
+    void prepare() {
+        GpuUnitShader.prepareUnlit(batch, material, MeshBuilder.createAttributes(ATTRIBUTES));
+        GpuUnitShader.prepareUnlit(batch, rangeMaterial("range-warmup", null, 1),
+              MeshBuilder.createAttributes(TEXTURED_ATTRIBUTES));
+    }
 
     /**
      * Shows the scene's range walls, firing lines and range labels. The lines hide while attacks play

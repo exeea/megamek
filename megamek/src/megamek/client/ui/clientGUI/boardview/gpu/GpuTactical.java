@@ -25,6 +25,7 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
@@ -35,6 +36,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
@@ -75,7 +77,12 @@ final class GpuTactical implements Disposable {
     static final float PLANE_SEE_THROUGH_LEVELS = 2;
     private static final Group PLANES = new Group(4, null);
     private record Span(float[] vertices, int start, int count) { }
-    private final ModelBatch batch = new ModelBatch();
+    /** A page's vertices: plain fills and walls, and outlines, whose dash pattern takes a texture coordinate. */
+    private static final VertexAttributes PLAIN_VERTICES = new VertexAttributes(VertexAttribute.Position(),
+          VertexAttribute.ColorPacked());
+    private static final VertexAttributes INKED_VERTICES = new VertexAttributes(VertexAttribute.Position(),
+          VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0));
+    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Tactical pages", GpuUnitShader::unlitProvider));
     private ShapeRenderer rulerShapes;
     /** Luminance differs as well as hue; the blocked section also has a dash pattern. */
     static final int RULER_CLEAR = 0x64D8A2FF;
@@ -83,7 +90,7 @@ final class GpuTactical implements Disposable {
     private final GpuHexMasks hexMasks = new GpuHexMasks();
     private final GpuHexMasks deploymentTint = new GpuHexMasks();
     private final GpuElectronicWarfare electronicWarfare = new GpuElectronicWarfare();
-    private final SpriteBatch textBatch = new SpriteBatch();
+    private final SpriteBatch textBatch;
     private final GpuTextures<List<BoardTactical.Text>> textures = new GpuTextures<>(true);
     private final Map<List<BoardTactical.Text>, TextImage> images = new HashMap<>();
     private final Map<BoardTactical.Point, List<BoardTactical.Text>> labels = new LinkedHashMap<>();
@@ -114,16 +121,24 @@ final class GpuTactical implements Disposable {
     }
 
     GpuTactical(float outlineSpeed) {
-        this(outlineSpeed, null);
+        this(outlineSpeed, null, null);
     }
 
     GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain) {
-        this(OUTLINE_SCROLL_SPEED, terrain);
+        this(OUTLINE_SCROLL_SPEED, terrain, null);
     }
 
-    private GpuTactical(float outlineSpeed, Function<Coords, BoardTacticalGeometry.Surface> terrain) {
+    /** The labels draw with the view's sprite program ({@code sprites}), which their batch does not own. */
+    GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain, ShaderProgram sprites) {
+        this(OUTLINE_SCROLL_SPEED, terrain, sprites);
+    }
+
+    // Without a shared program the text batch compiles and owns libGDX's own.
+    private GpuTactical(float outlineSpeed, Function<Coords, BoardTacticalGeometry.Surface> terrain,
+          ShaderProgram sprites) {
         this.outlineSpeed = outlineSpeed;
         this.terrain = terrain;
+        textBatch = new SpriteBatch(1000, sprites);
         wallMaterial.set(new DepthTestAttribute(GL20.GL_LEQUAL, 0, COPLANAR_DEPTH_FAR, false));
     }
 
@@ -361,10 +376,7 @@ final class GpuTactical implements Disposable {
                         if (ink == null) {
                             Texture texture = outlineTexture(group.stroke());
                             createdTextures.add(texture);
-                            ink = wallMaterial.copy();
-                            TextureAttribute diffuse = TextureAttribute.createDiffuse(texture);
-                            diffuse.scaleU = 1 / dashPeriod(group.stroke());
-                            ink.set(diffuse);
+                            ink = ink(texture, 1 / dashPeriod(group.stroke()));
                         }
                         inks.put(group.stroke(), ink);
                     }
@@ -433,10 +445,8 @@ final class GpuTactical implements Disposable {
             }
             short[] indices = new short[count / stride];
             for (int i = 0; i < indices.length; i++) { indices[i] = (short) i; }
-            Mesh mesh = group.stroke() == null
-                  ? new Mesh(true, indices.length, indices.length, VertexAttribute.Position(), VertexAttribute.ColorPacked())
-                  : new Mesh(true, indices.length, indices.length, VertexAttribute.Position(), VertexAttribute.ColorPacked(),
-                        VertexAttribute.TexCoords(0));
+            Mesh mesh = new Mesh(true, indices.length, indices.length,
+                  group.stroke() == null ? PLAIN_VERTICES : INKED_VERTICES);
             try {
                 mesh.setVertices(vertices);
                 mesh.setIndices(indices);
@@ -721,11 +731,24 @@ final class GpuTactical implements Disposable {
         return electronicWarfare;
     }
 
-    /** Links the hex mask and ECM programs now (GpuBattleView's warm-up), not when the first one shows. */
+    /** An outline's material: the walls' depth policy with its dash pattern, {@code dashScale} repeats per unit. */
+    private Material ink(Texture dashes, float dashScale) {
+        Material ink = wallMaterial.copy();
+        TextureAttribute diffuse = TextureAttribute.createDiffuse(dashes);
+        diffuse.scaleU = dashScale;
+        ink.set(diffuse);
+        return ink;
+    }
+
+    /**
+     * Links the hex masks' and the pages' programs behind the loading stage. ECM fields and the deployment tint, which
+     * last while they show, link when they first appear (the board's own ECM in the warm-up's frames).
+     */
     void prepare() {
         hexMasks.prepare();
-        deploymentTint.prepare();
-        electronicWarfare.prepare();
+        // The pages' unlit programs: fills and walls, and dashed outlines.
+        GpuUnitShader.prepareUnlit(batch, material, PLAIN_VERTICES);
+        GpuUnitShader.prepareUnlit(batch, ink(null, 1), INKED_VERTICES);
     }
 
     @Override

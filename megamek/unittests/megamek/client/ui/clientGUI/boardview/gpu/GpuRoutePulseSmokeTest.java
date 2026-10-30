@@ -79,6 +79,9 @@ class GpuRoutePulseSmokeTest {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
             try {
+                // GpuBattleView's warm-up: the route, its marks and its pulse then draw without linking a program.
+                overlay.prepare();
+                int programs = GpuShaderLoadSmokeTest.programs(overlay);
                 board.units = false;
                 List<GpuMovePlan.Step> route = List.of(
                       step(scene, origin.translated(0, 1), 0, GpuMovePlan.Band.WALK),
@@ -134,6 +137,7 @@ class GpuRoutePulseSmokeTest {
                     board.draw(overlay::render);
                     hud.captureBackBuffer("pulse-color-" + tactical + "-arrival").dispose();
                 }
+                assertEquals(programs, GpuShaderLoadSmokeTest.programs(overlay), "The route linked a program");
             } finally {
                 overlay.dispose();
                 board.dispose();

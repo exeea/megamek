@@ -29,7 +29,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
-/** Checks the upstream GLSL and classpath resources without creating an OpenGL context. */
+/** Checks the model stages and classpath resources without creating an OpenGL context. */
 class GpuUnitShaderTest {
     private Files previousFiles;
 
@@ -45,10 +45,10 @@ class GpuUnitShaderTest {
     }
 
     @Test
-    void composesTheBundledLibGdxShadersWithTheShippedResources() {
-        assertDoesNotThrow(() -> unitVertex(DefaultShader.getDefaultVertexShader()));
+    void composesTheModelStagesWithTheShippedResources() {
+        assertDoesNotThrow(() -> unitVertex(GpuShaderSource.read("model.vert")));
         assertDoesNotThrow(() -> GpuUnitShader.fragmentSource(GpuUnitShader.fragment()));
-        assertDoesNotThrow(() -> GpuThermalUnits.vertexSource(DefaultShader.getDefaultVertexShader()));
+        assertDoesNotThrow(() -> GpuThermalUnits.vertexSource(GpuShaderSource.read("model.vert")));
     }
 
     @ParameterizedTest
@@ -59,10 +59,10 @@ class GpuUnitShaderTest {
           fragment, // unit-overlays
           vertex, v_color = a_color;
           """)
-    void rejectsMissingOrAmbiguousUpstreamInsertionPoints(String stage, String anchor) {
+    void rejectsMissingOrAmbiguousInsertionPoints(String stage, String anchor) {
         boolean vertex = "vertex".equals(stage);
-        // The vertex stage is libGDX's; the fragment stage is model.frag with the shared lighting.
-        String source = vertex ? DefaultShader.getDefaultVertexShader() : GpuUnitShader.fragment();
+        // The vertex stage is model.vert; the fragment stage is model.frag with the shared lighting.
+        String source = vertex ? GpuShaderSource.read("model.vert") : GpuUnitShader.fragment();
         UnaryOperator<String> compose = vertex ? GpuUnitShaderTest::unitVertex : GpuUnitShader::fragmentSource;
         // Whitespace alone must not silently drop an effect; a second match must not inject it twice.
         for (String incompatible : List.of(source.replace(anchor, anchor.replace(" ", "  ")), source + "\n" + anchor)) {

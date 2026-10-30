@@ -4,7 +4,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuShaderSource.replaceOnce;
 
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attributes;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
@@ -90,8 +94,35 @@ final class GpuUnitShader extends DefaultShader {
         return provider(true, false);
     }
 
+    /**
+     * libGDX's unlit model stages as they are (model.vert, unlit.frag), compiled like every board program: the
+     * display-space tactical pages, fire control and route markers draw no environment.
+     */
+    static DefaultShaderProvider unlitProvider() {
+        return new DefaultShaderProvider(GpuShaderSource.read("model.vert"), GpuShaderSource.read("unlit.frag")) {
+            @Override
+            protected Shader createShader(Renderable renderable) {
+                return new DefaultShader(renderable, config, GpuGlsl.compile("GPU unlit model",
+                      createPrefix(renderable, config), config.vertexShader, config.fragmentShader));
+            }
+        };
+    }
+
+    /**
+     * Links the unlit program a material draws with on a vertex layout, behind the loading stage (GpuBattleView's
+     * warm-up), so the first route, range or outline links none. The program depends only on which attributes are set.
+     */
+    static void prepareUnlit(ModelBatch batch, Material material, VertexAttributes layout) {
+        Renderable sample = new Renderable();
+        sample.material = material;
+        Mesh mesh = new Mesh(true, 0, 0, layout);
+        sample.meshPart.set("unlit-warmup", mesh, 0, 0, GL20.GL_TRIANGLES);
+        try { batch.getShaderProvider().getShader(sample); }
+        finally { mesh.dispose(); }
+    }
+
     private static DefaultShaderProvider provider(boolean displayOutput, boolean encodeOutput) {
-        return new DefaultShaderProvider(GpuCloudShadow.vertex(vertexSource(linearVertex(getDefaultVertexShader()))),
+        return new DefaultShaderProvider(GpuCloudShadow.vertex(vertexSource(linearVertex(GpuShaderSource.read("model.vert")))),
               GpuCloudShadow.fragment(fragmentSource(fragment()))) {
             @Override
             protected Shader createShader(Renderable renderable) {
@@ -100,8 +131,7 @@ final class GpuUnitShader extends DefaultShader {
         };
     }
 
-    // These insertion points are the source contract with the pinned libGDX version.
-    // Reuse upstream material/shadow plumbing, and fail explicitly if an upgrade changes this contract.
+    // Insertion points in model.vert and model.frag: replaceOnce fails explicitly if an edit moves one.
     static String vertexSource(String source) {
         String declarations = GpuShaderSource.read("unit-material.vert");
         source = replaceOnce(source, MAIN, declarations + "\n" + MAIN + "\n    unitMaterialCoordinates();\n", "vertex");
@@ -116,11 +146,11 @@ final class GpuUnitShader extends DefaultShader {
     }
 
     /**
-     * libGDX's vertex stage with linear colours: units, props, buildings and liquids share it with the terrain. Its own
-     * per-vertex lighting is unused; the fragment stages light every surface (model.frag, shadeSurface).
+     * The model vertex stage (model.vert) with linear colours: units, props, buildings and liquids share it with the
+     * terrain. Its own per-vertex lighting is unused; the fragment stages light every surface (model.frag,
+     * shadeSurface).
      */
     static String linearVertex(String source) {
-        source = GpuGlsl.libGdx(source, true);
         source = replaceOnce(source, "#if defined(diffuseTextureFlag) || defined(specularTextureFlag) || defined(emissiveTextureFlag)",
               "#if defined(diffuseTextureFlag) || defined(specularTextureFlag) || defined(emissiveTextureFlag) || defined(modelSurfaceFlag)",
               "vertex");

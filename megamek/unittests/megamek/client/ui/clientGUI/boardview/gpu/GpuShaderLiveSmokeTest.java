@@ -305,7 +305,7 @@ class GpuShaderLiveSmokeTest {
                 }
 
                 void checkInactiveEffect() {
-                    // The warm-up links every weapon and weather effect (GpuBattleView.warmUp); this board has no ocean.
+                    // The warm-up links every weapon effect (GpuBattleView.warmUp); this board has no ocean.
                     manager.run(() -> {
                         var result = manager.apply(Map.of("ocean-initial.frag", "invalid lazy effect"));
                         assertTrue(result.success(), result.message());

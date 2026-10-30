@@ -5,7 +5,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.fiel
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.renderReady;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -93,8 +93,8 @@ class GpuWireframeSmokeTest {
         Mix shaded = render(view, "wireframe-off.png");
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Shaded frames");
         assertTrue(shaded.other > .6, "The shaded board is neither dark nor line green: " + shaded);
-        assertNotNull(field(((GpuWireframe) field(view, "wireframe")).units, "batch"),
-              "Loading warms the thermal batch up, so turning the view on compiles nothing");
+        assertNull(field(((GpuWireframe) field(view, "wireframe")).units, "batch"),
+              "The thermal view is optional: loading leaves its programs to its first use");
 
         toggle("utility-wireframe");
         assertTrue(tuning.wireframe());
@@ -221,6 +221,8 @@ class GpuWireframeSmokeTest {
 
     /** Baked field cover and instanced fungi must look exactly like the same wireframe board without scatter. */
     private static void verifyScatter() throws Exception {
+        // These offline terrains link behind no view frame: the shown view's per-frame link budget never resets.
+        GpuGlsl.presenting(false);
         var terrain = new GpuTerrain();
         var plain = new GpuTerrain();
         var wireframe = new GpuWireframe();
@@ -366,7 +368,8 @@ class GpuWireframeSmokeTest {
         File directory = new File(System.getProperty("megamek.gpu.screenshots"));
         assertTrue(directory.isDirectory() || directory.mkdirs());
         GpuBoardTestUi.capture(new File(directory, name));
-        return classify(20, 80, Gdx.graphics.getBackBufferWidth() - 290, Gdx.graphics.getBackBufferHeight() - 70, 2);
+        // The board between the HUD's panels: right of Forces, above the action bar, below the toolbar.
+        return classify(340, 160, Gdx.graphics.getBackBufferWidth() - 20, Gdx.graphics.getBackBufferHeight() - 70, 2);
     }
 
     /** Line green, near-black ground, or anything else, within back-buffer pixels whose rows count from the bottom. */

@@ -437,7 +437,7 @@ final class GpuAtmosphere implements Disposable {
 
     /**
      * SMAA on the window's composite (not on offscreen targets); turning it off releases its targets and keeps its
-     * programs, which the warm-up's thermal frame links (GpuBattleView).
+     * programs, which the warm-up's SMAA frame links (GpuBattleView).
      */
     void setAntiAliasing(boolean enabled) {
         antiAliasing = enabled;
@@ -1090,13 +1090,11 @@ final class GpuAtmosphere implements Disposable {
     }
 
     /**
-     * Links the FSR, weather and heat programs now (GpuBattleView's warm-up), not at the first render resolution below
-     * 1, rain or lava shown, and the depth cues' program while they are on; switched on later, it links at their first
-     * frame.
+     * Links the heat program now (GpuBattleView's warm-up), not at the first lava or hot unit shown, and the depth
+     * cues' program while they are on. FSR and each weather kind link at first use: a render resolution below 1, or
+     * that weather (the board's own falls in the warm-up's frames); switched on later, the depth cues too.
      */
     void prepare() {
-        if (fsr == null) { fsr = new GpuFsr(quad); }
-        if (particles == null) { particles = new GpuWeatherParticles(); }
         if (heatGlow == null) { heatGlow = new GpuHeatGlow(quad); }
         if (depthCueStrength > 0 && depthCues == null) { depthCues = new GpuDepthCues(quad); }
     }

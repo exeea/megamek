@@ -31,6 +31,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
+import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.ImmediateModeRenderer;
@@ -58,6 +59,8 @@ import megamek.logging.MMLogger;
 final class GpuBoardOverlay implements Disposable {
     /** One prototype pixel in hex radii at the prototype's Tactical View zoom, where 38 pixels are 1.25 radii. */
     static final float PIXEL = 1.25f / 38;
+    /** The vertices of every route and movement mark (Sink). */
+    private static final long VERTICES = VertexAttributes.Usage.Position | VertexAttributes.Usage.ColorPacked;
     // overlay.js:10-12, the selection palette of both views; movement uses the client's colours.
     private static final Color MINT = new Color(.45f, .92f, .80f, 1);
     private static final Color CORAL = new Color(1, .44f, .40f, 1);
@@ -93,7 +96,8 @@ final class GpuBoardOverlay implements Disposable {
     private static final float DRIFT_GAP_HEXES = .1f;
     private static final float DRIFT_HEAD_HEXES = .24f;
 
-    private final ModelBatch batch = new ModelBatch((camera, renderables) -> { });
+    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Route markers", GpuUnitShader::unlitProvider),
+          (camera, renderables) -> { });
     private final ModelBatch ghostBatch = new ModelBatch(GpuShaderManager.provider("Movement ghosts", GpuUnitShader::linearDisplayProvider),
           (camera, renderables) -> { });
     /** Draws the marks every frame, GpuBattleView draws its selection bands. */
@@ -450,6 +454,12 @@ final class GpuBoardOverlay implements Disposable {
         renderer.vertex(b.x, b.y, b.z);
         renderer.color(color);
         renderer.vertex(c.x, c.y, c.z);
+    }
+
+    /** The unlit programs of the route and movement marks and of the route's pulse, behind the loading stage. */
+    void prepare() {
+        GpuUnitShader.prepareUnlit(batch, material(true), MeshBuilder.createAttributes(VERTICES));
+        batch.getShaderProvider().getShader(pulse.prepare());
     }
 
     /**
@@ -1125,8 +1135,7 @@ final class GpuBoardOverlay implements Disposable {
 
         private MeshPartBuilder reserve(int count) {
             if (part == null || vertices + count > PART_VERTICES) {
-                part = builder.part("overlay-" + parts++, GL20.GL_TRIANGLES,
-                      VertexAttributes.Usage.Position | VertexAttributes.Usage.ColorPacked, material);
+                part = builder.part("overlay-" + parts++, GL20.GL_TRIANGLES, VERTICES, material);
                 vertices = 0;
             }
             vertices += count;

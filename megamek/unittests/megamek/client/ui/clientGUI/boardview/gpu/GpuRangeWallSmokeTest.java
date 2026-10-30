@@ -80,6 +80,9 @@ class GpuRangeWallSmokeTest {
                     var controls = List.of(moving, stopped, splitFrames, reverse);
                     try {
                         controls.forEach(control -> control.update(scene));
+                        // GpuBattleView's warm-up: the walls and dashed outlines then draw without linking a program.
+                        moving.prepare();
+                        int programs = GpuShaderLoadSmokeTest.programs(moving);
                         long builds = moving.builds();
                         BoardCamera camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -119,6 +122,7 @@ class GpuRangeWallSmokeTest {
                         moving.update(scene);
                         assertArrayEquals(advanced, draw(moving, camera.camera, false, 0),
                               "Rebuilding must retain the dash phase");
+                        assertEquals(programs, GpuShaderLoadSmokeTest.programs(moving), "The range walls linked a program");
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
                         failure.set(error);

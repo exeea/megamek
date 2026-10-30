@@ -182,16 +182,6 @@ final class GpuGlsl {
     /** The shading language every board shader compiles as, from {@link #MINIMUM} to {@link #MAXIMUM}. */
     static int glsl() { return version; }
 
-    /** Adapt upstream GLSL once, before inserting any board code. libGDX remains the owner of its lighting code. */
-    static String libGdx(String source, boolean vertex) {
-        source = source.replaceAll("\\battribute\\b", "in")
-              .replaceAll("\\bvarying\\b", vertex ? "out" : "in")
-              .replaceAll("\\btexture2DLod\\b", "textureLod")
-              .replaceAll("\\b(texture2D|textureCube)\\b", "texture")
-              .replaceAll("\\bgl_FragColor\\b", "fragColor");
-        return vertex ? source : "layout(location = 0) out vec4 fragColor;\n" + source;
-    }
-
     static ShaderProgram compile(String name, String vertex, String fragment) {
         return compile(name, "", vertex, fragment);
     }

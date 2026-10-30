@@ -249,6 +249,9 @@ class GpuNuclearImpactSmokeTest {
         int woodsBefore = woods(before);
         long treesBefore = trees(live.frame.get().scene());
         long plantsBefore = plants(terrain.presentation(live.frame.get().scene()));
+        // A board without fire or smoke links their programs when a nuke launches (GpuBattleView), not at load.
+        var fire = (GpuTerrainEffects) field(live.view, "terrainEffects");
+        boolean fireLinked = field(fire, "shader") != null;
         int programsBefore = GpuGlsl.compilesAfterLoading();
         int deferredBefore = GpuGlsl.deferredAfterLoading();
         double installMs = 0;
@@ -328,8 +331,9 @@ class GpuNuclearImpactSmokeTest {
             assertTrue(installed.tiles().stream().filter(tile -> terrain.groundDamage().scorched(scene, tile))
                   .flatMap(tile -> tile.features().stream()).noneMatch(GpuScatter::vegetation),
                   "No decorative plant remains in an installed scorched tile");
-            assertEquals(0, GpuGlsl.compilesAfterLoading() - programsBefore,
-                  "Impact and rebuilding must not compile new programs after loading");
+            assertNotNull(field(fire, "shader"), "The launch linked the fire and smoke programs");
+            assertTrue(GpuGlsl.compilesAfterLoading() - programsBefore <= (fireLinked ? 0 : 2),
+                  "Beyond the launch's fire and smoke, impact and rebuilding must not compile new programs");
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             complete = true;
         } finally {

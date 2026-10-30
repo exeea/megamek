@@ -51,7 +51,8 @@ import org.junit.jupiter.api.Test;
  * No shader compile holds a frame once the loading stage has gone. A game on Grassland 3 shows its overview, a close
  * view, a pan, a volley of a laser, an autocannon and missiles and the Tactical View; then a tank and an infantry
  * platoon that were not on the board deploy, and SMAA, a 75% render resolution and the thermal view are switched on and
- * off. The 3D editor on the same board opens every Assets category and reveals each of its sections, searches, and
+ * off. The Tactical View, the thermal (wireframe) view, SMAA and a render resolution below 100% are optional: they
+ * link their own programs when they first show; their links are not counted, but no loading stage may come back. The 3D editor on the same board opens every Assets category and reveals each of its sections, searches, and
  * paints lava, water, ice, a car and scorch. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
  * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
  * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back. With the
@@ -105,7 +106,7 @@ class GpuShaderLoadSmokeTest {
             }).when(source).takeFrame();
             // The spy holds a copy of the source's fields; the captures happen on the source.
             doAnswer(ignored -> fixture.source.reserveUnits()).when(source).reserveUnits();
-            // The game loads at 100%, so the switch to 75% below finds FSR linked by the warm-up alone.
+            // The game loads at 100%: the switch to 75% below links FSR at its first use, an optional setting.
             GUIPreferences.getInstance().setBoardRenderResolution(1);
             new Lwjgl3Application(new GpuBattleView(source) {
                 int step, links, programs;
@@ -139,9 +140,11 @@ class GpuShaderLoadSmokeTest {
                                 step++;
                             }
                         } else if (step == 3 && seconds > 25) {
+                            watch.optionalView(true);
                             setTacticalView(true);
                             step++;
                         } else if (step == 4 && seconds > 28) {
+                            watch.optionalView(false);
                             setTacticalView(false);
                             deploy(fixture, late.get(0), new Coords(7, 8));
                             step++;
@@ -149,6 +152,7 @@ class GpuShaderLoadSmokeTest {
                             deploy(fixture, late.get(1), new Coords(9, 8));
                             step++;
                         } else if (step == 6 && seconds > 36) {
+                            watch.optionalView(true);
                             ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(1);
                             BoardCamera.renderScale = .75f;
                             step++;
@@ -156,6 +160,7 @@ class GpuShaderLoadSmokeTest {
                             tuning.setWireframe(true);
                             step++;
                         } else if (step == 8 && seconds > 43) {
+                            watch.optionalView(false);
                             tuning.setWireframe(false);
                             ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(0);
                             BoardCamera.renderScale = 1;
@@ -440,9 +445,9 @@ class GpuShaderLoadSmokeTest {
         }
     }
 
-    /** The programs the terrain's shader provider holds. */
-    static int programs(GpuTerrain terrain) throws Exception {
-        var provider = ((ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "batch")).getShaderProvider();
+    /** The programs the shader provider of a renderer's {@code batch} holds: the terrain's, or an unlit overlay's. */
+    static int programs(Object renderer) throws Exception {
+        var provider = ((ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(renderer, "batch")).getShaderProvider();
         if (provider instanceof GpuShaderProvider edited) { provider = edited.active(); }
         return ((Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(provider, "shaders")).size;
     }
@@ -505,8 +510,25 @@ class GpuShaderLoadSmokeTest {
         private long loaded, previous, longest;
         private double longestAt;
         private int frames, loadingAgain;
+        // Links while an optional view shows (the Tactical View, the thermal view), which may link on first use.
+        private int optionalCompiles, optionalDeferred, optionalStart = -1, optionalDeferredStart, optionalUnlinked;
 
         Watch(String name) { this(name, GpuGlsl.compilesAfterLoading(), GpuGlsl.deferredAfterLoading()); }
+
+        /** Every frame an optional view presents is complete: its programs link before it draws, none skips a draw. */
+        void optionalView(boolean shows) {
+            if (shows) {
+                optionalStart = GpuGlsl.compilesAfterLoading();
+                optionalDeferredStart = GpuGlsl.deferredAfterLoading();
+                optionalUnlinked = GpuShaderProvider.unlinkedDraws();
+            } else if (optionalStart >= 0) {
+                optionalCompiles += GpuGlsl.compilesAfterLoading() - optionalStart;
+                optionalDeferred += GpuGlsl.deferredAfterLoading() - optionalDeferredStart;
+                optionalStart = -1;
+                assertEquals(optionalUnlinked, GpuShaderProvider.unlinkedDraws(),
+                      name + ": an optional view presented a frame without draws whose programs still linked");
+            }
+        }
 
         Watch(String name, int compiles, int deferred) {
             this.name = name; this.compiles = compiles; this.deferred = deferred;
@@ -546,14 +568,16 @@ class GpuShaderLoadSmokeTest {
 
         void check() {
             assertTrue(loaded != 0, name + ": the loading stage never went");
-            int after = GpuGlsl.compilesAfterLoading() - compiles;
+            int after = GpuGlsl.compilesAfterLoading() - compiles - optionalCompiles;
+            int deferredAfter = GpuGlsl.deferredAfterLoading() - deferred - optionalDeferred;
             String report = String.format(Locale.ROOT,
-                  "L1 %s frames=%d longest=%.1f ms at %.1f s compilesAfterLoading=%d deferred=%d loadingAgain=%d",
-                  name, frames, longest / 1e6, longestAt, after, GpuGlsl.deferredAfterLoading() - deferred, loadingAgain);
+                  "L1 %s frames=%d longest=%.1f ms at %.1f s compilesAfterLoading=%d deferred=%d loadingAgain=%d"
+                        + " optionalViews=%d+%d", name, frames, longest / 1e6, longestAt, after, deferredAfter, loadingAgain,
+                  optionalCompiles, optionalDeferred);
             LOGGER.info(report);
             System.out.println(report);
             assertEquals(0, after, name + ": shaders compiled on the render thread after the loading stage (see the timing log)");
-            assertEquals(0, GpuGlsl.deferredAfterLoading() - deferred,
+            assertEquals(0, deferredAfter,
                   name + ": shader links were deferred until after the loading stage (see the timing log)");
             assertEquals(0, loadingAgain, name + ": a loading stage came back");
         }

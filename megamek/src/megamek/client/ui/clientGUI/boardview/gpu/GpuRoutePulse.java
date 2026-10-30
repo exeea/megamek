@@ -255,6 +255,12 @@ final class GpuRoutePulse implements Disposable {
               + SETTLE / MathUtils.PI2 * MathUtils.sin(MathUtils.PI * settling / SETTLE));
     }
 
+    /** Its quad mesh and material ahead of a first route, for GpuBoardOverlay.prepare to link their program. */
+    Renderable prepare() {
+        if (mesh == null) { create(); }
+        return renderable;
+    }
+
     /**
      * This frame's quads, or null when nothing shows; GpuBoardOverlay draws them after its own meshes. While the
      * head travels: the lit marks behind it, its streak and the head; after it lands: the flare, the fading trail,

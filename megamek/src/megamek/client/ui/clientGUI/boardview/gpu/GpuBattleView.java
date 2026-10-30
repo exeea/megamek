@@ -189,6 +189,11 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuTextures<BoardScene.Pixels> unitTextures;
     private ModelBatch unitBatch;
     private SpriteBatch annotationBatch;
+    /**
+     * libGDX's sprite program, shared by the view's sprite batches (each would compile its own copy). They do not own
+     * it: the view disposes it after them.
+     */
+    private ShaderProgram sprites;
     private ShapeRenderer lines;
     private ShapeRenderer tethers;
     private ShaderProgram tetherShader;
@@ -228,14 +233,15 @@ class GpuBattleView extends ApplicationAdapter {
     private boolean entranceStarting;
     /**
      * The frames after a loading stage that still draw under it, so that the programs they need link before the board
-     * shows: the board as it will show and, unless the board makes its entrance, its Tactical View and a close view of
-     * its centre, whose ground cover and nearest details have programs of their own; last the thermal view with SMAA.
-     * Effects that first appear in play link with the first of them, and the game's units not on the board stand in
-     * the middle of each (warmUp, withReserve).
+     * shows: the board as it will show and, unless the board makes its entrance, a close view of its centre, whose
+     * ground cover and nearest details have programs of their own. Effects that first appear in play link with the
+     * first of them, and the game's units not on the board stand in the middle of each (warmUp, withReserve). Optional
+     * views and settings (the Tactical View, the wireframe view, SMAA, a render resolution below 100%) link their own
+     * programs when they first show, without a loading stage.
      */
-    private enum WarmUp { BOARD, TACTICAL, CLOSE, THERMAL, DONE }
+    private enum WarmUp { BOARD, CLOSE, DONE }
     private WarmUp warmUp = WarmUp.DONE;
-    /** Whether the Tactical View and close view were drawn under this loading stage. */
+    /** Whether the close view was drawn under this loading stage. */
     private boolean probed;
     private int quietFrames, closeFrames;
     /** The close view's zoom, as the close benchmark view's, and the most frames its detail may take to settle. */
@@ -331,12 +337,19 @@ class GpuBattleView extends ApplicationAdapter {
         createBoard();
     }
 
+    private boolean wireframeView() { return tuning.wireframe() && GpuWireframe.supported(); }
+
+    private ShaderProgram sprites() {
+        if (sprites == null) { sprites = SpriteBatch.createDefaultShader(); }
+        return sprites;
+    }
+
     private void createLoadingStage() {
         GpuGlsl.presenting(false);
         if (loadingStage != null) { return; }
         if (theme == null && loadingTheme == null) { loadingTheme = new GpuBoardSkin(); }
         var skin = theme != null ? theme.skin : loadingTheme.skin;
-        loadingStage = new Stage(new ScreenViewport());
+        loadingStage = new Stage(new ScreenViewport(), new SpriteBatch(1000, sprites()));
         Table content = new Table();
         content.setFillParent(true);
         Value edge = Value.percentHeight(.06f, content);
@@ -420,7 +433,7 @@ class GpuBattleView extends ApplicationAdapter {
         tuning.onDisplayMode(fullscreen -> Gdx.app.postRunnable(() -> setFullscreen(fullscreen)));
         // The HUD draws with the view's batch, which it does not own: the battle HUD over a game, the map tools over
         // the board editor and the map preview. The batch outlives an asset reload, which recreates the renderers.
-        annotationBatch = new SpriteBatch();
+        annotationBatch = new SpriteBatch(1000, sprites());
         ui = source instanceof GpuBoardSource game
               ? new GpuHud(game, theme.skin, annotationBatch, boardCamera, tuning, history)
               : new GpuMapHud(source, theme.skin, annotationBatch, boardCamera, tuning, history, () -> terrain);
@@ -470,8 +483,8 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setEditable(source.isEditor());
         offscreenLinks = new GpuGlsl.Preparation();
         GpuGlsl.linkOffscreen(offscreenLinks);
-        fireControl = new GpuFireControl();
-        tactical = new GpuTactical(terrain::tacticalSurface);
+        fireControl = new GpuFireControl(sprites());
+        tactical = new GpuTactical(terrain::tacticalSurface, sprites());
         atmosphere = new GpuAtmosphere();
         unitVisibility = new GpuUnitVisibility();
         wireframe = new GpuWireframe();
@@ -759,7 +772,7 @@ class GpuBattleView extends ApplicationAdapter {
         // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather.
         atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
-        atmosphere.setAntiAliasing(tuning.antiAliasing() || warmUp == WarmUp.THERMAL);
+        atmosphere.setAntiAliasing(tuning.antiAliasing());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
         atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
@@ -806,11 +819,14 @@ class GpuBattleView extends ApplicationAdapter {
         boolean hidden = warmUp != WarmUp.DONE;
         if (!hidden && loadingStage != null) {
             loadingStage.dispose();
+            loadingStage.getBatch().dispose();
             loadingStage = null;
             if (loadingTheme != null) { loadingTheme.dispose(); }
             loadingTheme = null;
         }
-        if (!hidden) { GpuGlsl.presenting(true); }
+        // The optional views link their own programs as the loading stage does, on the render thread: their first frame
+        // freezes briefly but shows its units and lines, never a frame drawn without them (GpuShaderProvider.UNLINKED).
+        if (!hidden) { GpuGlsl.presenting(!boardCamera.tactical() && !wireframeView()); }
         if (source.isEditor()) { terrain.previewEditorObjects(scene); }
         if (boardPrint == null) {
             var request = source.takePrintRequest();
@@ -922,8 +938,15 @@ class GpuBattleView extends ApplicationAdapter {
         markers.update(unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         updatePilotFlames();
+        // A nuke's fire and smoke link as it launches, or as a scheduled one goes off, before the burning hexes arrive
+        // (warmUp links them only on a board that has fire or smoke).
+        var detonations = playback.takeDetonations();
+        if (!detonations.isEmpty() || playback.attacks().stream()
+              .anyMatch(attack -> GpuArtilleryBlast.nuclearStats(attack.event.result().shot()) != null)) {
+            GpuGlsl.offscreen(terrainEffects::prepare);
+        }
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
-        playback.takeDetonations().forEach(attackEffects::detonate);
+        detonations.forEach(attackEffects::detonate);
         attackEffects.advance(Gdx.graphics.getDeltaTime());
         // No craters in the Tactical View or on the Classic columns.
         if (!terrain.columns() && !boardCamera.tactical()) {
@@ -940,7 +963,7 @@ class GpuBattleView extends ApplicationAdapter {
         outlined.addAll(markers.outlinedInstances());
         outlined.removeIf(instance -> instance == null || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
-        boolean wireframeView = (tuning.wireframe() || warmUp == WarmUp.THERMAL) && GpuWireframe.supported();
+        boolean wireframeView = wireframeView();
         // The units' poses and anchors and the camera are final for this frame. The tuning model follows the camera,
         // which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");
@@ -1084,33 +1107,35 @@ class GpuBattleView extends ApplicationAdapter {
     private void warmUp(boolean detailChanged) {
         switch (warmUp) {
             case BOARD -> {
-                // Effects draw into the scene's targets; hex masks and ECM fields over the finished frame.
+                // Effects draw into the scene's targets; hex masks over the finished frame. Combat's brief effects link
+                // now; hex fire and smoke, and splashes, where the board has them. Pilot flames link in these frames,
+                // with the flamers that carry them; star shells, ECM fields, the deployment tint and fire or smoke a
+                // board gains later, which last while they show, when they first appear.
                 GpuGlsl.offscreen(() -> {
                     attackEffects.prepare();
                     designators.prepare();
-                    starShells.prepare();
-                    terrainEffects.prepare();
-                    waterImpacts.prepare();
+                    if (source.isEditor() || scene.tiles().stream().anyMatch(tile -> tile.fireSmoke().present())) {
+                        terrainEffects.prepare();
+                    }
+                    if (source.isEditor() || terrain.hasWater()) { waterImpacts.prepare(); }
                     jumpJets.prepare();
-                    pilotFlames.prepare();
                     atmosphere.prepare();
                     terrain.prepareEffects();
                 });
+                // Overlays over the finished frame: before a first range, route or outline needs their programs.
                 tactical.prepare();
+                fireControl.prepare();
+                overlay.prepare();
                 if (ui instanceof GpuMapHud map && !map.prepare()) { break; }
                 // Probing moves the camera: not while the board makes its entrance.
                 if (probed || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
-                    warmUp = WarmUp.THERMAL;
+                    warmUp = WarmUp.DONE;
                 } else {
-                    setTacticalView(true);
-                    warmUp = WarmUp.TACTICAL;
+                    boardCamera.look(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0),
+                          CLOSE_ZOOM);
+                    quietFrames = closeFrames = 0;
+                    warmUp = WarmUp.CLOSE;
                 }
-            }
-            case TACTICAL -> {
-                setTacticalView(false);
-                boardCamera.look(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0), CLOSE_ZOOM);
-                quietFrames = closeFrames = 0;
-                warmUp = WarmUp.CLOSE;
             }
             case CLOSE -> {
                 quietFrames = terrain.busy() || detailChanged ? 0 : quietFrames + 1;
@@ -1121,7 +1146,6 @@ class GpuBattleView extends ApplicationAdapter {
                     warmUp = WarmUp.BOARD;
                 }
             }
-            case THERMAL -> warmUp = WarmUp.DONE;
             default -> { }
         }
         ScreenUtils.clear(.045f, .065f, .075f, 1, true);
@@ -3363,6 +3387,7 @@ class GpuBattleView extends ApplicationAdapter {
         GpuGlsl.presenting(false);
         if (loadingStage != null) {
             loadingStage.dispose();
+            loadingStage.getBatch().dispose();
             if (loadingTheme != null) { loadingTheme.dispose(); }
         }
         playback.clear();
@@ -3389,6 +3414,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (annotationBatch != null) {
             annotationBatch.dispose();
         }
+        // After every batch that draws with it: the loading stage's, the HUD's, fire control's and the tactical layer's.
+        if (sprites != null) { sprites.dispose(); }
         if (editorBadges != null) { editorBadges.dispose(); }
         if (unitTextures != null) {
             unitTextures.dispose();

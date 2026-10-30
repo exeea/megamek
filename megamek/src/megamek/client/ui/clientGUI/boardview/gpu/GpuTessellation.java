@@ -50,7 +50,7 @@ final class GpuTessellation {
     private static final String CURVED = "#curved";
     static final String CONTROL = "#pragma stage(tess_control)";
     static final String EVALUATION = "#pragma stage(tess_evaluation)";
-    /** A vertex stage's mesh input (GpuGlsl.libGdx spells libGDX's attributes so). */
+    /** A vertex stage's mesh input (model.vert spells libGDX's attributes so). */
     private static final Pattern INPUT = Pattern.compile("[\\t ]*in[\\t ]+(float|vec[234])[\\t ]+(\\w+)[\\t ]*;[\\t ]*");
     private static final Pattern DIRECTIVE = Pattern.compile("[\\t ]*#[\\t ]*(if|ifdef|ifndef|elif|else|endif|define|undef)\\b.*");
     private static final Set<ShaderProgram> PROGRAMS = Collections.newSetFromMap(new WeakHashMap<>());

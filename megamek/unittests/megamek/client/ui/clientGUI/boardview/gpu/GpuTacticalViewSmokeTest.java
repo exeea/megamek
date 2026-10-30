@@ -370,6 +370,10 @@ class GpuTacticalViewSmokeTest {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, (1 << 1) | (1 << 4)));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 80));
+        // A built bridge carrying a paved road: a bridge with no stored type and no road, building or pavement beside
+        // it decodes as a natural rock arch (BridgeSpan.decode), whose deck is the arch's rock.
+        bridge.addTerrain(new Terrain(Terrains.BRIDGE_ROAD, 1, true, (1 << 1) | (1 << 4)));
+        bridge.setAppearance(Map.of("bridge", megamek.common.board.HexAppearance.BUILT_BRIDGE));
         return new Board(WIDTH, HEIGHT, hexes);
     }
 
@@ -600,13 +604,14 @@ class GpuTacticalViewSmokeTest {
      */
     static void graphics(GpuBattleView view, BoardGraphics graphics) throws Exception {
         SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setBoardGraphics(graphics));
-        render(view);
         var terrain = (GpuTerrain) field(view, "terrain");
         long deadline = System.nanoTime() + 120_000_000_000L;
-        while (terrain.busy()) {
-            assertTrue(System.nanoTime() < deadline, "The graphics switch completes");
+        // The choice reaches the terrain on a later frame; then its rebuild runs behind the loading stage.
+        while (terrain.columns() != (graphics == BoardGraphics.CLASSIC)) {
+            assertTrue(System.nanoTime() < deadline, "The graphics switch reaches the terrain");
             view.render();
         }
+        GpuBoardTestUi.present(view);
         render(view);
     }
 

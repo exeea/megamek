@@ -62,14 +62,6 @@ final class GpuWeatherParticles implements Disposable {
         mesh = new Mesh(true, PARTICLES * 4, indices.length, VertexAttribute.Position(), VertexAttribute.TexCoords(0));
         mesh.setVertices(vertices);
         mesh.setIndices(indices);
-        try {
-            for (Kind kind : KINDS) {
-                shaders[kind.ordinal()] = GpuShaderManager.program(() -> shader(kind), next -> shaders[kind.ordinal()] = next);
-            }
-        } catch (RuntimeException failure) {
-            dispose();
-            throw failure;
-        }
     }
 
     static ShaderProgram shader(Kind kind) {
@@ -105,7 +97,12 @@ final class GpuWeatherParticles implements Disposable {
                     case HAIL -> effects.hail();
                 };
                 if (strength > 0) {
-                    ShaderProgram shader = shaders[kind.ordinal()];
+                    // A kind links when its weather first falls: the board's own behind the loading stage, a change later.
+                    int index = kind.ordinal();
+                    if (shaders[index] == null) {
+                        shaders[index] = GpuShaderManager.program(() -> shader(kind), next -> shaders[index] = next);
+                    }
+                    ShaderProgram shader = shaders[index];
                     shader.bind();
                     shader.setUniformMatrix("u_projView", camera.combined);
                     shader.setUniformf("u_origin", origin);

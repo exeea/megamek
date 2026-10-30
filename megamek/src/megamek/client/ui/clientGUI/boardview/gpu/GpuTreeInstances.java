@@ -456,11 +456,13 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /**
      * A depth pass that also draws instanced trees: each of its shaders renders either instanced renderables or the
-     * others, never both. Instanced trees use the plain configuration with the instanced vertex shader.
+     * others, never both. Instanced trees use the plain configuration with the instanced vertex shader. Its stages
+     * are depth.vert and depth.frag unless the configuration names them.
      */
     static DepthShaderProvider depthProvider(DepthShader.Config plain) {
-        DepthShader.Config trees = new DepthShader.Config(depthVertex(plain.vertexShader != null ? plain.vertexShader
-              : GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true)), plain.fragmentShader);
+        String plainVertex = plain.vertexShader != null ? plain.vertexShader : GpuShaderSource.read("depth.vert");
+        String plainFragment = plain.fragmentShader != null ? plain.fragmentShader : GpuShaderSource.read("depth.frag");
+        DepthShader.Config trees = new DepthShader.Config(depthVertex(plainVertex), plainFragment);
         trees.defaultCullFace = plain.defaultCullFace;
         trees.defaultDepthFunc = plain.defaultDepthFunc;
         trees.depthBufferOnly = plain.depthBufferOnly;
@@ -471,8 +473,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 boolean instanced = instanced(renderable);
                 DepthShader.Config chosen = instanced ? trees : plain;
                 boolean cutaway = renderable.material.has(GpuBuildingCutaway.TYPE);
-                String vertex = chosen.vertexShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true) : chosen.vertexShader;
-                String fragment = chosen.fragmentShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultFragmentShader(), false) : chosen.fragmentShader;
+                String vertex = instanced ? trees.vertexShader : plainVertex;
+                String fragment = plainFragment;
                 if (cutaway) {
                     vertex = GpuBuildingCutaway.depthVertex(vertex, instanced);
                     fragment = "in float v_buildingHeight;\n" + GpuBuildingCutaway.depthFragment(fragment, "v_buildingHeight");

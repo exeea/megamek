@@ -166,7 +166,7 @@ final class GpuTerrain implements Disposable {
         // page UV, and the sculpt and model fragment stages draw the patch.
         TerrainShaders(boolean depthOnly) {
             super(GpuSurfaceScars.vertex(invariantPosition(GpuCloudShadow.vertex(GpuUnitShader.linearVertex(
-                        DefaultShader.getDefaultVertexShader())))),
+                        GpuShaderSource.read("model.vert"))))),
                   GpuSurfaceScars.fragment(GpuCloudShadow.fragment(GpuUnitShader.fragment())));
             this.depthOnly = depthOnly;
             depthFragment = depthOnly ? GpuShaderSource.read("terrain-depth.frag") : null;
@@ -8010,13 +8010,16 @@ final class GpuTerrain implements Disposable {
         }
     }
 
+    /** Whether the board has water, where a falling unit splashes (GpuWaterImpacts). */
+    boolean hasWater() { return chunks.stream().anyMatch(chunk -> !chunk.water.isEmpty()); }
+
     /**
-     * Links the spore and geyser programs now (GpuBattleView's warm-up), not when the first comes into view; in the
-     * editor also the wave simulations of water and lava, which a stroke may paint.
+     * Links the spore and geyser programs now (GpuBattleView's warm-up) on a board that has them, not when the first
+     * comes into view; in the editor, which a stroke may give them, always, with the wave simulations of water and lava.
      */
     void prepareEffects() {
-        fungus.prepare();
-        geysers.prepare();
+        if (editable || chunks.stream().anyMatch(chunk -> !chunk.spores.isEmpty())) { fungus.prepare(); }
+        if (editable || chunks.stream().anyMatch(chunk -> !chunk.geysers.isEmpty())) { geysers.prepare(); }
         if (editable) {
             ocean.prepare();
             lavaOcean.prepare();

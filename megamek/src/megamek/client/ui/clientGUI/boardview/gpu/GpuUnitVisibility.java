@@ -55,13 +55,14 @@ final class GpuUnitVisibility implements Disposable {
         DepthShader.Config config = new DepthShader.Config();
         config.defaultCullFace = GL20.GL_BACK;
         config.depthBufferOnly = true;
+        config.vertexShader = GpuShaderSource.read("depth.vert");
         config.fragmentShader = GpuShaderSource.read("unit-color.frag");
         return new DepthShaderProvider(config) {
             @Override
             protected Shader createShader(Renderable renderable) {
                 return new DepthShader(renderable, this.config, GpuGlsl.compile("GPU unit outline",
                       DepthShader.createPrefix(renderable, this.config),
-                      GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true), this.config.fragmentShader)) {
+                      this.config.vertexShader, this.config.fragmentShader)) {
                     private final int outlineColor = register("u_outlineColor");
 
                     @Override
