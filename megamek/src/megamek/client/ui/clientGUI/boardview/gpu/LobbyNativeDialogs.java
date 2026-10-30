@@ -2,6 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -9,6 +11,7 @@ import java.util.function.Consumer;
 
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.PlayerSettingsForm;
@@ -19,10 +22,12 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.common.icons.Camouflage;
 
 /**
- * The single entry point of the lobby's libGDX dialogs, as {@link LobbyDialogs} is of its Swing ones: the camo chooser
- * and the player settings so far, the others moving here one at a time. One dialog shows at a time, over the whole
- * lobby on a scrim that takes every click and key ({@link UiDialog}); opening another replaces it. Every
- * {@code new UiDialog} of the lobby is here, which {@code LobbyDialogEntryPointsTest} enforces.
+ * The single entry point of the lobby's libGDX dialogs, as {@link LobbyDialogs} is of its Swing ones: the camo chooser,
+ * the player settings, the bot setup and a message so far, the others moving here one at a time. A dialog shows over
+ * the whole lobby on a scrim that takes every click and key ({@link UiDialog}). Opening the camo chooser or the player
+ * settings replaces whatever shows; the bot setup and a message go over it, as the player settings' Bot settings opens
+ * the bot setup, and closing one shows the one below again. Every {@code new UiDialog} of the lobby is here, which
+ * {@code LobbyDialogEntryPointsTest} enforces.
  * <p>
  * GPU thread. The camo pictures are read on a daemon thread of their own.
  */
@@ -31,10 +36,13 @@ final class LobbyNativeDialogs {
     private final Stage stage;
     private final boolean motion;
     private ExecutorService pictures;
-    private UiDialog open;
-    private Runnable closing;
+    /** The dialogs that show, the top one first, each with what to do once it has closed. */
+    private final Deque<Open> open = new ArrayDeque<>();
     private LobbyCamoView camoView;
     private LobbyPlayerSettingsView settingsView;
+    private LobbyBotSetupView botView;
+
+    private record Open(UiDialog dialog, Runnable closed) { }
 
     LobbyNativeDialogs(UiKit kit, Stage stage, boolean motion) {
         this.kit = kit;
@@ -44,14 +52,12 @@ final class LobbyNativeDialogs {
 
     /** Whether a dialog shows; the lobby behind it takes no keys meanwhile. */
     boolean isOpen() {
-        return open != null && open.isOpen();
+        return !open.isEmpty() && open.peek().dialog().isOpen();
     }
 
-    /** Closes the dialog that shows, as Cancel would. */
+    /** Closes the top dialog, as Cancel would. */
     void cancel() {
-        if (open != null) {
-            close();
-        }
+        close();
     }
 
     /**
@@ -65,7 +71,11 @@ final class LobbyNativeDialogs {
      */
     LobbyCamoView camo(LobbyCamoView.Source source, CamoCatalog catalog, CamoChoice choice, boolean assets,
           Consumer<Camouflage> chosen) {
-        UiDialog dialog = begin(Messages.getString("CamoChoiceDialog.select_camo_pattern"), "dialog.lg");
+        UiDialog dialog = begin(Messages.getString("CamoChoiceDialog.select_camo_pattern"), "dialog.lg", false,
+              () -> {
+                  camoView.dispose();
+                  camoView = null;
+              });
         if (pictures == null) {
             pictures = Executors.newSingleThreadExecutor(work -> {
                 Thread thread = new Thread(work, "Lobby camo pictures");
@@ -87,19 +97,50 @@ final class LobbyNativeDialogs {
      */
     LobbyPlayerSettingsView playerSettings(PlayerSettingsForm form, List<PlayerSettingsForm.Position> positions,
           @Nullable BufferedImage camo, LobbyPlayerSettingsView.Host host) {
-        UiDialog dialog = begin(Messages.getString("PlayerSettingsDialog.title"),
-              "dialog.md");
+        UiDialog dialog = begin(Messages.getString("PlayerSettingsDialog.title"), "dialog.md", false, () -> {
+            settingsView.dispose();
+            settingsView = null;
+        });
         settingsView = new LobbyPlayerSettingsView(kit, dialog, form, positions, camo, host, this::close);
         show(dialog);
         return settingsView;
     }
 
-    private UiDialog begin(String title, String width) {
-        if (open != null) {
-            close();
+    /**
+     * Opens the bot setup over whatever shows.
+     *
+     * @param host what the view asks of the window
+     */
+    LobbyBotSetupView botSetup(BotSetupForm form, LobbyBotSetupView.Host host) {
+        UiDialog dialog = begin(Messages.getString("BotConfigDialog.title"), "dialog.lg", true, () -> botView = null);
+        botView = new LobbyBotSetupView(kit, dialog, form, bodyWidth(dialog), host, this::close);
+        show(dialog);
+        return botView;
+    }
+
+    /** Shows {@code text} with an OK button over whatever shows, as an alert. */
+    UiDialog message(String title, String text) {
+        UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
+        var label = kit.typeLabel(text, "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.primary(Messages.getString("Ok.text"), this::close).setName("message-ok");
+        show(dialog);
+        return dialog;
+    }
+
+    /**
+     * @param over   whether it goes over the dialogs that show rather than replacing them
+     * @param closed what to do once it has closed, such as giving its view's textures back
+     */
+    private UiDialog begin(String title, String width, boolean over, Runnable closed) {
+        if (!over) {
+            while (!open.isEmpty()) {
+                close();
+            }
         }
         UiDialog dialog = new UiDialog(kit, title, this::close).width(width);
-        open = dialog;
+        open.push(new Open(dialog, closed));
         return dialog;
     }
 
@@ -116,25 +157,24 @@ final class LobbyNativeDialogs {
               .space().get("md"));
     }
 
+    /** Closes the top dialog, showing the one below it again. */
     private void close() {
-        UiDialog dialog = open;
-        open = null;
-        if (dialog != null) {
-            dialog.close();
-        }
-        if (camoView != null) {
-            camoView.dispose();
-            camoView = null;
-        }
-        if (settingsView != null) {
-            settingsView.dispose();
-            settingsView = null;
+        Open top = open.poll();
+        if (top != null) {
+            top.dialog().close();
+            top.closed().run();
+            Open below = open.peek();
+            if (below != null) {
+                stage.setScrollFocus(below.dialog().scroll());
+            }
         }
     }
 
-    /** As the screen goes: closes the dialog and stops the picture thread. */
+    /** As the screen goes: closes every dialog and stops the picture thread. */
     void dispose() {
-        close();
+        while (!open.isEmpty()) {
+            close();
+        }
         if (pictures != null) {
             pictures.shutdownNow();
             pictures = null;
@@ -151,7 +191,12 @@ final class LobbyNativeDialogs {
         return settingsView;
     }
 
+    @Nullable LobbyBotSetupView botView() {
+        return botView;
+    }
+
+    /** The top dialog, or null. */
     @Nullable UiDialog dialog() {
-        return open;
+        return open.isEmpty() ? null : open.peek().dialog();
     }
 }

@@ -740,7 +740,7 @@ work for Swing, and item 11 is under investigation.
          numbers are checked (a non-number or a negative, or a corner off the board, marks the field and disables
          OK and Apply, where Swing read 0); ground objects are applied on OK rather than at once; the overlay colour
          is a palette (the starting colour, caution yellow and the player colours) instead of a colour chooser; Use
-         Ruler is left out. Still Swing: Bot settings (L13b), the loadout file choosers, and the start screen's
+         Ruler is left out. Still Swing: the loadout file choosers and the start screen's
          briefing camo (`StartBriefingPage`). The Swing dialogs stay for their other users. Checks:
          `CamoCatalogTest`, `CamoChoiceTest`, `PlayerSettingsFormTest`, `LobbyCommandsTest` (a picker answering
          later), `LobbyPlayerControllerTest`, `LobbyDialogEntryPointsTest`, and the on-demand
@@ -749,7 +749,40 @@ work for Swing, and item 11 is under investigation.
          `lobby+dialog=playersettings` now open these and click through the Stage (a colour camo, then OK: the
          player's and the snapshot's camo change and the swatch shows it; start SE and offset 2, then OK: the game
          and the snapshot read "SE, 2, 3"), photographed at 2560x1400 and 1100x800.
-       - L13b Bot setup (to come).
+       - L13b ~~Bot setup~~. `LobbyBotSetupView` (models `BotSetupForm` and `BotTargetPicker` in
+         `megamek.client.lobby`) replaces the Swing `BotConfigDialog` in the lobby, for a new bot (Add ally, Add
+         opponent, Add on a new team, a ghost's replacement) and an existing bot's Bot settings (its card menu and
+         the player settings' button, over which it stacks). Every field of the Swing dialog: the name (new bots
+         only: blank or taken marks the field and disables OK) and the AI (radios, locked with its tooltip for an
+         existing bot, CASPAR only when its preference is on); the Behavior tab with the presets list (previous
+         configuration, the stored presets, the other local bots), Save (enabled once a stored preset's fields
+         differ), Delete preset and Save as new (a taken name marks the field), all written through
+         `BehaviorSettingsFactory` on the Swing thread while the buttons wait; the sliders in two columns (bravery,
+         self preservation, aggression, mutual support, piloting caution, facing awareness and precision, and with
+         the experimental preference anti-crowding and favour higher TMM) on the kit's token slider; combat posture;
+         Exclusive mutual support, I am a pirate, Ignore damage output (and Experimental); forced withdrawal and its
+         edge, auto flee and its edge (each select disabled while its switch is off). The Strategic targets tab:
+         the priority units picker (owners, forces and units folding, a search, force and unit ticks, a 1-5
+         priority select, enemy convoy units always ticked at 1, other targets for picked units not listed, the
+         count line) and the hex targets (typed as x, y counted from 1, or chosen from the board's buildings, fuel
+         tanks and bridges; a hex without one shows in `status.warning`; each removable). Help opens the Swing
+         Princess help. OK on a new bot connects it as the Swing lobby does and puts it on the chosen team; on an
+         existing bot it sets the settings on the local bot client and says so in the chat, as Swing does; the
+         answer is dropped if the bot left meanwhile. The connect failure alert is a libGDX message
+         (`LobbyNativeDialogs.message`). `LobbyNativeDialogs` now keeps a stack: camo and player settings replace
+         what shows, the bot setup and a message stack over it, and closing the top one gives the one below its
+         focus back. Differences from Swing: Delete preset is a button rather than the list's right-click, with no
+         confirmation as in Swing; the name is checked as typed; the add-unit-by-ID field is left out (the picker
+         lists every unit of the game). The Swing `BotConfigDialog` stays for the start screen, the in-game bot
+         settings and MekHQ; its building description now comes from `BotSetupForm.buildingInfo`. Checks:
+         `BotSetupFormTest`, `BotTargetPickerTest`, `LobbyPlayerControllerTest` (settings dropped once the bot
+         left), `LobbyDialogEntryPointsTest` (no `BotConfigDialog` or `doAlertDialog` in `GpuLobbyWindow`), and the
+         on-demand `LobbyNativeDialogsSmokeTest` (a stored preset, a slider click, the pirate switch, a typed name,
+         a force tick and a typed hex, a message stacked over the setup, then OK handing all of it back). Probes
+         `lobby+dialog=botconfig` and `lobby+dialog=addbot` (with `+targets` for the targets tab) click through
+         the Stage: COWARDLY, the pirate switch, bravery to 10, a unit and a hex, then OK; the log shows the
+         existing bot with those settings and the chat line, or the new bot on a new team (3) with them,
+         photographed at 2560x1400 and 900x700.
        - L13c Planetary conditions and game options (to come).
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`

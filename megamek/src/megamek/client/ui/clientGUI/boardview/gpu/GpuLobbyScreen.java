@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -15,6 +16,7 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.GL20;
@@ -33,6 +35,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.LobbyForces;
@@ -80,6 +83,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private static final int REQUISITION_SPRITES = 200;
     /** When the developer switch's clicks run, in seconds after the lobby shows. */
     static final double PROBE_CLICK_AT = 1.5;
+    /** The stored behaviour the probe chooses in the bot setup. */
+    private static final String PROBE_PRESET = "COWARDLY";
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -143,6 +148,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private java.io.File nativeShot;
     /** Whether the probe logs the lobby and quits once {@link #nativeShot} is saved. */
     private boolean nativeDone;
+    private final ArrayDeque<Runnable> botClicks = new ArrayDeque<>();
     private LobbySnapshot shown;
     private long start;
     private boolean shotSaved;
@@ -679,6 +685,22 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
+    /** GPU thread: closes the lobby's open menus, then opens the bot setup over the lobby and any dialog. */
+    void botSetupDialog(BotSetupForm form, LobbyBotSetupView.Host host) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.botSetup(form, host);
+        }
+    }
+
+    /** GPU thread: shows an alert over the lobby and any dialog. */
+    void messageDialog(String title, String text) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.message(title, text);
+        }
+    }
+
     private void closeMenus() {
         boolean closed = true;
         while (closed) {
@@ -801,6 +823,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
         double elapsed = (System.nanoTime() - nativeAt) / 1e9;
         boolean camo = "camo".equals(probe.dialog());
+        boolean bot = nativeDialogs.botView() != null;
         UiDialog dialog = nativeDialogs.dialog();
         Group root = stage.getRoot();
         switch (nativeStep) {
@@ -808,6 +831,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 if (dialog != null && elapsed > 2) {
                     if (camo) {
                         probeClick(root.findActor("camo:" + Camouflage.COLOUR_CAMOUFLAGE + "/"));
+                    } else if (bot) {
+                        probeClick(root.findActor("bot-preset-stored-" + PROBE_PRESET));
+                        queueBotClicks(dialog, probe);
                     } else {
                         probeReveal(dialog, root.findActor("settings-start-5"));
                     }
@@ -823,6 +849,12 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                         probeClick(root.findActor("camo-item-3"));
                         LobbyCamoView view = nativeDialogs.camoView();
                         LOGGER.info("The lobby probe chose the camo {}", view == null ? null : view.choice().result());
+                    } else if (bot) {
+                        Runnable click = botClicks.poll();
+                        if (click != null) {
+                            click.run();
+                            return;
+                        }
                     } else {
                         probeClick(root.findActor("settings-start-5"));
                         Actor offset = root.findActor("settings-offset");
@@ -847,7 +879,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
             case 3 -> {
                 if (elapsed > 5.5) {
-                    probeClick(root.findActor(camo ? "camo-ok" : "settings-ok"));
+                    probeClick(root.findActor(camo ? "camo-ok" : bot ? "bot-ok" : "settings-ok"));
                     LOGGER.info("The lobby probe pressed OK: dialog open {}", nativeDialogs.isOpen());
                     nativeStep++;
                 }
@@ -862,6 +894,67 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
             default -> nativeStep = -1;
         }
+    }
+
+    /**
+     * Queues the bot setup's clicks, one a frame so that each scroll shows before its click: after
+     * {@link #PROBE_PRESET}, the pirate switch and the bravery slider's right end; with {@code +targets} the targets
+     * tab, its first force's first unit and a typed hex.
+     */
+    private void queueBotClicks(UiDialog dialog, GpuLobbyProbe probe) {
+        Group root = stage.getRoot();
+        botClicks.add(() -> probeReveal(dialog, root.findActor("bot-flag-pirate")));
+        botClicks.add(() -> probeClick(root.findActor("bot-flag-pirate")));
+        botClicks.add(() -> probeReveal(dialog, root.findActor("bot-slider-bravery")));
+        botClicks.add(() -> {
+            Actor bravery = root.findActor("bot-slider-bravery");
+            int[] end = bravery == null ? null
+                  : GpuLobbyProbeInput.hover(stage, bravery, bravery.getWidth() - 2, bravery.getHeight() / 2);
+            if (end != null) {
+                stage.touchDown(end[0], end[1], 0, Input.Buttons.LEFT);
+                stage.touchUp(end[0], end[1], 0, Input.Buttons.LEFT);
+            }
+        });
+        if (probe.options().contains("targets")) {
+            botClicks.add(() -> probeReveal(dialog, root.findActor("bot-tab-targets")));
+            botClicks.add(() -> probeClick(root.findActor("bot-tab-targets")));
+            botClicks.add(() -> probeClick(firstNamed(root, "bot-fold-force-")));
+            botClicks.add(() -> probeReveal(dialog, firstNamed(root, "bot-tick-unit-")));
+            botClicks.add(() -> probeClick(firstNamed(root, "bot-tick-unit-")));
+            botClicks.add(() -> probeReveal(dialog, root.findActor("bot-hex-add")));
+            botClicks.add(() -> {
+                probeClick(root.findActor("bot-hex-coords"));
+                for (char typed : "3, 4".toCharArray()) {
+                    stage.keyTyped(typed);
+                }
+            });
+            botClicks.add(() -> probeClick(root.findActor("bot-hex-add")));
+        }
+        botClicks.add(() -> {
+            LobbyBotSetupView view = nativeDialogs.botView();
+            if (view != null) {
+                BotSetupForm form = view.form();
+                LOGGER.info("The lobby probe set the bot {} ({}): preset {}, bravery {}, pirate {}, targets {} and {}",
+                      form.name(), form.valid() ? "valid" : "invalid", form.description(),
+                      form.value(BotSetupForm.Slider.BRAVERY), form.flag(BotSetupForm.Flag.PIRATE),
+                      form.picker().picked(), form.hexTargets().stream().map(BotSetupForm.HexTarget::text).toList());
+            }
+        });
+    }
+
+    private static @Nullable Actor firstNamed(Group group, String prefix) {
+        for (Actor child : group.getChildren()) {
+            if (child.getName() != null && child.getName().startsWith(prefix)) {
+                return child;
+            }
+            if (child instanceof Group inner) {
+                Actor found = firstNamed(inner, prefix);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     private void probeClick(@Nullable Actor target) {

@@ -13,6 +13,9 @@ import static org.mockito.Mockito.when;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.BooleanSupplier;
 
 import com.badlogic.gdx.Input;
@@ -21,10 +24,18 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import megamek.client.Client;
+import megamek.client.bot.AIType;
+import megamek.client.bot.princess.BehaviorSettings;
+import megamek.client.bot.princess.PriorityTargetChoices.Candidate;
+import megamek.client.bot.princess.PriorityTargetChoices.ForceRole;
 import megamek.client.generator.enums.SkillGeneratorMethod;
+import megamek.client.lobby.BotSetupForm;
+import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.LobbyCommands;
@@ -35,6 +46,7 @@ import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
+import megamek.common.board.Coords;
 import megamek.common.containers.MunitionTree;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
@@ -205,6 +217,126 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(dialogs.isOpen(), "OK closes the settings");
             dialogs.dispose();
         });
+    }
+
+    @Test
+    void theBotSetupHandsBackWhatWasClicked() {
+        UiTestStage.run(ui -> {
+            Map<String, BehaviorSettings> stored = new TreeMap<>();
+            BehaviorSettings berserk = new BehaviorSettings();
+            berserk.setDescription("BERSERK");
+            berserk.setBraveryIndex(9);
+            berserk.setHyperAggressionIndex(9);
+            stored.put("BERSERK", berserk);
+            BotSetupForm.Presets presets = new BotSetupForm.Presets() {
+                @Override
+                public List<String> names() {
+                    return List.copyOf(stored.keySet());
+                }
+
+                @Override
+                public BehaviorSettings get(String name) {
+                    return stored.get(name);
+                }
+
+                @Override
+                public void save(BehaviorSettings preset) {
+                    stored.put(preset.getDescription(), preset);
+                }
+
+                @Override
+                public void remove(String name) {
+                    stored.remove(name);
+                }
+            };
+            BotTargetPicker picker = new BotTargetPicker(true, List.of(
+                  new Candidate(1, "Atlas", 5, "Enemy", 2, 10, "Lance", ForceRole.NONE, true, false),
+                  new Candidate(2, "Locust", 5, "Enemy", 2, 10, "Lance", ForceRole.NONE, true, false)), Map.of(),
+                  Map.of());
+            BotSetupForm form = new BotSetupForm(null, "Princess", Set.of("Local"), new BehaviorSettings(), null,
+                  false, false, presets, Map.of(), null, picker);
+            List<LobbyPlayerController.BotSetup> confirmed = new ArrayList<>();
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            dialogs.botSetup(form, new LobbyBotSetupView.Host() {
+                @Override
+                public void edt(Runnable work, Runnable then) {
+                    work.run();
+                    then.run();
+                }
+
+                @Override
+                public void help() {
+                }
+
+                @Override
+                public void confirm(LobbyPlayerController.BotSetup setup) {
+                    confirmed.add(setup);
+                }
+            });
+            ui.draw();
+
+            click(ui, find(ui, "bot-preset-stored-BERSERK"));
+            Slider bravery = find(ui, "bot-slider-bravery");
+            assertEquals(9, Math.round(bravery.getValue()), "the preset shows in the sliders");
+            Button save = find(ui, "bot-save");
+            assertTrue(save.isDisabled(), "an unchanged preset has nothing to save");
+            Slider aggression = find(ui, "bot-slider-aggression");
+            reveal(ui, aggression);
+            click(ui, aggression);
+            assertEquals(5, form.value(BotSetupForm.Slider.AGGRESSION), "a click on the slider's middle sets it");
+            assertFalse(save.isDisabled(), "a changed preset may be saved");
+            Actor pirate = find(ui, "bot-flag-pirate");
+            reveal(ui, pirate);
+            click(ui, pirate);
+
+            Actor name = find(ui, "bot-name");
+            reveal(ui, name);
+            click(ui, name);
+            ui.stage.keyTyped('X');
+            ui.draw();
+
+            click(ui, find(ui, "bot-tab-targets"));
+            click(ui, find(ui, "bot-tick-force-5:10"));
+            ui.draw();
+            assertEquals("2", ((Label) find(ui, "bot-target-count")).getText().toString().replaceAll("\\D", ""));
+            Actor hex = find(ui, "bot-hex-coords");
+            reveal(ui, hex);
+            click(ui, hex);
+            for (char typed : "3, 4".toCharArray()) {
+                ui.stage.keyTyped(typed);
+            }
+            Actor add = find(ui, "bot-hex-add");
+            click(ui, add);
+            assertEquals(1, form.hexTargets().size());
+
+            UiDialog setup = dialogs.dialog();
+            dialogs.message("Note", "Over the setup");
+            ui.draw();
+            click(ui, find(ui, "message-ok"));
+            assertTrue(setup.isOpen(), "a message over the setup closes alone");
+            assertTrue(dialogs.dialog() == setup);
+
+            click(ui, find(ui, "bot-ok"));
+            assertFalse(dialogs.isOpen(), "OK closes the setup");
+            assertEquals(1, confirmed.size());
+            LobbyPlayerController.BotSetup chosen = confirmed.getFirst();
+            assertEquals("PrincessX", chosen.name());
+            assertEquals(AIType.PRINCESS, chosen.type());
+            assertEquals(9, chosen.behavior().getBraveryIndex());
+            assertEquals(5, chosen.behavior().getHyperAggressionIndex());
+            assertTrue(chosen.behavior().iAmAPirate());
+            assertEquals(Set.of(1, 2), chosen.behavior().getPriorityUnitTargets());
+            assertEquals(Set.of(new Coords(2, 3).toString()), chosen.behavior().getStrategicBuildingTargets());
+            assertEquals("BERSERK", chosen.behavior().getDescription());
+            dialogs.dispose();
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Actor> T find(UiTestStage ui, String name) {
+        Actor actor = ui.stage.getRoot().findActor(name);
+        assertNotNull(actor, name + " shows");
+        return (T) actor;
     }
 
     /** Draws frames until {@code done}, as the camo pictures arrive from their thread, three seconds at most. */

@@ -1000,7 +1000,9 @@ Enter presses the focused button or else the primary (a disabled primary does no
 Escape and the close button run `cancel`, and Tab and Shift+Tab cycle through the card's enabled buttons, fields,
 selects and sliders only, scrolling the body to the focused one. Actions added to `layer()` before `show` are dropped,
 as showing restarts its fade; put per-frame work on an actor of its own. The lobby opens these only through
-`LobbyNativeDialogs` (camo and player settings so far). `GpuModalDialog` on the board is still the developers' work.
+`LobbyNativeDialogs` (camo, player settings, bot setup and a plain message so far); the bot setup and a message stack over
+another dialog, which gets its focus back when the top one closes. `GpuModalDialog` on the board is still the
+developers' work.
 
 ## Status cards
 

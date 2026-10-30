@@ -15,7 +15,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,6 +35,7 @@ import megamek.client.bot.BotFactory;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.LobbyBattlefield;
@@ -52,8 +52,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
-import megamek.client.ui.enums.DialogResult;
+import megamek.client.ui.dialogs.helpDialogs.PrincessHelpDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
@@ -402,6 +401,12 @@ public final class GpuLobbyWindow {
         LOGGER.info("Lobby probe player: camo {}, start {} offset {}; snapshot camo '{}', start '{}'",
               LobbySnapshot.camoKey(local.getCamouflage()), local.getStartingPos(), local.getStartOffset(),
               row == null ? null : row.camo(), row == null ? null : row.start());
+        gui.getLocalBots().forEach((name, bot) -> {
+            Player player = bot.getLocalPlayer();
+            String behavior = bot instanceof BotClient botClient ? botClient.getBehaviorSettings().toLog() : "-";
+            LOGGER.info("Lobby probe bot {}: team {}, behaviour {}", name, player == null ? null : player.getTeam(),
+                  behavior.replaceAll("\\s+", " "));
+        });
     }
 
     private void queueRefresh() {        if (refreshQueued.compareAndSet(false, true)) {
@@ -1055,17 +1060,9 @@ public final class GpuLobbyWindow {
         }
 
         @Override
-        public Optional<LobbyPlayerController.BotSetup> botSetup(@Nullable String name, BehaviorSettings behavior,
-              @Nullable AIType type) {
-            BotConfigDialog dialog = type == null
-                  ? new BotConfigDialog(swingDialogs.parent(), name, behavior, gui)
-                  : new BotConfigDialog(swingDialogs.parent(), name, behavior, gui, type);
-            dialog.setVisible(true);
-            if (dialog.getResult() != DialogResult.CONFIRMED) {
-                return Optional.empty();
-            }
-            return Optional.of(new LobbyPlayerController.BotSetup(dialog.getBotName(),
-                  type == null ? dialog.getSelectedAIType() : type, dialog.getBehaviorSettings()));
+        public void botSetup(@Nullable String name, BehaviorSettings behavior, @Nullable AIType type,
+              Consumer<LobbyPlayerController.BotSetup> chosen) {
+            openBotSetup(name, behavior, type, chosen);
         }
 
         @Override
@@ -1083,8 +1080,14 @@ public final class GpuLobbyWindow {
                 connected = false;
             }
             if (!connected) {
-                gui.doAlertDialog(Messages.getString("ChatLounge.AlertBot.title"),
-                      Messages.getString("ChatLounge.AlertBot.message"));
+                String title = Messages.getString("ChatLounge.AlertBot.title");
+                String text = Messages.getString("ChatLounge.AlertBot.message");
+                GpuHost.post(() -> {
+                    GpuLobbyScreen shown = screen;
+                    if (shown != null) {
+                        shown.messageDialog(title, text);
+                    }
+                });
                 bot.die();
                 return null;
             }
@@ -1298,6 +1301,72 @@ public final class GpuLobbyWindow {
             GpuLobbyScreen shown = screen;
             if (shown != null) {
                 shown.settingsDialog(form, positions, camo, host);
+            }
+        });
+    }
+
+    /**
+     * EDT: reads the bot setup and opens it natively over the lobby; {@code chosen} runs here, on the Swing thread,
+     * with the confirmed setup, after the server is told the bot's settings changed, as the Swing dialog tells it.
+     *
+     * @param name the bot's name, or null for a new bot, which is named in the dialog
+     * @param type the bot's AI, or null for a new bot, whose AI is chosen in the dialog
+     */
+    private void openBotSetup(@Nullable String name, BehaviorSettings behavior, @Nullable AIType type,
+          Consumer<LobbyPlayerController.BotSetup> chosen) {
+        if (closing) {
+            return;
+        }
+        BotSetupForm form;
+        try {
+            form = BotSetupForm.of(gui.getClient(), name, behavior, type);
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the bot setup");
+            return;
+        }
+        LobbyBotSetupView.Host host = new LobbyBotSetupView.Host() {
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        if (!closing) {
+                            work.run();
+                        }
+                    } catch (RuntimeException failure) {
+                        LOGGER.error(failure, "The bot setup failed");
+                    } finally {
+                        GpuHost.post(then);
+                    }
+                });
+            }
+
+            @Override
+            public void help() {
+                SwingUtilities.invokeLater(() -> {
+                    if (!closing) {
+                        new PrincessHelpDialog(swingDialogs.parent()).setVisible(true);
+                    }
+                });
+            }
+
+            @Override
+            public void confirm(LobbyPlayerController.BotSetup setup) {
+                SwingUtilities.invokeLater(() -> {
+                    if (closing) {
+                        return;
+                    }
+                    Client client = gui.getClient();
+                    client.sendServerChat(Player.PLAYER_NONE,
+                          client.getLocalPlayer() + " changed settings for bot " + setup.name());
+                    chosen.accept(setup);
+                    queueRefresh();
+                });
+            }
+        };
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.botSetupDialog(form, host);
             }
         });
     }

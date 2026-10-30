@@ -120,10 +120,12 @@ import org.lwjgl.glfw.GLFW;
  *     input and the focus back. The names: {@code gameoptions}, {@code conditions}, {@code victory},
  *     {@code randommap}, {@code mapsetup}, {@code loadmapsetup}, {@code camo}, {@code playersettings},
  *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3}, {@code randomarmy}, {@code skills},
- *     {@code names}, {@code loadlist} and {@code alert}. The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo} and
- *     {@code playersettings}) open on the stage instead, where the probe clicks through them: a colour camo for
- *     {@code camo}, the SE start and an offset of 2 for {@code playersettings}; it saves the frame buffer, presses
- *     OK, and logs what the next snapshot shows.</li>
+ *     {@code names}, {@code loadlist} and {@code alert}. The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
+ *     {@code playersettings}, {@code botconfig} and {@code addbot}) open on the stage instead, where the probe clicks
+ *     through them: a colour camo for {@code camo}, the SE start and an offset of 2 for {@code playersettings}, the
+ *     COWARDLY preset, the pirate switch and the bravery slider's top for the first local bot's settings
+ *     ({@code botconfig}) or a new bot on a new team ({@code addbot}), and with {@code +targets} a force and a hex on
+ *     the targets tab; it saves the frame buffer, presses OK, and logs what the next snapshot shows.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
@@ -443,7 +445,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     }
 
     /** The dialogs {@code lobby+dialog=name} opens on the stage, the lobby's libGDX dialogs. */
-    static final Set<String> NATIVE_DIALOGS = Set.of("camo", "playersettings");
+    static final Set<String> NATIVE_DIALOGS = Set.of("camo", "playersettings", "botconfig", "addbot");
 
     /** EDT: opens the libGDX dialog {@link #dialog()} names, as the lobby's control would. */
     void openNative(GpuLobbyWindow window, ClientGUI gui) {
@@ -496,7 +498,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             case "botconfig" -> window.botSettings(gui.getLocalBots().values().stream()
                   .map(AbstractClient::getLocalPlayer).filter(java.util.Objects::nonNull).mapToInt(Player::getId)
                   .findFirst().orElse(localId));
-            case "addbot" -> window.addBot(BOT_TEAM);
+            case "addbot" -> window.addBot(window.snapshot().freeTeam());
             case "customize" -> client.getGame().getEntitiesVector().stream()
                   .filter(entity -> entity.getOwnerId() == localId).findFirst()
                   .ifPresent(entity -> window.configureUnit(entity.getId()));

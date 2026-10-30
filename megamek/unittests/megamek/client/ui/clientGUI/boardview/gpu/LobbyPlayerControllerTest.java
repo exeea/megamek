@@ -178,6 +178,17 @@ class LobbyPlayerControllerTest {
     }
 
     @Test
+    void botSettingsAreDroppedWhenTheBotLeftWhileTheDialogShowed() {
+        when(botClient.getAIType()).thenReturn(AIType.PRINCESS);
+        dialogs.deferSetup = true;
+        controller.botSettings(bot.getId());
+        bots.remove(bot.getName());
+        BehaviorSettings changed = new BehaviorSettings();
+        dialogs.pendingSetup.accept(new LobbyPlayerController.BotSetup(bot.getName(), AIType.PRINCESS, changed));
+        verify(botClient, never()).setBehaviorSettings(changed);
+    }
+
+    @Test
     void anotherPlayerHasNoBotSettings() {
         controller.botSettings(enemy.getId());
         assertEquals(0, dialogs.setupAsked);
@@ -238,6 +249,8 @@ class LobbyPlayerControllerTest {
         final List<BooleanSupplier> polled = new ArrayList<>();
         Optional<Camouflage> camouflage = Optional.empty();
         LobbyPlayerController.BotSetup setup;
+        boolean deferSetup;
+        Consumer<LobbyPlayerController.BotSetup> pendingSetup;
         AbstractClient connected;
         int camouflageAsked;
         int setupAsked;
@@ -258,13 +271,17 @@ class LobbyPlayerControllerTest {
         }
 
         @Override
-        public Optional<LobbyPlayerController.BotSetup> botSetup(String name, BehaviorSettings behavior,
-              AIType type) {
+        public void botSetup(String name, BehaviorSettings behavior, AIType type,
+              Consumer<LobbyPlayerController.BotSetup> chosen) {
             setupAsked++;
             setupName = name;
             setupType = type;
             setupBehavior = behavior;
-            return Optional.ofNullable(setup);
+            if (deferSetup) {
+                pendingSetup = chosen;
+            } else if (setup != null) {
+                chosen.accept(setup);
+            }
         }
 
         @Override

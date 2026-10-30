@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -23,11 +22,11 @@ import megamek.common.units.Entity;
  * menu run them: player settings, camouflage, team and deployment area for the local player and their bots, the Game
  * Master role, and adding, setting up, replacing and removing bots. Every action takes a player id from the view and
  * checks that the local player may act on that player, so a stale view cannot act on a player who has changed. The
- * Swing dialogs, and making a bot, come from {@link Dialogs}; they need no OpenGL.
+ * dialogs, and making a bot, come from {@link Dialogs}.
  */
 final class LobbyPlayerController {
 
-    /** The Swing dialogs the actions ask through, owned by the client's frame, and the making of bots. */
+    /** The dialogs the actions ask through, and the making of bots. */
     interface Dialogs {
         /** Opens the player settings for the player {@code client} plays, as the Swing lobby does. */
         void playerSettings(Client client);
@@ -40,9 +39,11 @@ final class LobbyPlayerController {
 
         /**
          * Asks for a bot's setup: its name ({@code name} fixed if not null), its kind ({@code type} fixed if not null)
-         * and its behaviour, starting from {@code behavior}; empty when cancelled.
+         * and its behaviour, starting from {@code behavior}; hands the confirmed setup to {@code chosen} later on this
+         * thread, nothing when cancelled.
          */
-        Optional<BotSetup> botSetup(@Nullable String name, BehaviorSettings behavior, @Nullable AIType type);
+        void botSetup(@Nullable String name, BehaviorSettings behavior, @Nullable AIType type,
+              Consumer<BotSetup> chosen);
 
         /** Makes and connects the bot {@code setup} describes; null, after telling the player, when it fails. */
         @Nullable AbstractClient connectBot(BotSetup setup);
@@ -123,8 +124,13 @@ final class LobbyPlayerController {
         if (player == null || !(commands.localBotClient(player) instanceof BotClient bot)) {
             return;
         }
-        dialogs.botSetup(bot.getLocalPlayer().getName(), bot.getBehaviorSettings(), bot.getAIType())
-              .ifPresent(setup -> bot.setBehaviorSettings(setup.behavior()));
+        dialogs.botSetup(bot.getLocalPlayer().getName(), bot.getBehaviorSettings(), bot.getAIType(), setup -> {
+            // The dialog stayed open while the game went on: check again that the bot is still a local one
+            Player still = session.game().getPlayer(id);
+            if (still != null && commands.localBotClient(still) == bot) {
+                bot.setBehaviorSettings(setup.behavior());
+            }
+        });
     }
 
     /** Removes the local bot {@code id}; any other player is refused with the Swing lobby's message. */
@@ -155,17 +161,15 @@ final class LobbyPlayerController {
     }
 
     private void addBot(@Nullable String name, BehaviorSettings behavior, int team) {
-        Optional<BotSetup> setup = dialogs.botSetup(name, behavior, null);
-        if (setup.isEmpty()) {
-            return;
-        }
-        AbstractClient bot = dialogs.connectBot(setup.get());
-        if (bot == null) {
-            return;
-        }
-        session.localBots().put(setup.get().name(), bot);
-        if (team != Player.TEAM_UNASSIGNED) {
-            dialogs.poll(() -> commands.joinTeam(bot, team));
-        }
+        dialogs.botSetup(name, behavior, null, setup -> {
+            AbstractClient bot = dialogs.connectBot(setup);
+            if (bot == null) {
+                return;
+            }
+            session.localBots().put(setup.name(), bot);
+            if (team != Player.TEAM_UNASSIGNED) {
+                dialogs.poll(() -> commands.joinTeam(bot, team));
+            }
+        });
     }
 }
