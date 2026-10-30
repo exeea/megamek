@@ -25,6 +25,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
@@ -144,12 +145,66 @@ class GpuShadowCacheSmokeTest {
                 System.out.printf("SHADOW isolated cached=%s median=%.3fms p95=%.3fms%n", variant == 1,
                       times[variant][30], times[variant][57]);
             }
+            profiler.enable();
+            assertRefitKeepsTheTexelGrid(terrain, camera, profiler);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             profiler.disable();
             model.dispose();
             terrain.dispose();
         }
+    }
+
+    /**
+     * A pan past the map's room refits it at the same texel on the same world grid: the depth both maps hold is the
+     * same, moved by whole texels, so casters' shadows keep their edges as the view moves. Interpolated depth and its
+     * slope bias may differ in a few texels, where a depth step meets other 2 by 2 derivative quads.
+     */
+    private static void assertRefitKeepsTheTexelGrid(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler) {
+        // A view needing well under the whole board, which the board-wide map would otherwise cover.
+        camera.zoom(.5f);
+        terrain.renderShadows(camera.camera, List.of());
+        var light = ((DirectionalShadowLight) terrain.environment().shadowMap).getCamera();
+        int size = GpuTerrainShadows.SHADOW_RESOLUTION;
+        float width = light.viewportWidth, height = light.viewportHeight;
+        Vector3 right = new Vector3(light.direction).crs(light.up).nor();
+        float x = light.position.dot(right), y = light.position.dot(light.up);
+        int[] before = texels(depth(terrain));
+        boolean refit = false;
+        for (int pan = 0; pan < 60 && !refit; pan++) {
+            camera.pan(8, 3);
+            profiler.reset();
+            terrain.renderShadows(camera.camera, List.of());
+            refit = profiler.getDrawCalls() > 0;
+        }
+        assertTrue(refit, "The pans leave the map's room");
+        assertEquals(width, light.viewportWidth, 0, "The refit keeps the texel");
+        assertEquals(height, light.viewportHeight, 0);
+        float dx = (light.position.dot(right) - x) * size / width, dy = (light.position.dot(light.up) - y) * size / height;
+        assertEquals(Math.round(dx), dx, .01f, "The map moves by whole texels");
+        assertEquals(Math.round(dy), dy, .01f);
+        int[] after = texels(depth(terrain));
+        int shiftX = Math.round(dx), shiftY = Math.round(dy), compared = 0, differing = 0;
+        // Leave out the borders, which the shadow pass's scissor keeps clear.
+        for (int row = 1; row < size - 1; row++) {
+            for (int column = 1; column < size - 1; column++) {
+                int fromRow = row + shiftY, fromColumn = column + shiftX;
+                if (fromRow < 1 || fromColumn < 1 || fromRow >= size - 1 || fromColumn >= size - 1) { continue; }
+                compared++;
+                long change = Math.abs(Integer.toUnsignedLong(after[row * size + column])
+                      - Integer.toUnsignedLong(before[fromRow * size + fromColumn]));
+                if (change > 0xffffffffL / 10000) { differing++; }
+            }
+        }
+        System.out.printf("SHADOW refit shift=%d,%d compared=%d differing=%d%n", shiftX, shiftY, compared, differing);
+        assertTrue(compared > size * size / 2, "The maps overlap");
+        assertTrue(differing <= compared / 1000, "The overlap keeps its depth: " + differing + " of " + compared);
+    }
+
+    private static int[] texels(byte[] depth) {
+        int[] result = new int[depth.length / Integer.BYTES];
+        java.nio.ByteBuffer.wrap(depth).order(java.nio.ByteOrder.nativeOrder()).asIntBuffer().get(result);
+        return result;
     }
 
     private static Object field(Object target, String name) throws ReflectiveOperationException {

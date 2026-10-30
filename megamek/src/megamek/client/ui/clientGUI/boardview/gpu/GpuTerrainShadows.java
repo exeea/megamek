@@ -43,7 +43,16 @@ final class GpuTerrainShadows implements Disposable {
     /** Copies per restore before one copy of the whole map is the cheaper (an estimate, not measured). */
     private static final int SHADOW_RUNS = 32;
     private static final float SHADOW_GUARD_SCALE = 1.1f;
-    private static final float SHADOW_MAX_SCALE = SHADOW_RESOLUTION / 2048f;
+    /**
+     * A refit keeps the map's texel while the view's fit still has this much room in it and needs a texel at most
+     * SHADOW_MAX_SCALE finer (the map moves by whole texels only), and a map is kept while its texel is so fine: the
+     * texel grid stays put under the casters through pans and orbits and changes only past this band. Fresh maps take
+     * the ladder's texel for the guarded fit, 1.1 to 1.124 times the fit's.
+     */
+    private static final float SHADOW_KEEP_SCALE = 1.02f;
+    private static final float SHADOW_MAX_SCALE = 1.2f;
+    /** Texel sizes lie on a fixed ladder, this many steps an octave. */
+    private static final int SHADOW_LADDER = 32;
 
     private final Casters casters;
     private final List<Model> shadowModels = new ArrayList<>();
@@ -168,11 +177,20 @@ final class GpuTerrainShadows implements Disposable {
         if (!changed && !projectionChanged) { return; }
         shadowProjectionValid = false;
         if (projectionChanged) {
+            // Under the same light the texel grid stays where it is in the world (keepsTexel, snapShadowCamera):
+            // casters rasterize alike at every refit, so a pan or an orbit does not move their shadows' edges. When
+            // either axis must change, both take the ladder's texel at once: one change, not two in a row. The
+            // board-wide fit is always the same, the one its cache holds.
+            boolean keep = !boardWide && lightCamera.direction.equals(shadowFit.direction)
+                  && lightCamera.up.equals(shadowFit.up) && keepsTexel(lightCamera.viewportWidth, shadowFit.viewportWidth)
+                  && keepsTexel(lightCamera.viewportHeight, shadowFit.viewportHeight);
+            if (!keep) {
+                lightCamera.viewportWidth = ladderExtent(shadowFit.viewportWidth);
+                lightCamera.viewportHeight = ladderExtent(shadowFit.viewportHeight);
+            }
             lightCamera.position.set(shadowFit.position);
             lightCamera.direction.set(shadowFit.direction);
             lightCamera.up.set(shadowFit.up);
-            lightCamera.viewportWidth = shadowFit.viewportWidth * SHADOW_GUARD_SCALE;
-            lightCamera.viewportHeight = shadowFit.viewportHeight * SHADOW_GUARD_SCALE;
             lightCamera.near = shadowFit.near;
             lightCamera.far = shadowFit.far;
             snapShadowCamera(lightCamera);
@@ -414,6 +432,17 @@ final class GpuTerrainShadows implements Disposable {
             if (Math.abs(point.x) > 1 || Math.abs(point.y) > 1 || Math.abs(point.z) > 1.00001f) { return false; }
         }
         return true;
+    }
+
+    /** Whether the light's extent across one axis still serves a fit needing {@code required} there. */
+    private static boolean keepsTexel(float current, float required) {
+        return current >= required * SHADOW_KEEP_SCALE && current <= required * SHADOW_MAX_SCALE;
+    }
+
+    /** The light's extent across one axis for a fit needing {@code required}: the guarded fit's, its texel on the ladder. */
+    private static float ladderExtent(float required) {
+        double steps = Math.ceil(Math.log(required * SHADOW_GUARD_SCALE / SHADOW_RESOLUTION) / Math.log(2) * SHADOW_LADDER);
+        return (float) Math.pow(2, steps / SHADOW_LADDER) * SHADOW_RESOLUTION;
     }
 
     @Override

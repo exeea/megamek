@@ -127,7 +127,7 @@ class BoardShadowTest {
     }
 
     @Test
-    void reuseRequiresCoverageAndNeverCoarsensTheFormer2048TexelDetail() {
+    void reuseRequiresCoverageAndRecoversDetailWhenZoomingIn() {
         BoardCamera view = new BoardCamera();
         view.resize(1000, 700);
         view.zoom(.4f);
@@ -141,8 +141,6 @@ class BoardShadowTest {
         view.pan(2, 1);
         GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
         assertTrue(GpuTerrainShadows.canReuseShadowCamera(cached, required), "A small pan stays within the existing coverage");
-        assertTrue(cached.viewportWidth / GpuTerrainShadows.SHADOW_RESOLUTION <= required.viewportWidth / 2048);
-        assertTrue(cached.viewportHeight / GpuTerrainShadows.SHADOW_RESOLUTION <= required.viewportHeight / 2048);
 
         view.zoom(.5f);
         GpuTerrainShadows.fitShadowCamera(view.camera, required, bounds, sun);
