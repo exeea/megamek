@@ -1403,6 +1403,8 @@ final class GpuTerrain implements Disposable {
         borrowedAssets = borrowed != null;
         familyPrograms = new GpuFamilyPrograms(!borrowedAssets, Sculpt.TYPE, GpuTerrain::familyVariant);
         assets = borrowedAssets ? borrowed : new GpuAssets();
+        // The material arrays decode on the common pool while the view is made, before the first terrain draw.
+        if (!borrowedAssets) { assets.prepareSculptArray(SCULPT_LAYERS); }
         lavaLighting = new GpuLavaLighting(assets);
         environmentLighting.lavaLighting = lavaLighting;
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));

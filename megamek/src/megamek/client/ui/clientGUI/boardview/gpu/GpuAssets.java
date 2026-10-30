@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
@@ -210,15 +211,32 @@ final class GpuAssets implements Disposable {
      * finish layers ({@link #finishArrays}) of these materials and of the road materials the data has.
      */
     MaterialArrays sculptArray(List<String> names) {
-        if (terrainArrays == null) {
-            var finishes = new ArrayList<String>();
-            names.forEach(name -> finishes.add(sculptName(name)));
-            for (String road : GpuRoads.MATERIALS) {
-                if (hasMaterial("roads/" + road)) { finishes.add("roads/" + road); }
-            }
-            terrainArrays = terrainArrays(names, finishes);
-        }
+        if (terrainArrays == null) { terrainArrays = terrainArrays(names, sculptFinishes(names)); }
         return terrainArrays.arrays();
+    }
+
+    /** The finishes {@link #sculptArray} holds: the sculpted surfaces', then the road materials' the data has. */
+    private List<String> sculptFinishes(List<String> names) {
+        var finishes = new ArrayList<String>();
+        names.forEach(name -> finishes.add(sculptName(name)));
+        for (String road : GpuRoads.MATERIALS) {
+            if (hasMaterial("roads/" + road)) { finishes.add("roads/" + road); }
+        }
+        return finishes;
+    }
+
+    /**
+     * Starts preparing {@link #sculptArray}'s arrays on the common pool while the view is still being made, so that its
+     * first call with the same names only uploads them. A failure is reported where the arrays are first used.
+     */
+    void prepareSculptArray(List<String> names) {
+        if (terrainArrays != null || preparing != null) { return; }
+        try {
+            var materials = sculptFinishes(names);
+            preparing = new Preparing(List.copyOf(names), List.copyOf(materials), terrainWork(names, materials));
+        } catch (RuntimeException failure) {
+            // sculptArray reads the same files again and reports what is missing.
+        }
     }
 
     private static String sculptName(String name) { return "terrain/surfaces/" + name; }
@@ -287,8 +305,36 @@ final class GpuAssets implements Disposable {
     /** The sculpt arrays and the finish read from their data array, built together, with the finish's materials. */
     private record TerrainArrays(List<String> materials, MaterialArrays arrays, FinishArrays finish) { }
 
+    /** The sculpt arrays' work before any GL: their data, started, and the finish's values ({@link FinishArrays}). */
+    private record TerrainWork(StartedArrays arrays, float[] surface, float[] tint, float[] glow, float[] relief) { }
+
+    /** Work {@link #prepareSculptArray} started for these names and materials. */
+    private record Preparing(List<String> names, List<String> materials, CompletableFuture<TerrainWork> work) {
+        /** Releases the work's prepared layers, as they arrive; none of them is uploaded. */
+        void discard() { work.thenAccept(prepared -> prepared.arrays().discard()); }
+    }
+
+    /** The work the first sculpt or finish arrays take, or null. */
+    private Preparing preparing;
+
     private TerrainArrays terrainArrays(List<String> names, List<String> materials) {
-        // The finishes decode their maps on the common pool, while this thread lists the layers.
+        var started = preparing;
+        preparing = null;
+        if (started != null && !(started.names().equals(names) && started.materials().equals(materials))) {
+            started.discard();
+            started = null;
+        }
+        var work = joined(started != null ? started.work() : terrainWork(names, materials));
+        MaterialArrays arrays = arrays(work.arrays());
+        return new TerrainArrays(List.copyOf(materials), arrays,
+              new FinishArrays(arrays.data(), work.surface(), work.tint(), work.glow(), work.relief()));
+    }
+
+    /**
+     * The sculpt arrays' work as far as it goes without GL. This thread reads the materials and lists the layers; the
+     * common pool decodes the finishes, then lays out the arrays and starts preparing their layers.
+     */
+    private CompletableFuture<TerrainWork> terrainWork(List<String> names, List<String> materials) {
         List<GodotMaterial> materialDefinitions = materials.stream().map(this::definition).toList();
         var reading = new ArrayList<CompletableFuture<AuthoredFinish>>();
         for (int index = 0; index < materialDefinitions.size(); index++) {
@@ -297,15 +343,24 @@ final class GpuAssets implements Disposable {
             reading.add(pooled(() -> authoredFinish(material, roughnessMap)));
         }
         var layers = new ArrayList<Layer>();
-        for (String name : names) {
-            String material = sculptName(name);
-            sculptTile(name);
+        float[] tiles = new float[names.size()];
+        for (int index = 0; index < names.size(); index++) {
+            String name = names.get(index), material = sculptName(name);
+            tiles[index] = sculptTile(name);
             Layer color = layer(material, GpuMaterialMaps.colorLayout(material));
             Layer normal = layer(material, GpuMaterialMaps.normalLayout(material));
             boolean carpet = TUNDRA_CARPETS.contains(name);
             layers.add(carpet ? fitted(color) : color);
             layers.add(carpet ? fitted(normal) : normal);
         }
+        return CompletableFuture.allOf(reading.toArray(CompletableFuture[]::new))
+              .thenApplyAsync(read -> terrainWork(names, materials, materialDefinitions, reading, layers, tiles), pool());
+    }
+
+    /** The rest of {@link #terrainWork(List, List)}, once the finishes are read; it touches no state of this owner. */
+    private static TerrainWork terrainWork(List<String> names, List<String> materials,
+          List<GodotMaterial> materialDefinitions, List<CompletableFuture<AuthoredFinish>> reading, List<Layer> layers,
+          float[] tiles) {
         int firstRoad = names.size(), count = materials.size();
         float[] surface = new float[count * 4], tint = new float[count * 4], glow = new float[count * 3];
         float[] relief = new float[firstRoad * 2];
@@ -348,7 +403,7 @@ final class GpuAssets implements Disposable {
             surface[index * 4 + 3] = surfaceLayers[index] < 0 ? -1 : firstRoad + surfaceLayers[index];
             tint[index * 4 + 3] = emissionLayers[index] < 0 ? -1 : firstRoad + surfaces.size() + emissionLayers[index];
             if (index >= firstRoad) { continue; }
-            float tile = sculptTile(names.get(index));
+            float tile = tiles[index];
             if (surfaceLayers[index] >= 0) { spreads.add(new Spread(index, firstRoad + surfaceLayers[index], 0, tile)); }
             if (GpuMaterialMaps.PACKED_ROUGHNESS.contains(materials.get(index))) {
                 spreads.add(new Spread(index, index, 2, tile));
@@ -356,9 +411,7 @@ final class GpuAssets implements Disposable {
         }
         var finishes = new ArrayList<>(surfaces);
         finishes.addAll(emissions);
-        MaterialArrays arrays = repeatingArray(layers, 2, finishes, spreads);
-        return new TerrainArrays(List.copyOf(materials), arrays,
-              new FinishArrays(arrays.data(), surface, tint, glow, relief));
+        return new TerrainWork(startedArrays(layers, 2, finishes, spreads), surface, tint, glow, relief);
     }
 
     private static Pixmap rgbaPixmap(byte[] rgba, int width, int height) {
@@ -508,6 +561,17 @@ final class GpuAssets implements Disposable {
      * data array's normals widen in its mips ({@code spreads}, by data layer).
      */
     private static MaterialArrays repeatingArray(List<Layer> layers, int maps, List<Layer> extra, List<Spread> spreads) {
+        return arrays(startedArrays(layers, maps, extra, spreads));
+    }
+
+    /** A colour and a data array's layers, being prepared on the common pool ({@link MaterialArrayData#start}). */
+    private record StartedArrays(MaterialArrayData color, MaterialArrayData data) {
+        /** Releases the prepared layers that will not be uploaded. */
+        void discard() { color.discard(); data.discard(); }
+    }
+
+    /** {@link #repeatingArray(List, int, List, List)}'s arrays, without GL: both start preparing their layers. */
+    private static StartedArrays startedArrays(List<Layer> layers, int maps, List<Layer> extra, List<Spread> spreads) {
         if (layers.isEmpty() || maps < 2 || layers.size() % maps != 0) {
             throw new IllegalArgumentException("Incomplete repeating material arrays");
         }
@@ -525,12 +589,22 @@ final class GpuAssets implements Disposable {
             width = Math.max(width, layer.width());
             height = Math.max(height, layer.height());
         }
+        var started = new StartedArrays(new MaterialArrayData(colors, width, height, true),
+              new MaterialArrayData(data, width, height, false, spreads));
+        started.color().start();
+        started.data().start();
+        return started;
+    }
+
+    /** The GL arrays of started layers, uploaded in order; after a failure the layers still prepared are released. */
+    private static MaterialArrays arrays(StartedArrays started) {
         TextureArray color = null, numeric = null;
         try {
-            color = repeatingArray(new MaterialArrayData(colors, width, height, true));
-            numeric = repeatingArray(new MaterialArrayData(data, width, height, false, spreads));
+            color = repeatingArray(started.color());
+            numeric = repeatingArray(started.data());
             return new MaterialArrays(color, numeric);
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
+            started.discard();
             if (numeric != null) { numeric.dispose(); }
             if (color != null) { color.dispose(); }
             throw failure;
@@ -552,16 +626,18 @@ final class GpuAssets implements Disposable {
                 Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
             }
             return array;
-        } catch (RuntimeException failure) { array.dispose(); throw failure; }
+        } catch (RuntimeException | Error failure) { array.dispose(); throw failure; }
     }
 
     /**
      * Work on the common pool, so at most its parallelism runs at once; without at least two of its threads (where
      * supplyAsync's default would start a thread per task) the work runs at once, on the calling thread.
      */
-    private static <T> CompletableFuture<T> pooled(Supplier<T> work) {
-        return CompletableFuture.supplyAsync(work,
-              ForkJoinPool.getCommonPoolParallelism() > 1 ? ForkJoinPool.commonPool() : Runnable::run);
+    private static <T> CompletableFuture<T> pooled(Supplier<T> work) { return CompletableFuture.supplyAsync(work, pool()); }
+
+    /** {@link #pooled}'s executor. */
+    private static Executor pool() {
+        return ForkJoinPool.getCommonPoolParallelism() > 1 ? ForkJoinPool.commonPool() : Runnable::run;
     }
 
     /** The result of {@link #pooled} work, or the work's own failure. */
@@ -839,6 +915,9 @@ final class GpuAssets implements Disposable {
          */
         private final List<int[]> units = new ArrayList<>(), roughness = new ArrayList<>();
         private final List<Integer> close = new ArrayList<>();
+        /** The units started ({@link #start}) and not yet uploaded, in unit order, and the next unit to start. */
+        private final ArrayDeque<CompletableFuture<List<Prepared>>> ahead = new ArrayDeque<>();
+        private int next;
         private boolean prepared;
 
         MaterialArrayData(List<Supplier<Pixmap>> files, int width, int height, boolean color) {
@@ -922,18 +1001,12 @@ final class GpuAssets implements Disposable {
          * resize and build their mips on the common pool; only their uploads, in unit order, stay on this GL thread.
          */
         void upload() {
-            var ahead = new ArrayDeque<CompletableFuture<List<Prepared>>>();
-            int next = 0;
             var oldAlignment = com.badlogic.gdx.utils.BufferUtils.newIntBuffer(1);
             Gdx.gl.glGetIntegerv(GL20.GL_UNPACK_ALIGNMENT, oldAlignment);
             Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
             try {
                 for (int[] unit : units) {
-                    for (; next < units.size() && ahead.size() < AHEAD; next++) {
-                        int[] layers = units.get(next), channels = roughness.get(next);
-                        int level = close.get(next);
-                        ahead.add(pooled(() -> prepare(layers, channels, level)));
-                    }
+                    start();
                     var prepared = joined(ahead.remove());
                     try {
                         for (int index = 0; index < unit.length; index++) {
@@ -952,9 +1025,24 @@ final class GpuAssets implements Disposable {
             } finally {
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, oldAlignment.get(0));
                 // After a failure, the units still on their way are released as they arrive.
-                ahead.forEach(pending -> pending.thenAccept(prepared -> prepared.forEach(layer -> layer.pixels().dispose())));
+                discard();
             }
             if (!mipmaps) { Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY); }
+        }
+
+        /** Starts preparing the next units on the common pool, up to {@link #AHEAD} ahead of the upload. */
+        void start() {
+            for (; next < units.size() && ahead.size() < AHEAD; next++) {
+                int[] layers = units.get(next), channels = roughness.get(next);
+                int level = close.get(next);
+                ahead.add(pooled(() -> prepare(layers, channels, level)));
+            }
+        }
+
+        /** Releases the started units, as they arrive; none of them is uploaded. */
+        void discard() {
+            ahead.forEach(pending -> pending.thenAccept(prepared -> prepared.forEach(layer -> layer.pixels().dispose())));
+            ahead.clear();
         }
     }
 
@@ -1639,6 +1727,7 @@ final class GpuAssets implements Disposable {
         coverages.clear();
         catalog = null;
         if (terrainArrays != null) { terrainArrays.arrays().dispose(); terrainArrays = null; }
+        if (preparing != null) { preparing.discard(); preparing = null; }
         if (tundraCarpets != null) { tundraCarpets.dispose(); tundraCarpets = null; }
         roadRelief = null;
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }
