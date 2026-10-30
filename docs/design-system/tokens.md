@@ -501,9 +501,20 @@ so the value inside sits on a plain base. The `hud` and `hud-search` field style
 **Range input.** [`UiRangeInput`](../../megamek/src/megamek/client/ui/gdx/UiRangeInput.java), from
 `UiKit.rangeInput(minText, maxText)`, is a from–to pair for whole numbers: two compact `input` fields `control.lg` × 2
 (96) wide, their placeholders in `text.muted`, an en dash between them in `text.secondary`, `xs` (4) apart, left
-aligned. Only digits are taken, six at most; an empty end is open. The fields' own `ChangeEvent`s stop at the range,
+aligned; in a form column that fills, the two ends share its width equally, each at least half its own. Only digits are
+taken, six at most; an empty end is open. The fields' own `ChangeEvent`s stop at the range,
 which fires one per edit instead, so a listener on a block that holds several controls hears each edit once.
 `min()` and `max()` read the ends (null when open); `set(min, max)` fires nothing.
+
+**Form columns.** In a labelled form column every select, text field, range input and pick list takes the column's
+whole width, so the right edges of a form's inputs line up; inputs sized to their content give a ragged edge. Check
+boxes, radios, switches, segmented controls, buttons, chips, steppers and number inputs keep their own width. In
+libGDX, `UiKit.fillsFormColumn(input)` says which, `UiFormField` follows it for its input, and
+`UiKit.formRow(form, label, input, labelWidth)` adds a label-beside-input row that does (the advanced search). There is
+no maximum width: at 2560 wide the forms already split into columns, and a column's inputs reading as one block looks
+right. A row of a few selects with inline labels (the Requisition Filters drawer's role, era and source) shares the
+row's width equally instead, so its right edge meets the drawer's. A select beside a column of fields (the bot setup's
+combat posture under the presets) takes that column's width.
 
 ## Choices
 
@@ -1175,7 +1186,7 @@ they take the filter chip's look: `token-pill`, `token-pill-over` and `token-pil
 check before the target's letter square when on.
 `UiKit.filterChip(text)` makes [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java), the filter chip (`token-filter-chip`): `control.sm` high with `lg` padding at its sides, so it matches the compact buttons, search field and selects in its row; the neutral chip in text.secondary at rest; on, it fills in the accent's pressed tint, its text turns text.primary and the check shows in room the chip always keeps, so it never resizes. That room (`lg` side, the check's icon size and its `xs` gap) is kept at both ends, the check drawn in the leading one, so the label is centred on the chip whether checked or not. `UiFilterChip.sameWidth(chips)` gives a group the width of its widest label plus both reserves (the Requisition view's weight chips and the Filters drawer's choices); a search field beside them gives up width rather than the chips.
 
-**Staggered reveal (libGDX).** [`UiReveal`](../../megamek/src/megamek/client/ui/gdx/UiReveal.java) is a column of bands that appear one after another, each fading in and rising `space.md` over `motion.medium` on the token easing, `motion.fast` after the one before (the stagger stops growing after eight bands); it plays once, on the column's first show, and reduce motion shows every band at once. The Requisition dossier's Readout reveals its blocks with it, after the feel of MekHQ's planet details panel.
+**Staggered reveal (libGDX).** [`UiReveal`](../../megamek/src/megamek/client/ui/gdx/UiReveal.java) is a column of bands that appear one after another, each fading in and rising `space.md` over `motion.medium` on the token easing, `motion.fast` after the one before (the stagger stops growing after eight bands); it plays once, on the column's first show, and reduce motion shows every band at once. The Requisition dossier's Readout reveals its blocks with it, after the feel of MekHQ's planet details panel, as do the Damage tab (title, chart, range tiles, firing arcs) and the Factions tab (one band per era). `delay(index)` is how long a band waits, 0 without motion, so a widget inside the band can start its own motion as the band appears (the damage chart's sweep and the arc diagram's reveal).
 
 **Steppers and long lists (libGDX).** `UiKit.stepper(value, min, max)` makes [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java): − value + in `button-icon` compact buttons round the value in body.strong (as wide as its widest value, so the + does not move), disabled at the bounds, with an optional caption before them (`UiKit.stepper(caption, value, min, max)`); caption, −, value and + are all `xs` apart (`UiStepper.gap()`), and a row of steppers puts a larger gap (`md`) between groups, stepped by the arrow keys with the focus, firing a ChangeEvent per step (the Requisition strip's quantity and set skills). [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java) is a list of any length with one row height for a scroll pane: only the rows in view exist, reused as it scrolls (`UiVirtualList.visible` works out which), with the token row's hover and selected washes; a click selects, a double click or Enter activates, and Up, Down, Home, End, Page Up and Page Down move the selection (`UiVirtualList.step`) with the scroll pane following. The Requisition view lists its thousands of units in one.
 
@@ -1227,22 +1238,47 @@ newest on top and the hover pause are the developers' work.
 
 ## Charts
 
-A chart of values by whole step, such as damage by range, is a **step chart**. Each series is a line that keeps its
-value across its step and turns square into the next. Three guide lines in `border.subtle` sit behind the series: at
-nothing, at half, and at the ceiling. The ceiling rounds up to 1, 2 or 5 times a power of ten above the highest value.
-The guides are labelled in `caption` type and `text.muted`, and the first, middle and last step are labelled under the
-plot. Series draw in the order given, so the one that matters most comes last and sits on top. Each series may set its
-own thickness. A legend sits above the chart: a swatch of each series' color beside its name in `small` type. Take
-series colors from color roles. The Requisition dossier's Damage tab uses `text.muted` at half the `selection.width`
-for maximum damage, `status.warning` at twice it for heat-sustained, and `accent.primary` at that width for expected
-damage. Always put a table of the same numbers below the chart: the lines alone do not give a screen reader, or a
-color-blind reader, the values.
+A chart of values by whole step, such as damage by range, is a **step chart**. Each series keeps its value across its
+step and turns square into the next, in one of three styles: a **line**; an **area**, the same line over a fill in its
+color at `tint.pressed`, for the series that matters most; or a **ceiling**, a dashed line without the turns, for a
+bound the others stay under. Three guide lines in `border.subtle` sit behind the series: at nothing, at half, and at
+the ceiling. The ceiling rounds up to 1, 2 or 5 times a power of ten above the highest value. The guides are labelled
+in `caption` type and `text.muted`. Without bands the first, middle and last step are labelled under the plot. With
+**bands** (named runs of steps, such as short, medium and long range) a divider in `border.subtle` marks each band's
+start, every other band is washed in `border.subtle` at `tint.hover`, the band's name sits over it in `overline` type
+and `text.secondary`, and the steps labelled below are the bands' starts and the last. Series draw in the order given,
+so the one that matters most comes last and sits on top. A legend sits above the chart: a swatch of each series' color
+beside its name in `small` type. Take series colors from color roles. With motion the chart **sweeps** in once from the
+left over `motion.slow` on the token easing, an `accent.primary` scan line at its front; reduce motion draws it at
+once.
+
+The Requisition dossier's Damage tab is a targeting display rather than a table: maximum damage is a `text.muted`
+ceiling at half the `selection.width`, heat-sustained a `status.warning` line at twice it, and expected damage an
+`accent.primary` area at that width, over the S, M and L bands. Below the chart a **readout tile** per band gives the
+numbers a screen reader, or a color-blind reader, needs: a `token-card` with the band's name in `overline` and
+`text.secondary`, its hexes in `caption` and `text.muted`, the expected damage large in `display` type and the expected
+series' color, and the maximum and heat-sustained in `small` type and `text.secondary`. Under the
+tiles an **arc diagram** shows the expected damage by firing arc for the band picked in a segmented control.
+
+**Arc diagram.** A ring of arcs round a picture (the unit's sprite, or the unit icon in `text.muted`), the first arc
+centred at the top and the rest clockwise, `GAP_DEGREES` (4) apart, the hole `INNER` (0.55) of the ring. Each arc is a
+track in `border.subtle` filled in `accent.primary` at an opacity from `tint.hover` up to full by its value against the
+peak, nothing for nothing; the peak is taken across all bands, so switching bands keeps one scale. The value sits on
+its arc in `title` type, `text.primary`, or `text.onAccent` once the fill reaches `STRONG` (0.6); the arc's name is
+outside the ring in `caption` and `text.muted`. With motion the arcs fade in one after another, `motion.fast` apart
+over `motion.medium`, and a new band's fills glide from the last over `motion.medium`; reduce motion shows them at
+once.
 
 **libGDX.** `UiKit.stepChart()` makes
 [`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java).
 `show(List<UiStepChart.Series>, format)` takes the series and labels the guides with `format`. Each
-`Series(values, color, thickness)` holds the values for steps 1 to n. The chart takes the width its cell gives it; give
-the cell a height. It takes no input. Swing has no step chart yet.
+`Series(values, color, thickness[, style])` holds the values for steps 1 to n; the style is `LINE` unless given.
+`bands(starts, names)` names the bands, `sweep(motion[, delay])` draws the series in, and `progress()` reads how far.
+`UiStepChart.ceiling(peak)` and `UiStepChart.labelledSteps(steps, starts)` are the scale and the labelled steps, free
+of GL. The chart takes the width its cell gives it; give the cell a height. It takes no input. `UiKit.arcDiagram()`
+makes [`UiArcDiagram`](../../megamek/src/megamek/client/ui/gdx/UiArcDiagram.java): `centre(actor)`,
+`show(names, values, peak, format)` and `reveal(motion[, delay])`; `centreAngle`, `sliceAngles` and `intensity` are
+its geometry and fill, free of GL. Swing has no step chart or arc diagram yet.
 
 ## Code
 
@@ -1268,7 +1304,7 @@ the cell a height. It takes no input. Swing has no step chart yet.
 | [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
 | [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
-| [`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java) | The libGDX step chart |
+| [`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java), [`UiArcDiagram`](../../megamek/src/megamek/client/ui/gdx/UiArcDiagram.java) | The libGDX step chart and arc diagram |
 | [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java), [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java), [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java), [`UiReveal`](../../megamek/src/megamek/client/ui/gdx/UiReveal.java) | The libGDX virtualised list, stepper, filter chip and staggered reveal |
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |

@@ -564,7 +564,7 @@ work for Swing, and item 11 is under investigation.
        (`UiVirtualList`) of rows with the unit's sprite, name, "100 t · Mek · Inner Sphere · 2954" and its BV or PV.
        The Filters drawer holds the dialog's main filters: type within the category, tech base, rules level (none above
        the game's), role, canon, published record sheet, era (from the eras file) and source book, with Clear. A
-       picked unit opens the dossier beside the list, or over it in a narrow window: name, details, BV, Add to force,
+       picked unit opens the dossier beside the list, or over it in a narrow window: name, details, BV,
        the sprite, move, armor, structure, BV, PV, cost, the merged armament and the details (weight class, tech base,
        role, rules level, year, source). The adding strip (7.4 and 7.5) chooses the owner (you or the bots you may add
        for), skills (Default: the file's; Random, preselected as the dialog's average-skills preference does; Set:
@@ -631,7 +631,7 @@ work for Swing, and item 11 is under investigation.
          preloaded games and auto-resolve need no lounge panel, and `CommanderGUI` never had one.
        Not checked live: a real MekHQ game, and a second client reconnecting over the network.
      - L10 ~~Requisition dossier tabs~~. The dossier keeps a slim header (name and details cut with an ellipsis,
-       the full name in a tooltip, BV or PV, Add to force, close) over compact `UiTabs`: Overview, Readout, AS card,
+       the full name in a tooltip, BV or PV, close; the strip's Add is the only add) over compact `UiTabs`: Overview, Readout, AS card,
        Factions and Damage. The tab picked stays from unit to unit; only the tab in view is built, and it is rebuilt
        only when the unit, its record or the tab's own data change. Once the pointer or keys stay on a unit for
        130 ms, its full record (`MekSummary` to `Entity`) loads on a thread of its own, the newest unit winning
@@ -646,11 +646,13 @@ work for Swing, and item 11 is under investigation.
          damage S/M/L, OV, armour and structure, specials, PV), so it shows at once. It is a kit-built card: the
          Java2D `ASCard` leans on Swing's `UIUtil`, so it was not reused.
        - Factions (`RequisitionFactions`): the Force Generator's (`RATGenerator`) availability for the model, merged
-         per era and read on a second thread. It is shown era by era, each with the factions that field the unit and
-         their rarity. Swing's grid was too wide for the dossier; the faction logos are not shown.
+         per era and read on a second thread. It is shown era by era (only the eras that field it), each with the
+         factions that field the unit and their rarities as chips. Swing's grid was too wide for the dossier; the
+         faction logos are not shown.
        - Damage (`RequisitionDamage`, from `DamageProfile`): maximum, expected and heat-sustained damage at gunnery
-         4, or at the adding strip's set gunnery. It shows as a step chart (`UiStepChart`, a new kit piece), then
-         tables by range band and by direction, instead of Swing's radar.
+         4, or at the adding strip's set gunnery. It shows as a targeting display: a step chart (`UiStepChart`, a
+         new kit piece) over S, M and L bands, a readout tile per band, and an arc diagram (`UiArcDiagram`) of the
+         expected damage by firing arc round the unit's sprite, after Swing's radar.
        The narrow slide-over and the keyboard still work (LEFT and RIGHT move through the tabs). Checks:
        `RequisitionRowTest`, `RequisitionRecordTest` and `RequisitionFactionsTest`. The on-demand
        `LobbyDossierTabsSmokeTest` clicks the tabs and the switch, and checks that tabs are built lazily, the
@@ -840,6 +842,29 @@ work for Swing, and item 11 is under investigation.
         - AS card: MegaMek's own `ASCard` drawing, rendered off the GPU thread at the pixels the tab takes and
           redrawn when they change (`RequisitionCardImage`), with the kit card while it draws or if it fails.
         - Factions: the abbreviation is its own column (no tooltip), and an open era reads "3150–".
+      - Review fixes, round 2:
+        - Forms: every select, text, range input and pick list in a labelled form column fills the column
+          (`UiKit.fillsFormColumn`, `UiKit.formRow`, `UiFormField`), so right edges line up: advanced search, player
+          settings, bot setup (the posture takes the presets column's width, the retreat edges share theirs) and
+          planetary conditions; the Filters drawer's role, era and source share its width equally. No maximum width
+          was needed at 2560 wide.
+        - Dossier header: "+ Add to force" is gone; the strip's Add (owner, skills, quantity) is the single add, and
+          double click and Enter on a row still add.
+        - Damage tab: a targeting display. Expected damage is an accent area, heat-sustained a bright line and the
+          maximum a faint dashed ceiling, over S, M and L bands with the hexes below and a light grid; three readout
+          tiles (short, medium, long: expected large, maximum and heat-sustained small) replace the range table, and
+          an arc diagram round the sprite (six arcs, intensity by value, a segmented S/M/L switch) replaces the
+          direction table. The blocks reveal with `UiReveal`, the chart sweeps in and the arcs fade in turn; reduce
+          motion shows all at once.
+        - Factions tab: the eras reveal one after another on the first show; eras without the unit are hidden;
+          several rarities show as wrapping token chips within at most 45% of the row, never over the name; the
+          code column is as wide as the widest code, with an `lg` gap.
+        Checks: `UiArcDiagramTest`, `UiStepChartTest`, `UiFormRowTest`, `RequisitionRecordTest` (range bands) and
+        `RequisitionFactionsTest` (hidden eras, ratings); the on-demand `LobbyDossierTabsSmokeTest` checks the tiles,
+        the arcs and their band switch, the factions reveal and chips, and the strip's single Add. The probe takes
+        `search=<text>` (underscores for spaces) to pick a given unit. Not seen on screen: an era hidden between two
+        shown (the units photographed had none), and a capture of the factions reveal mid-way (its data arrives at a
+        varying time).
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.
