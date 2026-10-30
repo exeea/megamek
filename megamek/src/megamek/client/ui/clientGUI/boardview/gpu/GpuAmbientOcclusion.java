@@ -32,7 +32,8 @@ import com.badlogic.gdx.utils.Disposable;
  * colour stage of {@link GpuTerrain#render(Camera, Runnable, Runnable)}: half-resolution horizons from the pre-pass
  * depth with contact shadows toward the sun (CONTACT_METRES), then two depth-aware blur passes. While this attribute is
  * in the terrain's environment the pre-pass also draws
- * the relief, so the occlusion sees the ground and the trees; buildings, props and units neither cast nor receive it.
+ * the relief, so the occlusion sees the ground, the trees and the building shells the pre-pass draws (GpuTerrain.twin);
+ * other props, and units, neither cast nor receive it.
  * Its presence compiles ambientOcclusionFlag into the lit programs (GpuCloudShadow.prefix), so a switch is a lighting
  * change behind the terrain's loading stage, as specular anti-aliasing is. The occlusion is current from {@link #render}
  * to {@link #end}; other draws read visibility 1. Its targets follow the scene depth's size, so the window and the

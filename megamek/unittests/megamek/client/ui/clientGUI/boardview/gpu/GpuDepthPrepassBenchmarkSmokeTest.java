@@ -35,13 +35,14 @@ import org.lwjgl.opengl.GL41C;
 
 /**
  * Step 5's depth pre-pass (GpuTerrain.depthPrepass), timed with everything it costs. Each round of a view draws the
- * settings in a palindrome (off, all, all with LEQUAL, the trees, the default (the trees and the cliff chunks' relief),
- * the trees with objects, all but foliage, all but impostors, then back), so a steady drift of clock or heat cancels; a setting's value in a round is the mean of its two
+ * settings in a palindrome (off, all, all with LEQUAL, the trees, the trees and the cliff chunks' relief, the default
+ * (those and the building shells), all but foliage, all but impostors, then back), so a steady drift of clock or heat cancels; a setting's value in a round is the mean of its two
  * slots, its result the median over the rounds. The opaque stage splits into "opaque preparation" (the frame's detail, uploads and single
  * gather), "depth pre-pass" (the twins) and "colour pass" (the opaque colour draws), beside the frame's other stages for
  * its total. Each board's report also gives its load time with the twins and its colour and twin programs: counts and
  * the driver's binary sizes. Views are the baseline's (GpuDepthPrepassBaselineSmokeTest): the calibration board in rain,
- * the 40 by 40 forest and Dome Vent 2 at noon. Measured, not asserted: build/gpu-board-review/depth-prepass-benchmark.txt,
+ * the 40 by 40 forest, Dome Vent 2 and the 48 by 48 city at noon; Valencia City's only when named
+ * (-Dmegamek.gpu.prepassBoards=city,valencia). Measured, not asserted: build/gpu-board-review/depth-prepass-benchmark.txt,
  * which depth_prepass_abba.py reads. A run can be narrowed: -Dmegamek.gpu.prepassSettings=off,trees (setting names),
  * -Dmegamek.gpu.prepassViews=forest middle,forest close (view names) and -Dmegamek.gpu.prepassRounds=8.
  */
@@ -51,16 +52,18 @@ class GpuDepthPrepassBenchmarkSmokeTest {
     static final Set<GpuTerrain.Prepass> ALL = EnumSet.allOf(GpuTerrain.Prepass.class);
     static final Set<GpuTerrain.Prepass> NONE = EnumSet.noneOf(GpuTerrain.Prepass.class);
     private static final File CITY = new File("data/boards/unofficial/VictorMorson/48x48.board");
+    private static final File VALENCIA = new File(
+          "data/boards/unofficial/VictorMorson/128x192 Texlos - Livius - Valencia_City.board");
     private static final int ROUNDS = Integer.getInteger("megamek.gpu.prepassRounds", 4), SLOT_FRAMES = 30,
           WARM_FRAMES = 8;
     private static final List<Setting> SETTINGS = chosen("megamek.gpu.prepassSettings", List.of(
           new Setting("off", NONE, GL20.GL_EQUAL), new Setting("all", ALL, GL20.GL_EQUAL),
           new Setting("all-lequal", ALL, GL20.GL_LEQUAL),
           new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
-          new Setting("default", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+          new Setting("trees-cliffs", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
                 GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
-          new Setting("objects", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS,
-                GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
+          new Setting("default", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                GpuTerrain.Prepass.IMPOSTORS, GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
           without(GpuTerrain.Prepass.FOLIAGE), without(GpuTerrain.Prepass.IMPOSTORS)), Setting::name);
 
     /** A measured setting: the categories the pre-pass draws (none: off) and the colour pass's test for their draws. */
@@ -87,6 +90,7 @@ class GpuDepthPrepassBenchmarkSmokeTest {
         List<String> boards = List.of(System.getProperty("megamek.gpu.prepassBoards", "calibration,forest,dome vent,city")
               .split("\s*,\s*"));
         BoardScene city = boards.contains("city") ? GpuDepthPrepassBaselineSmokeTest.scene(CITY) : null;
+        BoardScene valencia = boards.contains("valencia") ? GpuDepthPrepassBaselineSmokeTest.scene(VALENCIA) : null;
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
@@ -123,6 +127,12 @@ class GpuDepthPrepassBenchmarkSmokeTest {
                         measure("city", city, GpuDepthPrepassBaselineSmokeTest.NOON, report, chosen(
                               "megamek.gpu.prepassViews", List.of(View.fitted("city fitted"),
                                     View.at("city middle", .5f, new Coords(24, 24))), View::name));
+                    }
+                    if (valencia != null) {
+                        // Valencia City's low, spread-out buildings; the middle view at its densest block.
+                        measure("valencia", valencia, GpuDepthPrepassBaselineSmokeTest.NOON, report, chosen(
+                              "megamek.gpu.prepassViews", List.of(View.fitted("valencia fitted"),
+                                    View.at("valencia middle", .5f, new Coords(96, 32))), View::name));
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {

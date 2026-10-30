@@ -53,7 +53,7 @@ import org.junit.jupiter.api.Test;
  * platoon that were not on the board deploy, and SMAA, a 75% render resolution and the thermal view are switched on and
  * off. The Tactical View, the thermal (wireframe) view, SMAA and a render resolution below 100% are optional: they
  * link their own programs when they first show; their links are not counted, but no loading stage may come back. The 3D editor on the same board opens every Assets category and reveals each of its sections, searches, and
- * paints lava, water, ice, a car and scorch. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
+ * paints lava, water, ice, a car, scorch and the board's first building. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
  * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
  * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back. With the
  * Tessellation switch on, a zoom from the fitted board to full-detail banks links nothing either.
@@ -308,14 +308,16 @@ class GpuShaderLoadSmokeTest {
         for (String text : List.of("tree", "lava")) {
             steps.add(() -> ((TextField) GpuBoardTestUi.stage().getRoot().findActor("editor-search")).setText(text));
         }
+        // The building is the board's first: its shell's program and depth twin come from the palette's warm-up.
         List<Coords> strokes = List.of(new Coords(3, 3), new Coords(7, 3), new Coords(11, 3), new Coords(5, 9),
-              new Coords(9, 9));
+              new Coords(9, 9), new Coords(13, 12));
         List<BoardEditorSession.Command> brushes = List.of(
               new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "water", "magma"),
               new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "water", "shallow"),
               new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "weather", "ice"),
               new BoardEditorSession.Command(BoardEditorSession.Action.ASSET, "", "scenery/vehicles/car"),
-              new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "scorch", "scorch/charred"));
+              new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "scorch", "scorch/charred"),
+              new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "building", "default"));
         for (int i = 0; i < strokes.size(); i++) {
             int stroke = i;
             steps.add(() -> {
@@ -408,6 +410,8 @@ class GpuShaderLoadSmokeTest {
                             assertFalse(scene.tile(strokes.get(3)).features().isEmpty(), "The car stands");
                             assertTrue(megamek.common.board.HexAppearance.scorch(scene.tile(strokes.get(4)).appearance()) > 0,
                                   "The authored scorch stroke shows");
+                            assertTrue(scene.tile(strokes.get(5)).features().stream().anyMatch(
+                                  feature -> feature.kind() == BoardScene.FeatureKind.BUILDING), "The building stands");
                             for (var severity : megamek.common.board.HexAppearance.Scorch.values()) {
                                 assertTrue(root.findActor("editor-library-" + severity.variant()) != null,
                                       "The gallery offers " + severity);

@@ -943,7 +943,9 @@ final class GpuTerrain implements Disposable {
      * pre-pass and the colour pass both ask, so a draw takes part in both or in neither.
      */
     private Shader twin(Shader colour, Attributes material) {
-        return prepasses(prepass(material)) ? prepassTwins.get(shaderGroup(colour)) : null;
+        Prepass category = prepass(material);
+        return prepasses(category) && (category != Prepass.OBJECTS || !objectsFar)
+              ? prepassTwins.get(shaderGroup(colour)) : null;
     }
 
     /**
@@ -958,7 +960,8 @@ final class GpuTerrain implements Disposable {
     /**
      * The pre-pass category of an opaque, depth-writing draw whose twin repeats its coverage exactly; null for any other
      * draw. Blended, decal, scar, cut-away, tileset, water, liquid, vegetation and road-mask draws, alpha-tested ground
-     * and objects stay out: a building's faded floors blend and its cut-away is flagged, so it joins only while whole.
+     * and objects, and objects other than building shells stay out: a building's faded floors blend and its cut-away is
+     * flagged, so it joins only while whole.
      */
     private static Prepass prepass(Attributes material) {
         var blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
@@ -968,9 +971,11 @@ final class GpuTerrain implements Disposable {
         // terrain-foliage.frag discards by the alpha test alone, which a cutout's twin repeats. Plants are GLB models
         // too (GpuModelMaterial), so they are told apart first.
         if (material.has(Foliage.TYPE)) { return material.has(Impostor.TYPE) ? Prepass.IMPOSTORS : Prepass.FOLIAGE; }
-        // model.frag discards only under an alpha test: an opaque object's empty twin repeats its coverage.
-        if (material.has(GpuModelMaterial.TYPE)) {
-            return material.has(FloatAttribute.AlphaTest) ? null : Prepass.OBJECTS;
+        // model.frag discards only under an alpha test: an opaque shell's empty twin repeats its coverage. Other objects
+        // select the same programs, so the flag decides each draw (GpuModelMaterial.occluder).
+        var surface = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+        if (surface != null) {
+            return surface.occluder && !material.has(FloatAttribute.AlphaTest) ? Prepass.OBJECTS : null;
         }
         // The relief's fragment stages never discard; these materials' stages do, or are not relief.
         if (blend != null || material.has(FloatAttribute.AlphaTest) || material.has(GpuWaterShader.TYPE)
@@ -1182,23 +1187,23 @@ final class GpuTerrain implements Disposable {
      * cutout leaves and impostor cards with their own alpha test. Native measurements take one category at a time.
      */
     /**
-     * OBJECTS: placed buildings and props, opaque model surfaces (model.frag) whose draw order leaves overdraw. CLIFFS:
-     * the relief of a chunk whose walls pass cliffWalls; RELIEF: the relief of the other chunks.
+     * OBJECTS: building shells' opaque model surfaces (model.frag, GpuModelMaterial.occluder), whose draw order leaves
+     * overdraw. CLIFFS: the relief of a chunk whose walls pass cliffWalls; RELIEF: the relief of the other chunks.
      */
     enum Prepass { RELIEF, CLIFFS, FOLIAGE, IMPOSTORS, OBJECTS }
 
     /**
      * The categories the depth pre-pass draws: the trees' leaves and impostor cards, whose cutouts hide the most shading,
-     * and the relief of cliff-heavy chunks, whose walls hide ground behind them. {@code -Dmegamek.gpu.depthPrepass=false}
-     * turns it off; {@code =objects} adds buildings and props; {@code =all} adds them and the other chunks' relief, for
-     * measurements only (on an Iris Xe their twins cost what they save). Twins build behind the loading stage for the
-     * categories set then; native checks also switch it between frames.
+     * the relief of cliff-heavy chunks, whose walls hide ground behind them, and building shells, which hide each
+     * other, the trees and the ground (not while a hex is under TreeLod.PREPASS_OBJECTS pixels).
+     * {@code -Dmegamek.gpu.depthPrepass=false} turns it off; {@code =all} adds the other chunks' relief, for measurements
+     * only (on an Iris Xe their twins cost what they save). Twins build behind the loading stage for the categories set
+     * then; native checks also switch it between frames.
      */
     static Set<Prepass> depthPrepass = switch (System.getProperty("megamek.gpu.depthPrepass", "")) {
         case "false" -> EnumSet.noneOf(Prepass.class);
         case "all" -> EnumSet.allOf(Prepass.class);
-        case "objects" -> EnumSet.of(Prepass.CLIFFS, Prepass.FOLIAGE, Prepass.IMPOSTORS, Prepass.OBJECTS);
-        default -> EnumSet.of(Prepass.CLIFFS, Prepass.FOLIAGE, Prepass.IMPOSTORS);
+        default -> EnumSet.of(Prepass.CLIFFS, Prepass.FOLIAGE, Prepass.IMPOSTORS, Prepass.OBJECTS);
     };
     /**
      * A chunk's relief is cliffs (Prepass.CLIFFS) when its walls, each relief triangle's area as seen from beside it,
@@ -1224,6 +1229,11 @@ final class GpuTerrain implements Disposable {
     private final Set<String> standSpecies = new HashSet<>();
     /** Whether this flush's colour draws follow a depth pre-pass (render, bindMaterial). */
     private boolean prepassed;
+    /**
+     * Whether a hex is under TreeLod.PREPASS_OBJECTS pixels on screen (updateDetail): objects then draw without their
+     * twins (twin), which stay built, so a zoom links nothing. Perspective views keep them.
+     */
+    private boolean objectsFar;
     /** The last pre-pass's twin draws, and the lists it reuses. */
     private int prepassDraws;
     private final Array<Renderable> prepassParts = new Array<>();
@@ -4047,10 +4057,17 @@ final class GpuTerrain implements Disposable {
             ModelInstance instance = building != null ? building.instance(0)
                   : new ModelInstance(drawn.apply(model));
             boolean metal = feature.kind() == BoardScene.FeatureKind.METAL;
+            // A single-model building or fuel tank (no kit assembly): a large occluder the depth pre-pass draws (prepass);
+            // not kit modules, a wall, an industrial structure, a placed object or an interior floor.
+            boolean shell = building == null && wallLayout == null && !placedObject && !generatedIndustrial
+                  && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
+                  && (feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/"));
             // Its renderables carry the colours to the instance data and the shader (copy keeps them).
             if (placedObject) { instance.userData = RigidGlb.packed(feature.colours()); }
             for (Material material : instance.materials) {
                 GpuTrafficSignal.mark(feature.asset(), material);
+                var finish = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+                if (shell && finish != null) { material.set(finish.occluder(true)); }
                 if (building == null && !BoardWall.supports(feature.asset()) && material.id.equals("wall")) {
                     material.get(TextureAttribute.class, TextureAttribute.Diffuse).scaleV = feature.height();
                 }
@@ -4806,6 +4823,12 @@ final class GpuTerrain implements Disposable {
                 }
             }
             chunk.cacheProps();
+            // Building shells' programs and those programs' twins link behind the loading stage (Prepass.OBJECTS).
+            for (Renderable part : chunk.shadowPropRenderables) {
+                if (prepass(part.material) == Prepass.OBJECTS) {
+                    prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
+                }
+            }
             // In the editor the water's depth pass and the roads', shores', decals', paint's and objects' programs
             // link before a stroke shows them too (advanceBuild): instanced parts as their batches draw them.
             if (editable) {
@@ -7976,6 +7999,9 @@ final class GpuTerrain implements Disposable {
         // pixels, and a forced redraw would drop the cached board-wide shadow on every zoom-out.
         smallHidden = smallObjects && !perspective && TreeLod.level(TreeLod.SMALL_OBJECTS,
               BoardGeometry.width() * pixelsPerUnit, smallHidden ? 1 : 0) == 1;
+        // Further out, building shells' twins cost more than the shading they save; the twins stay built.
+        objectsFar = !perspective && TreeLod.level(TreeLod.PREPASS_OBJECTS, BoardGeometry.width() * pixelsPerUnit,
+              objectsFar ? 1 : 0) == 1;
         Vector3 nearest = new Vector3();
         for (Chunk chunk : chunks) {
             if (perspective) {

@@ -13,6 +13,13 @@ final class TreeLod {
     static final float SMALL_OBJECT = .25f;
     /** Small objects hide while a hex is narrower than this on screen, in framebuffer pixels; {@link #level} adds ±10 %. */
     static final float[] SMALL_OBJECTS = { 12 };
+    /**
+     * Building shells join the depth pre-pass while a hex is at least this wide on screen (GpuTerrain.twin): further out
+     * their twins cost more than the shading they save. On an Iris Xe at 1080p, 29-pixel hexes (the 48 by 48 city
+     * fitted) saved 0.5 to 0.9 ms, within the rounds' spread, and 9.5-pixel ones (Valencia City fitted) cost 0.7 ms of
+     * pre-pass and saved nothing; this lies near their geometric mean, untuned.
+     */
+    static final float[] PREPASS_OBJECTS = { 16 };
     static final int LEVELS = PIXELS.length + 1;
     private static final float HYSTERESIS = 0.1f;
 

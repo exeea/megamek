@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
@@ -13,6 +14,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -28,13 +32,20 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.Attributes;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
+import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.BufferUtils;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDepthPrepassBaselineSmokeTest.View;
 import megamek.common.board.Coords;
@@ -47,8 +58,10 @@ import org.junit.jupiter.api.io.TempDir;
  * depth and the GL state right after the opaque terrain, and the composited window with its depth, for each category
  * alone, all of them and all with LEQUAL, against the frame without the pre-pass drawn before them and again after them
  * (a control for an unsteady frame). The calibration board in rain (fitted, middle, close, render scale 0.75, combat
- * scars over pre-passed ground) and the 40 by 40 forest at noon: canopy cards overlapping with different holes,
- * depth-quantised far away where impostors stand, mipmapped close, oblique in free flight. Also: the colour draws keep
+ * scars over pre-passed ground), the 40 by 40 forest at noon: canopy cards overlapping with different holes,
+ * depth-quantised far away where impostors stand, mipmapped close, oblique in free flight, and the 16 by 17 City
+ * (Skyscraper) at noon (fitted, middle, far out where its building shells draw without twins; in the middle view
+ * buildings whole, a hovered storey, a unit inside, whole again). Also: the colour draws keep
  * their order, the Tactical View and the Classic columns draw no pre-pass, shader edits of the twins fall back safely
  * (checkShaderEdits), and on the stages the driver compiled every twin's vertex stage is its program's, a cutout twin's
  * fragment stage is its program's with the early return, the vertex stage declares the alpha test's inputs invariant,
@@ -65,6 +78,7 @@ class GpuDepthPrepassSmokeTest {
     private static final Pattern DEPTH_EFFECT = Pattern.compile("\\bdiscard\\b|\\bgl_FragDepth\\b");
     /** What terrain-foliage.frag's alpha test reads (foliage-coverage.glsl). */
     private static final List<String> COVERAGE = List.of("v_diffuseUV", "v_color", "v_opacity", "v_alphaTest");
+    private static final File SKYSCRAPERS = new File("data/boards/Map Set 6/16x17 City (Skyscraper).board");
     private static final Set<GpuTerrain.Prepass> ALL = GpuDepthPrepassBenchmarkSmokeTest.ALL;
     private static final Set<GpuTerrain.Prepass> NONE = GpuDepthPrepassBenchmarkSmokeTest.NONE;
     private static final List<String> FAILURES = new ArrayList<>();
@@ -77,9 +91,10 @@ class GpuDepthPrepassSmokeTest {
           new Setting("relief", EnumSet.of(GpuTerrain.Prepass.RELIEF), GL20.GL_EQUAL),
           new Setting("foliage", EnumSet.of(GpuTerrain.Prepass.FOLIAGE), GL20.GL_EQUAL),
           new Setting("impostors", EnumSet.of(GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
-          // The default (GpuTerrain.depthPrepass): the trees and the cliff chunks' relief.
+          new Setting("objects", EnumSet.of(GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
+          // The default (GpuTerrain.depthPrepass): the trees, the cliff chunks' relief and the building shells.
           new Setting("default", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
-                GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+                GpuTerrain.Prepass.IMPOSTORS, GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
           new Setting("all", ALL, GL20.GL_EQUAL), new Setting("all-lequal", ALL, GL20.GL_LEQUAL));
 
     /**
@@ -93,6 +108,7 @@ class GpuDepthPrepassSmokeTest {
     void depthPrepassDrawsTheSameFrame() throws Exception {
         BoardScene calibration = GpuDepthPrepassBaselineSmokeTest.scene(GpuDepthPrepassBaselineSmokeTest.CALIBRATION);
         BoardScene forest = GpuForestBenchmarkSmokeTest.forest();
+        BoardScene city = GpuDepthPrepassBaselineSmokeTest.scene(SKYSCRAPERS);
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Files.createDirectories(GpuDepthPrepassBaselineSmokeTest.OUTPUT.toPath());
@@ -111,14 +127,22 @@ class GpuDepthPrepassSmokeTest {
                           .append(Gdx.graphics.getBackBufferWidth()).append(" x ")
                           .append(Gdx.graphics.getBackBufferHeight()).append('\n');
                     List<View> calibrationViews = GpuDepthPrepassBaselineSmokeTest.calibrationViews();
+                    // The calibration board has few trees; its cliff bay's chunks draw in the default pre-pass
+                    // (GpuTerrain.cliffWalls).
                     check("calibration", calibration, GpuDepthPrepassBaselineSmokeTest.RAIN, calibrationViews, report,
-                          true);
+                          EnumSet.of(GpuTerrain.Prepass.RELIEF, GpuTerrain.Prepass.CLIFFS), true);
                     List<View> forestViews = new ArrayList<>(GpuDepthPrepassBaselineSmokeTest.forestViews(forest));
                     forestViews.add(forestViews.get(1).flying());
                     // Far enough that the trees stand as impostor cards (TreeLod): no other view reaches them.
                     Coords centre = new Coords(forest.width() / 2, forest.height() / 2);
                     forestViews.add(View.at("forest impostors", 8, centre));
-                    check("forest", forest, GpuDepthPrepassBaselineSmokeTest.NOON, forestViews, report, false);
+                    check("forest", forest, GpuDepthPrepassBaselineSmokeTest.NOON, forestViews, report, EnumSet.of(
+                          GpuTerrain.Prepass.RELIEF, GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), false);
+                    // Far enough that the building shells draw without their twins (TreeLod.PREPASS_OBJECTS).
+                    Coords downtown = new Coords(city.width() / 2, city.height() / 2);
+                    check("city", city, GpuDepthPrepassBaselineSmokeTest.NOON, List.of(View.fitted("city fitted"),
+                                View.at("city middle", .5f, downtown), View.at("city far", 8, downtown)), report,
+                          EnumSet.of(GpuTerrain.Prepass.RELIEF, GpuTerrain.Prepass.OBJECTS), false);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     assertTrue(FAILURES.isEmpty(), "Depth pre-pass: " + FAILURES);
                 } catch (Throwable error) {
@@ -142,10 +166,11 @@ class GpuDepthPrepassSmokeTest {
 
     /**
      * The board loaded without the pre-pass and then with all its twins, which link while the other programs come from
-     * the cache; then every view's settings against the frame without the pre-pass, and the board's special cases.
+     * the cache; then every view's settings against the frame without the pre-pass, and the board's special cases. Each
+     * setting with one of the categories {@code present} must draw a twin in some view.
      */
     private static void check(String board, BoardScene scene, BoardAtmosphere.Settings settings, List<View> views,
-          StringBuilder report, boolean calibration) throws Exception {
+          StringBuilder report, Set<GpuTerrain.Prepass> present, boolean calibration) throws Exception {
         var camera = new BoardCamera();
         var frame = new GpuReviewFrame(settings);
         try (var timings = new GpuStageTimings()) {
@@ -176,17 +201,19 @@ class GpuDepthPrepassSmokeTest {
                     compareSettings(board + " " + view.name(), terrain, frame, camera, scene, view, timings, report,
                           drawn);
                 }
+                View middle = views.get(1);
+                if (present.contains(GpuTerrain.Prepass.OBJECTS)) {
+                    GpuDepthPrepassBaselineSmokeTest.show(middle, scene, camera);
+                    checkShellsOnly(board + " " + middle.name(), terrain, frame, camera, scene, middle, timings, report);
+                    checkBuildings(board + " " + middle.name(), terrain, frame, camera, scene, middle, timings, report,
+                          drawn);
+                }
                 for (int i = 0; i < SETTINGS.size(); i++) {
-                    // A category that never drew would leave its parity untested; the calibration board has few trees,
-                    // and its cliff bay's chunks draw in the default pre-pass (GpuTerrain.cliffWalls).
-                    Set<GpuTerrain.Prepass> categories = SETTINGS.get(i).categories();
-                    boolean expected = !calibration || categories.contains(GpuTerrain.Prepass.RELIEF)
-                          || categories.contains(GpuTerrain.Prepass.CLIFFS);
-                    if (expected && drawn[i] == 0) {
+                    // A category that never drew would leave its parity untested.
+                    if (!Collections.disjoint(SETTINGS.get(i).categories(), present) && drawn[i] == 0) {
                         FAILURES.add(board + ": the " + SETTINGS.get(i).name() + " setting drew no twin in any view");
                     }
                 }
-                View middle = views.get(1);
                 GpuDepthPrepassBaselineSmokeTest.show(middle, scene, camera);
                 checkOrder(board + " " + middle.name(), terrain, frame, camera, scene, middle, timings, report);
                 if (calibration) {
@@ -247,6 +274,7 @@ class GpuDepthPrepassSmokeTest {
                   .getShaderProvider();
             var twins = (GpuShaderProvider) GpuDepthPrepassBenchmarkSmokeTest.field(terrain, "prepassShaders");
             Object colourLadder = colour.active();
+            steady("shader edits", terrain, frame, camera, scene, view, timings, report);
             Capture off = capture(terrain, frame, camera, scene, view, NONE, GL20.GL_EQUAL, timings);
             expectTwins("shader edits, before", true, off, terrain, frame, camera, scene, view, timings, report);
             // A directive: the compiled stages drop comments (GpuGlsl.withoutComments).
@@ -313,6 +341,7 @@ class GpuDepthPrepassSmokeTest {
     /** Off, each setting, off again: each setting must match the first frame exactly, the second off frame too. */
     private static void compareSettings(String name, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
           BoardScene scene, View view, GpuStageTimings timings, StringBuilder report, int[] drawn) {
+        steady(name, terrain, frame, camera, scene, view, timings, report);
         Capture off = capture(terrain, frame, camera, scene, view, NONE, GL20.GL_EQUAL, timings);
         int covered = 0, deep = 0;
         for (int i = 3; i < off.scene().length; i += 4) { if (off.scene()[i] > 0) { covered++; } }
@@ -333,6 +362,39 @@ class GpuDepthPrepassSmokeTest {
               report);
     }
 
+    /**
+     * Draws the view without the pre-pass until its window holds still for GpuMeshPage.SETTLE_FRAMES + 2 frames (at most
+     * 200): mesh pages merge and the shadow map refits a while after a view settles, which moves a few pixels and would
+     * void every comparison of the view.
+     */
+    private static void steady(String name, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
+          BoardScene scene, View view, GpuStageTimings timings, StringBuilder report) {
+        GpuTerrain.depthPrepass = NONE;
+        byte[] previous = null;
+        int still = 0, frames = 0;
+        for (; still < GpuMeshPage.SETTLE_FRAMES + 2 && frames < 200; frames++) {
+            timings.beginFrame(false);
+            frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera));
+            byte[] next = window();
+            still = Arrays.equals(next, previous) ? still + 1 : 0;
+            previous = next;
+        }
+        if (frames > GpuMeshPage.SETTLE_FRAMES + 3) {
+            report.append(String.format(Locale.ROOT, "  %s: still after %d frames%n", name, frames));
+        }
+    }
+
+    /** The window's colour, as bytes. */
+    private static byte[] window() {
+        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+        ByteBuffer pixels = BufferUtils.newByteBuffer(width * height * 4);
+        Gdx.gl.glPixelStorei(GL20.GL_PACK_ALIGNMENT, 1);
+        Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels);
+        byte[] window = new byte[pixels.capacity()];
+        pixels.get(window);
+        return window;
+    }
+
     /** One frame with the pre-pass setting, read back right after the opaque terrain and after the composite. */
     private static Capture capture(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
           View view, Set<GpuTerrain.Prepass> categories, int depthFunction, GpuStageTimings timings) {
@@ -350,14 +412,9 @@ class GpuDepthPrepassSmokeTest {
             target[0] = floats(viewport.get(2), viewport.get(3), GL20.GL_RGBA, 4);
             target[1] = floats(viewport.get(2), viewport.get(3), GL20.GL_DEPTH_COMPONENT, 1);
         });
-        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
-        ByteBuffer pixels = BufferUtils.newByteBuffer(width * height * 4);
-        Gdx.gl.glPixelStorei(GL20.GL_PACK_ALIGNMENT, 1);
-        Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels);
-        byte[] window = new byte[pixels.capacity()];
-        pixels.get(window);
-        return new Capture(target[0], target[1], state.get(0), window,
-              floats(width, height, GL20.GL_DEPTH_COMPONENT, 1), terrain.prepassDraws());
+        byte[] window = window();
+        return new Capture(target[0], target[1], state.get(0), window, floats(Gdx.graphics.getBackBufferWidth(),
+              Gdx.graphics.getBackBufferHeight(), GL20.GL_DEPTH_COMPONENT, 1), terrain.prepassDraws());
     }
 
     /** The bound framebuffer's colour (RGBA) or depth, as floats: a half or a 24-bit depth converts exactly. */
@@ -509,6 +566,93 @@ class GpuDepthPrepassSmokeTest {
               report);
         compare("calibration scars, off again", off,
               capture(terrain, frame, camera, scene, view, NONE, GL20.GL_EQUAL, timings), report);
+    }
+
+    /**
+     * Buildings as hover and occupancy fade them (GpuTerrain.animate), at the building of three or more storeys nearest
+     * the view's centre: a hovered storey, a unit inside, then whole again. Faded storeys blend and stay out of the
+     * pre-pass; every other draw must still match.
+     */
+    private static void checkBuildings(String name, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
+          BoardScene scene, View view, GpuStageTimings timings, StringBuilder report, int[] drawn) throws Exception {
+        BoardScene.Tile tile = scene.tiles().stream().filter(candidate -> candidate.features().stream()
+                    .anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING && feature.height() >= 3))
+              .min(Comparator.comparingInt(candidate -> candidate.coords().distance(view.centre()))).orElseThrow();
+        Model box = new ModelBuilder().createBox(3, 3, 3, new Material(), VertexAttributes.Usage.Position);
+        // Refinement replaces chunks, and with them their fades: the view is settled before any fade.
+        GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+        try {
+            ModelInstance unit = new ModelInstance(box, BoardGeometry.center(tile.coords(), tile.elevation() + 1));
+            for (String state : List.of("hovered", "occupied", "whole again")) {
+                terrain.animate(0, state.equals("occupied") ? List.of(unit) : List.of(),
+                      GpuTerrain.DEFAULT_BUILDING_OPACITY, state.equals("hovered") ? tile.coords() : null,
+                      (tile.elevation() + 1) * BoardGeometry.level());
+                GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                int faded = 0;
+                for (Object chunk : (List<?>) GpuDepthPrepassBenchmarkSmokeTest.field(terrain, "chunks")) {
+                    faded += ((Set<?>) GpuDepthPrepassBenchmarkSmokeTest.field(chunk, "faded")).size();
+                }
+                report.append(String.format(Locale.ROOT, "%s, %s at %s: %d faded props%n", name, state, tile.coords(),
+                      faded));
+                if ((faded > 0) == state.equals("whole again")) {
+                    FAILURES.add(name + ", " + state + ": " + faded + " faded props");
+                }
+                compareSettings(name + ", " + state, terrain, frame, camera, scene, view, timings, report, drawn);
+            }
+        } finally { box.dispose(); }
+    }
+
+    /**
+     * Only building shells take an objects twin, draw by draw (GpuModelMaterial.occluder): in a frame of the view no
+     * other model draw has one, even one of a shell's program, and a shell draw's material without the flag,
+     * which selects the same program, has none either.
+     */
+    private static void checkShellsOnly(String name, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
+          BoardScene scene, View view, GpuStageTimings timings, StringBuilder report) throws ReflectiveOperationException {
+        Object batch = GpuDepthPrepassBenchmarkSmokeTest.field(terrain, "batch");
+        Method gathered = batch.getClass().getDeclaredMethod("gathered");
+        Method twin = GpuTerrain.class.getDeclaredMethod("twin", Shader.class, Attributes.class);
+        Method prepass = GpuTerrain.class.getDeclaredMethod("prepass", Attributes.class);
+        gathered.setAccessible(true);
+        twin.setAccessible(true);
+        prepass.setAccessible(true);
+        // Shell draws with a twin; other model draws whose program has one; the shell draws checked without the flag.
+        int[] counts = new int[3];
+        GpuTerrain.depthPrepass = ALL;
+        timings.beginFrame(false);
+        frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera, () -> {
+            try {
+                @SuppressWarnings("unchecked")
+                Array<Renderable> parts = (Array<Renderable>) gathered.invoke(batch);
+                for (Renderable part : parts) {
+                    var surface = part.material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+                    if (surface == null) { continue; }
+                    // An object surface the flag alone keeps out: not a plant's, nor blended, cut away or alpha-tested.
+                    Material flagged = new Material(part.material);
+                    flagged.set(surface.occluder(true));
+                    if (prepass.invoke(null, flagged) != GpuTerrain.Prepass.OBJECTS) { continue; }
+                    boolean twinned = twin.invoke(terrain, part.shader, part.material) != null;
+                    if (twinned && !surface.occluder) {
+                        FAILURES.add(name + ": a model draw other than a shell's took a twin: " + part.material.id);
+                    } else if (twinned) {
+                        counts[0]++;
+                        Material plain = new Material(part.material);
+                        plain.set(surface.occluder(false));
+                        if (twin.invoke(terrain, part.shader, plain) != null) {
+                            FAILURES.add(name + ": a shell's material without the flag took a twin: " + part.material.id);
+                        }
+                        counts[2]++;
+                    } else if (!surface.occluder
+                          && terrain.prepassTwins().containsKey(GpuShaderProvider.unwrap(part.shader))) {
+                        counts[1]++;
+                    }
+                }
+            } catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
+        }, null));
+        report.append(String.format(Locale.ROOT, "%s: %d shell draws with a twin; %d other model draws share a twinned"
+              + " program without one; %d shell materials without the flag take none%n", name, counts[0], counts[1],
+              counts[2]));
+        if (counts[0] == 0) { FAILURES.add(name + ": no shell draw took a twin"); }
     }
 
     /** No twin draws, and the same frame as without the pre-pass, before and after. */

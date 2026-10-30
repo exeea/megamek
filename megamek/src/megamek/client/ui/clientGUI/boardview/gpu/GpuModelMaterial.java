@@ -32,6 +32,11 @@ final class GpuModelMaterial extends Attribute {
     final float[] relief;
     /** The albedo's alpha is a paint mask (RigidGlb.Data#paintMasks): the vertex colour, a colour slot's, tints the paint alone. */
     final boolean paintMask;
+    /**
+     * A building shell's surface, which the depth pre-pass draws (GpuTerrain.prepass): carried per draw through batching
+     * and merges, since other objects' surfaces select the same programs.
+     */
+    final boolean occluder;
 
     GpuModelMaterial(float roughness, float metallic, Texture map) {
         this(roughness, metallic, 0, map, WHITE, BLACK, false, new float[4]);
@@ -44,6 +49,11 @@ final class GpuModelMaterial extends Attribute {
 
     GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
           boolean board, float[] relief, boolean paintMask) {
+        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false);
+    }
+
+    private GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
+          boolean board, float[] relief, boolean paintMask, boolean occluder) {
         super(TYPE);
         this.roughness = roughness;
         this.metallic = metallic;
@@ -54,6 +64,12 @@ final class GpuModelMaterial extends Attribute {
         this.board = board;
         this.relief = relief.clone();
         this.paintMask = paintMask;
+        this.occluder = occluder;
+    }
+
+    /** This surface, a building shell's or not ({@link #occluder}). */
+    GpuModelMaterial occluder(boolean shell) {
+        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, shell);
     }
 
     static void register(DefaultShader shader) {
@@ -138,7 +154,7 @@ final class GpuModelMaterial extends Attribute {
 
     @Override
     public Attribute copy() {
-        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask);
+        return occluder(occluder);
     }
 
     @Override
@@ -154,6 +170,7 @@ final class GpuModelMaterial extends Attribute {
         result = 31 * result + Boolean.hashCode(board);
         result = 31 * result + Arrays.hashCode(relief);
         result = 31 * result + Boolean.hashCode(paintMask);
+        result = 31 * result + Boolean.hashCode(occluder);
         return 31 * result + (map == null ? 0 : map.getTextureObjectHandle());
     }
 
@@ -169,6 +186,7 @@ final class GpuModelMaterial extends Attribute {
         if (order == 0) { order = Boolean.compare(board, surface.board); }
         if (order == 0) { order = Arrays.compare(relief, surface.relief); }
         if (order == 0) { order = Boolean.compare(paintMask, surface.paintMask); }
+        if (order == 0) { order = Boolean.compare(occluder, surface.occluder); }
         if (order == 0) {
             order = Integer.compare(map == null ? 0 : map.getTextureObjectHandle(),
                   surface.map == null ? 0 : surface.map.getTextureObjectHandle());
