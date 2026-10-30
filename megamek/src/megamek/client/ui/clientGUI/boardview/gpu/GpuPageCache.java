@@ -29,7 +29,8 @@ import org.lwjgl.opengl.GL33;
  * it changes. A page at pyramid level v covers 2^v times the ground of a level-0 page in the owner's plane, and builds in
  * as many steps as its owner needs (one a budget unit). The owner names the pages it needs each frame and builds a page
  * when {@link #fill} asks; this class keeps the layers (the pages needed this frame pinned, the others out least
- * recently needed first), readiness, the shaders' page table (one std140 uniform block over one level) and the fill
+ * recently needed first), readiness, the shaders' page table (one std140 uniform block over one level, where a page
+ * not ready stands in with its nearest ready coarser one) and the fill
  * budget.
  * <p>
  * A page is ready once its last step has been issued for the current revision, in the layer it holds now; a layer handed
@@ -42,10 +43,19 @@ final class GpuPageCache implements Disposable {
         boolean fill(int level, int x, int y, int layer, int step);
     }
 
-    /** Entries of the page table: a layer, or -1; four packed into each of 1020 ivec4 after a 32-byte header (16 KB). */
+    /** Which pages of a table's window a coarser ready page may stand in for while they build. */
+    interface StandIns {
+        boolean allowed(int x, int y);
+    }
+
+    /**
+     * Entries of the page table: a layer plus {@link #FALLBACK} times the levels up to the page it reads, or -1; four
+     * packed into each of 1020 ivec4 after a 32-byte header (16 KB).
+     */
     static final int TABLE_ENTRIES = 4080;
     static final int TABLE_HEADER_BYTES = 32;
     static final int TABLE_BYTES = TABLE_HEADER_BYTES + TABLE_ENTRIES * 4;
+    static final int FALLBACK = 4096;
     /** The anisotropy a read may take: its footprint stays within the gutter at the levels it reads. */
     static final float MAX_ANISOTROPY = 4;
     /** The first fill's cost guess in nanoseconds of GPU time; measured fills replace it. */
@@ -62,13 +72,14 @@ final class GpuPageCache implements Disposable {
     private final IntBuffer binding = BufferUtils.newIntBuffer(16);
     private int buffer;
     private long frame, revision;
-    // The fill budget: credit in nanoseconds of GPU time, the cost one step is expected to take, the timer queries
-    // (GL_TIME_ELAPSED, one a step) of earlier fills not yet read, and the last steps' costs, of which the estimate is
-    // the second largest: one stall does not throttle the fills that follow.
-    private long credit, estimate = FIRST_ESTIMATE;
-    private final ArrayDeque<Integer> queries = new ArrayDeque<>();
-    private final long[] costs = new long[8];
-    private int costCount;
+    // The fill budget: credit in nanoseconds of GPU time; per pyramid level, the cost one step is expected to take and
+    // the last steps' costs, of which the estimate is the second largest (one stall does not throttle the fills that
+    // follow); the timer queries (GL_TIME_ELAPSED, one a step) of earlier fills not yet read, with their levels.
+    private long credit;
+    private final long[] estimates;
+    private final long[][] costs;
+    private final int[] costCounts;
+    private final ArrayDeque<int[]> queries = new ArrayDeque<>();
     private long fills, steps;
 
     private static final class Page {
@@ -86,12 +97,16 @@ final class GpuPageCache implements Disposable {
 
     /**
      * Pages of {@code texels} a side, {@code gutter} of them along each edge drawn beyond the page so filtering reads
-     * real neighbours, {@code levels} mip levels of each page, one array of each internal format.
+     * real neighbours, {@code levels} mip levels of each page, pyramid levels 0 to {@code pyramid} - 1, one array of each
+     * internal format.
      */
-    GpuPageCache(int texels, int gutter, int levels, int... formats) {
+    GpuPageCache(int texels, int gutter, int levels, int pyramid, int... formats) {
         this.texels = texels;
         this.gutter = gutter;
         this.levels = levels;
+        estimates = new long[pyramid];
+        costs = new long[pyramid][8];
+        costCounts = new int[pyramid];
         this.formats = formats.clone();
         arrays = new GLTexture[formats.length];
     }
@@ -113,8 +128,8 @@ final class GpuPageCache implements Disposable {
 
     long steps() { return steps; }
 
-    /** The GPU nanoseconds the next step is expected to take (diagnostics). */
-    long estimate() { return estimate; }
+    /** The GPU nanoseconds a step of {@code level} is expected to take (diagnostics). */
+    long estimate(int level) { return estimates[level] == 0 ? FIRST_ESTIMATE : estimates[level]; }
 
     /** Whether storage exists. */
     boolean allocated() { return layers.length > 0; }
@@ -255,13 +270,16 @@ final class GpuPageCache implements Disposable {
      */
     boolean fill(long budget, long cpuDeadline, Filler filler) {
         readTimings();
-        credit = Math.min(credit + budget, Math.max(budget, estimate) + budget);
+        long dearest = 0;
+        for (Page page : needed) { dearest = Math.max(dearest, estimate(page.level)); }
+        credit = Math.min(credit + budget, Math.max(budget, dearest) + budget);
         int filled = 0;
         try {
             for (boolean staleOnes : new boolean[] { false, true }) {
                 for (Page page : needed) {
                     if (staleOnes != page.stale) { continue; }
                     while (!ready(page) || page.stale) {
+                        long estimate = estimate(page.level);
                         if (credit < estimate || System.nanoTime() >= cpuDeadline) { return false; }
                         // A stale page builds aside, in a spare layer, and keeps serving its old one meanwhile.
                         boolean aside = ready(page);
@@ -275,7 +293,7 @@ final class GpuPageCache implements Disposable {
                                   page.step++);
                         } finally {
                             GL15.glEndQuery(GL33.GL_TIME_ELAPSED);
-                            queries.add(query);
+                            queries.add(new int[] { query, page.level });
                         }
                         // Ready only after the last step: a layer handed over keeps no readiness of its last page.
                         if (complete) {
@@ -298,23 +316,27 @@ final class GpuPageCache implements Disposable {
             }
             return true;
         } finally {
-            if (filled == 0) { credit = Math.min(credit, Math.max(budget, estimate)); }
+            if (filled == 0) { credit = Math.min(credit, Math.max(budget, dearest)); }
         }
     }
 
     /**
      * Writes the page table for the window of {@code columns} x {@code rows} pages of pyramid level {@code level} from
      * (x0, y0), its first corner at ({@code originX}, {@code originY}) in the owner's units and pages
-     * {@code pageSize} of them: a ready page gives its layer, any other -1. False if the window holds more pages than
-     * the table.
+     * {@code pageSize} of them: each page's layer, or for those {@code standIns} allows its {@link #entry}. False if the
+     * window holds more pages than the table.
      */
-    boolean upload(int level, int x0, int y0, int columns, int rows, float originX, float originY, float pageSize) {
+    boolean upload(int level, int top, int x0, int y0, int columns, int rows, float originX, float originY,
+          float pageSize, StandIns standIns) {
         if (buffer == 0 || columns <= 0 || rows <= 0 || columns * rows > TABLE_ENTRIES) { return false; }
         table.clear();
         table.putFloat(originX).putFloat(originY).putFloat(pageSize).putFloat(texels);
         table.putFloat(columns).putFloat(rows).putFloat(gutter).putFloat(0);
         for (int y = 0; y < rows; y++) {
-            for (int x = 0; x < columns; x++) { table.putInt(layer(level, x0 + x, y0 + y)); }
+            for (int x = 0; x < columns; x++) {
+                table.putInt(standIns.allowed(x0 + x, y0 + y) ? entry(level, top, x0 + x, y0 + y)
+                      : layer(level, x0 + x, y0 + y));
+            }
         }
         int used = table.position();
         table.flip();
@@ -322,6 +344,18 @@ final class GpuPageCache implements Disposable {
         Gdx.gl.glBufferSubData(GL31.GL_UNIFORM_BUFFER, 0, used, table);
         Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, 0);
         return true;
+    }
+
+    /**
+     * Page (x, y) of {@code level}'s table entry: its layer while it can be read, else its nearest ready coarser page's
+     * up to {@code top} (that layer plus {@link #FALLBACK} times the levels up), else -1.
+     */
+    int entry(int level, int top, int x, int y) {
+        for (int up = 0; level + up <= top; up++) {
+            int layer = layer(level + up, x >> up, y >> up);
+            if (layer >= 0) { return layer + up * FALLBACK; }
+        }
+        return -1;
     }
 
     /** Binds the page table to uniform block binding {@code binding}. */
@@ -371,18 +405,20 @@ final class GpuPageCache implements Disposable {
         return layer;
     }
 
-    /** Folds finished timer queries into the cost estimate. */
+    /** Folds finished timer queries into their levels' cost estimates. */
     private void readTimings() {
         while (!queries.isEmpty()) {
-            int query = queries.peek();
-            if (GL15.glGetQueryObjecti(query, GL15.GL_QUERY_RESULT_AVAILABLE) == 0) { return; }
-            long elapsed = GL33.glGetQueryObjecti64(query, GL15.GL_QUERY_RESULT);
+            int[] query = queries.peek();
+            if (GL15.glGetQueryObjecti(query[0], GL15.GL_QUERY_RESULT_AVAILABLE) == 0) { return; }
+            long elapsed = GL33.glGetQueryObjecti64(query[0], GL15.GL_QUERY_RESULT);
             queries.remove();
-            GL15.glDeleteQueries(query);
-            costs[costCount++ % costs.length] = elapsed;
-            long[] recent = Arrays.copyOf(costs, Math.min(costCount, costs.length));
-            Arrays.sort(recent);
-            estimate = recent[Math.max(0, recent.length - 2)];
+            GL15.glDeleteQueries(query[0]);
+            int level = query[1];
+            long[] recent = costs[level];
+            recent[costCounts[level]++ % recent.length] = elapsed;
+            long[] sorted = Arrays.copyOf(recent, Math.min(costCounts[level], recent.length));
+            Arrays.sort(sorted);
+            estimates[level] = sorted[Math.max(0, sorted.length - 2)];
         }
     }
 
@@ -401,7 +437,7 @@ final class GpuPageCache implements Disposable {
             if (arrays[i] != null) { arrays[i].dispose(); arrays[i] = null; }
         }
         if (buffer != 0) { Gdx.gl.glDeleteBuffer(buffer); buffer = 0; }
-        for (int query : queries) { GL15.glDeleteQueries(query); }
+        for (int[] query : queries) { GL15.glDeleteQueries(query[0]); }
         queries.clear();
         pages.clear();
         free.clear();

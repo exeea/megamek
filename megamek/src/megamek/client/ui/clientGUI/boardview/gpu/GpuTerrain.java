@@ -2702,7 +2702,7 @@ final class GpuTerrain implements Disposable {
         // The ground material cache's first view builds behind the loading stage (ready), once the board and every
         // program are in.
         if (requested == null && rebuild == null && materialsReady()) {
-            materialCache.prewarm(camera, !installedColumns && !fluffHidden, this::drawCacheTops,
+            materialCache.prewarm(camera, !installedColumns, !fluffHidden, this::drawCacheTops,
                   () -> cacheChunks(camera));
         }
         // While opening/replacing a board or switching the graphics (both behind the loading stage), use more of the
@@ -7589,7 +7589,7 @@ final class GpuTerrain implements Disposable {
         boolean fluff = !fluffHidden;
         // The ground material cache fills the pages this view needs before anything draws (its own passes). Its
         // programs draw only when the warm-up linked every program of this lighting, the direct ones included.
-        materialCache.begin(camera, view && terrain && fluff && materialsReady(), this::drawCacheTops);
+        materialCache.begin(camera, terrain && materialsReady(), view && fluff, this::drawCacheTops);
         cacheChunks(camera);
         materialCache.end();
         shadingPass++;

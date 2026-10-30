@@ -70,6 +70,17 @@ final class GpuMaterialCache {
     private static final int TILE = 256, TILE_LEVELS = 9;
     /** The pyramid's coarsest level: its tiles' last level still holds one texel. */
     private static final int TOP_LEVEL = TILE_LEVELS - LEVELS;
+    /**
+     * The first coarse level: its pages render the material directly at their own texel, 4x multisampled (the source
+     * maps' mips filtering the rest), in one step whatever their level. Finer levels are exact means of 2^v x 2^v base
+     * tiles at the close view's texel.
+     */
+    private static final int COARSE = Integer.getInteger("megamek.gpu.materialCacheCoarse", 2);
+    /**
+     * The root: the coarsest level any view reads ({@link #TOP_LEVEL}) or, on a longer board, the coarsest needed to
+     * cover it in at most ROOT_PAGES pages a side, up to MAX_ROOT; so every page has the root above it.
+     */
+    private static final int ROOT_PAGES = 4, MAX_ROOT = 16;
     /** The uniform block binding of the page table (MaterialCachePages); no other program uses uniform blocks. */
     static final int BINDING = 1;
     /**
@@ -85,8 +96,8 @@ final class GpuMaterialCache {
      */
     private static final float TEXELS_PER_PIXEL = 4 * 1.732f * 1.25f;
     /**
-     * Page memory, MiB: {@code -Dmegamek.gpu.materialCacheMiB}, else what the driver reports (capacity), else this
-     * (Iris Xe shares system memory).
+     * Page memory, MiB: {@code -Dmegamek.gpu.materialCacheMiB}, else half of what the driver reports free when the
+     * storage is allocated (capacity), else this.
      */
     private static final long DEFAULT_CAP_MIB = 512;
     private static final Long CAP_MIB = Long.getLong("megamek.gpu.materialCacheMiB");
@@ -120,7 +131,7 @@ final class GpuMaterialCache {
     /** A page of any level. */
     private record PageKey(int at, int x, int y) { }
 
-    private final GpuPageCache pages = new GpuPageCache(PAGE_TEXELS, GUTTER, LEVELS, FORMATS);
+    private final GpuPageCache pages = new GpuPageCache(PAGE_TEXELS, GUTTER, LEVELS, MAX_ROOT + 1, FORMATS);
     // A top's cached-lit twin, and the generic copy its fill draws: both serve every family alike (GpuFamilyPrograms),
     // so no family programs link for the cache.
     private final Map<Material, Material> twins = new IdentityHashMap<>(), generics = new IdentityHashMap<>();
@@ -129,6 +140,9 @@ final class GpuMaterialCache {
     // a page, and the programs that reduce and sharpen.
     private final int[] tiles = new int[FORMATS.length];
     private int tileFramebuffer, tileDepth, readFramebuffer, drawFramebuffer, pageFramebuffer, mipVertices;
+    // A coarse page's multisampled render: its framebuffer, its targets' and its depth's storage.
+    private int coarseFramebuffer, coarseDepth;
+    private final int[] coarseTargets = new int[FORMATS.length];
     private ShaderProgram means, sharpen;
     private boolean active, usable = true, enabled = ENABLED, prewarmed = true;
     // The board's extent (world units), its world metre, and the pages the context allows (read once).
@@ -137,6 +151,10 @@ final class GpuMaterialCache {
     private long limit = -1;
     // A scene size the storage does not fit yet, and the frames it has held.
     private int resized, settled;
+    // The root's level and pages (inclusive), always needed first: any page not built yet reads it meanwhile.
+    private int root = TOP_LEVEL, rootX0, rootY0, rootX1 = -1, rootY1 = -1;
+    // The texel the fill evaluates the material at (u_cacheClosePixel): a base tile's, or a coarse page's.
+    private float fillTexel = CLOSE_PIXEL;
     // This frame: the level its pixels need and the level it reads (-1 before a frame reads any), the pages under the
     // view and how many of them the storage holds, the terrain pages drawn cached, and whether all read their own level.
     private int level, reading = -1, under, admitted;
@@ -150,6 +168,10 @@ final class GpuMaterialCache {
     private final Set<PageKey> copied = new HashSet<>();
     private Camera view;
     private Tops tops;
+    // Whether this frame may build pages (the root at least): the fill's programs are ready.
+    private boolean filling;
+    // The last view frame's CPU time in end() and the steps it built (diagnostics).
+    private long endNanos, endSteps;
 
     // ---- Tops: which faces and materials ----
 
@@ -246,13 +268,21 @@ final class GpuMaterialCache {
     void rebuilt(BoundingBox bounds, BoundingBox changed, float worldMetre) {
         board.set(bounds);
         metre = worldMetre;
+        root = TOP_LEVEL;
+        while (root < MAX_ROOT && (span(bounds.min.x, bounds.max.x, root) > ROOT_PAGES
+              || span(bounds.min.y, bounds.max.y, root) > ROOT_PAGES)) { root++; }
+        float rootSize = pageMetres(root) * metre;
+        rootX0 = (int) Math.floor(bounds.min.x / rootSize);
+        rootY0 = (int) Math.floor(bounds.min.y / rootSize);
+        rootX1 = (int) Math.floor(bounds.max.x / rootSize);
+        rootY1 = (int) Math.floor(bounds.max.y / rootSize);
         if (changed == null) {
             pages.invalidateAll();
             copied.clear();
             return;
         }
         if (!changed.isValid()) { return; }
-        for (int at = 0; at <= TOP_LEVEL; at++) {
+        for (int at = 0; at <= root; at++) {
             // A page reaches its gutter beyond its interior, and its sharpening one texel more.
             float size = pageMetres(at) * metre, reach = (GUTTER + 1) * (1 << at) * CLOSE_PIXEL * metre;
             pages.invalidate(at, (int) Math.floor((changed.min.x - reach) / size),
@@ -275,11 +305,15 @@ final class GpuMaterialCache {
             pages.allocate(0);
             return;
         }
-        reallocate(capacity());
+        reallocate();
         prewarmed = false;
     }
 
-    private void reallocate(int capacity) {
+    /** New storage: the old released first, so the memory read for the cap counts it free. */
+    private void reallocate() {
+        pages.allocate(0);
+        limit = -1;
+        int capacity = capacity();
         pages.allocate(capacity);
         copied.clear();
         reading = -1;
@@ -288,28 +322,15 @@ final class GpuMaterialCache {
 
     /**
      * The pages the scene's pixels need ({@link #TEXELS_PER_PIXEL}), at most as many as the board holds at the finest
-     * level and as the memory allows: {@link #CAP_MIB} when set, else a quarter of the dedicated video memory, half of
-     * the free texture memory, or {@link #DEFAULT_CAP_MIB} where the driver reports neither; and no more than an array's
-     * layers.
+     * level and as the memory allows ({@link #memory}), and no more than an array's layers.
      */
     private int capacity() {
         if (limit < 0) {
+            long bytes = memory();
             IntBuffer values = BufferUtils.newIntBuffer(16);
-            long bytes;
-            if (CAP_MIB != null) {
-                bytes = CAP_MIB << 20;
-            } else if (Gdx.graphics.supportsExtension("GL_NVX_gpu_memory_info")) {
-                Gdx.gl.glGetIntegerv(0x9047, values); // GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, KiB
-                bytes = values.get(0) * 1024L / 4;
-            } else if (Gdx.graphics.supportsExtension("GL_ATI_meminfo")) {
-                Gdx.gl.glGetIntegerv(0x87FC, values); // TEXTURE_FREE_MEMORY_ATI, KiB
-                bytes = values.get(0) * 1024L / 2;
-            } else {
-                bytes = DEFAULT_CAP_MIB << 20;
-            }
-            values.clear();
             Gdx.gl.glGetIntegerv(GL30.GL_MAX_ARRAY_TEXTURE_LAYERS, values);
-            limit = Math.min(bytes / pages.pageBytes(), values.get(0));
+            // A table entry holds the layer below FALLBACK.
+            limit = Math.min(bytes / pages.pageBytes(), Math.min(values.get(0), GpuPageCache.FALLBACK - 1));
         }
         long pixels = (long) (Gdx.graphics.getBackBufferWidth() * BoardCamera.renderScale)
               * (long) (Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale);
@@ -317,6 +338,43 @@ final class GpuMaterialCache {
         float page = pageMetres(0) * metre;
         long across = (long) Math.ceil(board.getWidth() / page) + 3, down = (long) Math.ceil(board.getHeight() / page) + 3;
         return (int) Math.max(1, Math.min(Math.min(wanted, across * down), limit));
+    }
+
+    /**
+     * The page memory, read when storage is allocated, after the board's own textures, models and units: {@link #CAP_MIB}
+     * when set, else half of what the driver reports free (NVX_gpu_memory_info's current available memory, or
+     * ATI_meminfo's free texture pool), so units and effects loaded later, other programs and, on a GPU sharing system
+     * memory, the system keep the rest; else {@link #DEFAULT_CAP_MIB}.
+     */
+    private long memory() {
+        if (CAP_MIB != null) { return CAP_MIB << 20; }
+        IntBuffer kib = BufferUtils.newIntBuffer(16);
+        if (Gdx.graphics.supportsExtension("GL_NVX_gpu_memory_info")) {
+            long[] values = new long[3];
+            int[] queries = { 0x9047, 0x9048, 0x9049 }; // dedicated, total available, current available (KiB)
+            for (int i = 0; i < 3; i++) {
+                kib.clear();
+                Gdx.gl.glGetIntegerv(queries[i], kib);
+                values[i] = kib.get(0) * 1024L;
+            }
+            LOGGER.info("Ground material cache memory (NVX): dedicated {} MiB, total {} MiB, available {} MiB",
+                  values[0] >> 20, values[1] >> 20, values[2] >> 20);
+            return values[2] / 2;
+        }
+        if (Gdx.graphics.supportsExtension("GL_ATI_meminfo")) {
+            Gdx.gl.glGetIntegerv(0x87FC, kib); // TEXTURE_FREE_MEMORY_ATI: free, largest block, aux free, aux largest
+            LOGGER.info("Ground material cache memory (ATI): free {} MiB, largest {} MiB, auxiliary free {} MiB",
+                  kib.get(0) >> 10, kib.get(1) >> 10, kib.get(2) >> 10);
+            return kib.get(0) * 1024L / 2;
+        }
+        LOGGER.info("Ground material cache memory: not reported, {} MiB", DEFAULT_CAP_MIB);
+        return DEFAULT_CAP_MIB << 20;
+    }
+
+    /** Pages of {@code at} a world range (world units) reaches. */
+    private int span(float from, float to, int at) {
+        float size = pageMetres(at) * metre;
+        return (int) Math.floor(to / size) - (int) Math.floor(from / size) + 1;
     }
 
     /** A page's interior at pyramid level {@code level}, in metres. */
@@ -352,10 +410,16 @@ final class GpuMaterialCache {
 
     /** The frame's levels, its pages and those the storage holds, the build so far (diagnostics). */
     String report() {
+        int rootBuilt = 0;
+        for (int x = rootX0; x <= rootX1; x++) {
+            for (int y = rootY0; y <= rootY1; y++) { rootBuilt += pages.layer(root, x, y) >= 0 ? 1 : 0; }
+        }
         return String.format(Locale.ROOT, "materialCache active=%b level=%d reading=%d exact=%b capacity=%d (%d MiB) "
-                    + "under=%d admitted=%d shown=%d cached=%s fills=%d tiles=%d gpuEstimate=%.3fms", active, level,
-              reading, exact, pages.capacity(), pages.capacity() * pages.pageBytes() >> 20, under, admitted,
-              shownPages(), cachedPages, pages.fills(), pages.steps(), pages.estimate() / 1e6);
+                    + "root=%d:%d/%d under=%d admitted=%d shown=%d cached=%s fills=%d tiles=%d gpuEstimate=%.3fms "
+                    + "endMs=%.2f endSteps=%d",
+              active, level, reading, exact, pages.capacity(), pages.capacity() * pages.pageBytes() >> 20, root,
+              rootBuilt, (rootX1 - rootX0 + 1) * (rootY1 - rootY0 + 1), under, admitted, shownPages(), cachedPages,
+              pages.fills(), pages.steps(), pages.estimate(Math.max(0, level)) / 1e6, endNanos / 1e6, endSteps);
     }
 
     // ---- The frame ----
@@ -364,19 +428,21 @@ final class GpuMaterialCache {
      * Starts a view's frame: whether its camera (orthographic, medium or far zoom, at most {@link
      * GpuPageCache#MAX_ANISOTROPY} times longer pixels along the ground than across) can draw cached tops, and the
      * level its pixels need: one to two texels a pixel across, so a read's mip stays below 1. {@code eligible} carries
-     * the terrain's own conditions (sculpted relief, not Tactical View, every program of the lighting warmed). A scene
-     * size the storage does not fit takes new storage once it held for {@link #SETTLE_FRAMES}; that frame draws
-     * directly.
+     * the view's own (its view camera, not Tactical View); {@code fill} whether pages can be built at all (sculpted
+     * relief, every program of the lighting warmed): the root then builds whatever the camera. A scene size the storage
+     * does not fit takes new storage once it held for {@link #SETTLE_FRAMES}; that frame draws directly.
      */
-    void begin(Camera camera, boolean eligible, Tops tops) {
+    void begin(Camera camera, boolean fill, boolean eligible, Tops tops) {
         view = camera;
         this.tops = tops;
+        filling = fill && enabled && usable;
         active = false;
         exact = false;
         under = admitted = 0;
         cachedPages.clear();
         topBounds.clear();
         visible.clear();
+        near.inf();
         pages.begin();
         if (!pages.allocated()) { return; }
         int capacity = capacity();
@@ -386,12 +452,12 @@ final class GpuMaterialCache {
             settled = capacity == resized ? settled + 1 : 0;
             resized = capacity;
             if (settled >= SETTLE_FRAMES) {
-                reallocate(capacity);
+                reallocate();
                 settled = 0;
                 return;
             }
         }
-        if (!eligible || !enabled || !usable || camera.projection.val[Matrix4.M33] == 0) { return; }
+        if (!filling || !eligible || camera.projection.val[Matrix4.M33] == 0) { return; }
         float[] pixel = groundPixel(camera);
         if (pixel[0] < MIN_PIXEL_METRES || pixel[1] > pixel[0] * GpuPageCache.MAX_ANISOTROPY) { return; }
         level = Math.max(0, (int) Math.floor(Math.log(pixel[0] / CLOSE_PIXEL) / Math.log(2)));
@@ -418,13 +484,18 @@ final class GpuMaterialCache {
 
     /** A chunk's cache tops ({@code bounds}, world units) on terrain page {@code page}, and whether it is in view. */
     void chunk(int page, BoundingBox bounds, boolean inView) {
-        if (!active || !bounds.isValid()) { return; }
+        if (!filling || !bounds.isValid()) { return; }
         topBounds.add(bounds);
-        if (inView) { visible.add(new Chunk(page, bounds)); }
+        if (active && inView) { visible.add(new Chunk(page, bounds)); }
     }
 
     /** {@link #end(long, long)} within a view frame's share of the fill. */
-    void end() { end(FILL_NANOS, FILL_CPU_NANOS); }
+    void end() {
+        long start = System.nanoTime(), steps = pages.steps();
+        end(FILL_NANOS, FILL_CPU_NANOS);
+        endNanos = System.nanoTime() - start;
+        endSteps = pages.steps() - steps;
+    }
 
     /**
      * Builds what this frame reads within {@code budget} nanoseconds of GPU time and {@code cpuNanos} of CPU time and
@@ -434,17 +505,24 @@ final class GpuMaterialCache {
      * build. True once nothing is left to build.
      */
     private boolean end(long budget, long cpuNanos) {
-        if (!active) {
-            reading = -1;
-            return true;
-        }
+        if (!pages.allocated() || !filling) { return true; }
         long deadline = System.nanoTime() + cpuNanos;
-        Set<Long> wanted = under(level);
+        // The root first, whatever the view: it stands in for every admitted page still building.
+        int rootPages = 0;
+        boolean rootBuilt = true;
+        for (int x = rootX0; x <= rootX1; x++) {
+            for (int y = rootY0; y <= rootY1; y++, rootPages++) {
+                pages.need(root, x, y, true);
+                // A stale root page (an edit) rebuilds too, whatever the view.
+                rootBuilt &= pages.current(root, x, y);
+            }
+        }
+        Set<Long> wanted = active ? under(level) : new HashSet<>();
         under = wanted.size();
         if (wanted.isEmpty()) {
             active = false;
             reading = -1;
-            return true;
+            return rootBuilt || build(budget, deadline);
         }
         // One level a frame for the whole view: after a zoom in, the coarser level read so far while every page of it
         // under the view is still there, until the finer one's are all built.
@@ -464,7 +542,7 @@ final class GpuMaterialCache {
         List<Long> order = new ArrayList<>(wanted);
         order.sort((a, b) -> Float.compare(distance(a, size, focus), distance(b, size, focus)));
         Set<Long> held = new HashSet<>(order.subList(0, Math.min(order.size(), Math.max(0,
-              pages.capacity() - coarse.size() - SPARES))));
+              pages.capacity() - rootPages - coarse.size() - SPARES))));
         admitted = held.size();
         int[] window = { Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE };
         for (long page : order) {
@@ -473,12 +551,16 @@ final class GpuMaterialCache {
             extend(window, unpackX(page), unpackY(page));
         }
         nearTops(window, level, 3);
-        // Their parents over the view and a page around it, where their children are all built: one-step copies,
+        // Their parents over the view and a page around it, one step each (coarse, or copied from built children),
         // ready for a zoom out, before the ring's tiles.
         if (level < TOP_LEVEL) {
             for (int x = Math.floorDiv(window[0] - 1, 2); x <= Math.floorDiv(window[2] + 1, 2); x++) {
                 for (int y = Math.floorDiv(window[1] - 1, 2); y <= Math.floorDiv(window[3] + 1, 2); y++) {
-                    if (pages.layer(level + 1, x, y) < 0 && copiable(level + 1, x, y)) { pages.need(level + 1, x, y, false); }
+                    // Built ones stay needed, so other prefetches never take their layers back and forth.
+                    if (pages.layer(level + 1, x, y) >= 0
+                          || (level + 1 >= COARSE ? !empty(level + 1, x, y) : copiable(level + 1, x, y))) {
+                        pages.need(level + 1, x, y, false);
+                    }
                 }
             }
         }
@@ -507,14 +589,17 @@ final class GpuMaterialCache {
         int[] table = { Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE };
         for (long page : read) { extend(table, unpackX(page), unpackY(page)); }
         float metres = pageMetres(reading);
-        if (!pages.upload(reading, table[0], table[1], table[2] - table[0] + 1, table[3] - table[1] + 1,
-              table[0] * metres, table[1] * metres, metres)) {
+        // A page the storage holds reads a coarser one up to the root while it builds; one it cannot hold draws
+        // directly (never a coarser level for lack of room).
+        GpuPageCache.StandIns standIns = (x, y) -> reading == level && held.contains(pack(x, y));
+        if (!pages.upload(reading, root, table[0], table[1], table[2] - table[0] + 1, table[3] - table[1] + 1,
+              table[0] * metres, table[1] * metres, metres, standIns)) {
             active = false;
             return true;
         }
         pages.bindTable(BINDING);
-        // A terrain page draws cached once every page under its visible tops can be read at that level; the frame is
-        // exact once they are all current too (none stale, rebuilding).
+        // A terrain page draws cached once every page under its visible tops can be read at that level, or (held and
+        // still building) stood in for by a coarser one; the frame is exact once each is its own and current.
         exact = reading == level;
         Set<Integer> direct = new HashSet<>();
         Set<Long> chunkPages = new HashSet<>();
@@ -522,8 +607,10 @@ final class GpuMaterialCache {
             chunkPages.clear();
             under(chunk.bounds(), reading, chunkPages);
             for (long page : chunkPages) {
-                if (pages.layer(reading, unpackX(page), unpackY(page)) < 0) { direct.add(chunk.page()); }
-                exact &= pages.current(reading, unpackX(page), unpackY(page));
+                int x = unpackX(page), y = unpackY(page);
+                int entry = standIns.allowed(x, y) ? pages.entry(reading, root, x, y) : pages.layer(reading, x, y);
+                if (entry < 0) { direct.add(chunk.page()); }
+                exact &= entry >= 0 && entry < GpuPageCache.FALLBACK && pages.current(reading, unpackX(page), unpackY(page));
             }
         }
         for (Chunk chunk : visible) {
@@ -580,17 +667,17 @@ final class GpuMaterialCache {
     }
 
     /**
-     * The loading stage's build, a loading frame's share at a time: the pages of the view's first frame and their
-     * ring, which {@code chunks} names ({@link #chunk}). {@link #prewarmed} once they are all built, or when the view
-     * draws nothing cached or there is no view (an offline fixture).
+     * The loading stage's build, a loading frame's share at a time: the root, whatever the camera, then the pages of
+     * the view's first frame and their ring, which {@code chunks} names ({@link #chunk}). {@link #prewarmed} once they
+     * are all built, or when there is no view (an offline fixture).
      */
-    void prewarm(Camera camera, boolean eligible, Tops tops, Runnable chunks) {
+    void prewarm(Camera camera, boolean fill, boolean eligible, Tops tops, Runnable chunks) {
         if (prewarmed) { return; }
         if (camera == null) {
             prewarmed = true;
             return;
         }
-        begin(camera, eligible, tops);
+        begin(camera, fill, eligible, tops);
         chunks.run();
         prewarmed = end(PREWARM_NANOS, PREWARM_NANOS);
     }
@@ -637,8 +724,8 @@ final class GpuMaterialCache {
 
     /**
      * Step {@code step} of page (x, y) of {@code at}, into {@code layer}: the whole page copied from its sixteen
-     * children when they are built, else its base tile (i, j) of 2^at a side, rendered, reduced and copied, levels at
-     * to at+2, into the page's three levels, then sharpened after the last. True after the last step.
+     * children when they are built, else one of its tiles rendered, reduced and copied into the page's three levels,
+     * then sharpened after the last. True after the last step.
      */
     private boolean fill(int at, int x, int y, int layer, int step) {
         if (step == 0 && copiable(at, x, y)) {
@@ -646,18 +733,25 @@ final class GpuMaterialCache {
             copied.add(new PageKey(at, x, y));
             return true;
         }
-        int side = 1 << at, i = step % side, j = step / side;
-        float tile = TILE * CLOSE_PIXEL * metre;
-        // The page's extent, gutters included, starts GUTTER texels of its level before its interior.
-        float minX = (x * pageMetres(at) - GUTTER * side * CLOSE_PIXEL) * metre + i * tile;
-        float minY = (y * pageMetres(at) - GUTTER * side * CLOSE_PIXEL) * metre + j * tile;
-        int last = at + LEVELS - 1;
+        // An exact level averages 2^at x 2^at base tiles at the close view's texel; a coarse one is one multisampled
+        // render at its own. Every tile is world-aligned on the page's grid, gutters included.
+        int sub = at < COARSE ? at : 0, side = 1 << sub, i = step % side, j = step / side;
+        float texel = CLOSE_PIXEL * (1 << (at - sub)), tile = TILE * texel * metre;
+        float minX = (x * pageMetres(at) - GUTTER * (1 << at) * CLOSE_PIXEL) * metre + i * tile;
+        float minY = (y * pageMetres(at) - GUTTER * (1 << at) * CLOSE_PIXEL) * metre + j * tile;
+        int last = sub + LEVELS - 1;
+        // A coarse page may lie far from the view (the root): touches then tests every chunk's tops.
         if (touches(minX, minY, minX + tile, minY + tile)) {
-            renderTile(minX, minY, tile, last);
+            fillTexel = texel;
+            try {
+                if (at >= COARSE) { renderCoarse(minX, minY, tile, last); } else { renderTile(minX, minY, tile, last); }
+            } finally {
+                fillTexel = CLOSE_PIXEL;
+            }
         } else {
             clearTile(last);
         }
-        copyTile(layer, at, i, j);
+        copyTile(layer, sub, i, j);
         if (step < side * side - 1) { return false; }
         sharpen(layer);
         copied.remove(new PageKey(at, x, y));
@@ -669,7 +763,7 @@ final class GpuMaterialCache {
      * or reached by no top (empty, beyond a board's edge).
      */
     private boolean copiable(int at, int x, int y) {
-        if (at == 0) { return false; }
+        if (at == 0 || at >= COARSE) { return false; }
         for (int cx = 2 * x - 1; cx <= 2 * x + 2; cx++) {
             for (int cy = 2 * y - 1; cy <= 2 * y + 2; cy++) {
                 boolean built = pages.current(at - 1, cx, cy) && !copied.contains(new PageKey(at - 1, cx, cy));
@@ -728,6 +822,34 @@ final class GpuMaterialCache {
     private void renderTile(float minX, float minY, float size, int last) {
         Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, tileFramebuffer);
         attachTile(0);
+        drawTops(minX, minY, size);
+        reduce(1, last);
+    }
+
+    /**
+     * A coarse page's whole extent rendered once, 4x multisampled, and resolved into the base tile's first level (the
+     * colour in linear light), then its means up to level {@code last}.
+     */
+    private void renderCoarse(float minX, float minY, float size, int last) {
+        Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, coarseFramebuffer);
+        drawTops(minX, minY, size);
+        // With FRAMEBUFFER_SRGB on, the resolve averages the colour in linear light; GL guarantees it from 4.4, and
+        // the drivers here do it on 3.3 too (else the colour's coarse levels would read slightly dark at edges).
+        Gdx.gl30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, coarseFramebuffer);
+        Gdx.gl30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, drawFramebuffer);
+        for (int target = 0; target < FORMATS.length; target++) {
+            Gdx.gl30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0 + target);
+            Gdx.gl30.glFramebufferTexture2D(GL30.GL_DRAW_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL20.GL_TEXTURE_2D,
+                  tiles[target], 0);
+            Gdx.gl30.glBlitFramebuffer(0, 0, TILE, TILE, 0, 0, TILE, TILE, GL20.GL_COLOR_BUFFER_BIT, GL20.GL_NEAREST);
+        }
+        Gdx.gl30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
+        Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, tileFramebuffer);
+        reduce(1, last);
+    }
+
+    /** The canonical material over a square of the board, top-down, into the bound framebuffer's TILE x TILE. */
+    private void drawTops(float minX, float minY, float size) {
         Gdx.gl.glViewport(0, 0, TILE, TILE);
         Gdx.gl.glEnable(GpuLinearOverlay.FRAMEBUFFER_SRGB);
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
@@ -744,7 +866,6 @@ final class GpuMaterialCache {
         fillCamera.far = board.getDepth() + metre * 200;
         fillCamera.update();
         tops.draw(fillCamera, minX, minY, minX + size, minY + size);
-        reduce(1, last);
     }
 
     /** An empty base tile: no coverage at any of its levels up to {@code last}. */
@@ -900,6 +1021,25 @@ final class GpuMaterialCache {
         Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, pageFramebuffer);
         targets.rewind();
         Gdx.gl30.glDrawBuffers(FORMATS.length, targets);
+        // The coarse pages' multisampled render (4 samples, which GL 3 guarantees for these formats).
+        coarseFramebuffer = Gdx.gl.glGenFramebuffer();
+        Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, coarseFramebuffer);
+        for (int i = 0; i < FORMATS.length; i++) {
+            coarseTargets[i] = Gdx.gl.glGenRenderbuffer();
+            Gdx.gl.glBindRenderbuffer(GL20.GL_RENDERBUFFER, coarseTargets[i]);
+            Gdx.gl30.glRenderbufferStorageMultisample(GL20.GL_RENDERBUFFER, 4, FORMATS[i], TILE, TILE);
+            Gdx.gl.glFramebufferRenderbuffer(GL20.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0 + i, GL20.GL_RENDERBUFFER,
+                  coarseTargets[i]);
+        }
+        coarseDepth = Gdx.gl.glGenRenderbuffer();
+        Gdx.gl.glBindRenderbuffer(GL20.GL_RENDERBUFFER, coarseDepth);
+        Gdx.gl30.glRenderbufferStorageMultisample(GL20.GL_RENDERBUFFER, 4, GL20.GL_DEPTH_COMPONENT16, TILE, TILE);
+        Gdx.gl.glBindRenderbuffer(GL20.GL_RENDERBUFFER, 0);
+        Gdx.gl.glFramebufferRenderbuffer(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT, GL20.GL_RENDERBUFFER, coarseDepth);
+        targets.rewind();
+        Gdx.gl30.glDrawBuffers(FORMATS.length, targets);
+        int coarseStatus = Gdx.gl.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER);
+        if (coarseStatus != GL20.GL_FRAMEBUFFER_COMPLETE) { status = coarseStatus; }
         readFramebuffer = Gdx.gl.glGenFramebuffer();
         drawFramebuffer = Gdx.gl.glGenFramebuffer();
         Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, previous);
@@ -976,13 +1116,13 @@ final class GpuMaterialCache {
 
     // ---- Programs ----
 
-    /** A fill program's close-view pixel. Its creation (a load, or a shader edit) rebuilds every page. */
+    /** A fill program's texel (fillTexel). Its creation (a load, or a shader edit) rebuilds every page. */
     void registerFill(DefaultShader shader) {
         invalidateAll();
         shader.register("u_cacheClosePixel", new BaseShader.GlobalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, CLOSE_PIXEL);
+                target.set(id, fillTexel);
             }
         });
     }
@@ -1039,10 +1179,15 @@ final class GpuMaterialCache {
             if (tiles[i] != 0) { Gdx.gl.glDeleteTexture(tiles[i]); tiles[i] = 0; }
         }
         if (tileDepth != 0) { Gdx.gl.glDeleteRenderbuffer(tileDepth); tileDepth = 0; }
-        for (int framebuffer : new int[] { tileFramebuffer, readFramebuffer, drawFramebuffer, pageFramebuffer }) {
+        for (int i = 0; i < coarseTargets.length; i++) {
+            if (coarseTargets[i] != 0) { Gdx.gl.glDeleteRenderbuffer(coarseTargets[i]); coarseTargets[i] = 0; }
+        }
+        if (coarseDepth != 0) { Gdx.gl.glDeleteRenderbuffer(coarseDepth); coarseDepth = 0; }
+        for (int framebuffer : new int[] { tileFramebuffer, readFramebuffer, drawFramebuffer, pageFramebuffer,
+              coarseFramebuffer }) {
             if (framebuffer != 0) { Gdx.gl.glDeleteFramebuffer(framebuffer); }
         }
-        tileFramebuffer = readFramebuffer = drawFramebuffer = pageFramebuffer = 0;
+        tileFramebuffer = readFramebuffer = drawFramebuffer = pageFramebuffer = coarseFramebuffer = 0;
         retireTwins();
         copied.clear();
     }
