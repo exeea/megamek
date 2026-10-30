@@ -60,13 +60,15 @@ final class GpuColorTexture {
         // file samples are opaque luminance, while caller-created Alpha Pixmaps still represent coverage.
         Pixmap expanded = null;
         try {
+            // Heap arrays and bulk copies: per-texel buffer calls are slow until the JIT compiles them.
+            byte[] gray = new byte[pixels.getWidth() * pixels.getHeight()], rgba = new byte[gray.length * 4];
             expanded = new Pixmap(pixels.getWidth(), pixels.getHeight(), Pixmap.Format.RGBA8888);
-            var source = pixels.getPixels();
-            var destination = expanded.getPixels();
-            for (int i = 0; i < pixels.getWidth() * pixels.getHeight(); i++) {
-                byte gray = source.get(i);
-                destination.put(i * 4, gray).put(i * 4 + 1, gray).put(i * 4 + 2, gray).put(i * 4 + 3, (byte) 255);
+            pixels.getPixels().get(0, gray);
+            for (int i = 0, at = 0; i < gray.length; i++, at += 4) {
+                rgba[at] = rgba[at + 1] = rgba[at + 2] = gray[i];
+                rgba[at + 3] = (byte) 255;
             }
+            expanded.getPixels().put(0, rgba);
             return expanded;
         } catch (RuntimeException failure) {
             if (expanded != null) { expanded.dispose(); }

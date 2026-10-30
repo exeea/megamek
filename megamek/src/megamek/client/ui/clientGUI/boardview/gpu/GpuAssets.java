@@ -8,11 +8,16 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.ref.Reference;
+import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -282,6 +287,14 @@ final class GpuAssets implements Disposable {
     private record TerrainArrays(List<String> materials, MaterialArrays arrays, FinishArrays finish) { }
 
     private TerrainArrays terrainArrays(List<String> names, List<String> materials) {
+        // The finishes decode their maps on the common pool, while this thread lists the layers.
+        List<GodotMaterial> materialDefinitions = materials.stream().map(this::definition).toList();
+        var reading = new ArrayList<CompletableFuture<AuthoredFinish>>();
+        for (int index = 0; index < materialDefinitions.size(); index++) {
+            GodotMaterial material = materialDefinitions.get(index);
+            boolean roughnessMap = index < names.size();
+            reading.add(pooled(() -> authoredFinish(material, roughnessMap)));
+        }
         var layers = new ArrayList<Layer>();
         for (String name : names) {
             String material = sculptName(name);
@@ -300,7 +313,7 @@ final class GpuAssets implements Disposable {
         var surfaceLayers = new int[count];
         var emissionLayers = new int[count];
         for (int index = 0; index < count; index++) {
-            var finish = authoredFinish(definition(materials.get(index)), index < firstRoad);
+            var finish = joined(reading.get(index));
             System.arraycopy(finish.surface(), 0, surface, index * 4, 3);
             System.arraycopy(finish.tint(), 0, tint, index * 4, 3);
             System.arraycopy(finish.glow(), 0, glow, index * 3, 3);
@@ -311,7 +324,7 @@ final class GpuAssets implements Disposable {
             boolean sculpted = index < firstRoad;
             boolean widens = sculpted && !TUNDRA_CARPETS.contains(names.get(index));
             if (sculpted) {
-                var parallax = GpuMaterialMaps.modelFinish(definition(materials.get(index)));
+                var parallax = GpuMaterialMaps.modelFinish(materialDefinitions.get(index));
                 if (parallax.heightmap() != null) {
                     relief[index * 2] = parallax.depthU();
                     relief[index * 2 + 1] = parallax.depthV();
@@ -401,11 +414,11 @@ final class GpuAssets implements Disposable {
             if (channel.map() == null) { continue; }
             if (map == null) {
                 map = new byte[width * height * 4];
-                for (int texel = 0; texel < width * height; texel++) {
-                    for (int other = 0; other < 3; other++) {
-                        map[texel * 4 + other] = (byte) Math.round(channels[other].value() * 255);
-                    }
-                    map[texel * 4 + 3] = (byte) 255;
+                for (int other = 0; other < 3; other++) { map[other] = (byte) Math.round(channels[other].value() * 255); }
+                map[3] = (byte) 255;
+                // Every texel repeats the first: copy the filled part onto the rest, doubling it.
+                for (int filled = 4; filled < map.length; filled *= 2) {
+                    System.arraycopy(map, 0, map, filled, Math.min(filled, map.length - filled));
                 }
             }
             byte[] values = onGrid(channel.map(), width, height);
@@ -550,8 +563,33 @@ final class GpuAssets implements Disposable {
         } catch (RuntimeException failure) { array.dispose(); throw failure; }
     }
 
+    /**
+     * Work on the common pool, so at most its parallelism runs at once; without at least two of its threads (where
+     * supplyAsync's default would start a thread per task) the work runs at once, on the calling thread.
+     */
+    private static <T> CompletableFuture<T> pooled(Supplier<T> work) {
+        return CompletableFuture.supplyAsync(work,
+              ForkJoinPool.getCommonPoolParallelism() > 1 ? ForkJoinPool.commonPool() : Runnable::run);
+    }
+
+    /** The result of {@link #pooled} work, or the work's own failure. */
+    private static <T> T joined(CompletableFuture<T> work) {
+        try {
+            return work.join();
+        } catch (CompletionException failure) {
+            if (failure.getCause() instanceof RuntimeException cause) { throw cause; }
+            if (failure.getCause() instanceof Error cause) { throw cause; }
+            throw failure;
+        }
+    }
+
     /** A single storage domain; source bytes are unchanged unless the existing grid requires resizing. */
     private static final class MaterialArrayData implements TextureArrayData {
+        /**
+         * Layers decoded, packed and resized ahead of their upload: enough to keep the common pool busy while the GL
+         * thread uploads in layer order, few enough to bound the pixels held at once.
+         */
+        private static final int AHEAD = Math.max(2, 2 * ForkJoinPool.getCommonPoolParallelism());
         private final List<Supplier<Pixmap>> files;
         private final int width, height;
         private final boolean color;
@@ -581,23 +619,46 @@ final class GpuAssets implements Disposable {
             prepared = false;
         }
 
-        /** The caller has an owned TextureArray handle and releases it if source decoding fails. */
+        /** One layer's pixels and their upload, which may borrow them. */
+        private record Prepared(Pixmap pixels, ByteBuffer upload) { }
+
+        private Prepared prepare(Supplier<Pixmap> file) {
+            var pixels = file.get();
+            try {
+                return new Prepared(pixels, GpuColorTexture.arrayPixels(pixels, width, height, color));
+            } catch (RuntimeException | Error failure) { pixels.dispose(); throw failure; }
+        }
+
+        /**
+         * The caller has an owned TextureArray handle and releases it if source decoding fails. Layers decode, pack
+         * and resize on the common pool; only their uploads, in layer order, stay on this GL thread.
+         */
         void upload() {
+            var ahead = new ArrayDeque<CompletableFuture<Prepared>>();
+            int next = 0;
             var oldAlignment = com.badlogic.gdx.utils.BufferUtils.newIntBuffer(1);
             Gdx.gl.glGetIntegerv(GL20.GL_UNPACK_ALIGNMENT, oldAlignment);
             Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
             try {
                 for (int layer = 0; layer < files.size(); layer++) {
-                    var pixels = files.get(layer).get();
+                    for (; next < files.size() && ahead.size() < AHEAD; next++) {
+                        var file = files.get(next);
+                        ahead.add(pooled(() -> prepare(file)));
+                    }
+                    var prepared = joined(ahead.remove());
                     try {
-                        var upload = GpuColorTexture.arrayPixels(pixels, width, height, color);
-                        try {
-                            Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
-                                  GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, upload);
-                        } finally { Reference.reachabilityFence(upload); }
-                    } finally { pixels.dispose(); }
+                        Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
+                              GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, prepared.upload());
+                    } finally {
+                        Reference.reachabilityFence(prepared.upload());
+                        prepared.pixels().dispose();
+                    }
                 }
-            } finally { Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, oldAlignment.get(0)); }
+            } finally {
+                Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, oldAlignment.get(0));
+                // After a failure, the layers still on their way are released as they arrive.
+                ahead.forEach(pending -> pending.thenAccept(prepared -> prepared.pixels().dispose()));
+            }
             Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);
         }
     }

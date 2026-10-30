@@ -385,6 +385,16 @@ final class GpuMaterialMaps {
                 byte[] rgba = new byte[width * height * 4];
                 if (pixels.getFormat() == Pixmap.Format.RGBA8888) {
                     pixels.getPixels().duplicate().position(0).get(rgba);
+                } else if (pixels.getFormat() == Pixmap.Format.RGB888) {
+                    // Opaque, as getPixel reads it, without a native call per texel.
+                    byte[] rgb = new byte[width * height * 3];
+                    pixels.getPixels().get(0, rgb);
+                    for (int i = 0, at = 0; i < rgb.length; i += 3, at += 4) {
+                        rgba[at] = rgb[i];
+                        rgba[at + 1] = rgb[i + 1];
+                        rgba[at + 2] = rgb[i + 2];
+                        rgba[at + 3] = (byte) 255;
+                    }
                 } else {
                     for (int y = 0, i = 0; y < height; y++) {
                         for (int x = 0; x < width; x++, i += 4) {
@@ -446,6 +456,7 @@ final class GpuMaterialMaps {
                     float[] tint = material.albedoColor();
                     boolean tinted = tint[0] != 1 || tint[1] != 1 || tint[2] != 1 || tint[3] != 1;
                     float[] linear = { GpuColor.linear(tint[0]), GpuColor.linear(tint[1]), GpuColor.linear(tint[2]) };
+                    boolean flipped = heights != null && material.heightmapFlipped();
                     for (int pixel = 0, at = 0; pixel < width * this.height; pixel++, at += 4) {
                         for (int c = 0; c < 3; c++) {
                             int value = primary.value(pixel, c);
@@ -453,13 +464,14 @@ final class GpuMaterialMaps {
                             out[at + c] = (byte) (tint[c] != 1
                                   ? Math.round(GpuColor.display(GpuColor.linear(value / 255f) * linear[c]) * 255) : value);
                         }
-                        out[at + 3] = (byte) (heights != null ? height(heights, pixel)
+                        out[at + 3] = (byte) (heights != null ? height(heights, pixel, flipped)
                               : tinted ? Math.round(primary.value(pixel, 3) * tint[3]) : primary.value(pixel, 3));
                     }
                 }
                 case HEIGHT -> {
+                    boolean flipped = material.heightmapFlipped();
                     for (int pixel = 0, at = 0; pixel < width * height; pixel++, at += 4) {
-                        byte value = (byte) height(primary, pixel);
+                        byte value = (byte) height(primary, pixel, flipped);
                         out[at] = out[at + 1] = out[at + 2] = value;
                         out[at + 3] = (byte) 255;
                     }
@@ -495,8 +507,9 @@ final class GpuMaterialMaps {
                     Surface surface = new Surface(this);
                     Map8 cracks = layout == Layout.ICE ? map(material.extra("cracks")) : null;
                     int relief = Math.clamp(Math.round(material.heightmapScale() * 25.5f), 0, 255);
+                    boolean flipped = material.heightmapFlipped();
                     for (int pixel = 0, at = 0; pixel < width * height; pixel++, at += 4) {
-                        out[at] = (byte) height(primary, pixel);
+                        out[at] = (byte) height(primary, pixel, flipped);
                         out[at + 1] = (byte) surface.roughness(pixel);
                         out[at + 2] = (byte) (cracks != null ? cracks.value(pixel, 0) : surface.occlusion(pixel));
                         out[at + 3] = (byte) (cracks != null ? surface.subsurface(pixel) : relief);
@@ -527,9 +540,10 @@ final class GpuMaterialMaps {
             return out;
         }
 
-        private int height(Map8 heightmap, int pixel) {
+        /** {@code flipped} is the material's heightmapFlipped, read once per layout: it parses a property. */
+        private static int height(Map8 heightmap, int pixel, boolean flipped) {
             int value = heightmap.value(pixel, 0);
-            return material.heightmapFlipped() ? 255 - value : value;
+            return flipped ? 255 - value : value;
         }
     }
 
