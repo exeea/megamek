@@ -845,9 +845,7 @@ class GpuLightingConsistencySmokeTest {
                         double v = (y + .5) / HEIGHT;
                         double blend = v * v * (3 - 2 * v);
                         double radiance = horizon + (sky - horizon) * blend;
-                        double edgeX = 1.0 / WIDTH, edgeY = 2 * v - 1;
-                        double vignette = 1 - .045 * (edgeX * edgeX + edgeY * edgeY);
-                        int expected = (int) Math.round(255 * exposedDisplay(radiance, atmosphere.exposure()) * vignette);
+                        int expected = (int) Math.round(255 * exposedDisplay(radiance, atmosphere.exposure()));
                         assertEquals(expected, column.getPixel(0, y) >>> 24, 1,
                               "The parallel board backdrop must interpolate linear light and encode once; row=" + y);
                     }
@@ -1132,11 +1130,10 @@ class GpuLightingConsistencySmokeTest {
         double[] tint = { light.tint().r, light.tint().g, light.tint().b };
         double luminance = raw[0] * tint[0] * .2126 + raw[1] * tint[1] * .7152 + raw[2] * tint[2] * .0722;
         long[] result = new long[3];
-        double vignette = 1 - .045 * (1.0 / (WIDTH * WIDTH) + 1.0 / (HEIGHT * HEIGHT));
         for (int c = 0; c < 3; c++) {
             double ordinary = luminance + (raw[c] * tint[c] - luminance) * light.saturation();
             double radiance = ordinary * (1 - selected) + raw[c] * selected + .12 * glow[c];
-            result[c] = Math.round(255 * exposedDisplay(radiance, gain) * vignette);
+            result[c] = Math.round(255 * exposedDisplay(radiance, gain));
         }
         return result;
     }

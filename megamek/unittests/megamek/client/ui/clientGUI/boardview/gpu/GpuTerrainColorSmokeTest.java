@@ -164,12 +164,10 @@ class GpuTerrainColorSmokeTest {
                     luminance += color[channel] * weights[channel];
                 }
                 int x = sampleX(swatch, width), y = sampleY(row, height);
-                double edgeX = 2 * (x + .5) / width - 1, edgeY = 2 * (y + .5) / height - 1;
-                double vignette = 1 - .045 * (edgeX * edgeX + edgeY * edgeY);
                 for (int channel = 0; channel < 3; channel++) {
                     double graded = luminance + (color[channel] - luminance) * grade.saturation();
                     double shoulder = Math.min(graded, .6) + .4 * (1 - Math.exp(-Math.max(graded - .6, 0) / .4));
-                    int expected = (int) Math.round(255 * display(shoulder) * vignette);
+                    int expected = (int) Math.round(255 * display(shoulder));
                     assertEquals(expected, Math.round(displayed[row][swatch][channel] * 255), 1,
                           name + "/" + NAMES[swatch] + ": final pixels must encode the measured linear scene once");
                 }

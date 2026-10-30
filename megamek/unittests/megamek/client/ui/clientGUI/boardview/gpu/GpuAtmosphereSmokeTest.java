@@ -1315,7 +1315,7 @@ class GpuAtmosphereSmokeTest {
                                     double display = authored ? Math.pow(shoulder, 1 / 2.2)
                                           : shoulder <= .0031308 ? shoulder * 12.92
                                           : 1.055 * Math.pow(shoulder, 1 / 2.4) - .055;
-                                    double expected = display * (1 - .045 * Math.pow(2 * y - 1, 2));
+                                    double expected = display;
                                     String label = palette.label() + ", " + camera.getClass().getSimpleName()
                                           + ", ray=" + elevation + ", row=" + row + ", channel=" + channel;
                                     assertEquals(expected, sample.get(channel), .0015, label);

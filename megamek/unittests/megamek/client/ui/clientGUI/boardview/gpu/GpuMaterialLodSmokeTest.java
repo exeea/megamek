@@ -81,9 +81,6 @@ class GpuMaterialLodSmokeTest {
         for (String material : materials) {
             var terrain = new GpuTerrain();
             var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
-            // No lens vignette: the close frame is measured whole and the far one at its centre.
-            int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
-            frame.atmosphere().setPrintTile(0, 0, width, height, width, height);
             try {
                 var camera = new BoardCamera();
                 BoardScene scene = scene(material);

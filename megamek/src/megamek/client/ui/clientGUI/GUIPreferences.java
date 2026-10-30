@@ -346,6 +346,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_AMBIENT_OCCLUSION = "BoardAmbientOcclusion";
     /** Whether the 3D board separates nearer surfaces from farther ones by a haze behind the view's focus. */
     public static final String BOARD_DEPTH_CUES = "BoardDepthCues";
+    /** Whether the 3D board darkens the corners of the view like a camera lens. */
+    public static final String BOARD_VIGNETTE = "BoardVignette";
     /** Whether the 3D board tessellates its sculpted relief, where the graphics card offers it (OpenGL 4.0). */
     public static final String BOARD_TESSELLATION = "BoardTessellation";
     /** The 3D board's UI scale, a choice of its Tuning panel: the share (0.5 to 1) of the scale the window sets. */
@@ -928,6 +930,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_TERRAIN_PARALLAX, true);
         store.setDefault(BOARD_AMBIENT_OCCLUSION, false);
         store.setDefault(BOARD_DEPTH_CUES, false);
+        store.setDefault(BOARD_VIGNETTE, false);
         store.setDefault(BOARD_TESSELLATION, false);
         store.setDefault(BOARD_UI_SCALE, 1f);
         store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
@@ -2049,6 +2052,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardDepthCues(boolean enabled) {
         store.setValue(BOARD_DEPTH_CUES, enabled);
+    }
+
+    /** Whether the 3D board's lens vignette is on. */
+    public boolean getBoardVignette() {
+        return store.getBoolean(BOARD_VIGNETTE);
+    }
+
+    public void setBoardVignette(boolean enabled) {
+        store.setValue(BOARD_VIGNETTE, enabled);
     }
 
     /** Whether the 3D board's sculpted relief is tessellated. */

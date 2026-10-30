@@ -168,6 +168,8 @@ final class GpuAtmosphere implements Disposable {
     /** Made at the first frame with depth cues; strength 0 skips its pass. */
     private GpuDepthCues depthCues;
     private float depthCueStrength;
+    /** The lens vignette on screen (Display tab); a print never takes it. */
+    private boolean vignette;
     private final Color depthHaze = new Color();
     /** This frame's seconds, as begin() received them. */
     private float frameDelta;
@@ -590,6 +592,8 @@ final class GpuAtmosphere implements Disposable {
     /** The depth cues' haze strength for the next board views ({@link GpuDepthCues}), 0 to 1; 0 is off. */
     void setDepthCues(float strength) { depthCueStrength = MathUtils.clamp(strength, 0, 1); }
 
+    void setVignette(boolean enabled) { vignette = enabled; }
+
     void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom) {
         end(camera, terrain, board, bottom, null);
     }
@@ -713,7 +717,7 @@ final class GpuAtmosphere implements Disposable {
               ? camera.viewportWidth / Math.max(1, camera.viewportHeight) : printFrame[4], cameraRelativeLight ? 1 : 0);
         if (printFrame == null) { compositeShader.setUniformf("u_frame", 0, 0, 1, 1); }
         else { compositeShader.setUniformf("u_frame", printFrame[0], printFrame[1], printFrame[2], printFrame[3]); }
-        compositeShader.setUniformf("u_vignette", printFrame == null ? 1 : 0);
+        compositeShader.setUniformf("u_vignette", printFrame == null && vignette ? 1 : 0);
         // Zero drift or density constants can optimize these uniforms out of an edited shader.
         compositeShader.setUniformf(compositeShader.fetchUniformLocation("u_spaceTime", false), (float) spaceTime);
         compositeShader.setUniformMatrix(compositeShader.fetchUniformLocation("u_spaceView", false), camera.view);

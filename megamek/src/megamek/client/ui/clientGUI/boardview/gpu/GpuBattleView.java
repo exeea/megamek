@@ -796,6 +796,7 @@ class GpuBattleView extends ApplicationAdapter {
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
         terrain.setTessellation(tuning.tessellation());
         atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
+        atmosphere.setVignette(tuning.vignette());
         // Lighting, not an option: the sky light the board's relief hides from canyons and the feet of its walls.
         skyVisibility.update(terrain.environment(), scene, 1);
         terrain.setGravity(atmosphereSettings.gravity());

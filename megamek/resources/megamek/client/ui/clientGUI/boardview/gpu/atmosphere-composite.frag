@@ -31,7 +31,7 @@ uniform float u_backdropExposure; // Positive: UI-authored backdrop with user EV
 uniform float u_transparentBackground;
 uniform vec3 u_spaceBackdrop; // Enabled, viewing aspect ratio, camera-relative sun/sky.
 uniform vec4 u_frame; // This target's part of the whole picture as uv offset and scale: a print tile's, else (0, 0, 1, 1).
-uniform float u_vignette; // The lens vignette's strength: 1 on screen, 0 for a print.
+uniform float u_vignette; // The lens vignette's strength: 1 on screen when the Display tab turns it on, else 0.
 uniform float u_spaceTime;
 uniform mat4 u_spaceView;
 uniform vec4 u_spaceLight; // Actual source direction and strength; never rotates with the decorative background.

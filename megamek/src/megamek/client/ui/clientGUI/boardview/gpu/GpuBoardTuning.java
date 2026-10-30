@@ -122,6 +122,7 @@ final class GpuBoardTuning {
     private final CheckBox tessellation;
     private final CheckBox ambientOcclusion;
     private final CheckBox depthCues;
+    private final CheckBox vignette;
     /** The graphics card rows; null on computers without two cards to choose from. */
     private SelectBox<GpuGraphicsCard> graphicsCard;
     private Label cardInUse;
@@ -350,6 +351,18 @@ final class GpuBoardTuning {
             public void changed(ChangeEvent event, Actor actor) {
                 boolean enabled = depthCues.isChecked();
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardDepthCues(enabled));
+            }
+        });
+        vignette = checkbox(skin, "Vignette", "tuning-vignette");
+        // The saved choice (off until one is saved); like anti-aliasing, Defaults leaves it alone.
+        vignette.setChecked(GUIPreferences.getInstance().getBoardVignette());
+        vignette.addListener(new TextTooltip("Darkens the corners of the view a little, as a camera lens does. Prints"
+              + " never take it. The choice is saved for the next session.", skin, "menu"));
+        vignette.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = vignette.isChecked();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardVignette(enabled));
             }
         });
         Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
@@ -1133,6 +1146,11 @@ final class GpuBoardTuning {
     /** The haze that separates nearer surfaces from farther ones (GpuDepthCues). */
     boolean depthCues() {
         return depthCues.isChecked();
+    }
+
+    /** The lens vignette over the composited view (atmosphere-composite.frag). */
+    boolean vignette() {
+        return vignette.isChecked();
     }
 
     /** The window's physical size, after a resize: the render resolution shows the scene size it gives. */
