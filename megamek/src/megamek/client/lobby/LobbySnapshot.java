@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.AbstractClient;
 import megamek.client.Client;
@@ -20,6 +21,7 @@ import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.eras.Eras;
 import megamek.common.game.Game;
+import megamek.common.icons.Camouflage;
 import megamek.common.interfaces.IStartingPositions;
 import megamek.common.loaders.MapSettings;
 import megamek.common.options.OptionsConstants;
@@ -147,13 +149,15 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
      * @param start      where the player deploys, as the Swing lobby words it ("Blind" when hidden), or empty
      * @param startValid false when the player's deployment area overlaps another's where the rules forbid it
      * @param colour     the player's colour as 0xRRGGBB
+     * @param camo       the player's camouflage as {@link #camoKey} names it
      */
     public record PlayerRow(int id, String name, int team, boolean bot, boolean self, boolean local,
           boolean gameMaster, boolean observer, boolean ready, boolean ghost, boolean hidden, int units, int bv,
-          int tons, String start, boolean startValid, int colour) {
+          int tons, String start, boolean startValid, int colour, String camo) {
 
         public PlayerRow {
             Objects.requireNonNull(start);
+            Objects.requireNonNull(camo);
         }
 
         /** @return whether this is a bot that runs on this machine, which the local player may set up or remove */
@@ -164,7 +168,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         /** @return this player shown {@code ready} */
         public PlayerRow withReady(boolean ready) {
             return new PlayerRow(id, name, team, bot, self, local, gameMaster, observer, ready, ghost, hidden, units,
-                  bv, tons, start, startValid, colour);
+                  bv, tons, start, startValid, colour, camo);
         }
     }
 
@@ -318,7 +322,8 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
                   player.getName(), team, player.isBot(), self, localIds.contains(player.getId()),
                   player.isGameMaster(), player.isObserver(), player.isDone(), player.isGhost(), hidden, units, bv,
                   (int) Math.round(tons), startText(game, player, hidden),
-                  hidden || LobbyRules.isValidStartPos(game, player), colour(player)));
+                  hidden || LobbyRules.isValidStartPos(game, player), colour(player),
+                  camoKey(player.getCamouflage())));
         }
         int localTeam = local == null ? Player.TEAM_NONE : Math.max(Player.TEAM_NONE, local.getTeam());
         List<TeamGroup> teams = new ArrayList<>();
@@ -373,6 +378,14 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
     private static int colour(Player player) {
         var colour = player.getColour();
         return colour == null ? 0 : colour.getColour().getRGB() & 0xFFFFFF;
+    }
+
+    /**
+     * A camouflage's category and file name joined by a bar, which tells its picture apart; empty for none. Rotation,
+     * scale and overlay are left out: they only change how units wear it.
+     */
+    public static String camoKey(@Nullable Camouflage camo) {
+        return camo == null ? "" : camo.getCategory() + '|' + camo.getFilename();
     }
 
     /**

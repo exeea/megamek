@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Vector;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 import megamek.client.AbstractClient;
 import megamek.client.Client;
@@ -101,6 +102,20 @@ class LobbyPlayerControllerTest {
     void aCancelledCamouflageSendsNothing() {
         controller.camouflage(local.getId());
         verify(client, never()).sendPlayerInfo();
+    }
+
+    @Test
+    void aCamouflageChosenAfterThePlayerLeftIsNotSent() {
+        LobbyPlayerController.Dialogs late = new FakeDialogs() {
+            @Override
+            public void camouflage(Camouflage initial, List<Entity> units, Consumer<Camouflage> chosen) {
+                game.removePlayer(bot.getId());
+                chosen.accept(new Camouflage(Camouflage.COLOUR_CAMOUFLAGE, "Red"));
+            }
+        };
+        new LobbyPlayerController(() -> client, new LobbyCommands(() -> client, prompts), late)
+              .camouflage(bot.getId());
+        verify(botClient, never()).sendPlayerInfo();
     }
 
     @Test
@@ -218,7 +233,7 @@ class LobbyPlayerControllerTest {
     }
 
     /** Dialogs that answer as a test sets them up, and remember what they were asked. */
-    private static final class FakeDialogs implements LobbyPlayerController.Dialogs {
+    private static class FakeDialogs implements LobbyPlayerController.Dialogs {
         final List<Client> settingsOpened = new ArrayList<>();
         final List<BooleanSupplier> polled = new ArrayList<>();
         Optional<Camouflage> camouflage = Optional.empty();
@@ -237,9 +252,9 @@ class LobbyPlayerControllerTest {
         }
 
         @Override
-        public Optional<Camouflage> camouflage(Camouflage initial, List<Entity> units) {
+        public void camouflage(Camouflage initial, List<Entity> units, Consumer<Camouflage> chosen) {
             camouflageAsked++;
-            return camouflage;
+            camouflage.ifPresent(chosen);
         }
 
         @Override

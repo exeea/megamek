@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 import jakarta.annotation.Nullable;
 import megamek.client.AbstractClient;
@@ -31,8 +32,11 @@ final class LobbyPlayerController {
         /** Opens the player settings for the player {@code client} plays, as the Swing lobby does. */
         void playerSettings(Client client);
 
-        /** Asks for a camouflage for a player now wearing {@code initial} and owning {@code units}; empty: cancelled. */
-        Optional<Camouflage> camouflage(Camouflage initial, List<Entity> units);
+        /**
+         * Asks for a camouflage for a player now wearing {@code initial} and owning {@code units}, and hands the one chosen
+         * to {@code chosen} later on this thread; nothing when cancelled.
+         */
+        void camouflage(Camouflage initial, List<Entity> units, Consumer<Camouflage> chosen);
 
         /**
          * Asks for a bot's setup: its name ({@code name} fixed if not null), its kind ({@code type} fixed if not null)
@@ -83,9 +87,13 @@ final class LobbyPlayerController {
         if (player == null) {
             return;
         }
-        Client client = commands.clientFor(player);
-        dialogs.camouflage(player.getCamouflage(), session.game().getPlayerEntities(player, false))
-              .ifPresent(camo -> commands.changePlayerCamo(client, camo));
+        dialogs.camouflage(player.getCamouflage(), session.game().getPlayerEntities(player, false), camo -> {
+            // The dialog stayed open while the game went on: check again that the player may still be changed
+            Player still = configurable(id);
+            if (still != null) {
+                commands.changePlayerCamo(commands.clientFor(still), camo);
+            }
+        });
     }
 
     /** Moves player {@code id} to {@code team}, if they are the local player or one of their bots. */

@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -18,7 +19,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Every Swing dialog the native lobby opens goes through {@link LobbyDialogs}: the lobby's own on its
  * {@link LobbyDialogs#parent()}, the lobby prompts', services' and unit actions' on the same client frame, and nothing
- * else in the lobby watches the toolkit or opens a dialog of its own.
+ * else in the lobby watches the toolkit or opens a dialog of its own. The dialogs the lobby draws itself (a libGDX
+ * {@link megamek.client.ui.gdx.UiDialog}) all open through {@link LobbyNativeDialogs}.
  */
 class LobbyDialogEntryPointsTest {
     private static final Path GPU = Path.of("src/megamek/client/ui/clientGUI/boardview/gpu");
@@ -32,6 +34,8 @@ class LobbyDialogEntryPointsTest {
     private static final List<String> PROMPT_OWNERS = List.of("frame()", "clientGUI", "clientGUI.getFrame()");
     /** A file chooser's first argument is its folder; it takes its owner as it shows. */
     private static final Pattern FOLDER_CHOOSER = Pattern.compile("new JFileChooser\\(");
+    /** The lobby's own libGDX dialogs and their one entry point, which take no Swing owner. */
+    private static final List<String> NATIVE = List.of("new UiDialog(", "new LobbyNativeDialogs(");
 
     @Test
     void theLobbysOwnDialogsUseTheOnePath() throws IOException {
@@ -51,6 +55,31 @@ class LobbyDialogEntryPointsTest {
         }
         assertTrue(checked > 5, "Lobby sources not found at " + GPU.toAbsolutePath());
         assertEquals(List.of(), offenders);
+    }
+
+@Test
+    void theLobbysNativeDialogsUseTheOnePath() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        try (Stream<Path> files = Files.list(GPU)) {
+            for (Path file : files.filter(LobbyDialogEntryPointsTest::lobbySource).toList()) {
+                String name = file.getFileName().toString();
+                String source = Files.readString(file);
+                if (!name.equals("LobbyNativeDialogs.java") && source.contains("new UiDialog(")) {
+                    offenders.add(name + ": makes a UiDialog itself");
+                }
+                if (!name.equals("GpuLobbyScreen.java") && source.contains("new LobbyNativeDialogs(")) {
+                    offenders.add(name + ": makes a second native dialog entry point");
+                }
+            }
+        }
+        assertEquals(List.of(), offenders);
+        String window = Files.readString(GPU.resolve("GpuLobbyWindow.java"));
+        // The camo picker and player settings are drawn by the lobby now; their Swing dialogs stay for other screens
+        assertFalse(window.contains("new CamoChooserDialog("));
+        assertFalse(window.contains("new PlayerSettingsDialog("));
+        String screen = Files.readString(GPU.resolve("GpuLobbyScreen.java"));
+        assertTrue(screen.contains("nativeDialogs.camo("));
+        assertTrue(screen.contains("nativeDialogs.playerSettings("));
     }
 
     @Test
@@ -95,7 +124,9 @@ class LobbyDialogEntryPointsTest {
         Matcher matcher = pattern.matcher(source);
         while (matcher.find()) {
             String owner = matcher.group(group).trim();
-            if (!allowed.contains(owner) && !matcher.group().startsWith("new LobbyDialogs(")) {
+            String made = matcher.group();
+            if (!allowed.contains(owner) && !made.startsWith("new LobbyDialogs(")
+                  && NATIVE.stream().noneMatch(made::startsWith)) {
                 offenders.add(name + ": " + matcher.group().trim());
             }
         }

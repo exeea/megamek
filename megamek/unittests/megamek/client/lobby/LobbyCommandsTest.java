@@ -26,12 +26,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Vector;
+import java.util.function.Consumer;
 
 import megamek.client.AbstractClient;
 import megamek.client.Client;
 import megamek.common.Player;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
+import megamek.common.icons.Camouflage;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Crew;
@@ -153,9 +155,26 @@ class LobbyCommandsTest {
         verify(client, never()).sendUpdateEntity(anyCollection());
     }
 
-    @Test
-    void exceedingC3CapacityIsRefused() {
+@Test
+    void aCamoPickerAnswersLaterAndTheCamoIsSentThen() {
         Entity own = unitOf(local);
+        when(own.getCamouflage()).thenReturn(new Camouflage());
+        when(own.getCamouflageOrElseOwners()).thenReturn(local.getCamouflage());
+        List<Consumer<Camouflage>> pending = new ArrayList<>();
+        commands.camoPicker((initial, individual, units, chosen) -> pending.add(chosen));
+
+        commands.individualCamo(List.of(own));
+
+        verify(prompts, never()).chooseCamo(any(), anyBoolean(), any());
+        verify(client, never()).sendUpdateEntity(anyCollection());
+        Camouflage red = new Camouflage(Camouflage.COLOUR_CAMOUFLAGE, "RED");
+        pending.get(0).accept(red);
+        verify(own).setCamouflage(red);
+        verify(client).sendUpdateEntity(List.<Entity>of(own));
+    }
+
+    @Test
+    void exceedingC3CapacityIsRefused() {        Entity own = unitOf(local);
         try (MockedStatic<C3Util> c3Util = mockStatic(C3Util.class)) {
             c3Util.when(() -> C3Util.connect(any(), anyCollection(), anyInt(), anyBoolean()))
                   .thenThrow(new C3CapacityException());

@@ -24,6 +24,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.Scaling;
+import jakarta.annotation.Nullable;
 import megamek.client.lobby.ChatFold;
 import megamek.client.lobby.ChatHistory;
 import megamek.client.lobby.ChatLine;
@@ -91,6 +93,11 @@ final class LobbyPlayersPanel {
 
         /** Keeps whether the chat dock is open or folded (a client preference). */
         default void chatOpen(boolean open) { }
+
+        /** The picture of the camo {@link LobbySnapshot#camoKey} names, once it has been drawn; else null. */
+        default @Nullable Drawable camo(String key) {
+            return null;
+        }
     }
 
     private final UiKit kit;
@@ -266,6 +273,13 @@ final class LobbyPlayersPanel {
               com.badlogic.gdx.scenes.scene2d.actions.Actions.run(() -> card.setBackground(kit.skin.getDrawable("token-card")))));
     }
 
+    /** Draws the cards again as the camo pictures their swatches wait for arrive. */
+    void camosArrived() {
+        if (shown != null) {
+            fillPlayers(shown);
+        }
+    }
+
     private void fillPlayers(LobbySnapshot snapshot) {
         playerList.clearChildren();
         menuButtons.clear();
@@ -322,7 +336,9 @@ final class LobbyPlayersPanel {
         card.setName("lobby-player-" + player.id());
         card.top().left();
 
-        Image swatch = kit.solid(new Color(player.colour() << 8 | 0xFF));
+        Drawable camo = player.camo().isEmpty() ? null : actions.camo(player.camo());
+        Image swatch = camo == null ? kit.solid(new Color(player.colour() << 8 | 0xFF)) : new Image(camo, Scaling.fill);
+        swatch.setName("lobby-player-swatch-" + player.id());
         float swatchSize = size("icon.lg");
         card.add(swatch).size(swatchSize).top().padRight(space("md"));
         if (player.local()) {

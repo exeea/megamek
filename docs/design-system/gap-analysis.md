@@ -714,6 +714,43 @@ work for Swing, and item 11 is under investigation.
        clicks the fold through the Stage, then the player and both bots chat: 2 unread, the own line not counted;
        photographed at 2560x1400 and narrow. Not checked live: the kept filters across a real restart (unit tested
        only).
+     - L13 Lobby dialogs to libGDX, one at a time (step 6's `LobbyDialogs` list, most used first).
+       - L13a ~~Camo picker and player settings~~. Kit: `UiDialog`, the token dialog surface every later port
+         reuses: a `UiModal` layer on `surface.scrim` (no dismissal on the scrim: a form wants an answer) holding
+         the `UiKit.dialog` card (title, close button, a vertical-only scrolling body, a footer of leading tools and
+         centred primary/secondary buttons), sized `dialog.sm`/`md`/`lg` or the window less `xxxl` margins, faded in
+         over `fast`; Enter presses the focused button or the primary, Space the focused button, Escape and the close
+         button cancel, Tab and Shift+Tab cycle inside the card only, and the lobby takes no key or click behind it.
+         `LobbyNativeDialogs` is the lobby's one entry point for these (the only `new UiDialog` in the lobby, which
+         `LobbyDialogEntryPointsTest` enforces, along with no `CamoChooserDialog`/`PlayerSettingsDialog` left in
+         `GpuLobbyWindow`). Camo (`LobbyCamoView`, models `CamoCatalog` and `CamoChoice`): the category tree with
+         colour camos first, a search of three letters or more, Include subcategories, a virtualised `UiCardGrid` of
+         thumbnails read on a daemon thread and uploaded as textures (at most 320 kept), the preview of up to two of
+         the units (or the camo itself), rotation and scale sliders, the asset overlay's colour, direction and style
+         for Battlefield Support Assets, Refresh directory, and Reset to the owner's camo for units with their own.
+         Opened from the player card (swatch and menu), the unit menu's camo action (`LobbyCommands.camoPicker`, so
+         `individualCamo` no longer goes through `LobbyPrompts.chooseCamo` while the lobby shows) and the probe. The
+         player swatch now shows the camo picture. Player settings (`LobbyPlayerSettingsView`, model
+         `PlayerSettingsForm`): every section of the Swing dialog in its order (camo and name; automatic ammunition
+         configuration with faction, Autoconfig/Randomize/Restore, Truly random, No nukes, Save/Load loadout; Bot
+         settings for bots; deployment area with the start grid, other players' marks and invalid positions, offset,
+         width, walk-on and width-restricted notes, the custom NW/SE corners and Apply; initiative modifier;
+         minefields when allowed; fortified hexes; ground objects; skill generation; email for humans), sent through
+         the same `Player` setters and `Client.sendPlayerInfo` and `sendProxyUpdates`. Differences from Swing:
+         numbers are checked (a non-number or a negative, or a corner off the board, marks the field and disables
+         OK and Apply, where Swing read 0); ground objects are applied on OK rather than at once; the overlay colour
+         is a palette (the starting colour, caution yellow and the player colours) instead of a colour chooser; Use
+         Ruler is left out. Still Swing: Bot settings (L13b), the loadout file choosers, and the start screen's
+         briefing camo (`StartBriefingPage`). The Swing dialogs stay for their other users. Checks:
+         `CamoCatalogTest`, `CamoChoiceTest`, `PlayerSettingsFormTest`, `LobbyCommandsTest` (a picker answering
+         later), `LobbyPlayerControllerTest`, `LobbyDialogEntryPointsTest`, and the on-demand
+         `LobbyNativeDialogsSmokeTest` (the scrim blocks the lobby, Enter, Escape and Tab; a camo click and OK; a
+         start click, an empty number disabling OK, then OK sending). Probes `lobby+dialog=camo` and
+         `lobby+dialog=playersettings` now open these and click through the Stage (a colour camo, then OK: the
+         player's and the snapshot's camo change and the swatch shows it; start SE and offset 2, then OK: the game
+         and the snapshot read "SE, 2, 3"), photographed at 2560x1400 and 1100x800.
+       - L13b Bot setup (to come).
+       - L13c Planetary conditions and game options (to come).
   7. A settings check across the startup path.
 - If the developers accept it, move hud-v3 onto the tokens and the new libGDX controls (including the `UiTheme`
   rename pass). Until then, hud-v3 code does not change.

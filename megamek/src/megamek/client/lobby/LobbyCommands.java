@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.Vector;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import jakarta.annotation.Nullable;
@@ -81,8 +82,26 @@ public class LobbyCommands {
     /** How a Mek is deployed. */
     public enum Stance { PRONE, HULL_DOWN, STANDING }
 
+    /**
+     * A camo chooser that answers later, such as one drawn in the lobby's own window rather than a modal Swing dialog.
+     */
+    @FunctionalInterface
+    public interface CamoPicker {
+        /**
+         * Shows the chooser and returns at once; {@code chosen} runs on the caller's thread with the camo when the
+         * player confirms one, and never when they cancel.
+         *
+         * @param initial           the camouflage to start from
+         * @param hasIndividualCamo {@code true} when any of the units has a camouflage other than its owner's
+         * @param units             the units to show the camouflage on
+         * @param chosen            takes the chosen camouflage
+         */
+        void choose(Camouflage initial, boolean hasIndividualCamo, List<Entity> units, Consumer<Camouflage> chosen);
+    }
+
     private final LobbySession session;
     private final LobbyPrompts prompts;
+    private volatile CamoPicker camoPicker;
 
     /**
      * @param session the local client, its game and bots
@@ -91,6 +110,14 @@ public class LobbyCommands {
     public LobbyCommands(LobbySession session, LobbyPrompts prompts) {
         this.session = session;
         this.prompts = prompts;
+    }
+
+    /**
+     * Has {@link #individualCamo} ask {@code picker} instead of {@link LobbyPrompts#chooseCamo}; null goes back to
+     * the prompts.
+     */
+    public void camoPicker(@Nullable CamoPicker picker) {
+        camoPicker = picker;
     }
 
     // region Readiness
@@ -567,14 +594,21 @@ public class LobbyCommands {
         // The chooser is preset to a random entity's settings
         Entity entity = CollectionUtil.anyOneElement(entities);
         boolean hasIndividualCamo = entities.stream().anyMatch(e -> !e.getCamouflage().hasDefaultCategory());
-        Optional<Camouflage> chosen = prompts.chooseCamo(entity.getCamouflageOrElseOwners(), hasIndividualCamo,
-              new ArrayList<>(entities));
-        if (chosen.isEmpty()) {
+        CamoPicker picker = camoPicker;
+        if (picker != null) {
+            List<Entity> units = new ArrayList<>(entities);
+            picker.choose(entity.getCamouflageOrElseOwners(), hasIndividualCamo, units,
+                  chosen -> applyIndividualCamo(units, entity, chosen));
             return;
         }
+        Optional<Camouflage> chosen = prompts.chooseCamo(entity.getCamouflageOrElseOwners(), hasIndividualCamo,
+              new ArrayList<>(entities));
+        chosen.ifPresent(camo -> applyIndividualCamo(entities, entity, camo));
+    }
+
+    private void applyIndividualCamo(Collection<Entity> entities, Entity entity, Camouflage selectedItem) {
         // Choosing the player camo resets the units to have no individual camo. The asset marker overlay rides on
         // the camo, so it is carried automatically (including on a reset back to the player camo).
-        Camouflage selectedItem = chosen.get();
         Camouflage ownerCamo = entity.getOwner().getCamouflage();
         boolean noIndividualCamo = selectedItem.equals(ownerCamo);
 

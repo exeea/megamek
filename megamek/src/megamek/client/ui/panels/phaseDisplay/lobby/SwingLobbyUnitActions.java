@@ -313,7 +313,8 @@ public final class SwingLobbyUnitActions {
         }
     }
 
-    private void saveLoadout(MunitionTree source) {
+    /** Asks for a file and saves the loadout {@code source} to it, as Save Loadout does. */
+    public void saveLoadout(MunitionTree source) {
         JFileChooser fc = new JFileChooser(Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toString());
         FileNameExtensionFilter adfFilter = new FileNameExtensionFilter("adf files (*.adf)", "adf");
         fc.addChoosableFileFilter(adfFilter);
@@ -329,7 +330,8 @@ public final class SwingLobbyUnitActions {
         source.writeToADFFilename(file);
     }
 
-    private MunitionTree loadLoadout() {
+    /** Asks for a loadout file and reads it, as Load Loadout does; null when none was chosen or it was unreadable. */
+    public MunitionTree loadLoadout() {
         JFileChooser fc = new JFileChooser(Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toString());
         FileNameExtensionFilter adfFilter = new FileNameExtensionFilter("adf files (*.adf)", "adf");
         fc.addChoosableFileFilter(adfFilter);

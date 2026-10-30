@@ -36,29 +36,34 @@ import megamek.client.bot.BotFactory;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.lobby.CamoCatalog;
+import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.LobbyBattlefield;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.lobby.LobbyUnitOrder;
+import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
-import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.Player;
+import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.board.Board;
+import megamek.common.containers.MunitionTree;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -250,7 +255,8 @@ public final class GpuLobbyWindow {
     /** EDT: the map settings whose custom deployment zones {@link #customZones} holds. */
     private MapSettings zonesOf;
     private Collection<Integer> customZones = List.of();
-    private PlayerSettingsDialog playerSettings;
+    /** EDT: the camo keys whose pictures went to the screen for the players' swatches. */
+    private final Set<String> camoKeys = new HashSet<>();
     /** EDT: the unit menu whose items the screen shows, until one is chosen. */
     private LobbyUnitMenu unitMenu;
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
@@ -299,6 +305,7 @@ public final class GpuLobbyWindow {
         active = window;
         gui.getClient().getGame().addGameListener(window.gameListener);
         window.swingDialogs.install();
+        gui.lobbyCommands().camoPicker(window.camoPicker);
         window.refresh();
         GpuHost.show(window.scene);
         window.probe = GpuLobbyProbe.applyOnce(gui);
@@ -384,8 +391,20 @@ public final class GpuLobbyWindow {
         }
     }
 
-    private void queueRefresh() {
-        if (refreshQueued.compareAndSet(false, true)) {
+    /** EDT, for the developer switch's libGDX dialogs: logs the local player as the game and the snapshot have them. */
+    void logProbePlayer() {
+        Player local = gui.getClient().getLocalPlayer();
+        if (local == null) {
+            return;
+        }
+        LobbySnapshot.PlayerRow row = snapshot.teams().stream().flatMap(team -> team.players().stream())
+              .filter(player -> player.id() == local.getId()).findFirst().orElse(null);
+        LOGGER.info("Lobby probe player: camo {}, start {} offset {}; snapshot camo '{}', start '{}'",
+              LobbySnapshot.camoKey(local.getCamouflage()), local.getStartingPos(), local.getStartOffset(),
+              row == null ? null : row.camo(), row == null ? null : row.start());
+    }
+
+    private void queueRefresh() {        if (refreshQueued.compareAndSet(false, true)) {
             // Later, so the chat box has taken the same event first
             SwingUtilities.invokeLater(this::refresh);
         }
@@ -419,6 +438,7 @@ public final class GpuLobbyWindow {
         snapshot = read;
         LobbySnapshot shownRead = read;
         sendSprites(shownRead);
+        sendCamos();
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
             if (shown != null) {
@@ -1026,24 +1046,12 @@ public final class GpuLobbyWindow {
     private final LobbyPlayerController.Dialogs dialogs = new LobbyPlayerController.Dialogs() {
         @Override
         public void playerSettings(Client client) {
-            if (playerSettings != null) {
-                playerSettings.dispose();
-            }
-            playerSettings = new PlayerSettingsDialog(gui, client, null);
-            playerSettings.setModal(false);
-            playerSettings.showDialog();
+            openPlayerSettings(client);
         }
 
         @Override
-        public Optional<Camouflage> camouflage(Camouflage initial, List<Entity> units) {
-            CamoChooserDialog chooser = new CamoChooserDialog(swingDialogs.parent(), initial);
-            try {
-                chooser.setDisplayedEntities(units);
-                return chooser.showDialog().isConfirmed() ? Optional.ofNullable(chooser.getSelectedItem())
-                      : Optional.empty();
-            } finally {
-                chooser.dispose();
-            }
+        public void camouflage(Camouflage initial, List<Entity> units, Consumer<Camouflage> chosen) {
+            openCamo(initial, false, units, chosen);
         }
 
         @Override
@@ -1105,6 +1113,195 @@ public final class GpuLobbyWindow {
         }
     };
 
+    /** The unit menu's camo action asks through the native chooser while this lobby shows. */
+    private final LobbyCommands.CamoPicker camoPicker = this::openCamo;
+
+    // ---- The native dialogs ----
+
+    /** The camo picture the player settings' header and the swatches show, in pixels. */
+    private static final int CAMO_PICTURE = 72;
+    /** The camo chooser's preview of a camo without units, in pixels. */
+    private static final int CAMO_PREVIEW = 96;
+
+    /**
+     * EDT: reads the camo directory and opens the native camo chooser over the lobby; {@code chosen} runs here, on
+     * the Swing thread, with the confirmed camo.
+     *
+     * @param individual whether the camo is the units' own, which offers going back to the owner's
+     * @param units      the units wearing it, of which at most two are previewed
+     */
+    private void openCamo(Camouflage initial, boolean individual, List<Entity> units, Consumer<Camouflage> chosen) {
+        if (closing) {
+            return;
+        }
+        CamoCatalog catalog = camoCatalog(false);
+        CamoChoice choice = new CamoChoice(initial, individual);
+        List<Entity> previewed = previewUnits(units);
+        boolean assets = previewed.stream().anyMatch(entity -> entity instanceof BattlefieldSupportAsset);
+        LobbyCamoView.Source source = new LobbyCamoView.Source() {
+            @Override
+            public CamoCatalog catalog(boolean refresh) {
+                return camoCatalog(refresh);
+            }
+
+            @Override
+            public @Nullable BufferedImage thumbnail(Camouflage camo, int size) {
+                return camoPicture(camo, size);
+            }
+
+            @Override
+            public List<BufferedImage> preview(Camouflage camo) {
+                List<BufferedImage> images = new ArrayList<>();
+                if (previewed.isEmpty()) {
+                    BufferedImage picture = camoPicture(camo, CAMO_PREVIEW);
+                    if (picture != null) {
+                        images.add(picture);
+                    }
+                }
+                for (Entity entity : previewed) {
+                    BufferedImage image = sprite(entity, camo);
+                    if (image != null) {
+                        images.add(image);
+                    }
+                }
+                return images;
+            }
+        };
+        Consumer<Camouflage> confirmed = camo -> SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                chosen.accept(camo);
+                queueRefresh();
+            }
+        });
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.camoDialog(source, catalog, choice, assets, confirmed);
+            }
+        });
+    }
+
+    /** The camo directory with the colour camos, read from disk again when {@code refresh}. */
+    private static CamoCatalog camoCatalog(boolean refresh) {
+        if (refresh) {
+            MMStaticDirectoryManager.refreshCamouflageDirectory();
+        }
+        List<String> colours = new ArrayList<>();
+        for (PlayerColour colour : PlayerColour.values()) {
+            colours.add(colour.name());
+        }
+        return new CamoCatalog(CamoCatalog.of(MMStaticDirectoryManager.getCamouflage()), colours);
+    }
+
+    /** At most two units to preview: an asset and another unit when there are both, as the Swing chooser picks. */
+    private static List<Entity> previewUnits(List<Entity> units) {
+        Entity asset = units.stream().filter(entity -> entity instanceof BattlefieldSupportAsset).findFirst()
+              .orElse(null);
+        Entity other = units.stream().filter(entity -> !(entity instanceof BattlefieldSupportAsset)).findFirst()
+              .orElse(null);
+        if (asset != null && other != null) {
+            return List.of(asset, other);
+        }
+        return List.copyOf(units.subList(0, Math.min(2, units.size())));
+    }
+
+    /** The camo's picture, {@code size} pixels square, or null; any thread. */
+    static @Nullable BufferedImage camoPicture(Camouflage camo, int size) {
+        try {
+            Image image = camo.getImage(size);
+            if (image == null || image.getWidth(null) <= 0 || image.getHeight(null) <= 0) {
+                return null;
+            }
+            BufferedImage copy = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = copy.createGraphics();
+            graphics.drawImage(image, 0, 0, size, size, null);
+            graphics.dispose();
+            return copy;
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The lobby could not draw the camo {}", camo);
+            return null;
+        }
+    }
+
+    /** EDT: sends the pictures of the players' camos the screen has not had, for their swatches. */
+    private void sendCamos() {
+        Map<String, BufferedImage> fresh = new HashMap<>();
+        for (Player player : gui.getClient().getGame().getPlayersList()) {
+            Camouflage camo = player.getCamouflage();
+            String key = LobbySnapshot.camoKey(camo);
+            if (!key.isEmpty() && camoKeys.add(key)) {
+                BufferedImage picture = camoPicture(camo, CAMO_PICTURE);
+                if (picture != null) {
+                    fresh.put(key, picture);
+                }
+            }
+        }
+        if (!fresh.isEmpty()) {
+            GpuHost.post(() -> {
+                GpuLobbyScreen shown = screen;
+                if (shown != null) {
+                    shown.camos(fresh);
+                }
+            });
+        }
+    }
+
+    /** EDT: reads the player settings of the player {@code client} plays and opens them natively over the lobby. */
+    private void openPlayerSettings(Client client) {
+        if (closing) {
+            return;
+        }
+        PlayerSettingsForm form;
+        List<PlayerSettingsForm.Position> positions;
+        try {
+            form = PlayerSettingsForm.of(client, gui.lobbyCommands());
+            positions = form.positions();
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the player settings");
+            return;
+        }
+        BufferedImage camo = camoPicture(form.player().getCamouflage(), CAMO_PICTURE);
+        int id = form.player().getId();
+        LobbyPlayerSettingsView.Host host = new LobbyPlayerSettingsView.Host() {
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        if (!closing) {
+                            work.run();
+                        }
+                    } catch (RuntimeException failure) {
+                        LOGGER.error(failure, "The player settings failed");
+                    } finally {
+                        GpuHost.post(then);
+                        queueRefresh();
+                    }
+                });
+            }
+
+            @Override
+            public void saveLoadout(MunitionTree tree) {
+                new SwingLobbyUnitActions(gui).saveLoadout(tree);
+            }
+
+            @Override
+            public @Nullable MunitionTree loadLoadout() {
+                return new SwingLobbyUnitActions(gui).loadLoadout();
+            }
+
+            @Override
+            public void botSettings() {
+                GpuLobbyWindow.this.botSettings(id);
+            }
+        };
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.settingsDialog(form, positions, camo, host);
+            }
+        });
+    }
+
     /** GPU thread, as the screen's listener is disposed: returns every adopted dialog to its Swing owner. */
     void disposing() {
         screen = null;
@@ -1131,6 +1328,9 @@ public final class GpuLobbyWindow {
 
     private void finished(Throwable failure) {
         swingDialogs.uninstall();
+        if (active == this || active == null || active.gui != gui) {
+            gui.lobbyCommands().camoPicker(null);
+        }
         gui.getClient().getGame().removeGameListener(gameListener);
         boolean replaced = closing;
         closing = true;

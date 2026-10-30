@@ -120,7 +120,10 @@ import org.lwjgl.glfw.GLFW;
  *     input and the focus back. The names: {@code gameoptions}, {@code conditions}, {@code victory},
  *     {@code randommap}, {@code mapsetup}, {@code loadmapsetup}, {@code camo}, {@code playersettings},
  *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3}, {@code randomarmy}, {@code skills},
- *     {@code names}, {@code loadlist} and {@code alert}.</li>
+ *     {@code names}, {@code loadlist} and {@code alert}. The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo} and
+ *     {@code playersettings}) open on the stage instead, where the probe clicks through them: a colour camo for
+ *     {@code camo}, the SE start and an offset of 2 for {@code playersettings}; it saves the frame buffer, presses
+ *     OK, and logs what the next snapshot shows.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
@@ -437,6 +440,17 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             }
         }
         return null;
+    }
+
+    /** The dialogs {@code lobby+dialog=name} opens on the stage, the lobby's libGDX dialogs. */
+    static final Set<String> NATIVE_DIALOGS = Set.of("camo", "playersettings");
+
+    /** EDT: opens the libGDX dialog {@link #dialog()} names, as the lobby's control would. */
+    void openNative(GpuLobbyWindow window, ClientGUI gui) {
+        for (Dialog dialog : showingDialogs()) {
+            dialog.setVisible(false);
+        }
+        openDialog(window, gui);
     }
 
     /** The dialog {@code lobby+dialog=name} opens over the lobby, or null. */

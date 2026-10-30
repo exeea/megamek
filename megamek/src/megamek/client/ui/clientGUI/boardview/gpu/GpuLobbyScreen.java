@@ -19,7 +19,9 @@ import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -31,10 +33,13 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.CamoCatalog;
+import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionFactions;
 import megamek.client.lobby.RequisitionLoader;
@@ -47,10 +52,12 @@ import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
+import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiRangeInput;
 import megamek.client.ui.gdx.UiVirtualList;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MekSummary;
 import megamek.logging.MMLogger;
 
@@ -125,6 +132,17 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private final Map<String, Texture> spriteTextures = new HashMap<>();
     private final Map<Integer, Drawable> spriteDrawables = new HashMap<>();
     private Texture mapTexture;
+    /** The players' camo pictures by {@link LobbySnapshot#camoKey}, for their swatches. */
+    private final Map<String, Texture> camoTextures = new HashMap<>();
+    private final Map<String, Drawable> camoDrawables = new HashMap<>();
+    private LobbyNativeDialogs nativeDialogs;
+    /** The developer switch's steps through a libGDX dialog, from 0; -1 when there are none. */
+    private int nativeStep = -1;
+    private long nativeAt;
+    /** The file the next frame is saved to, after it is drawn, for the developer switch's libGDX dialogs. */
+    private java.io.File nativeShot;
+    /** Whether the probe logs the lobby and quits once {@link #nativeShot} is saved. */
+    private boolean nativeDone;
     private LobbySnapshot shown;
     private long start;
     private boolean shotSaved;
@@ -264,9 +282,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         forces.attach(stage.getRoot());
         battlefield.attach(stage.getRoot());
         topBar.attach(stage.getRoot());
+        nativeDialogs = new LobbyNativeDialogs(kit, stage, motion);
         stage.addListener(new InputListener() {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
+                // A dialog over the lobby has the keys: none of them reaches the lobby behind it
+                if (event.isHandled() || nativeDialogs.isOpen()) {
+                    return false;
+                }
                 if (keycode != Keys.ESCAPE) {
                     return readyKey(keycode);
                 }
@@ -394,6 +417,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public void chatOpen(boolean open) {
                 preferences.setLobbyChatFolded(!open);
+            }
+
+            @Override
+            public Drawable camo(String key) {
+                return camoDrawables.get(key);
             }
         };
     }
@@ -616,6 +644,53 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         forces.redraw();
     }
 
+    /** GPU thread: takes the camo pictures of the players' swatches, by {@link LobbySnapshot#camoKey}. */
+    void camos(Map<String, BufferedImage> images) {
+        if (stage == null || images.isEmpty()) {
+            return;
+        }
+        images.forEach((key, image) -> {
+            Texture texture = GpuStartScreen.texture(image, true);
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            Texture old = camoTextures.put(key, texture);
+            if (old != null) {
+                old.dispose();
+            }
+            camoDrawables.put(key, new TextureRegionDrawable(texture));
+        });
+        players.camosArrived();
+    }
+
+    /** GPU thread: closes the lobby's open menus, then opens the camo chooser over the lobby. */
+    void camoDialog(LobbyCamoView.Source source, CamoCatalog catalog, CamoChoice choice, boolean assets,
+          Consumer<Camouflage> chosen) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.camo(source, catalog, choice, assets, chosen);
+        }
+    }
+
+    /** GPU thread: closes the lobby's open menus, then opens the player settings over the lobby. */
+    void settingsDialog(PlayerSettingsForm form, List<PlayerSettingsForm.Position> positions,
+          @Nullable BufferedImage camo, LobbyPlayerSettingsView.Host host) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.playerSettings(form, positions, camo, host);
+        }
+    }
+
+    private void closeMenus() {
+        boolean closed = true;
+        while (closed) {
+            closed = topBar.back() || players.back() || forces.back() || battlefield.back();
+        }
+    }
+
+    /** The lobby's libGDX dialogs; null before the screen is made. */
+    @Nullable LobbyNativeDialogs nativeDialogs() {
+        return nativeDialogs;
+    }
+
     /** The battlefield's body goes back to its column whenever another view, or the forces, take the centre. */
     private void centreChanged(String showing) {
         boolean battlefieldShown = BATTLEFIELD.equals(showing);
@@ -692,11 +767,123 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             unitMenuPending = false;
         }
         probeInput();
+        probeNative();
         hud.update(Set.of());
         stage.draw();
+        if (nativeShot != null) {
+            if (GpuStartScreen.saveFrame(nativeShot, bw, bh)) {
+                LOGGER.info("Lobby shot saved to {}", nativeShot.getAbsoluteFile());
+            }
+            nativeShot = null;
+            if (nativeDone) {
+                nativeDone = false;
+                GpuLobbyProbe probe = window.probe();
+                SwingUtilities.invokeLater(() -> {
+                    window.logProbePlayer();
+                    if (probe != null && probe.quit()) {
+                        SwingUtilities.invokeLater(() -> System.exit(0));
+                    }
+                });
+            }
+        }
         takeShot();
     }
 
+    /**
+     * The developer switch's clicks through a libGDX dialog ({@code lobby+dialog=camo} or {@code playersettings}), a
+     * step every second or so once it shows: it picks a colour camo, or the SE start and an offset of 2; saves the
+     * frame; presses OK; and saves the frame again with the lobby changed, then logs the snapshot.
+     */
+    private void probeNative() {
+        GpuLobbyProbe probe = window.probe();
+        if (nativeStep < 0 || probe == null) {
+            return;
+        }
+        double elapsed = (System.nanoTime() - nativeAt) / 1e9;
+        boolean camo = "camo".equals(probe.dialog());
+        UiDialog dialog = nativeDialogs.dialog();
+        Group root = stage.getRoot();
+        switch (nativeStep) {
+            case 0 -> {
+                if (dialog != null && elapsed > 2) {
+                    if (camo) {
+                        probeClick(root.findActor("camo:" + Camouflage.COLOUR_CAMOUFLAGE + "/"));
+                    } else {
+                        probeReveal(dialog, root.findActor("settings-start-5"));
+                    }
+                    nativeStep++;
+                } else if (elapsed > 20) {
+                    LOGGER.warn("The lobby probe's dialog {} never showed", probe.dialog());
+                    nativeStep = -1;
+                }
+            }
+            case 1 -> {
+                if (elapsed > 3) {
+                    if (camo) {
+                        probeClick(root.findActor("camo-item-3"));
+                        LobbyCamoView view = nativeDialogs.camoView();
+                        LOGGER.info("The lobby probe chose the camo {}", view == null ? null : view.choice().result());
+                    } else {
+                        probeClick(root.findActor("settings-start-5"));
+                        Actor offset = root.findActor("settings-offset");
+                        probeClick(offset);
+                        stage.keyTyped('\b');
+                        stage.keyTyped('\b');
+                        stage.keyTyped('2');
+                        LobbyPlayerSettingsView view = nativeDialogs.settingsView();
+                        LOGGER.info("The lobby probe set start {} and offset '{}' ({})",
+                              view == null ? null : view.form().startPos(),
+                              view == null ? null : view.form().text(PlayerSettingsForm.Field.OFFSET),
+                              view == null ? null : view.form().valid() ? "valid" : "invalid");
+                    }
+                    nativeStep++;
+                }
+            }
+            case 2 -> {
+                if (elapsed > 4.5) {
+                    nativeShot = probe.shot();
+                    nativeStep++;
+                }
+            }
+            case 3 -> {
+                if (elapsed > 5.5) {
+                    probeClick(root.findActor(camo ? "camo-ok" : "settings-ok"));
+                    LOGGER.info("The lobby probe pressed OK: dialog open {}", nativeDialogs.isOpen());
+                    nativeStep++;
+                }
+            }
+            case 4 -> {
+                if (elapsed > 9) {
+                    String path = probe.shot().getPath();
+                    nativeShot = new java.io.File(path.replaceFirst("(\\.png)?$", "-after.png"));
+                    nativeStep = -1;
+                    nativeDone = true;
+                }
+            }
+            default -> nativeStep = -1;
+        }
+    }
+
+    private void probeClick(@Nullable Actor target) {
+        if (target == null) {
+            LOGGER.warn("The lobby probe found nothing to click");
+            return;
+        }
+        GpuLobbyProbeInput.click(stage, target);
+    }
+
+    /** Scrolls the dialog's body so that {@code target} shows in the middle. */
+    private static void probeReveal(UiDialog dialog, @Nullable Actor target) {
+        if (target == null) {
+            LOGGER.warn("The lobby probe found nothing to scroll to");
+            return;
+        }
+        ScrollPane scroll = dialog.scroll();
+        scroll.layout();
+        Vector2 at = target.localToAscendantCoordinates(scroll.getActor(), new Vector2());
+        scroll.scrollTo(at.x, at.y, target.getWidth(), target.getHeight(), false, true);
+        scroll.updateVisualScroll();
+    }
     /**
      * The developer switch's clicks, through the stage as the Commander's would go: the compact rows toggle and the
      * Filters button {@value #PROBE_CLICK_AT} s in, Filters again a second later to shut the drawer, and half a second
@@ -851,6 +1038,12 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         shotSaved = true;
+        if (probe.dialog() != null && GpuLobbyProbe.NATIVE_DIALOGS.contains(probe.dialog())) {
+            nativeStep = 0;
+            nativeAt = System.nanoTime();
+            SwingUtilities.invokeLater(() -> probe.openNative(window, window.gui()));
+            return;
+        }
         if (probe.dialog() != null) {
             // The frame buffer has no Swing dialogs, so the screen is photographed instead
             SwingUtilities.invokeLater(window::probeDialog);
@@ -868,7 +1061,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        if (nativeDialogs != null) {
+            nativeDialogs.dispose();
+        }
         window.disposing();
+        camoTextures.values().forEach(Texture::dispose);
+        camoTextures.clear();
+        camoDrawables.clear();
         spriteTextures.values().forEach(Texture::dispose);
         spriteTextures.clear();
         requisitionSprites.values().forEach(sprite -> sprite.getRegion().getTexture().dispose());

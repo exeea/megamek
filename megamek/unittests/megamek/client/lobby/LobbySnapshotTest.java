@@ -227,13 +227,13 @@ class LobbySnapshotTest {
     private static LobbySnapshot.PlayerRow row(int id, String name, int team, boolean self, boolean observer,
           boolean hidden, int bv) {
         return new LobbySnapshot.PlayerRow(id, name, team, false, self, self, false, observer, false, false, hidden, 1,
-              bv, 0, "", true, 0);
+              bv, 0, "", true, 0, "");
     }
 
     @Test
     void countsOnlyThePlayersTheServerWaitsFor() {
         LobbySnapshot.PlayerRow ghost = new LobbySnapshot.PlayerRow(3, "Gone", 1, false, false, false, false, false,
-              false, true, false, 1, 0, 0, "", true, 0);
+              false, true, false, 1, 0, 0, "", true, 0, "");
         LobbySnapshot snapshot = snapshotOf(List.of(new LobbySnapshot.TeamGroup(1, "Team 1",
               List.of(row(1, "Me", 1, true, false, false, 0), row(2, "Watcher", 1, false, true, false, 0), ghost,
                     row(4, "Ally", 1, false, false, false, 0).withReady(true)))));
