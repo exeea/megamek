@@ -657,6 +657,9 @@ class GpuShadingNormalSmokeTest {
                 // First include the leaf itself as caster, then add an independent upstream opaque box.
                 var camera = shadow.getCamera();
                 camera.position.set(light).scl(200); camera.direction.set(light).scl(-1);
+                // A light from above takes the slab (GpuShadowLight.SlabCamera): heights down through the plates.
+                camera.near = GpuShadowLight.slab(camera.direction) ? 100 : 1;
+                camera.far = GpuShadowLight.slab(camera.direction) ? -100 : 500;
                 camera.up.set(0, 1, 0); camera.update();
                 var occluder = new ModelInstance(blocker);
                 occluder.transform.setToTranslation(light.cpy().scl(40));

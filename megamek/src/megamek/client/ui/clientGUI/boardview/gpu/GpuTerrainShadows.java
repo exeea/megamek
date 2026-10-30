@@ -8,7 +8,6 @@ import java.util.List;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -64,7 +63,7 @@ final class GpuTerrainShadows implements Disposable {
     private boolean shadowProjectionValid;
     /** The retained map is clear while its directional source is zero; cleared once per such interval. */
     private boolean shadowEmpty;
-    private final OrthographicCamera shadowFit = new OrthographicCamera();
+    private final GpuShadowLight.SlabCamera shadowFit = new GpuShadowLight.SlabCamera();
     private boolean shadowViewPresent;
     private GpuShadowLight shadow;
     /** Allocated only for gameplay casters. Reuses the unchanged terrain depth when units move. */
@@ -76,7 +75,7 @@ final class GpuTerrainShadows implements Disposable {
     // every time a tilt returns to it and the costliest to draw: its terrain shadow is kept and copied back.
     private FrameBuffer boardShadow;
     private boolean boardShadowValid;
-    private final OrthographicCamera boardShadowFit = new OrthographicCamera();
+    private final GpuShadowLight.SlabCamera boardShadowFit = new GpuShadowLight.SlabCamera();
     private boolean shadowBoardWide;
     private boolean shadowDirty;
     // Frames since a camera refinement last replaced a chunk the cached shadow has not redrawn; -1 when none.
@@ -335,8 +334,10 @@ final class GpuTerrainShadows implements Disposable {
         try {
             Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
             Gdx.gl.glScissor(1, 1, SHADOW_RESOLUTION - 2, SHADOW_RESOLUTION - 2);
+            GpuShadowLight.depthClamp(true);
             casters.units(lightCamera, units);
         } finally {
+            GpuShadowLight.depthClamp(false);
             Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
             shadow.getFrameBuffer().end();
         }
@@ -374,12 +375,13 @@ final class GpuTerrainShadows implements Disposable {
     }
 
     /** Focus texels on visible receivers, retaining the full light depth for offscreen shadow casters. */
-    static void fitShadowCamera(Camera view, Camera target, BoundingBox bounds, Vector3 direction) {
+    static void fitShadowCamera(Camera view, GpuShadowLight.SlabCamera target, BoundingBox bounds, Vector3 direction) {
         fitShadowToReceivers(view == null ? bounds : BoardCamera.viewportBounds(view, bounds), target, bounds, direction);
     }
 
     /** Focus texels on these receivers, retaining the full light depth for offscreen shadow casters. */
-    static void fitShadowToReceivers(BoundingBox receivers, Camera target, BoundingBox bounds, Vector3 direction) {
+    static void fitShadowToReceivers(BoundingBox receivers, GpuShadowLight.SlabCamera target, BoundingBox bounds,
+          Vector3 direction) {
         target.direction.set(direction).nor();
         Vector3 right = new Vector3(target.direction)
               .crs(Math.abs(target.direction.z) > 0.99f ? Vector3.Y : Vector3.Z).nor();
@@ -404,9 +406,18 @@ final class GpuTerrainShadows implements Disposable {
         target.viewportWidth = Math.max(1, lightSpace.getWidth()) * border;
         target.viewportHeight = Math.max(1, lightSpace.getHeight()) * border;
         Vector3 center = lightSpace.getCenter(new Vector3());
-        target.position.set(right).scl(center.x).mulAdd(target.up, center.y).mulAdd(target.direction, near - 1);
-        target.near = 1;
-        target.far = far - near + 2;
+        target.position.set(right).scl(center.x).mulAdd(target.up, center.y);
+        if (GpuShadowLight.slab(target.direction)) {
+            // Depth runs down all casters' heights, onscreen or not, from a world unit above the highest to one below
+            // the lowest (GpuShadowLight.SlabCamera).
+            target.near = bounds.max.z + 1;
+            target.far = bounds.min.z - 1;
+        } else {
+            // Lower than the world sun ever is, along the light over all casters, onscreen or not.
+            target.position.mulAdd(target.direction, near - 1);
+            target.near = 1;
+            target.far = far - near + 2;
+        }
         snapShadowCamera(target);
     }
 

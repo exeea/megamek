@@ -27,7 +27,7 @@ class BoardShadowTest {
         Vector3 direction = new Vector3(2, 1, -1).nor();
         BoundingBox small = new BoundingBox(new Vector3(-1000, -1000, -30), new Vector3(1000, 1000, 120));
         BoundingBox large = new BoundingBox(new Vector3(-20000, -20000, -30), new Vector3(20000, 20000, 120));
-        OrthographicCamera target = new OrthographicCamera();
+        GpuShadowLight.SlabCamera target = new GpuShadowLight.SlabCamera();
         for (boolean isometric : new boolean[] { false, true }) {
             view.setIsometric(isometric);
             GpuTerrainShadows.fitShadowCamera(view.camera, target, small, direction);
@@ -60,7 +60,7 @@ class BoardShadowTest {
         view.resize(1000, 700);
         view.zoom(0.2f);
         BoundingBox bounds = new BoundingBox(new Vector3(0, -15000, -30), new Vector3(13000, 0, 100));
-        OrthographicCamera target = new OrthographicCamera();
+        GpuShadowLight.SlabCamera target = new GpuShadowLight.SlabCamera();
         for (Vector3 direction : new Vector3[] { new Vector3(0, 0, -1), new Vector3(2, 1, -1).nor() }) {
             for (Vector3 focus : new Vector3[] { new Vector3(5000, -5000, 0), new Vector3(13000, -15000, 0) }) {
                 view.center(focus);
@@ -84,7 +84,7 @@ class BoardShadowTest {
         view.update();
         Vector3 direction = new Vector3(2, 1, -1).nor();
         BoundingBox bounds = new BoundingBox(new Vector3(-20000, -20000, 0), new Vector3(20000, 20000, 120));
-        OrthographicCamera target = new OrthographicCamera();
+        GpuShadowLight.SlabCamera target = new GpuShadowLight.SlabCamera();
         GpuTerrainShadows.fitShadowCamera(view, target, bounds, direction);
         assertTrue(target.viewportWidth < 1500 && target.viewportHeight < 1500,
               "A perspective closeup must not spread shadow texels over the whole board");
@@ -114,8 +114,8 @@ class BoardShadowTest {
         view.update();
         BoundingBox bounds = new BoundingBox(new Vector3(-1000, -1000, 0), new Vector3(1000, 1000, 120));
         Vector3 direction = new Vector3(2, 1, -1).nor();
-        OrthographicCamera target = new OrthographicCamera();
-        OrthographicCamera wholeBoard = new OrthographicCamera();
+        GpuShadowLight.SlabCamera target = new GpuShadowLight.SlabCamera();
+        GpuShadowLight.SlabCamera wholeBoard = new GpuShadowLight.SlabCamera();
         GpuTerrainShadows.fitShadowCamera(null, wholeBoard, bounds, direction);
         GpuTerrainShadows.fitShadowCamera(view, target, bounds, direction);
         assertEquals(wholeBoard.viewportWidth, target.viewportWidth, .001f);
@@ -133,7 +133,7 @@ class BoardShadowTest {
         view.zoom(.4f);
         BoundingBox bounds = new BoundingBox(new Vector3(-20000, -20000, -30), new Vector3(20000, 20000, 120));
         Vector3 sun = new Vector3(2, 1, -1).nor();
-        OrthographicCamera cached = new OrthographicCamera(), required = new OrthographicCamera();
+        GpuShadowLight.SlabCamera cached = new GpuShadowLight.SlabCamera(), required = new GpuShadowLight.SlabCamera();
         GpuTerrainShadows.fitShadowCamera(view.camera, cached, bounds, sun);
         cached.viewportWidth *= 1.1f;
         cached.viewportHeight *= 1.1f;
@@ -155,7 +155,7 @@ class BoardShadowTest {
         BoardCamera view = new BoardCamera();
         view.resize(1000, 700);
         BoundingBox bounds = new BoundingBox(new Vector3(-1000, -1000, -30), new Vector3(1000, 1000, 120));
-        OrthographicCamera cached = new OrthographicCamera(), required = new OrthographicCamera();
+        GpuShadowLight.SlabCamera cached = new GpuShadowLight.SlabCamera(), required = new GpuShadowLight.SlabCamera();
         Vector3 sun = new Vector3(0, 0, -1);
         GpuTerrainShadows.fitShadowCamera(view.camera, cached, bounds, sun);
         cached.viewportWidth *= 1.1f;
@@ -180,7 +180,7 @@ class BoardShadowTest {
         for (boolean perspective : new boolean[] { false, true }) {
             view.setIsometric(false);
             view.setPerspective(perspective);
-            OrthographicCamera cached = new OrthographicCamera(), required = new OrthographicCamera();
+            GpuShadowLight.SlabCamera cached = new GpuShadowLight.SlabCamera(), required = new GpuShadowLight.SlabCamera();
             GpuTerrainShadows.fitShadowCamera(view.camera, cached, bounds, sun);
             cached.viewportWidth *= 1.1f;
             cached.viewportHeight *= 1.1f;
@@ -191,6 +191,63 @@ class BoardShadowTest {
                 assertTrue(GpuTerrainShadows.canReuseShadowCamera(cached, required));
                 for (Vector3 corner : required.frustum.planePoints) { assertInside(cached, corner); }
             }
+        }
+    }
+
+    @Test
+    void slabDepthRunsDownTheCastersAlongEveryRayOfLight() {
+        BoundingBox bounds = new BoundingBox(new Vector3(-2000, -2000, -30), new Vector3(2000, 2000, 120));
+        for (Vector3 direction : new Vector3[] { new Vector3(2, 1, -1).nor(), new Vector3(1, 0, -.25f).nor() }) {
+            GpuShadowLight.SlabCamera slab = new GpuShadowLight.SlabCamera();
+            GpuTerrainShadows.fitShadowCamera(null, slab, bounds, direction);
+            OrthographicCamera plain = new OrthographicCamera();
+            plain.position.set(slab.position);
+            plain.direction.set(slab.direction);
+            plain.up.set(slab.up);
+            plain.viewportWidth = slab.viewportWidth;
+            plain.viewportHeight = slab.viewportHeight;
+            plain.near = -10000;
+            plain.far = 10000;
+            plain.update();
+            Vector3 point = new Vector3(300, -200, 40);
+            Vector3 inSlab = point.cpy().prj(slab.combined), inPlain = point.cpy().prj(plain.combined);
+            assertEquals(inPlain.x, inSlab.x, 1e-5f, "Across the map the slab is the light's own projection");
+            assertEquals(inPlain.y, inSlab.y, 1e-5f);
+            // Depth: 0 at the slab's top, 1 at its bottom, a world unit beyond the casters' heights.
+            assertEquals(-1, new Vector3(0, 0, bounds.max.z + 1).prj(slab.combined).z, 1e-5f);
+            assertEquals(1, new Vector3(0, 0, bounds.min.z - 1).prj(slab.combined).z, 1e-5f);
+            // Farther from the sun along a ray: the same texel, deeper.
+            Vector3 farther = point.cpy().mulAdd(direction, 25).prj(slab.combined);
+            assertEquals(inSlab.x, farther.x, 1e-5f);
+            assertEquals(inSlab.y, farther.y, 1e-5f);
+            assertTrue(farther.z > inSlab.z);
+            for (int corner = 0; corner < 8; corner++) {
+                assertInside(slab, new Vector3((corner & 1) == 0 ? bounds.min.x : bounds.max.x,
+                      (corner & 2) == 0 ? bounds.min.y : bounds.max.y, (corner & 4) == 0 ? bounds.min.z : bounds.max.z));
+            }
+        }
+    }
+
+    @Test
+    void onlyLightsBelowTheWorldSunMeasureDepthAlongTheLight() {
+        // Every world-fixed sun and moon takes the slab, its lowest included.
+        for (float hour = 0; hour < 24; hour += .25f) {
+            Vector3 world = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0,
+                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)).direction();
+            assertTrue(GpuShadowLight.slab(new Vector3(world).nor()), "World light at " + hour + " h: " + world);
+        }
+        // The camera-relative light's floor (Lighting.relativeTo) keeps depth along the light: none across the map.
+        BoundingBox bounds = new BoundingBox(new Vector3(-2000, -2000, -30), new Vector3(2000, 2000, 120));
+        Vector3 direction = new Vector3(1, 0, -.05f).nor();
+        GpuShadowLight.SlabCamera camera = new GpuShadowLight.SlabCamera();
+        GpuTerrainShadows.fitShadowCamera(null, camera, bounds, direction);
+        Vector3 point = new Vector3(300, -200, 40);
+        float depth = point.cpy().prj(camera.combined).z;
+        assertEquals(depth, point.cpy().mulAdd(camera.up, 50).prj(camera.combined).z, 1e-5f);
+        assertTrue(point.cpy().mulAdd(direction, 25).prj(camera.combined).z > depth);
+        for (int corner = 0; corner < 8; corner++) {
+            assertInside(camera, new Vector3((corner & 1) == 0 ? bounds.min.x : bounds.max.x,
+                  (corner & 2) == 0 ? bounds.min.y : bounds.max.y, (corner & 4) == 0 ? bounds.min.z : bounds.max.z));
         }
     }
 

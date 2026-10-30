@@ -15,10 +15,21 @@ uniform float u_shadowPCFOffset;
 uniform mat4 u_shadowMapProjViewTrans;
 in vec3 v_shadowMapUv;
 
-// One hardware comparison at at (shadow-map coordinates), against the receiver's plane there (slope: its depth per unit
-// across the map) and depth further along it. The map has no mip levels: an explicit level lets taps sit in branches.
+// The receiver's plane moves a comparison by the map's drift (shadowDrift) in full and by the rest of its slope at most
+// shadowPlaneLimit, in map depth; sculptShadow and surfaceVisibility set both.
+vec2 shadowPlaneDrift;
+float shadowPlaneLimit;
+
+// The receiver's plane (slope: its depth per unit across the map) offset away across the map.
+float shadowPlane(vec2 offset, vec2 slope) {
+    return dot(offset, shadowPlaneDrift)
+          + clamp(dot(offset, slope - shadowPlaneDrift), -shadowPlaneLimit, shadowPlaneLimit);
+}
+
+// One hardware comparison at at (shadow-map coordinates), against the receiver's plane there and depth further along
+// it. The map has no mip levels: an explicit level lets taps sit in branches.
 float shadowTap(vec3 uv, vec2 slope, vec2 at, float depth) {
-    return textureLod(u_shadowTexture, vec3(at, uv.z + depth + clamp(dot(at - uv.xy, slope), -.002, .002)), 0.0);
+    return textureLod(u_shadowTexture, vec3(at, uv.z + depth + shadowPlane(at - uv.xy, slope)), 0.0);
 }
 
 // Two adjacent texels' tent weights, first and first + 1 (texel centres at whole numbers of p), as one bilinear
@@ -31,6 +42,15 @@ vec2 shadowPair(float p, float halfWidth, float first) {
 
 // Texels across the square shadow map: libGDX's u_shadowPCFOffset is half of one.
 float shadowMapSize() { return .5 / u_shadowPCFOffset; }
+
+// The map's depth per unit across it at one distance from the sun: none for depth along the light; for height across
+// the casters' slab (GpuShadowLight.SlabCamera) the drift shadow-depth.frag leaves out of the casters' slope bias.
+vec2 shadowDrift() {
+    vec3 across = vec3(u_shadowMapProjViewTrans[0][0], u_shadowMapProjViewTrans[1][0], u_shadowMapProjViewTrans[2][0]);
+    vec3 up = vec3(u_shadowMapProjViewTrans[0][1], u_shadowMapProjViewTrans[1][1], u_shadowMapProjViewTrans[2][1]);
+    vec3 row = vec3(u_shadowMapProjViewTrans[0][2], u_shadowMapProjViewTrans[1][2], u_shadowMapProjViewTrans[2][2]);
+    return vec2(dot(row, across) / dot(across, across), dot(row, up) / dot(up, up));
+}
 
 // A pair's comparison at height y (shadowTent), weighted; none where a narrow tent gives it no weight.
 float shadowWeighted(vec3 uv, vec2 slope, float size, vec2 x, float y) {
@@ -132,9 +152,12 @@ vec3 skyReflection(vec3 normal, vec3 view, float roughness, vec3 f0, vec3 ground
 }
 
 // Models and the other surfaces: the terrain's tent (sculptShadow) at a fixed width, in four comparisons. Without
-// the receiver's plane, it keeps the texels a four-tap box read, so a surface lit at an angle does not shadow itself.
+// the receiver's plane, it keeps the texels a four-tap box read, so a surface lit at an angle does not shadow itself:
+// the casters' slope bias covers the box. The comparisons follow only the map's drift, which that bias leaves out.
 float surfaceVisibility() {
 #ifdef shadowMapFlag
+    shadowPlaneDrift = shadowDrift();
+    shadowPlaneLimit = 0.0;
     return shadowVisibility(shadowTent(v_shadowMapUv, vec2(0.0), 1.5, false));
 #else
     return 1.0;
@@ -149,6 +172,9 @@ in float v_impostorLift;
 // The sculpted terrain and its trees widen the tent with the distance to what casts the shadow (contact hardening).
 // The sun's disc, about half a degree across: a penumbra is this share of the distance from what casts it.
 const float SUN_DIAMETER = .0093;
+// Beyond the map's drift, the receiver's plane moves a comparison at most this far along the light, in metres
+// (shadowPlaneLimit).
+const float RECEIVER_PLANE_METRES = 1.0;
 
 // metre: world units per metre. lift: how far the visible surface stands out along normal from the mesh, its relief
 // (terrain parallax): raised grains catch the light at a shadow's edge and hollows fall into it first. fray: a shift
@@ -174,15 +200,23 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) 
     vec3 du = dFdx(shadowUv), dv = dFdy(shadowUv);
     float det = du.x * dv.y - du.y * dv.x;
     vec2 slope = abs(det) > 1e-14 ? vec2(dv.y * du.z - du.y * dv.z, du.x * dv.z - dv.x * du.z) / det : vec2(0.0);
+    // Map depth per world unit toward the sun: the depth row along the light, whatever the map's depth measures
+    // (GpuShadowLight.SlabCamera: height across the casters' slab).
+    float depthPerUnit = .5 * abs(dot(vec3(u_shadowMapProjViewTrans[0][2], u_shadowMapProjViewTrans[1][2],
+          u_shadowMapProjViewTrans[2][2]), light));
+    shadowPlaneLimit = RECEIVER_PLANE_METRES * metre * depthPerUnit;
+    shadowPlaneDrift = shadowDrift();
     // After the receiver plane: the fray moves where the edge falls, along the surface as the taps do, never into it.
     vec2 frayUv = fray * metre * .5 * length(row);
-    shadowUv += vec3(frayUv, clamp(dot(frayUv, slope), -.002, .002));
+    shadowUv += vec3(frayUv, shadowPlane(frayUv, slope));
     // The widest tent (shadowTent) reaches six by six texels: nine blocks of two by two, each one comparison at its
-    // middle. Against the highest depth any tent compares in a block (half a texel of the receiver's plane above, the
-    // plane's clamp bounding it), the centre and its four edges lit: lit, the corners, a fifth of the widest tent's
-    // weight, unseen. Against the lowest, all nine shadowed: every texel any tent reads is shadowed, the umbra, exactly.
+    // middle. Against the highest depth any tent compares in a block (half a texel of the receiver's plane above: its
+    // drift in full, the plane's clamp bounding the rest), the centre and its four edges lit: lit, the corners, a fifth
+    // of the widest tent's weight, unseen. Against the lowest, all nine shadowed: every texel any tent reads is
+    // shadowed, the umbra, exactly.
     float size = shadowMapSize(), spacing = 2.0 / size;
-    float bound = min(.5 * (abs(slope.x) + abs(slope.y)) / size, .004);
+    vec2 drift = abs(shadowPlaneDrift), bent = abs(slope - shadowPlaneDrift);
+    float bound = .5 * (drift.x + drift.y) / size + min(.5 * (bent.x + bent.y) / size, 2.0 * shadowPlaneLimit);
     vec2 middle = (floor(shadowUv.xy * size - .5) + 1.0) / size;
     float lit = shadowCross(shadowUv, slope, middle, spacing, bound);
     if (lit >= 4.9999) return 1.0;
@@ -195,8 +229,6 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) 
     // Half the penumbra in texels, as the tent's half width: from one (the map resolves no finer) to the widest.
     float halfWidth = 1.0;
     if (blocked > 1e-4) {
-        float depthPerUnit = .5 * length(vec3(u_shadowMapProjViewTrans[0][2], u_shadowMapProjViewTrans[1][2],
-              u_shadowMapProjViewTrans[2][2]));
         float beyondNear = 5.0 - shadowCross(shadowUv, slope, middle, spacing, -3.0 * metre * depthPerUnit);
         float beyondFar = 5.0 - shadowCross(shadowUv, slope, middle, spacing, -15.0 * metre * depthPerUnit);
         float caster = (1.5 + 5.5 * beyondNear / blocked + 23.0 * beyondFar / blocked) * metre;

@@ -28,13 +28,21 @@ uniform float u_shadowStrength;
 // SCATTERING_PHASE
 // GROUND_LAYER
 
+// Air this many world units nearer the sun than the surface under it reads lit (sunlight).
+const float GEOMETRY_SHADOW_BIAS = 1.0;
+
 float sunlight(vec3 position) {
     float light = cloudTransmission(position);
     if (u_hasGeometryShadow > 0.5 && u_shadowStrength > 0.0) {
         vec4 projected = u_geometryProjection * vec4(position, 1.0);
         vec3 uv = projected.xyz / projected.w * 0.5 + 0.5;
         if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0 && uv.z > 0.0 && uv.z < 1.0) {
-            light *= mix(1.0, texture(u_geometryShadow, vec3(uv.xy, uv.z - 0.0005)), u_shadowStrength);
+            // Map depth per world unit toward the sun: the depth row along the light, whatever the map's depth
+            // measures (GpuShadowLight.SlabCamera: height across the casters' slab).
+            float depthPerUnit = .5 * abs(dot(vec3(u_geometryProjection[0][2], u_geometryProjection[1][2],
+                  u_geometryProjection[2][2]), u_sunDirection));
+            light *= mix(1.0, texture(u_geometryShadow, vec3(uv.xy, uv.z - GEOMETRY_SHADOW_BIAS * depthPerUnit)),
+                  u_shadowStrength);
         }
     }
     return light;

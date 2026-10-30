@@ -890,7 +890,9 @@ final class GpuTerrain implements Disposable {
     }
 
     private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
-          GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")))),
+          GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.replaceOnce(
+                GpuShaderSource.read("shadow-depth.frag"), "// SHADOW_MAP_TEXELS",
+                "#define MAP_TEXELS " + GpuTerrainShadows.SHADOW_RESOLUTION + ".0\n//", "shadow depth")))),
           new GpuOpaqueSorter());
     /** The sun's shadow map and its caches; the terrain's depth pass and the units cast into it. */
     private final GpuTerrainShadows shadowMap = new GpuTerrainShadows(new GpuTerrainShadows.Casters() {

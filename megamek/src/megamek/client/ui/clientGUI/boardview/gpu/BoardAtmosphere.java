@@ -34,6 +34,8 @@ final class BoardAtmosphere {
     private static final int FLAMMABLE_TAINT_COLOR = 0xc58e68ff;
     /** Keep low-angle shadows about five caster-heights long without unbounded incidence compensation. */
     private static final float MIN_LIGHT_ALTITUDE = 0.24f;
+    /** The z of the world-fixed sun's lowest light; only the camera-relative light (Lighting.relativeTo) goes lower. */
+    static final float LOWEST_SUN_Z = direction(6, true).z;
     /**
      * The moon stays higher, casting shadows about two caster-heights long: its beam carries the night fill that the
      * moon contrast moves into it, and at a grazing angle it would light walls and plants brighter than daylight.
