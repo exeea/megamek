@@ -6,6 +6,7 @@ import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.Vector;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -38,6 +40,7 @@ import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
+import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyForces;
@@ -46,16 +49,19 @@ import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.lobby.LobbyUnitOrder;
+import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.helpDialogs.PrincessHelpDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
+import megamek.client.ui.panels.phaseDisplay.lobby.VictoryConditionsDialog;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.util.PlayerColour;
@@ -79,8 +85,13 @@ import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MekSummary;
+import megamek.common.options.GameOptions;
+import megamek.common.options.IBasicOption;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
+import megamek.common.units.Mek;
+import megamek.common.units.Tank;
 import megamek.logging.MMLogger;
 import megamek.server.ServerBoardHelper;
 
@@ -180,6 +191,9 @@ public final class GpuLobbyWindow {
         @Override
         public void gameSettingsChange(GameSettingsChangeEvent event) {
             queueRefresh();
+            if (!event.isMapSettingsOnlyChange()) {
+                gameOptionsChanged();
+            }
         }
 
         @Override
@@ -401,6 +415,9 @@ public final class GpuLobbyWindow {
         LOGGER.info("Lobby probe player: camo {}, start {} offset {}; snapshot camo '{}', start '{}'",
               LobbySnapshot.camoKey(local.getCamouflage()), local.getStartingPos(), local.getStartOffset(),
               row == null ? null : row.camo(), row == null ? null : row.start());
+        LobbyBattlefield battlefield = snapshot.battlefield();
+        LOGGER.info("Lobby probe battlefield: conditions '{}', rules '{}', notable rules {}",
+              battlefield.conditions(), battlefield.rulesLine(), battlefield.notableRules());
         gui.getLocalBots().forEach((name, bot) -> {
             Player player = bot.getLocalPlayer();
             String behavior = bot instanceof BotClient botClient ? botClient.getBehaviorSettings().toLog() : "-";
@@ -729,7 +746,11 @@ public final class GpuLobbyWindow {
         return new LobbyBattlefieldController.Lounge() {
             @Override
             public void command(LobbyBattlefieldController.Command command) {
-                lounge.battlefieldCommand(SwingLobbyServices.BattlefieldCommand.valueOf(command.name()));
+                switch (command) {
+                    case CONDITIONS -> openConditions();
+                    case GAME_OPTIONS -> openGameOptions();
+                    default -> lounge.battlefieldCommand(SwingLobbyServices.BattlefieldCommand.valueOf(command.name()));
+                }
             }
 
             @Override
@@ -1368,6 +1389,147 @@ public final class GpuLobbyWindow {
             if (shown != null) {
                 shown.botSetupDialog(form, host);
             }
+        });
+    }
+
+    /** Runs {@code work} on the Swing thread unless the lobby closes, then {@code then} on the GPU thread. */
+    private void edt(String what, Runnable work, Runnable then) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                if (!closing) {
+                    work.run();
+                }
+            } catch (RuntimeException failure) {
+                LOGGER.error(failure, "The lobby's {} failed", what);
+            } finally {
+                GpuHost.post(then);
+                queueRefresh();
+            }
+        });
+    }
+
+    /** EDT: reads the planetary conditions and opens them natively over the lobby; OK sends them to the server. */
+    private void openConditions() {
+        if (closing) {
+            return;
+        }
+        PlanetaryConditionsForm form;
+        try {
+            form = new PlanetaryConditionsForm(gui.getClient().getGame().getPlanetaryConditions());
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the planetary conditions");
+            return;
+        }
+        LobbyConditionsView.Host host = new LobbyConditionsView.Host() {
+            @Override
+            public void send(PlanetaryConditions conditions) {
+                gui.getClient().sendPlanetaryConditions(conditions);
+            }
+
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                GpuLobbyWindow.this.edt("planetary conditions", work, then);
+            }
+        };
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.conditionsDialog(form, host);
+            }
+        });
+    }
+
+    /** EDT: the game's options as the lobby edits them, its victory options left to the Victory Conditions. */
+    private GameOptionsForm gameOptionsForm() {
+        return new GameOptionsForm(gui.getClient().getGame().getOptions(),
+              Set.of(VictoryConditionsDialog.VICTORY_OPTIONS_GROUP_NAME), true);
+    }
+
+    /**
+     * EDT: reads the game options and opens them natively over the lobby; OK sends the changed ones to the server and
+     * saves them all as the last used, as the Swing dialog does.
+     */
+    private void openGameOptions() {
+        if (closing) {
+            return;
+        }
+        GameOptionsForm form;
+        try {
+            form = gameOptionsForm();
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the game options");
+            return;
+        }
+        LobbyGameOptionsView.Host host = new LobbyGameOptionsView.Host() {
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                GpuLobbyWindow.this.edt("game options", work, then);
+            }
+
+            @Override
+            public void send(String password, Vector<IBasicOption> changed, Vector<IBasicOption> all) {
+                if (!changed.isEmpty()) {
+                    gui.getClient().sendGameOptions(password, changed);
+                }
+                GameOptions.saveOptions(all);
+            }
+
+            @Override
+            public void save(Vector<IBasicOption> all) {
+                File file = GameOptionsDialog.selectGameOptionsFile(swingDialogs.parent(), true);
+                if (file != null) {
+                    GameOptions.saveOptions(all, file.getAbsolutePath());
+                }
+            }
+
+            @Override
+            public boolean load(GameOptions into) {
+                File file = GameOptionsDialog.selectGameOptionsFile(swingDialogs.parent(), false);
+                if (file == null) {
+                    return false;
+                }
+                into.loadOptions(file, false);
+                return true;
+            }
+
+            @Override
+            public void grabBars() {
+                for (Entity entity : gui.getClient().getGame().getEntitiesVector()) {
+                    if (entity instanceof Mek mek) {
+                        mek.setBAGrabBars();
+                    } else if (entity instanceof Tank tank) {
+                        tank.setBAGrabBars();
+                    }
+                }
+            }
+        };
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.gameOptionsDialog(form, host);
+            }
+        });
+    }
+
+    /** Any thread: shows the server's options in the native game options, when they show, as the Swing dialog does. */
+    private void gameOptionsChanged() {
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown == null || !shown.gameOptionsOpen()) {
+                return;
+            }
+            SwingUtilities.invokeLater(() -> {
+                if (closing) {
+                    return;
+                }
+                GameOptionsForm fresh = gameOptionsForm();
+                GpuHost.post(() -> {
+                    GpuLobbyScreen now = screen;
+                    if (now != null) {
+                        now.gameOptionsChanged(fresh);
+                    }
+                });
+            });
         });
     }
 

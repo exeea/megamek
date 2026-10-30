@@ -121,11 +121,14 @@ import org.lwjgl.glfw.GLFW;
  *     {@code randommap}, {@code mapsetup}, {@code loadmapsetup}, {@code camo}, {@code playersettings},
  *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3}, {@code randomarmy}, {@code skills},
  *     {@code names}, {@code loadlist} and {@code alert}. The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
- *     {@code playersettings}, {@code botconfig} and {@code addbot}) open on the stage instead, where the probe clicks
- *     through them: a colour camo for {@code camo}, the SE start and an offset of 2 for {@code playersettings}, the
- *     COWARDLY preset, the pirate switch and the bravery slider's top for the first local bot's settings
- *     ({@code botconfig}) or a new bot on a new team ({@code addbot}), and with {@code +targets} a force and a hex on
- *     the targets tab; it saves the frame buffer, presses OK, and logs what the next snapshot shows.</li>
+ *     {@code playersettings}, {@code botconfig}, {@code addbot}, {@code conditions} and {@code gameoptions}) open on
+ *     the stage instead, where the probe clicks through them: a colour camo for {@code camo}, the SE start and an
+ *     offset of 2 for {@code playersettings}, the COWARDLY preset, the pirate switch and the bravery slider's top for
+ *     the first local bot's settings ({@code botconfig}) or a new bot on a new team ({@code addbot}), and with
+ *     {@code +targets} a force and a hex on the targets tab; two steps down the light and one down the weather for
+ *     {@code conditions}; a search for double blind and its check box for {@code gameoptions}; it saves the frame
+ *     buffer, presses OK, and logs what the next snapshot shows, the battlefield's conditions and notable rules
+ *     among it.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
@@ -445,7 +448,8 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     }
 
     /** The dialogs {@code lobby+dialog=name} opens on the stage, the lobby's libGDX dialogs. */
-    static final Set<String> NATIVE_DIALOGS = Set.of("camo", "playersettings", "botconfig", "addbot");
+    static final Set<String> NATIVE_DIALOGS = Set.of("camo", "playersettings", "botconfig", "addbot", "conditions",
+          "gameoptions");
 
     /** EDT: opens the libGDX dialog {@link #dialog()} names, as the lobby's control would. */
     void openNative(GpuLobbyWindow window, ClientGUI gui) {

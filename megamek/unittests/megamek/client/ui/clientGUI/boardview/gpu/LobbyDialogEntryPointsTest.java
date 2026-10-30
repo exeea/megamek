@@ -80,10 +80,15 @@ class LobbyDialogEntryPointsTest {
         assertFalse(window.contains("new PlayerSettingsDialog("));
         assertFalse(window.contains("new BotConfigDialog("));
         assertFalse(window.contains("doAlertDialog("));
+        // The planetary conditions and game options too; the window's own command opens them natively
+        assertFalse(window.contains("new PlanetaryConditionsDialog("));
+        assertFalse(window.contains("new GameOptionsDialog("));
         String screen = Files.readString(GPU.resolve("GpuLobbyScreen.java"));
         assertTrue(screen.contains("nativeDialogs.camo("));
         assertTrue(screen.contains("nativeDialogs.playerSettings("));
         assertTrue(screen.contains("nativeDialogs.botSetup("));
+        assertTrue(screen.contains("nativeDialogs.conditions("));
+        assertTrue(screen.contains("nativeDialogs.gameOptions("));
         assertTrue(screen.contains("nativeDialogs.message("));
     }
 

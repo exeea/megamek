@@ -1063,8 +1063,21 @@ public class GameOptionsDialog extends AbstractButtonDialog implements ActionLis
     }
 
     private File selectGameOptionsFile(boolean saveDialog) {
+        return selectGameOptionsFile(this, saveDialog);
+    }
+
+    /**
+     * Asks for a game options file in the mmconf directory, offering the XML files that hold options; a chosen name
+     * without the ".xml" extension gets it. Swing thread.
+     *
+     * @param parent     the window the file chooser goes over
+     * @param saveDialog whether to save rather than to open
+     *
+     * @return the chosen file, or null when none was chosen
+     */
+    public static @Nullable File selectGameOptionsFile(Component parent, boolean saveDialog) {
         JFileChooser fc = new JFileChooser("mmconf");
-        fc.setLocation(getLocation().x + 150, getLocation().y + 100);
+        fc.setLocation(parent.getLocation().x + 150, parent.getLocation().y + 100);
         fc.setFileFilter(new FileFilter() {
             @Override
             public boolean accept(File dir) {
@@ -1089,7 +1102,7 @@ public class GameOptionsDialog extends AbstractButtonDialog implements ActionLis
                 return "GameOptions";
             }
         });
-        int returnVal = saveDialog ? fc.showSaveDialog(this) : fc.showOpenDialog(this);
+        int returnVal = saveDialog ? fc.showSaveDialog(parent) : fc.showOpenDialog(parent);
         if ((returnVal != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
             return null;
         }

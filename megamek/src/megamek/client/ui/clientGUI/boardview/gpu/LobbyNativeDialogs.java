@@ -14,6 +14,8 @@ import jakarta.annotation.Nullable;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
+import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
@@ -23,10 +25,11 @@ import megamek.common.icons.Camouflage;
 
 /**
  * The single entry point of the lobby's libGDX dialogs, as {@link LobbyDialogs} is of its Swing ones: the camo chooser,
- * the player settings, the bot setup and a message so far, the others moving here one at a time. A dialog shows over
- * the whole lobby on a scrim that takes every click and key ({@link UiDialog}). Opening the camo chooser or the player
- * settings replaces whatever shows; the bot setup and a message go over it, as the player settings' Bot settings opens
- * the bot setup, and closing one shows the one below again. Every {@code new UiDialog} of the lobby is here, which
+ * the player settings, the bot setup, the planetary conditions, the game options, a message and a confirmation. A
+ * dialog shows over the whole lobby on a scrim that takes every click and key ({@link UiDialog}). Opening the camo
+ * chooser, the player settings, the conditions or the game options replaces whatever shows; the bot setup, a message
+ * and a confirmation go over it, as the player settings' Bot settings opens the bot setup or hiding a rule category
+ * asks first, and closing one shows the one below again. Every {@code new UiDialog} of the lobby is here, which
  * {@code LobbyDialogEntryPointsTest} enforces.
  * <p>
  * GPU thread. The camo pictures are read on a daemon thread of their own.
@@ -35,12 +38,21 @@ final class LobbyNativeDialogs {
     private final UiKit kit;
     private final Stage stage;
     private final boolean motion;
+    /** The game options' width (tokens.md): dialog.lg and dialog.sm, the navigation beside a page of options. */
+    static final float OPTIONS_WIDTH = DesignTokens.shipped().size().get("dialog.lg")
+          + DesignTokens.shipped().size().get("dialog.sm");
+    /** What the game options' card takes above and below its page: the title bar and the footer, with their gaps. */
+    private static final float OPTIONS_CHROME = 180;
+    private static final float OPTIONS_MIN_PANE = 280;
+    private static final float OPTIONS_MAX_PANE = 760;
     private ExecutorService pictures;
     /** The dialogs that show, the top one first, each with what to do once it has closed. */
     private final Deque<Open> open = new ArrayDeque<>();
     private LobbyCamoView camoView;
     private LobbyPlayerSettingsView settingsView;
     private LobbyBotSetupView botView;
+    private LobbyConditionsView conditionsView;
+    private LobbyGameOptionsView optionsView;
 
     private record Open(UiDialog dialog, Runnable closed) { }
 
@@ -83,7 +95,8 @@ final class LobbyNativeDialogs {
                 return thread;
             });
         }
-        camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures, bodyWidth(dialog),
+        camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures, bodyWidth(dialog,
+              "dialog.lg"),
               chosen, this::close);
         show(dialog);
         return camoView;
@@ -113,9 +126,50 @@ final class LobbyNativeDialogs {
      */
     LobbyBotSetupView botSetup(BotSetupForm form, LobbyBotSetupView.Host host) {
         UiDialog dialog = begin(Messages.getString("BotConfigDialog.title"), "dialog.lg", true, () -> botView = null);
-        botView = new LobbyBotSetupView(kit, dialog, form, bodyWidth(dialog), host, this::close);
+        botView = new LobbyBotSetupView(kit, dialog, form, bodyWidth(dialog, "dialog.lg"), host, this::close);
         show(dialog);
         return botView;
+    }
+
+    /** Opens the planetary conditions. */
+    LobbyConditionsView conditions(PlanetaryConditionsForm form, LobbyConditionsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("PlanetaryConditionsDialog.title"), "dialog.md", false,
+              () -> conditionsView = null);
+        conditionsView = new LobbyConditionsView(kit, dialog, form, host, this::close);
+        show(dialog);
+        return conditionsView;
+    }
+
+    /**
+     * Opens the game options, as wide as a large and a small dialog side by side ({@link #OPTIONS_WIDTH}), its page
+     * as high as the window leaves.
+     */
+    LobbyGameOptionsView gameOptions(GameOptionsForm form, LobbyGameOptionsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("GameOptionsDialog.title"), OPTIONS_WIDTH, false,
+              () -> optionsView = null);
+        float space = DesignTokens.shipped().space().get("xxxl");
+        // The window less its margins, the card's title and footer, and the navigation's search above the tree
+        float paneHeight = Math.clamp(stage.getHeight() - 2 * space - OPTIONS_CHROME, OPTIONS_MIN_PANE,
+              OPTIONS_MAX_PANE);
+        optionsView = new LobbyGameOptionsView(kit, dialog, this, form, bodyWidth(dialog, OPTIONS_WIDTH), paneHeight,
+              host, this::close);
+        show(dialog);
+        return optionsView;
+    }
+
+    /** Asks {@code text} over whatever shows; {@code yes} runs once OK closed it, and Cancel only closes it. */
+    UiDialog confirm(String title, String text, Runnable yes) {
+        UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
+        var label = kit.typeLabel(text, "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.primary(Messages.getString("Ok.text"), () -> {
+            close();
+            yes.run();
+        }).setName("confirm-ok");
+        dialog.cancelButton(Messages.getString("Cancel.text")).setName("confirm-cancel");
+        show(dialog);
+        return dialog;
     }
 
     /** Shows {@code text} with an OK button over whatever shows, as an alert. */
@@ -134,6 +188,10 @@ final class LobbyNativeDialogs {
      * @param closed what to do once it has closed, such as giving its view's textures back
      */
     private UiDialog begin(String title, String width, boolean over, Runnable closed) {
+        return begin(title, DesignTokens.shipped().size().get(width), over, closed);
+    }
+
+    private UiDialog begin(String title, float width, boolean over, Runnable closed) {
         if (!over) {
             while (!open.isEmpty()) {
                 close();
@@ -149,10 +207,13 @@ final class LobbyNativeDialogs {
     }
 
     /** The width the body will have in this window: the card's width less its padding and the scroll bar. */
-    private float bodyWidth(UiDialog dialog) {
+    private float bodyWidth(UiDialog dialog, String width) {
+        return bodyWidth(dialog, DesignTokens.shipped().size().get(width));
+    }
+
+    private float bodyWidth(UiDialog dialog, float width) {
         float space = DesignTokens.shipped().space().get("xxxl");
-        float card = Math.min(DesignTokens.shipped().size().get("dialog.lg"), Math.max(0, stage.getWidth() - 2
-              * space));
+        float card = Math.min(width, Math.max(0, stage.getWidth() - 2 * space));
         return Math.max(0, card - dialog.card().getPadLeft() - dialog.card().getPadRight() - DesignTokens.shipped()
               .space().get("md"));
     }
@@ -193,6 +254,14 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyBotSetupView botView() {
         return botView;
+    }
+
+    @Nullable LobbyConditionsView conditionsView() {
+        return conditionsView;
+    }
+
+    @Nullable LobbyGameOptionsView optionsView() {
+        return optionsView;
     }
 
     /** The top dialog, or null. */

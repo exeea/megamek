@@ -38,10 +38,12 @@ import jakarta.annotation.Nullable;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
+import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionFactions;
@@ -62,6 +64,7 @@ import megamek.client.ui.gdx.UiVirtualList;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MekSummary;
+import megamek.common.options.OptionsConstants;
 import megamek.logging.MMLogger;
 
 /**
@@ -148,7 +151,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private java.io.File nativeShot;
     /** Whether the probe logs the lobby and quits once {@link #nativeShot} is saved. */
     private boolean nativeDone;
-    private final ArrayDeque<Runnable> botClicks = new ArrayDeque<>();
+    private final ArrayDeque<Runnable> nativeClicks = new ArrayDeque<>();
     private LobbySnapshot shown;
     private long start;
     private boolean shotSaved;
@@ -693,6 +696,35 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
+    /** GPU thread: closes the lobby's open menus, then opens the planetary conditions over the lobby. */
+    void conditionsDialog(PlanetaryConditionsForm form, LobbyConditionsView.Host host) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.conditions(form, host);
+        }
+    }
+
+    /** GPU thread: closes the lobby's open menus, then opens the game options over the lobby. */
+    void gameOptionsDialog(GameOptionsForm form, LobbyGameOptionsView.Host host) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.gameOptions(form, host);
+        }
+    }
+
+    /** GPU thread: shows the game's options anew in the game options, when they show, as the server changed them. */
+    void gameOptionsChanged(GameOptionsForm fresh) {
+        LobbyGameOptionsView view = nativeDialogs == null ? null : nativeDialogs.optionsView();
+        if (view != null) {
+            view.reload(fresh);
+        }
+    }
+
+    /** GPU thread: whether the game options show. */
+    boolean gameOptionsOpen() {
+        return nativeDialogs != null && nativeDialogs.optionsView() != null;
+    }
+
     /** GPU thread: shows an alert over the lobby and any dialog. */
     void messageDialog(String title, String text) {
         if (stage != null) {
@@ -824,6 +856,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         double elapsed = (System.nanoTime() - nativeAt) / 1e9;
         boolean camo = "camo".equals(probe.dialog());
         boolean bot = nativeDialogs.botView() != null;
+        boolean conditions = nativeDialogs.conditionsView() != null;
+        boolean options = nativeDialogs.optionsView() != null;
+        boolean queued = bot || conditions || options;
         UiDialog dialog = nativeDialogs.dialog();
         Group root = stage.getRoot();
         switch (nativeStep) {
@@ -834,6 +869,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     } else if (bot) {
                         probeClick(root.findActor("bot-preset-stored-" + PROBE_PRESET));
                         queueBotClicks(dialog, probe);
+                    } else if (conditions) {
+                        queueConditionsClicks();
+                    } else if (options) {
+                        queueOptionsClicks();
                     } else {
                         probeReveal(dialog, root.findActor("settings-start-5"));
                     }
@@ -849,8 +888,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                         probeClick(root.findActor("camo-item-3"));
                         LobbyCamoView view = nativeDialogs.camoView();
                         LOGGER.info("The lobby probe chose the camo {}", view == null ? null : view.choice().result());
-                    } else if (bot) {
-                        Runnable click = botClicks.poll();
+                    } else if (queued) {
+                        Runnable click = nativeClicks.poll();
                         if (click != null) {
                             click.run();
                             return;
@@ -879,7 +918,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
             case 3 -> {
                 if (elapsed > 5.5) {
-                    probeClick(root.findActor(camo ? "camo-ok" : bot ? "bot-ok" : "settings-ok"));
+                    probeClick(root.findActor(camo ? "camo-ok" : bot ? "bot-ok" : conditions ? "conditions-ok"
+                          : options ? "options-ok" : "settings-ok"));
                     LOGGER.info("The lobby probe pressed OK: dialog open {}", nativeDialogs.isOpen());
                     nativeStep++;
                 }
@@ -903,10 +943,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
      */
     private void queueBotClicks(UiDialog dialog, GpuLobbyProbe probe) {
         Group root = stage.getRoot();
-        botClicks.add(() -> probeReveal(dialog, root.findActor("bot-flag-pirate")));
-        botClicks.add(() -> probeClick(root.findActor("bot-flag-pirate")));
-        botClicks.add(() -> probeReveal(dialog, root.findActor("bot-slider-bravery")));
-        botClicks.add(() -> {
+        nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-flag-pirate")));
+        nativeClicks.add(() -> probeClick(root.findActor("bot-flag-pirate")));
+        nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-slider-bravery")));
+        nativeClicks.add(() -> {
             Actor bravery = root.findActor("bot-slider-bravery");
             int[] end = bravery == null ? null
                   : GpuLobbyProbeInput.hover(stage, bravery, bravery.getWidth() - 2, bravery.getHeight() / 2);
@@ -916,21 +956,21 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
         });
         if (probe.options().contains("targets")) {
-            botClicks.add(() -> probeReveal(dialog, root.findActor("bot-tab-targets")));
-            botClicks.add(() -> probeClick(root.findActor("bot-tab-targets")));
-            botClicks.add(() -> probeClick(firstNamed(root, "bot-fold-force-")));
-            botClicks.add(() -> probeReveal(dialog, firstNamed(root, "bot-tick-unit-")));
-            botClicks.add(() -> probeClick(firstNamed(root, "bot-tick-unit-")));
-            botClicks.add(() -> probeReveal(dialog, root.findActor("bot-hex-add")));
-            botClicks.add(() -> {
+            nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-tab-targets")));
+            nativeClicks.add(() -> probeClick(root.findActor("bot-tab-targets")));
+            nativeClicks.add(() -> probeClick(firstNamed(root, "bot-fold-force-")));
+            nativeClicks.add(() -> probeReveal(dialog, firstNamed(root, "bot-tick-unit-")));
+            nativeClicks.add(() -> probeClick(firstNamed(root, "bot-tick-unit-")));
+            nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-hex-add")));
+            nativeClicks.add(() -> {
                 probeClick(root.findActor("bot-hex-coords"));
                 for (char typed : "3, 4".toCharArray()) {
                     stage.keyTyped(typed);
                 }
             });
-            botClicks.add(() -> probeClick(root.findActor("bot-hex-add")));
+            nativeClicks.add(() -> probeClick(root.findActor("bot-hex-add")));
         }
-        botClicks.add(() -> {
+        nativeClicks.add(() -> {
             LobbyBotSetupView view = nativeDialogs.botView();
             if (view != null) {
                 BotSetupForm form = view.form();
@@ -938,6 +978,58 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                       form.name(), form.valid() ? "valid" : "invalid", form.description(),
                       form.value(BotSetupForm.Slider.BRAVERY), form.flag(BotSetupForm.Flag.PIRATE),
                       form.picker().picked(), form.hexTargets().stream().map(BotSetupForm.HexTarget::text).toList());
+            }
+        });
+    }
+
+    /** Queues the planetary conditions' clicks, one a frame: two steps down the light, one down the weather. */
+    private void queueConditionsClicks() {
+        Group root = stage.getRoot();
+        nativeClicks.add(() -> probeClick(root.findActor("conditions-light")));
+        nativeClicks.add(() -> stage.keyDown(Input.Keys.DOWN));
+        nativeClicks.add(() -> stage.keyDown(Input.Keys.DOWN));
+        nativeClicks.add(() -> stage.keyDown(Input.Keys.ENTER));
+        nativeClicks.add(() -> probeClick(root.findActor("conditions-weather")));
+        nativeClicks.add(() -> stage.keyDown(Input.Keys.DOWN));
+        nativeClicks.add(() -> stage.keyDown(Input.Keys.ENTER));
+        nativeClicks.add(() -> {
+            LobbyConditionsView view = nativeDialogs.conditionsView();
+            if (view != null) {
+                PlanetaryConditionsForm form = view.form();
+                LOGGER.info("The lobby probe set the conditions ({}): light {}, weather {}, wind {}",
+                      form.valid() ? "valid" : "invalid", form.light(), form.weather(), form.wind());
+            }
+        });
+    }
+
+    /** Queues the game options' clicks, one a frame: a search for double blind and a click on its check box. */
+    private void queueOptionsClicks() {
+        Group root = stage.getRoot();
+        nativeClicks.add(() -> probeClick(root.findActor("options-search")));
+        nativeClicks.add(() -> {
+            for (char typed : "double blind".toCharArray()) {
+                stage.keyTyped(typed);
+            }
+        });
+        nativeClicks.add(() -> {
+            LobbyGameOptionsView view = nativeDialogs.optionsView();
+            if (view != null) {
+                GameOptionsForm form = view.form();
+                form.visiblePages().stream()
+                      .filter(page -> form.visibleSections(page).stream()
+                            .flatMap(section -> form.visibleRows(page, section).stream())
+                            .anyMatch(row -> row.name().equals(OptionsConstants.ADVANCED_DOUBLE_BLIND)))
+                      .findFirst()
+                      .ifPresent(page -> probeClick(root.findActor("options-page-" + page.id())));
+            }
+        });
+        nativeClicks.add(() -> probeClick(root.findActor("option-" + OptionsConstants.ADVANCED_DOUBLE_BLIND)));
+        nativeClicks.add(() -> {
+            LobbyGameOptionsView view = nativeDialogs.optionsView();
+            if (view != null) {
+                LOGGER.info("The lobby probe searched '{}' to page {} and changed {}", view.form().search(),
+                      view.pageId(), view.form().changedOptions().stream()
+                            .map(option -> option.getName() + "=" + option.getValue()).toList());
             }
         });
     }

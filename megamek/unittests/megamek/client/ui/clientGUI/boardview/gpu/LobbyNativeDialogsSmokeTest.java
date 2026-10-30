@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.Vector;
 import java.util.function.BooleanSupplier;
 
 import com.badlogic.gdx.Input;
@@ -38,10 +39,13 @@ import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
+import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyPrompts;
+import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.gdx.UiDialog;
+import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -51,13 +55,20 @@ import megamek.common.containers.MunitionTree;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MapSettings;
+import megamek.common.options.GameOptions;
+import megamek.common.options.IBasicOption;
+import megamek.common.options.OptionsConstants;
+import megamek.common.planetaryConditions.Atmosphere;
+import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.planetaryConditions.Weather;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
  * Clicks the lobby's libGDX dialogs through the stage, as a pointer and keyboard would: the kit's dialog blocks the
  * lobby behind it and answers Enter, Escape and Tab; the camo chooser hands back the clicked camo; the player settings
- * refuse a bad number and send a chosen start position.
+ * refuse a bad number and send a chosen start position; the planetary conditions follow their rules and send what was
+ * chosen; the game options search, mark a change, ask before hiding the unofficial rules and send the changes.
  */
 @Tag("on-demand")
 class LobbyNativeDialogsSmokeTest {
@@ -328,6 +339,144 @@ class LobbyNativeDialogsSmokeTest {
             assertEquals(Set.of(1, 2), chosen.behavior().getPriorityUnitTargets());
             assertEquals(Set.of(new Coords(2, 3).toString()), chosen.behavior().getStrategicBuildingTargets());
             assertEquals("BERSERK", chosen.behavior().getDescription());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theConditionsFollowTheirRulesAndSendWhatWasChosen() {
+        UiTestStage.run(ui -> {
+            PlanetaryConditionsForm form = new PlanetaryConditionsForm(new PlanetaryConditions());
+            List<PlanetaryConditions> sent = new ArrayList<>();
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            dialogs.conditions(form, new LobbyConditionsView.Host() {
+                @Override
+                public void send(PlanetaryConditions conditions) {
+                    sent.add(conditions);
+                }
+
+                @Override
+                public void edt(Runnable work, Runnable then) {
+                    work.run();
+                    then.run();
+                }
+            });
+            ui.draw();
+
+            UiSelect weather = find(ui, "conditions-weather");
+            reveal(ui, weather);
+            click(ui, weather);
+            ui.stage.keyDown(Input.Keys.DOWN);
+            ui.stage.keyDown(Input.Keys.ENTER);
+            ui.draw();
+            assertEquals(Weather.values()[1], form.weather(), "the weather list's next entry is chosen");
+
+            UiSelect atmosphere = find(ui, "conditions-atmosphere");
+            reveal(ui, atmosphere);
+            click(ui, atmosphere);
+            ui.stage.keyDown(Input.Keys.HOME);
+            ui.stage.keyDown(Input.Keys.ENTER);
+            ui.draw();
+            assertEquals(Atmosphere.VACUUM, form.atmosphere());
+            assertTrue(weather.isDisabled(), "a vacuum has no weather");
+            assertEquals(Weather.CLEAR, form.weather(), "a vacuum clears the weather");
+
+            Actor temperature = find(ui, "conditions-temperature");
+            reveal(ui, temperature);
+            click(ui, temperature);
+            for (int i = 0; i < 4; i++) {
+                ui.stage.keyTyped('\b');
+            }
+            for (char typed : "500".toCharArray()) {
+                ui.stage.keyTyped(typed);
+            }
+            ui.draw();
+            Button ok = find(ui, "conditions-ok");
+            assertFalse(form.valid());
+            assertTrue(ok.isDisabled(), "a temperature out of range disables OK");
+            click(ui, ok);
+            assertTrue(sent.isEmpty());
+
+            ui.stage.setKeyboardFocus(temperature);
+            ui.stage.keyTyped('\b');
+            ui.stage.keyTyped('\b');
+            ui.draw();
+            assertFalse(ok.isDisabled());
+            click(ui, ok);
+            assertEquals(1, sent.size());
+            assertEquals(5, sent.getFirst().getTemperature());
+            assertEquals(Atmosphere.VACUUM, sent.getFirst().getAtmosphere());
+            assertFalse(dialogs.isOpen(), "OK closes the conditions");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theGameOptionsSearchMarkAskAndSendTheChanges() {
+        UiTestStage.run(ui -> {
+            GameOptionsForm form = new GameOptionsForm(new GameOptions(), Set.of(), true);
+            List<Vector<IBasicOption>> sent = new ArrayList<>();
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyGameOptionsView view = dialogs.gameOptions(form, new LobbyGameOptionsView.Host() {
+                @Override
+                public void edt(Runnable work, Runnable then) {
+                    work.run();
+                    then.run();
+                }
+
+                @Override
+                public void send(String password, Vector<IBasicOption> changed, Vector<IBasicOption> all) {
+                    sent.add(changed);
+                }
+
+                @Override
+                public void save(Vector<IBasicOption> all) {
+                }
+
+                @Override
+                public boolean load(GameOptions into) {
+                    return false;
+                }
+
+                @Override
+                public void grabBars() {
+                }
+            });
+            ui.draw();
+
+            click(ui, find(ui, "options-search"));
+            for (char typed : "double blind".toCharArray()) {
+                ui.stage.keyTyped(typed);
+            }
+            ui.draw();
+            List<GameOptionsForm.Page> shown = form.visiblePages();
+            assertTrue(shown.size() < form.pages().size(), "the search narrows the groups");
+            GameOptionsForm.Page sensors = shown.stream()
+                  .filter(page -> form.visibleSections(page).stream()
+                        .flatMap(section -> form.visibleRows(page, section).stream())
+                        .anyMatch(row -> row.name().equals(OptionsConstants.ADVANCED_DOUBLE_BLIND)))
+                  .findFirst().orElseThrow();
+            click(ui, find(ui, "options-page-" + sensors.id()));
+            assertEquals(sensors.id(), view.pageId());
+
+            Actor changed = find(ui, "option-" + OptionsConstants.ADVANCED_DOUBLE_BLIND + "-changed");
+            assertFalse(changed.isVisible(), "an untouched option carries no mark");
+            Actor doubleBlind = find(ui, "option-" + OptionsConstants.ADVANCED_DOUBLE_BLIND);
+            reveal(ui, doubleBlind);
+            click(ui, doubleBlind);
+            assertTrue(form.bool(OptionsConstants.ADVANCED_DOUBLE_BLIND));
+            assertTrue(changed.isVisible(), "a changed option is marked");
+
+            click(ui, find(ui, "options-unofficial"));
+            assertNotNull(ui.stage.getRoot().findActor("confirm-ok"), "hiding the unofficial rules asks first");
+            click(ui, find(ui, "confirm-cancel"));
+            assertTrue(form.unofficialShown(), "a cancelled question keeps them shown");
+
+            click(ui, find(ui, "options-ok"));
+            assertEquals(1, sent.size());
+            assertEquals(List.of(OptionsConstants.ADVANCED_DOUBLE_BLIND),
+                  sent.getFirst().stream().map(IBasicOption::getName).toList());
+            assertFalse(dialogs.isOpen(), "OK closes the options");
             dialogs.dispose();
         });
     }
