@@ -320,6 +320,11 @@ public final class UiKit {
         return scroll;
     }
 
+    /** A step chart in the Token v0 look, such as damage by range ({@link UiStepChart}). */
+    public UiStepChart stepChart() {
+        return new UiStepChart(this);
+    }
+
     /** Equal-size visual choices that fit their content and viewport, with bounded growth when space permits. */
     public UiChoiceGrid choiceGrid(float cardWidth, float gap) {
         return new UiChoiceGrid(cardWidth, gap);
