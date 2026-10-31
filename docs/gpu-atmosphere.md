@@ -82,8 +82,21 @@ approximation, not measured atmospheric radiometry or a per-frame sky simulation
 The normal visible background retains the UI palette. Tainted/toxic horizon colors
 remain visible at night, sunrise and sunset without increasing that palette's luminance.
 **Show lighting sky** displays the environment used for lighting instead. The toggle
-does not change the board's illumination. The old whole-scene taint and automatic night
-desaturation are removed; light colors and the user's explicit display controls remain.
+does not change the board's illumination. The old whole-scene taint is removed; light colors
+and the user's explicit display controls remain.
+
+**Night vision.** Moonlight is deliberately far brighter than real moonlight so the board
+stays readable. To still read as night, the composite applies a Purkinje-style shift
+(`atmosphere-grade.glsl` `nightVision`): dim exposed pixels turn toward a cool blue-grey at
+their own luminance, so brightness and readability are unchanged. A pixel with any channel
+above .25 (exposed) keeps its colour, so fires, lamps, flashes and coloured emitters stay
+saturated. The share is .65 at a moonlit full night and .8 without a moon (Moonless, Pitch
+Black), eases in only once the sun has set (daylight below .6, `GpuAtmosphere.nightVision`)
+so dusk and dawn keep their warmth, and is zero by day and in the Tactical View. Selected heat, heat glow, sun glare and flashes are added after it;
+overlays and the HUD draw after the composite. Raising the scenario's exposure lifts pixels
+out of the band, so at +2 EV the shift mostly disappears. The night presets set only the
+brightness, in even steps: Full Moon 0 EV, Moonless -0.3 EV, Pitch Black -1 EV (lit ground
+about .028, .017 and .011 linear on a grassland board).
 
 Ground wetness follows liquid rain automatically. Freezing temperature and very
 thin/airless conditions suppress it. `rain-surface.glsl` uses the same wetness for
@@ -198,7 +211,7 @@ light to the complete scene, including sky, weather and emissive effects.
 White balance uses relative RGB gains normalized to preserve neutral-gray
 luminance; it is a cool/warm adjustment, not a calibrated Kelvin setting.
 Contrast acts around display mid-gray after the highlight shoulder and sRGB
-conversion, before the existing vignette. Tactical overlays and HUD colors stay
+conversion, before the optional lens vignette. Tactical overlays and HUD colors stay
 unchanged. These controls add arithmetic and two uniforms, with no additional
 render pass, texture lookup, framebuffer, or terrain/shadow rebuild. The balance
 gains are calculated on the CPU only when white balance or tint changes.
@@ -349,6 +362,16 @@ Shafts reuse the scene depth rather than drawing the board into a second
 camera-depth pass. The composite combines scene color, fog, shafts,
 grading, exposure and glare, then restores scene depth for later draws.
 Weather particles and tactical/UI passes must retain the intended depth/order.
+
+**Shadows** (Tuning → Display, Normal until switched, saved). The sun's one shadow map is fitted to the view and
+its texels follow the rendered pixels: 1.2 a pixel along the scene's longer side, from 2304 (1080p) to 4608 (4K);
+High doubles that, up to 8192. Steady frames cost the same at every size (the map is cached; lookups ~3 ms on an
+Iris Xe at 1080p); only a redraw (a zoom or refit) grows with it: on a wooded 76x113 board an Iris Xe takes 28 ms at
+2304, 61 ms at 4608 and 82 ms at 8192. Prints and previews keep 2304.
+
+**Vignette** (Tuning → Display, off until switched on, saved) darkens the composited view toward its corners, as a
+camera lens does: the display colour times 1 - .045 times the squared distance from the centre (corners 9%, edge
+middles 4.5%). Prints never take it.
 
 **Depth cues** (Tuning → Display, off until switched on, saved) separate nearer terrain from farther terrain in
 clear air, in either projection; the Tactical View keeps clear air. `GpuDepthCues` measures the focus, the mean camera

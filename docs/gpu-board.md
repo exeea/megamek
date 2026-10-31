@@ -184,6 +184,15 @@ trooper and battle armour suit; they hop along their path instead of moving limb
 hover) and buggy (motorized) are the `Infantry/mechanized_apc.png` and `motorized_buggy.png` sprites extruded into
 GLBs; their grey pixels take the camouflage, like the 2D icon.
 
+Meeples leave no wreck in the 3D view (a wreck has no gameplay; the Tactical View keeps its crossed-out base). The
+first frame a unit shows destroyed, its meeple explodes (`MeepleCasualties`): `MeepleShatter` cuts it along four
+planes in different directions into closed pieces, and `MeepleDebris` throws them away from the hits playing against
+the unit, a third of them into the hexes around, under a fast tabletop gravity. They bounce off the ground, roofs and
+rocks, sampled lazily from the board's picking (foliage gives way, liquids give way to their bed), and come to rest;
+after four seconds every piece stops, whatever it is caught in. A formation's lost soldier turns to the hits, is
+knocked back onto its back, and a lost vehicle explodes like a meeple. Once everything is still it lies a moment,
+then sinks into the ground and is gone. The pieces do not collide with each other.
+
 `MeepleVisual` owns token geometry, wall paint and attachment sockets. `MeepleAnimator` supplies rigid token poses;
 `UnitAnimator` retains articulated model poses. Both sample the existing movement/combat timeline. Walkers bounce,
 vehicles rock subtly and airborne craft bank through turns; displacement slides. Push/punch/kick and the stronger

@@ -130,7 +130,7 @@ on its own.
   side the wall's, and the height is the colour map's, read once more at the unmoved coordinates.
   Natural ground, banks and cliffs of every family, volcanic ground, pavement and its rubble, and
   the rock kit's walls take it; tundra mats, mud, scorch, field earth, tree pits and concrete
-  slabs keep their maps in place. It fades out with the normal detail. Its height read is one
+  slabs keep their maps in place. A move under half a pixel reads nothing. Its height read is one
   trilinear sample, without the colour's anisotropic filtering. On llvmpipe it adds about 1% to a
   grass board's frame at tactical zoom and 6% to a rock board's, 2–20% close up.
 
@@ -208,10 +208,9 @@ roughness of its own for any material.
 Every role of a natural surface (cover, mantle, debris and rock, on tops and walls)
 reads its material's finish with the same projection as its colour, and so do tundra
 mats, turf and meadow blades (their ground's or their grass's), road coats, pavement,
-tree pits and rock kits. On natural surfaces (volcanic ones too) and tundra mats, where the
-normal detail fades out with distance, roughness, metallic and scattering fade to their means, which
-costs no texture read; emission keeps its map at every distance. Mud and scorch also
-keep their roughness in their own normal maps, which their shaders read.
+tree pits and rock kits, at every distance. The surface layers' mips widen the roughness by the
+normals' spread ([material detail at distance](gpu-terrain-materials.md#material-detail-at-distance)).
+Mud and scorch also keep their roughness in their own normal maps, which their shaders read.
 
 ## Loose and constrained materials
 

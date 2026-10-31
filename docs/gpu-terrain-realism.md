@@ -212,7 +212,7 @@ Budgets are acceptance rules, not claims of measured speedups:
   and camera-refinement stalls separately. First-run build timing includes cache
   and initialization effects. A 60 FPS target means 16.7 ms per complete frame.
 - Keep the 16-sampler portability check (`GpuSamplerBudgetSmokeTest`). Run the
-  material-LOD near/far comparison (`GpuMaterialLodSmokeTest`) when changing
+  material map check (`GpuMaterialLodSmokeTest`) when changing
   normal/height reads, filtering or layer selection.
 
 Shared geometry changes use `BoardSculptTest`, `BoardReliefTest`,

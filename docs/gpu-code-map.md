@@ -169,6 +169,9 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `ArmFlip`, `UpperBodyTurn` | Track the displayed arm-flip and torso-turn interpolation. |
 | `UnitAttachments` | Places exterior riders/swarmers after the carrier's final pose, shared by drawing, picking and effects. |
 | `UnitAttachmentMotion` | Tracks boarding/release transforms and motion on the same playback clock. |
+| `MeepleCasualties` | Plays meeples dying after the view stops drawing them: destroyed units' meeples and formations' lost vehicles explode, lost soldiers fall on their backs; then they lie, sink and go. |
+| `MeepleShatter` | Cuts a meeple's mesh along several planes into closed rigid pieces, each with its outermost points as contacts. |
+| `MeepleDebris` | Rigid-body physics of the thrown pieces against a height field sampled from the board's picking, with a time limit that always stops them. |
 | `GpuAttackEffects` | Chooses visual attacks and their emitters from the posed loadout. |
 | `GpuMissileEffects`, `GpuExplosionEffects`, `GpuJumpJets` | Render batched missiles, bounded fire/smoke volumes and visible jump exhaust. |
 | `GpuPilotFlames` | Renders the pilot flame every working flamer keeps at its `flame` emitter: a blue gas core and flickering fire tongues in the flamer stream's shader. |

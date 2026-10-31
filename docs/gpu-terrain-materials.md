@@ -19,7 +19,6 @@ changes only appearance.
 | `BoardRough` | Authored rough variants whose drawing, picking and support use the same placement. |
 | `GpuTerrain` | Worker preparation, installed chunks, resource ownership and rendering. |
 | `TerrainLod` | Projected-size render sampling; board dimensions do not select quality. |
-| `terrain-detail.glsl` | Projected-size material detail, independent of cached mesh LOD. |
 | `GpuAssets / terrain-sculpt.frag` | Material resources and the main geological surface program. |
 
 ## Canonical geometry
@@ -177,8 +176,8 @@ Its ambient grime uses cavity detail rather than exaggerating the shallow float
 finish's height into a pattern of bright, apparently raised islands.
 Relief and world fields are evaluated once. Blending the pigment responses adds
 arithmetic; organic wear can also sample existing soil/tissue maps where it
-reveals those materials. No textures, geometry or draw calls are added. Fine
-wear fades with normal detail; broad exposed-rock patches remain at distance.
+reveals those materials. No textures, geometry or draw calls are added. Wear and
+worn organic cover show at every zoom, from the filtered height, cavity and normal.
 Intermediate intensities can change which existing maps contribute to a blend;
 unchanged draw counts alone do not establish identical GPU time.
 Existing field, mud, marsh, quicksand and tundra overlays retain their own maps;
@@ -628,35 +627,40 @@ frames do not mix results from different settings.
 
 ## Material detail at distance
 
-`terrain-detail.glsl` measures metres per pixel from world-position derivatives before
-material branching. Fine ground normals fade out between 0.4375 and 0.625 metres per
-pixel (about 48 pixels across a 30-metre hex). Cliff normals survive twice as far,
-fading between 0.875 and 1.25 metres per pixel. This follows apparent surface area in
-both cameras, without rebuilding geometry or making mesh LOD authoritative for shading.
+The ground material does not change its look with zoom: medium and far views show the
+close view averaged into their pixels. Nothing fades with distance; texture filtering
+(trilinear and anisotropic) does the averaging.
 
-At zero detail the material branches skip normal/AO texture reads. Colour and height
-used for terrain contact blending remain sampled, preserving slope bands, shore
-materials and concrete joints. A natural layer keeps its average look instead
-(`distantLayer`, from `u_finishDistant`: its means, read once at load from its smallest
-mip, so the far path reads no texture for them): its cavity fades to the layer's mean,
-and its relief, the length of its mean normal, takes the share of direct sun its
-tilted facets would turn away (`sunOnRelief`: much under a high sun, little under a
-low one, never more than flat ground gets). The relief is softened as the close view
-softens it (power .25), so far zoom matches the close view averaged into its pixels:
-across every family, flat and stepped, noon to evening, the mean brightness is off by
-0.85 sRGB levels on average and 2.4 at most. Other surfaces'
-cavity fades to 0.9. Vertex/contact occlusion and geometry shadows remain.
+- **Reference.** The close view at `GpuMaterialCache.CLOSE_PIXEL` (0.1 m per pixel) is the
+  look every zoom averages. Detail finer than it shades as the close
+  view always has: the normals' mean direction and the plain mean roughness.
+- **Mips.** The sculpt data array and the magma surface maps build their own mips on the
+  decode pool (`GpuAssets.mipmaps`). Up to the level the close view reads they are the plain
+  means, normals renormalised. Above it they average that level's unit normals,
+  unnormalised, and its roughness as GGX alpha^2, widened by the normals' spread as a von
+  Mises-Fisher lobe: alpha^2 += 1 / (2 kappa), with kappa = l (3 - l^2) / (1 - l^2) and l the
+  mean normal's length, as the ground material cache widens its roughness. Each
+  surface's finish layer takes its normal layer's spread; mud and scorch also widen the
+  roughness in their normal maps.
+- **Relief.** A natural surface's normal length is its relief: how well the close view's
+  normals under the pixel agree (`normalSpread`: half of one less the filtered read's
+  length, an empirical factor fitted on NVIDIA to `GpuMaterialLodSmokeTest`'s seven
+  materials). Mixing independent reads adds their spreads times their squared weights, so
+  the close view's mixed normals agree better than any one map's. The relief takes the
+  share of direct sun that facets finer than the pixel turn away (`sunOnRelief`), counted
+  from the close view: it enters over the octave above `CLOSE_PIXEL`, where finer reads
+  shorten by their filtering alone. The cache fill stores the close view's relief (none),
+  so the cached ground's mean normal length alone carries the averaged relief. Other
+  surfaces' relief is 1.
+- **Skips.** Only look-neutral work is skipped: a parallax move under half a pixel reads
+  nothing (magma too), and a role that cannot show through its height blend is not read.
+  Procedural fine noise, crop rows, rain and pool ripples and specular antialiasing keep
+  their own footprint filtering.
 
-Volcanic materials also skip their relief trace when normals fade out. Their surface
-map (height, roughness, AO, relief range) fades out by 1.25 metres per pixel, using a
-roughness of 0.85 and no parallax. Lava colour, heat, currents and emission remain
-active at every distance. Near detail and physical shared boundaries are unchanged.
-
-`GpuMaterialLodSmokeTest` renders sand, desert, Mars, concrete, crust and lava with altered detail
-maps. Close pixels must respond, while distant pixels must be identical despite
-changes to the normal/AO and volcanic surface maps. These native checks establish
-the rendering behaviour, not an FPS improvement; frame-time gains need measurement
-in the complete board view.
+`GpuMaterialLodSmokeTest` renders every family, crust and lava with altered normal maps, which
+must change close pixels; dry surfaces must still reflect light. These native checks
+establish the rendering behaviour, not an FPS change; frame times need measurement in the
+complete board view.
 
 ## Themes and the SAND gameplay treatment
 
@@ -770,7 +774,7 @@ pavement and magma keep their gameplay precedence.
 
 `BoardAridSurfaceTest` covers volcanic/lunar SAND capture and the six-triangle flat
 mesh at every LOD. Native board captures cover Thunder Rift and Crystalline Canyon;
-`GpuMaterialLodSmokeTest` also exercises the volcanic maps' distance filtering.
+`GpuMaterialLodSmokeTest` also exercises the volcanic normal maps.
 
 ## Ultra-sublevel pits
 
@@ -869,10 +873,8 @@ The two caps use translated sampling at their 8-metre scale, for both color
 and normal/cavity. This avoids overlaying an enlarged second set of fractures.
 Single-scale sand and cap colour/height samples use their explicit texture
 gradients and mipmaps without the extra fade toward the texture's overall mean.
-Resolved ripples and fractures therefore survive normal gameplay zoom; normal
-detail still fades with projected size. Two-scale materials keep their colour
-averaging. `GpuTerrainMaterialReviewSmokeTest` checks its stability during a
-deterministic pan and zoom; see
+Resolved ripples and fractures therefore survive normal gameplay zoom. `GpuTerrainMaterialReviewSmokeTest` checks
+its stability during a deterministic pan and zoom; see
 [native reviews](gpu-terrain-realism.md#native-reviews).
 
 The [board asset format](../../mm-data/data/models/board/README.md) owns dimensions,
@@ -906,6 +908,6 @@ The interior uses four texture samples: two colour/height and two packed surface
 reads, with no runtime pigment recolouring. The shifted samples reuse the ordinary
 terrain helper and the slow world-region field. If height competition rejects the
 mud, its two surface-data reads are skipped. Absent mud takes no material reads.
-Normal detail fades with distance; packed roughness/AO remain needed. This adds no
+Packed roughness/AO remain needed with normal maps off. This adds no
 sampler, pass or shader variant and does not alter the base terrain's role pruning.
 Marsh and quicksand retain their existing materials and vegetation.
