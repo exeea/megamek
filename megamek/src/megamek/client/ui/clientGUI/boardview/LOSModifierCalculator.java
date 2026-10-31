@@ -40,6 +40,7 @@ import java.util.stream.Collectors;
 import jakarta.annotation.Nullable;
 import megamek.common.Hex;
 import megamek.common.LosEffects;
+import megamek.common.Messages;
 import megamek.common.Player;
 import megamek.common.ToHitData;
 import megamek.common.board.Coords;
@@ -594,7 +595,7 @@ final class LOSModifierCalculator {
         if ((waterDepth == 1) && (targetRelHeight == 0)) {
             boolean terrainCoverAlreadyApplied = losEffects.getTargetCover() != LosEffects.COVER_NONE;
             if (!terrainCoverAlreadyApplied) {
-                thd.addModifier(1, "target has partial cover (water)");
+                thd.addModifier(1, Messages.getString("WeaponAttackAction.AeTargetHasPartialCoverWater"));
             }
         }
     }

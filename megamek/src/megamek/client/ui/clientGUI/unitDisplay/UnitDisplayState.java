@@ -213,9 +213,10 @@ public final class UnitDisplayState {
         toHit = switch (data.getValue()) {
             case TargetRoll.IMPOSSIBLE, TargetRoll.AUTOMATIC_FAIL -> String.format("To Hit: (0%%) %s", data.getDesc());
             case TargetRoll.AUTOMATIC_SUCCESS -> String.format("To Hit: (100%%) %s", data.getDesc());
-            default -> String.format("<font color=\"%s\">To Hit: <b>%2d (%2.0f%%)</b></font> = %s",
+            default -> String.format("<font color=\"%s\">To Hit: <b>%2d (%.1f%%)</b></font> = %s%s",
                   GUIPreferences.hexColor(GUIPreferences.getInstance().getUnitToolTipHighlightColor()), data.getValue(),
-                  Compute.oddsAbove(data.getValue(), naturalAptitude), data.getDesc());
+                  Compute.oddsAsDisplayPercent(Compute.oddsAbove(data.getValue(), naturalAptitude)), data.getDesc(),
+                  naturalAptitude ? " " + Messages.getString("MekDisplay.NaturalAptitudeRoll") : "");
         };
         changed();
     }
