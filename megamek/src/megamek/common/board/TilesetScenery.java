@@ -191,7 +191,7 @@ public final class TilesetScenery {
 
     /**
      * The hex's structure models by structure terrain: a designed building's or fuel tank's model, else its tileset entry;
-     * only models whose GLB file exists.
+     * only models that exist for that structure ({@link BoardGenerator#exists}, or a custom kit).
      */
     public static Map<Integer, String> structureModels(Hex hex) {
         return structureModels(tileset(), hex);
@@ -204,7 +204,7 @@ public final class TilesetScenery {
             if (design == null || !hex.containsTerrain(terrain)) { continue; }
             var variant = BoardEditorBlueprint.get().variant(design.variant());
             String asset = design.asset() != null ? design.asset() : variant == null ? null : variant.model(hex);
-            if (asset != null && !asset.isBlank() && (new File(Configuration.dataDir(), "models/board/" + asset + ".glb").isFile()
+            if (asset != null && !asset.isBlank() && (BoardGenerator.exists(asset, terrain)
                   || asset.startsWith("buildings/") && customBuildingFile(asset).isFile())) { models.put(terrain, asset); }
         }
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
@@ -213,14 +213,17 @@ public final class TilesetScenery {
             for (TilesetMatcher.Pick image : images) {
                 String model = image == null ? "" : image.key();
                 if (model.startsWith("buildings/")) {
-                    boolean legacy = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile();
+                    boolean glb = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile();
                     boolean custom = customBuildingFile(model).isFile();
+                    // A generated asset counts only for the structure its generator builds (BoardGenerator).
+                    var generator = BoardGenerator.of(model);
                     // An entry that names only the key has no art to fall back to.
-                    if (!legacy && !custom && !TilesetMatcher.image(image.source()) && MISSING.add(model)) {
+                    if (!glb && !custom && generator == null && !TilesetMatcher.image(image.source()) && MISSING.add(model)) {
                         LOGGER.warn("The Classic tileset names the structure model {}, which does not exist", model);
                     }
                     for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-                        if ((legacy || custom) && hex.containsTerrain(terrain) && image.has(terrain)) {
+                        boolean drawn = glb || custom || generator != null && generator.builds(terrain);
+                        if (drawn && hex.containsTerrain(terrain) && image.has(terrain)) {
                             models.putIfAbsent(terrain, model);
                         }
                     }

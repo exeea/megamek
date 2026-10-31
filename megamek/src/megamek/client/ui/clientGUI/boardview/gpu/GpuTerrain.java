@@ -2176,7 +2176,7 @@ final class GpuTerrain implements Disposable {
 
     /**
      * The models {@code scene}'s features may draw (collectFeatures): not scatter (but fungus), boulders, rough ground,
-     * shafts, decals or generated industrial plants.
+     * shafts or decals.
      */
     private static java.util.Set<String> featureModels(BoardScene scene) {
         java.util.Set<String> names = new java.util.LinkedHashSet<>();
@@ -2185,7 +2185,7 @@ final class GpuTerrain implements Disposable {
                 var kind = feature.kind();
                 if (kind == BoardScene.FeatureKind.SCATTER && !BoardFungus.asset(feature.asset())
                       || kind == BoardScene.FeatureKind.BOULDER || kind == BoardScene.FeatureKind.ROUGH
-                      || kind == BoardScene.FeatureKind.SHAFT || BoardIndustrial.supports(feature)
+                      || kind == BoardScene.FeatureKind.SHAFT
                       || feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
                 names.add(feature.asset());
             }

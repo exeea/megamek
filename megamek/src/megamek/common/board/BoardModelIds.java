@@ -12,8 +12,9 @@ import megamek.logging.MMLogger;
 
 /**
  * The board models' stable ids, for saved boards alone: {@code models/board/uids.json} maps each model's opaque id, never
- * reused, to its current path there without {@code .glb}. The game and its code name a model by its path; a saved
- * board ({@link BoardFile}) stores the path and the id, so a model moved or renamed since still loads.
+ * reused, to its current path there without {@code .glb} (or a generated asset's name, {@link BoardGenerator}). The game
+ * and its code name a model by its path; a saved board ({@link BoardFile}) stores the path and the id, so a model moved
+ * or renamed since still loads.
  * {@code tools/move_model.py} moves a model's file and its line together.
  */
 public final class BoardModelIds {

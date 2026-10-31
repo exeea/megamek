@@ -383,8 +383,10 @@ public final class BoardEditorSession {
      * while its object stays in its hex.
      */
     private List<HexIssue> importIssues = List.of();
-    /** Whether an object model file exists, per asset, so validation reads the disk once per asset. */
+    /** Whether an object's model exists, per asset, so validation reads the disk once per asset. */
     private final Map<String, Boolean> modelFiles = new java.util.HashMap<>();
+    /** Whether a decal's image exists, per asset; a decal may share a model's asset name. */
+    private final Map<String, Boolean> decalImages = new java.util.HashMap<>();
     /** The random map settings, kept between uses of Random map as the old editor kept them; made on first use. */
     private MapSettings randomSettings;
     /**
@@ -2698,19 +2700,17 @@ public final class BoardEditorSession {
     }
 
     /**
-     * Whether the renderer has the object's art: a decal's image, a stamp's catalog entry, or else the model file the
-     * renderer draws, the object's own asset (a palette alias such as a pond has no art of its own).
+     * Whether the renderer has the object's art: a decal's image, a stamp's catalog entry, or else the model the
+     * renderer draws for the object's own asset, a file or a generator's, such as a route marker's track
+     * (BoardGenerator#exists; a palette alias such as a pond has no art of its own).
      */
     private boolean assetExists(BoardDecoration object) {
-        // A rail or maglev route marker has no model of its own: the route builder draws its track.
-        if (megamek.common.board.RailRoute.isRoute(object)) { return true; }
         if (object.kind().equals("decal")) {
-            return modelFiles.computeIfAbsent(object.asset(), name -> megamek.common.board.BoardDecalArt.image(name).isFile());
+            return decalImages.computeIfAbsent(object.asset(), name -> megamek.common.board.BoardDecalArt.image(name).isFile());
         }
         var entry = blueprint.asset(object.asset());
         return entry != null && entry.layout() != null || modelFiles.computeIfAbsent(object.asset(),
-              name -> megamek.common.board.BoardModelBounds.file(new java.io.File(Configuration.dataDir(), "models/board"), name)
-                    .isFile());
+              name -> megamek.common.board.BoardGenerator.exists(name, megamek.common.board.BoardGenerator.OBJECT));
     }
 
     /** XY is normalized to the same odd-column lattice as the board renderer, with north-positive Y. */

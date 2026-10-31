@@ -46,11 +46,7 @@ final class BoardWall {
     }
 
     static boolean supports(String asset) {
-        if (!asset.startsWith(PREFIX)) { return false; }
-        try {
-            int exits = Integer.parseInt(asset.substring(PREFIX.length()));
-            return exits >= 0 && exits <= 63 && asset.equals(PREFIX + exits);
-        } catch (NumberFormatException invalid) { return false; }
+        return megamek.common.board.BoardGenerator.of(asset) == megamek.common.board.BoardGenerator.WALL;
     }
 
     /** An authored model changes a wall's appearance, not its solid building rules. */

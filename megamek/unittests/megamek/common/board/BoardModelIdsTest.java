@@ -19,7 +19,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Saved boards find their models by stable id ({@link BoardModelIds}), so every board model must keep exactly one id
- * and every id its model. A model moved by hand fails here until its line in {@code uids.json} names its new path.
+ * and every id its model, a GLB or a generator's ({@link BoardGenerator}). A model moved by hand fails here until its
+ * line in {@code uids.json} names its new path.
  */
 class BoardModelIdsTest {
     @Test
@@ -32,7 +33,10 @@ class BoardModelIdsTest {
         for (var entry : index.properties()) {
             String path = entry.getValue().asText();
             assertNull(ids.put(path, entry.getKey()), "Two ids name " + path);
-            if (!Files.isRegularFile(board.resolve(path + ".glb"))) { missing.add(entry.getKey() + ": " + path); }
+            // A generated asset has no file: its generator (BoardGenerator) is its model.
+            if (!Files.isRegularFile(board.resolve(path + ".glb")) && BoardGenerator.of(path) == null) {
+                missing.add(entry.getKey() + ": " + path);
+            }
         }
         List<String> unnamed;
         try (Stream<Path> files = Files.walk(board)) {

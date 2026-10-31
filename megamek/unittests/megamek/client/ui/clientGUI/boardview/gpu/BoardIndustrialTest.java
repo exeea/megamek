@@ -80,6 +80,17 @@ class BoardIndustrialTest {
         }
     }
 
+    /** The tileset's heavy industry names the generated plant, which needs no model file (BoardGenerator). */
+    @Test
+    void theTilesetsHeavyIndustryIsTheGeneratedPlant() {
+        Hex hex = new Hex(0);
+        hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, 3));
+        String asset = megamek.common.board.TilesetScenery.structureModels(hex).get(Terrains.INDUSTRIAL);
+        assertNotNull(asset, "A heavy industrial hex keeps its plant");
+        assertEquals(megamek.common.board.BoardGenerator.HEAVY_INDUSTRIAL, megamek.common.board.BoardGenerator.of(asset), asset);
+        assertTrue(BoardIndustrial.supports(BoardFeatures.capture(hex, CENTER, Map.of(Terrains.INDUSTRIAL, asset)).getFirst()));
+    }
+
     @Test
     void neighborsAgreeOnEveryConnectionAndRemovalRetiresOnlyThePipe() {
         for (int direction = 0; direction < 6; direction++) {

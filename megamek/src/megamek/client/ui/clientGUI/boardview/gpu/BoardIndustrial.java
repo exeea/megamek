@@ -44,7 +44,7 @@ final class BoardIndustrial {
 
     static boolean supports(BoardScene.Feature feature) {
         return feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
-              && feature.asset().matches("buildings/(?:saxarba/)?misc/heavy_industrial_[a-d]");
+              && megamek.common.board.BoardGenerator.of(feature.asset()) == megamek.common.board.BoardGenerator.HEAVY_INDUSTRIAL;
     }
 
     private static List<Equipment> equipment(BoardScene.Tile tile, BoardScene.Feature feature) {

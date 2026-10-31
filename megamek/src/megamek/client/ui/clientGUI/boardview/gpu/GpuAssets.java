@@ -1115,15 +1115,16 @@ final class GpuAssets implements Disposable {
 
     /**
      * Starts decoding, on the common pool, the GLB of each named model (a board load's features) not decoded yet, so
-     * the chunk builds that first draw them mostly upload. A name without a model file, or a custom kit's building
-     * ({@link #building}), decodes to nothing; levels a load never takes are dropped at the next one.
+     * the chunk builds that first draw them mostly upload. A generator's asset (BoardGenerator) is skipped; a name
+     * without a model file, or a custom kit's building ({@link #building}), decodes to nothing. Levels a load never
+     * takes are dropped at the next one.
      */
     void prepareModels(java.util.Set<String> names) {
         decoding.keySet().retainAll(names);
         File folder = root;
         for (String name : names) {
             if (modelLods.containsKey(name) || recolourable.containsKey(name) || decoding.containsKey(name)
-                  || BoardWall.supports(name)) { continue; }
+                  || megamek.common.board.BoardGenerator.of(name) != null) { continue; }
             decoding.put(name, pooled(() -> {
                 if (name.startsWith("buildings/") && TilesetScenery.customBuildingFile(name).isFile()) { return null; }
                 var source = RigidGlb.source(folder, name);
