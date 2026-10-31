@@ -4,6 +4,7 @@ uniform float u_exposure;
 uniform float u_lightning;
 uniform vec3 u_tint;
 uniform float u_saturation;
+uniform float u_nightVision; // rod vision's share in dim light (nightVision): none by day, most at full night
 // User display adjustments. Zero offsets also keep isolated previews neutral without additional bindings.
 uniform vec3 u_whiteBalanceShift;
 uniform vec2 u_colorAdjust; // Saturation - 1, contrast - 1.
@@ -28,13 +29,26 @@ vec3 backdropRadiance(vec3 authored, float exposure) {
     return mix(target, above, step(vec3(KNEE), target));
 }
 
+// Night vision (the Purkinje shift): in dim light the eye's rods take over, which see no colour and favour blue-green.
+// The night stays as bright as the light model makes it, for a readable board: a dim exposed pixel turns toward a cool
+// blue-grey at its own luminance, while one with any bright channel (fires, lamps, flashes, coloured emitters) keeps the
+// cones' colour.
+vec3 nightVision(vec3 linear, float share) {
+    linear = max(linear, vec3(0.0));
+    float luminance = dot(linear, vec3(0.2126, 0.7152, 0.0722));
+    share *= 1.0 - smoothstep(.05, .25, max(linear.r, max(linear.g, linear.b)));
+    if (share <= 0.0) return linear;
+    vec3 shifted = mix(linear, dot(linear, vec3(.04, .46, .50)) * vec3(.72, .90, 1.2), share);
+    return shifted * (luminance / max(dot(shifted, vec3(0.2126, 0.7152, 0.0722)), 1e-6));
+}
+
 vec3 gradeScene(vec3 linear, float coverage) {
     linear *= u_exposure * (1.0 + u_lightning);
     // Sky colors already carry the time/cover palette; grade in proportion to scene coverage.
     vec3 graded = linear * u_tint;
     float luminance = dot(graded, vec3(0.2126, 0.7152, 0.0722));
     linear = mix(linear, mix(vec3(luminance), graded, u_saturation), coverage);
-    return linear;
+    return nightVision(linear, u_nightVision * coverage);
 }
 
 vec3 displayScene(vec3 linear) {

@@ -42,6 +42,12 @@ final class GpuAtmosphere implements Disposable {
     static final float MAX_SAND_OPACITY = 0.25f;
     /** Particle colors are authored bright, so they take this share of the light on level ground. */
     private static final float PARTICLE_ALBEDO = 0.4f;
+    /**
+     * Rod vision's share of dim pixels at full night (atmosphere-grade.glsl nightVision): a moonlit board, kept bright
+     * enough to read, still looks like night. It comes in after sunset, as the night falls (nightVision(Lighting)), so
+     * dusk and dawn keep their warmth.
+     */
+    private static final float NIGHT_VISION = .65f;
     private static final BoardAtmosphere.SkyPalette TACTICAL_BACKDROP = BoardAtmosphere.skyPalette(
           BoardAtmosphere.DEFAULTS, BoardAtmosphere.DEFAULT_TAINT_STRENGTH, false);
     /** Below this display brightness each hex uses white neutral ink; otherwise black. Zero disables adaptation. */
@@ -340,6 +346,15 @@ final class GpuAtmosphere implements Disposable {
     float exposure() {
         // Manual light controls must not immediately be cancelled by automatic exposure.
         return exposureLighting.adaptation() * (float) Math.pow(2, settings.exposure());
+    }
+
+    /**
+     * Rod vision's share under {@code lighting}: none while the sun is up (daylight from .6), easing in as the twilight
+     * fades, NIGHT_VISION once the daylight has gone.
+     */
+    static float nightVision(BoardAtmosphere.Lighting lighting) {
+        float night = MathUtils.clamp((.6f - lighting.daylight()) / .6f, 0, 1);
+        return NIGHT_VISION * night * night * (3 - 2 * night);
     }
 
     /** Linear light for smoke, spray and precipitation blended into the HDR scene. */
@@ -696,6 +711,7 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_exposure", exposure());
         compositeShader.setUniformf("u_tint", lighting.tint().r, lighting.tint().g, lighting.tint().b);
         compositeShader.setUniformf("u_saturation", lighting.saturation());
+        compositeShader.setUniformf("u_nightVision", nightVision(lighting));
         compositeShader.setUniformf("u_whiteBalanceShift", whiteBalanceShift);
         compositeShader.setUniformf("u_colorAdjust", options.saturation() - 1, options.contrast() - 1);
         Color sky = backdropSky(), horizon = backdropHorizon();

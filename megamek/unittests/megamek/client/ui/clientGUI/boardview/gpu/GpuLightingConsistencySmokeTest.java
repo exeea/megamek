@@ -1124,18 +1124,42 @@ class GpuLightingConsistencySmokeTest {
         } catch (ReflectiveOperationException failure) { throw new AssertionError("Actual heat target", failure); }
     }
 
-    /** Independent RGB grade of an opaque pixel: selected heat bypasses tint, but shares exactly one output gain. */
+    /**
+     * Independent RGB grade of an opaque pixel: selected heat bypasses tint and the night's rod vision, but shares
+     * exactly one output gain.
+     */
     private static long[] expectedComposite(float[] raw, BoardAtmosphere.Lighting light, double gain,
           double selected, float[] glow) {
         double[] tint = { light.tint().r, light.tint().g, light.tint().b };
         double luminance = raw[0] * tint[0] * .2126 + raw[1] * tint[1] * .7152 + raw[2] * tint[2] * .0722;
+        double[] ordinary = new double[3];
+        for (int c = 0; c < 3; c++) {
+            ordinary[c] = (luminance + (raw[c] * tint[c] - luminance) * light.saturation()) * (1 - selected) * gain;
+        }
+        ordinary = nightVision(ordinary, GpuAtmosphere.nightVision(light));
         long[] result = new long[3];
         for (int c = 0; c < 3; c++) {
-            double ordinary = luminance + (raw[c] * tint[c] - luminance) * light.saturation();
-            double radiance = ordinary * (1 - selected) + raw[c] * selected + .12 * glow[c];
+            double radiance = ordinary[c] / gain + raw[c] * selected + .12 * glow[c];
             result[c] = Math.round(255 * exposedDisplay(radiance, gain));
         }
         return result;
+    }
+
+    /**
+     * Rod vision (atmosphere-grade.glsl nightVision) of exposed light: dim light turns blue-grey at its luminance, light
+     * with a bright channel keeps its colour.
+     */
+    private static double[] nightVision(double[] exposed, double share) {
+        double luminance = exposed[0] * .2126 + exposed[1] * .7152 + exposed[2] * .0722;
+        double t = Math.clamp((Math.max(exposed[0], Math.max(exposed[1], exposed[2])) - .05) / .2, 0, 1);
+        share *= 1 - t * t * (3 - 2 * t);
+        if (share <= 0) { return exposed; }
+        double rods = exposed[0] * .04 + exposed[1] * .46 + exposed[2] * .5;
+        double[] cool = { .72, .9, 1.2 }, shifted = new double[3];
+        for (int c = 0; c < 3; c++) { shifted[c] = exposed[c] + (rods * cool[c] - exposed[c]) * share; }
+        double scale = luminance / Math.max(shifted[0] * .2126 + shifted[1] * .7152 + shifted[2] * .0722, 1e-6);
+        for (int c = 0; c < 3; c++) { shifted[c] *= scale; }
+        return shifted;
     }
 
     private static void assertComposite(float[] raw, BoardAtmosphere.Lighting light, double gain,

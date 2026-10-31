@@ -184,7 +184,9 @@ void main() {
         coverage = coverage * behind + weather.a;
         heat *= behind;
     }
-    linear = gradeScene(linear, coverage);
+    // A printable cutout's foreground is premultiplied: grade its own colour, then cover it again.
+    linear = u_transparentBackground > 0.5 && coverage > 0.0 ? gradeScene(linear / coverage, 1.0) * coverage
+          : gradeScene(linear, coverage);
     linear += heat * sand.a * atmosphere.a * u_exposure;
     // A printable cutout keeps physical coverage. Lens effects cannot create opacity over the paper.
     float lensCoverage = u_transparentBackground > 0.5 ? coverage : 1.0;
