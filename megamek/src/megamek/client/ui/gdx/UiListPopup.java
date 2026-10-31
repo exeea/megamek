@@ -31,6 +31,8 @@ import megamek.client.ui.design.DesignTokens;
 public final class UiListPopup extends Table {
     /** The most rows shown before the list scrolls. */
     public static final int MAX_ROWS = 10;
+    /** The longest pause between type-ahead keys that still adds to the prefix. */
+    public static final long TYPE_AHEAD_MS = 1000;
 
     private final UiTheme.SelectStyle style;
     private final List<Row> rows = new ArrayList<>();
@@ -42,6 +44,9 @@ public final class UiListPopup extends Table {
     private int active = -1;
     private IntConsumer chosen = index -> { };
     private Runnable closed = () -> { };
+    /** The type-ahead prefix and the time of its last key. */
+    private final StringBuilder typed = new StringBuilder();
+    private long typedAt;
     /** The control that opened it, or null. */
     private Actor face;
     /** The actor that gets the keyboard focus back when it closes, or null. */
@@ -86,6 +91,11 @@ public final class UiListPopup extends Table {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
                 return key(keycode);
+            }
+
+            @Override
+            public boolean keyTyped(InputEvent event, char character) {
+                return typeAhead(character, System.currentTimeMillis());
             }
         });
     }
@@ -216,6 +226,32 @@ public final class UiListPopup extends Table {
             case Input.Keys.ESCAPE, Input.Keys.TAB -> close();
             default -> {
                 return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Type-ahead: a printable key adds to a prefix, kept while keys come less than {@link #TYPE_AHEAD_MS} apart, and
+     * makes the first row starting with it, ignoring case, active. Returns whether the key was used.
+     */
+    boolean typeAhead(char character, long now) {
+        if (rows.isEmpty() || Character.isISOControl(character)) {
+            return false;
+        }
+        if (now - typedAt > TYPE_AHEAD_MS) {
+            typed.setLength(0);
+        }
+        if (character == ' ' && typed.isEmpty()) {
+            return false;
+        }
+        typedAt = now;
+        typed.append(Character.toLowerCase(character));
+        String prefix = typed.toString();
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).label.getText().toString().toLowerCase().startsWith(prefix)) {
+                active(i);
+                return true;
             }
         }
         return true;

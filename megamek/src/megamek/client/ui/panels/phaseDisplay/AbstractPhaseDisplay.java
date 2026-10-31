@@ -61,7 +61,7 @@ import megamek.common.util.DistractableDelegate;
 
 /**
  * This is the base class for all the "displays" which take control during the local player's turn. Only one display is
- * shown at each time; the ChatLounge is also a display. The ChatLounge doesn't show the
+ * shown at each time; the lobby shows in the native window instead. The lobby doesn't show the
  * {@link megamek.client.ui.clientGUI.boardview.BoardClientState} but most other displays do. Typically, the display itself is
  * the button bar at the bottom of the GUI.
  * <p>

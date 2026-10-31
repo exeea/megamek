@@ -41,7 +41,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -58,9 +57,6 @@ import megamek.client.ui.util.IntRangeTextField;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.battlefieldSupport.BFSArtilleryType;
 import megamek.common.battlefieldSupport.BFSAssetType;
-import megamek.common.battlefieldSupport.BFSDamage;
-import megamek.common.battlefieldSupport.BFSRange;
-import megamek.common.battlefieldSupport.BFSSpecial;
 import megamek.common.battlefieldSupport.BFSSpecialType;
 import megamek.common.loaders.MekSummary;
 import megamek.common.units.EntityMovementMode;
@@ -76,18 +72,8 @@ public class BFSAdvancedSearchPanel extends JPanel {
     private static final String BETWEEN = Messages.getString("BFSAdvancedSearchPanel.between");
     private static final String AND = Messages.getString("BFSAdvancedSearchPanel.and");
 
-    /** The movement modes offered as filters, in display order. */
-    private static final List<EntityMovementMode> MOVE_MODES = List.of(
-          EntityMovementMode.TRACKED, EntityMovementMode.WHEELED, EntityMovementMode.HOVER,
-          EntityMovementMode.VTOL, EntityMovementMode.WIGE, EntityMovementMode.INF_LEG,
-          EntityMovementMode.INF_JUMP, EntityMovementMode.INF_MOTORIZED, EntityMovementMode.NONE);
-
-    /** The parameter-valued Specials whose numeric value can be filtered with an "at least" threshold. Artillery is
-     * excluded because its parameter is a type token rather than a number (see the Artillery Type filter). */
-    private static final List<BFSSpecialType> NUMERIC_SPECIALS = Arrays.stream(BFSSpecialType.values())
-          .filter(BFSSpecialType::takesValue)
-          .filter(type -> type != BFSSpecialType.ARTILLERY)
-          .toList();
+    private static final List<EntityMovementMode> MOVE_MODES = BFSSearchFilter.MOVE_MODES;
+    private static final List<BFSSpecialType> NUMERIC_SPECIALS = BFSSearchFilter.NUMERIC_SPECIALS;
 
     private final JCheckBox useAssetType = new JCheckBox(Messages.getString("BFSAdvancedSearchPanel.assetType"));
     private final Map<BFSAssetType, JToggleButton> assetTypeButtons = new EnumMap<>(BFSAssetType.class);
@@ -200,114 +186,46 @@ public class BFSAdvancedSearchPanel extends JPanel {
      *       every active filter. When any filter is active, non-asset summaries never match.
      */
     public boolean matches(@Nullable MekSummary mekSummary) {
-        if (!isActive()) {
-            return true;
-        }
-        if ((mekSummary == null) || !mekSummary.isBattlefieldSupportAsset()) {
-            return false;
-        }
-        if (useAssetType.isSelected() && !selectedAssetTypes().contains(mekSummary.getBfsAssetType())) {
-            return false;
-        }
-        if (useMoveMode.isSelected() && !selectedMoveModes().contains(mekSummary.getBfsMovementMode())) {
-            return false;
-        }
-        if (useSpecials.isSelected()
-              && !new HashSet<>(mekSummary.getBfsSpecials()).containsAll(selectedSpecials())) {
-            return false;
-        }
-        if (!matchesNumericSpecials(mekSummary)) {
-            return false;
-        }
-        if (useArtilleryType.isSelected() && !matchesArtilleryType(mekSummary)) {
-            return false;
-        }
-        if (mp.active() && !mp.matches(mekSummary.getBfsMp())) {
-            return false;
-        }
-        if (tmm.active() && !tmm.matches(mekSummary.getBfsTmm())) {
-            return false;
-        }
-        if (skill.active() && !skill.matches(mekSummary.getBfsSkill())) {
-            return false;
-        }
-        BFSDamage bfsDamage = mekSummary.getBfsDamage();
-        if (damage.active() && !damage.matches((bfsDamage != null) ? bfsDamage.total() : 0)) {
-            return false;
-        }
-        if (damagePerHit.active() && !damagePerHit.matches((bfsDamage != null) ? bfsDamage.perHit() : 0)) {
-            return false;
-        }
-        if (damageHits.active() && !damageHits.matches((bfsDamage != null) ? bfsDamage.hits() : 0)) {
-            return false;
-        }
-        if (destroyCheck.active() && !destroyCheck.matches(mekSummary.getBfsDestroyCheck())) {
-            return false;
-        }
-        if (threshold.active() && !threshold.matches(mekSummary.getBfsThreshold())) {
-            return false;
-        }
-        if (bsp.active() && !bsp.matches(mekSummary.getBfsBsp())) {
-            return false;
-        }
-        if (bv.active() && !bv.matches(mekSummary.getBV())) {
-            return false;
-        }
-        if (longRange.active()) {
-            BFSRange range = mekSummary.getBfsRange();
-            if ((range == null) || range.isKeyword() || !longRange.matches(range.longRange())) {
-                return false;
-            }
-        }
-        return true;
+        return getFilter().matches(mekSummary);
     }
 
-    /**
-     * @return true if the asset satisfies every enabled numeric Special filter
-     */
-    private boolean matchesNumericSpecials(MekSummary mekSummary) {
-        return numericSpecialFilters.values().stream()
+    /** @return The criteria the panel's fields set, as a toolkit-free filter. */
+    public BFSSearchFilter getFilter() {
+        BFSSearchFilter.Builder filter = BFSSearchFilter.builder();
+        if (useAssetType.isSelected()) {
+            filter.assetTypes(new HashSet<>(selectedAssetTypes()));
+        }
+        if (useMoveMode.isSelected()) {
+            filter.moveModes(new HashSet<>(selectedMoveModes()));
+        }
+        if (useSpecials.isSelected()) {
+            filter.specials(new HashSet<>(selectedSpecials()));
+        }
+        numericSpecialFilters.values().stream()
               .filter(NumericSpecialFilter::active)
-              .allMatch(filter -> filter.matches(mekSummary.getBfsSpecialDetails()));
-    }
-
-    /**
-     * @return true if the asset has an Artillery Special and, when specific types are selected, its artillery type is
-     *       one of them. When no type is selected, any Artillery asset matches.
-     */
-    private boolean matchesArtilleryType(MekSummary mekSummary) {
-        if (!mekSummary.getBfsSpecials().contains(BFSSpecialType.ARTILLERY)) {
-            return false;
+              .forEach(special -> filter.numericSpecial(special.type, special.minimum.getIntVal(Integer.MIN_VALUE)));
+        if (useArtilleryType.isSelected()) {
+            filter.artilleryTypes(new HashSet<>(selectedArtilleryTypes()));
         }
-        List<BFSArtilleryType> selected = selectedArtilleryTypes();
-        if (selected.isEmpty()) {
-            return true;
-        }
-        BFSArtilleryType assetType = artilleryTypeOf(mekSummary);
-        return (assetType != null) && selected.contains(assetType);
-    }
-
-    private static @Nullable BFSArtilleryType artilleryTypeOf(MekSummary mekSummary) {
-        return mekSummary.getBfsSpecialDetails().stream()
-              .filter(special -> special.knownType().orElse(null) == BFSSpecialType.ARTILLERY)
-              .map(BFSSpecial::value)
-              .map(BFSArtilleryType::fromString)
-              .filter(Objects::nonNull)
-              .findFirst()
-              .orElse(null);
+        mp.addTo(filter, BFSSearchFilter.Stat.MP);
+        tmm.addTo(filter, BFSSearchFilter.Stat.TMM);
+        skill.addTo(filter, BFSSearchFilter.Stat.SKILL);
+        damage.addTo(filter, BFSSearchFilter.Stat.DAMAGE);
+        damagePerHit.addTo(filter, BFSSearchFilter.Stat.DAMAGE_PER_HIT);
+        damageHits.addTo(filter, BFSSearchFilter.Stat.DAMAGE_HITS);
+        destroyCheck.addTo(filter, BFSSearchFilter.Stat.DESTROY_CHECK);
+        threshold.addTo(filter, BFSSearchFilter.Stat.THRESHOLD);
+        bsp.addTo(filter, BFSSearchFilter.Stat.BSP);
+        bv.addTo(filter, BFSSearchFilter.Stat.BV);
+        longRange.addTo(filter, BFSSearchFilter.Stat.LONG_RANGE);
+        return filter.build();
     }
 
     /**
      * @return true when any of the search filters is activated so that units might be filtered out.
      */
     public boolean isActive() {
-        return useAssetType.isSelected() || useMoveMode.isSelected() || useSpecials.isSelected()
-              || numericSpecialFilters.values().stream().anyMatch(NumericSpecialFilter::active)
-              || useArtilleryType.isSelected()
-              || mp.active() || tmm.active() || skill.active() || damage.active()
-              || damagePerHit.active() || damageHits.active()
-              || destroyCheck.active() || threshold.active() || bsp.active() || bv.active()
-              || longRange.active();
+        return getFilter().isActive();
     }
 
     private List<BFSAssetType> selectedAssetTypes() {
@@ -577,8 +495,11 @@ public class BFSAdvancedSearchPanel extends JPanel {
             return use.isSelected();
         }
 
-        boolean matches(int value) {
-            return (value >= from.getIntVal(Integer.MIN_VALUE)) && (value <= to.getIntVal(Integer.MAX_VALUE));
+        void addTo(BFSSearchFilter.Builder filter, BFSSearchFilter.Stat stat) {
+            if (active()) {
+                filter.range(stat, new BFSSearchFilter.IntRange(from.getIntVal(Integer.MIN_VALUE),
+                      to.getIntVal(Integer.MAX_VALUE)));
+            }
         }
 
         void setFieldsEnabled(boolean enabled) {
@@ -614,13 +535,6 @@ public class BFSAdvancedSearchPanel extends JPanel {
 
         boolean active() {
             return use.isSelected();
-        }
-
-        boolean matches(List<BFSSpecial> specials) {
-            int min = minimum.getIntVal(Integer.MIN_VALUE);
-            return specials.stream()
-                  .filter(special -> special.knownType().orElse(null) == type)
-                  .anyMatch(special -> special.intValue().orElse(Integer.MIN_VALUE) >= min);
         }
 
         void setFieldsEnabled(boolean enabled) {

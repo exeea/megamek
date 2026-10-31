@@ -26,6 +26,7 @@ import com.badlogic.gdx.graphics.g2d.freetype.FreeType;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
@@ -184,6 +185,11 @@ public final class UiTheme implements Disposable {
           Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
           // shield_person: the Game Master's toast (Token v0)
           Map.entry("shield-person", 0xF650),
+          // The lobby's player cards: more_vert, add, check_circle, radio_button_unchecked, hourglass_empty,
+          // smart_toy (a bot) and palette (camouflage)
+          Map.entry("more-vert", 0xE5D4), Map.entry("add", 0xE145), Map.entry("check-circle", 0xE86C),
+          Map.entry("radio-unchecked", 0xE836), Map.entry("hourglass", 0xE88B), Map.entry("bot", 0xF06C),
+          Map.entry("palette", 0xE40A),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,
           // security, visibility, terrain, visibility_off (a TAG link's crosshair is "locate").
           Map.entry("power", 0xE8AC), Map.entry("prone", 0xE258), Map.entry("anchor", 0xF1CD),
@@ -527,6 +533,12 @@ public final class UiTheme implements Disposable {
      * type style's upper-case condensed game mode copy.
      */
     public static final String CAPS = "-caps";
+    /**
+     * The done face of a primary button, such as Ready once the player is ready: a status.success face with the
+     * text.onAccent label, leaning toward the label on hover and press; it has the compact and caps copies a token
+     * button has.
+     */
+    public static final String DONE_BUTTON = "button-done";
 
     /** A button style built from the design tokens, with the focus ring its button draws over its face. */
     public static final class TokenButtonStyle extends TextButton.TextButtonStyle {
@@ -597,6 +609,15 @@ public final class UiTheme implements Disposable {
         box("tb-primary", token(inverse), token(inverse), border, radius, null, 0, 0, 0);
         box("tb-primary-over", token(inverseHover), strong, border, radius, null, 0, 0, 0);
         box("tb-primary-down", token(inversePressed), strong, border, radius, null, 0, 0, 0);
+        // Ready's done face: status.success with the onAccent label, leaning toward the label on hover and press
+        int success = tokens.color("status.success", mode);
+        int onAccent = tokens.color("text.onAccent", mode);
+        box("tb-done", token(success), token(success), border, radius, null, 0, 0, 0);
+        box("tb-done-over", token(ColorMath.over(ColorMath.withAlpha(onAccent, tokens.alpha("tint.hover")), success)),
+              strong, border, radius, null, 0, 0, 0);
+        box("tb-done-down",
+              token(ColorMath.over(ColorMath.withAlpha(onAccent, tokens.alpha("tint.pressed")), success)), strong,
+              border, radius, null, 0, 0, 0);
         box("tb-danger", token(raised), token(danger), border, radius, null, 0, 0, 0);
         box("tb-danger-over", token(ColorMath.over(ColorMath.withAlpha(danger, tokens.alpha("tint.hover")), raised)),
               token(danger), border, radius, null, 0, 0, 0);
@@ -705,6 +726,20 @@ public final class UiTheme implements Disposable {
                     TokenButtonStyle caps = new TokenButtonStyle(style);
                     caps.font = skin.getFont(CAPS_FONT);
                     skin.add("button-" + kind + suffix + CAPS, caps, TextButton.TextButtonStyle.class);
+                }
+                if (kind.equals("primary")) {
+                    TokenButtonStyle done = new TokenButtonStyle(style);
+                    done.up = sized(resized("tb-done", 0, 0, 0), vertical, horizontal, height, false);
+                    done.over = sized(resized("tb-done-over", 0, 0, 0), vertical, horizontal, height, false);
+                    done.down = sized(resized("tb-done-down", 0, 0, 0), vertical, horizontal, height, false);
+                    Color onDone = token(onAccent);
+                    done.fontColor = onDone;
+                    done.overFontColor = onDone;
+                    done.downFontColor = onDone;
+                    skin.add(DONE_BUTTON + suffix, done, TextButton.TextButtonStyle.class);
+                    TokenButtonStyle doneCaps = new TokenButtonStyle(done);
+                    doneCaps.font = skin.getFont(CAPS_FONT);
+                    skin.add(DONE_BUTTON + suffix + CAPS, doneCaps, TextButton.TextButtonStyle.class);
                 }
             }
         }
@@ -1482,6 +1517,8 @@ public final class UiTheme implements Disposable {
     public static final String TOKEN_LIST = "token-list";
     /** The token look of hud-v3's split pane divider ({@code hud-split}). */
     public static final String TOKEN_SPLIT = "token-split";
+    /** The Button style of a card that opens something ({@code UiPictureCard}): its edge in border.strong on hover. */
+    public static final String TOKEN_PICTURE_CARD = "token-picture-card";
 
     /**
      * Token v0 styles for hud-v3's own lists, trees, grids and splits (docs/design-system/tokens.md, Lists and trees,
@@ -1533,21 +1570,37 @@ public final class UiTheme implements Disposable {
         box("token-row-lifted", token(tokens.color("surface.raised", mode)), control, border, radius, null, 0, 0, 0);
         box("token-row-slot", token(tokens.color("surface.base", mode)), subtle, border, radius, null, 0, 0, 0);
 
-        // The frame pads xs, which insets the rows' shape; the bar sits over the rows, inside the frame's edge
-        float bar = sm + 2 * tokens.space().get("xxs");
+        // The frame pads xs, which insets the rows' shape. The bar sits inside the frame's edge, beside the rows rather
+        // than over them (UiKit.scrollList), xs clear of them, so no row content or wash runs under it.
+        float xxs = tokens.space().get("xxs");
+        float bar = sm + 2 * xxs;
         ScrollPane.ScrollPaneStyle list = new ScrollPane.ScrollPaneStyle();
         list.background = box("list-frame", token(tokens.color("surface.input", mode)), control, border,
               tokens.radius().get("md"), null, xs, xs, 0);
-        list.vScroll = skin.newDrawable("white", Color.CLEAR);
-        list.vScroll.setMinWidth(bar);
-        list.vScrollKnob = scrollThumb("scroll-thumb", control, sm, height);
+        list.vScroll = scrollStrip(null, bar, xs);
+        list.vScrollKnob = scrollThumb("scroll-thumb", control, sm, height, xxs);
         skin.add(TOKEN_LIST, list);
-        box("scroll-rail", hover, null, 0, bar / 2, null, 0, 0, 0).setMinWidth(bar);
-        scrollThumb("scroll-thumb-over", token(tokens.color("text.muted", mode)), sm, height);
-        scrollThumb("scroll-thumb-down", token(tokens.color("text.secondary", mode)), sm, height);
+        skin.add("scroll-rail", scrollStrip(box("scroll-rail-pill", hover, null, 0, bar / 2, null, 0, 0, 0), bar, xs),
+              Drawable.class);
+        scrollThumb("scroll-thumb-over", token(tokens.color("text.muted", mode)), sm, height, xxs);
+        scrollThumb("scroll-thumb-down", token(tokens.color("text.secondary", mode)), sm, height, xxs);
 
         box("token-card", token(tokens.color("surface.panel", mode)), subtle, border, tokens.radius().get("md"), null,
               0, 0, 0);
+        // A selected card keeps its surface under an accent edge; a card that takes a drop rises, under the same edge
+        Color accentEdge = token(tokens.color("accent.primary", mode));
+        box("token-card-selected", token(tokens.color("surface.panel", mode)), accentEdge, border,
+              tokens.radius().get("md"), null, 0, 0, 0);
+        box("token-card-drop", token(tokens.color("surface.raised", mode)), accentEdge, 2 * border,
+              tokens.radius().get("md"), null, 0, 0, 0);
+        // A card that opens something takes the border.strong edge under the pointer
+        Button.ButtonStyle pictureCard = new Button.ButtonStyle();
+        pictureCard.up = skin.getDrawable("token-card");
+        pictureCard.over = box("token-card-over", token(tokens.color("surface.panel", mode)),
+              token(tokens.color("border.strong", mode)), border, tokens.radius().get("md"), null, 0, 0, 0);
+        pictureCard.down = pictureCard.over;
+        pictureCard.disabled = pictureCard.up;
+        skin.add(TOKEN_PICTURE_CARD, pictureCard);
 
         float band = md;
         float active = tokens.size().get("selection.width");
@@ -1571,6 +1624,11 @@ public final class UiTheme implements Disposable {
     public static final String TOKEN_PANEL_PLAIN = "token-panel-plain";
     /** The rails frame, which replaces {@code panel-rails}: the overlay panel with border.control rails, no corners. */
     public static final String TOKEN_RAILS = "token-rails";
+    /**
+     * The Button style of a folded panel's rail ({@code UiKit.rail}): the token panel, its edge in border.control on
+     * hover, and the selection's wash, edge and ticks while checked.
+     */
+    public static final String TOKEN_RAIL = "token-rail";
 
     /**
      * Token v0 styles for hud-v3's containers (docs/design-system/tokens.md, Panels, Dialogs and Tooltips): the panel
@@ -1607,6 +1665,22 @@ public final class UiTheme implements Disposable {
         skin.add(TOKEN_RAILS, pad(new HudFrame(white, overlayPanel, token(tokens.color("border.control", mode)), null,
               0, null), sm, md), Drawable.class);
 
+        // A rail is the panel as a toggle: its edge lights on hover, and it takes the selection's wash and edge
+        Color selectedEdge = token(tokens.color("selected.primary", mode));
+        Drawable railOver = pad(new HudFrame(white, panel, null, strong, tick,
+              token(tokens.color("border.control", mode)), border).paperRoll(), lg, lg);
+        Drawable railOn = pad(new HudFrame(white, token(ColorMath.over(tokens.color("selected.background", mode),
+              tokens.color("surface.panel", mode))), null, selectedEdge, tick, selectedEdge, border).paperRoll(), lg,
+              lg);
+        Button.ButtonStyle rail = new Button.ButtonStyle();
+        rail.up = skin.getDrawable(TOKEN_PANEL);
+        rail.over = railOver;
+        rail.down = railOver;
+        rail.checked = railOn;
+        rail.checkedOver = railOn;
+        rail.checkedDown = railOn;
+        skin.add(TOKEN_RAIL, rail);
+
         Label.LabelStyle tipText = new Label.LabelStyle(skin.get(TYPE + "small", Label.LabelStyle.class));
         tipText.fontColor = token(tokens.color("text.primary", mode));
         TextTooltip.TextTooltipStyle tip = new TextTooltip.TextTooltipStyle(tipText, box("token-tip",
@@ -1618,8 +1692,18 @@ public final class UiTheme implements Disposable {
 
     /** The Label style of a token count badge's digits: caption's size in the medium face. */
     public static final String TOKEN_BADGE = "token-badge";
-    /** The prefix of a token status chip's frame, followed by neutral, success, warning or danger. */
+    /** The prefix of a token chip's frame, followed by neutral, success, warning, danger or accent. */
     public static final String TOKEN_CHIP = "token-chip-";
+    /**
+     * The prefix of an acting chip's Button style, followed by the frame's tone: the chip's frame at rest, washed in its
+     * status color under the pointer, filled pressed or checked (lit).
+     */
+    public static final String TOKEN_CHIP_BUTTON = "token-chip-button-";
+    /**
+     * The Button style of a filter chip ({@link UiFilterChip}): the neutral chip at rest, washed under the pointer, and
+     * filled in the accent's pressed tint with its accent edge while on.
+     */
+    public static final String TOKEN_FILTER_CHIP = "token-filter-chip";
     /** The prefix of a token toast's card, followed by the level's name in lower case. */
     public static final String TOKEN_TOAST = "token-toast-";
 
@@ -1637,11 +1721,32 @@ public final class UiTheme implements Disposable {
         float md = tokens.space().get("md");
         float lg = tokens.space().get("lg");
         float chip = tokens.size().get("icon.sm") + 2 * tokens.space().get("xxs");
-        String[] tones = {"neutral", "success", "warning", "danger"};
-        for (String tone : tones) {
-            String edge = "neutral".equals(tone) ? "border.control" : "status." + tone;
-            box(TOKEN_CHIP + tone, Color.CLEAR, token(tokens.color(edge, mode)), border, radius, null, 0, 0, chip);
+        String[][] tones = { { "neutral", "border.control" }, { "success", "status.success" },
+                             { "warning", "status.warning" }, { "danger", "status.danger" },
+                             { "accent", "accent.primary" } };
+        for (String[] tone : tones) {
+            box(TOKEN_CHIP + tone[0], Color.CLEAR, token(tokens.color(tone[1], mode)), border, radius, null, 0, 0, chip);
+            // A chip that acts: its status color washes it under the pointer, and fills it pressed or lit
+            int edge = tokens.color(tone[1], mode);
+            box(TOKEN_CHIP + tone[0] + "-over", token(ColorMath.withAlpha(edge, tokens.alpha("tint.hover"))),
+                  token(edge), border, radius, null, 0, 0, chip);
+            box(TOKEN_CHIP + tone[0] + "-lit", token(ColorMath.withAlpha(edge, tokens.alpha("tint.pressed"))),
+                  token(edge), border, radius, null, 0, 0, chip);
+            Button.ButtonStyle acting = new Button.ButtonStyle();
+            acting.up = skin.getDrawable(TOKEN_CHIP + tone[0]);
+            acting.over = skin.getDrawable(TOKEN_CHIP + tone[0] + "-over");
+            acting.down = skin.getDrawable(TOKEN_CHIP + tone[0] + "-lit");
+            acting.checked = acting.down;
+            acting.checkedOver = acting.down;
+            skin.add(TOKEN_CHIP_BUTTON + tone[0], acting);
         }
+        Button.ButtonStyle filter = new Button.ButtonStyle();
+        filter.up = skin.getDrawable(TOKEN_CHIP + "neutral");
+        filter.over = skin.getDrawable(TOKEN_CHIP + "neutral-over");
+        filter.down = skin.getDrawable(TOKEN_CHIP + "accent-lit");
+        filter.checked = filter.down;
+        filter.checkedOver = filter.down;
+        skin.add(TOKEN_FILTER_CHIP, filter);
 
         // The badge's ring is drawn inside its box, so the box is the badge plus the ring on each side
         float ring = tokens.space().get("xxs");
@@ -1681,12 +1786,39 @@ public final class UiTheme implements Disposable {
         return drawable;
     }
 
-    /** A scroll bar's pill thumb, {@code width} wide and at least {@code length} long. */
-    private NinePatchDrawable scrollThumb(String name, Color color, float width, float length) {
-        NinePatchDrawable thumb = box(name, color, null, 0, width / 2, null, 0, 0, 0);
-        thumb.setMinWidth(width);
+    /**
+     * A scroll bar's pill thumb, {@code width} wide and at least {@code length} long, {@code inset} from the bar's
+     * trailing side. The scroll pane puts a thumb against that side, so the drawable is wider than the pill by the inset.
+     */
+    private Drawable scrollThumb(String name, Color color, float width, float length, float inset) {
+        NinePatchDrawable pill = box(name + "-pill", color, null, 0, width / 2, null, 0, 0, 0);
+        Drawable thumb = new BaseDrawable() {
+            @Override
+            public void draw(Batch batch, float x, float y, float drawnWidth, float height) {
+                pill.draw(batch, x, y, Math.max(0, drawnWidth - inset), height);
+            }
+        };
+        thumb.setMinWidth(width + inset);
         thumb.setMinHeight(length);
+        skin.add(name, thumb, Drawable.class);
         return thumb;
+    }
+
+    /**
+     * The scroll bar's strip, {@code bar} wide plus a {@code gap} on the content's side; {@code look} (null: nothing)
+     * fills only the bar, so the gap stays clear between the content and the bar.
+     */
+    private static Drawable scrollStrip(Drawable look, float bar, float gap) {
+        Drawable strip = new BaseDrawable() {
+            @Override
+            public void draw(Batch batch, float x, float y, float width, float height) {
+                if (look != null) {
+                    look.draw(batch, x + width - bar, y, bar, height);
+                }
+            }
+        };
+        strip.setMinWidth(bar + gap);
+        return strip;
     }
 
     /** A divider line {@code thickness} thick across the middle of a grab band {@code band} high (or wide). */

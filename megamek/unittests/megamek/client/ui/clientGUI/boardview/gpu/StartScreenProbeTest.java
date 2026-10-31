@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -46,5 +48,22 @@ class StartScreenProbeTest {
         assertTrue(probe.quit());
         StartScreenProbe bad = StartScreenProbe.from(Map.of("MM_START_SHOT", "out.png", "MM_START_SHOT_AT", "soon"));
         assertEquals(StartTimeline.INTRO_END + 1, bad.shotAt());
+    }
+
+    @Test
+    void lobbyIsNotAStartPage() {
+        StartScreenProbe probe = StartScreenProbe.from(Map.of("MM_START_PAGE", "lobby+ready"));
+        assertTrue(probe.lobby());
+        assertTrue(probe.has("ready"));
+        assertFalse(StartScreenProbe.from(Map.of("MM_START_PAGE", "host")).lobby());
+    }
+
+    @Test
+    void freePortSkipsATakenPort() throws IOException {
+        try (ServerSocket taken = new ServerSocket(0)) {
+            int port = taken.getLocalPort();
+            int free = StartScreenProbe.freePort(port);
+            assertTrue(free > port, "the taken port is skipped");
+        }
     }
 }

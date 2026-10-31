@@ -1,16 +1,15 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,7 +24,7 @@ import javax.swing.SwingUtilities;
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
-import megamek.client.ui.dialogs.UnitLoadingDialog;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
@@ -36,28 +35,25 @@ import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MekSummaryCache;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.Test;
 
 class ClientGUIUnitLoadingTest {
-    @ParameterizedTest
-    @ValueSource(booleans = { false, true })
-    void enteringLobbyDoesNotWaitForUnitsOrConstructUnitTools(boolean nativeBoard) throws Exception {
+    @Test
+    void enteringLobbyDoesNotWaitForUnitsOrConstructUnitTools() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless());
         AtomicReference<ClientGUI> opened = new AtomicReference<>();
         FutureTask<Void> startup = new FutureTask<>(() -> {
-            GUIPreferences preferences = GUIPreferences.getInstance();
-            boolean use3D = preferences.getUse3DBoard();
-            preferences.setUse3DBoard(nativeBoard);
             try (var sound = mockConstruction(SoundManager.class);
-                  var inspector = nativeBoard ? mockConstruction(UnitDisplayPanel.class) : null;
-                  var inspectorDialog = nativeBoard ? mockConstruction(UnitDisplayDialog.class) : null;
+                  var inspector = mockConstruction(UnitDisplayPanel.class);
+                  var inspectorDialog = mockConstruction(UnitDisplayDialog.class);
                   var cacheAccess = mockStatic(MekSummaryCache.class);
                   var application = mockStatic(MegaMekGUI.class);
                   // Keep real Swing presentation, but prevent a GL thread from outliving gui.die() and opening a
                   // failure dialog in later tests. This test exercises the routing, not native rendering.
                   var boardWindow = mockStatic(GpuBoardWindow.class, call ->
-                        call.getMethod().getName().equals("open") ? null : call.callRealMethod())) {
+                        call.getMethod().getName().equals("open") ? null : call.callRealMethod());
+                  // The lobby is a scene of the native window; the test checks what entering it builds, not the scene.
+                  var lobbyWindow = mockStatic(GpuLobbyWindow.class)) {
                 MekSummaryCache cache = mock(MekSummaryCache.class);
                 cacheAccess.when(MekSummaryCache::getInstance).thenReturn(cache);
                 MegaMekController controller = new MegaMekController();
@@ -77,22 +73,12 @@ class ClientGUIUnitLoadingTest {
                 opened.set(gui);
                 try {
                     gui.initialize();
-                    boardWindow.verify(() -> GpuBoardWindow.open(eq(gui), any()), nativeBoard
-                          ? times(1) : never());
                     gui.switchPanel(GamePhase.LOUNGE);
-                    assertTrue(gui.getFrame().isShowing());
-                    if (nativeBoard) {
-                        gui.setUnitDisplayVisible(true);
-                        assertTrue(inspector.constructed().isEmpty());
-                        assertTrue(inspectorDialog.constructed().isEmpty());
-                    } else {
-                        UnitLoadingDialog progress = Arrays.stream(gui.getFrame().getOwnedWindows())
-                              .filter(UnitLoadingDialog.class::isInstance)
-                              .map(UnitLoadingDialog.class::cast)
-                              .findFirst().orElseThrow();
-                        assertTrue(progress.isShowing());
-                        assertFalse(progress.isModal(), "Entering the lobby must not block its controls");
-                    }
+                    lobbyWindow.verify(() -> GpuLobbyWindow.open(gui), atLeastOnce());
+                    boardWindow.verify(() -> GpuBoardWindow.open(eq(gui), any()), never());
+                    gui.setUnitDisplayVisible(true);
+                    assertTrue(inspector.constructed().isEmpty());
+                    assertTrue(inspectorDialog.constructed().isEmpty());
                     assertTrue(Arrays.stream(gui.getFrame().getOwnedWindows())
                           .noneMatch(window -> (window instanceof MegaMekUnitSelectorDialog)
                                 || (window instanceof RandomArmyDialog)));
@@ -101,8 +87,6 @@ class ClientGUIUnitLoadingTest {
                     gui.die();
                     opened.set(null);
                 }
-            } finally {
-                preferences.setUse3DBoard(use3D);
             }
             return null;
         });

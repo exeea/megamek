@@ -592,7 +592,7 @@ public class ServerLobbyHelper {
     /**
      * A force is editable to the sender of a command if any forces in its force chain (this includes the force itself)
      * is owned by the sender. This allows editing forces of other players if they are a subforce of one's own force.
-     * See also LobbyActions.isEditable(Force)
+     * See also LobbyCommands.isEditable(Force)
      */
     @Deprecated(since = "0.51.0", forRemoval = true)
     static boolean isEditable(Force force, Game game, Player sender) {

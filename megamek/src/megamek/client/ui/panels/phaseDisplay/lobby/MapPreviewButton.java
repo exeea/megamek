@@ -77,7 +77,7 @@ import megamek.common.loaders.MapSettings;
 import megamek.common.util.ImageUtil;
 import megamek.logging.MMLogger;
 
-/** A specialized JButton for the map preview panel of the Lobby. */
+/** A specialized JButton for the map preview panel of the map setup. */
 public class MapPreviewButton extends JButton {
     private static final MMLogger logger = MMLogger.create(MapPreviewButton.class);
 
@@ -88,13 +88,13 @@ public class MapPreviewButton extends JButton {
     private Dimension currentPreviewSize;
     private Image scaledImage;
     private Image baseImage;
-    private final ChatLounge lobby;
+    private final MapSetupDialog lobby;
     private int index;
     private boolean isExample = false;
     private String boardName = "";
 
-    /** A specialized JButton for the map preview panel of the Lobby. */
-    public MapPreviewButton(ChatLounge cl, int nr) {
+    /** A specialized JButton for the map preview panel of the map setup. */
+    public MapPreviewButton(MapSetupDialog cl, int nr) {
         super("");
         lobby = cl;
         MapButtonTransferHandler dndHandler = new MapButtonTransferHandler(lobby, this);
@@ -220,8 +220,8 @@ public class MapPreviewButton extends JButton {
         lobby.changeMapDnD(newBoardName, this);
     }
 
-    /** A specialized JButton for the map preview panel of the Lobby. */
-    public MapPreviewButton(ChatLounge cl) {
+    /** A specialized JButton for the map preview panel of the map setup. */
+    public MapPreviewButton(MapSetupDialog cl) {
         this(cl, 0);
     }
 
@@ -383,9 +383,9 @@ public class MapPreviewButton extends JButton {
 
         public final DataFlavor flavor = DataFlavor.stringFlavor;
         private final MapPreviewButton button;
-        private final ChatLounge lobby;
+        private final MapSetupDialog lobby;
 
-        public MapButtonTransferHandler(ChatLounge cl, MapPreviewButton mpButton) {
+        public MapButtonTransferHandler(MapSetupDialog cl, MapPreviewButton mpButton) {
             lobby = cl;
             button = mpButton;
         }

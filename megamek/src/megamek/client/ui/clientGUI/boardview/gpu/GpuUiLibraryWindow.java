@@ -16,10 +16,8 @@ import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
+import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -70,9 +68,9 @@ import megamek.logging.MMLogger;
 /**
  * The developer gallery of the native (libGDX) side of the design system, opened from Help in the lobby. It shows
  * every hud-v3 toolkit element as the game draws it today, one tab per group, each beside the column where its
- * migrated (Token v0) look will go, so the team can discuss the migration element by element. Only one native window
- * may run at a time (GLFW is process-wide), so it frees a map preview first, refuses beside a board or editor, and
- * closes for a board that opens.
+ * migrated (Token v0) look will go, so the team can discuss the migration element by element. It is a scene of the one
+ * native window ({@link GpuHost}): it replaces a map preview, refuses beside a board or editor, and ends when a board
+ * opens.
  */
 public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private static final MMLogger LOGGER = MMLogger.create(GpuUiLibraryWindow.class);
@@ -157,10 +155,33 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     private final Palette previousPalette = DesignTokens.palette();
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     private final Table[] pages = new Table[TABS.length];
-    private volatile Lwjgl3Application application;
     private volatile boolean closeRequested;
-    /** What runs on the EDT once the native window is gone: a board window waiting for it. */
+    /** What runs on the EDT once the gallery has ended. */
     private Runnable afterClose;
+    private final GpuHost.Scene scene = new GpuHost.Scene() {
+        @Override
+        public ApplicationListener listener() {
+            return GpuUiLibraryWindow.this;
+        }
+
+        @Override
+        public String title() {
+            return Messages.getString("UiLibrary.gdx.title");
+        }
+
+        @Override
+        public void closeRequested() {
+            GpuHost.end(this);
+        }
+
+        @Override
+        public void ended(Throwable failure) {
+            if (failure != null) {
+                LOGGER.error(failure, "The native UI library failed");
+            }
+            SwingUtilities.invokeLater(GpuUiLibraryWindow.this::finished);
+        }
+    };
     private GpuBoardSkin boardSkin;
     private GpuHudKit hud;
     private UiKit kit;
@@ -185,23 +206,22 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             SwingUtilities.invokeLater(() -> showLibrary(owner));
             return;
         }
-        if (open != null) {
-            open.focus();
+        if (open != null && !open.closeRequested) {
+            GpuHost.focus();
             return;
         }
-        if (!GpuNativeWindow.claim(owner, () -> showLibrary(owner))) {
+        if (GpuBoardWindow.isRunning()) {
+            javax.swing.JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
             return;
         }
         GpuUiLibraryWindow window = new GpuUiLibraryWindow(GUIPreferences.getInstance().getGUIScale());
         open = window;
-        Thread thread = new Thread(window::run, "MegaMek-UI-library");
-        thread.setDaemon(true);
-        thread.start();
+        GpuHost.show(window.scene);
     }
 
     /**
-     * EDT: closes the open gallery and runs {@code then} on the EDT once its native window is gone, so a board window
-     * can take GLFW. Returns false, and runs nothing, when no gallery is open.
+     * EDT: closes the open gallery and runs {@code then} on the EDT once it has ended. Returns false, and runs
+     * nothing, when no gallery is open.
      */
     static boolean closeThen(Runnable then) {
         if (open == null) {
@@ -212,18 +232,9 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         return true;
     }
 
-    private void run() {
-        try {
-            Lwjgl3ApplicationConfiguration configuration = GpuBoardWindow.configuration(true);
-            configuration.setTitle(Messages.getString("UiLibrary.gdx.title"));
-            configuration.setWindowedMode(1660, 1000);
-            new Lwjgl3Application(this, configuration);
-        } catch (RuntimeException | LinkageError failure) {
-            LOGGER.error(failure, "The native UI library window failed");
-        } finally {
-            application = null;
-            SwingUtilities.invokeLater(this::finished);
-        }
+    /** EDT: whether the gallery holds the window and is not closing. */
+    static boolean isShowing() {
+        return open != null && !open.closeRequested;
     }
 
     private void finished() {
@@ -239,26 +250,11 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     private void requestClose() {
         closeRequested = true;
-        Lwjgl3Application app = application;
-        if (app != null) {
-            app.postRunnable(app::exit);
-        }
-    }
-
-    private void focus() {
-        Lwjgl3Application app = application;
-        if (app != null) {
-            app.postRunnable(() -> {
-                var window = ((Lwjgl3Graphics) app.getGraphics()).getWindow();
-                window.restoreWindow();
-                window.focusWindow();
-            });
-        }
+        GpuHost.end(scene);
     }
 
     @Override
     public void create() {
-        application = (Lwjgl3Application) Gdx.app;
         boardSkin = new GpuBoardSkin();
         hud = new GpuHudKit(boardSkin.skin);
         kit = hud.ui;
@@ -303,7 +299,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
         tokenOverlays();
         selectTab(0);
         if (closeRequested) {
-            Gdx.app.exit();
+            GpuHost.end(scene);
         }
     }
 

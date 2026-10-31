@@ -39,7 +39,6 @@ import megamek.client.ui.Base64Image;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
@@ -186,9 +185,6 @@ class GpuStoryDialogTest {
 
     /** EDT: a real client of an empty game, its unit display and sounds stubbed. */
     private static ClientGUI client() {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean use3D = preferences.getUse3DBoard();
-        preferences.setUse3DBoard(true);
         try (var display = mockConstruction(UnitDisplayPanel.class);
               var sound = mockConstruction(SoundManager.class)) {
             Game game = new Game();
@@ -198,8 +194,6 @@ class GpuStoryDialogTest {
             when(client.getGame()).thenReturn(game);
             when(client.getLocalPlayer()).thenReturn(player);
             return new ClientGUI(client, null);
-        } finally {
-            preferences.setUse3DBoard(use3D);
         }
     }
 

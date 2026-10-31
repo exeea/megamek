@@ -33,25 +33,18 @@
 package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 
 import megamek.client.Client;
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts by 1) player 2) transported units 3) ID. */
 public class PlayerTransportIDSorter extends MekTableSorter {
 
     private final Client client;
 
-    /** A Lobby Mek Table sorter that sorts by 1) player 2) transported units 3) ID. */
-    public PlayerTransportIDSorter(ClientGUI clientGUI) {
-        this(clientGUI.getClient());
-    }
 
     /** A Lobby Mek Table sorter that sorts by 1) player 2) transported units 3) ID. */
     public PlayerTransportIDSorter(Client client) {
-        super(I18n.getTextAt(RESOURCE_BUNDLE, "PlayerTransportIDSorter.DisplayName"),
-              MekTableModel.COL_UNIT);
+        super(I18n.getTextAt(RESOURCE_BUNDLE, "PlayerTransportIDSorter.DisplayName"));
         this.client = client;
     }
 

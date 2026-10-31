@@ -1,0 +1,105 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.lobby;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+import megamek.client.ui.Messages;
+import megamek.common.Player;
+import megamek.common.game.Game;
+import megamek.common.options.OptionsConstants;
+
+/** The checks the lobby makes before the local player and their bots may declare themselves ready. */
+public final class ReadyCheck {
+
+    /** What keeps the players from being ready. */
+    public enum Reason {
+        /** Double blind with exclusive deployment, and two deployment zones overlap. */
+        OVERLAPPING_DEPLOYMENT,
+        /** Commander killed victory is on, and some of the local players have units but no commander. */
+        NO_COMMANDER
+    }
+
+    /**
+     * Something that keeps the players from being ready.
+     *
+     * @param reason      what is wrong
+     * @param playerNames the players it concerns: those without a commander, none for overlapping deployment
+     */
+    public record Blocker(Reason reason, List<String> playerNames) {
+
+        /** @return the title to show the blocker under */
+        public String title() {
+            return Messages.getString((reason == Reason.OVERLAPPING_DEPLOYMENT)
+                  ? "ChatLounge.OverlapDeploy.title" : "ChatLounge.noCmdr.title");
+        }
+
+        /** @return the message explaining the blocker */
+        public String message() {
+            if (reason == Reason.OVERLAPPING_DEPLOYMENT) {
+                return Messages.getString("ChatLounge.OverlapDeploy.msg");
+            }
+            StringBuilder message = new StringBuilder(Messages.getString("ChatLounge.noCmdr.msg"));
+            for (String player : playerNames) {
+                message.append(player).append("\n");
+            }
+            return message.toString();
+        }
+    }
+
+    private ReadyCheck() {}
+
+    /**
+     * @param game        the game
+     * @param localPlayer the local player
+     * @param localBots   the players of the local bots
+     *
+     * @return what keeps the local player and their bots from being ready, most important first; empty when they may
+     *       be ready
+     */
+    public static List<Blocker> blockers(Game game, Player localPlayer, Collection<Player> localBots) {
+        List<Blocker> blockers = new ArrayList<>();
+        if (!overlapping(game).isEmpty()) {
+            blockers.add(new Blocker(Reason.OVERLAPPING_DEPLOYMENT, List.of()));
+        }
+        List<String> leaderless = withoutCommander(game, localPlayer, localBots).stream().map(Player::getName)
+              .toList();
+        if (!leaderless.isEmpty()) {
+            blockers.add(new Blocker(Reason.NO_COMMANDER, leaderless));
+        }
+        return blockers;
+    }
+
+    /**
+     * @return the players whose deployment area overlaps another's where double blind with exclusive deployment
+     *       forbids it, in the game's player order; empty when none does
+     */
+    public static List<Player> overlapping(Game game) {
+        return game.getPlayersList().stream().filter(player -> !LobbyRules.isValidStartPos(game, player)).toList();
+    }
+
+    /**
+     * @return the local player and those of their bots that have units but no commander while commander killed
+     *       victory is on, the local player first; empty when the option is off or all have one
+     */
+    public static List<Player> withoutCommander(Game game, Player localPlayer, Collection<Player> localBots) {
+        if (!game.getOptions().booleanOption(OptionsConstants.VICTORY_COMMANDER_KILLED)) {
+            return List.of();
+        }
+        List<Player> players = new ArrayList<>();
+        if (lacksCommander(game, localPlayer)) {
+            players.add(localPlayer);
+        }
+        for (Player bot : localBots) {
+            if (lacksCommander(game, bot)) {
+                players.add(bot);
+            }
+        }
+        return players;
+    }
+
+    private static boolean lacksCommander(Game game, Player player) {
+        return (game.getLiveCommandersOwnedBy(player) < 1) && (game.getEntitiesOwnedBy(player) > 0);
+    }
+}

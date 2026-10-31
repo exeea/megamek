@@ -108,7 +108,8 @@ final class GpuBoardTestUi {
      * ({@code GpuBattleView.FullscreenKey}) among the input processors.
      */
     static Stage stage() {
-        for (InputProcessor processor : ((InputMultiplexer) Gdx.input.getInputProcessor()).getProcessors()) {
+        for (InputProcessor processor : ((InputMultiplexer) GpuHost.unguarded(Gdx.input.getInputProcessor()))
+              .getProcessors()) {
             if (processor instanceof Stage stage) {
                 return stage;
             }

@@ -32,16 +32,13 @@
  */
 package megamek.client.ui.panels.phaseDisplay.lobby;
 
-import java.util.List;
+import java.util.Optional;
 import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 
-import jakarta.annotation.Nullable;
+import megamek.client.lobby.ForceNameRequest;
 import megamek.client.ui.Messages;
-import megamek.common.Player;
-import megamek.common.force.ForceNames;
-import megamek.common.game.Game;
 
 /**
  * Asks for a force's name, offering names that suit its side and read well on the radio ("Charlie Lance", "Gamma
@@ -52,25 +49,20 @@ final class ForceNameChooser {
     private ForceNameChooser() {}
 
     /**
-     * @param frame       the frame to center on
-     * @param game        the game, for the owner's units
-     * @param owner       the player the force belongs to
-     * @param currentName the force's name now, or {@code null} for a new force
+     * @param frame   the frame to center on
+     * @param request the names to offer and the force's name now
      *
-     * @return the chosen name, trimmed, or {@code null} when cancelled or left blank
+     * @return the chosen name, trimmed, or empty when cancelled or left blank
      */
-    static @Nullable String choose(JFrame frame, Game game, @Nullable Player owner, @Nullable String currentName) {
-        ForceNames.Style style = ForceNames.styleFor((owner == null) ? null : owner.getName(),
-              (owner == null) ? List.of() : game.getPlayerEntities(owner, false));
-        JComboBox<String> names = new JComboBox<>(ForceNames.suggestions(style).toArray(new String[0]));
+    static Optional<String> choose(JFrame frame, ForceNameRequest request) {
+        JComboBox<String> names = new JComboBox<>(request.suggestions().toArray(new String[0]));
         names.setEditable(true);
-        names.setSelectedItem((currentName == null) ? "" : currentName);
+        names.setSelectedItem((request.currentName() == null) ? "" : request.currentName());
         int result = JOptionPane.showConfirmDialog(frame, names, Messages.getString("ChatLounge.forceName.title"),
               JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-        Object chosen = names.getEditor().getItem();
-        if ((result != JOptionPane.OK_OPTION) || (chosen == null) || chosen.toString().isBlank()) {
-            return null;
+        if (result != JOptionPane.OK_OPTION) {
+            return Optional.empty();
         }
-        return chosen.toString().trim();
+        return ForceNameRequest.accept(names.getEditor().getItem());
     }
 }

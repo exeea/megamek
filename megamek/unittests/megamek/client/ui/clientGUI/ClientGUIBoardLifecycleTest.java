@@ -30,13 +30,14 @@ import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
-import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
+import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -136,18 +137,17 @@ class ClientGUIBoardLifecycleTest {
                 MapSettings settings = MapSettings.getInstance();
                 settings.setBoardsSelectedVector(List.of(MapSettings.BOARD_GENERATED));
                 when(gui.getClient().getMapSettings()).thenReturn(settings);
-                ChatLounge lounge;
+                MapSetupDialog lounge;
                 try (var views = mockConstruction(BoardView.class);
                       var panels = mockConstruction(BoardViewPanel.class)) {
-                    lounge = new ChatLounge(gui);
-                    gui.chatlounge = lounge;
+                    lounge = openMapSetup(gui);
                     assertTrue(views.constructed().isEmpty(), "An unopened lobby preview must not create a renderer");
                     assertTrue(panels.constructed().isEmpty());
                 }
                 try {
                     session.game().receiveBoard(0, Board.createEmptyBoard(8, 8));
                     lounge.previewGameBoard();
-                    var previewField = ChatLounge.class.getDeclaredField("previewBV");
+                    var previewField = MapSetupDialog.class.getDeclaredField("previewBV");
                     previewField.setAccessible(true);
                     BoardView preview = (BoardView) previewField.get(lounge);
                     assertNotNull(preview);
@@ -157,11 +157,10 @@ class ClientGUIBoardLifecycleTest {
                     lounge.previewGameBoard();
                     assertSame(state, ((BoardView) previewField.get(lounge)).getClientState());
                     assertEquals(List.of(), boardListeners(previous), "Both gameplay and preview must detach the old map");
-                    var windowField = ChatLounge.class.getDeclaredField("boardPreviewW");
+                    var windowField = MapSetupDialog.class.getDeclaredField("boardPreviewW");
                     windowField.setAccessible(true);
                     var window = (JDialog) windowField.get(lounge);
                     window.dispatchEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSING));
-                    lounge.killPreviewBV();
                     assertTrue(state.isClosed());
                     assertTrue(state.getGame().getGameListeners().isEmpty());
                     assertNull(previewField.get(lounge));
@@ -173,8 +172,7 @@ class ClientGUIBoardLifecycleTest {
                     assertTrue(reopened.getGame().getGameListeners().isEmpty());
                     assertNull(previewField.get(lounge));
                 } finally {
-                    lounge.killPreviewBV();
-                    lounge.removeAllListeners();
+                    MapSetupDialog.closePreviews(gui);
                 }
             }
             return null;
@@ -192,7 +190,8 @@ class ClientGUIBoardLifecycleTest {
         Deque<AutoCloseable> resources = new ArrayDeque<>();
         AtomicReference<Board> shown3D = new AtomicReference<>();
         AtomicInteger raised3D = new AtomicInteger();
-        AtomicReference<ChatLounge> lounge = new AtomicReference<>();
+        AtomicReference<MapSetupDialog> lounge = new AtomicReference<>();
+        AtomicReference<ClientGUI> client = new AtomicReference<>();
         Board server = Board.createEmptyBoard(6, 6);
         try {
             onClient(() -> {
@@ -236,34 +235,34 @@ class ClientGUIBoardLifecycleTest {
                 MapSettings settings = MapSettings.getInstance();
                 settings.setBoardsSelectedVector(List.of(MapSettings.BOARD_GENERATED));
                 when(gui.getClient().getMapSettings()).thenReturn(settings);
-                ChatLounge chatLounge = new ChatLounge(gui);
-                lounge.set(chatLounge);
-                gui.chatlounge = chatLounge;
+                client.set(gui);
+                MapSetupDialog mapSetup = openMapSetup(gui);
+                lounge.set(mapSetup);
 
-                chatLounge.previewGameBoard();
-                Board first = shown2D(chatLounge);
+                mapSetup.previewGameBoard();
+                Board first = shown2D(mapSetup);
                 assertNotNull(first);
                 assertNull(shown3D.get(), "The 2D preview opens no 3D preview");
-                button(field(chatLounge, "boardPreviewW"), Messages.getString("GpuBoard.preview")).doClick();
+                button(field(mapSetup, "boardPreviewW"), Messages.getString("GpuBoard.preview")).doClick();
                 assertSame(first, shown3D.get(), "The 2D preview's 3D button shows the 2D preview's board");
-                ((AbstractButton) field(chatLounge, "butBoardPreview3D")).doClick();
+                ((AbstractButton) field(mapSetup, "butBoardPreview3D")).doClick();
                 assertSame(first, shown3D.get(), "The lobby's 3D button shows the open 2D preview's board too");
 
-                chatLounge.previewGameBoard();
-                Board second = shown2D(chatLounge);
+                mapSetup.previewGameBoard();
+                Board second = shown2D(mapSetup);
                 assertNotSame(first, second, "The 2D button rolls the map settings again");
                 assertSame(second, shown3D.get(), "The open 3D preview shows the new roll too");
                 assertEquals(2, raised3D.get(), "The new roll does not bring the 3D preview to the front");
 
-                JDialog window = field(chatLounge, "boardPreviewW");
+                JDialog window = field(mapSetup, "boardPreviewW");
                 window.getRootPane().getActionMap().get("closeAction").actionPerformed(null);
-                assertNull(field(chatLounge, "previewBV"));
+                assertNull(field(mapSetup, "previewBV"));
                 assertSame(second, shown3D.get(), "Closing the 2D preview leaves the 3D preview open");
 
-                chatLounge.previewGameBoard();
-                assertSame(second, shown2D(chatLounge), "Opened beside the 3D preview, the 2D shows its board");
+                mapSetup.previewGameBoard();
+                assertSame(second, shown2D(mapSetup), "Opened beside the 3D preview, the 2D shows its board");
                 assertSame(second, shown3D.get(), "Opening the 2D preview rolls no new board for the 3D preview");
-                JDialog reopened = field(chatLounge, "boardPreviewW");
+                JDialog reopened = field(mapSetup, "boardPreviewW");
                 reopened.getRootPane().getActionMap().get("closeAction").actionPerformed(null);
 
                 // A server-built battlefield arrives (on the EDT later) while only the 3D preview is open.
@@ -276,16 +275,15 @@ class ClientGUIBoardLifecycleTest {
                 assertNull(field(lounge.get(), "boardPreviewW"), "Updating the 3D preview opens no 2D preview");
                 lounge.get().previewGameBoard();
                 assertSame(server, shown2D(lounge.get()));
-                lounge.get().killPreviewBV();
+                MapSetupDialog.closePreviews(client.get());
                 assertNull(shown3D.get(), "The lobby's end closes its 3D preview");
                 assertNull(field(lounge.get(), "previewBV"), "The lobby's end closes its 2D preview");
                 return null;
             });
         } finally {
             onClient(() -> {
-                if (lounge.get() != null) {
-                    lounge.get().killPreviewBV();
-                    lounge.get().removeAllListeners();
+                if (client.get() != null) {
+                    MapSetupDialog.closePreviews(client.get());
                 }
                 while (!resources.isEmpty()) {
                     resources.pop().close();
@@ -295,15 +293,28 @@ class ClientGUIBoardLifecycleTest {
         }
     }
 
-    private static Board shown2D(ChatLounge lounge) {
+    /** Opens the client's map setup, as the lobby's Map setup button does, and returns it. */
+    @SuppressWarnings("unchecked")
+    private static MapSetupDialog openMapSetup(ClientGUI gui) {
+        MapSetupDialog.open(gui);
+        try {
+            var open = MapSetupDialog.class.getDeclaredField("OPEN");
+            open.setAccessible(true);
+            return ((java.util.Map<ClientGUI, MapSetupDialog>) open.get(null)).get(gui);
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    private static Board shown2D(MapSetupDialog lounge) {
         BoardView view = field(lounge, "previewBV");
         return view.getClientState().getBoard();
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> T field(ChatLounge lounge, String name) {
+    private static <T> T field(MapSetupDialog lounge, String name) {
         try {
-            var field = ChatLounge.class.getDeclaredField(name);
+            var field = MapSetupDialog.class.getDeclaredField(name);
             field.setAccessible(true);
             return (T) field.get(lounge);
         } catch (ReflectiveOperationException failure) {
@@ -350,15 +361,45 @@ class ClientGUIBoardLifecycleTest {
         });
     }
 
-    private record Session(Game game, ClientGUI gui, boolean use3D, Set<CloseClientListener> closeListeners) implements AutoCloseable {
+    /**
+     * A client that joins or reconnects to a game past the lounge goes straight to the board, back to the lobby scene
+     * when the game returns to the lounge, and to the board again as the next game starts.
+     */
+    @Test
+    void joiningARunningGameShowsTheBoardAndTheLoungeShowsTheLobby() throws Exception {
+        onClient(() -> {
+            try (var session = Session.create(GamePhase.MOVEMENT);
+                  var lobby = mockStatic(GpuLobbyWindow.class);
+                  var board = mockStatic(GpuBoardWindow.class)) {
+                ClientGUI gui = session.gui();
+                gui.showDefaultBoard(ClientGUI.CG_DEFAULT);
+                board.verify(() -> GpuBoardWindow.open(same(gui), any()));
+                lobby.verify(() -> GpuLobbyWindow.open(any()), never());
+                gui.showDefaultBoard(ClientGUI.CG_BOARD_VIEW);
+                board.verify(() -> GpuBoardWindow.open(same(gui), any()), times(1));
+
+                gui.showDefaultBoard(ClientGUI.CG_CHAT_LOUNGE);
+                lobby.verify(() -> GpuLobbyWindow.open(gui));
+                board.verify(() -> GpuBoardWindow.closeFor(gui));
+
+                // Between the lounge and the first board phase the lobby stays up
+                lobby.when(() -> GpuLobbyWindow.isActiveFor(gui)).thenReturn(true);
+                gui.showDefaultBoard(ClientGUI.CG_DEFAULT);
+                board.verify(() -> GpuBoardWindow.open(same(gui), any()), times(1));
+                gui.showDefaultBoard(ClientGUI.CG_BOARD_VIEW);
+                board.verify(() -> GpuBoardWindow.open(same(gui), any()), times(2));
+                lobby.verify(() -> GpuLobbyWindow.closeFor(gui), times(2));
+            }
+            return null;
+        });
+    }
+
+    private record Session(Game game, ClientGUI gui, Set<CloseClientListener> closeListeners) implements AutoCloseable {
         static Session create() throws Exception {
             return create(GamePhase.LOUNGE);
         }
 
         static Session create(GamePhase phase) throws Exception {
-            GUIPreferences preferences = GUIPreferences.getInstance();
-            boolean previous = preferences.getUse3DBoard();
-            preferences.setUse3DBoard(true);
             Game game = new Game();
             game.setPhase(phase);
             Player player = new Player(0, "Native lifecycle");
@@ -380,7 +421,7 @@ class ClientGUIBoardLifecycleTest {
             var listener = ClientGUI.class.getDeclaredField("gameListener");
             listener.setAccessible(true);
             game.addGameListener((GameListener) listener.get(gui));
-            return new Session(game, gui, previous, closeListeners);
+            return new Session(game, gui, closeListeners);
         }
 
         @Override
@@ -388,7 +429,6 @@ class ClientGUIBoardLifecycleTest {
             if (gui.getFrame().isDisplayable() || !gui.boardStates().isEmpty()) {
                 gui.die();
             }
-            GUIPreferences.getInstance().setUse3DBoard(use3D);
         }
     }
 

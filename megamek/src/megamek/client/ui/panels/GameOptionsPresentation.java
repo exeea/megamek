@@ -44,7 +44,7 @@ import megamek.common.options.OptionsConstants;
 import megamek.logging.MMLogger;
 
 /** Explicit presentation-only placement for every registered game option. */
-final class GameOptionsPresentation {
+public final class GameOptionsPresentation {
     private static final MMLogger LOGGER = MMLogger.create(GameOptionsPresentation.class);
     private static final String BASIC = "basic";
     private static final String GAME_MASTER = "gameMaster";
@@ -128,7 +128,7 @@ final class GameOptionsPresentation {
         return location;
     }
 
-    static Location locationOrFallback(String sourceGroupId, String optionName) {
+    public static Location locationOrFallback(String sourceGroupId, String optionName) {
         Location location = LOCATIONS.get(optionName);
         if (location != null && location.sourceGroupId().equals(sourceGroupId)) {
             return location;
@@ -571,7 +571,8 @@ final class GameOptionsPresentation {
      * @param sectionOrder  section position within the page
      * @param optionOrder   option position within the section; {@link Integer#MAX_VALUE} appends fallback entries
      */
-    record Location(String sourceGroupId, PageDefinition page, String sectionId, int sectionOrder, int optionOrder) {
+    public record Location(String sourceGroupId, PageDefinition page, String sectionId, int sectionOrder,
+          int optionOrder) {
     }
 
     /**
@@ -582,15 +583,15 @@ final class GameOptionsPresentation {
      * @param advanced              whether the page uses the advanced-rules marker
      * @param order                 page position in navigation
      */
-    record PageDefinition(String id, String categoryId, String iconGroupId, String fallbackSourceGroupId,
+    public record PageDefinition(String id, String categoryId, String iconGroupId, String fallbackSourceGroupId,
           boolean advanced, int order) {
-        String title(Map<String, String> sourceGroups) {
+        public String title(Map<String, String> sourceGroups) {
             return usesSingleSourceFallback(sourceGroups)
                   ? sourceGroups.get(fallbackSourceGroupId)
                   : getTextAt(CLIENT_BUNDLE, "GameOptionsDialog.page." + id + ".title");
         }
 
-        List<String> path(Map<String, String> sourceGroups) {
+        public List<String> path(Map<String, String> sourceGroups) {
             if (categoryId.isBlank()) {
                 return List.of(title(sourceGroups));
             }
@@ -605,7 +606,7 @@ final class GameOptionsPresentation {
             return List.of("gameOptions." + categoryId, routeId());
         }
 
-        boolean isDirect() {
+        public boolean isDirect() {
             return categoryId.isBlank();
         }
 
@@ -613,7 +614,7 @@ final class GameOptionsPresentation {
             return usesSingleSourceFallback(sourceGroups) ? fallbackSourceGroupId : iconGroupId;
         }
 
-        String routeId() {
+        public String routeId() {
             return "gameOptions." + id;
         }
 

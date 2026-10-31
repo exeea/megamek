@@ -48,17 +48,15 @@ import megamek.common.units.Entity;
 public abstract class MekTableSorter implements Comparator<Entity> {
 
     protected static final String RESOURCE_BUNDLE = "megamek.client.sorters";
-    private final int columnIndex;
     private final String displayName;
     private final Sorting sorting;
 
-    public MekTableSorter(String displayName, int columnIndex) {
-        this(displayName, columnIndex, Sorting.ASCENDING);
+    public MekTableSorter(String displayName) {
+        this(displayName, Sorting.ASCENDING);
     }
 
-    public MekTableSorter(String displayName, int columnIndex, Sorting sorting) {
+    public MekTableSorter(String displayName, Sorting sorting) {
         this.displayName = displayName;
-        this.columnIndex = columnIndex;
         this.sorting = sorting;
     }
 
@@ -358,13 +356,6 @@ public abstract class MekTableSorter implements Comparator<Entity> {
      */
     public String getDisplayName() {
         return displayName;
-    }
-
-    /**
-     * Returns the column index of the Mek Table that this sorter is to be used with.
-     */
-    public int getColumnIndex() {
-        return columnIndex;
     }
 
     /**

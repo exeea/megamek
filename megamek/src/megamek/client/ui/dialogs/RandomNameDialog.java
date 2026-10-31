@@ -195,7 +195,6 @@ public class RandomNameDialog extends JDialog implements ActionListener {
                     c.sendUpdateEntity(ent);
                 }
             }
-            clientgui.chatlounge.refreshEntities();
             // need to notify about customization not updating entities in server
             setVisible(false);
         } else if (ev.getSource().equals(butSave)) {

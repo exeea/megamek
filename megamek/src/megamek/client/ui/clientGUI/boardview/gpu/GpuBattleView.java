@@ -291,6 +291,11 @@ class GpuBattleView extends ApplicationAdapter {
         shaderEdits.run(this::createBoard);
     }
 
+    /** GPU thread: the board's source has closed, so this view is done; a standalone view ends its application. */
+    void sourceClosed() {
+        Gdx.app.exit();
+    }
+
     void prepareEntrance() {
         entrancePending = true;
     }
@@ -596,7 +601,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (tuning != null && tuning.takeAssetReloadRequest()) { reloadAssets(); }
         showAssetSyncProgress();
         if (waitingForAssetCapture || assetReloadFailed) {
-            if (source.isClosed()) { Gdx.app.exit(); return; }
+            if (source.isClosed()) { sourceClosed(); return; }
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             ui.draw();
@@ -723,7 +728,7 @@ class GpuBattleView extends ApplicationAdapter {
             return;
         }
         if (source.isClosed()) {
-            Gdx.app.exit();
+            sourceClosed();
             return;
         }
         if (Gdx.graphics.getWidth() <= 0 || Gdx.graphics.getHeight() <= 0) {
