@@ -349,7 +349,8 @@ final class BoardAtmosphere {
             case DAY, DUSK_DAWN, FULL_MOON -> 0; // the light's own adaptation sets these
             case GLARE -> 0.6f;
             case SOLAR_FLARE -> 1.2f;
-            case MOONLESS -> -0.6f;
+            // Night vision sets the night's look; these set brightness: full moon, moonless, pitch black in even steps.
+            case MOONLESS -> -0.3f;
             case PITCH_BLACK -> -1.0f;
         };
         boolean air = !inSpace && !conditions.getAtmosphere().isVacuum();

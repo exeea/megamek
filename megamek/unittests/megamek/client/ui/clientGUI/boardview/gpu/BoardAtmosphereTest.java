@@ -186,7 +186,7 @@ class BoardAtmosphereTest {
         assertTrue(fullMoon > moonless * 1.35f, "Lit full moon stays distinct without changing the readable moonless floor");
         conditions.setLight(Light.PITCH_BLACK);
         float pitch = displayedGround(BoardAtmosphere.fromScenario(conditions, false, 0.5));
-        assertEquals(moonless * Math.pow(2, -.4), pitch, .000001f, "Restore the UI preset EV difference");
+        assertEquals(moonless * Math.pow(2, -.7), pitch, .000001f, "The presets' EV difference (-0.3 and -1 EV)");
     }
 
     @Test
@@ -226,13 +226,14 @@ class BoardAtmosphereTest {
                           "Removing the moon must not brighten the atmospheric sky at " + fullSettings.hour());
                     assertTrue(luminance(full.horizon()) * fullGain > luminance(moonless.horizon()) * moonlessGain);
                 }
-                assertEquals(moonlessGain * Math.pow(2, -.4), blackGain, .000001f,
-                      "Pitch black retains the UI four-tenths-stop presentation below moonless");
+                assertEquals(moonlessGain * Math.pow(2, -.7), blackGain, .000001f,
+                      "Pitch black stays seven tenths of a stop below moonless");
                 if (pressure == Atmosphere.STANDARD && time == .5) {
                     // Calibrated source targets account for the UI gamma-2.2 versus current sRGB display boundary.
                     assertEquals(.01652369f, luminance(moonless.groundLight()), .000001f,
                           "The independent source budget preserves the UI moonless display target");
-                    assertEquals(.12782765, displayedGround(moonlessSettings), .00001);
+                    // Moonless shows 0.3 EV below the full moon's; night vision sets the look.
+                    assertEquals(.15737429, displayedGround(moonlessSettings), .00001);
                     assertEquals(.09687524, displayedGround(blackSettings), .00001);
                 }
             }
@@ -800,7 +801,7 @@ class BoardAtmosphereTest {
             } else if (light.isDuskOrFullMoonOrMoonlessOrPitchBack()) {
                 assertEquals(0, daylight);
                 float expectedExposure = switch (light) {
-                    case MOONLESS -> -0.6f;
+                    case MOONLESS -> -0.3f;
                     case PITCH_BLACK -> -1.0f;
                     default -> 0;
                 };

@@ -572,7 +572,7 @@ final class GpuBoardTuning {
               "Starts at a random minute within the scenario's daylight, dawn/dusk or night window. "
                     + "It stays fixed during combat; adjust here to override. Defaults restores the scenario's choice.", skin, "menu"));
         daylight.get(1).slider().addListener(new TextTooltip(
-              "Visual brightness offset. The Moonless preset uses -1.2 EV; Pitch Black uses -2 EV, both without moonlight. "
+              "Visual brightness offset. The Moonless preset uses -0.3 EV; Pitch Black uses -1 EV, both without moonlight. "
                     + "Glare/Solar Flare use +0.6/+1.2 EV. Time of day also sets the base exposure.", skin, "menu"));
         section(skin, "Planet properties");
         gravity = controls(skin, List.of(new Knob("Gravity (g)", 0, 10, 0.01f, "%.2f")), this::applyAtmosphere, 0);
