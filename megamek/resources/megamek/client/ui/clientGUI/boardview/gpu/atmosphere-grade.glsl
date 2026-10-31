@@ -31,8 +31,8 @@ vec3 backdropRadiance(vec3 authored, float exposure) {
 
 // Night vision (the Purkinje shift): in dim light the eye's rods take over, which see no colour and favour blue-green.
 // The night stays as bright as the light model makes it, for a readable board: a dim exposed pixel turns toward a cool
-// blue-grey at its own luminance, while one with any bright channel (fires, lamps, flashes, coloured emitters) keeps the
-// cones' colour.
+// blue-grey at its own luminance, while one with any bright channel (fires, lamps, flashes, coloured emitters) keeps
+// the cones' colour.
 vec3 nightVision(vec3 linear, float share) {
     linear = max(linear, vec3(0.0));
     float luminance = dot(linear, vec3(0.2126, 0.7152, 0.0722));

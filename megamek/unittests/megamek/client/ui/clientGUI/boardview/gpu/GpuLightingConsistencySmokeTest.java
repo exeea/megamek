@@ -215,7 +215,8 @@ class GpuLightingConsistencySmokeTest {
                         assertEquals(1, samples[pass][3], .0005, "Alpha-over an opaque model remains opaque");
                         assertTrue(depth > 0 && depth < 1, "The actual model must write visible depth");
                         atmosphere.end(camera, terrain, dry, 0);
-                        assertComposite(samples[pass], lighting, atmosphere.exposure(), 0, new float[3],
+                        assertComposite(samples[pass], lighting, atmosphere.exposure(), atmosphere.nightVision(), 0,
+                              new float[3],
                               "Canonical material mixture pass=" + pass + "; " + settings);
                         assertEquals(depth, centerDepth(), 1f / 16777215,
                               "The compositor retains the model's hardware depth");
@@ -272,7 +273,7 @@ class GpuLightingConsistencySmokeTest {
                             assertEquals(raw[c] * selected, glow[c], 4 * halfSpacing(raw[c] * selected),
                                   "Heat is selected in canonical units before gain, including zero-source vacuum");
                         }
-                        assertComposite(raw, lighting, atmosphere.exposure(), selected, glow,
+                        assertComposite(raw, lighting, atmosphere.exposure(), atmosphere.nightVision(), selected, glow,
                               "Canonical heat red=" + red + "; " + settings);
                         assertEquals(.5, centerDepth(), .000001, "Heat compositing retains source depth");
                         System.out.printf(Locale.ROOT, "HEAT hour=%.1f pressure=%s moon=%s zero=%s gain=%.9g "
@@ -653,7 +654,8 @@ class GpuLightingConsistencySmokeTest {
                         atmosphere.end(camera, terrain, scene, 0);
                         int displayed = centerRed();
                         long expectedDisplay = expectedComposite(new float[] { radiance, radiance, radiance },
-                              atmosphere.lighting(), atmosphere.exposure(), 0, new float[3])[0];
+                              atmosphere.lighting(), atmosphere.exposure(), atmosphere.nightVision(), 0,
+                              new float[3])[0];
                         double spacing = Math.scalb(1.0, Math.max(-24,
                               Math.getExponent((double) radiance * GpuSceneRadiance.SCALE) - 10)) / GpuSceneRadiance.SCALE;
                         diagnostic.append(String.format(Locale.ROOT, "%.10g,%.10g,%.10g,%.5f,%.5f,%+.5f,%d,%d%n",
@@ -1125,10 +1127,10 @@ class GpuLightingConsistencySmokeTest {
     }
 
     /**
-     * Independent RGB grade of an opaque pixel: selected heat bypasses tint and the night's rod vision, but shares
-     * exactly one output gain.
+     * Independent RGB grade of an opaque pixel: selected heat bypasses tint and the night's rod vision ({@code night},
+     * its share), but shares exactly one output gain.
      */
-    private static long[] expectedComposite(float[] raw, BoardAtmosphere.Lighting light, double gain,
+    private static long[] expectedComposite(float[] raw, BoardAtmosphere.Lighting light, double gain, double night,
           double selected, float[] glow) {
         double[] tint = { light.tint().r, light.tint().g, light.tint().b };
         double luminance = raw[0] * tint[0] * .2126 + raw[1] * tint[1] * .7152 + raw[2] * tint[2] * .0722;
@@ -1136,7 +1138,7 @@ class GpuLightingConsistencySmokeTest {
         for (int c = 0; c < 3; c++) {
             ordinary[c] = (luminance + (raw[c] * tint[c] - luminance) * light.saturation()) * (1 - selected) * gain;
         }
-        ordinary = nightVision(ordinary, GpuAtmosphere.nightVision(light));
+        ordinary = nightVision(ordinary, night);
         long[] result = new long[3];
         for (int c = 0; c < 3; c++) {
             double radiance = ordinary[c] / gain + raw[c] * selected + .12 * glow[c];
@@ -1146,8 +1148,8 @@ class GpuLightingConsistencySmokeTest {
     }
 
     /**
-     * Rod vision (atmosphere-grade.glsl nightVision) of exposed light: dim light turns blue-grey at its luminance, light
-     * with a bright channel keeps its colour.
+     * Rod vision (atmosphere-grade.glsl nightVision) of exposed light: dim light turns blue-grey at its luminance,
+     * light with a bright channel keeps its colour.
      */
     private static double[] nightVision(double[] exposed, double share) {
         double luminance = exposed[0] * .2126 + exposed[1] * .7152 + exposed[2] * .0722;
@@ -1162,9 +1164,9 @@ class GpuLightingConsistencySmokeTest {
         return shifted;
     }
 
-    private static void assertComposite(float[] raw, BoardAtmosphere.Lighting light, double gain,
+    private static void assertComposite(float[] raw, BoardAtmosphere.Lighting light, double gain, double night,
           double selected, float[] glow, String message) {
-        long[] expected = expectedComposite(raw, light, gain, selected, glow);
+        long[] expected = expectedComposite(raw, light, gain, night, selected, glow);
         var pixel = BufferUtils.newByteBuffer(4);
         Gdx.gl.glReadPixels(WIDTH / 2, HEIGHT / 2, 1, 1, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixel);
         for (int c = 0; c < 3; c++) {
