@@ -149,6 +149,8 @@ public final class GpuStartWindow {
     private static Consumer<ConnectRequest> connects;
     private static Consumer<LoadRequest> loads;
     private static Consumer<ScenarioRequest> scenarios;
+    /** The window a start action launched, until it closes; the start screen takes no input meanwhile. */
+    private static volatile Window launched;
 
     private final boolean greet;
     private final Set<Dialog> modalDialogs = new LinkedHashSet<>();
@@ -171,6 +173,7 @@ public final class GpuStartWindow {
         @Override
         public ApplicationListener listener() {
             screen = new GpuStartScreen(GpuStartWindow.this, greet, GUIPreferences.getInstance());
+            screen.setInputBlocked(inputBlocked());
             return screen;
         }
 
@@ -190,7 +193,11 @@ public final class GpuStartWindow {
             if (modalOpen) {
                 SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
             } else if (!GpuLobbyOverlay.requestClose()) {
-                dispatch(Action.QUIT);
+                if (launched != null) {
+                    SwingUtilities.invokeLater(GpuStartWindow::frontLaunched);
+                } else {
+                    dispatch(Action.QUIT);
+                }
             }
         }
 
@@ -264,6 +271,44 @@ public final class GpuStartWindow {
     public static void reopen() {
         if (anchor != null) {
             open(false);
+        }
+    }
+
+    /**
+     * EDT: suspends the start screen while {@code window}, which a start action launched, is open, so another game
+     * can't start under it; {@link #resume} ends that. The screen may come and go meanwhile and stays suspended.
+     */
+    public static void suspendWhile(Window window) {
+        launched = window;
+        inputChanged();
+    }
+
+    /** EDT: the launched window has closed; the start screen takes input again. */
+    public static void resume() {
+        launched = null;
+        inputChanged();
+    }
+
+    /** EDT: whether a launched window has the start screen suspended. */
+    public static boolean isSuspended() {
+        return launched != null;
+    }
+
+    private static void inputChanged() {
+        GpuStartWindow window = open;
+        if (window != null) {
+            window.post(() -> window.screen.setInputBlocked(window.inputBlocked()));
+        }
+    }
+
+    private boolean inputBlocked() {
+        return modalOpen || launched != null;
+    }
+
+    private static void frontLaunched() {
+        Window window = launched;
+        if (window != null && window.isShowing()) {
+            window.toFront();
         }
     }
 
@@ -418,41 +463,37 @@ public final class GpuStartWindow {
 
     /** Any thread: runs a menu action on the Swing thread. */
     void dispatch(Action action) {
-        Consumer<Action> handler = actions;
-        if (handler != null) {
-            SwingUtilities.invokeLater(() -> handler.accept(action));
-        }
+        request(actions, action);
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to host the game the Host page describes. */
     void host(HostRequest request) {
-        Consumer<HostRequest> handler = hosts;
-        if (handler != null) {
-            SwingUtilities.invokeLater(() -> handler.accept(request));
-        }
+        request(hosts, request);
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to join the game the Connect page describes. */
     void connect(ConnectRequest request) {
-        Consumer<ConnectRequest> handler = connects;
-        if (handler != null) {
-            SwingUtilities.invokeLater(() -> handler.accept(request));
-        }
+        request(connects, request);
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to host the saved game the Load game page describes. */
     void load(LoadRequest request) {
-        Consumer<LoadRequest> handler = loads;
-        if (handler != null) {
-            SwingUtilities.invokeLater(() -> handler.accept(request));
-        }
+        request(loads, request);
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to host the scenario the briefing describes. */
     void scenario(ScenarioRequest request) {
-        Consumer<ScenarioRequest> handler = scenarios;
+        request(scenarios, request);
+    }
+
+    /** Any thread: hands {@code request} to {@code handler} on the Swing thread, unless the screen is suspended. */
+    static <T> void request(Consumer<T> handler, T request) {
         if (handler != null) {
-            SwingUtilities.invokeLater(() -> handler.accept(request));
+            SwingUtilities.invokeLater(() -> {
+                if (launched == null) {
+                    handler.accept(request);
+                }
+            });
         }
     }
 
@@ -715,6 +756,6 @@ public final class GpuStartWindow {
      */
     private void setStartEnabled(boolean enabled) {
         modalOpen = !enabled;
-        post(() -> screen.setInputBlocked(!enabled));
+        post(() -> screen.setInputBlocked(inputBlocked()));
     }
 }
