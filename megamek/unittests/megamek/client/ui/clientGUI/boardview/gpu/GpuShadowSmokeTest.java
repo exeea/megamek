@@ -157,19 +157,17 @@ class GpuShadowSmokeTest {
                           "Lighting-only variants preserve every visible triangle/depth");
                     if (variant.getKey().equals("cliff-light-gate-off")) { uncut = pixels; }
                     if (variant.getKey().equals("cliff-triangle-gate")) {
-                        // Original native captures established these interior chip pixels before the correction.
-                        int[][] points = name.equals("mines-cliff")
-                              ? new int[][] { pose == 0 ? new int[] { 575, 745 } : new int[] { 615, 822 } }
-                              : pose == 0 ? new int[][] { { 702, 407 }, { 819, 522 } } : new int[0][];
-                        for (int[] point : points) {
-                            int at = ((Gdx.graphics.getHeight() - 1 - point[1]) * Gdx.graphics.getWidth() + point[0]) * 4;
-                            assertTrue(reference[at] > pixels[at] + .01f,
-                                  "The reproduced curved cliff keeps incident light at " + java.util.Arrays.toString(point));
-                            assertEquals(uncut[at], reference[at], 0,
+                        // The triangle gate darkens curved cliff pixels the smooth support keeps lit, wherever the
+                        // current meshes put them; each of them is already sun-facing, so no eligibility bypass is needed.
+                        int darkened = 0;
+                        for (int i = 0; i < pixels.length; i += 4) {
+                            if (reference[i] <= pixels[i] + .01f) { continue; }
+                            darkened++;
+                            assertEquals(uncut[i], reference[i], 1e-6f,
                                   "An already sun-facing base surface needs no eligibility bypass");
-                            probes.add(java.util.Map.of("pose", pose, "x", point[0], "y", point[1],
-                                  "current", reference[at], "triangleGate", pixels[at], "uncut", uncut[at]));
                         }
+                        assertTrue(darkened > 500, "The reproduced curved cliff keeps incident light: " + darkened);
+                        probes.add(java.util.Map.of("pose", pose, "darkenedByTriangleGate", darkened));
                     }
                     int altered = 0, cliffs = 0, rejectedSmoothFront = 0, rejectedMappedFront = 0;
                     float maxChange = 0;
