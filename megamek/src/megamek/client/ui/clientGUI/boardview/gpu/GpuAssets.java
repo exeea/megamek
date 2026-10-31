@@ -54,6 +54,8 @@ final class GpuAssets implements Disposable {
     private final Map<String, List<Model>> modelLods = new HashMap<>();
     /** Each recoloured model's decoded levels, in the model's own colours (a missing level repeats the one before). */
     private final Map<String, List<ModelData>> recolourable = new HashMap<>();
+    /** Models' levels decoding on the common pool ahead of their first use ({@link #prepareModels}); each taken once. */
+    private final Map<String, CompletableFuture<List<ModelData>>> decoding = new HashMap<>();
     /** Whether each placed model has colour slots, read from its file's JSON once. */
     private final Map<String, Boolean> hasSlots = new HashMap<>();
     /** How many mesh levels each placed model's file holds, read from its JSON once. */
@@ -643,7 +645,7 @@ final class GpuAssets implements Disposable {
      * Work on the common pool, so at most its parallelism runs at once; without at least two of its threads (where
      * supplyAsync's default would start a thread per task) the work runs at once, on the calling thread.
      */
-    private static <T> CompletableFuture<T> pooled(Supplier<T> work) { return CompletableFuture.supplyAsync(work, pool()); }
+    static <T> CompletableFuture<T> pooled(Supplier<T> work) { return CompletableFuture.supplyAsync(work, pool()); }
 
     /** {@link #pooled}'s executor. */
     private static Executor pool() {
@@ -651,7 +653,7 @@ final class GpuAssets implements Disposable {
     }
 
     /** The result of {@link #pooled} work, or the work's own failure. */
-    private static <T> T joined(CompletableFuture<T> work) {
+    static <T> T joined(CompletableFuture<T> work) {
         try {
             return work.join();
         } catch (CompletionException failure) {
@@ -1108,7 +1110,33 @@ final class GpuAssets implements Disposable {
 
     /** A recolourable model's decoded levels, in its own colours; decoded once. */
     private List<ModelData> decoded(String name) {
-        return recolourable.computeIfAbsent(name, shape -> RigidGlb.loadLods(RigidGlb.source(root, shape), root.toPath()));
+        return recolourable.computeIfAbsent(name, shape -> decode(shape, RigidGlb.source(root, shape)));
+    }
+
+    /**
+     * Starts decoding, on the common pool, the GLB of each named model (a board load's features) not decoded yet, so
+     * the chunk builds that first draw them mostly upload. A name without a model file, or a custom kit's building
+     * ({@link #building}), decodes to nothing; levels a load never takes are dropped at the next one.
+     */
+    void prepareModels(java.util.Set<String> names) {
+        decoding.keySet().retainAll(names);
+        File folder = root;
+        for (String name : names) {
+            if (modelLods.containsKey(name) || recolourable.containsKey(name) || decoding.containsKey(name)
+                  || BoardWall.supports(name)) { continue; }
+            decoding.put(name, pooled(() -> {
+                if (name.startsWith("buildings/") && TilesetScenery.customBuildingFile(name).isFile()) { return null; }
+                var source = RigidGlb.source(folder, name);
+                return source.file().isFile() ? RigidGlb.loadLods(source, folder.toPath()) : null;
+            }));
+        }
+    }
+
+    /** {@code name}'s levels from {@code source}: those {@link #prepareModels} decoded, else decoded now. */
+    private List<ModelData> decode(String name, RigidGlb.Source source) {
+        var started = decoding.remove(name);
+        var levels = started == null ? null : joined(started);
+        return levels != null ? levels : RigidGlb.loadLods(source, root.toPath());
     }
 
     /** The first level whose mesh {@code level} draws: itself, or the level it repeats where the file lacks it. */
@@ -1336,7 +1364,7 @@ final class GpuAssets implements Disposable {
             if (!source.file().isFile()) {
                 throw new IllegalArgumentException("Missing board model " + source.file().getPath());
             }
-            var data = RigidGlb.loadLods(source, root.toPath());
+            var data = decode(shape, source);
             List<Model> levels = new ArrayList<>();
             for (int index = 0; index < data.size(); index++) {
                 int previous = data.indexOf(data.get(index));
@@ -1740,6 +1768,7 @@ final class GpuAssets implements Disposable {
         liquids.values().forEach(animation -> animation.frames().forEach(Texture::dispose));
         models.clear();
         modelLods.clear();
+        decoding.clear();
         materials.clear();
         cliffs.clear();
         magmas.values().forEach(MaterialArrays::dispose);

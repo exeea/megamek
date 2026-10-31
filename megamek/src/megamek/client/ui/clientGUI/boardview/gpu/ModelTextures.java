@@ -2,11 +2,17 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
@@ -19,46 +25,72 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 final class ModelTextures {
     private ModelTextures() { }
 
+    /** An image as one glTF role reads it: its cache key, whether its RGB is sRGB, its pixels and its sampler. */
+    private record Role(String key, boolean color, Supplier<Pixmap> pixels, RigidGlb.Image image) { }
+
     static Model create(ModelData data, Map<String, Texture> cache, BiFunction<String, Boolean, Texture> external) {
         File textures = GpuMaterialMaps.boardTextures();
-        // A glTF role (a ModelTexture usage, or GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE or HEIGHT_USAGE) decides a board
-        // material map's layout.
-        BiFunction<String, Integer, Texture> load = (key, usage) -> {
-            boolean color = color(usage);
-            var image = data instanceof RigidGlb.Data glb ? glb.images.get(key) : null;
-            if (image == null) { return external.apply(key, color); }
-            var map = image.encoded() == null ? GpuMaterialMaps.modelMap(new File(image.file()), usage, textures) : null;
-            return cache.computeIfAbsent((color ? "color:" : "data:") + key + (map == null ? "" : map.suffix()), ignored -> {
-                Texture texture;
-                if (map != null) {
-                    texture = GpuColorTexture.create(map.pixels(), true, color);
-                } else if (image.encoded() == null) {
-                    var file = new com.badlogic.gdx.files.FileHandle(image.file());
-                    texture = color ? GpuColorTexture.create(file, true) : GpuColorTexture.createData(file, true);
-                } else if (color) {
-                    texture = GpuColorTexture.create(image.encoded(), true);
-                } else {
-                    texture = GpuColorTexture.createData(image.encoded(), true);
-                }
-                texture.setFilter(filter(image.minFilter()), filter(image.magFilter()));
-                texture.setWrap(wrap(image.wrapS()), wrap(image.wrapT()));
-                return texture;
-            });
-        };
+        Map<String, RigidGlb.Image> images = data instanceof RigidGlb.Data glb ? glb.images : Map.of();
         var usages = new HashMap<String, Integer>();
-        // Decode first, so an invalid image cannot strand meshes inside a partially constructed Model.
+        List<Map.Entry<String, Integer>> reads = new ArrayList<>();
         for (var material : data.materials) {
             if (material.textures == null) { continue; }
             for (var texture : material.textures) {
                 usages.putIfAbsent(texture.fileName, texture.usage);
-                load.apply(texture.fileName, texture.usage);
+                reads.add(Map.entry(texture.fileName, texture.usage));
             }
         }
         if (data instanceof RigidGlb.Data glb) {
             glb.surfaces.values().stream().map(RigidGlb.Surface::map).filter(java.util.Objects::nonNull)
-                  .forEach(key -> load.apply(key, GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE));
+                  .forEach(key -> reads.add(Map.entry(key, GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE)));
             glb.surfaces.values().stream().map(RigidGlb.Surface::relief).filter(java.util.Objects::nonNull)
-                  .forEach(relief -> load.apply(relief.map(), GpuMaterialMaps.HEIGHT_USAGE));
+                  .forEach(relief -> reads.add(Map.entry(relief.map(), GpuMaterialMaps.HEIGHT_USAGE)));
+        }
+        // A glTF role (a ModelTexture usage, or GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE or HEIGHT_USAGE) decides a board
+        // material map's layout. Each image's roles resolve once, together on the common pool: a board map's lookup
+        // reads its files.
+        Map<String, CompletableFuture<Role>> roles = new HashMap<>();
+        for (var read : reads) {
+            var image = images.get(read.getKey());
+            if (image != null) {
+                roles.computeIfAbsent(read.getValue() + ":" + read.getKey(),
+                      ignored -> GpuAssets.pooled(() -> role(image, read.getKey(), read.getValue(), textures)));
+            }
+        }
+        BiFunction<String, Integer, Role> role = (key, usage) -> {
+            var image = images.get(key);
+            return image == null ? null : GpuAssets.joined(roles.computeIfAbsent(usage + ":" + key,
+                  ignored -> CompletableFuture.completedFuture(role(image, key, usage, textures))));
+        };
+        // The pixels of the images not cached yet decode together on the common pool. A texture takes its own at its
+        // upload; a managed texture's next one (a context restore) decodes them again.
+        Map<String, CompletableFuture<Pixmap>> ahead = new HashMap<>();
+        BiFunction<String, Integer, Texture> load = (key, usage) -> {
+            var read = role.apply(key, usage);
+            if (read == null) { return external.apply(key, color(usage)); }
+            return cache.computeIfAbsent(read.key(), ignored -> {
+                Texture texture = GpuColorTexture.create(() -> {
+                    var started = ahead.remove(read.key());
+                    return started != null ? GpuAssets.joined(started) : read.pixels().get();
+                }, true, read.color());
+                texture.setFilter(filter(read.image().minFilter()), filter(read.image().magFilter()));
+                texture.setWrap(wrap(read.image().wrapS()), wrap(read.image().wrapT()));
+                return texture;
+            });
+        };
+        // Decode first, so an invalid image cannot strand meshes inside a partially constructed Model.
+        try {
+            for (var read : reads) {
+                var image = role.apply(read.getKey(), read.getValue());
+                if (image != null && !cache.containsKey(image.key()) && !ahead.containsKey(image.key())) {
+                    ahead.put(image.key(), GpuAssets.pooled(image.pixels()));
+                }
+            }
+            reads.forEach(read -> load.apply(read.getKey(), read.getValue()));
+        } finally {
+            // Pixels a failure left untaken, before or during a texture's construction.
+            ahead.values().forEach(pixels -> pixels.thenAccept(Pixmap::dispose));
+            ahead.clear();
         }
         Model model = new Model(data, key -> load.apply(key, usages.getOrDefault(key, ModelTexture.USAGE_UNKNOWN)));
         // glTF permits one source image in both a color and a data role. Each role needs its own GPU storage.
@@ -104,6 +136,16 @@ final class ModelTextures {
             if (owned.next() instanceof Texture) { owned.remove(); }
         }
         return model;
+    }
+
+    /** {@code image} (the model's image {@code key}) as role {@code usage} reads it; GL-free. */
+    private static Role role(RigidGlb.Image image, String key, int usage, File textures) {
+        boolean color = color(usage);
+        var map = image.encoded() == null ? GpuMaterialMaps.modelMap(new File(image.file()), usage, textures) : null;
+        Supplier<Pixmap> pixels = map != null ? map.pixels()
+              : image.encoded() == null ? () -> GpuColorTexture.decode(new FileHandle(image.file()))
+              : () -> GpuColorTexture.decode(image.encoded());
+        return new Role((color ? "color:" : "data:") + key + (map == null ? "" : map.suffix()), color, pixels, image);
     }
 
     private static boolean color(int usage) {

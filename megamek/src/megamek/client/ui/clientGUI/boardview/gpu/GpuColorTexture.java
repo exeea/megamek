@@ -28,17 +28,9 @@ final class GpuColorTexture {
         return new Texture(new ImageData(() -> decode(file), mipmaps, true, true, true));
     }
 
-    static Texture create(byte[] encoded, boolean mipmaps) {
-        return new Texture(new ImageData(() -> decode(encoded), mipmaps, true, true, true));
-    }
-
     /** Numerical maps share core-GL channel layout handling, without applying an RGB transfer function. */
     static Texture createData(FileHandle file, boolean mipmaps) {
         return new Texture(new ImageData(() -> decode(file), mipmaps, true, true, false));
-    }
-
-    static Texture createData(byte[] encoded, boolean mipmaps) {
-        return new Texture(new ImageData(() -> decode(encoded), mipmaps, true, true, false));
     }
 
     /**
@@ -52,7 +44,7 @@ final class GpuColorTexture {
     /** File grayscale means opaque luminance; the caller owns the returned pixels. */
     static Pixmap decode(FileHandle file) { return decodedImage(new Pixmap(file)); }
 
-    private static Pixmap decode(byte[] encoded) { return decodedImage(new Pixmap(encoded, 0, encoded.length)); }
+    static Pixmap decode(byte[] encoded) { return decodedImage(new Pixmap(encoded, 0, encoded.length)); }
 
     private static Pixmap decodedImage(Pixmap pixels) {
         if (pixels.getFormat() != Pixmap.Format.Alpha) { return pixels; }

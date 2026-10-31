@@ -2155,6 +2155,8 @@ final class GpuTerrain implements Disposable {
                   || targetColumns != columns || targetTessellated != tessellation) {
                 startFamilySession();
                 curvedFamilies.clear();
+                // Its models decode on the common pool while the board prepares, before the chunk builds draw them.
+                if (!borrowedAssets) { assets.prepareModels(featureModels(scene)); }
             }
             requested = new Request(meshGeneration, scene, settings, columns, tessellation);
             // Before anything prepares for it: whether its programs compile the biome stage.
@@ -2170,6 +2172,25 @@ final class GpuTerrain implements Disposable {
                 if (!Objects.equals(light, scene.light())) { updateLight(scene.light()); }
             }
         }
+    }
+
+    /**
+     * The models {@code scene}'s features may draw (collectFeatures): not scatter (but fungus), boulders, rough ground,
+     * shafts, decals or generated industrial plants.
+     */
+    private static java.util.Set<String> featureModels(BoardScene scene) {
+        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        for (BoardScene.Tile tile : scene.tiles()) {
+            for (BoardScene.Feature feature : tile.features()) {
+                var kind = feature.kind();
+                if (kind == BoardScene.FeatureKind.SCATTER && !BoardFungus.asset(feature.asset())
+                      || kind == BoardScene.FeatureKind.BOULDER || kind == BoardScene.FeatureKind.ROUGH
+                      || kind == BoardScene.FeatureKind.SHAFT || BoardIndustrial.supports(feature)
+                      || feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
+                names.add(feature.asset());
+            }
+        }
+        return names;
     }
 
     private boolean materialsReady() { return terrainMaterialsReady && sameMaterialConfiguration(); }
