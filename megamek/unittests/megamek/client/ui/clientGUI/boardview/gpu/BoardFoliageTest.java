@@ -55,9 +55,11 @@ class BoardFoliageTest {
                 for (int i = 0; i < part.indices.length; i += 3) {
                     for (int edge = 0; edge < 3; edge++) {
                         int a = corner(part.indices, i + edge), b = corner(part.indices, i + (edge + 1) % 3);
-                        // The branch texture's stem starts midway along its bottom edge.
-                        if (v[a + 11] == 1 && v[b + 11] == 1 && Math.abs(v[a + 10] - v[b + 10]) > .9f) {
-                            roots.add(new Vector3(v[a] + v[b], v[a + 1] + v[b + 1], v[a + 2] + v[b + 2]).scl(.5f));
+                        // The branch texture's stem starts midway along its bottom edge, which a folded card splits.
+                        float t = (.5f - v[a + 10]) / (v[b + 10] - v[a + 10]);
+                        if (v[a + 11] > .97f && v[b + 11] > .97f && Math.abs(v[a + 10] - v[b + 10]) > .3f && t >= 0 && t <= 1) {
+                            roots.add(new Vector3(v[a] + t * (v[b] - v[a]), v[a + 1] + t * (v[b + 1] - v[a + 1]),
+                                  v[a + 2] + t * (v[b + 2] - v[a + 2])));
                         }
                     }
                 }
