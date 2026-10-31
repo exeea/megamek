@@ -607,10 +607,6 @@ void main() {
         normal = upNormal(detail.rgb, face);
         cavity = detail.a * .6 + .4;
     }
-    if (ground && !shore && family(4.0)) {
-        // BoardRelief.groundOcclusion, per pixel.
-        occlusion = 1.0 - .3 * exp(-surfaceUV.y / 1.6);
-    }
     if (shore && !natural && family(4.0) && face.z < .6) {
         concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
               albedo, normal, occlusion, cavity, finish);
@@ -627,6 +623,10 @@ void main() {
     }
 #endif
 #endif
+    if (ground && !shore && family(4.0)) {
+        // BoardRelief.groundOcclusion, per pixel (cached pavement too: the cache holds no occlusion).
+        occlusion = 1.0 - .3 * exp(-surfaceUV.y / 1.6);
+    }
     lunar = family(LUNAR_FAMILY) ? 1.0 : 0.0;
 #ifdef terrainBlendFlag
     if (ground || cliff) lunar = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - LUNAR_FAMILY)));

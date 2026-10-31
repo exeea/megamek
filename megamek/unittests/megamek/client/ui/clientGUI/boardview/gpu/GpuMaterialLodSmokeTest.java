@@ -75,10 +75,7 @@ class GpuMaterialLodSmokeTest {
      */
     private static void checkAveraging(boolean cached) {
         var failures = new ArrayList<String>();
-        // The cache never draws concrete (GpuMaterialCache.cacheable): it stays in the direct run only.
-        var materials = cached ? List.of("grass", "dirt", "sand", "rock", "snow", "desert")
-              : List.of("grass", "dirt", "sand", "rock", "snow", "desert", "concrete");
-        for (String material : materials) {
+        for (String material : List.of("grass", "dirt", "sand", "rock", "snow", "desert", "concrete")) {
             var terrain = new GpuTerrain();
             var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
             try {

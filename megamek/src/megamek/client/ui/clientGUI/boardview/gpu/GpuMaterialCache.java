@@ -33,7 +33,7 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL31;
 
 /**
- * The ground material cache: the canonical material of level, dry natural tops, as the close view shows it
+ * The ground material cache: the canonical material of level, dry ground tops, as the close view shows it
  * (terrain-sculpt.frag, materialFillFlag), averaged exactly into the world-locked pages of a mip pyramid
  * ({@link GpuPageCache}) and read back by a cached-lit program (materialCachedFlag), which adds the live layers and the
  * lighting. Zooming out only reads coarser pages and mips: nothing in a page depends on the view.
@@ -180,31 +180,27 @@ final class GpuMaterialCache {
     // ---- Tops: which faces and materials ----
 
     /**
-     * A sculpt material whose level tops are cached: natural ground, alone or blended with other natural covers; not
-     * volcanic, iced or concrete. A blend's live layers take its covers' plain proportions (terrain-sculpt.frag), so
-     * covers whose live effects follow the height-blended weights stay direct: sand (its windows onto the substrate),
-     * fungus (the level grade) and lunar ground (its regolith light). Bounce light, rain, wind and ground damage follow
-     * the mixture rather than each patch.
+     * A sculpt material whose level tops are cached: natural ground or pavement, alone or blended; not volcanic or iced.
+     * A blend's live layers take its covers' plain proportions (terrain-sculpt.frag), so covers whose live effects
+     * follow the height-blended weights stay direct: sand (its windows onto the substrate), fungus (the level grade) and
+     * lunar ground (its regolith light). Bounce light, rain, wind and ground damage follow the mixture rather than each
+     * patch. Pavement keeps its per-pixel occlusion live; like natural ground, its cached tops have no parallax.
      */
     static boolean cacheable(Material material) {
         if (!SPLIT || GpuTessellation.curved(material)) { return false; }
         var sculpt = (FloatAttribute) material.get(GpuTerrain.Sculpt.TYPE);
-        if (sculpt == null || !natural(sculpt.value) || material.has(GpuMagmaShader.TYPE)
+        if (sculpt == null || sculpt.value >= BoardSurfaceBlend.CRUST || material.has(GpuMagmaShader.TYPE)
               || material.has(GpuIceShader.TYPE)) { return false; }
         var blend = (GpuSurfaceBlend) material.get(GpuSurfaceBlend.TYPE);
         if (blend != null) {
             for (float family : blend.families) {
-                if (!natural(family) || family == BoardScene.Surface.SAND.ordinal()
+                if (family >= BoardSurfaceBlend.CRUST || family == BoardScene.Surface.SAND.ordinal()
                       || family == BoardScene.Surface.FUNGUS.ordinal() || family == BoardScene.Surface.LUNAR.ordinal()) {
                     return false;
                 }
             }
         }
         return true;
-    }
-
-    private static boolean natural(float family) {
-        return family != BoardScene.Surface.CONCRETE.ordinal() && family < BoardSurfaceBlend.CRUST;
     }
 
     /** The material a chunk's cache tops draw in: the same attributes, so the same programs, under its own id. */
@@ -220,7 +216,7 @@ final class GpuMaterialCache {
     static boolean isCached(Attributes material) { return material instanceof Material m && m.id.endsWith(CACHED); }
 
     /**
-     * A dry ground face of a natural top that lies level, untouched by water, in a hex that no biome cover reaches:
+     * A dry ground face of a cached top that lies level, untouched by water, in a hex that no biome cover reaches:
      * the canonical material holds no biome layer, and its weathering follows the cover.
      */
     static boolean top(BoardSurface surface, BoardSurface.Face face, BoardScene scene,
