@@ -226,16 +226,26 @@ final class GpuAssets implements Disposable {
     }
 
     /**
-     * Starts preparing {@link #sculptArray}'s arrays on the common pool while the view is still being made, so that its
-     * first call with the same names only uploads them. A failure is reported where the arrays are first used.
+     * Starts preparing the terrain's material arrays on the common pool while the view is still being made:
+     * {@link #sculptArray}'s for these names, and the {@link #scatter} atlas. Their first use then only uploads them. A
+     * failure is reported where they are first used.
      */
-    void prepareSculptArray(List<String> names) {
-        if (terrainArrays != null || preparing != null) { return; }
-        try {
-            var materials = sculptFinishes(names);
-            preparing = new Preparing(List.copyOf(names), List.copyOf(materials), terrainWork(names, materials));
-        } catch (RuntimeException failure) {
-            // sculptArray reads the same files again and reports what is missing.
+    void prepareTerrainArrays(List<String> names) {
+        if (terrainArrays == null && preparing == null) {
+            try {
+                var finishes = sculptFinishes(names);
+                preparing = new Preparing(List.copyOf(names), List.copyOf(finishes), terrainWork(names, finishes));
+            } catch (RuntimeException failure) {
+                // sculptArray reads the same files again and reports what is missing.
+            }
+        }
+        if (!materials.containsKey(SCATTER) && scatterPixels == null) {
+            try {
+                var definitions = GpuScatter.materials(this);
+                scatterPixels = pooled(() -> GpuScatter.pixels(definitions));
+            } catch (RuntimeException failure) {
+                // scatter reads the same materials again and reports the failure.
+            }
         }
     }
 
@@ -308,7 +318,7 @@ final class GpuAssets implements Disposable {
     /** The sculpt arrays' work before any GL: their data, started, and the finish's values ({@link FinishArrays}). */
     private record TerrainWork(StartedArrays arrays, float[] surface, float[] tint, float[] glow, float[] relief) { }
 
-    /** Work {@link #prepareSculptArray} started for these names and materials. */
+    /** Work {@link #prepareTerrainArrays} started for these names and materials. */
     private record Preparing(List<String> names, List<String> materials, CompletableFuture<TerrainWork> work) {
         /** Releases the work's prepared layers, as they arrive; none of them is uploaded. */
         void discard() { work.thenAccept(prepared -> prepared.arrays().discard()); }
@@ -1407,8 +1417,21 @@ final class GpuAssets implements Disposable {
     }
 
     Texture scatter() {
-        return materials.computeIfAbsent("scatter-atlas", key -> GpuScatter.atlas(this));
+        return materials.computeIfAbsent(SCATTER, key -> {
+            var started = scatterPixels;
+            scatterPixels = null;
+            Pixmap pixels = started != null ? joined(started) : GpuScatter.pixels(GpuScatter.materials(this));
+            try {
+                return GpuScatter.atlas(pixels);
+            } finally { pixels.dispose(); }
+        });
     }
+
+    /** The scatter atlas's key among the materials. */
+    private static final String SCATTER = "scatter-atlas";
+
+    /** The scatter atlas's pixels {@link #prepareTerrainArrays} started, which {@link #scatter} takes; or null. */
+    private CompletableFuture<Pixmap> scatterPixels;
 
     Cliff road(String name) {
         return cliffs.computeIfAbsent("roads/" + name, key -> new Cliff(texture(key, GpuMaterialMaps.Layout.COLOR, true),
@@ -1728,6 +1751,7 @@ final class GpuAssets implements Disposable {
         catalog = null;
         if (terrainArrays != null) { terrainArrays.arrays().dispose(); terrainArrays = null; }
         if (preparing != null) { preparing.discard(); preparing = null; }
+        if (scatterPixels != null) { scatterPixels.thenAccept(Pixmap::dispose); scatterPixels = null; }
         if (tundraCarpets != null) { tundraCarpets.dispose(); tundraCarpets = null; }
         roadRelief = null;
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }

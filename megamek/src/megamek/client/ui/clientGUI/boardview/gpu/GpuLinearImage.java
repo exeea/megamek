@@ -157,4 +157,9 @@ final class GpuLinearImage {
     Texture texture(boolean mipmaps) {
         return GpuColorTexture.ldr(pixels, width, height, mipmaps);
     }
+
+    /** {@link #texture}'s pixels, encoded without GL; the caller owns them. */
+    Pixmap ldr() {
+        return GpuColorTexture.ldrPixels(pixels, width, height);
+    }
 }

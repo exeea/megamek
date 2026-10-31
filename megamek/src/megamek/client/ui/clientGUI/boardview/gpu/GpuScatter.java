@@ -32,17 +32,31 @@ final class GpuScatter {
         };
     }
 
-    /** Uploaded once and owned by GpuAssets; source height/coverage alpha never makes scatter transparent. */
-    static Texture atlas(GpuAssets assets) {
+    /** The atlas's materials, read by their owner: one definition per swatch, null where the board data has none. */
+    static GodotMaterial[] materials(GpuAssets assets) {
+        var definitions = new GodotMaterial[MATERIALS.length];
+        for (int index = 0; index < MATERIALS.length; index++) {
+            if (MATERIALS[index] != null && assets.hasMaterial(MATERIALS[index])) {
+                definitions[index] = assets.definition(MATERIALS[index]);
+            }
+        }
+        return definitions;
+    }
+
+    /**
+     * The atlas's sRGB pixels from {@link #materials}, without GL, so they can be made off the render thread; the caller
+     * owns them. Source height/coverage alpha never makes scatter transparent.
+     */
+    static Pixmap pixels(GodotMaterial[] materials) {
         var atlas = new GpuLinearImage(WIDTH, HEIGHT);
         atlas.fill(1, 1, 1, 1);
         int interior = CELL - 2 * BORDER;
         for (int index = 0; index < MATERIALS.length; index++) {
             if (MATERIALS[index] == null) { continue; }
             GpuLinearImage source;
-            if (assets.hasMaterial(MATERIALS[index])) {
+            if (materials[index] != null) {
                 // Only the albedo: the atlas ignores the sculpted materials' heights.
-                Pixmap pixels = GpuMaterialMaps.pack(assets.definition(MATERIALS[index]), GpuMaterialMaps.Layout.COLOR);
+                Pixmap pixels = GpuMaterialMaps.pack(materials[index], GpuMaterialMaps.Layout.COLOR);
                 try { source = new GpuLinearImage(pixels); }
                 finally { pixels.dispose(); }
             } else {
@@ -55,7 +69,12 @@ final class GpuScatter {
             atlas.extrude(x, y, interior, interior, BORDER);
         }
         atlas.opaque();
-        Texture texture = atlas.texture(true);
+        return atlas.ldr();
+    }
+
+    /** The atlas uploaded from {@link #pixels}, which the caller still owns; GpuAssets owns the texture. */
+    static Texture atlas(Pixmap pixels) {
+        Texture texture = GpuColorTexture.create(pixels, true);
         texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
         texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
         // The 32-pixel extruded border still occupies a full texel at the last sampled mip level.

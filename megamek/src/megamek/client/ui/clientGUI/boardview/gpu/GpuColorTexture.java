@@ -88,6 +88,14 @@ final class GpuColorTexture {
 
     /** Bounded composed RGB is encoded once for sRGB8 storage; alpha remains independent eight-bit coverage. */
     static Texture ldr(float[] linear, int width, int height, boolean mipmaps) {
+        var pixels = ldrPixels(linear, width, height);
+        try {
+            return create(pixels, mipmaps);
+        } finally { pixels.dispose(); }
+    }
+
+    /** {@link #ldr}'s pixels, encoded without GL; the caller owns them. */
+    static Pixmap ldrPixels(float[] linear, int width, int height) {
         if (linear.length != width * height * 4) { throw new IllegalArgumentException("RGBA image dimensions"); }
         var pixels = new Pixmap(width, height, Pixmap.Format.RGBA8888);
         try {
@@ -96,8 +104,8 @@ final class GpuColorTexture {
                 float value = (index & 3) == 3 ? linear[index] : GpuColor.display(linear[index]);
                 rgba.put(index, (byte) Math.round(Math.clamp(value, 0f, 1f) * 255));
             }
-            return create(pixels, mipmaps);
-        } finally { pixels.dispose(); }
+            return pixels;
+        } catch (RuntimeException | Error failure) { pixels.dispose(); throw failure; }
     }
 
     /** CPU-composited light/color is uploaded directly, without an intermediate display encoding. */
