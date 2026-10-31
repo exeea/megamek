@@ -361,10 +361,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_EDITOR_LAYERS_SPLIT = "BoardEditorLayersSplit";
     /** Whether the 3D board editor's side view is open, as the user last left it. */
     public static final String BOARD_EDITOR_SIDE_VIEW = "BoardEditorSideView";
-    public static final String LOBBY_MEK_TABLE_UNIT_WIDTH = "LobbyMekTableUnitWidth";
-    public static final String LOBBY_MEK_TABLE_PILOT_WIDTH = "LobbyMekTablePilotWidth";
-    public static final String LOBBY_MEK_TABLE_PLAYER_WIDTH = "LobbyMekTablePlayerWidth";
-    public static final String LOBBY_MEK_TABLE_BV_WIDTH = "LobbyMekTableBVWidth";
     /** Whether the lobby requisition dossier's Readout tab shows the TRO rather than the Summary. */
     public static final String REQUISITION_READOUT_TRO = "RequisitionReadoutTro";
     /** The lobby requisition's kept weights, tech bases and rules levels. */
@@ -938,10 +934,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
         store.setDefault(BOARD_EDITOR_SIDE_VIEW, true);
-        store.setDefault(LOBBY_MEK_TABLE_UNIT_WIDTH, 170);
-        store.setDefault(LOBBY_MEK_TABLE_PILOT_WIDTH, 80);
-        store.setDefault(LOBBY_MEK_TABLE_PLAYER_WIDTH, 50);
-        store.setDefault(LOBBY_MEK_TABLE_BV_WIDTH, 50);
         store.setDefault(REQUISITION_READOUT_TRO, false);
         store.setDefault(REQUISITION_FILTERS, "");
         store.setDefault(LOBBY_CHAT_FOLDED, false);

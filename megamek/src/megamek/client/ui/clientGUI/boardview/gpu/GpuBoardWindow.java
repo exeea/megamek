@@ -278,6 +278,8 @@ public final class GpuBoardWindow {
     private volatile boolean exitRequested;
     private volatile Throwable startupFailure;
     private Runnable afterClose;
+    /** EDT: opens the board of a game that started while this editor held the window; null for none. */
+    private Runnable waitingBoard;
 
     private GpuBoardWindow(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel) {
         this(gui, view, panel, null, null, null);
@@ -661,6 +663,15 @@ public final class GpuBoardWindow {
                         open(gui, view, panel);
                     }
                 };
+            } else if (active.editor != null && gui != null) {
+                // The game started while the map editor, opened from its lobby, holds the window: the board takes the
+                // window once the editor closes, after its usual question about unsaved changes
+                active.waitingBoard = () -> {
+                    if (gui.getFrame().isDisplayable() && !gui.getClient().getGame().getPhase().isLounge()) {
+                        open(gui, view, panel);
+                    }
+                };
+                JOptionPane.showMessageDialog(active.swingWindow, Messages.getString("GpuBoard.gameWaitsForEditor"));
             } else if (active.gui != gui || (gui == null && active.initialView != view)) {
                 JOptionPane.showMessageDialog(gui == null ? null : gui.getFrame(),
                       Messages.getString("GpuBoard.alreadyOpen"));
@@ -1094,6 +1105,8 @@ public final class GpuBoardWindow {
         // The native window is already destroyed. Never resurrect a client that is shutting down.
         if (afterClose != null) {
             afterClose.run();
+        } else if (waitingBoard != null) {
+            waitingBoard.run();
         } else if (GpuLobbyWindow.reopenFor(swingWindow)) {
             // The lobby that opened this preview or editor shows again
             LOGGER.debug("The lobby shows again");

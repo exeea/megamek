@@ -68,8 +68,6 @@ public final class GpuHost {
     /** Guarded by {@link #LOCK}: the GPU thread, or null while the window is closed. */
     private static Thread thread;
     private static volatile boolean keepOpen;
-    /** Closes this window once no scene is wanted, whatever {@link #keepOpen} says; a new window starts without it. */
-    private static volatile boolean closeWhenIdle;
     private static volatile Runnable idle;
     private static volatile Lwjgl3Application application;
     private static volatile long windowHandle;
@@ -129,7 +127,6 @@ public final class GpuHost {
         synchronized (LOCK) {
             replaced = requested;
             requested = scene;
-            closeWhenIdle = false;
             if (thread == null) {
                 startThread();
             }
@@ -149,15 +146,21 @@ public final class GpuHost {
      */
     static void end(Scene scene) {
         boolean pending;
+        boolean empty;
         synchronized (LOCK) {
             if (requested != scene) {
                 return;
             }
             requested = null;
             pending = current != scene;
+            empty = current == null;
         }
         if (pending) {
             scene.ended(null);
+            if (empty) {
+                // No shown scene stops in its place, which would bring the idle scene back
+                SwingUtilities.invokeLater(GpuHost::idled);
+            }
         }
         Lwjgl3Application app = application;
         if (app != null) {
@@ -235,20 +238,7 @@ public final class GpuHost {
         });
     }
 
-    /**
-     * Any thread: closes the window once its scene has ended and nothing replaces it, instead of showing the idle scene,
-     * for a Swing window that takes its place; the next {@link #show} opens it again.
-     */
-    static void closeWhenIdle() {
-        closeWhenIdle = true;
-        Lwjgl3Application app = application;
-        if (app != null) {
-            app.postRunnable(() -> { });
-        }
-    }
-
     private static void startThread() {
-        closeWhenIdle = false;
         Thread started = new Thread(GpuHost::run, "MegaMek-GPU");
         started.setDaemon(true);
         thread = started;
@@ -354,7 +344,7 @@ public final class GpuHost {
     /** EDT, after a scene ended: shows the idle scene when the window stays open and nothing else was asked for. */
     private static void idled() {
         Runnable then = idle;
-        if (then != null && keepOpen && !closeWhenIdle && isOpen() && wanted() == null) {
+        if (then != null && keepOpen && isOpen() && wanted() == null) {
             then.run();
         }
     }
@@ -472,7 +462,7 @@ public final class GpuHost {
                 }
                 if (next != null) {
                     start(next);
-                } else if (!keepOpen || closeWhenIdle) {
+                } else if (!keepOpen) {
                     Gdx.app.exit();
                     return;
                 }

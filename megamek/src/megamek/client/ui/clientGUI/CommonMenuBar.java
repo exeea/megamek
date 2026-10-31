@@ -33,7 +33,6 @@
  */
 package megamek.client.ui.clientGUI;
 
-import static java.awt.event.InputEvent.CTRL_DOWN_MASK;
 import static java.awt.event.KeyEvent.*;
 import static megamek.client.ui.Messages.getString;
 import static megamek.client.ui.clientGUI.ClientGUI.*;
@@ -54,7 +53,6 @@ import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JRadioButtonMenuItem;
-import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import megamek.MMConstants;
@@ -131,8 +129,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     // The Units menu
     private final JMenuItem fileUnitsReinforce = new JMenuItem(getString("CommonMenuBar.fileUnitsReinforce"));
     private final JMenuItem fileUnitsReinforceRAT = new JMenuItem(getString("CommonMenuBar.fileUnitsReinforceRAT"));
-    private final JMenuItem fileUnitsPaste = new JMenuItem(getString("CommonMenuBar.fileUnitsPaste"));
-    private final JMenuItem fileUnitsCopy = new JMenuItem(getString("CommonMenuBar.fileUnitsCopy"));
     private final JMenuItem fileUnitsSave = new JMenuItem(getString("CommonMenuBar.fileUnitsSave"));
     // The Board menu
     private final JMenuItem boardSaveAs = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAs"));
@@ -261,10 +257,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(gameGameOptions, menu, VIEW_GAME_OPTIONS, VK_O);
         initMenuItem(gamePlayerSettings, menu, VIEW_PLAYER_SETTINGS);
         initMenuItem(gameNetworkInformation, menu, VIEW_NETWORK_INFORMATION);
-        initMenuItem(fileUnitsCopy, menu, FILE_UNITS_COPY);
-        fileUnitsCopy.setAccelerator(KeyStroke.getKeyStroke(VK_C, CTRL_DOWN_MASK));
-        initMenuItem(fileUnitsPaste, menu, FILE_UNITS_PASTE);
-        fileUnitsPaste.setAccelerator(KeyStroke.getKeyStroke(VK_V, CTRL_DOWN_MASK));
         initMenuItem(fileUnitsReinforce, menu, FILE_UNITS_REINFORCE);
         initMenuItem(fileUnitsReinforceRAT, menu, FILE_UNITS_REINFORCE_RAT);
         initMenuItem(fileUnitsSave, menu, FILE_UNITS_SAVE);
@@ -548,8 +540,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         gameAllHotLoadOff.setVisible(isLobby && hotLoadAvailable);
         boardSaveAs.setEnabled(isInGame); // TODO: should work in the lobby
         boardSaveAsImage.setEnabled(isInGame); // TODO: should work in the lobby
-        fileUnitsPaste.setEnabled(isLobby);
-        fileUnitsCopy.setEnabled(isLobby);
         // reinforcing a player during a game is a gamemaster's job and lives on the Game Master menu; the same
         // dialog outside a game is how anybody builds an army, so the lobby keeps it
         fileUnitsReinforce.setEnabled(isInGame && isNotVictory && localPlayerHoldsGameMasterRole);

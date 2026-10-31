@@ -689,6 +689,11 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         }
         // listen to new frame
         GpuStartWindow.suspendWhile(launched);
+        if (!launched.isDisplayable()) {
+            // A frame closes with windowClosed only once it has a native peer; the native lobby and board keep the
+            // client's frame hidden, so it may never have been shown
+            launched.addNotify();
+        }
         launched.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosed(WindowEvent e) {

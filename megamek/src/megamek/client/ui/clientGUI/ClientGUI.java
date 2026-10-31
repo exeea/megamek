@@ -230,8 +230,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String FILE_REBUILD_CACHE = "fileRebuildCache";
     public static final String FILE_UNITS_OPEN = "fileUnitsOpen";
     public static final String FILE_UNITS_SAVE = "fileUnitsSave";
-    public static final String FILE_UNITS_PASTE = "fileUnitsPaste";
-    public static final String FILE_UNITS_COPY = "fileUnitsCopy";
     // endregion file menu
 
     // region view menu
@@ -1451,10 +1449,6 @@ public class ClientGUI extends AbstractClientGUI
                 ignoreHotKeys = true;
                 doSaveUnit();
                 ignoreHotKeys = false;
-                break;
-            case FILE_UNITS_PASTE:
-            case FILE_UNITS_COPY:
-                // the lobby's units were copied and pasted in the Swing lobby's unit table, which is gone
                 break;
             case FILE_UNITS_OPEN:
                 ignoreHotKeys = true;
