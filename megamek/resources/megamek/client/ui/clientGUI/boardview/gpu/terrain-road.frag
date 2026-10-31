@@ -222,9 +222,10 @@ float crackBorder(vec2 p) {
 }
 
 // What a pit exposes: the gravel road's aggregate where the merged coats carry its maps, else darkened asphalt.
-vec3 pitAggregate(vec2 uv, vec3 asphalt) {
+// Explicit gradients (the road's UV over the pixel): asphaltWear runs only where the paint shows.
+vec3 pitAggregate(vec2 uv, mat2 gradient, vec3 asphalt) {
 #ifdef roadCoatFlag
-    return texture(u_roadColors, vec3(uv * 1.7, 2.0)).rgb * .62;
+    return textureGrad(u_roadColors, vec3(uv * 1.7, 2.0), gradient[0] * 1.7, gradient[1] * 1.7).rgb * .62;
 #else
     return asphalt * vec3(1.5, 1.35, 1.15);
 #endif
@@ -234,7 +235,7 @@ vec3 pitAggregate(vec2 uv, vec3 asphalt) {
 // (R height, G roughness, B cavity), and the slope its damage gives the normal (in m's frame). Lane-bound and oriented
 // marks give way to even wear across a junction's hub. Wear never makes the surface glossier: it would glint in the sun.
 // Returns how much water it holds: ruts, cracks and potholes fill first.
-float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2 uv, inout vec3 albedo,
+float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2 uv, mat2 gradient, inout vec3 albedo,
       inout vec4 surface, out vec2 slope) {
     slope = vec2(0.0);
     vec2 across = vec2(-heading.y, heading.x);
@@ -352,7 +353,7 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
     albedo = mix(albedo, albedo * .35, skid);
     albedo = mix(albedo, albedo * .5, stain);
     // A pothole: broken through to the base course, its aggregate shadowed deeper in.
-    albedo = mix(albedo, pitAggregate(uv, albedo) * mix(.55, 1.0, grain), pit);
+    albedo = mix(albedo, pitAggregate(uv, gradient, albedo) * mix(.55, 1.0, grain), pit);
     surface.g = mix(surface.g, .92, pit);
     surface.b = mix(surface.b, surface.b * .55, pit);
     hollow = max(hollow, max(pit, crack * .8));
@@ -393,12 +394,13 @@ void main() {
     materialUV += roadParallax(m, uv, roadGradient, face, dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
 #endif
     vec4 roadColor = v_color;
+    // Off its mask a fragment is discarded at the end: it keeps its neighbours' lanes through the material's filtering
+    // and fwidth, but skips the asphalt's wear and the lighting (whose derivatives were taken above).
+    bool roadHidden = false;
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
     roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
-    // Keep neighboring lanes through material filtering, edge fwidth and shadow receiver derivatives.
-    bool roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0)))
-          || roadColor.a < .002;
+    roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0))) || roadColor.a < .002;
 #endif
     vec3 tint = roadColor.rgb;
     if (m.mapped && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
@@ -418,8 +420,8 @@ void main() {
     if (paved) {
         vec2 heading = (roadColor.rg * 255.0 - 128.0) / 127.0;
         float hub = smoothstep(.04, .46, 1.0 - length(heading));
-        wearWater = asphaltWear(wearMetres, wearPixel, normalize(heading), roadColor.b, hub, materialUV, albedo,
-              properties, wearSlope);
+        wearWater = roadHidden ? 0.0 : asphaltWear(wearMetres, wearPixel, normalize(heading), roadColor.b, hub,
+              materialUV, roadGradient, albedo, properties, wearSlope);
     } else if (m.mapped && abs(m.transition) > .5) {
         wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
         loosePatches = texture(u_rainNoise, groundUV / 5.0 + .37).b;
@@ -508,8 +510,10 @@ void main() {
         coverFinish(finish, soilMud);
     }
 #endif
-    albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, finish,
-          m.mapped ? mix(1.0, properties.b, .7) : 1.0);
+    if (!roadHidden) {
+        albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, finish,
+              m.mapped ? mix(1.0, properties.b, .7) : 1.0);
+    }
 #ifdef roadFlag
     // The road's outer strip carries coverage. World-anchored grain breaks up its dusty verge.
     float grain = m.mapped ? properties.r : roadAlbedo(m, uv * 2.3).r;
