@@ -35,24 +35,18 @@ package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 import java.util.List;
 
 import megamek.client.Client;
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts by C3 network association (and by ID after that). */
 public class C3IDSorter extends MekTableSorter {
 
     private final Client client;
 
-    /** A Lobby Mek Table sorter that sorts mainly by association to C3 networks */
-    public C3IDSorter(ClientGUI clientGUI) {
-        this(clientGUI.getClient());
-    }
 
     /** A Lobby Mek Table sorter that sorts mainly by association to C3 networks */
     public C3IDSorter(Client client) {
-        super(I18n.getTextAt(RESOURCE_BUNDLE, "C3IDSorter.DisplayName"), MekTableModel.COL_UNIT);
+        super(I18n.getTextAt(RESOURCE_BUNDLE, "C3IDSorter.DisplayName"));
         this.client = client;
     }
 

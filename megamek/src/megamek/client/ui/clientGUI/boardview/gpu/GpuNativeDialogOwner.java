@@ -38,8 +38,7 @@ import org.lwjgl.system.windows.User32;
 /**
  * Makes Swing dialogs native owned windows of the GPU board window, the way a dialog belongs to its frame: it stays
  * above the board without being topmost over other applications, follows it when it is minimized and has no taskbar
- * button of its own. The game lobby's frame, shown inset over the start screen, is adopted the same way. Each
- * platform has its own relationship:
+ *  button of its own. The game lobby's dialogs are adopted the same way. Each platform has its own relationship:
  * <ul>
  *     <li>Windows: the board window becomes the dialog's owner window. The board window stays enabled while a modal
  *     Swing dialog is open, so Windows activates it again as the dialog hides; the board ignores its own input

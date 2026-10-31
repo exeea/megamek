@@ -177,7 +177,7 @@ class CapitalFighterOptionsTest {
         @DisplayName("Fighter with transport bays should be eligible loader when Single No Cap is ON")
         void fighterEligibleForLoadingWithSingleNoCap() {
             // This test verifies that with the fix for #7935, single fighters
-            // will pass the !isCapitalFighter() check used in LobbyMekPopup
+            // will pass the !isCapitalFighter() check used in LobbyUnitMenu
             // when "Single Fighters Not Capital" is enabled.
             setCapitalFighterOption(true);
             setSingleFightersNotCapitalOption(true);

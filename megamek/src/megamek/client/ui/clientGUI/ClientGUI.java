@@ -44,6 +44,8 @@ import java.awt.FlowLayout;
 import java.awt.HeadlessException;
 import java.awt.Image;
 import java.awt.KeyboardFocusManager;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -58,6 +60,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -79,6 +82,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.commands.*;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.ratgenerator.GenerationContext;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.AudioService;
@@ -95,7 +99,8 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyOverlay;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuHost;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
@@ -135,8 +140,10 @@ import megamek.client.ui.panels.ReceivingGameDataPanel;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.panels.phaseDisplay.*;
-import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
+import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.tileset.TilesetManager;
@@ -379,7 +386,7 @@ public class ClientGUI extends AbstractClientGUI
     protected JComponent curPanel;
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
-    public ChatLounge chatlounge;
+    private LobbyCommands lobbyCommands;
 
     private final ConcurrentLinkedQueue<Runnable> toastDripQueue = new ConcurrentLinkedQueue<>();
     private javax.swing.Timer toastDripTimer;
@@ -1014,9 +1021,6 @@ public class ClientGUI extends AbstractClientGUI
 
     @Override
     public void initialize() {
-        // In MegaMek's own window the lobby shows inset over the start screen; it must lose its decorations before
-        // anything makes the frame displayable
-        GpuLobbyOverlay.adopt(frame, this::handleExit);
         menuBar = CommonMenuBar.getMenuBarForGame();
         menuBar.setClientSupplier(() -> client);
         frame.setJMenuBar(menuBar);
@@ -1093,12 +1097,18 @@ public class ClientGUI extends AbstractClientGUI
             controller.registerCommandAction(KeyCommandBind.BOT_COMMANDS.cmd, GUIP::toggleBotCommandsEnabled);
         }
 
-        showDefaultBoard(CG_DEFAULT);
+        // A joining client lands in the lounge; the phase the server sends next replaces the lobby when it is not
+        showDefaultBoard(CG_CHAT_LOUNGE);
         client.changePhase(GamePhase.UNKNOWN);
         // Unit tools are created on demand; constructing them here can wait for the cache on the EDT.
         new UnitLoadingDialog(frame).showForBackgroundLoad();
-        frame.setVisible(!GpuBoardWindow.isActiveFor(this));
+        frame.setVisible(!GpuBoardWindow.isActiveFor(this) && !GpuLobbyWindow.isActiveFor(this));
         GUIP.addPreferenceChangeListener(this);
+    }
+
+    /** The game's chat, which the native lobby shows and sends through; null before {@link #initialize}. */
+    public ChatterBox getChatterBox() {
+        return cb;
     }
 
     @Override
@@ -1443,18 +1453,8 @@ public class ClientGUI extends AbstractClientGUI
                 ignoreHotKeys = false;
                 break;
             case FILE_UNITS_PASTE:
-                if (curPanel instanceof ChatLounge) {
-                    ignoreHotKeys = true;
-                    ((ChatLounge) curPanel).importClipboard();
-                    ignoreHotKeys = false;
-                }
-                break;
             case FILE_UNITS_COPY:
-                if (curPanel instanceof ChatLounge) {
-                    ignoreHotKeys = true;
-                    ((ChatLounge) curPanel).copyToClipboard();
-                    ignoreHotKeys = false;
-                }
+                // the lobby's units were copied and pasted in the Swing lobby's unit table, which is gone
                 break;
             case FILE_UNITS_OPEN:
                 ignoreHotKeys = true;
@@ -1503,14 +1503,14 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case GAME_ALL_MG_BURST_ON:
             case GAME_ALL_MG_BURST_OFF:
-                if (curPanel instanceof ChatLounge lounge) {
-                    lounge.setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
+                if (client.getGame().getPhase().isLounge()) {
+                    SwingLobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
                 }
                 break;
             case GAME_ALL_HOT_LOAD_ON:
             case GAME_ALL_HOT_LOAD_OFF:
-                if (curPanel instanceof ChatLounge lounge) {
-                    lounge.setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
+                if (client.getGame().getPhase().isLounge()) {
+                    SwingLobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
                 }
                 break;
             case VIEW_NETWORK_INFORMATION:
@@ -1780,9 +1780,8 @@ public class ClientGUI extends AbstractClientGUI
 
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
-        if (chatlounge != null) {
-            chatlounge.killPreviewBV();
-        }
+        GpuLobbyWindow.closeFor(this);
+        SwingLobbyServices.forget(this);
         client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
@@ -1886,9 +1885,6 @@ public class ClientGUI extends AbstractClientGUI
         switch (phase) {
             case LOUNGE:
                 // reset old report tabs and images, if any
-                ChatLounge cl = (ChatLounge) phaseComponents.get(String.valueOf(GamePhase.LOUNGE));
-                cb.setDoneButton(cl.getButDone());
-                cl.setBottom(cb.getComponent());
                 tilesetManager.reset();
                 break;
             case POINTBLANK_SHOT:
@@ -1954,16 +1950,22 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /** Keep the lounge in its own UI; the selected board owns loading screens and subsequent game phases. */
+    /**
+     * The lounge shows the native lobby scene, and every later phase the native board, each replacing the other in the
+     * one window; the frame stays hidden behind both and shows only when the lobby scene can't start.
+     */
     void showDefaultBoard(String mainPanel) {
         if (getClient() instanceof BotClient) {
             return;
         }
         if (CG_CHAT_LOUNGE.equals(mainPanel)) {
             boardViewChosen = false;
-            GpuBoardWindow.showLegacy2D(this);
-        } else if (!boardViewChosen) {
+            GpuLobbyWindow.open(this);
+            GpuBoardWindow.closeFor(this);
+        } else if (!boardViewChosen && !(CG_DEFAULT.equals(mainPanel) && GpuLobbyWindow.isActiveFor(this))) {
+            // While waiting for the server (joining, or between the lounge and the first board phase) the lobby stays
             openGpuBoard();
+            GpuLobbyWindow.closeFor(this);
         }
     }
 
@@ -2013,8 +2015,8 @@ public class ClientGUI extends AbstractClientGUI
         String main;
         switch (phase) {
             case LOUNGE:
-                component = new ChatLounge(this);
-                chatlounge = (ChatLounge) component;
+                // the lobby shows in the native window; the hidden frame keeps an empty card for the phase
+                component = new JPanel();
                 main = CG_CHAT_LOUNGE;
                 component.setName(main);
                 panMain.add(component, main);
@@ -2026,7 +2028,7 @@ public class ClientGUI extends AbstractClientGUI
                 panMain.add(component, main);
                 break;
             case EXCHANGE:
-                chatlounge.killPreviewBV();
+                MapSetupDialog.closePreviews(this);
                 component = new ReceivingGameDataPanel();
                 main = CG_EXCHANGE;
                 component.setName(main);
@@ -3137,9 +3139,24 @@ public class ClientGUI extends AbstractClientGUI
               ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
               ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         textArea.setText("<pre>" + message + "</pre>");
-        scrollPane.setPreferredSize(new Dimension((int) (clientGuiPanel.getSize().getWidth() / 1.5),
-              (int) (clientGuiPanel.getSize().getHeight() / 1.5)));
+        scrollPane.setPreferredSize(new Dimension((int) (alertArea().getWidth() / 1.5),
+              (int) (alertArea().getHeight() / 1.5)));
         JOptionPane.showMessageDialog(frame, scrollPane, title, messageType);
+    }
+
+    /**
+     * The area an alert sizes itself by: the client's panel while it shows; the native window while that shows in place
+     * of the hidden frame, as in the libGDX lobby, where the panel has no size; the screen otherwise.
+     */
+    private Dimension alertArea() {
+        if (clientGuiPanel.isShowing()) {
+            return clientGuiPanel.getSize();
+        }
+        Rectangle window = GpuHost.swingClientBounds();
+        if (window != null) {
+            return window.getSize();
+        }
+        return Toolkit.getDefaultToolkit().getScreenSize();
     }
 
     /**
@@ -3531,7 +3548,7 @@ public class ClientGUI extends AbstractClientGUI
      * find MML either automatically or based on a configured client setting.
      *
      * @param unitList The list of units to print
-     * @param button   This should always be ChatLounge#butPrintList, if you need to trigger this method from somewhere
+     * @param button   The button that started the printing, which shows the progress; if you need to trigger this method from somewhere
      *                 else, override it.
      */
     public void printList(ArrayList<Entity> unitList, JButton button) {
@@ -4103,9 +4120,6 @@ public class ClientGUI extends AbstractClientGUI
                 gameOptionsDialog.update(getClient().getGame().getOptions());
             }
 
-            if (curPanel instanceof ChatLounge cl) {
-                cl.updateMapSettings(getClient().getMapSettings());
-            }
 
             // the host may have turned Allow Game Master on or off, which offers or takes away the Become entry,
             // or the burst fire and hot-loading options behind the lobby's all-units equipment shortcuts
@@ -4451,6 +4465,21 @@ public class ClientGUI extends AbstractClientGUI
         return client;
     }
 
+    /** @return the lobby's commands for this client, with their Swing dialogs */
+    public LobbyCommands lobbyCommands() {
+        if (lobbyCommands == null) {
+            lobbyCommands = new LobbyCommands(this::getClient, new SwingLobbyPrompts(this));
+        }
+        return lobbyCommands;
+    }
+
+    /**
+     * EDT: the board editor opened from the lobby saved {@code savedFile}, or nothing (null); while still in the lobby,
+     * the map settings take the saved board, as the map setup's own Edit Board does.
+     */
+    public void boardEditorClosed(@Nullable Path savedFile, boolean savedAssembledPreview) {
+        MapSetupDialog.boardEditorClosed(this, savedFile, savedAssembledPreview);
+    }
     @Override
     public JComponent turnTimerComponent() {
         return menuBar;

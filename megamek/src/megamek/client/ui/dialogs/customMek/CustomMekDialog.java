@@ -1994,10 +1994,6 @@ public class CustomMekDialog extends AbstractButtonDialog
         }
 
         okay = true;
-        if ((clientGUI != null) && (clientGUI.chatlounge != null)) {
-            clientGUI.chatlounge.refreshEntities();
-        }
-
         // Check validity of units after customization
         for (Entity entity : entities) {
             TestEntity testEntity = TestEntity.getEntityVerifier(entity);

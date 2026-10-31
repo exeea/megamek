@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +24,7 @@ import javax.swing.SwingUtilities;
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
@@ -50,7 +51,9 @@ class ClientGUIUnitLoadingTest {
                   // Keep real Swing presentation, but prevent a GL thread from outliving gui.die() and opening a
                   // failure dialog in later tests. This test exercises the routing, not native rendering.
                   var boardWindow = mockStatic(GpuBoardWindow.class, call ->
-                        call.getMethod().getName().equals("open") ? null : call.callRealMethod())) {
+                        call.getMethod().getName().equals("open") ? null : call.callRealMethod());
+                  // The lobby is a scene of the native window; the test checks what entering it builds, not the scene.
+                  var lobbyWindow = mockStatic(GpuLobbyWindow.class)) {
                 MekSummaryCache cache = mock(MekSummaryCache.class);
                 cacheAccess.when(MekSummaryCache::getInstance).thenReturn(cache);
                 MegaMekController controller = new MegaMekController();
@@ -70,9 +73,9 @@ class ClientGUIUnitLoadingTest {
                 opened.set(gui);
                 try {
                     gui.initialize();
-                    boardWindow.verify(() -> GpuBoardWindow.open(eq(gui), any()), times(1));
                     gui.switchPanel(GamePhase.LOUNGE);
-                    assertTrue(gui.getFrame().isShowing());
+                    lobbyWindow.verify(() -> GpuLobbyWindow.open(gui), atLeastOnce());
+                    boardWindow.verify(() -> GpuBoardWindow.open(eq(gui), any()), never());
                     gui.setUnitDisplayVisible(true);
                     assertTrue(inspector.constructed().isEmpty());
                     assertTrue(inspectorDialog.constructed().isEmpty());

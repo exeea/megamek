@@ -577,9 +577,8 @@ class GpuBoardWindowSmokeTest {
         BoardFile.save(Board.createEmptyBoard(8, 8), file);
         byte[] saved = Files.readAllBytes(file);
         Coords at = new Coords(3, 4);
-        var lobby = mock(megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge.class);
         var client = mock(ClientGUI.class);
-        client.chatlounge = lobby;
+        var lobby = client;
         doAnswer(call -> {
             assertTrue(SwingUtilities.isEventDispatchThread(), "The lobby refresh belongs to Swing");
             return null;

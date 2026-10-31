@@ -33,23 +33,17 @@
 package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 
 import megamek.client.Client;
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts for 1) Player 2) BV. */
 public class PlayerBVSorter extends MekTableSorter {
 
     private final Client client;
 
-    /** A Lobby Mek Table sorter that sorts for 1) Player 2) BV. */
-    public PlayerBVSorter(ClientGUI clientGUI, Sorting sorting) {
-        this(clientGUI.getClient(), sorting);
-    }
 
     public PlayerBVSorter(Client client, Sorting sorting) {
-        super(I18n.getTextAt(RESOURCE_BUNDLE, "PlayerBVSorter.DisplayName"), MekTableModel.COL_BV, sorting);
+        super(I18n.getTextAt(RESOURCE_BUNDLE, "PlayerBVSorter.DisplayName"), sorting);
         this.client = client;
     }
 

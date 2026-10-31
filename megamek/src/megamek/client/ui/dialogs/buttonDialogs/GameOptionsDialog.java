@@ -71,6 +71,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.DialogOptionListener;
 import megamek.client.ui.dialogs.MMDialogs.MMConfirmDialog;
 import megamek.client.ui.panels.DialogOptionComponentYPanel;
+import megamek.client.ui.panels.GameOptionsCatalog;
 import megamek.client.ui.panels.GameOptionsPane;
 import megamek.client.ui.panels.phaseDisplay.lobby.VictoryConditionsDialog;
 import megamek.client.ui.settings.SettingsBadge;
@@ -96,17 +97,7 @@ import org.w3c.dom.NodeList;
 public class GameOptionsDialog extends AbstractButtonDialog implements ActionListener, DialogOptionListener {
     private static final MMLogger LOGGER = MMLogger.create(GameOptionsDialog.class);
     private static final int BUTTON_GAP = 8;
-    private static final Set<String> CORE_RULES_DISABLED_OPTIONS = Set.of(
-          OptionsConstants.BASE_FLAMER_HEAT,
-          OptionsConstants.ADVANCED_COMBAT_TAC_OPS_AMS,
-          OptionsConstants.ADVANCED_COMBAT_TAC_OPS_CHARGE_DAMAGE,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_WALK_BACKWARDS,
-          OptionsConstants.ADVANCED_COMBAT_TAC_OPS_RETRACTABLE_BLADES,
-          OptionsConstants.ADVANCED_COMBAT_UNJAM_UAC,
-          OptionsConstants.INIT_FRONT_LOAD_INITIATIVE,
-          OptionsConstants.ADVANCED_MINEFIELDS,
-          OptionsConstants.ADVANCED_ALTERNATE_MASC,
-          OptionsConstants.ADVANCED_ALTERNATE_MASC_ENHANCED);
+    private static final Set<String> CORE_RULES_DISABLED_OPTIONS = GameOptionsCatalog.CORE_RULES_DISABLED_OPTIONS;
 
     private ClientGUI clientGui;
     private JFrame frame;
@@ -585,12 +576,7 @@ public class GameOptionsDialog extends AbstractButtonDialog implements ActionLis
     }
 
     static String normalizeRulesSystem(@Nullable Object value) {
-        if (value instanceof String rulesSystem
-              && (OptionsConstants.RULES_CORE.equals(rulesSystem) || OptionsConstants.RULES_TW.equals(rulesSystem))) {
-            return rulesSystem;
-        }
-        LOGGER.debug("Unknown rules system '{}'; using '{}'.", value, OptionsConstants.RULES_CORE);
-        return OptionsConstants.RULES_CORE;
+        return GameOptionsCatalog.normalizeRulesSystem(value);
     }
 
     /**
@@ -1077,8 +1063,21 @@ public class GameOptionsDialog extends AbstractButtonDialog implements ActionLis
     }
 
     private File selectGameOptionsFile(boolean saveDialog) {
+        return selectGameOptionsFile(this, saveDialog);
+    }
+
+    /**
+     * Asks for a game options file in the mmconf directory, offering the XML files that hold options; a chosen name
+     * without the ".xml" extension gets it. Swing thread.
+     *
+     * @param parent     the window the file chooser goes over
+     * @param saveDialog whether to save rather than to open
+     *
+     * @return the chosen file, or null when none was chosen
+     */
+    public static @Nullable File selectGameOptionsFile(Component parent, boolean saveDialog) {
         JFileChooser fc = new JFileChooser("mmconf");
-        fc.setLocation(getLocation().x + 150, getLocation().y + 100);
+        fc.setLocation(parent.getLocation().x + 150, parent.getLocation().y + 100);
         fc.setFileFilter(new FileFilter() {
             @Override
             public boolean accept(File dir) {
@@ -1103,7 +1102,7 @@ public class GameOptionsDialog extends AbstractButtonDialog implements ActionLis
                 return "GameOptions";
             }
         });
-        int returnVal = saveDialog ? fc.showSaveDialog(this) : fc.showOpenDialog(this);
+        int returnVal = saveDialog ? fc.showSaveDialog(parent) : fc.showOpenDialog(parent);
         if ((returnVal != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
             return null;
         }

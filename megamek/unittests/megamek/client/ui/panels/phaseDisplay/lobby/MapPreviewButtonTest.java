@@ -38,7 +38,7 @@ class MapPreviewButtonTest {
     @Test
     void levelDialogEnforcesBoundsChangesOnlyItsPanelAndResetBypassesInvalidInput() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            ChatLounge lobby = mock(ChatLounge.class);
+            MapSetupDialog lobby = mock(MapSetupDialog.class);
             lobby.mapSettings = MapSettings.getInstance();
             lobby.mapSettings.setMapSize(2, 2);
             lobby.mapSettings.setBoardLevelOffset(0, 5);
@@ -108,7 +108,7 @@ class MapPreviewButtonTest {
     @Test
     void themeRadioChoicesChangeOnlyTheirPanelAndDefaultRestoresNoOverride() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            ChatLounge lobby = mock(ChatLounge.class);
+            MapSetupDialog lobby = mock(MapSetupDialog.class);
             lobby.mapSettings = MapSettings.getInstance();
             lobby.mapSettings.setMapSize(2, 2);
             lobby.mapSettings.setBoardTheme(0, "snow");

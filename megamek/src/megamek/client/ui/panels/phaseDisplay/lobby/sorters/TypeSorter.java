@@ -32,9 +32,8 @@
  */
 package megamek.client.ui.panels.phaseDisplay.lobby.sorters;
 
-import megamek.client.ui.panels.phaseDisplay.lobby.MekTableModel;
-import megamek.common.units.Entity;
 import megamek.common.internationalization.I18n;
+import megamek.common.units.Entity;
 
 /** A Lobby Mek Table sorter that sorts by unit type. */
 public class TypeSorter extends MekTableSorter {
@@ -43,7 +42,7 @@ public class TypeSorter extends MekTableSorter {
      * A Lobby Mek Table sorter that sorts by unit type.
      */
     public TypeSorter(Sorting sorting) {
-        super(I18n.getTextAt(RESOURCE_BUNDLE, "TypeSorter.DisplayName"), MekTableModel.COL_UNIT,
+        super(I18n.getTextAt(RESOURCE_BUNDLE, "TypeSorter.DisplayName"),
               sorting);
     }
 

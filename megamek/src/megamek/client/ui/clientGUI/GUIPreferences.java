@@ -365,6 +365,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String LOBBY_MEK_TABLE_PILOT_WIDTH = "LobbyMekTablePilotWidth";
     public static final String LOBBY_MEK_TABLE_PLAYER_WIDTH = "LobbyMekTablePlayerWidth";
     public static final String LOBBY_MEK_TABLE_BV_WIDTH = "LobbyMekTableBVWidth";
+    /** Whether the lobby requisition dossier's Readout tab shows the TRO rather than the Summary. */
+    public static final String REQUISITION_READOUT_TRO = "RequisitionReadoutTro";
+    /** The lobby requisition's kept weights, tech bases and rules levels. */
+    public static final String REQUISITION_FILTERS = "RequisitionFilters";
+    /** Whether the lobby's chat dock is folded. */
+    public static final String LOBBY_CHAT_FOLDED = "LobbyChatFolded";
     public static final String MAP_ZOOM_INDEX = "MapZoomIndex";
     public static final String MEK_SELECTOR_INCLUDE_MODEL = "MekSelectorIncludeModel";
     public static final String MEK_SELECTOR_INCLUDE_NAME = "MekSelectorIncludeName";
@@ -936,6 +942,9 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(LOBBY_MEK_TABLE_PILOT_WIDTH, 80);
         store.setDefault(LOBBY_MEK_TABLE_PLAYER_WIDTH, 50);
         store.setDefault(LOBBY_MEK_TABLE_BV_WIDTH, 50);
+        store.setDefault(REQUISITION_READOUT_TRO, false);
+        store.setDefault(REQUISITION_FILTERS, "");
+        store.setDefault(LOBBY_CHAT_FOLDED, false);
         store.setDefault(MAP_ZOOM_INDEX, 7);
         store.setDefault(MEK_SELECTOR_INCLUDE_MODEL, true);
         store.setDefault(MEK_SELECTOR_INCLUDE_NAME, true);
@@ -2182,6 +2191,21 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getString(UI_THEME);
     }
 
+    /** Whether the requisition dossier's Readout tab shows the TRO rather than the Summary. */
+    public boolean getRequisitionReadoutTro() {
+        return store.getBoolean(REQUISITION_READOUT_TRO);
+    }
+
+    /** The lobby requisition's kept weights, tech bases and rules levels, as {@code Filters.kept()} writes them. */
+    public String getRequisitionFilters() {
+        return store.getString(REQUISITION_FILTERS);
+    }
+
+    /** Whether the lobby's chat dock is folded to its header and input line. */
+    public boolean getLobbyChatFolded() {
+        return store.getBoolean(LOBBY_CHAT_FOLDED);
+    }
+
     /** Whether the interface skips its transitions (hover fades, popup fades, smooth scrolling). */
     public boolean getReduceMotion() {
         return store.getBoolean(REDUCE_MOTION);
@@ -3257,6 +3281,18 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setUITheme(String s) {
         store.setValue(UI_THEME, s);
+    }
+
+    public void setRequisitionReadoutTro(boolean tro) {
+        store.setValue(REQUISITION_READOUT_TRO, tro);
+    }
+
+    public void setRequisitionFilters(String filters) {
+        store.setValue(REQUISITION_FILTERS, filters);
+    }
+
+    public void setLobbyChatFolded(boolean folded) {
+        store.setValue(LOBBY_CHAT_FOLDED, folded);
     }
 
     public void setReduceMotion(boolean reduce) {

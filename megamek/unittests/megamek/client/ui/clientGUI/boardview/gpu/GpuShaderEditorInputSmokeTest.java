@@ -5,9 +5,6 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmo
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 import java.awt.KeyboardFocusManager;
 import java.awt.Toolkit;
@@ -23,8 +20,6 @@ import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
-import megamek.client.ui.panels.phaseDisplay.lobby.LobbyKeyDispatcher;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
@@ -64,8 +59,6 @@ class GpuShaderEditorInputSmokeTest {
     void clipboardUndoAndTypingStayInTheEditorInsteadOfReachingGameCommands() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             var editor = editor("initial source");
-            var lobby = mock(ChatLounge.class);
-            var lobbyKeys = new LobbyKeyDispatcher(lobby);
             var gameKeys = new TestController();
             var commands = new AtomicInteger();
             for (var bind : new KeyCommandBind[] { KeyCommandBind.FIRE, KeyCommandBind.UNDO, KeyCommandBind.REDO }) {
@@ -79,33 +72,24 @@ class GpuShaderEditorInputSmokeTest {
                 var text = text(editor);
                 text.selectAll();
                 clipboard.setContents(new StringSelection("shader clipboard text"), null);
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK);
+                press(text, gameKeys, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK);
                 assertEquals("shader clipboard text", text.getText());
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK);
+                press(text, gameKeys, KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK);
                 clipboard.setContents(new StringSelection("copy did not run"), null);
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK);
+                press(text, gameKeys, KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK);
                 assertEquals(text.getText(), clipboard.getData(DataFlavor.stringFlavor));
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK);
+                press(text, gameKeys, KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK);
                 assertEquals("", text.getText());
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK);
+                press(text, gameKeys, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK);
                 assertEquals("shader clipboard text", text.getText());
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK);
+                press(text, gameKeys, KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK);
                 assertEquals("", text.getText());
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK);
+                press(text, gameKeys, KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK);
                 assertEquals("shader clipboard text", text.getText());
-                press(text, gameKeys, lobbyKeys, KeyEvent.VK_F, 0);
-                dispatch(text, gameKeys, lobbyKeys, new KeyEvent(text, KeyEvent.KEY_TYPED, 0, 0, KeyEvent.VK_UNDEFINED, 'f'));
+                press(text, gameKeys, KeyEvent.VK_F, 0);
+                dispatch(text, gameKeys, new KeyEvent(text, KeyEvent.KEY_TYPED, 0, 0, KeyEvent.VK_UNDEFINED, 'f'));
                 assertEquals("shader clipboard textf", text.getText());
                 assertEquals(0, commands.get(), "Typing and undo must not fire weapons or undo game orders");
-                verify(lobby, never()).copyToClipboard();
-                verify(lobby, never()).importClipboard();
-
-                assertFalse(lobbyKeys.dispatchKeyEvent(key(new JPanel(), KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK)),
-                      "Other windows keep their shortcuts even outside a text component");
-                assertTrue(lobbyKeys.dispatchKeyEvent(key(lobby, KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK)));
-                assertTrue(lobbyKeys.dispatchKeyEvent(key(lobby, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK)));
-                verify(lobby).copyToClipboard();
-                verify(lobby).importClipboard();
                 assertTrue(gameKeys.dispatchKeyEvent(key(new JPanel(), KeyCommandBind.FIRE.key, KeyCommandBind.FIRE.modifiers)));
                 assertEquals(1, commands.get(), "The board's own commands still work");
             } catch (Exception error) { throw new AssertionError(error); }
@@ -136,14 +120,13 @@ class GpuShaderEditorInputSmokeTest {
         return new KeyEvent(source, KeyEvent.KEY_PRESSED, 0, modifiers, code, KeyEvent.CHAR_UNDEFINED);
     }
 
-    private static void press(RSyntaxTextArea text, TestController game, LobbyKeyDispatcher lobby, int code, int modifiers) {
-        dispatch(text, game, lobby, key(text, code, modifiers));
-        dispatch(text, game, lobby, new KeyEvent(text, KeyEvent.KEY_RELEASED, 0, modifiers, code, KeyEvent.CHAR_UNDEFINED));
+    private static void press(RSyntaxTextArea text, TestController game, int code, int modifiers) {
+        dispatch(text, game, key(text, code, modifiers));
+        dispatch(text, game, new KeyEvent(text, KeyEvent.KEY_RELEASED, 0, modifiers, code, KeyEvent.CHAR_UNDEFINED));
     }
 
-    private static void dispatch(RSyntaxTextArea text, TestController game, LobbyKeyDispatcher lobby, KeyEvent event) {
+    private static void dispatch(RSyntaxTextArea text, TestController game, KeyEvent event) {
         assertFalse(game.dispatchKeyEvent(event), "Game shortcuts must leave text events alone");
-        assertFalse(lobby.dispatchKeyEvent(event), "Lobby shortcuts must leave text events alone");
         KeyboardFocusManager.getCurrentKeyboardFocusManager().redispatchEvent(text, event);
     }
 

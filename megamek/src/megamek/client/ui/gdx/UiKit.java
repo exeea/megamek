@@ -16,7 +16,9 @@ import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
+import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -66,6 +68,12 @@ public final class UiKit {
             this.color = color;
         }
     }
+
+    /**
+     * The text role whose case token chips follow: tokens-v0 cases chips and badges with the {@code overline} tags,
+     * upper case in both the app and the game presentation.
+     */
+    static final String CHIP_CASE = "overline";
 
     /** The skin the widgets are built from: a UiTheme's, or one that a view's own skin composes with it. */
     public final Skin skin;
@@ -200,15 +208,27 @@ public final class UiKit {
     /**
      * A list as {@link #scrollList(Actor)}; with {@code token}, in the Token v0 look (docs/design-system/tokens.md,
      * Lists and trees, Scrollbars): the input frame, and a pill thumb that always shows, over a rail while the pointer
-     * is on the bar, lighter while hovered and lighter still while dragged.
+     * is on the bar, lighter while hovered and lighter still while dragged. The bar takes a strip of its own beside the
+     * list, {@code xs} clear of it, so nothing in the list draws under the bar.
      */
     public ScrollPane scrollList(Actor list, boolean token) {
+        return scrollList(list, token, true);
+    }
+
+    /**
+     * A list as {@link #scrollList(Actor, boolean)}; without {@code framed}, with no frame behind it, for a list that
+     * fills a panel of its own.
+     */
+    public ScrollPane scrollList(Actor list, boolean token, boolean framed) {
         if (!token) {
             return scrollList(list);
         }
         ScrollPane scroll = scrollList(list);
         ScrollPane.ScrollPaneStyle rest = new ScrollPane.ScrollPaneStyle(
               skin.get(UiTheme.TOKEN_LIST, ScrollPane.ScrollPaneStyle.class));
+        if (!framed) {
+            rest.background = null;
+        }
         ScrollPane.ScrollPaneStyle over = new ScrollPane.ScrollPaneStyle(rest);
         over.vScroll = skin.getDrawable("scroll-rail");
         over.vScrollKnob = skin.getDrawable("scroll-thumb-over");
@@ -216,6 +236,8 @@ public final class UiKit {
         down.vScrollKnob = skin.getDrawable("scroll-thumb-down");
         scroll.setStyle(rest);
         scroll.setFadeScrollBars(false);
+        // The bar takes its own strip beside the list, so rows, their washes and their trailing text end before it
+        scroll.setScrollbarsOnTop(false);
         // The pointer's x in the pane while it is over it, else negative
         float[] pointer = { -1 };
         scroll.addListener(new InputListener() {
@@ -237,8 +259,8 @@ public final class UiKit {
             if (scroll.isScrollY() && scroll.isDragging()) {
                 look = down;
             } else if (scroll.isScrollY()) {
-                float right = scroll.getWidth() - rest.background.getRightWidth();
-                if (pointer[0] >= right - scroll.getScrollBarWidth() && pointer[0] <= right) {
+                float right = scroll.getWidth() - (rest.background == null ? 0 : rest.background.getRightWidth());
+                if (overScrollBar(pointer[0], right, scroll.getScrollBarWidth())) {
                     look = over;
                 }
             }
@@ -247,6 +269,14 @@ public final class UiKit {
             }
         })));
         return scroll;
+    }
+
+    /**
+     * Whether a pointer at {@code x} in a scroll pane is on its vertical bar's strip, {@code width} wide (the bar and
+     * its gap to the list) and ending at {@code right}; a negative {@code x} is a pointer elsewhere.
+     */
+    static boolean overScrollBar(float x, float right, float width) {
+        return width > 0 && x >= 0 && x >= right - width && x <= right;
     }
 
     /**
@@ -289,6 +319,16 @@ public final class UiKit {
         scroll.setFadeScrollBars(false);
         scroll.setScrollbarsOnTop(false);
         return scroll;
+    }
+
+    /** A step chart in the Token v0 look, such as damage by range ({@link UiStepChart}). */
+    public UiStepChart stepChart() {
+        return new UiStepChart(this);
+    }
+
+    /** A ring of arcs around a centre picture in the Token v0 look, such as damage by firing arc. */
+    public UiArcDiagram arcDiagram() {
+        return new UiArcDiagram(this);
     }
 
     /** Equal-size visual choices that fit their content and viewport, with bounded growth when space permits. */
@@ -414,6 +454,30 @@ public final class UiKit {
         Icon icon = new Icon(skin.getDrawable("icon-" + name), size);
         icon.setColor(color);
         return icon;
+    }
+
+    /**
+     * A solid fill in a token colour role, such as a team's colour bar; its size is its cell's. An area filled with a
+     * colour from the game, such as a player's swatch, takes {@link #solid(Color)}.
+     */
+    public Image solid(String role) {
+        return solid(UiTheme.tokenColor(role));
+    }
+
+    /** A solid fill in {@code color}, sized by its cell, such as a player's colour swatch. */
+    public Image solid(Color color) {
+        return new Image(skin.newDrawable("white", color));
+    }
+
+    /**
+     * A card (Token v0's {@code token-card}: surface.panel with a border.subtle edge and the md radius), padded sm and md
+     * as a list card is, for one item of a list such as a lobby player; its rows are the view's.
+     */
+    public Table card() {
+        Table card = new Table();
+        card.setBackground(skin.getDrawable("token-card"));
+        card.pad(space("sm"), space("md"), space("sm"), space("sm"));
+        return card;
     }
 
     /**
@@ -641,6 +705,23 @@ public final class UiKit {
         return button;
     }
 
+    /**
+     * The widest of a token button's faces: its preferred width showing each of {@code texts}, cased as a button
+     * label, so a button whose text changes, or a matched pair of buttons, can keep one width. The button shows its
+     * text as before afterwards.
+     */
+    public float faceWidth(UiButton button, String... texts) {
+        CharSequence shown = button.getText();
+        String kept = shown == null ? "" : shown.toString();
+        float width = 0;
+        for (String text : texts) {
+            button.setText(cased("button", text));
+            width = Math.max(width, button.getPrefWidth());
+        }
+        button.setText(kept);
+        return width;
+    }
+
     /** The gap between a button's parts: .b's 1 unit when they stack, a utility's 4, and the row gaps per style. */
     private static float gap(String style, boolean column) {
         if (column) {
@@ -775,7 +856,7 @@ public final class UiKit {
     /**
      * A chip in hud-v3's look, or with {@code token} Token v0's status chip: OK, WARN and BAD with their status icon
      * and a 1px edge in the status color over text.primary, NORMAL the neutral chip with a border.control edge and
-     * text.secondary; small type, sentence case.
+     * text.secondary; small type, in upper case as the overline in either presentation.
      */
     public Actor chip(String text, Tone tone, boolean token) {
         if (!token) {
@@ -787,23 +868,124 @@ public final class UiKit {
             case BAD -> "danger";
             default -> null;
         };
+        if (status == null) {
+            return tokenChip("neutral", null, null, text, "text.secondary");
+        }
+        String icon = switch (tone) {
+            case OK -> "check";
+            case WARN -> "warn";
+            default -> "error";
+        };
+        return tokenChip(status, icon, "status." + status, text, "text.primary");
+    }
+
+    /**
+     * Token v0's status chip without an icon, its edge in the {@link UiTheme#TOKEN_CHIP} frame {@code edge} (neutral,
+     * accent, success, warning or danger) and its text in text.primary, such as a side's Battle Value edged in the
+     * side's colour. It has the status chip's height, padding and type ({@link #chip(String, Tone, boolean)}).
+     */
+    public Table edgeChip(String text, String edge) {
+        return tokenChip(edge, null, null, text, "text.primary");
+    }
+
+    /**
+     * A status chip as {@link #chip(String, Tone, boolean)} that acts on a click: under the pointer its status color
+     * washes it, pressed or checked it fills ({@link UiTheme#TOKEN_CHIP_BUTTON}). Check it for a moment to light it,
+     * as when it asks to be seen.
+     */
+    public Button actingChip(String text, Tone tone) {
+        String frame = switch (tone) {
+            case OK -> "success";
+            case WARN -> "warning";
+            case BAD -> "danger";
+            default -> "neutral";
+        };
+        Button chip = new Button(skin, UiTheme.TOKEN_CHIP_BUTTON + frame);
+        chip.setProgrammaticChangeEvents(false);
+        fillChip(chip, frame.equals("neutral") ? null : switch (tone) {
+            case OK -> "check";
+            case WARN -> "warn";
+            default -> "error";
+        }, frame.equals("neutral") ? null : "status." + frame, text,
+              frame.equals("neutral") ? "text.secondary" : "text.primary");
+        return chip;
+    }
+
+    /**
+     * A compact whole-number stepper ({@link UiStepper}): − {@code value} +, within {@code min} and {@code max}.
+     */
+    public UiStepper stepper(int value, int min, int max) {
+        return new UiStepper(this, null, value, min, max);
+    }
+
+    /**
+     * A stepper as {@link #stepper(int, int, int)} led by {@code caption} in small text.secondary, the caption, the
+     * buttons and the value all {@link UiStepper#gap()} apart: one group, which stands a larger space from the next.
+     */
+    public UiStepper stepper(String caption, int value, int min, int max) {
+        return new UiStepper(this, caption, value, min, max);
+    }
+
+    /**
+     * A filter chip ({@link UiFilterChip}): a control, so {@code control.sm} high like the compact buttons, fields and
+     * selects beside it, in the status chip's type; at each end it keeps {@code md}, {@code icon.sm} and {@code xs}, so
+     * its text is centred; toggling on a click, on it fills in the accent's pressed tint and a check shows in its
+     * leading room. The view reads {@code isChecked()} on its change.
+     */
+    public UiFilterChip filterChip(String text) {
+        DesignTokens tokens = DesignTokens.shipped();
+        float iconSize = tokens.size().get("icon.sm");
+        float vertical = (tokens.size().get("control.sm") - iconSize) / 2;
+        return new UiFilterChip(skin, icon("check", iconSize, UiTheme.tokenColor("accent.primary")),
+              typeLabel(cased(CHIP_CASE, text), "small", "text.secondary"), iconSize, vertical, space("md"),
+              space("xs"));
+    }
+
+    /**
+     * A count badge standing beside a title ({@link UiCountBadge}), such as the unread lines on a folded chat's header;
+     * a badge on a button's corner is {@link UiButton#badge}. Zero hides it.
+     */
+    public UiCountBadge countBadge(int count) {
+        return new UiCountBadge(skin, count);
+    }
+
+    /**
+     * The status chip's geometry: {@code icon.sm} plus {@code xxs} above and below, 20 high whatever the type's line
+     * height; {@code xs} before an icon or {@code md} before the text, {@code md} after it; small type, cased as
+     * {@link #CHIP_CASE}.
+     */
+    private Table tokenChip(String frame, String icon, String iconRole, String text, String textRole) {
+        Table chip = new Table();
+        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + frame));
+        fillChip(chip, icon, iconRole, text, textRole);
+        return chip;
+    }
+
+    private void fillChip(Table chip, String icon, String iconRole, String text, String textRole) {
+        DesignTokens tokens = DesignTokens.shipped();
+        float iconSize = tokens.size().get("icon.sm");
+        float xxs = space("xxs");
         float xs = space("xs");
         float md = space("md");
-        Table chip = new Table();
-        chip.setBackground(skin.getDrawable(UiTheme.TOKEN_CHIP + (status == null ? "neutral" : status)));
-        if (status == null) {
-            chip.add(typeLabel(text, "small", "text.secondary")).padLeft(md).padRight(md);
-        } else {
-            String icon = switch (tone) {
-                case OK -> "check";
-                case WARN -> "warn";
-                default -> "error";
-            };
-            chip.add(icon(icon, DesignTokens.shipped().size().get("icon.sm"), UiTheme.tokenColor("status." + status)))
-                  .padLeft(xs);
-            chip.add(typeLabel(text, "small", "text.primary")).padLeft(xs).padRight(md);
+        chip.pad(xxs, icon == null ? md : xs, xxs, md);
+        if (icon != null) {
+            chip.add(icon(icon, iconSize, UiTheme.tokenColor(iconRole))).size(iconSize).padRight(xs);
         }
-        return chip;
+        chip.add(typeLabel(cased(CHIP_CASE, text), "small", textRole)).height(iconSize);
+    }
+
+    /**
+     * A rail: a folded panel standing at the window's edge, as the token panel with {@code icon} at its top and
+     * {@code title} read downwards in the title role. It toggles, its edge lighting on hover, and shows selected while
+     * checked ({@link UiTheme#TOKEN_RAIL}); the view opens and closes the folded panel on its change.
+     */
+    public Button rail(String title, String icon) {
+        Button rail = new Button(skin, UiTheme.TOKEN_RAIL);
+        rail.top();
+        rail.add(icon(icon, DesignTokens.shipped().size().get("icon.md"), UiTheme.tokenColor("text.secondary")))
+              .row();
+        rail.add(new UiVerticalText(roleTypeLabel("title", title, "text.secondary"))).padTop(space("md"));
+        return rail;
     }
 
     /** A search field (.field) with its placeholder, and a clear button while it holds text. */
@@ -891,6 +1073,29 @@ public final class UiKit {
         return new UiFormField(this, label, input);
     }
 
+    /**
+     * Whether {@code input} takes the whole width of its form column, so the right edges of a form's inputs line up:
+     * selects, text, search and range inputs, pick lists and rows built of them do; check boxes, radios, switches,
+     * segmented controls, buttons, chips, steppers and number inputs keep their own width.
+     */
+    public static boolean fillsFormColumn(Actor input) {
+        return !(input instanceof Button || input instanceof UiOptionBar || input instanceof HorizontalGroup
+              || input instanceof UiStepper || input instanceof UiNumber);
+    }
+
+    /**
+     * Adds a labelled row to {@code form}: {@code label} on the left, {@code labelWidth} wide and at the input's top,
+     * and {@code input} beside it, across the rest of the column when {@link #fillsFormColumn} says so. Every kit form
+     * built of these rows lines up its inputs' right edges.
+     */
+    public static Cell<Actor> formRow(Table form, Actor label, Actor input, float labelWidth) {
+        float gap = DesignTokens.shipped().space().get("md");
+        form.add(label).width(labelWidth).top().left().padRight(gap);
+        Cell<Actor> cell = form.add(input).expandX().fill(fillsFormColumn(input) ? 1f : 0f, 0f).minWidth(0).left();
+        form.row();
+        return cell;
+    }
+
     /** A token check box (docs/design-system/tokens.md, Choices): for a choice a form confirms. */
     public UiChoice check(String text, boolean checked) {
         return new UiChoice(this, UiChoice.Kind.CHECK, text, checked);
@@ -904,6 +1109,14 @@ public final class UiKit {
     /** A token switch: for a setting that applies at once. */
     public UiChoice toggleSwitch(String text, boolean on) {
         return new UiChoice(this, UiChoice.Kind.SWITCH, text, on);
+    }
+
+    /**
+     * A card that shows a picture and opens something when clicked ({@link UiPictureCard}); {@code text} shows, muted,
+     * until it has a picture, in a card {@code aspect} times as high as it is wide.
+     */
+    public UiPictureCard pictureCard(String text, float aspect) {
+        return new UiPictureCard(this, text, aspect);
     }
 
     /** Makes radio buttons exclusive: exactly one stays selected, the first checked one or else the first. */
@@ -929,6 +1142,22 @@ public final class UiKit {
     /** A token select in an input box (docs/design-system/tokens.md, Select), the first item current. */
     public UiSelect tokenSelect(boolean compact, String... items) {
         return new UiSelect(this, compact ? UiSelect.Kind.COMPACT : UiSelect.Kind.REGULAR, items);
+    }
+
+    /**
+     * A whole-number span ({@link UiRangeInput}): two compact digit-only inputs with {@code minText} and
+     * {@code maxText} as their placeholders; an empty end is open.
+     */
+    public UiRangeInput rangeInput(String minText, String maxText) {
+        return new UiRangeInput(this, minText, maxText);
+    }
+
+    /**
+     * Picks from a long list ({@link UiPickList}): a compact select showing {@code placeholder} that adds
+     * {@code items} as removable chips; with {@code excludes}, a click switches a chip between must-have and must-not.
+     */
+    public UiPickList pickList(String placeholder, java.util.List<String> items, boolean excludes) {
+        return new UiPickList(this, placeholder, items, excludes);
     }
 
     /** An inline token select: text with a dotted underline, for a value inside a sentence or a dense row. */

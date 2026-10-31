@@ -232,6 +232,26 @@ public class MekSearchFilter {
     }
 
     /**
+     * @return An enabled filter that every unit passes until criteria are set: every text range and text criterion
+     *       is empty, every tri-state is "any" and every list empty. Views other than the advanced search dialog start
+     *       from it.
+     */
+    public static MekSearchFilter allowingAll() {
+        MekSearchFilter filter = new MekSearchFilter();
+        filter.isDisabled = false;
+        for (java.lang.reflect.Field field : MekSearchFilter.class.getFields()) {
+            if ((field.getType() == String.class) && !java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                try {
+                    field.set(filter, "");
+                } catch (IllegalAccessException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+        }
+        return filter;
+    }
+
+    /**
      * Deep copy constructor. New instantiations of all state variables are created.
      *
      * @param mekSearchFilter The <code>MekSearchFilter</code> to create a copy of.

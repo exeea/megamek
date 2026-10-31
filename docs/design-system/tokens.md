@@ -414,6 +414,8 @@ buttons with the default margin. Buttons from the factories grow to the size's h
 **libGDX.** [`UiTheme`](../../megamek/src/megamek/client/ui/gdx/UiTheme.java) registers the `TextButtonStyle`s
 `button-<kind>` and `button-<kind>-compact` (`button-primary`, `button-secondary`, `button-quiet`, `button-danger`,
 `button-toggle`, `button-icon`, `button-special`), built from the tokens. `UiKit.button(style, icon, text, sub)` makes one.
+`UiTheme.DONE_BUTTON` (`button-done`, with `-compact` and `-caps` copies) is a primary button in `status.success` with
+its label in `text.onAccent`: the lobby's Ready once the player is ready, with a check before the label.
 libGDX gives hover priority over focus, so [`UiButton`](../../megamek/src/megamek/client/ui/gdx/UiButton.java) draws
 the focus ring as an overlay when it has keyboard focus; `focused(true)` and `held(true)` freeze those states for the
 gallery. The libGDX label is 12.5 px (`hud-medium`) and the Swing one 13 px; aligning them is part of the type pass.
@@ -495,6 +497,24 @@ dial and hex pickers (`UiAngleDial`, `UiHexSides`) only recolour: `style("token"
 (discs, border.control and border.strong ticks, accent value, text.muted labels that turn text.secondary when chosen
 and text.primary on hover). The hub keeps hud-v3's mint ring, `selection.width` (2) wide, and the needle stops at it,
 so the value inside sits on a plain base. The `hud` and `hud-search` field styles stay as hud-v3 draws them today.
+
+**Range input.** [`UiRangeInput`](../../megamek/src/megamek/client/ui/gdx/UiRangeInput.java), from
+`UiKit.rangeInput(minText, maxText)`, is a from–to pair for whole numbers: two compact `input` fields `control.lg` × 2
+(96) wide, their placeholders in `text.muted`, an en dash between them in `text.secondary`, `xs` (4) apart, left
+aligned; in a form column that fills, the two ends share its width equally, each at least half its own. Only digits are
+taken, six at most; an empty end is open. The fields' own `ChangeEvent`s stop at the range,
+which fires one per edit instead, so a listener on a block that holds several controls hears each edit once.
+`min()` and `max()` read the ends (null when open); `set(min, max)` fires nothing.
+
+**Form columns.** In a labelled form column every select, text field, range input and pick list takes the column's
+whole width, so the right edges of a form's inputs line up; inputs sized to their content give a ragged edge. Check
+boxes, radios, switches, segmented controls, buttons, chips, steppers and number inputs keep their own width. In
+libGDX, `UiKit.fillsFormColumn(input)` says which, `UiFormField` follows it for its input, and
+`UiKit.formRow(form, label, input, labelWidth)` adds a label-beside-input row that does (the advanced search). There is
+no maximum width: at 2560 wide the forms already split into columns, and a column's inputs reading as one block looks
+right. A row of a few selects with inline labels (the Requisition Filters drawer's role, era and source) shares the
+row's width equally instead, so its right edge meets the drawer's. A select beside a column of fields (the bot setup's
+combat posture under the presets) takes that column's width.
 
 ## Choices
 
@@ -638,6 +658,17 @@ select; `select(i)` from code fires none, and `placeholder(text)` shows the plac
 Token v0 look: the `token-select` style is the input box with a `text.secondary` chevron, and `token-select-inline` a
 dotted `border.control` underline that turns `border.strong` on hover.
 
+- **Type-ahead.** While the list is open, printable keys build a prefix and the first row that starts with it,
+  ignoring case, becomes active; a pause of a second (`UiListPopup.TYPE_AHEAD_MS`) starts a new prefix, and a space
+  counts only inside one. Enter then chooses the row. This makes long lists (equipment, quirks) usable from the keys.
+- **Pick list.** [`UiPickList`](../../megamek/src/megamek/client/ui/gdx/UiPickList.java), from
+  `UiKit.pickList(placeholder, items, excludes)`, picks several values from a list too long for chips: a compact select
+  showing its placeholder, and the picks below it, `xs` (4) apart and wrapping, as acting chips with an `icon.sm`
+  close glyph. Choosing an item adds it as a must-have and puts the placeholder back. With `excludes`, a click on a
+  chip switches it between must-have (`NORMAL` tone) and must-not-have (`BAD` tone); without, it removes it, and the
+  close glyph always removes it. One `ChangeEvent` per change; `picks()` is the index to must-have map and
+  `set(picks)` fires nothing. Use filter chips while there are ten choices or fewer.
+
 ## Lists and trees
 
 Show many items to pick from or browse. A select is better when only the chosen value needs to stay visible; a table
@@ -755,9 +786,12 @@ scrolls instead of drawing a stripe beside it.
 them without changes. A bar takes the color of an opaque view, otherwise the viewport's; a transparent scroll pane
 shows what's behind it.
 
-**libGDX.** The `token-list` scroll pane style has the 10-wide bar and the `border.control` pill thumb, which always
-shows; `UiKit.scrollList(list, true)` swaps in the `scroll-rail` and the `text.muted` thumb while the pointer is on the
-bar and the `text.secondary` thumb while it drags. hud-v3's 4-wide `hud-list` knob stays as hud-v3 draws it.
+**libGDX.** The `token-list` scroll pane style has the 10-wide bar and the `border.control` pill thumb, `xxs` in from
+the bar's sides, which always shows. `UiKit.scrollList(list, true)` gives the bar a strip of its own beside the list,
+the bar plus an `xs` (4) gap, so rows, their hover and selection washes and their right-aligned values all end left of
+it and nothing draws under the bar. The pointer anywhere on the strip swaps in the `scroll-rail` and the `text.muted`
+thumb, and dragging shows the `text.secondary` thumb. hud-v3's 4-wide `hud-list` knob, which sits on the content, stays
+as hud-v3 draws it.
 
 ## Sliders
 
@@ -964,8 +998,31 @@ owner sets the width (`dialog.sm`) and adds the body and the footer, centred, th
 other and at least 88, the main one first. `UiModal.fadeIn(seconds)` fades the layer in over `fast` when it opens; its
 scrim is already `surface.scrim`. `new UiConfirmation(kit, name, dismissed, UiTheme.TOKEN)` puts the confirmation
 beside its trigger in the token popover: a `status.warning` icon, the question in `body.strong` over `text.secondary`
-detail, then compact danger and secondary buttons with the focus on Cancel. The dialog keys and `GpuModalDialog` are
-still the developers' work.
+detail, then compact danger and secondary buttons with the focus on Cancel.
+
+`UiDialog` puts these together for a dialog with a form: `new UiDialog(kit, title, cancel).width("dialog.md")` makes
+the `UiModal` layer (the `surface.scrim`, which takes every click and key, a click on it not dismissing) and the card,
+`body()` is a table in a vertical-only scroll pane under the title, `primary`, `secondary` and `cancelButton` add the
+centred footer buttons in that order, and `tool` adds compact secondary buttons at the footer's leading end (such as
+Reset or Refresh). The card is the width token or the window less `xxxl` on each side, whichever is narrower, and at
+most the window's height less `xxxl` on each side, the body scrolling. `show(stage, motion)` fades it in over `fast`
+(at once without motion), focuses the first field, else the primary button, and `close()` gives the focus back. Keys:
+Enter presses the focused button or else the primary (a disabled primary does nothing), Space the focused button,
+Escape and the close button run `cancel`, and Tab and Shift+Tab cycle through the card's enabled buttons, fields,
+selects and sliders only, scrolling the body to the focused one. Actions added to `layer()` before `show` are dropped,
+as showing restarts its fade; put per-frame work on an actor of its own. The lobby opens these only through
+`LobbyNativeDialogs` (camo, player settings, bot setup, planetary conditions, game options, a confirmation and a plain
+message); the bot setup, a confirmation and a message stack over another dialog, which gets its focus back when the top
+one closes. A confirmation (`LobbyNativeDialogs.confirm`) is a `dialog.sm` card with the question as body text and
+OK/Cancel. The planetary conditions are a `dialog.md` card with captioned sections on one two-column grid, the `md`
+gutter split between the columns so they line up from section to section, and check boxes under a blank label so they
+sit on the fields' line. The game options are the one larger dialog: `dialog.lg + dialog.sm` wide (1220, or the
+window less `xxxl` margins), a 260 navigation column (search, match count, the group tree, the unofficial and legacy
+switches, the password) beside a page shown in a scroll pane whose height follows the window (between 280 and 760),
+the navigation stacking above the page below a 720 body; an option is its control with its tooltip, then its marks as
+non-interactive chips (Important and Unofficial and Legacy in `NORMAL`, Changed in `OK`, shown while it differs), and an
+advanced page's title carries a `status.warning` chip; text and number options are at most 320 wide; Defaults, Save
+and Load are footer tools. `GpuModalDialog` on the board is still the developers' work.
 
 ## Status cards
 
@@ -1049,6 +1106,15 @@ row, each `md` below the one before. `token-panel-danger` replaces `panel-foe` (
 `token-frame` is the plain frame, `token-rails` replaces `panel-rails` (the Tactical View chip: the overlay panel
 with `border.control` rails), `token-panel-overlay` is the panel on the overlay surface over the board, and `token-divider` replaces `rule`. `new UiPopover(kit, dismissed, UiTheme.TOKEN)` is the popover in the
 `token-popup` frame, with a `body.strong` title over `small` detail in `text.secondary` and a `border.subtle` divider.
+`UiKit.card()` is a card inside a panel (the lobby's player cards): the `token-card` frame padded `sm`, with `md` on
+the leading side. `UiKit.solid(role)` is a flat block of a color token (a team's edge bar, a player's color swatch),
+sized by its cell. `token-card-selected` is a selected card (a unit picked with ctrl or shift click): the same
+surface under an `accent.primary` edge. `token-card-drop` is the card or formation under a dragged unit: `surface.raised`,
+with a doubled `accent.primary` edge; between rows the drop target is a `token-row-slot` strip. `UiKit.pictureCard(text, aspect)` (`UiPictureCard`) is a card that shows a picture and opens something when
+clicked (the lobby's map): the `token-picture-card` button, `token-card` at rest and `token-card-over` (a
+`border.strong` edge) under the pointer, as high as its width times the picture's aspect up to `maxHeight`, with a
+muted line while there is no picture. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot` and
+`palette` glyphs to `UiTheme.ICONS`.
 
 The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`
 is the unit row as a selectable plain panel: the `token-unit-row` style has a `border.subtle` edge at rest,
@@ -1106,13 +1172,23 @@ value whose `onRemove` runs after the chip leaves its parent (`TagChip.removeTag
 for it.
 
 **libGDX.** `UiKit.chip(text, tone, true)` is the status chip: `Tone.OK`, `WARN` and `BAD` get the check, warning and
-error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip. A
+error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip;
+`UiKit.edgeChip(text, edge)` is the status chip without an icon, edged in any `token-chip-*` frame (the lobby's sides).
+`UiKit.actingChip(text, tone)` is the status chip as a button (`token-chip-button-<tone>`): `tint.hover` washes it
+under the pointer and `tint.pressed` fills it pressed or checked, so checking it for a moment lights it (the lobby's
+warning chips, which a blocked Ready lights for 700 ms). All three set their text in upper case, as the `overline` role in either [presentation](#presentation-mode). A
 button in a token style (`button-*`) draws `UiButton.badge` as the count badge, in the `token-badge` face and frame
-with its ring in `surface.panel`, and `UiButton.dot` as the dot; hud-v3's buttons keep the amber pill. About 25 calls in
-the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips, in capitals (the sentence case
-question is open for the whole HUD). hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
+with its ring in `surface.panel`, and `UiButton.dot` as the dot; `UiKit.countBadge(count)` (`UiCountBadge`) is the
+same badge on its own, beside a title (the lobby chat's unread lines), hidden at 0 but keeping its height; hud-v3's buttons keep the amber pill. About 25 calls in
+the unit card, the forces panel and overview and the HUD kit still make hud-v3's chips (`UiKit.chip(text, tone)`), also
+in capitals. hud-v3 has no tag chips; its target pills (`pill`, `pill-on`) are toggles, so
 they take the filter chip's look: `token-pill`, `token-pill-over` and `token-pill-on` in `GpuBoardSkin`, with the
 check before the target's letter square when on.
+`UiKit.filterChip(text)` makes [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java), the filter chip (`token-filter-chip`): `control.sm` high with `lg` padding at its sides, so it matches the compact buttons, search field and selects in its row; the neutral chip in text.secondary at rest; on, it fills in the accent's pressed tint, its text turns text.primary and the check shows in room the chip always keeps, so it never resizes. That room (`lg` side, the check's icon size and its `xs` gap) is kept at both ends, the check drawn in the leading one, so the label is centred on the chip whether checked or not. `UiFilterChip.sameWidth(chips)` gives a group the width of its widest label plus both reserves (the Requisition view's weight chips and the Filters drawer's choices); a search field beside them gives up width rather than the chips.
+
+**Staggered reveal (libGDX).** [`UiReveal`](../../megamek/src/megamek/client/ui/gdx/UiReveal.java) is a column of bands that appear one after another, each fading in and rising `space.md` over `motion.medium` on the token easing, `motion.fast` after the one before (the stagger stops growing after eight bands); it plays once, on the column's first show, and reduce motion shows every band at once. The Requisition dossier's Readout reveals its blocks with it, after the feel of MekHQ's planet details panel, as do the Damage tab (title, chart, range tiles, firing arcs) and the Factions tab (one band per era). `delay(index)` is how long a band waits, 0 without motion, so a widget inside the band can start its own motion as the band appears (the damage chart's sweep and the arc diagram's reveal).
+
+**Steppers and long lists (libGDX).** `UiKit.stepper(value, min, max)` makes [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java): − value + in `button-icon` compact buttons round the value in body.strong (as wide as its widest value, so the + does not move), disabled at the bounds, with an optional caption before them (`UiKit.stepper(caption, value, min, max)`); caption, −, value and + are all `xs` apart (`UiStepper.gap()`), and a row of steppers puts a larger gap (`md`) between groups, stepped by the arrow keys with the focus, firing a ChangeEvent per step (the Requisition strip's quantity and set skills). [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java) is a list of any length with one row height for a scroll pane: only the rows in view exist, reused as it scrolls (`UiVirtualList.visible` works out which), with the token row's hover and selected washes; a click selects, a double click or Enter activates, and Up, Down, Home, End, Page Up and Page Down move the selection (`UiVirtualList.step`) with the scroll pane following. The Requisition view lists its thousands of units in one.
 
 ## Toasts
 
@@ -1160,6 +1236,50 @@ its bar, the level's icon (`shield-person` for the Game Master), the sprite fitt
 `slow`. Where the stack sits is still hud-v3's: above the dock with the newest at the bottom. The top centre, the
 newest on top and the hover pause are the developers' work.
 
+## Charts
+
+A chart of values by whole step, such as damage by range, is a **step chart**. Each series keeps its value across its
+step and turns square into the next, in one of three styles: a **line**; an **area**, the same line over a fill in its
+color at `tint.pressed`, for the series that matters most; or a **ceiling**, a dashed line without the turns, for a
+bound the others stay under. Three guide lines in `border.subtle` sit behind the series: at nothing, at half, and at
+the ceiling. The ceiling rounds up to 1, 2 or 5 times a power of ten above the highest value. The guides are labelled
+in `caption` type and `text.muted`. Without bands the first, middle and last step are labelled under the plot. With
+**bands** (named runs of steps, such as short, medium and long range) a divider in `border.subtle` marks each band's
+start, every other band is washed in `border.subtle` at `tint.hover`, the band's name sits over it in `overline` type
+and `text.secondary`, and the steps labelled below are the bands' starts and the last. Series draw in the order given,
+so the one that matters most comes last and sits on top. A legend sits above the chart: a swatch of each series' color
+beside its name in `small` type. Take series colors from color roles. With motion the chart **sweeps** in once from the
+left over `motion.slow` on the token easing, an `accent.primary` scan line at its front; reduce motion draws it at
+once.
+
+The Requisition dossier's Damage tab is a targeting display rather than a table: maximum damage is a `text.muted`
+ceiling at half the `selection.width`, heat-sustained a `status.warning` line at twice it, and expected damage an
+`accent.primary` area at that width, over the S, M and L bands. Below the chart a **readout tile** per band gives the
+numbers a screen reader, or a color-blind reader, needs: a `token-card` with the band's name in `overline` and
+`text.secondary`, its hexes in `caption` and `text.muted`, the expected damage large in `display` type and the expected
+series' color, and the maximum and heat-sustained in `small` type and `text.secondary`. Under the
+tiles an **arc diagram** shows the expected damage by firing arc for the band picked in a segmented control.
+
+**Arc diagram.** A ring of arcs round a picture (the unit's sprite, or the unit icon in `text.muted`), the first arc
+centred at the top and the rest clockwise, `GAP_DEGREES` (4) apart, the hole `INNER` (0.55) of the ring. Each arc is a
+track in `border.subtle` filled in `accent.primary` at an opacity from `tint.hover` up to full by its value against the
+peak, nothing for nothing; the peak is taken across all bands, so switching bands keeps one scale. The value sits on
+its arc in `title` type, `text.primary`, or `text.onAccent` once the fill reaches `STRONG` (0.6); the arc's name is
+outside the ring in `caption` and `text.muted`. With motion the arcs fade in one after another, `motion.fast` apart
+over `motion.medium`, and a new band's fills glide from the last over `motion.medium`; reduce motion shows them at
+once.
+
+**libGDX.** `UiKit.stepChart()` makes
+[`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java).
+`show(List<UiStepChart.Series>, format)` takes the series and labels the guides with `format`. Each
+`Series(values, color, thickness[, style])` holds the values for steps 1 to n; the style is `LINE` unless given.
+`bands(starts, names)` names the bands, `sweep(motion[, delay])` draws the series in, and `progress()` reads how far.
+`UiStepChart.ceiling(peak)` and `UiStepChart.labelledSteps(steps, starts)` are the scale and the labelled steps, free
+of GL. The chart takes the width its cell gives it; give the cell a height. It takes no input. `UiKit.arcDiagram()`
+makes [`UiArcDiagram`](../../megamek/src/megamek/client/ui/gdx/UiArcDiagram.java): `centre(actor)`,
+`show(names, values, peak, format)` and `reveal(motion[, delay])`; `centreAngle`, `sliceAngles` and `intensity` are
+its geometry and fill, free of GL. Swing has no step chart or arc diagram yet.
+
 ## Code
 
 | Class | Role |
@@ -1184,6 +1304,8 @@ newest on top and the hover pause are the developers' work.
 | [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
 | [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
+| [`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java), [`UiArcDiagram`](../../megamek/src/megamek/client/ui/gdx/UiArcDiagram.java) | The libGDX step chart and arc diagram |
+| [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java), [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java), [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java), [`UiReveal`](../../megamek/src/megamek/client/ui/gdx/UiReveal.java) | The libGDX virtualised list, stepper, filter chip and staggered reveal |
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |
 | [`TokenTooltips`](../../megamek/src/megamek/client/ui/design/swing/TokenTooltips.java), [`TokenToolTipUI`](../../megamek/src/megamek/client/ui/design/swing/TokenToolTipUI.java) | The Swing tooltips |
 | [`TokenScrollBarUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollBarUI.java), [`TokenScrollPaneUI`](../../megamek/src/megamek/client/ui/design/swing/TokenScrollPaneUI.java) | The Swing scrollbars |
