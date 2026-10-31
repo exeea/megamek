@@ -679,7 +679,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
     }
 
     /**
-     * Hides this window for later. Listens to the frame until it closes, then calls unlaunch().
+     * Suspends the start screen while {@code launched} is open, then calls unlaunch() once it closes.
      */
     private void launch(JFrame launched) {
         // clean up disposable things
@@ -688,6 +688,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             randomArmyDialog = null;
         }
         // listen to new frame
+        GpuStartWindow.suspendWhile(launched);
         launched.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosed(WindowEvent e) {
@@ -706,6 +707,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             server = null;
         }
         // show the start screen again, without its greeting
+        GpuStartWindow.resume();
         GpuStartWindow.reopen();
 
         // Check for post-unlaunch action (e.g., load game from lobby)
