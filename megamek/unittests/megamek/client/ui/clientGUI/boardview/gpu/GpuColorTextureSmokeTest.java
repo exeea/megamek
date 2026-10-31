@@ -580,7 +580,9 @@ class GpuColorTextureSmokeTest {
                     assertPixel(actual, expected[0], expected[1], expected[2], expected[3], 0,
                           "Resized array and fixed-byte colour texture sample identically");
                 } finally { reference.dispose(); }
-                assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), .5, .5, .5, 128.0 / 255, .001,
+                // Halfway between the stored bytes 137 and 225, which decode to .2501 and .7529.
+                double between = (GpuColor.linear(137 / 255f) + GpuColor.linear(225 / 255f)) / 2;
+                assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), between, between, between, 128.0 / 255, .001,
                       "Array bilinear filtering decodes before averaging");
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 1), .5, .5, .5, 128.0 / 255, .004,
                       "Array mip generation averages linear light within sRGB8 storage precision");

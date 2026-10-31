@@ -79,6 +79,7 @@ class GpuMagmaFlowSmokeTest {
             shader.setUniformi("u_magmaColor", 2);
             shader.setUniformi("u_magmaOcean", 1);
             shader.setUniformf("u_magmaOceanScale", 0);
+            shader.setUniformf("u_magmaCoverage", assets.coverage(GpuAssets.magmaName(true)));
             Gdx.gl.glViewport(0, 0, SIZE, SIZE);
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDisable(GL20.GL_BLEND);

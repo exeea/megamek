@@ -15,6 +15,7 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -120,6 +121,7 @@ class GpuScatterSmokeTest {
                             plain.setAtmosphere(lighting);
                             boolean visible = step < 2 || step == 4;
                             int vertices = visible ? triangles * 3 : 0;
+                            if (step == 0) { settle(camera.camera, plain, terrain); }
                             int[] background = count(profiler, () -> plain.render(camera.camera));
                             int[] decorated = count(profiler, () -> terrain.render(camera.camera));
                             assertEquals(vertices, decorated[0] - background[0], "Color pass at LoD step " + step);
@@ -160,9 +162,10 @@ class GpuScatterSmokeTest {
                         plain.update(approach(List.of()));
                         camera.camera.zoom = .25f;
                         camera.center(BoardGeometry.center(new Coords(0, 0), 0));
+                        settle(camera.camera, plain, terrain);
                         assertEquals(count(profiler, () -> plain.render(camera.camera))[0],
                               count(profiler, () -> terrain.render(camera.camera))[0],
-                              "A sloped road approach into an unpaved hex must also suppress scatter");
+                              "A sloped road approach onto a roadless concrete apron must also suppress scatter");
                         terrain.update(scene);
                         GpuStageTimings.stopCounting(profiler, rawGl20);
                         camera.fit(scene);
@@ -242,6 +245,16 @@ class GpuScatterSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Scatter rendering", failure.get()); }
     }
 
+    /**
+     * Draws the views until their deferred work has settled: prop pages merge only after their sources held for
+     * GpuMeshPage.SETTLE_FRAMES frames, then a little each frame, and the ground material cache fills its pages.
+     */
+    private static void settle(Camera camera, GpuTerrain... terrains) {
+        for (int frame = 0; frame < 2 * GpuMeshPage.SETTLE_FRAMES; frame++) {
+            for (GpuTerrain terrain : terrains) { terrain.render(camera); }
+        }
+    }
+
     private static int[] count(GLProfiler profiler, Runnable draw) {
         profiler.reset();
         ScreenUtils.clear(.035f, .055f, .075f, 1, true);
@@ -303,12 +316,16 @@ class GpuScatterSmokeTest {
         }
     }
 
+    /**
+     * A paved road ending a level above a roadless concrete hex ramps into it (BoardRoadGrade.apron); a road ending at
+     * other unpaved ground keeps its whole ramp in its own hex.
+     */
     private static BoardScene approach(List<BoardScene.Feature> details) {
-        var empty = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, null, details,
+        var apron = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.CONCRETE, null, details,
               List.of());
-        var road = new BoardScene.Tile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS, null, List.of(),
-              List.of());
-        return new BoardScene(0, 1, 2, List.of(empty, road), List.of(), List.of(), -1, "", List.of());
+        var road = new BoardScene.Tile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS, null, null,
+              List.of(), List.of(), BoardLiquid.NONE, null, false, BoardRoad.Kind.PAVED);
+        return new BoardScene(0, 1, 2, List.of(apron, road), List.of(), List.of(), -1, "", List.of());
     }
 
     private static void bushLowSun(GpuTerrain terrain, BoardCamera camera, BoardScene scene, String name) {

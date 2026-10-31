@@ -835,8 +835,7 @@ class GpuLightingConsistencySmokeTest {
                 // Independent authored noon red stops. Both stay below the highlight shoulder, so this isolates
                 // the scene/gradient encoding contract from the tone curve and any rendered geometry.
                 double scale = noonRedSkyScale(atmosphere.lighting());
-                double sky = linear(.154) * scale, horizon = linear(.54) * scale;
-                assertEquals(sky, centerRadiance(), .00005,
+                assertEquals(linear(.154) * scale, centerRadiance(), .00005,
                       "The scene clear must contain sky radiance decoded once from the authored color");
                 atmosphere.end(camera, terrain, scene, 0);
                 Pixmap column = Pixmap.createFromFrameBuffer(WIDTH / 2, 0, 1, HEIGHT);
@@ -844,10 +843,11 @@ class GpuLightingConsistencySmokeTest {
                     for (int y : new int[] { 0, HEIGHT / 2, HEIGHT - 1 }) {
                         double v = (y + .5) / HEIGHT;
                         double blend = v * v * (3 - 2 * v);
-                        double radiance = horizon + (sky - horizon) * blend;
-                        int expected = (int) Math.round(255 * exposedDisplay(radiance, atmosphere.exposure()));
+                        // The uncovered backdrop is the UI's: its authored stops, blended as the UI draws them. Below
+                        // the shoulder's knee the display shows that blend unchanged.
+                        int expected = (int) Math.round(255 * (.54 + (.154 - .54) * blend));
                         assertEquals(expected, column.getPixel(0, y) >>> 24, 1,
-                              "The parallel board backdrop must interpolate linear light and encode once; row=" + y);
+                              "The parallel board backdrop must show the UI's authored gradient; row=" + y);
                     }
                 } finally { column.dispose(); }
                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -893,14 +893,14 @@ class GpuLightingConsistencySmokeTest {
                 Gdx.gl.glReadPixels(WIDTH / 2, HEIGHT / 2, 1, 1, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
                 assertEquals(1f, depth.get(0), "The depthless material must leave the sky depth untouched");
                 atmosphere.end(camera, terrain, scene, 0);
-                // Parallel board cameras retain a screen-space backdrop; uncovered coverage uses this pixel's sky.
+                // Parallel board cameras retain a screen-space backdrop; uncovered coverage shows the UI's authored
+                // gradient at this pixel, whose radiance the view's exposure brings to its authored display value.
                 double v = (HEIGHT / 2.0 + .5) / HEIGHT;
                 double blend = v * v * (3 - 2 * v);
-                double sky = (linear(.54) + (linear(.154) - linear(.54)) * blend)
-                      * noonRedSkyScale(atmosphere.lighting());
+                double sky = linear(.54 + (.154 - .54) * blend) / atmosphere.exposure();
                 double radiance = .5 * dielectricRadiance(.8, false) + .5 * sky;
                 assertEquals(Math.round(255 * exposedDisplay(radiance, atmosphere.exposure())), centerRed(), 1,
-                      "The final pixel must contain half the material and half the linear board backdrop");
+                      "The final pixel must contain half the material and half the UI's board backdrop");
                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             } finally {
                 model.dispose();
@@ -1004,9 +1004,9 @@ class GpuLightingConsistencySmokeTest {
                         batch.begin(camera(false));
                         batch.render(new ModelInstance(model));
                         batch.end();
-                        double radiance = mode == 0 ? linear(.4) * pigment
-                              : mode == 1 ? pigment + linear(.5) : linear(.25) * pigment + linear(.15);
-                        double opacity = mode == 2 ? .75 : .55;
+                        // Paint is the movement destination's blue ghost; Erase is the same ghost in red.
+                        double radiance = mode == 1 ? pigment + linear(.5) : linear(.25) * pigment + linear(.15);
+                        double opacity = .75;
                         assertEquals(display(radiance) * opacity + .2 * (1 - opacity), centerValue(), .001,
                               "Imported paint, erase and movement ghosts encode once before blending; mode=" + mode);
                         var rgba = BufferUtils.newFloatBuffer(4);
@@ -1171,9 +1171,12 @@ class GpuLightingConsistencySmokeTest {
         return linear(color) * (1 - fresnel) + reflectedEnvironment * fresnel;
     }
 
-    /** Independent authored red stops integrate to the actual canonical, white-balanced red sky irradiance. */
+    /**
+     * The scene clear's authored noon red stops share one scale (the visible palette's normalization and white point),
+     * which the published horizon measures; the visible sky is presentation, so the ambient light does not.
+     */
     private static double noonRedSkyScale(BoardAtmosphere.Lighting lighting) {
-        return lighting.ambient().r / (.2 * linear(.54) + .8 * linear(.154));
+        return lighting.horizon().r / linear(.54);
     }
 
     private static int radianceFrame(GpuAtmosphere atmosphere, GpuTerrain terrain, BoardScene scene,

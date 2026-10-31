@@ -471,7 +471,7 @@ class GpuMagmaSmokeTest {
     }
 
     private static Mesh paletteQuad(int scenario, float span) {
-        float[] vertices = new float[12 * 14];
+        float[] vertices = new float[12 * 18];
         int offset = 0;
         // Boundary at screen x=64.5: sample 64 is zero, sample 65 positive, inside the same 2-wide quad.
         float[] columns = { -.5f, .5f / 128, .5f };
@@ -492,7 +492,7 @@ class GpuMagmaSmokeTest {
                 float rim = sloping ? 2 * levelMetres - foot : 2;
                 float[] vertex = { x * span, y * span * (sloping ? .6f : 1), y * span * (sloping ? .8f : 0),
                       0, sloping ? -.8f : 0, sloping ? .6f : 1, Color.WHITE_FLOAT_BITS, foot, rim,
-                      1 - weight - bank, weight, bank, 0, 0 };
+                      1 - weight - bank, weight, bank, 0, 0, 0, 0, 0, 0 }; // no bank foot (BoardSurfaceBlend.NO_FOOT)
                 System.arraycopy(vertex, 0, vertices, offset, vertex.length);
                 offset += vertex.length;
             }

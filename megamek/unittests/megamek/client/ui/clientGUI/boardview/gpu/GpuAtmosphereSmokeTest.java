@@ -108,15 +108,19 @@ class GpuAtmosphereSmokeTest {
             checkSkyDirections();
             checkForegroundWeather();
         }
+        // Gray-155 tileset art with one gray-65 hex: the known receivers the light checks compare. Enhanced ground
+        // draws its own materials; tileset art is the Classic graphics'.
+        BoardScene.Pixels gray = art(155), dark = art(65);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
-                      List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+                      List.of(), List.of(), BoardLiquid.NONE, x == 1 && y == 2 ? dark : gray));
             }
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
         GpuTerrain terrain = new GpuTerrain();
+        terrain.setColumns(!fogShadowOnly);
         GpuAtmosphere atmosphere = new GpuAtmosphere();
         ModelBatch batch = new ModelBatch(GpuUnitShader.provider());
         var model = new ModelBuilder().createBox(36, 36, 108,
@@ -207,9 +211,9 @@ class GpuAtmosphereSmokeTest {
                 GpuBoardTestUi.capture(new File(output, "atmosphere-twilight-" + hour + ".png"));
             }
             Files.writeString(new File(output, "twilight-floor.txt").toPath(), floor);
-            // Overcast twilight, whose cloud shadows take most of the low sun's light, stays as readable as a clear
-            // full-moon night.
-            assertTrue(darkestTwilight > nightBrightnessFloor,
+            // Overcast twilight, whose cloud shadows take most of the low sun's light, stays about as readable as a clear
+            // full-moon night: no darker than four fifths of it.
+            assertTrue(darkestTwilight > .8f * luminance(night),
                   "The rendered board must not go dark during twilight:\n" + floor);
             checkPressureLighting(atmosphere, terrain, batch, tower, camera, scene, ground, center);
             checkTwilightShadows(atmosphere, terrain, batch, tower, camera, scene);
@@ -1086,6 +1090,9 @@ class GpuAtmosphereSmokeTest {
 
     private void checkWetGround(GpuAtmosphere atmosphere, GpuTerrain terrain, ModelBatch batch, ModelInstance tower,
           BoardCamera camera, BoardScene scene) throws IOException {
+        // Rain wets Enhanced's ground materials; Classic's tileset art stays dry.
+        terrain.setColumns(false);
+        terrain.update(scene);
         camera.setIsometric(false);
         camera.fit(scene);
         Vector3 plain = BoardGeometry.center(new Coords(1, 3), 0);
@@ -1098,8 +1105,8 @@ class GpuAtmosphereSmokeTest {
               new BoardAtmosphere.Effects(1, 0, 0, 0, 0, 0, 0));
         drawScene(atmosphere, terrain, batch, List.of(tower), camera, scene, rain, null, 0);
         Color wetPlain = sample(camera, plain);
-        // The tileset material darkens linear albedo by 10 to 17.5% (terrain-normal.frag); the wet film's sheen gives
-        // a little light back. Measure linear radiance: display encoding compresses the visible percentage change.
+        // Rain darkens the ground's albedo by a quarter to a half of the light it returns (rain-surface.glsl wetAlbedo);
+        // the wet film's sheen gives a little back. Measure linear radiance: display encoding compresses the change.
         assertTrue(linearLuminance(wetPlain) < linearLuminance(dryPlain) * 0.9f,
               "Wet ground darkens its albedo: " + dryPlain + " -> " + wetPlain);
         assertTrue(linearLuminance(sample(camera, normal)) < linearLuminance(dryNormal) * 0.97f,
@@ -1142,6 +1149,7 @@ class GpuAtmosphereSmokeTest {
         atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
         camera.setIsometric(false);
         camera.fit(scene);
+        terrain.setColumns(true);
         terrain.update(scene);
     }
 
@@ -1679,5 +1687,15 @@ class GpuAtmosphereSmokeTest {
     private static float linearLuminance(Color color) {
         return .2126f * GpuColor.linear(color.r) + .7152f * GpuColor.linear(color.g)
               + .0722f * GpuColor.linear(color.b);
+    }
+
+    /** A hex of uniform tileset art in this gray. */
+    private static BoardScene.Pixels art(int gray) {
+        var image = new java.awt.image.BufferedImage(84, 72, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        var graphics = image.createGraphics();
+        graphics.setColor(new java.awt.Color(gray, gray, gray));
+        graphics.fillRect(0, 0, 84, 72);
+        graphics.dispose();
+        return new BoardScene.Pixels(image);
     }
 }

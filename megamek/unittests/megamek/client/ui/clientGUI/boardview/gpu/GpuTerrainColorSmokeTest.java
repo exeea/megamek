@@ -116,7 +116,7 @@ class GpuTerrainColorSmokeTest {
                 atmosphere.end(camera, terrain, scene, 0);
                 float[][][] displayed = read(width, height, false);
                 report.append(name).append(" groundLight=").append(rgb(lighting.groundLight())).append('\n');
-                verify(name, radiance, displayed, atmosphere.lighting(), width, height, report);
+                verify(name, radiance, displayed, atmosphere.lighting(), atmosphere.exposure(), width, height, report);
                 GpuReviewFrame.save(new File(directory, name + ".png"));
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -129,8 +129,11 @@ class GpuTerrainColorSmokeTest {
     }
 
     private static void verify(String name, float[][][] radiance, float[][][] displayed,
-          BoardAtmosphere.Lighting grade, int width, int height, StringBuilder report) {
-        double specular = integratedSpecular();
+          BoardAtmosphere.Lighting grade, float exposure, int width, int height, StringBuilder report) {
+        double specular = integratedSpecular(.04);
+        // Multiple scattering returns the 1 - E of white light that single scattering loses, coloured by f0
+        // (Fdez-Aguera 2019); the diffuse budget stays the single-scattering remainder.
+        double white = integratedSpecular(1), reflected = specular * (1 + .04 * (1 - white) / white);
         for (int swatch = 0; swatch < COLORS.length; swatch++) {
             for (int row = 0; row < 3; row++) {
                 report.append("  ").append(NAMES[swatch]).append(" row=").append(row)
@@ -148,9 +151,9 @@ class GpuTerrainColorSmokeTest {
                     double expectedDiffuse = linear(COLORS[swatch][channel]) * (1 - specular);
                     assertEquals(expectedDiffuse, diffuse, .001,
                           "White illumination must preserve each known pigment channel's diffuse reflectance");
-                    assertEquals(specular, reflection, .0002,
+                    assertEquals(reflected, reflection, .0002,
                           "Neutral dielectric reflection must match independent hemispherical GGX integration");
-                    assertEquals(expectedDiffuse + specular, full, .001,
+                    assertEquals(expectedDiffuse + reflected, full, .001,
                           "The complete colored material must retain the independently predicted neutral sheen");
                 }
             }
@@ -160,7 +163,8 @@ class GpuTerrainColorSmokeTest {
                 double luminance = 0;
                 double[] weights = { .2126, .7152, .0722 };
                 for (int channel = 0; channel < 3; channel++) {
-                    color[channel] = radiance[row][swatch][channel] * tint[channel];
+                    // The composite exposes the scene for the view's adaptation, then grades it.
+                    color[channel] = radiance[row][swatch][channel] * exposure * tint[channel];
                     luminance += color[channel] * weights[channel];
                 }
                 int x = sampleX(swatch, width), y = sampleY(row, height);
@@ -194,8 +198,8 @@ class GpuTerrainColorSmokeTest {
         return result;
     }
 
-    /** Independent hemispherical GGX midpoint integral, without the production LUT or its interpolation. */
-    private static double integratedSpecular() {
+    /** Independent hemispherical GGX midpoint integral for f0, without the production LUT or its interpolation. */
+    private static double integratedSpecular(double f0) {
         int samples = 65536;
         double sum = 0, alphaSquared = Math.pow(ROUGHNESS, 4);
         for (int i = 0; i < samples; i++) {
@@ -204,7 +208,7 @@ class GpuTerrainColorSmokeTest {
             double halfZ = Math.sqrt((1 - u) / (1 + (alphaSquared - 1) * u));
             double lightZ = 2 * halfZ * halfZ - 1;
             if (lightZ <= 0) { continue; }
-            double fresnel = .04 + .96 * Math.pow(1 - halfZ, 5);
+            double fresnel = f0 + (1 - f0) * Math.pow(1 - halfZ, 5);
             double masking = 2 * lightZ / (lightZ + Math.sqrt(lightZ * lightZ * (1 - alphaSquared) + alphaSquared));
             sum += fresnel * masking;
         }

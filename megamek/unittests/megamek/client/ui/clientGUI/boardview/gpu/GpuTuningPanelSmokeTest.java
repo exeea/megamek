@@ -1060,6 +1060,7 @@ class GpuTuningPanelSmokeTest {
                     clickOn(harness, conditions);
                     assertTrue(opened.await(30, TimeUnit.SECONDS), "the Swing planetary conditions editor opens");
                     panel.update(inputs);
+                    harness.draw();
                     assertTrue(conditions.isDisabled(), "one editor at a time");
                     assertTrue(closed.await(30, TimeUnit.SECONDS), "the test closes it");
                 });
