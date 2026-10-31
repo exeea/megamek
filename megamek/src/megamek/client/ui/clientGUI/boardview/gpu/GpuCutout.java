@@ -27,7 +27,7 @@ final class GpuCutout {
 
     private record Crossing(long key, Vector3 point) { }
     private record Link(Vector3 point, long next) { }
-    private record Edge(Vector3 start, Vector3 end) {
+    record Edge(Vector3 start, Vector3 end) {
         double x(double y) {
             return start.x + (end.x - start.x) * (y - start.y) / (end.y - start.y);
         }
@@ -216,17 +216,31 @@ final class GpuCutout {
         return edges;
     }
 
-    /**
-     * Tessellate horizontal bands between contour vertices. Even/odd spans preserve holes and disconnected
-     * pieces without bridging them. Every cap boundary lies on the exact same panel as its wall.
-     */
+    /** Every cap boundary lies on the exact same panel as its wall. */
     private static int caps(List<List<Vector3>> loops, BoardScene.Pixels pixels, TextureRegion region, Vector3 origin,
           float scale, float height, boolean bottomCap, MeshPartBuilder caps) {
-        List<Edge> edges = edges(loops);
-        var rows = new TreeSet<Float>();
-        for (Edge edge : edges) { rows.add(edge.start().y); }
-        List<Float> levels = new ArrayList<>(rows);
         int vertices = 0;
+        for (Vector3[] span : fill(edges(loops))) {
+            vertices += capTriangle(pixels, region, origin, scale, height, span[0], span[1], span[2], bottomCap, caps);
+            vertices += capTriangle(pixels, region, origin, scale, height, span[0], span[2], span[3], bottomCap, caps);
+        }
+        return vertices;
+    }
+
+    /**
+     * Tessellates closed outlines in the XY plane in horizontal bands between their vertices. Even/odd spans preserve
+     * holes and disconnected pieces without bridging them.
+     *
+     * @return each span's corners: top left, top right, bottom right, bottom left
+     */
+    static List<Vector3[]> fill(List<Edge> edges) {
+        var rows = new TreeSet<Float>();
+        for (Edge edge : edges) {
+            rows.add(edge.start().y);
+            rows.add(edge.end().y);
+        }
+        List<Float> levels = new ArrayList<>(rows);
+        List<Vector3[]> spans = new ArrayList<>();
         for (int row = 1; row < levels.size(); row++) {
             float top = levels.get(row - 1), bottom = levels.get(row);
             // Adjacent float levels can be one ULP apart; their midpoint must still lie strictly inside the band.
@@ -234,17 +248,13 @@ final class GpuCutout {
             var active = edges.stream().filter(edge -> Math.min(edge.start().y, edge.end().y) < middle
                         && Math.max(edge.start().y, edge.end().y) > middle)
                   .sorted(Comparator.comparingDouble(edge -> edge.x(middle))).toList();
-            for (int span = 0; span < active.size(); span += 2) {
+            for (int span = 0; span + 1 < active.size(); span += 2) {
                 Edge left = active.get(span), right = active.get(span + 1);
-                var a = new Vector3((float) left.x(top), top, 0);
-                var b = new Vector3((float) right.x(top), top, 0);
-                var c = new Vector3((float) right.x(bottom), bottom, 0);
-                var d = new Vector3((float) left.x(bottom), bottom, 0);
-                vertices += capTriangle(pixels, region, origin, scale, height, a, b, c, bottomCap, caps);
-                vertices += capTriangle(pixels, region, origin, scale, height, a, c, d, bottomCap, caps);
+                spans.add(new Vector3[] { new Vector3((float) left.x(top), top, 0), new Vector3((float) right.x(top), top, 0),
+                      new Vector3((float) right.x(bottom), bottom, 0), new Vector3((float) left.x(bottom), bottom, 0) });
             }
         }
-        return vertices;
+        return spans;
     }
 
     private static int capTriangle(BoardScene.Pixels pixels, TextureRegion region, Vector3 origin, float scale,

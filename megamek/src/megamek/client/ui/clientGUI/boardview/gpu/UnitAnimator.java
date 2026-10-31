@@ -966,8 +966,10 @@ final class UnitAnimator {
         body.reset();
         body.hop = 0;
         if (body.rig.mek() || body.rig.trooper() || "proto-v1".equals(body.rig.type())) {
-            // Outward-looking troops fall forward, preserving space between the formation's bodies.
-            root.rotate(Vector3.X, (body.rig.trooper() ? -90 : "quad-v1".equals(body.rig.type()) ? 65 : 90) * progress);
+            // Outward-looking troops fall forward, preserving space between the formation's bodies; meeple figures fall
+            // on their backs, as their casualties do (MeepleCasualties).
+            root.rotate(Vector3.X, (body.rig.meeple() ? 90 : body.rig.trooper() ? -90 : "quad-v1".equals(body.rig.type()) ? 65 : 90)
+                  * progress);
             body.rotate("leftArm", Vector3.X, -22 * progress);
             body.rotate("rightArm", Vector3.X, 18 * progress);
             body.rotate("head", Vector3.Y, 18 * progress);

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,6 +142,12 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
     private record UnitSprite(BoardScene.Pixels pixels, boolean meeple) { }
     private final Map<UnitSprite, GpuUnitModel> spriteModels = new HashMap<>();
+    /** The way the hits last played against each unit on the board drove it: its dying meeples fly that way. */
+    private final Map<Integer, Vector3> hitDirections = new HashMap<>();
+    private final MeepleCasualties casualties = new MeepleCasualties();
+    private final MeepleDebris.Ground debrisGround = this::debrisHeight;
+    /** The units seen dead, in either camera: a meeple explodes only as its unit first shows dead. */
+    private final Set<String> deadUnits = new HashSet<>();
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
     private final GpuJumpJets jumpJets = new GpuJumpJets();
@@ -777,7 +784,8 @@ class GpuBattleView extends ApplicationAdapter {
             scene = unitFrame.scene();
         }
         if (warmUp != WarmUp.DONE) { scene = withReserve(scene); }
-        camouflage.retain(scene.units());
+        // Dying meeples still wear their unit's camouflage (MeepleCasualties).
+        camouflage.retain(Stream.concat(scene.units().stream(), casualties.units().stream()).toList());
         if (unitModels != null) {
             // The units not on the board keep the models their warm-up assembled, for the moment they appear.
             unitModels.retainAssemblies(Stream.concat(scene.units().stream(), source.reserveUnits().stream())
@@ -929,6 +937,7 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("unit poses");
         markers.beginFrame(scene.markers(), Gdx.graphics.getDeltaTime());
         prepareUnits();
+        casualties.advance(animationSeconds(), debrisGround);
         applyHover();
         for (var unit : scene.units()) {
             var instance = unitInstances.get(unit.id() + ":" + unit.part());
@@ -977,6 +986,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         unitBounds.begin();
         List<ModelInstance> units = new ArrayList<>(unitInstances.values());
+        casualties.casualties().forEach(casualty -> units.add(casualty.instance));
         List<ModelInstance> outlined = scene.units().stream()
               .filter(unit -> !unit.sensorContact() || GpuMarkers.outlineEnabled(BoardMarker.Kind.SENSOR_CONTACT))
               .map(unit -> unitInstances.get(unit.id() + ":" + unit.part()))
@@ -1001,7 +1011,8 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
         // An armed building's roof turret and wall casemates are part of it: unlike a unit inside, they never open it.
-        List<ModelInstance> occupants = new ArrayList<>(units);
+        // Dying meeples neither wade nor open buildings.
+        List<ModelInstance> occupants = new ArrayList<>(unitInstances.values());
         for (var unit : scene.units()) {
             if (unit.model() != null && unit.model().state() != null && unit.model().state().structure().building() != null) {
                 occupants.remove(unitInstances.get(unit.id() + ":" + unit.part()));
@@ -1576,15 +1587,19 @@ class GpuBattleView extends ApplicationAdapter {
         // Zoomed out, the 3D view's units grow to stay visible; the Tactical View's meeples keep their size in the hex.
         float growth = boardCamera.tactical() ? 1
               : UnitScreenScale.factor(UnitScreenScale.hexPixels(boardCamera.camera.zoom, layoutScale));
-        unitInstances.keySet().retainAll(scene.units().stream().map(unit -> unit.id() + ":" + unit.part())
-              .collect(Collectors.toSet()));
+        Set<String> keys = scene.units().stream().map(unit -> unit.id() + ":" + unit.part()).collect(Collectors.toSet());
+        unitInstances.keySet().retainAll(keys);
+        deadUnits.retainAll(keys);
         unitTints.keySet().retainAll(unitInstances.keySet());
         upperBodyTurns.keySet().retainAll(unitInstances.keySet());
         armFlips.keySet().retainAll(unitInstances.keySet());
         animators.keySet().retainAll(unitInstances.keySet());
         unitDamage.keySet().retainAll(unitInstances.keySet());
         equipmentAppearance.keySet().retainAll(unitInstances.keySet());
+        hitDirections.keySet().retainAll(scene.units().stream().map(BoardScene.Unit::id).collect(Collectors.toSet()));
         for (BoardScene.Unit unit : scene.units()) {
+            var hit = hitDirection(unit);
+            if (hit != null) { hitDirections.put(unit.id(), hit); }
             Vector3 position = BoardGeometry.center(unit.location().coords(), unit.location().elevation());
             playback.placeDisplacement(unit, position);
             float facing = unit.location().facing() * 60;
@@ -1612,8 +1627,7 @@ class GpuBattleView extends ApplicationAdapter {
             GpuUnitModel visual = unit.sensorContact() ? markers.model(BoardMarker.Kind.SENSOR_CONTACT)
                   : unitModels == null ? null : unitModels.get(unit.model(), unit.id(), unit.part());
             boolean authored = !unit.sensorContact() && visual != null;
-            boolean dead = !unit.sensorContact() && unit.model() != null && unit.model().state() != null
-                  && unit.model().state().pose().dead();
+            boolean dead = dead(unit);
             var death = playback.attacks().stream().filter(attack -> attack.death() && attack.event.entityId() == unit.id())
                   .findFirst().orElse(null);
             float collapse = death == null ? dead ? 1 : 0 : death.deathProgress();
@@ -1637,9 +1651,30 @@ class GpuBattleView extends ApplicationAdapter {
             }
             String key = unit.id() + ":" + unit.part();
             ModelInstance instance = unitInstances.get(key);
+            boolean dying = dead && deadUnits.add(key);
+            if (!dead) { deadUnits.remove(key); }
+            if (dead && visual.meeple() && !UnitAnimator.troops(unit) && !boardCamera.tactical()) {
+                // A destroyed unit's meeple explodes as it first shows dead. A wreck has no gameplay: none is drawn,
+                // but the Tactical View's crossed-out base. A formation's figures die one by one instead, as its
+                // assembly loses them.
+                unitInstances.remove(key);
+                if (dying && instance instanceof GpuUnitInstance standing && MeepleVisual.isMeeple(standing)
+                      && history.speed() != UnitMotion.Speed.INSTANT) {
+                    casualties.exploded(standing, unit, hitDirections.get(unit.id()));
+                }
+                continue;
+            }
             if (instance == null || instance.model != visual.instance.model) {
                 animators.remove(key);
+                ModelInstance previous = instance;
                 instance = newUnitInstance(key, visual);
+                // A meeple formation's lost soldiers and vehicles die where they stood, rather than vanish with its
+                // smaller assembly.
+                if (previous instanceof GpuUnitInstance shown && shown.visual() != null && shown.visual().infantry()
+                      && authored && visual.infantry() && displayMode().meeple(unit.model()) && UnitAnimator.troops(unit)
+                      && unit.attachment() == null && history.speed() != UnitMotion.Speed.INSTANT) {
+                    casualties.lost(shown, visual, unit, hitDirections.get(unit.id()));
+                }
             }
             BoardScene.LocationDamage shownDamage = unitDamage.getOrDefault(key, BoardScene.LocationDamage.NONE);
             boolean mek = authored && (unit.model().state() == null ? visual.turnsUpperBody()
@@ -1782,8 +1817,61 @@ class GpuBattleView extends ApplicationAdapter {
         crowds.pack(occupiedGround);
     }
 
+    /** Destroyed, or doomed and about to be: its wreck, or its death playing. */
+    private static boolean dead(BoardScene.Unit unit) {
+        return !unit.sensorContact() && unit.model() != null && unit.model().state() != null
+              && unit.model().state().pose().dead();
+    }
+
     private UnitAnimator newAnimator() {
         return new UnitAnimator(groundSurfaces, () -> scene, crowds);
+    }
+
+    /**
+     * The way the hits playing against {@code unit} drive it, horizontal: away from each attacker, from an artillery
+     * round landing in its hex or from a nuclear blast's centre; null when none is playing.
+     */
+    private Vector3 hitDirection(BoardScene.Unit unit) {
+        var at = BoardGeometry.center(unit.location().coords(), unit.location().elevation());
+        var away = new Vector3();
+        for (var attack : playback.attacks()) {
+            var target = attack.event.target();
+            boolean blast = attack.event.result().shot() != null && attack.event.result().shot().artillery();
+            var landing = attack.event.destination();
+            if (blast && landing.coords().equals(unit.location().coords())) {
+                away.add(away(at, BoardGeometry.center(landing.coords(), landing.elevation())));
+            } else if (!blast && target != null && target.id() == unit.id()) {
+                var attacker = attack.event.attacker();
+                away.add(away(at, UnitAttack.center(unitInstances.get(attacker.id() + ":" + attacker.part()),
+                      attacker.location(), new Vector3())));
+            }
+        }
+        var detonation = playback.detonation();
+        if (away.isZero() && detonation != null) {
+            away.add(away(at, BoardGeometry.center(detonation.result().coords(), detonation.result().elevation())));
+        }
+        return away.isZero(1e-6f) ? null : away.nor();
+    }
+
+    /** The horizontal direction from {@code source} to {@code at}; none where they coincide. */
+    private static Vector3 away(Vector3 at, Vector3 source) {
+        var away = new Vector3(at.x - source.x, at.y - source.y, 0);
+        return away.len2() < 1e-4f ? away.setZero() : away.nor();
+    }
+
+    /**
+     * What thrown meeple pieces land on at (x, y) ({@link #debrisGround}): the top of the ground, roof or rock the
+     * pointer would pick there, foliage giving way, or a liquid's bed; half a unit up, as units stand. NaN off the board.
+     */
+    private float debrisHeight(float x, float y) {
+        var tile = BoardGeometry.tile(scene, x, y);
+        if (tile == null) { return Float.NaN; }
+        float top = (tile.elevation() + 40) * BoardGeometry.level();
+        var hit = terrain.selectionHit(scene, new com.badlogic.gdx.math.collision.Ray(new Vector3(x, y, top),
+              new Vector3(0, 0, -1)));
+        float height = hit == null ? BoardGeometry.surfaceZ(tile) : top - (float) Math.sqrt(hit.distance());
+        boolean liquid = tile.liquid().present() && !tile.frozen() && height <= BoardGeometry.surfaceZ(tile) + 1;
+        return (liquid ? BoardGeometry.groundZ(tile) : height) + .5f;
     }
 
     /**
@@ -2297,6 +2385,12 @@ class GpuBattleView extends ApplicationAdapter {
                 }
             }
         }
+        for (var casualty : casualties.casualties()) {
+            var bounds = unitBounds.get(casualty.instance);
+            if (!boardCamera.camera.frustum.boundsInFrustum(bounds)) { continue; }
+            if (thermal) { wireframe.units.add(casualty.instance, casualty.unit, bounds); }
+            else { unitBatch.render(casualty.instance, terrain.environment()); }
+        }
         // Every marker writes normal scene depth, independently of its optional see-through outline.
         markers.instances().forEach(unitBatch::render);
         unitBatch.end();
@@ -2664,7 +2758,8 @@ class GpuBattleView extends ApplicationAdapter {
             BoardScene.Unit picked = null;
             for (BoardScene.Unit unit : scene.units()) {
                 var instance = unitInstances.get(unit.id() + ":" + unit.part());
-                if (instance == null) { continue; }
+                // A wreck has no gameplay: a click on it takes the ground beneath.
+                if (instance == null || dead(unit)) { continue; }
                 float distance = unitPicking.distance(instance, ray);
                 if (distance < nearest) {
                     nearest = distance;
@@ -3477,6 +3572,9 @@ class GpuBattleView extends ApplicationAdapter {
     private void clearUnitInstances() {
         animators.clear();
         unitInstances.clear();
+        casualties.dispose();
+        hitDirections.clear();
+        deadUnits.clear();
         unitBounds.begin();
         unitAnchors.clear();
         unitTints.clear();
