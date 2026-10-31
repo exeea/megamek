@@ -7,10 +7,8 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -73,6 +71,8 @@ import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.GameSettingsChangeEvent;
+import megamek.common.event.board.GameBoardChangeEvent;
+import megamek.common.event.board.GameBoardNewEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.event.entity.GameEntityNewEvent;
 import megamek.common.event.entity.GameEntityRemoveEvent;
@@ -210,6 +210,16 @@ public final class GpuLobbyWindow {
         public void gameEntityChange(GameEntityChangeEvent event) {
             queueRefresh();
         }
+
+        @Override
+        public void gameBoardNew(GameBoardNewEvent event) {
+            boardReplaced();
+        }
+
+        @Override
+        public void gameBoardChanged(GameBoardChangeEvent event) {
+            boardReplaced();
+        }
     };
     private final GpuHost.Scene scene = new GpuHost.Scene() {
         @Override
@@ -275,8 +285,8 @@ public final class GpuLobbyWindow {
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
     private final Set<String> spriteKeys = new HashSet<>();
     /** The catalogue units whose sprites the Requisition asked for, the latest first, and the thread that draws them. */
-    private final Deque<MekSummary> spriteQueue = new ArrayDeque<>();
-    private Thread spriteThread;
+    private final LobbySpriteWorker<MekSummary> sprites = new LobbySpriteWorker<>("Requisition sprites",
+          this::drawRequisitionSprite);
     private Map<Integer, String> sentSprites = Map.of();
     /** Set when a new screen needs every sprite again. */
     private volatile boolean spritesStale;
@@ -426,10 +436,22 @@ public final class GpuLobbyWindow {
         });
     }
 
-    private void queueRefresh() {        if (refreshQueued.compareAndSet(false, true)) {
+    private void queueRefresh() {
+        if (refreshQueued.compareAndSet(false, true)) {
             // Later, so the chat box has taken the same event first
             SwingUtilities.invokeLater(this::refresh);
         }
+    }
+
+    /**
+     * Any thread: the server sent a board, often after the chat and readiness updates that refreshed the lobby, or
+     * changed the one it has in place; the map is drawn again either way.
+     */
+    private void boardReplaced() {
+        SwingUtilities.invokeLater(() -> {
+            mapKey = null;
+            queueRefresh();
+        });
     }
 
     /** EDT: reads the lobby and hands it to the screen. */
@@ -669,62 +691,39 @@ public final class GpuLobbyWindow {
      * screen. The files are read on a thread of their own, the latest asked first, as the newest rows are those in view.
      */
     void requisitionSprites(List<MekSummary> units) {
-        synchronized (spriteQueue) {
-            for (MekSummary unit : units) {
-                spriteQueue.remove(unit);
-                spriteQueue.addFirst(unit);
-            }
-            if (spriteThread == null) {
-                spriteThread = new Thread(this::drawRequisitionSprites, "Requisition sprites");
-                spriteThread.setDaemon(true);
-                spriteThread.start();
-            }
-            spriteQueue.notifyAll();
+        if (!closing) {
+            sprites.request(units);
         }
     }
 
-    private void drawRequisitionSprites() {
-        while (true) {
-            MekSummary unit;
-            synchronized (spriteQueue) {
-                while (spriteQueue.isEmpty()) {
-                    try {
-                        spriteQueue.wait();
-                    } catch (InterruptedException interrupted) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
+    /** The Requisition sprites' thread: draws one unit's sprite on the Swing thread and hands it to the screen. */
+    private void drawRequisitionSprite(MekSummary unit) {
+        if (closing) {
+            return;
+        }
+        Entity entity = LobbyRequisitionController.FILES.read(unit);
+        if (entity == null) {
+            return;
+        }
+        String key = LobbyRequisitionPanel.spriteKey(unit);
+        try {
+            // The tileset and its images are Swing's
+            SwingUtilities.invokeAndWait(() -> {
+                Player local = gui.getClient().getLocalPlayer();
+                BufferedImage image = (local == null) ? null : sprite(entity, local.getCamouflage());
+                if (image != null) {
+                    GpuHost.post(() -> {
+                        GpuLobbyScreen shown = screen;
+                        if (shown != null) {
+                            shown.requisitionSprite(key, image);
+                        }
+                    });
                 }
-                unit = spriteQueue.pollFirst();
-            }
-            if (closing) {
-                continue;
-            }
-            Entity entity = LobbyRequisitionController.FILES.read(unit);
-            if (entity == null) {
-                continue;
-            }
-            String key = LobbyRequisitionPanel.spriteKey(unit);
-            try {
-                // The tileset and its images are Swing's
-                SwingUtilities.invokeAndWait(() -> {
-                    Player local = gui.getClient().getLocalPlayer();
-                    BufferedImage image = (local == null) ? null : sprite(entity, local.getCamouflage());
-                    if (image != null) {
-                        GpuHost.post(() -> {
-                            GpuLobbyScreen shown = screen;
-                            if (shown != null) {
-                                shown.requisitionSprite(key, image);
-                            }
-                        });
-                    }
-                });
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                return;
-            } catch (java.lang.reflect.InvocationTargetException failure) {
-                LOGGER.warn(failure, "The Requisition could not draw the sprite of {}", unit.getName());
-            }
+            });
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            LOGGER.warn(failure, "The Requisition could not draw the sprite of {}", unit.getName());
         }
     }
 
@@ -1565,6 +1564,7 @@ public final class GpuLobbyWindow {
         gui.getClient().getGame().removeGameListener(gameListener);
         boolean replaced = closing;
         closing = true;
+        sprites.stop();
         if (mapTimer != null) {
             mapTimer.stop();
         }
