@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.gdx.UiKit.onChange;
-import static megamek.client.ui.gdx.UiKit.text;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -66,9 +65,8 @@ final class GpuMoreDrawer {
         panel.pad(PAD_TOP, PAD_X, PAD_BOTTOM, PAD_X);
         title = ui.label("", "hud-title", 13, Color.WHITE);
         title.setEllipsis(true);
-        UiButton close = ui.button("hud-mini", null, "X", null);
+        UiButton close = ui.closeButton(this::close);
         close.setName("dock-more-close");
-        onChange(close, this::close);
         head.pad(0, 2, 0, 2);
         head.add(title).left().minWidth(0);
         head.add().expandX();
@@ -90,11 +88,14 @@ final class GpuMoreDrawer {
         return open;
     }
 
-    /** The columns the usable commands need at {@code height}: as many rows as it holds. One while it is closed. */
+    /**
+     * The columns the usable commands need at {@code height}: as many rows as it holds. One while it is hidden; the
+     * closing slide keeps the open panel's shape.
+     */
     int columnsAt(float height) {
         float rowsRoom = height - chrome();
         int rows = Math.max(1, (int) Math.floor((rowsRoom + GAP) / (BUTTON + GAP)));
-        return open ? Math.max(1, (commands.size() + rows - 1) / rows) : 1;
+        return slide.isVisible() ? Math.max(1, (commands.size() + rows - 1) / rows) : 1;
     }
 
     /** The columns {@code width} holds, zero when it is too narrow for one. */
@@ -176,8 +177,8 @@ final class GpuMoreDrawer {
         }
     }
 
-    private void show(GpuCommandDock.More more) {
-        title.setText(UiTheme.upper(more.title()));
+    /** The commands of {@code more} the panel shows: the enabled ones without children. */
+    static List<BoardScene.Command> usable(GpuCommandDock.More more) {
         List<BoardScene.Command> usable = new ArrayList<>();
         for (List<BoardScene.Command> group : List.of(more.items(), more.commands())) {
             for (BoardScene.Command command : group) {
@@ -186,6 +187,12 @@ final class GpuMoreDrawer {
                 }
             }
         }
+        return usable;
+    }
+
+    private void show(GpuCommandDock.More more) {
+        title.setText(UiTheme.upper(more.title()));
+        List<BoardScene.Command> usable = usable(more);
         List<String> keys = new ArrayList<>();
         for (BoardScene.Command command : usable) {
             keys.add(command.id() + '\n' + command.label() + '\n' + command.shortcut());
@@ -202,13 +209,6 @@ final class GpuMoreDrawer {
         String highlighted = grid.highlighted() == null ? null : grid.highlighted().getName();
         grid.clearChildren();
         columns = columns(slide.getWidth());
-        if (commands.isEmpty()) {
-            Label empty = ui.label(text("GpuBoard.hud.dock.moreNone"), "hud-small", 11.5f, Color.WHITE);
-            empty.setName("dock-more-empty");
-            empty.setWrap(true);
-            grid.add(empty).growX().minWidth(0).left();
-            return;
-        }
         for (int index = 0; index < commands.size(); index++) {
             BoardScene.Command command = commands.get(index);
             String id = command.id();

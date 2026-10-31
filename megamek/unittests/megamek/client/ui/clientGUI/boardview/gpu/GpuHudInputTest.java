@@ -961,7 +961,7 @@ class GpuHudInputTest {
         Actor oldButton = hud.stage.getRoot().findActor("dock-more-extra");
         updateMore(List.of(new BoardScene.Command("extra", "extra", "", false, false, List.of(),
               ran::incrementAndGet)));
-        assertNull(hud.stage.getRoot().findActor("dock-more-extra"));
+        assertNull(hud.stage.getRoot().findActor("dock-more"), "without a usable command More closes and goes");
         oldButton.fire(new ChangeListener.ChangeEvent());
         assertEquals(0, ran.get(), "a detached button cannot run its old action");
     }
@@ -1132,24 +1132,13 @@ class GpuHudInputTest {
     }
 
     @Test
-    void moreWrapsTheEmptyMessageWithinItsViewport() {
-        hud.resize(1280, 720, 1);
+    void moreIsOnlyOfferedWithACommandToUse() {
         updateMore(List.of());
-        change("dock-more");
-        updateMore(List.of());
-        hud.stage.act(1);
-        validateLayout(hud.stage.getRoot());
-        Label empty = hud.stage.getRoot().findActor("dock-more-empty");
-        assertNotNull(empty);
-        assertEquals(UiKit.text("GpuBoard.hud.dock.moreNone"), empty.getText().toString());
-        ScrollPane scroll = hud.stage.getRoot().findActor("dock-more-scroll");
-        Rectangle viewport = GpuHudTestStage.bounds(scroll);
-        Rectangle message = GpuHudTestStage.bounds(empty);
-        assertTrue(message.x >= viewport.x - .5f && message.x + message.width <= viewport.x + viewport.width + .5f
-              && message.y >= viewport.y - .5f && message.y + message.height <= viewport.y + viewport.height + .5f,
-              message + " outside " + viewport);
-        assertTrue(empty.getGlyphLayout().width <= empty.getWidth() + .5f, "all text fits horizontally");
-        assertTrue(empty.getGlyphLayout().height <= empty.getHeight() + .5f, "wrapped lines fit vertically");
+        assertNull(hud.stage.getRoot().findActor("dock-more"));
+        updateMore(List.of(new BoardScene.Command("extra", "extra", "", false, false, List.of(), () -> { })));
+        assertNull(hud.stage.getRoot().findActor("dock-more"), "unavailable commands offer no More");
+        updateMore(List.of(extra("extra", () -> { })));
+        assertNotNull(hud.stage.getRoot().findActor("dock-more"));
     }
 
     private static BoardScene.Command extra(String id, Runnable action) {

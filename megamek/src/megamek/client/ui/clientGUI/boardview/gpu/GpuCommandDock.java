@@ -408,7 +408,7 @@ final class GpuCommandDock implements GpuHud.Component {
         };
         boolean stopShown = phase.isMovement() && panels.move().holdingRemaining() > 0
               || (phase.isFiring() || phase.isTargeting()) && panels.fire().autoDeclareRemaining() > 0;
-        Shape shape = new Shape(variant, buttons, hasMore(), variant != Variant.WAITING
+        Shape shape = new Shape(variant, buttons, more() != null, variant != Variant.WAITING
               && (variant != Variant.GENERIC || done() != null), secondaryShown, stopShown,
               variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown(),
               variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
@@ -484,7 +484,9 @@ final class GpuCommandDock implements GpuHud.Component {
     private void forget() {
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         GpuMovePlan.Snapshot move = inputs.frame().panels().move();
-        if (open != null && (inputs.dialog() != null || state.dialog != GpuHudState.Dialog.NONE || state.overview
+        // The Tuning panel stays open beside play; the other dialogs cover the board.
+        boolean dialog = state.dialog != GpuHudState.Dialog.NONE && state.dialog != GpuHudState.Dialog.TUNING;
+        if (open != null && (inputs.dialog() != null || dialog || state.overview
               || inputs.frame().status().turnIndex() != confirmTurn
               || inputs.frame().status().round() != confirmRound
               || inputs.frame().status().phase() != confirmPhase)) {
@@ -1084,7 +1086,7 @@ final class GpuCommandDock implements GpuHud.Component {
             return null;
         }
         List<BoardScene.Command> items = new ArrayList<>();
-        return switch (variant) {
+        More more = switch (variant) {
             case PLAN -> {
                 items.addAll(others(MOVE_SHOWN).map(GpuCommandDock::entry).toList());
                 yield new More(text("GpuBoard.hud.dock.moreMovement"), null,
@@ -1114,12 +1116,13 @@ final class GpuCommandDock implements GpuHud.Component {
                       .toList());
             }
         };
+        // Without a command to use now, the dock shows no More button.
+        return GpuMoreDrawer.usable(more).isEmpty() ? null : more;
     }
 
     /**
-     * Whether the shown variant has a More popover: movement and weapon declaration always offer it; the turn
-     * without an adjacent enemy only while one of MegaMek's other physical commands (dodge,
-     * explosives, clear woods) can be used.
+     * Whether the shown variant offers More: movement and weapon declaration always; the turn without an adjacent
+     * enemy only while one of MegaMek's other physical commands (dodge, explosives, clear woods) can be used.
      */
     private boolean hasMore() {
         return switch (variant) {

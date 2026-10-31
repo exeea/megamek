@@ -588,7 +588,7 @@ class GpuCommandDockSmokeTest {
             Group drawer = dock.drawer();
             assertTrue(drawer.isVisible());
             // The panel's movement controls and unit record no longer appear in More.
-            assertEquals(List.of("MORE MOVEMENT", "X", "GO PRONE"), texts(drawer));
+            assertEquals(List.of("MORE MOVEMENT", "GO PRONE"), texts(drawer));
             hud.capture("g6-more-drawer-movement").dispose();
             click(hud, drawer.findActor("dock-more-moveGoProne"));
             assertEquals(List.of("moveGoProne"), ran);
@@ -603,7 +603,7 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, none);
             click(hud, button(dock, "dock-more"));
             show(hud, dock, none);
-            assertEquals(List.of("MORE", "X", "UNIT RECORD", "DODGE"), texts(dock.drawer()));
+            assertEquals(List.of("MORE", "UNIT RECORD", "DODGE"), texts(dock.drawer()));
             hud.capture("g6-more-drawer-physical").dispose();
             click(hud, dock.drawer().findActor("dock-more-dodge"));
             assertEquals(List.of("dodge"), ran);
