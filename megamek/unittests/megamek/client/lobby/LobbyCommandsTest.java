@@ -383,6 +383,9 @@ class LobbyCommandsTest {
             verify(first).setOwner(bot);
             verify(second).setOwner(bot);
             assertEquals(3, first.getCrew().getGunnery());
+            assertEquals(3, first.getCrew().getGunneryL());
+            assertEquals(3, first.getCrew().getGunneryM());
+            assertEquals(3, first.getCrew().getGunneryB());
             assertEquals(4, first.getCrew().getPiloting());
             verify(client).sendAddEntity(List.of(first, second));
             verify(client).sendServerChat(eq(Player.PLAYER_NONE), eq(local + " selected 2 units for player: Bot"));

@@ -775,7 +775,11 @@ public class LobbyCommands {
                     case RANDOM -> client().getSkillGenerator().setRandomSkills(entity);
                     case FIXED -> {
                         for (int slot = 0; slot < crew.getSlotCount(); slot++) {
+                            // The RPG gunnery skills are what attacks use when that option is on
                             crew.setGunnery(skills.gunnery(), slot);
+                            crew.setGunneryL(skills.gunnery(), slot);
+                            crew.setGunneryM(skills.gunnery(), slot);
+                            crew.setGunneryB(skills.gunnery(), slot);
                             crew.setPiloting(skills.piloting(), slot);
                         }
                     }
