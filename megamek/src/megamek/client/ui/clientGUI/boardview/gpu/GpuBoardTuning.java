@@ -118,6 +118,7 @@ final class GpuBoardTuning {
     /** The UI scale last saved: the slider's value once no button is held (see {@link #saveUiScale()}). */
     private float uiScaleSaved;
     private final SelectBox<String> antiAliasing;
+    private final SelectBox<String> shadows;
     private final CheckBox specularAntialiasing;
     private final CheckBox tessellation;
     private final CheckBox ambientOcclusion;
@@ -272,6 +273,15 @@ final class GpuBoardTuning {
         antiAliasing.addListener(new TextTooltip("SMAA smooths the jagged edges of the 3D scene after its lighting and "
               + "atmosphere, before overlays, labels and the HUD. Off shows the scene as rendered. The choice is "
               + "saved for the next session.", skin, "menu"));
+        shadows = choice(skin, "Shadows", "tuning-shadows", new String[] { "Normal", "High" }, this::applyShadows);
+        // The saved choice (Normal until one is saved); like anti-aliasing, Defaults leaves it alone.
+        syncing = true;
+        shadows.setSelectedIndex("HIGH".equalsIgnoreCase(GUIPreferences.getInstance().getBoardShadows()) ? 1 : 0);
+        syncing = false;
+        shadows.addListener(new TextTooltip("The sun's shadow map follows the screen: about one shadow texel to a "
+              + "rendered pixel. High doubles that for sharper shadow edges under rims, rocks and plants; it uses more "
+              + "video memory and takes longer to redraw the shadows when the view zooms. The choice is saved for the "
+              + "next session.", skin, "menu"));
         specularAntialiasing = checkbox(skin, "Specular anti-aliasing", "tuning-specular-anti-aliasing");
         // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
         specularAntialiasing.setChecked(GUIPreferences.getInstance().getBoardSpecularAntiAliasing());
@@ -1133,6 +1143,11 @@ final class GpuBoardTuning {
         return antiAliasing.getSelectedIndex() == 1;
     }
 
+    /** High shadows: twice the shadow texels a rendered pixel takes (GpuTerrainShadows). */
+    boolean highShadows() {
+        return shadows.getSelectedIndex() == 1;
+    }
+
     /** Tessellated sculpted relief (GpuTessellation), where the context offers it. */
     boolean tessellation() {
         return tessellation.isChecked();
@@ -1164,6 +1179,11 @@ final class GpuBoardTuning {
     private void applyAntiAliasing() {
         String choice = antiAliasing.getSelected().toUpperCase(Locale.ROOT);
         SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAntiAliasing(choice));
+    }
+
+    private void applyShadows() {
+        String choice = shadows.getSelected().toUpperCase(Locale.ROOT);
+        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardShadows(choice));
     }
 
     /** The view reads the choice each frame; it is also saved for later sessions, on the Swing thread. */

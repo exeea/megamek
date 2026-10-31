@@ -791,6 +791,9 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.setAntiAliasing(tuning.antiAliasing());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
         atmosphere.updateLight(boardCamera);
+        // Before the light binds: its first map takes this scene's size.
+        terrain.setShadowScene(Math.max(Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight())
+              * BoardCamera.renderScale, tuning.highShadows());
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());

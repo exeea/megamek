@@ -165,7 +165,7 @@ class GpuShadowCacheSmokeTest {
         camera.zoom(.5f);
         terrain.renderShadows(camera.camera, List.of());
         var light = ((DirectionalShadowLight) terrain.environment().shadowMap).getCamera();
-        int size = GpuTerrainShadows.SHADOW_RESOLUTION;
+        int size = ((DirectionalShadowLight) terrain.environment().shadowMap).getFrameBuffer().getWidth();
         float width = light.viewportWidth, height = light.viewportHeight;
         Vector3 right = new Vector3(light.direction).crs(light.up).nor();
         float x = light.position.dot(right), y = light.position.dot(light.up);

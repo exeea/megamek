@@ -909,8 +909,8 @@ final class GpuTerrain implements Disposable {
 
     private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
           GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.replaceOnce(
-                GpuShaderSource.read("shadow-depth.frag"), "// SHADOW_MAP_TEXELS",
-                "#define MAP_TEXELS " + GpuTerrainShadows.SHADOW_RESOLUTION + ".0\n//", "shadow depth")))),
+                GpuShaderSource.read("shadow-depth.frag"), "// SHADOW_MAP_PASS", "#define SHADOW_PASS\n//",
+                "shadow depth")))),
           new GpuOpaqueSorter());
     /** The sun's shadow map and its caches; the terrain's depth pass and the units cast into it. */
     private final GpuTerrainShadows shadowMap = new GpuTerrainShadows(new GpuTerrainShadows.Casters() {
@@ -7471,6 +7471,9 @@ final class GpuTerrain implements Disposable {
 
     void setTessellation(boolean tessellation) { this.tessellation = tessellation; }
 
+    /** The battle view's scene for the shadow map's size (GpuTerrainShadows.setScene). */
+    void setShadowScene(float pixels, boolean high) { shadowMap.setScene(pixels, high); }
+
     /** The switch, which the installed chunks follow once the terrain is ready (unlike {@link #columns()}). */
     boolean tessellation() { return tessellation; }
 
@@ -8144,7 +8147,7 @@ final class GpuTerrain implements Disposable {
             // moves at one texel size. A map whose texel spans half a metre or more cannot resolve leaves: its trees
             // cast the shadow of their second decimated level at most. Alpha-tested foliage drawn into such a map at the
             // near level was fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
-            float texels = shadows ? GpuTerrainShadows.SHADOW_RESOLUTION / Math.min(camera.viewportWidth, camera.viewportHeight) : 0;
+            float texels = shadows ? shadowMap.resolution() / Math.min(camera.viewportWidth, camera.viewportHeight) : 0;
             int coarsest = shadows && 1 / texels >= BoardRelief.metres(.5f) ? 2 : 0;
             for (Chunk chunk : chunks) {
                 boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);

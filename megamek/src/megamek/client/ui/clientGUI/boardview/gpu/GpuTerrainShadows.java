@@ -16,6 +16,7 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
@@ -35,10 +36,18 @@ final class GpuTerrainShadows implements Disposable {
         BoundingBox bounds(ModelInstance unit);
     }
 
-    static final int SHADOW_RESOLUTION = 2304;
+    /**
+     * The map's texels across follow the scene's pixels (resolution): at least its 1080p size, at most its 4K size, or
+     * twice as many with High shadows. {@code -Dmegamek.gpu.shadowTexels} sets one size for every scene.
+     */
+    static final int MIN_RESOLUTION = 2304, MAX_RESOLUTION = 4608, MAX_HIGH_RESOLUTION = 8192;
+    private static final Integer FORCED_RESOLUTION = Integer.getInteger("megamek.gpu.shadowTexels");
+    /** Shadow texels a scene pixel takes along the scene's longer side: 2304 for a 1920-pixel scene. */
+    private static final float TEXELS_PER_PIXEL = 1.2f;
+    /** Frames a changed size must hold before the map follows it (a window being resized, a quality switch). */
+    private static final int SETTLE_FRAMES = 30;
     /** Texels on a side of the tiles in which moved units' shadows are restored from the cached terrain map. */
     private static final int SHADOW_TILE = 64;
-    private static final int SHADOW_TILES = SHADOW_RESOLUTION / SHADOW_TILE;
     /** Copies per restore before one copy of the whole map is the cheaper (an estimate, not measured). */
     private static final int SHADOW_RUNS = 32;
     private static final float SHADOW_GUARD_SCALE = 1.1f;
@@ -80,6 +89,13 @@ final class GpuTerrainShadows implements Disposable {
     private boolean shadowDirty;
     // Frames since a camera refinement last replaced a chunk the cached shadow has not redrawn; -1 when none.
     private int refinedShadowFrames = -1;
+    // The battle view's scene (setScene): its longer side in pixels, 0 for none, and High shadows (Display tab); the map's
+    // texels across, and a different size asked for with the frames it has held.
+    private float scenePixels;
+    private boolean high;
+    private int resolution = MIN_RESOLUTION, wanted, wantedFrames;
+    /** The context's largest texture side, read once. */
+    private int maxTexture;
 
     GpuTerrainShadows(Casters casters) { this.casters = casters; }
 
@@ -89,10 +105,51 @@ final class GpuTerrainShadows implements Disposable {
     /** A refined chunk casts its terrain at finer detail: the map serves until refinement settles, then redraws once. */
     void refined() { refinedShadowFrames = 0; }
 
+    /** The map's texels across. */
+    int resolution() { return resolution; }
+
+    /**
+     * The battle view's scene: {@code pixels} along its longer side as the render resolution draws it, and High shadows
+     * (twice the texels a pixel takes). The map follows once they hold (followScene). Prints and previews never set it
+     * and keep {@link #MIN_RESOLUTION}, so a window resized during a tiled print cannot change its tiles' shadows.
+     */
+    void setScene(float pixels, boolean high) {
+        scenePixels = pixels;
+        this.high = high;
+    }
+
+    /**
+     * Texels across the map for a scene of {@code pixels} along its longer side: {@link #TEXELS_PER_PIXEL} each, twice
+     * that when {@code high}, in whole tiles, from {@link #MIN_RESOLUTION} to {@link #MAX_RESOLUTION} (or
+     * {@link #MAX_HIGH_RESOLUTION}) and the largest texture the context allows. The map is fitted to the view, so a
+     * texel then covers about as many pixels at every scene size.
+     */
+    static int resolution(float pixels, boolean high, int maxTexture) {
+        int largest = maxTexture / SHADOW_TILE * SHADOW_TILE;
+        if (FORCED_RESOLUTION != null) { return tiled(Math.clamp(FORCED_RESOLUTION, SHADOW_TILE, largest)); }
+        int most = Math.min(high ? MAX_HIGH_RESOLUTION : MAX_RESOLUTION, largest);
+        return Math.max(Math.min(MIN_RESOLUTION, most), Math.min(tiled(pixels * TEXELS_PER_PIXEL * (high ? 2 : 1)), most));
+    }
+
+    /** Texels up to whole restore tiles. */
+    private static int tiled(float texels) { return (int) Math.ceil(texels / SHADOW_TILE) * SHADOW_TILE; }
+
+    /** The texels across the scene asks for (setScene). */
+    private int sceneResolution() {
+        if (maxTexture == 0) {
+            var values = BufferUtils.newIntBuffer(16);
+            Gdx.gl.glGetIntegerv(GL20.GL_MAX_TEXTURE_SIZE, values);
+            maxTexture = values.get(0);
+        }
+        return resolution(scenePixels, high, maxTexture);
+    }
+
     /** The light, made on first use, as the environment's shadow map. */
     GpuShadowLight bind(Environment environment) {
         if (shadow == null) {
-            shadow = new GpuShadowLight(SHADOW_RESOLUTION, SHADOW_RESOLUTION, 1, 1, 1, 2);
+            resolution = sceneResolution();
+            shadow = new GpuShadowLight(resolution, resolution, 1, 1, 1, 2);
+            shadowFit.texels = boardShadowFit.texels = resolution;
             shadowProjectionValid = false;
         }
         if (environment.shadowMap != shadow) {
@@ -109,7 +166,8 @@ final class GpuTerrainShadows implements Disposable {
             shadow.dispose();
             shadow = null;
             shadowEmpty = false;
-            staticShadowValid = false;
+            // The caches go with the map: the next one may take another size.
+            disposeCaches();
         }
         environment.shadowMap = null;
     }
@@ -123,6 +181,7 @@ final class GpuTerrainShadows implements Disposable {
         if (shadow == null || !bound) {
             return;
         }
+        followScene();
         // Refinement has settled: the refined chunks cast their own shadow (replaceDetail).
         if (refinedShadowFrames >= 0 && ++refinedShadowFrames > GpuMeshPage.SETTLE_FRAMES) {
             refinedShadowFrames = -1;
@@ -192,13 +251,13 @@ final class GpuTerrainShadows implements Disposable {
             lightCamera.up.set(shadowFit.up);
             lightCamera.near = shadowFit.near;
             lightCamera.far = shadowFit.far;
-            snapShadowCamera(lightCamera);
+            snapShadowCamera((GpuShadowLight.SlabCamera) lightCamera);
         }
         // The tiles the changed units' shadows covered and now cover: within an unchanged projection, only these differ
         // from the cached terrain map under the units (restoreTiles).
         int[][] rects = new int[units.size()][];
         for (int index = 0; index < units.size(); index++) { rects[index] = shadowTexels(lightCamera, casters.bounds(units.get(index))); }
-        boolean[] stale = new boolean[SHADOW_TILES * SHADOW_TILES];
+        boolean[] stale = new boolean[tiles() * tiles()];
         for (int index = 0; index < Math.max(units.size(), shadowRects.size()); index++) {
             if (index < units.size() && !moved[index]) { continue; }
             if (index < shadowRects.size()) { markTiles(stale, shadowRects.get(index)); }
@@ -239,7 +298,7 @@ final class GpuTerrainShadows implements Disposable {
                 shadowBase = null;
                 if (boardWide) {
                     if (boardShadow == null) {
-                        boardShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
+                        boardShadow = GpuShadowLight.depthBuffer(resolution, resolution);
                     }
                     shadow.getFrameBuffer().transfer(boardShadow, buffers);
                     remember(boardShadowFit, lightCamera);
@@ -253,7 +312,7 @@ final class GpuTerrainShadows implements Disposable {
                 restoreTiles(boardShadow, stale);
             } else {
                 if (staticShadow == null) {
-                    staticShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
+                    staticShadow = GpuShadowLight.depthBuffer(resolution, resolution);
                 }
                 if (!staticShadowValid) {
                     shadow.begin();
@@ -274,8 +333,37 @@ final class GpuTerrainShadows implements Disposable {
         shadowDirty = false;
     }
 
+    /**
+     * A size held for {@link #SETTLE_FRAMES} frames resizes the map, whose caches go with its depth; this render then
+     * draws it whole.
+     */
+    private void followScene() {
+        int next = sceneResolution();
+        if (next == resolution) { wantedFrames = 0; return; }
+        wantedFrames = next == wanted ? wantedFrames + 1 : 0;
+        wanted = next;
+        if (wantedFrames < SETTLE_FRAMES) { return; }
+        resolution = next;
+        wantedFrames = 0;
+        shadow.resize(resolution);
+        shadowFit.texels = boardShadowFit.texels = resolution;
+        disposeCaches();
+        // Its depth is undefined until drawn or cleared: a lightless board clears it again.
+        shadowEmpty = false;
+        shadowProjectionValid = false;
+        shadowDirty = true;
+    }
+
+    /** The cached terrain maps, sized as the map they were drawn for. */
+    private void disposeCaches() {
+        if (staticShadow != null) { staticShadow.dispose(); staticShadow = null; }
+        if (boardShadow != null) { boardShadow.dispose(); boardShadow = null; }
+        shadowBase = null;
+        staticShadowValid = boardShadowValid = false;
+    }
+
     /** A unit's footprint in the light's map, in texels from x0, y0 to x1, y1, a texel wider each side. */
-    private static int[] shadowTexels(Camera lightCamera, BoundingBox bounds) {
+    private int[] shadowTexels(Camera lightCamera, BoundingBox bounds) {
         float x0 = Float.POSITIVE_INFINITY, y0 = Float.POSITIVE_INFINITY, x1 = Float.NEGATIVE_INFINITY, y1 = x1;
         Vector3 corner = new Vector3();
         for (int i = 0; i < 8; i++) {
@@ -286,34 +374,39 @@ final class GpuTerrainShadows implements Disposable {
             x1 = Math.max(x1, corner.x);
             y1 = Math.max(y1, corner.y);
         }
-        float half = SHADOW_RESOLUTION / 2f;
-        return new int[] { Math.clamp((int) Math.floor((x0 + 1) * half) - 1, 0, SHADOW_RESOLUTION),
-              Math.clamp((int) Math.floor((y0 + 1) * half) - 1, 0, SHADOW_RESOLUTION),
-              Math.clamp((int) Math.ceil((x1 + 1) * half) + 1, 0, SHADOW_RESOLUTION),
-              Math.clamp((int) Math.ceil((y1 + 1) * half) + 1, 0, SHADOW_RESOLUTION) };
+        float half = resolution / 2f;
+        return new int[] { Math.clamp((int) Math.floor((x0 + 1) * half) - 1, 0, resolution),
+              Math.clamp((int) Math.floor((y0 + 1) * half) - 1, 0, resolution),
+              Math.clamp((int) Math.ceil((x1 + 1) * half) + 1, 0, resolution),
+              Math.clamp((int) Math.ceil((y1 + 1) * half) + 1, 0, resolution) };
     }
 
-    private static void markTiles(boolean[] tiles, int[] texels) {
-        int top = Math.min(SHADOW_TILES, (texels[3] + SHADOW_TILE - 1) / SHADOW_TILE);
-        int right = Math.min(SHADOW_TILES, (texels[2] + SHADOW_TILE - 1) / SHADOW_TILE);
+    /** The map's restore tiles across. */
+    private int tiles() { return resolution / SHADOW_TILE; }
+
+    private void markTiles(boolean[] tiles, int[] texels) {
+        int across = tiles();
+        int top = Math.min(across, (texels[3] + SHADOW_TILE - 1) / SHADOW_TILE);
+        int right = Math.min(across, (texels[2] + SHADOW_TILE - 1) / SHADOW_TILE);
         for (int y = texels[1] / SHADOW_TILE; y < top; y++) {
-            for (int x = texels[0] / SHADOW_TILE; x < right; x++) { tiles[y * SHADOW_TILES + x] = true; }
+            for (int x = texels[0] / SHADOW_TILE; x < right; x++) { tiles[y * across + x] = true; }
         }
     }
 
     /**
      * The cached terrain map back over the stale tiles, a run of them in a row per copy, instead of the whole map (2304
-     * by 2304 depth texels) whenever a unit moves. The whole map in one copy where the map holds another cache's terrain
+     * by 2304 depth texels or more) whenever a unit moves. The whole map in one copy where the map holds another cache's terrain
      * (the two may hold different levels of detail), past half the map, or past SHADOW_RUNS copies.
      */
     private void restoreTiles(FrameBuffer cache, boolean[] stale) {
         var runs = new com.badlogic.gdx.utils.IntArray();
         int marked = 0;
-        for (int y = 0; y < SHADOW_TILES; y++) {
-            for (int x = 0; x < SHADOW_TILES; x++) {
-                if (!stale[y * SHADOW_TILES + x]) { continue; }
+        int across = tiles();
+        for (int y = 0; y < across; y++) {
+            for (int x = 0; x < across; x++) {
+                if (!stale[y * across + x]) { continue; }
                 int end = x;
-                while (end + 1 < SHADOW_TILES && stale[y * SHADOW_TILES + end + 1]) { end++; }
+                while (end + 1 < across && stale[y * across + end + 1]) { end++; }
                 runs.addAll(x * SHADOW_TILE, y * SHADOW_TILE, (end + 1) * SHADOW_TILE, (y + 1) * SHADOW_TILE);
                 marked += end + 1 - x;
                 x = end;
@@ -333,7 +426,7 @@ final class GpuTerrainShadows implements Disposable {
         shadow.getFrameBuffer().begin();
         try {
             Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
-            Gdx.gl.glScissor(1, 1, SHADOW_RESOLUTION - 2, SHADOW_RESOLUTION - 2);
+            Gdx.gl.glScissor(1, 1, resolution - 2, resolution - 2);
             GpuShadowLight.depthClamp(true);
             casters.units(lightCamera, units);
         } finally {
@@ -402,7 +495,7 @@ final class GpuTerrainShadows implements Disposable {
             far = Math.max(far, depth);
         }
         // Leave a filtering border, and align the light grid to texels to avoid crawling edges while panning.
-        float border = 1 + 4f / SHADOW_RESOLUTION;
+        float border = 1 + 4f / target.texels;
         target.viewportWidth = Math.max(1, lightSpace.getWidth()) * border;
         target.viewportHeight = Math.max(1, lightSpace.getHeight()) * border;
         Vector3 center = lightSpace.getCenter(new Vector3());
@@ -421,11 +514,11 @@ final class GpuTerrainShadows implements Disposable {
         snapShadowCamera(target);
     }
 
-    private static void snapShadowCamera(Camera target) {
+    private static void snapShadowCamera(GpuShadowLight.SlabCamera target) {
         Vector3 right = new Vector3(target.direction).crs(target.up).nor();
         float x = target.position.dot(right), y = target.position.dot(target.up);
-        float texelX = target.viewportWidth / SHADOW_RESOLUTION;
-        float texelY = target.viewportHeight / SHADOW_RESOLUTION;
+        float texelX = target.viewportWidth / target.texels;
+        float texelY = target.viewportHeight / target.texels;
         target.position.mulAdd(right, Math.round(x / texelX) * texelX - x)
               .mulAdd(target.up, Math.round(y / texelY) * texelY - y);
         target.update();
@@ -451,9 +544,9 @@ final class GpuTerrainShadows implements Disposable {
     }
 
     /** The light's extent across one axis for a fit needing {@code required}: the guarded fit's, its texel on the ladder. */
-    private static float ladderExtent(float required) {
-        double steps = Math.ceil(Math.log(required * SHADOW_GUARD_SCALE / SHADOW_RESOLUTION) / Math.log(2) * SHADOW_LADDER);
-        return (float) Math.pow(2, steps / SHADOW_LADDER) * SHADOW_RESOLUTION;
+    private float ladderExtent(float required) {
+        double steps = Math.ceil(Math.log(required * SHADOW_GUARD_SCALE / resolution) / Math.log(2) * SHADOW_LADDER);
+        return (float) Math.pow(2, steps / SHADOW_LADDER) * resolution;
     }
 
     @Override

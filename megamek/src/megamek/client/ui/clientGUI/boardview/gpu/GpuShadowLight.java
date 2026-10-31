@@ -6,7 +6,10 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.Attributes;
+import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
+import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLFrameBuffer;
 import com.badlogic.gdx.math.Matrix4;
@@ -21,6 +24,7 @@ final class GpuShadowLight extends DirectionalShadowLight {
     GpuShadowLight(int width, int height, float viewportWidth, float viewportHeight, float near, float far) {
         super(width, height, viewportWidth, viewportHeight, near, far);
         cam = new SlabCamera();
+        ((SlabCamera) cam).texels = width;
         cam.viewportWidth = viewportWidth;
         cam.viewportHeight = viewportHeight;
         cam.near = near;
@@ -29,6 +33,27 @@ final class GpuShadowLight extends DirectionalShadowLight {
         fbo = depthBuffer(width, height);
         // The binder applies this descriptor too; setting only Texture's filter would be overwritten by libGDX.
         textureDesc.minFilter = textureDesc.magFilter = Texture.TextureFilter.Linear;
+    }
+
+    /** A square map of {@code texels} a side in place of the current one, whose depth is lost. */
+    void resize(int texels) {
+        fbo.dispose();
+        fbo = depthBuffer(texels, texels);
+        ((SlabCamera) cam).texels = texels;
+    }
+
+    /**
+     * The shadow pass's map texels across (shadow-depth.frag), from the light's camera it draws with; another camera
+     * (the outline depth) takes the smallest map's.
+     */
+    static void register(BaseShader shader) {
+        shader.register("u_shadowTexels", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, (float) (target.camera instanceof SlabCamera slab ? slab.texels
+                      : GpuTerrainShadows.MIN_RESOLUTION));
+            }
+        });
     }
 
     /** Caches copy only depth, with exactly the light's attachment format and normal framebuffer ownership. */
@@ -81,6 +106,9 @@ final class GpuShadowLight extends DirectionalShadowLight {
      * orthographic projection. A light that does not take the slab (slab) is a plain orthographic camera.
      */
     static final class SlabCamera extends OrthographicCamera {
+        /** Texels across the map this camera fits (GpuTerrainShadows.resolution). */
+        int texels = GpuTerrainShadows.MIN_RESOLUTION;
+
         @Override
         public void update(boolean updateFrustum) {
             if (!slab(direction)) {

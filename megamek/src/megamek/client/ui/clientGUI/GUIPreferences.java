@@ -336,6 +336,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
     /** The 3D board's anti-aliasing, a choice of its Tuning panel: OFF or SMAA. */
     public static final String BOARD_ANTI_ALIASING = "BoardAntiAliasing";
+    /** The 3D board's shadow detail: NORMAL (the map's texels follow the scene's pixels) or HIGH (twice as many). */
+    public static final String BOARD_SHADOWS = "BoardShadows";
     /** Whether the 3D board widens highlights by the surface normal's variance over a pixel. */
     public static final String BOARD_SPECULAR_ANTI_ALIASING = "BoardSpecularAntiAliasing";
     /** Whether the 3D board shades surfaces with their materials' normal maps. */
@@ -925,6 +927,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_VIEW_3D, true);
         store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "DISCRETE");
         store.setDefault(BOARD_ANTI_ALIASING, "OFF");
+        store.setDefault(BOARD_SHADOWS, "NORMAL");
         store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
         store.setDefault(BOARD_NORMAL_MAPS, true);
         store.setDefault(BOARD_TERRAIN_PARALLAX, true);
@@ -2008,6 +2011,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardAntiAliasing(String antiAliasing) {
         store.setValue(BOARD_ANTI_ALIASING, antiAliasing);
+    }
+
+    /** The 3D board's shadow detail, NORMAL or HIGH. */
+    public String getBoardShadows() {
+        return store.getString(BOARD_SHADOWS);
+    }
+
+    public void setBoardShadows(String shadows) {
+        store.setValue(BOARD_SHADOWS, shadows);
     }
 
     /** Whether the 3D board's specular anti-aliasing is on. */

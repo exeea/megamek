@@ -11,10 +11,11 @@ uniform float u_alphaTest;
 
 #ifdef PackedDepthFlag
 in float v_depth;
-// SHADOW_MAP_TEXELS: GpuTerrain's shadow pass defines MAP_TEXELS, the map's texels across.
-#ifdef MAP_TEXELS
-// The pass's view-projection (libGDX's camera uniform).
+// SHADOW_MAP_PASS: GpuTerrain's shadow pass defines SHADOW_PASS.
+#ifdef SHADOW_PASS
+// The pass's view-projection (libGDX's camera uniform), and the map's texels across (GpuShadowLight.register).
 uniform mat4 u_projViewTrans;
+uniform float u_shadowTexels;
 #endif
 #endif
 
@@ -30,12 +31,12 @@ void main() {
     // or, where the drift adds to that slope (a face turned to the sun), the slope with it across a bilinear
     // comparison's texels, which share one reference, plus half a texel of bent. Depth along the view does not drift.
     vec2 drift = vec2(0.0);
-#ifdef MAP_TEXELS
+#ifdef SHADOW_PASS
     if (u_projViewTrans[0][3] == 0.0 && u_projViewTrans[1][3] == 0.0 && u_projViewTrans[2][3] == 0.0) {
         vec3 across = vec3(u_projViewTrans[0][0], u_projViewTrans[1][0], u_projViewTrans[2][0]);
         vec3 up = vec3(u_projViewTrans[0][1], u_projViewTrans[1][1], u_projViewTrans[2][1]);
         vec3 row = vec3(u_projViewTrans[0][2], u_projViewTrans[1][2], u_projViewTrans[2][2]);
-        drift = vec2(dot(row, across) / dot(across, across), dot(row, up) / dot(up, up)) / MAP_TEXELS;
+        drift = vec2(dot(row, across) / dot(across, across), dot(row, up) / dot(up, up)) / u_shadowTexels;
     }
 #endif
     vec2 change = vec2(dFdx(v_depth), dFdy(v_depth));

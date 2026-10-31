@@ -36,7 +36,7 @@ class BoardShadowTest {
             GpuTerrainShadows.fitShadowCamera(view.camera, target, large, direction);
             assertEquals(width, target.viewportWidth, 0.01f);
             assertEquals(height, target.viewportHeight, 0.01f);
-            assertTrue(Math.max(width, height) / GpuTerrainShadows.SHADOW_RESOLUTION < 0.5f,
+            assertTrue(Math.max(width, height) / GpuTerrainShadows.MIN_RESOLUTION < 0.5f,
                   "Closeups must retain sub-world-unit shadow texels even on a huge board");
             Vector3 right = new Vector3(view.camera.direction).crs(view.camera.up).nor();
             for (float x : new float[] { -0.49f, 0, 0.49f }) {

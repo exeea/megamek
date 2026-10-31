@@ -489,6 +489,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                     }
                 };
                 GpuBuildingCutaway.register(result);
+                GpuShadowLight.register(result);
                 return result;
             }
         };
