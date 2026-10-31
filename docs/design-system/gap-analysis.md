@@ -52,7 +52,7 @@ Agreed so far:
 | Review | Runnable galleries opened from MegaMek: one Swing, one libGDX. The Swing library is the complete set; libGDX is a subset that grows on demand. |
 | Naming, translucency | Role-based token names with a `UiTheme` rename pass; surfaces get opaque and overlay values. |
 | In-game UI | Once a game starts, all UI is libGDX and dark only; the remaining in-game Swing dialogs migrate to libGDX. The lobby is being ported to libGDX; until then it stays Swing. |
-| Native window | One libGDX window for the whole run, switching between screens (start, editor and preview, game, later the lobby). It hides while the Swing lobby shows instead of closing. Until that scene host lands, the start screen, board window and UI library are separate applications that take turns through one shared check. |
+| Native window | One libGDX window for the whole run (`GpuHost`), switching between scenes: start screen, map editor and preview, game and UI library. The Swing lobby shows inset over the dimmed start screen in the same window until it is ported to libGDX. A game always uses the GPU board; Legacy 2D remains only for map previews and the editor's 2D Preview. |
 | Animation | Broad UI animation (for example panel reveals) comes after the unification pass. |
 
 ## Sources inventoried
@@ -375,8 +375,8 @@ work for Swing, and item 11 is under investigation.
      instant cut with reduce motion), with Settings, Help and Tools on screen and Up, Down, Tab and Enter moving
      through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
      sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
-     left. The window opens maximized the first time and remembers its bounds;
-     the lobby opens at the same bounds. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
+     left. The window opens maximized the first time and remembers its bounds; it is the one window of the whole run,
+     and the lobby shows inset over the dimmed start screen in it. If OpenGL cannot start, MegaMek shows an error and exits. The licensing
      notice waits for the reveal to end. The old splash medal is dropped. Its pages replace the menu in the menu's own
      column, with Back (Esc) to return, so the art stays in view. ~~G1, the window and menu~~, ~~G2, the Host
      page~~, ~~G3, the Connect page~~, ~~G4, Load game~~, ~~G5, the scenario browser~~ and ~~G6, the briefing~~ are

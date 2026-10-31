@@ -101,7 +101,6 @@ import org.lwjgl.glfw.GLFW;
 /** Exercises the real Swing/native window handoff and the shared menu through Scene2D input. */
 @Tag("on-demand")
 class GpuBoardWindowSmokeTest {
-    private boolean boardStyle;
 
     private static final List<String> WINDOW_BOUNDS = List.of(GUIPreferences.GPU_BOARD_POS_X, GUIPreferences.GPU_BOARD_POS_Y,
           GUIPreferences.GPU_BOARD_SIZE_WIDTH, GUIPreferences.GPU_BOARD_SIZE_HEIGHT);
@@ -111,7 +110,6 @@ class GpuBoardWindowSmokeTest {
     @BeforeEach
     void saveBoardStyle() {
         var prefs = GUIPreferences.getInstance();
-        boardStyle = prefs.getUse3DBoard();
         // The native window reopens at its last saved bounds; every case starts from the maximized default.
         for (String key : WINDOW_BOUNDS) { savedBounds.put(key, prefs.getInt(key)); }
         savedMaximized = prefs.getBoolean(GUIPreferences.GPU_BOARD_MAXIMIZED);
@@ -120,10 +118,9 @@ class GpuBoardWindowSmokeTest {
 
     @AfterEach
     void restoreBoardStyle() throws Exception {
-        await(() -> Thread.getAllStackTraces().keySet().stream()
-              .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+        // The next suite's own window must not start while the host's thread still shuts GLFW down
+        await(() -> !GpuHost.isOpen());
         var prefs = GUIPreferences.getInstance();
-        prefs.setUse3DBoard(boardStyle);
         for (String key : WINDOW_BOUNDS) { prefs.setValue(key, savedBounds.get(key)); }
         prefs.setValue(GUIPreferences.GPU_BOARD_MAXIMIZED, savedMaximized);
     }
@@ -150,10 +147,10 @@ class GpuBoardWindowSmokeTest {
                 return null;
             });
             await(() -> Gdx.app != null && Gdx.app != previous);
-            await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > 3));
+            await(() -> onGl(() -> frames() > 3));
             for (boolean isometric : new boolean[] { false, true }) {
                 onGl(() -> {
-                    GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+                    GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
                     battle.boardCamera.setIsometric(isometric);
                     return null;
                 });
@@ -191,9 +188,9 @@ class GpuBoardWindowSmokeTest {
             });
         }
     }
-    /** {@code gpuChoice} and {@code legacy2DChoice} are View > Renderer's 3D (current graphics) and Legacy 2D items. */
+    /** {@code gpuChoice} is View > Renderer's item for the current graphics. */
     private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
-          JMenuItem legacy2DChoice, UnitOverviewOverlay overview) { }
+          UnitOverviewOverlay overview) { }
 
     private static int sidebarBorderColor(UnitOverviewOverlay overview, int index) {
         var graphics = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
@@ -210,7 +207,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     private static void clickBoard(Coords coords, int button, int modifiers) {
-        Vector3 point = ((GpuBattleView) Gdx.app.getApplicationListener()).screenPosition(coords);
+        Vector3 point = ((GpuBattleView) GpuHost.sceneListener()).screenPosition(coords);
         var processor = Gdx.input.getInputProcessor();
         Input original = Gdx.input;
         Input keys = mock(Input.class);
@@ -244,7 +241,7 @@ class GpuBoardWindowSmokeTest {
                 BoardSource source = previewSource();
                 var workers = new AtomicReference<ExecutorService>();
                 await(() -> onGl(() -> {
-                    var view = (GpuBattleView) Gdx.app.getApplicationListener();
+                    var view = (GpuBattleView) GpuHost.sceneListener();
                     var terrainField = GpuBattleView.class.getDeclaredField("terrain");
                     terrainField.setAccessible(true);
                     var terrain = (GpuTerrain) terrainField.get(view);
@@ -261,8 +258,7 @@ class GpuBoardWindowSmokeTest {
                     return true;
                 }));
                 await(() -> onSwing(launcher::isShowing));
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
                 assertTrue(workers.get().isTerminated(), "No terrain workers may outlive their native window");
                 assertTrue(source.isClosed());
                 assertNull(onSwing(() -> savePrompt(launcher)), "Cancelling loading must not report a startup failure");
@@ -344,7 +340,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     private static void assertCameraDrag(int button, boolean shift, boolean orbit) {
-        BoardCamera camera = ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera;
+        BoardCamera camera = ((GpuBattleView) GpuHost.sceneListener()).boardCamera;
         Vector3 direction = camera.camera.direction.cpy();
         Vector3 focus = camera.focus.cpy();
         Input original = Gdx.input;
@@ -370,7 +366,7 @@ class GpuBoardWindowSmokeTest {
         Input original = Gdx.input;
         Input pointer = mock(Input.class);
         Vector3 screen = coords == null ? new Vector3(10, 10, 0)
-              : ((GpuBattleView) Gdx.app.getApplicationListener()).screenPosition(coords);
+              : ((GpuBattleView) GpuHost.sceneListener()).screenPosition(coords);
         when(pointer.getX()).thenReturn(Math.round(screen.x));
         when(pointer.getY()).thenReturn(Math.round(screen.y));
         when(pointer.isKeyPressed(Input.Keys.CONTROL_LEFT)).thenReturn(control);
@@ -397,7 +393,7 @@ class GpuBoardWindowSmokeTest {
         when(keyboard.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn((modifiers & InputEvent.ALT_DOWN_MASK) != 0);
         Gdx.input = keyboard;
         try {
-            GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+            GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
             Point last = null;
             for (Coords coords : hexes) {
                 // Pick against the frame actually on screen, not a newer Swing snapshot awaiting rendering.
@@ -422,7 +418,6 @@ class GpuBoardWindowSmokeTest {
 
     @Test
     void mapPreviewReusesItsWindowWhileBrowsingAndReleasesResourcesWhenClosed() throws Exception {
-        GUIPreferences.getInstance().setUse3DBoard(false);
         AtomicInteger browserReturned = new AtomicInteger();
         JDialog browser = onSwing(() -> {
             JFrame frame = new JFrame("Lobby");
@@ -445,12 +440,11 @@ class GpuBoardWindowSmokeTest {
                 return null;
             });
             await(() -> Gdx.app != null && Gdx.app != previous);
-            await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
+            await(() -> onGl(() -> frames() >= 5));
             BoardSource first = previewSource();
             onSwing(() -> {
                 assertTrue(browser.isShowing());
                 assertEquals(0, browserReturned.get(), "Preview must not accept or dismiss the map picker");
-                assertFalse(GUIPreferences.getInstance().getUse3DBoard());
                 assertEquals(16, first.takeFrame().scene().width());
                 assertEquals(17, first.takeFrame().scene().height());
                 assertTrue(first.takeFrame().scene().units().isEmpty());
@@ -477,7 +471,7 @@ class GpuBoardWindowSmokeTest {
                 return null;
             });
             await(() -> Gdx.app != null && Gdx.app != firstApplication);
-            await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
+            await(() -> onGl(() -> frames() >= 5));
             BoardSource second = previewSource();
             Application secondApplication = Gdx.app;
             onSwing(() -> {
@@ -510,7 +504,6 @@ class GpuBoardWindowSmokeTest {
             });
             await(() -> !GpuBoardWindow.isActiveFor(null));
             assertTrue(third.isClosed());
-            assertFalse(GUIPreferences.getInstance().getUse3DBoard());
         } finally {
             onSwing(() -> { browser.getOwner().dispose(); return null; });
         }
@@ -1028,7 +1021,7 @@ class GpuBoardWindowSmokeTest {
 
     private static boolean previewReady(BoardSource source) throws Exception {
         return onGl(() -> {
-            var view = (GpuBattleView) Gdx.app.getApplicationListener();
+            var view = (GpuBattleView) GpuHost.sceneListener();
             var terrainField = GpuBattleView.class.getDeclaredField("terrain");
             terrainField.setAccessible(true);
             var terrain = (GpuTerrain) terrainField.get(view);
@@ -1043,7 +1036,7 @@ class GpuBoardWindowSmokeTest {
         return onGl(() -> {
             var field = GpuBattleView.class.getDeclaredField("source");
             field.setAccessible(true);
-            return (BoardSource) field.get(Gdx.app.getApplicationListener());
+            return (BoardSource) field.get(GpuHost.sceneListener());
         });
     }
 
@@ -1059,7 +1052,7 @@ class GpuBoardWindowSmokeTest {
                     return null;
                 });
                 openNative(ui);
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
+                await(() -> onGl(() -> frames() >= 5));
                 onSwing(() -> {
                     verify(ui.view(), never()).getComponent();
                     assertNull(ui.view().getPanel().getParent());
@@ -1123,7 +1116,7 @@ class GpuBoardWindowSmokeTest {
                     doReturn(Optional.of(ui.view().getClientState())).when(gui).getCurrentBoardState();
                     return null;
                 });
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
+                await(() -> onGl(() -> frames() >= 5));
                 // With the board, the HUD's phase header names the server wait until a phase display replaces it.
                 String waiting = UiTheme.upper(Messages.getString("ClientGUI.waitingOnTheServer"));
                 await(() -> onGl(() -> phaseHeaderTexts().contains(waiting)));
@@ -1160,7 +1153,7 @@ class GpuBoardWindowSmokeTest {
                         return null;
                     });
                     await(() -> Gdx.app != null && Gdx.app != restarting);
-                    await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > 0));
+                    await(() -> onGl(() -> frames() > 0));
                     assertFalse(onSwing(() -> ui.frame().isVisible()), "A queued native restart never flashes 2D");
                 } finally {
                     onSwing(() -> {
@@ -1341,10 +1334,10 @@ class GpuBoardWindowSmokeTest {
                 openNative(ui);
                 await(() -> onSwing(() -> !ui.frame().isVisible()));
                 awaitMaximizedWindow();
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.entranceOpacity() == 1));
+                await(() -> onGl(() -> frames() >= 5));
+                await(() -> onGl(() -> ((GpuBattleView) GpuHost.sceneListener()).boardCamera.entranceOpacity() == 1));
                 onGl(() -> {
-                    BoardCamera camera = ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera;
+                    BoardCamera camera = ((GpuBattleView) GpuHost.sceneListener()).boardCamera;
                     assertTrue(camera.isIsometric());
                     for (var tile : fixture.source.takeFrame().scene().tiles()) {
                         for (int corner = 0; corner < 6; corner++) {
@@ -1375,20 +1368,20 @@ class GpuBoardWindowSmokeTest {
                 for (int[] size : new int[][] { { 900, 600 }, { 2043, 1200 }, { 2560, 1600 }, { 3840, 2160 }, { 1280, 800 } }) {
                     onSwing(() -> { preferences.setBoardUiScale(size[0] == 2560 ? .5f : 1f); return null; });
                     input(() -> assertTrue(Gdx.graphics.setWindowedMode(size[0], size[1])));
-                    long resizedFrame = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames());
+                    long resizedFrame = onGl(() -> frames());
                     // Allow the EDT to publish the resized overlay and upload it on the render thread.
-                    await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > resizedFrame + 15));
+                    await(() -> onGl(() -> frames() > resizedFrame + 15));
                     assertFalse(onSwing(() -> ui.frame().isVisible()),
                           "Resizing must not fall back to the Legacy 2D board");
                     // A client's request to centre on the unit, as Center camera gives it, keeps zoom and angle.
                     float zoom = onGl(() -> {
-                        GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+                        GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
                         battle.boardCamera.setIsometric(size[0] != 900);
                         battle.boardCamera.pan(140, -100);
                         assertFalse(unitIsCentered(fixture));
                         return battle.boardCamera.camera.zoom;
                     });
-                    Vector3 direction = onGl(() -> new Vector3(((GpuBattleView) Gdx.app.getApplicationListener())
+                    Vector3 direction = onGl(() -> new Vector3(((GpuBattleView) GpuHost.sceneListener())
                           .boardCamera.camera.direction));
                     Callable<Long> centerOnUnit = () -> {
                         ui.view().centerOn(fixture.entity);
@@ -1398,7 +1391,7 @@ class GpuBoardWindowSmokeTest {
                     };
                     awaitCenterRequest(onSwing(centerOnUnit));
                     Vector3 settled = onGl(() -> {
-                        GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+                        GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
                         assertEquals(zoom, battle.boardCamera.camera.zoom, 0.001f, "Centering preserves zoom");
                         assertTrue(direction.epsilonEquals(battle.boardCamera.camera.direction, 0.001f), "Centering preserves the view angle");
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -1409,7 +1402,7 @@ class GpuBoardWindowSmokeTest {
                     });
                     awaitCenterRequest(onSwing(centerOnUnit));
                     onGl(() -> {
-                        GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+                        GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
                         assertTrue(settled.epsilonEquals(battle.boardCamera.focus, .001f),
                               "A second request must retain the same framing, not snap to the unit's hex");
                         return null;
@@ -1430,38 +1423,20 @@ class GpuBoardWindowSmokeTest {
                     for (String key : List.of("CommonMenuBar.viewIncGUIScale", "CommonMenuBar.viewDecGUIScale")) {
                         assertFalse(texts.contains(Messages.getString(key)), key);
                     }
-                    GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+                    GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
                     float before = battle.boardCamera.camera.zoom;
                     GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewZoomIn"));
                     assertNotEquals(before, battle.boardCamera.camera.zoom, "The menu must zoom the active GPU camera");
                     return null;
                 });
-                input(() -> GpuBoardTestUi.click("utility-menu"));
-                // View is still open; its Renderer group opens in the next frame.
-                input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewRenderer")));
-                onGl(() -> {
-                    GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewLegacy2D"));
-                    return null;
-                });
-                await(() -> onSwing(() -> ui.frame().isVisible()));
-                assertSame(ui.menus(), onSwing(() -> ui.frame().getJMenuBar()));
-                assertEquals(position, fixture.entity.getPosition());
-
-                assertFalse(preferences.getUse3DBoard(), "The last selected board is saved");
-                assertTrue(onSwing(() -> ui.legacy2DChoice().isSelected()), "Renderer shows Legacy 2D");
-                // Reopen through the same menu. Client disposal must never bring the old frame back.
-                openNative(ui);
-                await(() -> onSwing(() -> !ui.frame().isVisible()));
-                awaitMaximizedWindow();
-                assertTrue(preferences.getUse3DBoard());
+                // A game has no Legacy 2D board to switch to: Renderer offers only the 3D board's graphics.
                 assertTrue(onSwing(() -> ui.gpuChoice().isSelected()), "Renderer shows the 3D board's graphics");
                 onSwing(() -> {
                     GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     return null;
                 });
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
                 onSwing(() -> {
                     assertFalse(ui.frame().isDisplayable());
                     assertFalse(ui.frame().isVisible());
@@ -1476,8 +1451,7 @@ class GpuBoardWindowSmokeTest {
                     ui.menus().die();
                     return null;
                 });
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
             }
         }
     }
@@ -1500,7 +1474,7 @@ class GpuBoardWindowSmokeTest {
     private static boolean unitIsCentered(GpuBoardFixture fixture) {
         Coords position = fixture.entity.getPosition();
         Vector3 expected = BoardGeometry.center(position, fixture.game.getBoard().getHex(position).getLevel());
-        return ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.epsilonEquals(expected, 0.01f);
+        return ((GpuBattleView) GpuHost.sceneListener()).boardCamera.focus.epsilonEquals(expected, 0.01f);
     }
 
     private ClientWindow createClientWindow(GpuBoardFixture fixture) throws Exception {
@@ -1577,8 +1551,6 @@ class GpuBoardWindowSmokeTest {
             if (event.getActionCommand().equals(ClientGUI.VIEW_GRAPHICS_CLASSIC)
                   || event.getActionCommand().equals(ClientGUI.VIEW_GRAPHICS_ENHANCED)) {
                 GpuBoardWindow.open(fixture.view, () -> fixture.panel);
-            } else if (event.getActionCommand().equals(ClientGUI.VIEW_LEGACY_2D)) {
-                GpuBoardWindow.showLegacy2D(gui);
             }
         });
         frame.setJMenuBar(menus);
@@ -1594,8 +1566,7 @@ class GpuBoardWindowSmokeTest {
         String graphics = GUIPreferences.getInstance().getBoardGraphics() == BoardGraphics.CLASSIC
               ? ClientGUI.VIEW_GRAPHICS_CLASSIC : ClientGUI.VIEW_GRAPHICS_ENHANCED;
         JMenuItem gpuChoice = rendererItem(rendererMenu, graphics);
-        return new ClientWindow(frame, menus, view, gpuChoice, rendererItem(rendererMenu, ClientGUI.VIEW_LEGACY_2D),
-              overview);
+        return new ClientWindow(frame, menus, view, gpuChoice, overview);
     }
 
     private static JMenuItem rendererItem(JMenu renderer, String command) {
@@ -1615,7 +1586,7 @@ class GpuBoardWindowSmokeTest {
         });
         await(() -> Gdx.app != null && Gdx.app != previous);
         awaitMaximizedWindow();
-        await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > 0));
+        await(() -> onGl(() -> frames() > 0));
         assertFalse(onSwing(() -> ui.frame().isVisible()), "The native window replaces the old window");
     }
 
@@ -1626,9 +1597,9 @@ class GpuBoardWindowSmokeTest {
     }
 
     private static void awaitNavigation() throws Exception {
-        long previous = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames());
+        long previous = onGl(() -> frames());
         await(() -> onGl(() -> {
-            GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+            GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
             return battle.frames() > previous + 2 && !battle.boardCamera.isFraming();
         }));
     }
@@ -1642,7 +1613,7 @@ class GpuBoardWindowSmokeTest {
         var applied = GpuBattleView.class.getDeclaredField("centerSequence");
         applied.setAccessible(true);
         await(() -> onGl(() -> {
-            GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+            GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
             return applied.getLong(battle) >= sequence && !battle.boardCamera.isFraming();
         }));
     }
@@ -1653,6 +1624,11 @@ class GpuBoardWindowSmokeTest {
         app.postRunnable(task);
         // A cold native startup uploads the board and models before servicing queued input.
         return task.get(30, TimeUnit.SECONDS);
+    }
+
+    /** GL thread: the shown board's frame count, or -1 until the host has started the board's scene. */
+    private static long frames() {
+        return GpuHost.sceneListener() instanceof GpuBattleView battle ? battle.frames() : -1;
     }
 
     private static void captureMenu(String name) throws Exception {
@@ -1683,9 +1659,9 @@ class GpuBoardWindowSmokeTest {
     private static void input(Runnable action) throws Exception {
         long previous = onGl(() -> {
             action.run();
-            return ((GpuBattleView) Gdx.app.getApplicationListener()).frames();
+            return frames();
         });
-        await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > previous));
+        await(() -> onGl(() -> frames() > previous));
     }
 
     private static void await(Callable<Boolean> condition) throws Exception {
@@ -1699,13 +1675,13 @@ class GpuBoardWindowSmokeTest {
      */
     private static void awaitBoardFrames(int count) throws Exception {
         await(GpuBoardTestUi.LOADING_SECONDS, () -> "Timed out waiting for the board to load: " + loadingState(),
-              () -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= count));
+              () -> onGl(() -> frames() >= count));
     }
 
     /** The active native window's {@link GpuBoardTestUi#loadingState}, read on its GL thread. */
     private static String loadingState() {
         try {
-            return onGl(() -> GpuBoardTestUi.loadingState((GpuBattleView) Gdx.app.getApplicationListener()));
+            return onGl(() -> GpuBoardTestUi.loadingState((GpuBattleView) GpuHost.sceneListener()));
         } catch (Exception failure) {
             return "unavailable (" + failure + ")";
         }

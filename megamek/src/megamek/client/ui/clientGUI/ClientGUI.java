@@ -95,6 +95,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
@@ -491,7 +492,8 @@ public class ClientGUI extends AbstractClientGUI
         controller = c;
         // Dialogs that know only their parent frame find their client here (forFrame)
         frame.getRootPane().putClientProperty(ClientGUI.class, this);
-        boardViewsContainer.setLegacy2DEnabled(client instanceof BotClient || !GUIP.getUse3DBoard());
+        // Only a bot's client draws its own 2D board; a player's game shows the GPU board
+        boardViewsContainer.setLegacy2DEnabled(client instanceof BotClient);
         initializeSpriteHandlers();
         panMain.setLayout(cardsMain);
         panSecondary.setLayout(cardsSecondary);
@@ -1012,6 +1014,9 @@ public class ClientGUI extends AbstractClientGUI
 
     @Override
     public void initialize() {
+        // In MegaMek's own window the lobby shows inset over the start screen; it must lose its decorations before
+        // anything makes the frame displayable
+        GpuLobbyOverlay.adopt(frame, this::handleExit);
         menuBar = CommonMenuBar.getMenuBarForGame();
         menuBar.setClientSupplier(() -> client);
         frame.setJMenuBar(menuBar);
@@ -1577,13 +1582,7 @@ public class ClientGUI extends AbstractClientGUI
                 if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_IN); }
                 else { getCurrentBoardView().ifPresent(IBoardView::zoomIn); }
                 break;
-            // The Renderer menu has saved the choice (CommonMenuBar); the lobby keeps its own UI until a board shows.
-            case VIEW_LEGACY_2D:
-                if (!client.getGame().getPhase().isLounge()) {
-                    boardViewChosen = true;
-                    GpuBoardWindow.showLegacy2D(this);
-                }
-                break;
+            // The Renderer menu has saved the graphics (CommonMenuBar); the lobby keeps its own UI until a board shows.
             case VIEW_GRAPHICS_CLASSIC:
             case VIEW_GRAPHICS_ENHANCED:
                 if (!client.getGame().getPhase().isLounge()) {
@@ -1964,12 +1963,7 @@ public class ClientGUI extends AbstractClientGUI
             boardViewChosen = false;
             GpuBoardWindow.showLegacy2D(this);
         } else if (!boardViewChosen) {
-            if (GUIP.getUse3DBoard()) {
-                openGpuBoard();
-            } else {
-                boardViewChosen = true;
-                GpuBoardWindow.showLegacy2D(this);
-            }
+            openGpuBoard();
         }
     }
 

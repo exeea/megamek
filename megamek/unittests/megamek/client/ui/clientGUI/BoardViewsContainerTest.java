@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -19,7 +18,6 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
-import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JPanel;
 import javax.swing.JRadioButtonMenuItem;
@@ -38,45 +36,35 @@ import org.junit.jupiter.api.Test;
 
 class BoardViewsContainerTest {
     @Test
-    void savedLegacy2DStyleStartsLegacy2D() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean style = preferences.getUse3DBoard();
+    void aGameShowsTheGpuBoard() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            try {
+            try (var gpu = mockStatic(GpuBoardWindow.class)) {
                 ClientGUI gui = mock(ClientGUI.class);
                 Client client = mock(Client.class);
                 Game game = new Game();
                 game.setPhase(GamePhase.STARTING_SCENARIO);
                 when(gui.getClient()).thenReturn(client);
                 when(client.getGame()).thenReturn(game);
-                JFrame frame = mock(JFrame.class);
-                when(gui.getFrame()).thenReturn(frame);
                 doCallRealMethod().when(gui).showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
-                preferences.setUse3DBoard(false);
                 gui.showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
-                verify(frame).setVisible(true);
-                verify(gui).setLegacy2DViewEnabled(true);
-                assertFalse(preferences.getUse3DBoard());
-            } finally {
-                preferences.setUse3DBoard(style);
+                gpu.verify(() -> GpuBoardWindow.open(eq(gui), any()));
+                verify(gui, never()).setLegacy2DViewEnabled(true);
             }
         });
     }
 
     /**
-     * View > Renderer is the menu's one entry for the board's renderers: Legacy 2D, Classic and Enhanced as one radio
-     * group that shows the renderer the preferences choose. During a game a choice switches the shown board through
-     * the client's board switch; in the lobby, which shows no board, it is saved for the game's board.
+     * View > Renderer is the menu's one entry for the game board's graphics: Classic and Enhanced as one radio group
+     * that shows the graphics the preferences choose. During a game a choice shows the board with them; in the lobby,
+     * which shows no board, it is saved for the game's board. Legacy 2D is no longer a game's renderer.
      */
     @Test
-    void theRendererMenuShowsTheRendererAndAChoiceSwitchesIt() throws Exception {
+    void theRendererMenuShowsTheGraphicsAndAChoiceSwitchesThem() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean style = preferences.getUse3DBoard();
         BoardGraphics graphics = preferences.getBoardGraphics();
         SwingUtilities.invokeAndWait(() -> {
             CommonMenuBar menu = CommonMenuBar.getMenuBarForGame();
             try (var gpu = mockStatic(GpuBoardWindow.class)) {
-                preferences.setUse3DBoard(true);
                 preferences.setBoardGraphics(BoardGraphics.ENHANCED);
                 Game game = new Game();
                 game.setPhase(GamePhase.MOVEMENT);
@@ -91,18 +79,12 @@ class BoardViewsContainerTest {
                             .equals(Messages.getString("CommonMenuBar.viewRenderer"))).toList();
                 assertEquals(1, renderers.size());
                 JMenu renderer = renderers.getFirst();
-                assertEquals(List.of(ClientGUI.VIEW_LEGACY_2D, ClientGUI.VIEW_GRAPHICS_CLASSIC,
-                      ClientGUI.VIEW_GRAPHICS_ENHANCED), Arrays.stream(renderer.getMenuComponents())
-                      .map(item -> ((JRadioButtonMenuItem) item).getActionCommand()).toList());
+                assertEquals(List.of(ClientGUI.VIEW_GRAPHICS_CLASSIC, ClientGUI.VIEW_GRAPHICS_ENHANCED),
+                      Arrays.stream(renderer.getMenuComponents())
+                            .map(item -> ((JRadioButtonMenuItem) item).getActionCommand()).toList());
                 assertEquals(ClientGUI.VIEW_GRAPHICS_ENHANCED, selected(renderer));
 
-                item(renderer, ClientGUI.VIEW_LEGACY_2D).doClick(0);
-                assertFalse(preferences.getUse3DBoard());
-                assertEquals(ClientGUI.VIEW_LEGACY_2D, selected(renderer));
-                gpu.verify(() -> GpuBoardWindow.showLegacy2D(gui));
-
                 item(renderer, ClientGUI.VIEW_GRAPHICS_CLASSIC).doClick(0);
-                assertTrue(preferences.getUse3DBoard());
                 assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics());
                 assertEquals(ClientGUI.VIEW_GRAPHICS_CLASSIC, selected(renderer));
                 gpu.verify(() -> GpuBoardWindow.open(eq(gui), any()));
@@ -112,23 +94,20 @@ class BoardViewsContainerTest {
 
                 game.setPhase(GamePhase.LOUNGE);
                 menu.setPhase(GamePhase.LOUNGE);
-                assertTrue(item(renderer, ClientGUI.VIEW_LEGACY_2D).isEnabled());
-                item(renderer, ClientGUI.VIEW_LEGACY_2D).doClick(0);
-                assertFalse(preferences.getUse3DBoard(), "The lobby saves the choice for the game's board");
-                assertEquals(ClientGUI.VIEW_LEGACY_2D, selected(renderer));
-                // and shows no board: the game's switches are still the only ones
-                gpu.verify(() -> GpuBoardWindow.showLegacy2D(gui));
+                assertTrue(item(renderer, ClientGUI.VIEW_GRAPHICS_CLASSIC).isEnabled());
+                item(renderer, ClientGUI.VIEW_GRAPHICS_CLASSIC).doClick(0);
+                assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics(),
+                      "The lobby saves the choice for the game's board");
+                // and shows no board: the game's choice is still the only one that opened it
                 gpu.verify(() -> GpuBoardWindow.open(eq(gui), any()));
             } catch (ReflectiveOperationException failure) {
                 throw new AssertionError(failure);
             } finally {
                 menu.die();
-                preferences.setUse3DBoard(style);
                 preferences.setBoardGraphics(graphics);
             }
         });
     }
-
     /** A client of {@code game} that runs its real menu actions and nothing else. */
     private static ClientGUI clientGUI(Game game) throws ReflectiveOperationException {
         ClientGUI gui = mock(ClientGUI.class, invocation -> invocation.getMethod().getName().equals("actionPerformed")

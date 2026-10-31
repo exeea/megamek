@@ -1,0 +1,713 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import java.awt.Rectangle;
+import java.util.function.Consumer;
+import javax.swing.SwingUtilities;
+
+import com.badlogic.gdx.ApplicationListener;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.InputAdapter;
+import com.badlogic.gdx.InputProcessor;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.utils.GdxRuntimeException;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.util.ScreenFit;
+import megamek.logging.MMLogger;
+import org.lwjgl.glfw.GLFW;
+
+/**
+ * MegaMek's one native (libGDX) window. It runs one scene at a time (the start screen, a game's board, the map
+ * editor, a map preview or the UI library), and switching scenes keeps the window, its place and its OpenGL context.
+ * When MegaMek runs its own start screen the window stays open from the greeting to Quit ({@link #keepOpen}); without
+ * it (a game MekHQ starts) the window opens with a scene and closes when the scene ends, as before.
+ *
+ * <p>Scenes are asked for on any thread and switch on the GPU thread, between frames: the old scene's listener is
+ * paused and disposed, the shared OpenGL state is reset, and the new scene's listener is created and sized. A scene
+ * that fails ends with the failure; the window stays for the next scene.</p>
+ *
+ * <p>The window can dim the scene and ignore its input while a Swing window shows inset over it, as the game lobby
+ * does ({@link #dim}).</p>
+ */
+public final class GpuHost {
+    private static final MMLogger LOGGER = MMLogger.create(GpuHost.class);
+    /** How long the dim layer takes to fade in or out, in seconds. */
+    private static final float DIM_FADE = 0.15f;
+    /** How dark the dim layer is at full strength. */
+    private static final float DIM_ALPHA = 0.6f;
+    /** Frames between saves of the window's bounds; following the window for an overlay is every frame. */
+    private static final int BOUNDS_SAVE_FRAMES = 15;
+
+    /** What runs in the window. The callbacks other than {@link #ended} run on the GPU thread. */
+    interface Scene {
+        /** GPU thread: the listener that draws the scene, made as the scene starts. */
+        ApplicationListener listener();
+
+        /** The window's title while the scene shows. */
+        String title();
+
+        /** GPU thread, before the listener is created: the window the scene shows in. */
+        default void started(long windowHandle) { }
+
+        /** GPU thread: the window's close box was clicked. The window never closes by itself. */
+        void closeRequested();
+
+        /** GPU thread: the window took the focus. */
+        default void focusGained() { }
+
+        /** GPU thread: the window lost the focus. */
+        default void focusLost() { }
+
+        /**
+         * Any thread: the scene has ended, its listener disposed if it was ever created; {@code failure} when it
+         * ended because it failed, null otherwise. Runs once, and without OpenGL.
+         */
+        void ended(Throwable failure);
+    }
+
+    private static final Object LOCK = new Object();
+    /** Guarded by {@link #LOCK}: the scene asked for, which the GPU thread shows next; null for none. */
+    private static Scene requested;
+    /** Guarded by {@link #LOCK}: the GPU thread, or null while the window is closed. */
+    private static Thread thread;
+    private static volatile boolean keepOpen;
+    private static volatile Runnable idle;
+    private static volatile Lwjgl3Application application;
+    private static volatile long windowHandle;
+    /** Whether a window ever opened in this run; a failure before then means OpenGL itself could not start. */
+    private static volatile boolean everOpened;
+    /** The window's client area in GLFW screen coordinates, followed every frame; null while it is closed. */
+    private static volatile Rectangle clientBounds;
+    private static volatile Consumer<Rectangle> boundsWatcher;
+    private static volatile boolean dimmed;
+    private static volatile Runnable dimClicked;
+
+    /** Written under {@link #LOCK} by the GPU thread: the scene shown now. */
+    private static volatile Scene current;
+    // GPU thread only
+    private static ApplicationListener listener;
+    private static GpuWindowBounds startBounds;
+    private static GpuWindowBounds normalBounds;
+    private static GpuWindowBounds publishedBounds;
+    private static int framesSinceSave;
+
+    private GpuHost() {
+    }
+
+    /**
+     * Any time: whether the window stays open between scenes. MegaMek's own start screen sets it, so the window shows
+     * from the greeting to Quit; a game started by MekHQ leaves it off, so its window closes with the game.
+     */
+    public static void keepOpen(boolean open) {
+        keepOpen = open;
+    }
+
+    /** Whether the window stays open between scenes. */
+    static boolean keepsOpen() {
+        return keepOpen;
+    }
+
+    /**
+     * Any time: what the open window shows when a scene ends and none takes its place, run on the Swing thread after
+     * the scene's {@link Scene#ended}; the start screen reopens itself this way. Null leaves the window empty.
+     */
+    static void whenIdle(Runnable then) {
+        idle = then;
+    }
+
+    /**
+     * Any thread: shows {@code scene} in the window, opening the window when it is closed, and ends the scene shown
+     * now. A scene asked for but not shown yet ends without starting.
+     */
+    static void show(Scene scene) {
+        Scene replaced;
+        synchronized (LOCK) {
+            replaced = requested;
+            requested = scene;
+            if (thread == null) {
+                startThread();
+            }
+            if (replaced == scene || current == replaced) {
+                // The GPU thread ends the shown one as it switches
+                replaced = null;
+            }
+        }
+        if (replaced != null) {
+            replaced.ended(null);
+        }
+    }
+
+    /**
+     * Any thread: ends {@code scene} if it shows or is about to. The window then waits for the next scene, or closes
+     * when it doesn't stay open. Nothing when another scene has taken its place.
+     */
+    static void end(Scene scene) {
+        boolean pending;
+        synchronized (LOCK) {
+            if (requested != scene) {
+                return;
+            }
+            requested = null;
+            pending = current != scene;
+        }
+        if (pending) {
+            scene.ended(null);
+        }
+        Lwjgl3Application app = application;
+        if (app != null) {
+            // Wakes the loop when it renders on demand
+            app.postRunnable(() -> { });
+        }
+    }
+
+    /** Any thread: whether {@code scene} is the one asked for, shown or about to be. */
+    static boolean isShowing(Scene scene) {
+        return wanted() == scene;
+    }
+
+    private static Scene wanted() {
+        synchronized (LOCK) {
+            return requested;
+        }
+    }
+
+    /** Any thread: whether the window is open or opening. */
+    public static boolean isOpen() {
+        synchronized (LOCK) {
+            return thread != null;
+        }
+    }
+
+    /** GPU thread: the shown scene's listener, or null between scenes; {@code Gdx.app}'s listener is the host's. */
+    static ApplicationListener sceneListener() {
+        return listener;
+    }
+
+    /** GPU thread: the scene's own input processor when {@code processor} is the host's guard in front of it. */
+    static InputProcessor unguarded(InputProcessor processor) {
+        return processor == Root.GUARD ? Root.sceneInput : processor;
+    }
+
+    /** Whether a window ever opened in this run. */
+    static boolean everOpened() {
+        return everOpened;
+    }
+
+    /** Any thread: runs {@code work} on the GPU thread, before the next frame; nothing while the window is closed. */
+    static void post(Runnable work) {
+        Lwjgl3Application app = application;
+        if (app != null) {
+            app.postRunnable(work);
+        }
+    }
+
+    /** The open window's client area in GLFW screen coordinates, or null while it is closed. */
+    static Rectangle clientBounds() {
+        return clientBounds;
+    }
+
+    /**
+     * Any thread: {@code watcher} hears, on the Swing thread, each new client area of the window in GLFW screen
+     * coordinates, starting with the current one; null stops it.
+     */
+    static void watchBounds(Consumer<Rectangle> watcher) {
+        boundsWatcher = watcher;
+        Rectangle bounds = clientBounds;
+        if (watcher != null && bounds != null) {
+            SwingUtilities.invokeLater(() -> {
+                if (boundsWatcher == watcher) {
+                    watcher.accept(bounds);
+                }
+            });
+        }
+    }
+
+    /**
+     * Any thread: dims the scene and ignores its input while a Swing window shows over it, or brings it back.
+     * {@code clicked} runs on the Swing thread when the dimmed scene is clicked.
+     */
+    static void dim(boolean dim, Runnable clicked) {
+        dimClicked = clicked;
+        dimmed = dim;
+        post(() -> {
+            if (dim && listener != null) {
+                // Keys held as the scene dims would otherwise stay held
+                listener.pause();
+            }
+        });
+    }
+
+    static boolean isDimmed() {
+        return dimmed;
+    }
+
+    /** Any thread: brings the window to the front and gives it the keyboard. */
+    static void focus() {
+        post(() -> {
+            if (Gdx.graphics instanceof Lwjgl3Graphics graphics) {
+                Lwjgl3Window window = graphics.getWindow();
+                window.setVisible(true);
+                if (window.isIconified()) {
+                    window.restoreWindow();
+                }
+                window.focusWindow();
+            }
+        });
+    }
+
+    private static void startThread() {
+        Thread started = new Thread(GpuHost::run, "MegaMek-GPU");
+        started.setDaemon(true);
+        thread = started;
+        started.start();
+    }
+
+    private static void run() {
+        Throwable failure = null;
+        try {
+            startBounds = loadBounds();
+            normalBounds = startBounds;
+            publishedBounds = startBounds;
+            Lwjgl3ApplicationConfiguration configuration = GpuBoardWindow.configuration(true);
+            configuration.setWindowedMode(startBounds.width(), startBounds.height());
+            if (!startBounds.centred()) {
+                configuration.setWindowPosition(startBounds.x(), startBounds.y());
+            }
+            configuration.setMaximized(startBounds.maximized());
+            // The start screen's hex reveal draws through a stencil mask; no multisampling, which the board's blits
+            // to the window could not resolve into
+            configuration.setBackBufferConfig(8, 8, 8, 8, 24, 8, 0);
+            configuration.setWindowListener(new Lwjgl3WindowAdapter() {
+                @Override
+                public void created(Lwjgl3Window window) {
+                    everOpened = true;
+                    GpuGlsl.detect();
+                    GpuNativeDialogOwner.Win32.useWindowIconsForClass(window.getWindowHandle());
+                    fitOnScreen(window);
+                    windowHandle = window.getWindowHandle();
+                }
+
+                @Override
+                public void focusGained() {
+                    if (current != null) {
+                        current.focusGained();
+                    }
+                }
+
+                @Override
+                public void focusLost() {
+                    if (current != null) {
+                        current.focusLost();
+                    }
+                }
+
+                @Override
+                public boolean closeRequested() {
+                    if (current != null) {
+                        current.closeRequested();
+                        return false;
+                    }
+                    return !keepOpen;
+                }
+            });
+            new Lwjgl3Application(new Root(), configuration);
+        } catch (RuntimeException | LinkageError error) {
+            failure = error;
+            try {
+                String detail = GpuGlsl.glfwError();
+                if (!detail.isEmpty()) {
+                    failure = new GdxRuntimeException(detail, error);
+                }
+            } catch (RuntimeException | LinkageError diagnosticFailure) {
+                error.addSuppressed(diagnosticFailure);
+            }
+        } finally {
+            closed(failure);
+        }
+    }
+
+    /** The window's thread, as it ends: ends the scenes it leaves, or opens it again for one asked for meanwhile. */
+    private static void closed(Throwable failure) {
+        application = null;
+        windowHandle = 0;
+        clientBounds = null;
+        listener = null;
+        Scene shown;
+        Scene waiting;
+        synchronized (LOCK) {
+            shown = current;
+            current = null;
+            thread = null;
+            waiting = requested;
+            if (failure != null || waiting == shown) {
+                requested = null;
+            }
+            if (failure == null && waiting != null && waiting != shown) {
+                startThread();
+                waiting = null;
+            }
+        }
+        if (failure != null) {
+            LOGGER.error(failure, "The native window failed");
+        }
+        if (shown != null) {
+            shown.ended(failure);
+        }
+        if (waiting != null && waiting != shown) {
+            waiting.ended(failure);
+        }
+    }
+
+    /** EDT, after a scene ended: shows the idle scene when the window stays open and nothing else was asked for. */
+    private static void idled() {
+        Runnable then = idle;
+        if (then != null && keepOpen && isOpen() && wanted() == null) {
+            then.run();
+        }
+    }
+
+    private static GpuWindowBounds loadBounds() {
+        GpuWindowBounds[] bounds = new GpuWindowBounds[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> bounds[0] = GpuWindowBounds.load(GUIPreferences.getInstance()));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interrupted);
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new IllegalStateException(failure.getCause());
+        }
+        return bounds[0];
+    }
+
+    /**
+     * A window saved on a monitor that has since been unplugged, or moved off the desktop, comes back onto the nearest
+     * monitor's work area. A centred window needs no check.
+     */
+    private static void fitOnScreen(Lwjgl3Window window) {
+        if (startBounds.centred()) {
+            return;
+        }
+        var fitted = ScreenFit.fit(startBounds.rectangle(), GpuWindowBounds.workAreas());
+        if (fitted.equals(startBounds.rectangle())) {
+            return;
+        }
+        LOGGER.info("The window saved at {} is off screen; moved to {}", startBounds.rectangle(), fitted);
+        long handle = window.getWindowHandle();
+        boolean maximized = startBounds.maximized();
+        if (maximized) {
+            window.restoreWindow();
+        }
+        GLFW.glfwSetWindowSize(handle, fitted.width, fitted.height);
+        window.setPosition(fitted.x, fitted.y);
+        if (maximized) {
+            window.maximizeWindow();
+        }
+        normalBounds = new GpuWindowBounds(fitted.x, fitted.y, fitted.width, fitted.height, maximized);
+    }
+
+    /**
+     * Follows the window as the user moves, resizes or maximizes it: the client area for an overlay every frame, and
+     * the bounds to save a few times a second. The normal bounds update only while the window is neither maximized nor
+     * minimized, so a maximized window keeps the size it restores to, and a minimized one does not save the far-off
+     * position Windows reports for it.
+     */
+    private static void trackBounds() {
+        if (!(Gdx.graphics instanceof Lwjgl3Graphics graphics)) {
+            return;
+        }
+        Lwjgl3Window window = graphics.getWindow();
+        if (window == null || window.isIconified()) {
+            return;
+        }
+        long handle = window.getWindowHandle();
+        int[] width = new int[1];
+        int[] height = new int[1];
+        GLFW.glfwGetWindowSize(handle, width, height);
+        Rectangle client = new Rectangle(window.getPositionX(), window.getPositionY(), width[0], height[0]);
+        if (!client.equals(clientBounds)) {
+            clientBounds = client;
+            Consumer<Rectangle> watcher = boundsWatcher;
+            if (watcher != null) {
+                SwingUtilities.invokeLater(() -> {
+                    if (boundsWatcher == watcher) {
+                        watcher.accept(client);
+                    }
+                });
+            }
+        }
+        // Fullscreen keeps the windowed bounds it returns to, which are also what the next start opens.
+        if (graphics.isFullscreen() || ++framesSinceSave < BOUNDS_SAVE_FRAMES) {
+            return;
+        }
+        framesSinceSave = 0;
+        boolean maximized = GLFW.glfwGetWindowAttrib(handle, GLFW.GLFW_MAXIMIZED) == GLFW.GLFW_TRUE;
+        GpuWindowBounds normal = normalBounds;
+        if (!maximized) {
+            normal = new GpuWindowBounds(client.x, client.y, client.width, client.height, false);
+            normalBounds = normal;
+        }
+        GpuWindowBounds saved = new GpuWindowBounds(normal.x(), normal.y(), normal.width(), normal.height(), maximized);
+        if (!saved.equals(publishedBounds)) {
+            publishedBounds = saved;
+            SwingUtilities.invokeLater(() -> saved.save(GUIPreferences.getInstance()));
+        }
+    }
+
+    /** The window's listener: hands each frame to the scene and switches scenes between frames. */
+    private static final class Root implements ApplicationListener {
+        private ShapeRenderer shapes;
+        /** The dim layer's strength, from 0 (none) to 1. */
+        private float dim;
+        /** The scene's own input, which {@link #GUARD} passes events to unless the scene is dimmed. */
+        private static InputProcessor sceneInput;
+        private static final InputProcessor GUARD = new Guard();
+
+        @Override
+        public void create() {
+            application = (Lwjgl3Application) Gdx.app;
+            shapes = new ShapeRenderer();
+        }
+
+        @Override
+        public void resize(int width, int height) {
+            if (listener != null && width > 0 && height > 0) {
+                try {
+                    listener.resize(width, height);
+                } catch (RuntimeException | LinkageError failure) {
+                    stop(failure);
+                }
+            }
+        }
+
+        @Override
+        public void render() {
+            if (current != null && current != wanted()) {
+                stop(null);
+            }
+            if (current == null) {
+                Scene next;
+                synchronized (LOCK) {
+                    next = requested;
+                    current = next;
+                }
+                if (next != null) {
+                    start(next);
+                } else if (!keepOpen) {
+                    Gdx.app.exit();
+                    return;
+                }
+            }
+            trackBounds();
+            if (listener != null) {
+                try {
+                    listener.render();
+                } catch (RuntimeException | LinkageError failure) {
+                    stop(failure);
+                }
+            }
+            if (listener == null) {
+                Gdx.gl.glClearColor(.045f, .065f, .075f, 1);
+                Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+            }
+            drawDim();
+            guardInput();
+        }
+
+        private void start(Scene scene) {
+            resetGl();
+            Gdx.input.setInputProcessor(null);
+            sceneInput = null;
+            Gdx.graphics.setForegroundFPS(GpuBoardWindow.DEFAULT_VSYNC ? 0 : 60);
+            if (Gdx.graphics instanceof Lwjgl3Graphics graphics) {
+                graphics.getWindow().setTitle(scene.title());
+            }
+            try {
+                scene.started(windowHandle);
+                listener = scene.listener();
+                listener.create();
+                if (Gdx.graphics.getWidth() > 0 && Gdx.graphics.getHeight() > 0) {
+                    listener.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                }
+            } catch (RuntimeException | LinkageError failure) {
+                stop(failure);
+            }
+        }
+
+        /** Ends the current scene, with {@code failure} when it failed; a failed scene is not shown again. */
+        private void stop(Throwable failure) {
+            Scene scene = current;
+            ApplicationListener ending = listener;
+            listener = null;
+            if (ending != null) {
+                try {
+                    ending.pause();
+                    ending.dispose();
+                } catch (RuntimeException | LinkageError disposal) {
+                    if (failure == null) {
+                        failure = disposal;
+                    } else {
+                        failure.addSuppressed(disposal);
+                    }
+                }
+            }
+            Gdx.input.setInputProcessor(null);
+            sceneInput = null;
+            resetGl();
+            synchronized (LOCK) {
+                current = null;
+                if (failure != null && requested == scene) {
+                    requested = null;
+                }
+            }
+            if (scene != null) {
+                scene.ended(failure);
+                SwingUtilities.invokeLater(GpuHost::idled);
+            }
+        }
+
+        /** The scene darkened under a Swing window, fading in and out. */
+        private void drawDim() {
+            float step = Gdx.graphics.getDeltaTime() / DIM_FADE;
+            dim = dimmed ? Math.min(1, dim + step) : Math.max(0, dim - step);
+            if (dim <= 0) {
+                return;
+            }
+            resetGl();
+            Gdx.gl.glEnable(GL20.GL_BLEND);
+            Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+            shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            shapes.begin(ShapeRenderer.ShapeType.Filled);
+            shapes.setColor(0, 0, 0, DIM_ALPHA * dim);
+            shapes.rect(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            shapes.end();
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+        }
+
+        /** Keeps the scene's input behind the guard, whichever processor the scene set last. */
+        private void guardInput() {
+            InputProcessor input = Gdx.input.getInputProcessor();
+            if (input != GUARD) {
+                sceneInput = input;
+                Gdx.input.setInputProcessor(GUARD);
+            }
+        }
+
+        @Override
+        public void pause() {
+            if (listener != null) {
+                listener.pause();
+            }
+        }
+
+        @Override
+        public void resume() {
+            if (listener != null) {
+                listener.resume();
+            }
+        }
+
+        @Override
+        public void dispose() {
+            if (current != null) {
+                stop(null);
+            }
+            shapes.dispose();
+        }
+
+        /** Passes input to the scene unless it is dimmed; a click on the dimmed scene goes to the window over it. */
+        private static final class Guard extends InputAdapter {
+            private InputProcessor target() {
+                return dimmed ? null : sceneInput;
+            }
+
+            @Override
+            public boolean keyDown(int keycode) {
+                InputProcessor target = target();
+                return target != null && target.keyDown(keycode);
+            }
+
+            @Override
+            public boolean keyUp(int keycode) {
+                InputProcessor target = target();
+                return target != null && target.keyUp(keycode);
+            }
+
+            @Override
+            public boolean keyTyped(char character) {
+                InputProcessor target = target();
+                return target != null && target.keyTyped(character);
+            }
+
+            @Override
+            public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+                if (dimmed) {
+                    Runnable clicked = dimClicked;
+                    if (clicked != null) {
+                        SwingUtilities.invokeLater(clicked);
+                    }
+                    return true;
+                }
+                return sceneInput != null && sceneInput.touchDown(screenX, screenY, pointer, button);
+            }
+
+            @Override
+            public boolean touchUp(int screenX, int screenY, int pointer, int button) {
+                InputProcessor target = target();
+                return target != null && target.touchUp(screenX, screenY, pointer, button);
+            }
+
+            @Override
+            public boolean touchCancelled(int screenX, int screenY, int pointer, int button) {
+                InputProcessor target = target();
+                return target != null && target.touchCancelled(screenX, screenY, pointer, button);
+            }
+
+            @Override
+            public boolean touchDragged(int screenX, int screenY, int pointer) {
+                InputProcessor target = target();
+                return target != null && target.touchDragged(screenX, screenY, pointer);
+            }
+
+            @Override
+            public boolean mouseMoved(int screenX, int screenY) {
+                InputProcessor target = target();
+                return target != null && target.mouseMoved(screenX, screenY);
+            }
+
+            @Override
+            public boolean scrolled(float amountX, float amountY) {
+                InputProcessor target = target();
+                return target != null && target.scrolled(amountX, amountY);
+            }
+        }
+    }
+
+    /** The OpenGL state every scene starts from, whatever the one before left. */
+    private static void resetGl() {
+        GL20 gl = Gdx.gl;
+        gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, 0);
+        gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        gl.glDisable(GL20.GL_BLEND);
+        gl.glDisable(GL20.GL_DEPTH_TEST);
+        gl.glDisable(GL20.GL_SCISSOR_TEST);
+        gl.glDisable(GL20.GL_STENCIL_TEST);
+        gl.glDisable(GL20.GL_CULL_FACE);
+        gl.glDisable(GpuLinearOverlay.FRAMEBUFFER_SRGB);
+        gl.glColorMask(true, true, true, true);
+        gl.glDepthMask(true);
+        gl.glDepthFunc(GL20.GL_LESS);
+        gl.glUseProgram(0);
+        gl.glActiveTexture(GL20.GL_TEXTURE0);
+        gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
+        // A context without sRGB framebuffers reports the disable as an error; it changes nothing there.
+        while (gl.glGetError() != GL20.GL_NO_ERROR) {
+            // drain
+        }
+    }
+}

@@ -152,10 +152,10 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
           "CommonMenuBar.viewPlanetaryConditions"));
     private final JMenuItem viewZoomIn = new JMenuItem(getString("CommonMenuBar.viewZoomIn"));
     /**
-     * The board's renderer: Legacy 2D, Classic or Enhanced ({@link #rendererMenu}). It is enabled in every state:
-     * outside a game's board (the lobby) a choice is saved for the next one.
+     * The game board's graphics: Classic or Enhanced ({@link #rendererMenu}). It is enabled in every state: outside a
+     * game's board (the lobby) a choice is saved for the next one.
      */
-    private final JMenu viewRenderer = rendererMenu(this);
+    private final JMenu viewRenderer = rendererMenu(this, false);
     private final JMenuItem viewZoomOut = new JMenuItem(getString("CommonMenuBar.viewZoomOut"));
     private final JMenuItem viewZoomReset = new JMenuItem(getString("CommonMenuBar.viewZoomReset"));
     private final JMenuItem viewZoomOverviewToggle = new JMenuItem(getString("CommonMenuBar.viewZoomOverviewToggle"));
@@ -467,13 +467,10 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case ClientGUI.VIEW_LABELS -> GUIP.setUnitLabelStyle(GUIP.getUnitLabelStyle().next());
             case VIEW_TOGGLE_HEX_TYPES -> GUIP.toggleHexTypes();
             case VIEW_UNIT_OVERVIEW -> GUIP.setShowUnitOverview(!GUIP.getShowUnitOverview());
-            // A Renderer choice is saved here; during a game, ClientGUI also switches the shown board.
-            case VIEW_LEGACY_2D -> GUIP.setUse3DBoard(false);
-            case VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED -> {
-                GUIP.setBoardGraphics(VIEW_GRAPHICS_CLASSIC.equals(event.getActionCommand())
-                      ? BoardGraphics.CLASSIC : BoardGraphics.ENHANCED);
-                GUIP.setUse3DBoard(true);
-            }
+            // A Renderer choice is saved here; the game's board follows the preference.
+            case VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED ->
+                  GUIP.setBoardGraphics(VIEW_GRAPHICS_CLASSIC.equals(event.getActionCommand())
+                        ? BoardGraphics.CLASSIC : BoardGraphics.ENHANCED);
             case ClientGUI.HELP_RESET_NAGS ->
                   MegaMek.getMMOptions().setNagDialogIgnore(MMConstants.NAG_BOT_README, false);
         }
@@ -672,7 +669,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case GUIPreferences.ROUNDS_IN_AIR_ENABLED -> gameRoundsInAir.setSelected(GUIP.getRoundsInAirEnabled());
             case GUIPreferences.BOT_COMMANDS_ENABLED, GUIPreferences.BOT_COMMANDS_LOCATION ->
                   updateBotCommandsSelection();
-            case GUIPreferences.BOARD_VIEW_3D, GUIPreferences.BOARD_GRAPHICS -> updateRendererSelection();
+            case GUIPreferences.BOARD_GRAPHICS -> updateRendererSelection();
         }
     }
 
@@ -740,15 +737,17 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     }
 
     /**
-     * A Renderer submenu: Legacy 2D, Classic and Enhanced, in that order, as one radio group whose items carry the
-     * action commands {@link ClientGUI#VIEW_LEGACY_2D}, {@link ClientGUI#VIEW_GRAPHICS_CLASSIC} and
+     * A Renderer submenu: Legacy 2D when {@code legacy2D} is set, then Classic and Enhanced, as one radio group whose
+     * items carry the action commands {@link ClientGUI#VIEW_LEGACY_2D}, {@link ClientGUI#VIEW_GRAPHICS_CLASSIC} and
      * {@link ClientGUI#VIEW_GRAPHICS_ENHANCED}; {@code listener} runs a choice and {@link #selectRenderer} checks one.
-     * The game's menu bar and the map preview's Legacy 2D window use it.
+     * The game's menu bar uses it without Legacy 2D, which only a map preview still offers.
      */
-    public static JMenu rendererMenu(ActionListener listener) {
+    public static JMenu rendererMenu(ActionListener listener, boolean legacy2D) {
         JMenu renderer = new JMenu(getString("CommonMenuBar.viewRenderer"));
         ButtonGroup group = new ButtonGroup();
-        for (String command : List.of(VIEW_LEGACY_2D, VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED)) {
+        List<String> commands = legacy2D ? List.of(VIEW_LEGACY_2D, VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED)
+              : List.of(VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED);
+        for (String command : commands) {
             JRadioButtonMenuItem item = new JRadioButtonMenuItem(getString("CommonMenuBar." + command));
             item.setActionCommand(command);
             item.addActionListener(listener);
@@ -767,9 +766,9 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         }
     }
 
-    /** Checks the renderer the preferences choose for the game's board: Legacy 2D, or the 3D board with its graphics. */
+    /** Checks the graphics the preferences choose for the game's board. */
     private void updateRendererSelection() {
-        selectRenderer(viewRenderer, !GUIP.getUse3DBoard() ? VIEW_LEGACY_2D
-              : GUIP.getBoardGraphics() == BoardGraphics.CLASSIC ? VIEW_GRAPHICS_CLASSIC : VIEW_GRAPHICS_ENHANCED);
+        selectRenderer(viewRenderer, GUIP.getBoardGraphics() == BoardGraphics.CLASSIC ? VIEW_GRAPHICS_CLASSIC
+              : VIEW_GRAPHICS_ENHANCED);
     }
 }

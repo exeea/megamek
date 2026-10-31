@@ -58,6 +58,7 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -104,12 +105,17 @@ class GpuSwingCutSmokeTest {
         }
     }
 
+    @AfterEach
+    void awaitHostClosed() throws Exception {
+        // The next suite's own window must not start while the host's thread still shuts GLFW down
+        await(() -> !GpuHost.isOpen());
+    }
+
     @Test
     void aScriptedBattleShowsNoSwingWindowOverTheNativeWindowAndTheLegacy2DBoardGetsThemBack() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         Map<String, String> saved = new LinkedHashMap<>();
-        for (String key : Stream.of(WINDOWS, SHOWN, List.of(GUIPreferences.BOT_COMMANDS_LOCATION,
-              GUIPreferences.BOARD_VIEW_3D)).flatMap(List::stream).toList()) {
+        for (String key : Stream.of(WINDOWS, SHOWN, List.of(GUIPreferences.BOT_COMMANDS_LOCATION)).flatMap(List::stream).toList()) {
             saved.put(key, preferences.getString(key));
         }
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -125,7 +131,7 @@ class GpuSwingCutSmokeTest {
                 });
                 await(() -> Gdx.app != null && Gdx.app != previous);
                 await(() -> onSwing(() -> GpuBoardWindow.drawsDialogsFor(gui)));
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > 5));
+                await(() -> onGl(() -> frames() > 5));
 
                 // Default preferences: the minimap stays on through the report phases (the Legacy 2D board's phase rule
                 // would hide it there).
@@ -206,8 +212,7 @@ class GpuSwingCutSmokeTest {
                     GpuBoardWindow.closeFor(gui);
                     return null;
                 });
-                await(() -> Thread.getAllStackTraces().keySet().stream()
-                      .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
+                await(() -> !GpuHost.isOpen());
                 onSwing(() -> {
                     client.windows().forEach(Window::dispose);
                     client.frame().dispose();
@@ -348,9 +353,14 @@ class GpuSwingCutSmokeTest {
     /** Lets the EDT and the native window catch up: posted Swing events, then a few frames. */
     private static void settle() throws Exception {
         onSwing(() -> null);
-        long frames = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames());
-        await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > frames + 3));
+        long before = onGl(() -> frames());
+        await(() -> onGl(() -> frames() > before + 3));
         onSwing(() -> null);
+    }
+
+    /** GL thread: the shown board's frame count, or -1 until the host has started the board's scene. */
+    private static long frames() {
+        return GpuHost.sceneListener() instanceof GpuBattleView battle ? battle.frames() : -1;
     }
 
     private static <T> T onGl(Callable<T> action) throws Exception {

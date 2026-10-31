@@ -12,7 +12,7 @@ import org.lwjgl.glfw.GLFW;
 import org.lwjgl.system.MemoryStack;
 
 /**
- * Where the GPU board window sits, in GLFW screen coordinates. The size and position are the window's normal,
+ * Where MegaMek's native window sits, in GLFW screen coordinates. The size and position are the window's normal,
  * un-maximized ones, kept even while it is maximized so a restore returns to them.
  *
  * @param x         left edge, or {@code -1} with {@code y} to centre the window
@@ -50,22 +50,6 @@ record GpuWindowBounds(int x, int y, int width, int height, boolean maximized) {
         preferences.setGpuBoardSizeWidth(width);
         preferences.setGpuBoardSizeHeight(height);
         preferences.setGpuBoardMaximized(maximized);
-    }
-
-    /** The start window's bounds. Read on the Swing thread before the GPU thread starts. */
-    static GpuWindowBounds loadStart(GUIPreferences preferences) {
-        return new GpuWindowBounds(preferences.getStartWindowPosX(), preferences.getStartWindowPosY(),
-              preferences.getStartWindowSizeWidth(), preferences.getStartWindowSizeHeight(),
-              preferences.getStartWindowMaximized());
-    }
-
-    /** Saves these as the start window's bounds, on the Swing thread. */
-    void saveStart(GUIPreferences preferences) {
-        preferences.setStartWindowPosX(x);
-        preferences.setStartWindowPosY(y);
-        preferences.setStartWindowSizeWidth(width);
-        preferences.setStartWindowSizeHeight(height);
-        preferences.setStartWindowMaximized(maximized);
     }
 
     Rectangle rectangle() {

@@ -11,7 +11,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `GpuBoardWindow` | Creates and closes the native application/window; coordinates renderer switching and window reuse. |
+| `GpuHost` | Owns the one native application and window for the whole run and switches its scenes (start screen, board, editor, preview, UI library); dims the window while the Swing lobby shows over it (`GpuLobbyOverlay`). |
+| `GpuBoardWindow` | Runs a game board, editor or map preview as a `GpuHost` scene; coordinates preview reuse and the preview's Legacy 2D window. |
 | `GpuBattleView` | Orchestrates each frame: consumes snapshots, advances playback, places units and submits scene/UI passes. |
 | `BoardSource` | Defines captured frame data and the input callbacks crossing between the Swing and GL threads. |
 | `BoardScene` | Stores terrain, visible units, annotations and resolved animation events as presentation snapshots. |
