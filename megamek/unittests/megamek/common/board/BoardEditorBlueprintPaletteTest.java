@@ -161,11 +161,11 @@ class BoardEditorBlueprintPaletteTest {
         assertNull(BLUEPRINT.entry("building/tank-farm"), "One fuel-tank card, under Industry");
         assertEquals("fuelTank", BLUEPRINT.variant("building/tank-farm").owner());
         assertTrue(BLUEPRINT.variants("building").stream().noneMatch(variant -> variant.asset().contains("/fuel_tanks/")));
+        // Heavy industry is a terrain whose plant is generated (BoardGenerator); no building design names its plants.
         for (String suffix : List.of("a", "b", "c", "d")) {
             String id = "buildings/saxarba/misc/heavy_industrial_" + suffix;
             assertNull(BLUEPRINT.entry(id), "The obsolete industrial design is not a palette card");
-            assertNotNull(BLUEPRINT.variant(id), "Saved maps can still resolve the old design");
-            assertFalse(BLUEPRINT.variants("building").contains(BLUEPRINT.variant(id)), "The design picker also omits it");
+            assertNull(BLUEPRINT.variant(id), "Nor a design");
         }
     }
 
