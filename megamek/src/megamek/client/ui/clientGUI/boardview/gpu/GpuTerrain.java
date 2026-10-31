@@ -1669,6 +1669,8 @@ final class GpuTerrain implements Disposable {
     /** Marks a tree model's materials for the foliage shader, once; instances copy the marks. */
     private static Model foliage(Model model) {
         for (Material material : model.materials) {
+            // A missing model's shared marked box stays a plain prop wherever it stands in (GpuAssets#missing).
+            if (material.id.equals(GpuAssets.MISSING)) { continue; }
             if (!material.has(Foliage.TYPE)) {
                 boolean solid = material.id.startsWith("bark") || material.id.equals("cactus") || material.id.equals("fruit")
                       || material.id.equals("fungus") || material.id.equals("mycelium") || material.id.equals("coral");
@@ -2155,8 +2157,12 @@ final class GpuTerrain implements Disposable {
                   || targetColumns != columns || targetTessellated != tessellation) {
                 startFamilySession();
                 curvedFamilies.clear();
-                // Its models decode on the common pool while the board prepares, before the chunk builds draw them.
-                if (!borrowedAssets) { assets.prepareModels(featureModels(scene)); }
+                // Its models decode on the common pool while the board prepares, before the chunk builds draw them. A new
+                // board's report lists what it draws as marked boxes (GpuAssets#takeMissing); a graphics switch adds none.
+                if (!borrowedAssets) {
+                    assets.prepareModels(featureModels(scene));
+                    if (target == null || !sameBoard(target, scene)) { assets.newBoard(); }
+                }
             }
             requested = new Request(meshGeneration, scene, settings, columns, tessellation);
             // Before anything prepares for it: whether its programs compile the biome stage.
@@ -2233,6 +2239,9 @@ final class GpuTerrain implements Disposable {
               && installedTessellation == tessellation && !familiesPending()
               && (materialCache.prewarmed() || !materialsReady());
     }
+
+    /** The models that could not load and draw as marked boxes, not yet reported, each with why (GpuAssets#takeMissing). */
+    Map<String, String> takeMissingAssets() { return assets.takeMissing(); }
 
     int buildProgress() {
         if (requested == null) { return materialsReady() && !familiesPending() ? -1 : 100; }

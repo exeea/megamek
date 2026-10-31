@@ -182,6 +182,9 @@ final class GpuMapHud implements GpuBoardHud {
     }
 
     @Override
+    public megamek.client.ui.gdx.UiKit uiKit() { return kit.ui; }
+
+    @Override
     public void resize(int width, int height, float displayScale) {
         // Keep the complete editing workspace usable when a large desktop UI scale meets a smaller window. The Tuning
         // panel's UI scale, already a share of displayScale, is a share of that limit too, so each of its steps shows.

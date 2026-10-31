@@ -25,12 +25,12 @@ final class GpuColorTexture {
     }
 
     static Texture create(FileHandle file, boolean mipmaps) {
-        return new Texture(new ImageData(() -> decode(file), mipmaps, true, true, true));
+        return texture(new ImageData(() -> decode(file), mipmaps, true, true, true));
     }
 
     /** Numerical maps share core-GL channel layout handling, without applying an RGB transfer function. */
     static Texture createData(FileHandle file, boolean mipmaps) {
-        return new Texture(new ImageData(() -> decode(file), mipmaps, true, true, false));
+        return texture(new ImageData(() -> decode(file), mipmaps, true, true, false));
     }
 
     /**
@@ -38,7 +38,13 @@ final class GpuColorTexture {
      * again, not kept, when the context is restored. {@code color} selects sRGB storage for RGB.
      */
     static Texture create(Supplier<Pixmap> pixels, boolean mipmaps, boolean color) {
-        return new Texture(new ImageData(pixels, mipmaps, true, true, color));
+        return texture(new ImageData(pixels, mipmaps, true, true, color));
+    }
+
+    /** Its pixels come first: an image that cannot be decoded leaves no GL texture behind. */
+    private static Texture texture(ImageData data) {
+        data.prepare();
+        return new Texture(data);
     }
 
     /** File grayscale means opaque luminance; the caller owns the returned pixels. */

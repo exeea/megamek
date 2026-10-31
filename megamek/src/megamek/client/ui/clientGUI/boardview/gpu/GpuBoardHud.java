@@ -15,6 +15,9 @@ interface GpuBoardHud extends Disposable {
 
     Stage stage();
 
+    /** The kit its widgets and dialogs (UiMessageDialog) are made with. */
+    megamek.client.ui.gdx.UiKit uiKit();
+
     /** The window's logical size and the display scale. */
     void resize(int width, int height, float displayScale);
 

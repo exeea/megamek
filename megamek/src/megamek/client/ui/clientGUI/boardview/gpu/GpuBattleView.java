@@ -856,6 +856,13 @@ class GpuBattleView extends ApplicationAdapter {
             loadingStage = null;
             if (loadingTheme != null) { loadingTheme.dispose(); }
             loadingTheme = null;
+            // Models that could not load stand as marked boxes (GpuAssets#missing); the shown board names them.
+            var missing = terrain.takeMissingAssets();
+            if (!missing.isEmpty()) {
+                megamek.client.ui.gdx.UiMessageDialog.show(ui.uiKit(), ui.stage(), UiKit.text("GpuBoard.missingAssets.title"),
+                      UiKit.text("GpuBoard.missingAssets.message", missing.keySet().stream().sorted()
+                            .collect(Collectors.joining("\n"))), List.of(UiKit.text("Close")), answer -> { });
+            }
         }
         // The optional views' own programs link in the background (GpuGlsl.deferral) when they first show: no freeze, and
         // until linked their draws wait (GpuShaderProvider.UNLINKED).

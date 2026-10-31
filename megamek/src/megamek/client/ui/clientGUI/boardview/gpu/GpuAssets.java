@@ -44,6 +44,9 @@ import megamek.common.board.TilesetScenery;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
 final class GpuAssets implements Disposable {
+    private static final megamek.logging.MMLogger LOGGER = megamek.logging.MMLogger.create(GpuAssets.class);
+    /** The marked box's model and material id: what a missing or unreadable model draws as, in every view. */
+    static final String MISSING = "missing-asset";
     private final File root = new File(Configuration.dataDir(), "models/board");
     /** Board materials: Godot 4 StandardMaterial3D resources and their maps (GodotMaterial), with materials.json. */
     private final File textures = new File(root, "textures");
@@ -56,6 +59,12 @@ final class GpuAssets implements Disposable {
     private final Map<String, List<ModelData>> recolourable = new HashMap<>();
     /** Models' levels decoding on the common pool ahead of their first use ({@link #prepareModels}); each taken once. */
     private final Map<String, CompletableFuture<List<ModelData>>> decoding = new HashMap<>();
+    /** The models that could not load, each with why: each draws as the marked box ({@link #missing}), logged once. */
+    private final Map<String, String> unloadable = new HashMap<>();
+    /** Those drawn as boxes since the last report ({@link #takeMissing}), each with why. */
+    private final Map<String, String> unreported = new java.util.LinkedHashMap<>();
+    /** Those already reported for the current board ({@link #newBoard}): a graphics switch does not list them again. */
+    private final java.util.Set<String> reported = new java.util.HashSet<>();
     /** Whether each placed model has colour slots, read from its file's JSON once. */
     private final Map<String, Boolean> hasSlots = new HashMap<>();
     /** How many mesh levels each placed model's file holds, read from its JSON once. */
@@ -1093,19 +1102,64 @@ final class GpuAssets implements Disposable {
     /** {@link #model(String, BoardDecoration.Colours)} with {@code label} written on its label materials ({@link RigidGlb#label}). */
     Model model(String name, megamek.common.board.BoardDecoration.Colours colours, String label) {
         if (colours.slots().isEmpty() && label.isEmpty()) { return lodModel(name, 0); }
-        // A copy's key cannot meet a level's name ("name-lodN").
-        return models.computeIfAbsent(name + colours.slots() + "#" + label, key -> {
-            // The file is decoded once; each set of colours and label changes a copy of its vertices for its own GPU mesh.
-            ModelData data = decoded(name).getFirst();
-            var mesh = data.meshes.first();
-            float[] vertices = mesh.vertices;
-            mesh.vertices = vertices.clone();
-            try {
-                RigidGlb.recolour(data, colours);
-                RigidGlb.label(data, label);
-                return createModel(data);
-            } finally { mesh.vertices = vertices; }
+        if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
+        try {
+            // A copy's key cannot meet a level's name ("name-lodN").
+            return models.computeIfAbsent(name + colours.slots() + "#" + label, key -> {
+                // The file is decoded once; each set of colours and label changes a copy of its vertices for its own mesh.
+                ModelData data = decoded(name).getFirst();
+                var mesh = data.meshes.first();
+                float[] vertices = mesh.vertices;
+                mesh.vertices = vertices.clone();
+                try {
+                    RigidGlb.recolour(data, colours);
+                    RigidGlb.label(data, label);
+                    return createModel(data);
+                } finally { mesh.vertices = vertices; }
+            });
+        } catch (RuntimeException failure) { return missing(name, reason(failure)); }
+    }
+
+    /**
+     * The marked box a model that cannot load draws as, in every view, so a board with a missing or unreadable model
+     * still loads. {@code asset} is logged once, and kept for the loading's report ({@link #takeMissing}) once per board.
+     */
+    private Model missing(String asset, String reason) {
+        if (unloadable.putIfAbsent(asset, reason) == null) {
+            LOGGER.warn("Board model {} draws as a marked box: {}", asset, reason);
+        }
+        if (!reported.contains(asset)) { unreported.putIfAbsent(asset, unloadable.get(asset)); }
+        return box();
+    }
+
+    private static String reason(RuntimeException failure) {
+        return failure.getMessage() != null ? failure.getMessage() : failure.toString();
+    }
+
+    /** The marked box, standing on its origin. Its material ({@link #MISSING}) stays a plain prop's. */
+    private Model box() {
+        return models.computeIfAbsent(MISSING, key -> {
+            var builder = new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder();
+            builder.begin();
+            com.badlogic.gdx.graphics.g3d.utils.shapebuilders.BoxShapeBuilder.build(builder.part(MISSING, GL20.GL_TRIANGLES,
+                  com.badlogic.gdx.graphics.VertexAttributes.Usage.Position | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal,
+                  new Material(MISSING, ColorAttribute.createDiffuse(1, .25f, .1f, 1))), 0, 0, 4, 8, 8, 8);
+            return builder.end();
         });
+    }
+
+    /** The models that could not load and no report has shown yet, each with why; empty when there are none. */
+    Map<String, String> takeMissing() {
+        var result = Map.copyOf(unreported);
+        reported.addAll(unreported.keySet());
+        unreported.clear();
+        return result;
+    }
+
+    /** A new board's report lists every model it draws as a marked box, whatever earlier boards reported. */
+    void newBoard() {
+        reported.clear();
+        unreported.clear();
     }
 
     /** A recolourable model's decoded levels, in its own colours; decoded once. */
@@ -1154,7 +1208,9 @@ final class GpuAssets implements Disposable {
     List<Model> objectLevels(String name) {
         int count = fileLevels.computeIfAbsent(name, key -> {
             var source = RigidGlb.source(root, key);
-            return source.file().isFile() ? RigidGlb.levels(source.file()) : 1;
+            try {
+                return source.file().isFile() ? RigidGlb.levels(source.file()) : 1;
+            } catch (RuntimeException unreadable) { return 1; } // slotted reports it
         });
         List<Model> result = new ArrayList<>(List.of(slotted(name)));
         for (int level = 1; level < Math.min(count, TreeLod.PROPS.length + 1); level++) { result.add(slotted(name, level)); }
@@ -1164,31 +1220,34 @@ final class GpuAssets implements Disposable {
     /**
      * A placed object's model, in every view: a model with colour slots is one shared mesh whose placements pass their
      * colours per draw ({@link RigidGlb#colourSlotMesh}, applied by model-colour-slots.glsl); another model is the model
-     * itself, a missing file the marked box ({@link #decoration}).
+     * itself, a missing or unreadable file the marked box ({@link #missing}).
      */
     Model slotted(String name) { return slotted(name, 0); }
 
     /** {@link #slotted(String)} at a mesh level ({@link #objectLevels}). */
     Model slotted(String name, int level) {
         var source = RigidGlb.source(root, name);
-        if (!source.file().isFile()) { return decoration(name, megamek.common.board.BoardDecoration.Colours.NONE); }
-        if (!hasSlots.computeIfAbsent(name, key -> !RigidGlb.colourSlots(source.file()).isEmpty())) { return lodModel(name, level); }
-        int own = ownLevel(name, level);
-        // The key cannot meet a detail level's name or a colour copy's "name[...]".
-        return models.computeIfAbsent((own == 0 ? name : MeshLod.name(name, own)) + "#slots",
-              key -> createModel(RigidGlb.colourSlotMesh(decoded(name).get(own))));
+        if (!source.file().isFile()) { return missing(name, "no model file " + source.file().getPath()); }
+        if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
+        try {
+            if (!hasSlots.computeIfAbsent(name, key -> !RigidGlb.colourSlots(source.file()).isEmpty())) {
+                return lodModel(name, level);
+            }
+            int own = ownLevel(name, level);
+            // The key cannot meet a detail level's name or a colour copy's "name[...]".
+            return models.computeIfAbsent((own == 0 ? name : MeshLod.name(name, own)) + "#slots",
+                  key -> createModel(RigidGlb.colourSlotMesh(decoded(name).get(own))));
+        } catch (RuntimeException failure) { return missing(name, reason(failure)); }
     }
 
     /**
      * A placed model in its colours as one model of its own ({@link #model(String,
-     * megamek.common.board.BoardDecoration.Colours)}), for the editor preview's ghosts; a missing file is a marked box,
-     * so missing authored references remain editable and visible instead of aborting the board renderer.
+     * megamek.common.board.BoardDecoration.Colours)}), for the editor preview's ghosts; a missing or unreadable file is
+     * the marked box, so missing authored references remain editable and visible instead of aborting the board renderer.
      */
     Model decoration(String name, megamek.common.board.BoardDecoration.Colours colours) {
-        if (RigidGlb.source(root, name).file().isFile()) { return model(name, colours); }
-        return models.computeIfAbsent("missing-decoration", key -> new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder()
-              .createBox(8, 8, 8, new com.badlogic.gdx.graphics.g3d.Material(ColorAttribute.createDiffuse(1, .25f, .1f, 1)),
-                    com.badlogic.gdx.graphics.VertexAttributes.Usage.Position | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal));
+        var file = RigidGlb.source(root, name).file();
+        return file.isFile() ? model(name, colours) : missing(name, "no model file " + file.getPath());
     }
 
     /**
@@ -1278,9 +1337,17 @@ final class GpuAssets implements Disposable {
     GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed, boolean withInterior) {
         if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
         File file = TilesetScenery.customBuildingFile(asset);
+        // A kit that cannot load is reported under its own name; the caller then draws the asset's model, or its box.
+        String kit = asset + " (kit)";
         if (!file.isFile()) { return null; }
-        return buildings.computeIfAbsent(file, key -> new GpuBuilding(GpuBuilding.kit(key), this::createModel))
-              .assemble(levels, reach, seed, withInterior);
+        if (unloadable.containsKey(kit)) { missing(kit, unloadable.get(kit)); return null; }
+        try {
+            return buildings.computeIfAbsent(file, key -> new GpuBuilding(GpuBuilding.kit(key), this::createModel))
+                  .assemble(levels, reach, seed, withInterior);
+        } catch (RuntimeException failure) {
+            missing(kit, reason(failure));
+            return null;
+        }
     }
 
     /**
@@ -1359,21 +1426,28 @@ final class GpuAssets implements Disposable {
 
     Model lodModel(String name, int level) {
         if (BoardWall.supports(name)) { return wallLevels(name, 1).get(level); }
-        return modelLods.computeIfAbsent(name, shape -> {
-            // A tree's winter form may be its bare file's snow variant.
-            var source = RigidGlb.source(root, shape);
-            if (!source.file().isFile()) {
-                throw new IllegalArgumentException("Missing board model " + source.file().getPath());
-            }
-            var data = decode(shape, source);
-            List<Model> levels = new ArrayList<>();
-            for (int index = 0; index < data.size(); index++) {
-                int previous = data.indexOf(data.get(index));
-                levels.add(previous < index ? levels.get(previous)
-                      : models.computeIfAbsent(MeshLod.name(shape, index), key -> createModel(data.get(previous))));
-            }
-            return List.copyOf(levels);
-        }).get(level);
+        if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
+        try {
+            return modelLods.computeIfAbsent(name, shape -> {
+                // A tree's winter form may be its bare file's snow variant.
+                var source = RigidGlb.source(root, shape);
+                if (!source.file().isFile()) {
+                    throw new IllegalArgumentException("no model file " + source.file().getPath());
+                }
+                var data = decode(shape, source);
+                // A file without near geometry is no model: its draws (tree stands, prop batches) need a mesh.
+                if (data.isEmpty() || data.getFirst().meshes.isEmpty()) {
+                    throw new IllegalArgumentException("no geometry in " + source.file().getPath());
+                }
+                List<Model> levels = new ArrayList<>();
+                for (int index = 0; index < data.size(); index++) {
+                    int previous = data.indexOf(data.get(index));
+                    levels.add(previous < index ? levels.get(previous)
+                          : models.computeIfAbsent(MeshLod.name(shape, index), key -> createModel(data.get(previous))));
+                }
+                return List.copyOf(levels);
+            }).get(level);
+        } catch (RuntimeException failure) { return missing(name, reason(failure)); }
     }
 
     /** The captured wall layout determines the shared mesh; this asset owner's ordinary cache disposes it. */
@@ -1388,16 +1462,23 @@ final class GpuAssets implements Disposable {
 
     List<Model> wallLevels(BoardWall.Layout layout) {
         String shape = layout.asset() + "@family-" + layout.family().folder + "@height-" + layout.height() + "@arms-" + layout.arms();
-        return modelLods.computeIfAbsent(shape, ignored -> {
-            List<Model> result = new ArrayList<>();
-            for (int lod = 0; lod < BoardWall.LODS; lod++) {
-                int own = lod;
-                result.add(models.computeIfAbsent(MeshLod.name(shape, lod),
-                      key -> createModel(BoardWall.model(layout, own))));
-            }
-            while (result.size() < RigidGlb.LEVELS) { result.add(result.getLast()); }
-            return List.copyOf(result);
-        });
+        // A family's kit that cannot load is reported once by its name; its walls draw the marked box.
+        String kit = "buildings/walls/" + layout.family().folder;
+        if (unloadable.containsKey(kit)) { return java.util.Collections.nCopies(RigidGlb.LEVELS, missing(kit, unloadable.get(kit))); }
+        try {
+            return modelLods.computeIfAbsent(shape, ignored -> {
+                List<Model> result = new ArrayList<>();
+                for (int lod = 0; lod < BoardWall.LODS; lod++) {
+                    int own = lod;
+                    result.add(models.computeIfAbsent(MeshLod.name(shape, lod),
+                          key -> createModel(BoardWall.model(layout, own))));
+                }
+                while (result.size() < RigidGlb.LEVELS) { result.add(result.getLast()); }
+                return List.copyOf(result);
+            });
+        } catch (RuntimeException failure) {
+            return java.util.Collections.nCopies(RigidGlb.LEVELS, missing(kit, reason(failure)));
+        }
     }
 
     /** A board material's colour: albedo with its coverage, or with height for sculpted terrain. */

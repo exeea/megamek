@@ -307,11 +307,17 @@ final class BoardGroundCut {
         return !model(asset).cut().isEmpty();
     }
 
-    /** A model's cut and stands, none where the asset has no model file. */
+    /** A model's cut and stands, none where the asset has no readable model file (it draws the marked box). */
     private static RigidGlb.Groundwork model(String asset) {
         return MODELS.computeIfAbsent(asset, key -> {
             File file = BoardModelBounds.file(new File(Configuration.dataDir(), "models/board"), key);
-            return file.isFile() ? RigidGlb.groundwork(file) : RigidGlb.Groundwork.NONE;
+            try {
+                return file.isFile() ? RigidGlb.groundwork(file) : RigidGlb.Groundwork.NONE;
+            } catch (RuntimeException unreadable) {
+                // A worker interrupted by a closing board fails its read: that is no answer to keep.
+                if (Thread.currentThread().isInterrupted()) { throw unreadable; }
+                return RigidGlb.Groundwork.NONE;
+            }
         });
     }
 }

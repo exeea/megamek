@@ -398,6 +398,9 @@ final class GpuHud implements GpuBoardHud {
     }
 
     @Override
+    public megamek.client.ui.gdx.UiKit uiKit() { return kit.ui; }
+
+    @Override
     public void resize(int width, int height, float displayScale) {
         scale = displayScale;
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / displayScale);

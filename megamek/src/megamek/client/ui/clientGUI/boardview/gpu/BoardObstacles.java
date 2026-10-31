@@ -23,10 +23,19 @@ final class BoardObstacles {
     private final List<Footprint> footprints = new ArrayList<>();
     private final boolean plants;
 
+    /** Model and kit files that could not be read: their features keep no clearance, and are not read again. */
+    private static final java.util.Set<File> UNREADABLE = ConcurrentHashMap.newKeySet();
+
     private record Geometry(Map<String, BoardShape> shapes, BoundingBox bounds) { }
 
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
-    static void reload() { MODELS.clear(); BoardWall.reload(); }
+    static void reload() { MODELS.clear(); UNREADABLE.clear(); BoardWall.reload(); }
+
+    /** Remembers a file that cannot be read, unless the read failed because a closing board interrupted its worker. */
+    private static void unreadable(File file, RuntimeException failure) {
+        if (Thread.currentThread().isInterrupted()) { throw failure; }
+        UNREADABLE.add(file);
+    }
 
     /**
      * Projected triangles retain empty courtyards and gaps between tanks. An earthwork's ({@code thin} above zero: scenery
@@ -154,25 +163,50 @@ final class BoardObstacles {
             // A civilian wall stands on posts with open fencing and no base: ground cover grows everywhere beneath it.
             if (plants && wall && layout.family() == BoardWall.Family.CIVILIAN) { continue; }
             boolean assembled = BoardIndustrial.supports(feature) || wall;
-            boolean custom = object == null && !assembled && feature.asset().startsWith("buildings/")
-                  && TilesetScenery.customBuildingFile(feature.asset()).isFile();
+            File customFile = feature.asset().startsWith("buildings/") ? TilesetScenery.customBuildingFile(feature.asset()) : null;
+            boolean custom = object == null && !assembled && customFile != null && customFile.isFile()
+                  && !UNREADABLE.contains(customFile);
             File root = new File(Configuration.dataDir(), "models/board");
+            ConnectedKit.Kit kit = null;
+            if (custom) {
+                try {
+                    kit = GpuBuilding.kit(customFile);
+                } catch (RuntimeException failure) {
+                    // The asset's own model then draws (GpuAssets#building), and keeps its clearance.
+                    unreadable(customFile, failure);
+                    custom = false;
+                }
+            }
             // A tree's winter form has the shape of its bare file's geometry.
-            File file = custom ? TilesetScenery.customBuildingFile(feature.asset())
-                  : RigidGlb.source(root, feature.asset()).file();
-            // Unresolved native references draw a renderer-owned placeholder and must remain editable.
-            if (object != null && !file.isFile()) { continue; }
-            var geometry = assembled || custom ? null : geometry(root, file);
+            File file = custom ? customFile : RigidGlb.source(root, feature.asset()).file();
+            // A missing or unreadable model draws the renderer's marked box (GpuAssets#missing), which keeps no clearance;
+            // a placed one stays editable.
+            if (!assembled && (!file.isFile() || UNREADABLE.contains(file))) { continue; }
+            Geometry geometry;
+            try {
+                geometry = assembled || custom ? null : geometry(root, file);
+            } catch (RuntimeException failure) {
+                unreadable(file, failure);
+                continue;
+            }
             List<Vector3> points = new ArrayList<>();
             if (wall) {
-                // Ground cover grows up to a military wall's body; other dressing also keeps clear of its buttresses.
-                points.addAll(plants ? BoardWall.footprint(layout) : BoardWall.triangles(layout));
+                // Ground cover grows up to a military wall's body; other dressing also keeps clear of its buttresses. A
+                // family whose kit cannot be read draws the marked box, which keeps no clearance.
+                File kits = new File(Configuration.dataDir(), "models/buildings/walls/" + layout.family().folder);
+                if (UNREADABLE.contains(kits)) { continue; }
+                try {
+                    var body = BoardWall.triangles(layout);
+                    points.addAll(plants ? BoardWall.footprint(layout) : body);
+                } catch (RuntimeException unreadableKit) {
+                    unreadable(kits, unreadableKit);
+                    continue;
+                }
             } else if (assembled) {
                 points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
             } else if (custom) {
                 // The drawn kit's pieces for this hex's connections (GpuBuilding), with the selected roof's underside
                 // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole.
-                var kit = GpuBuilding.kit(file);
                 int levels = Math.max(1, Math.round(feature.height()));
                 for (var piece : ConnectedKit.placements(kit, 0, levels, ConnectedKit.reach(scene, tile, levels), 0,
                       GpuBuilding.seed(tile, feature))) {
@@ -269,7 +303,7 @@ final class BoardObstacles {
      * Points whose convex hull is a placed object's footprint on the board plane, as drawn: a decal's stamp ({@link
      * BoardDecals#paintRectangle}); a route's track ({@link BoardRail#paths}, its half width either side); else the
      * eight corners of its model's bounds placed by {@link BoardFeatures#decorationTransform} (anchor, turn, tilt,
-     * scale, stretch and mirror). Null for a missing model, whose placeholder the renderer draws.
+     * scale, stretch and mirror). Null for a missing or unreadable model, whose placeholder the renderer draws.
      */
     static List<Vector3> outline(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
         var object = feature.decoration();
@@ -290,8 +324,14 @@ final class BoardObstacles {
         }
         File root = new File(Configuration.dataDir(), "models/board");
         File file = RigidGlb.source(root, feature.asset()).file();
-        if (!file.isFile()) { return null; }
-        BoundingBox bounds = geometry(root, file).bounds();
+        if (!file.isFile() || UNREADABLE.contains(file)) { return null; }
+        BoundingBox bounds;
+        try {
+            bounds = geometry(root, file).bounds();
+        } catch (RuntimeException failure) {
+            unreadable(file, failure);
+            return null;
+        }
         var transform = BoardFeatures.decorationTransform(owner, feature, 0);
         List<Vector3> corners = new ArrayList<>(8);
         for (int i = 0; i < 8; i++) {
