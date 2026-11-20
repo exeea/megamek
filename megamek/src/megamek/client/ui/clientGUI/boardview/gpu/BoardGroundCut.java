@@ -140,21 +140,12 @@ final class BoardGroundCut {
             if (!feature.authoredPlacement() || feature.decoration() != null) { continue; }
             var model = model(feature.asset());
             if (model.cut().isEmpty() && model.stands().isEmpty()) { continue; }
-            // Where the terrain stands the model (GpuTerrain#placeAuthored): on its hex's ground at the centre.
-            Matrix4 placement = BoardFeatures.authoredTransform(cx + feature.x() * BoardGeometry.hexScale(),
-                  cy + feature.y() * BoardGeometry.hexScale(), base(faces, cx, cy, BoardGeometry.groundZ(tile)),
-                  fitted(scene, tile, feature));
+            Matrix4 placement = placement(scene, tile, feature, base(faces, cx, cy, BoardGeometry.groundZ(tile)));
             List<BoardSurface.Face> open = new ArrayList<>(), kept = new ArrayList<>(), dug = new ArrayList<>();
             faces.forEach(face -> (ground.test(face) ? open : kept).add(face));
-            for (int t = 0; t < model.cut().size(); t++) {
-                if (!shown(model.cutParts()[t], feature.parts())) { continue; }
-                Vector3[] triangle = model.cut().get(t);
-                Vector3 a = new Vector3(triangle[0]).mul(placement), b = new Vector3(triangle[1]).mul(placement);
-                Vector3 c = new Vector3(triangle[2]).mul(placement);
-                // Counter-clockwise seen from above, so each side's outward normal is on its right.
-                if ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) < 0) { Vector3 swap = b; b = c; c = swap; }
-                subtract(open, List.of(side(a, b), side(b, c), side(c, a)), relief, a, b, c);
-                dug.add(new BoardSurface.Face(a, b, c, BoardSurface.Finish.DUG));
+            for (Vector3[] t : cut(model, feature, placement)) {
+                subtract(open, List.of(side(t[0], t[1]), side(t[1], t[2]), side(t[2], t[0])), relief, t[0], t[1], t[2]);
+                dug.add(new BoardSurface.Face(t[0], t[1], t[2], BoardSurface.Finish.DUG));
             }
             faces.clear();
             faces.addAll(kept);
@@ -173,6 +164,51 @@ final class BoardGroundCut {
             });
         }
         return List.copyOf(stands);
+    }
+
+    /**
+     * The ground {@code tile}'s scenery digs away, as {@link #dig} cuts it: each cut triangle's x and y, counter-clockwise
+     * seen from above, six floats a triangle; null where it digs none. The height field clips its ground by it
+     * ({@link FieldStamps}); a cut's footprint does not depend on the height it stands at.
+     */
+    static float[] footprint(BoardScene scene, BoardScene.Tile tile) {
+        if (tile.frozen() || BoardBridge.standing(tile) != null) { return null; }
+        List<Vector3[]> triangles = new ArrayList<>();
+        for (var feature : tile.features()) {
+            if (!feature.authoredPlacement() || feature.decoration() != null) { continue; }
+            var model = model(feature.asset());
+            if (!model.cut().isEmpty()) { triangles.addAll(cut(model, feature, placement(scene, tile, feature, 0))); }
+        }
+        if (triangles.isEmpty()) { return null; }
+        float[] result = new float[triangles.size() * 6];
+        for (int i = 0; i < triangles.size(); i++) {
+            for (int k = 0; k < 3; k++) {
+                result[i * 6 + k * 2] = triangles.get(i)[k].x;
+                result[i * 6 + k * 2 + 1] = triangles.get(i)[k].y;
+            }
+        }
+        return result;
+    }
+
+    /** Where the terrain stands {@code feature}'s model (GpuTerrain#placeAuthored): on its hex's ground at the centre. */
+    private static Matrix4 placement(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature, float base) {
+        return BoardFeatures.authoredTransform(BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale(),
+              BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale(), base, fitted(scene, tile, feature));
+    }
+
+    /** The cut triangles of the parts {@code feature} shows, placed: each counter-clockwise seen from above. */
+    private static List<Vector3[]> cut(RigidGlb.Groundwork model, BoardScene.Feature feature, Matrix4 placement) {
+        List<Vector3[]> result = new ArrayList<>();
+        for (int t = 0; t < model.cut().size(); t++) {
+            if (!shown(model.cutParts()[t], feature.parts())) { continue; }
+            Vector3[] triangle = model.cut().get(t);
+            Vector3 a = new Vector3(triangle[0]).mul(placement), b = new Vector3(triangle[1]).mul(placement);
+            Vector3 c = new Vector3(triangle[2]).mul(placement);
+            // Counter-clockwise seen from above, so each side's outward normal is on its right.
+            if ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) < 0) { Vector3 swap = b; b = c; c = swap; }
+            result.add(new Vector3[] { a, b, c });
+        }
+        return result;
     }
 
     /** The height an earthwork stands at, at (x, y): its hex's ground there as it was before any of it was dug. */

@@ -13,6 +13,10 @@ layout(location = 12) in vec4 a_instance3;
 // When the tree or kit structure began dissolving between detail levels: positive at the level it takes, negative at
 // the one it leaves, 0 at rest (GpuTreeInstances.Stand#detail, GpuTerrain.Prop#dissolve).
 flat out float v_levelDissolve;
+// A plant's shade from its turn (#instanceTint), for its fragment's colour (terrain-foliage.frag).
+flat out float v_instanceTint;
+// Its amplitude: a scatter plant's (GpuTerrain#SCATTER_TINT), 0 for a tree, whose colour is its own.
+uniform float u_instanceTint;
 #endif
 #ifdef impostorFlag
 // IMPOSTOR_FRAMES
@@ -30,6 +34,14 @@ vec3 instanceTurn(vec3 v) {
 vec3 instanceScale() {
     return placeScale(a_instance0, a_instance1);
 }
+
+#ifdef levelDissolveFlag
+// The shade a scatter bush took by its turn when it was baked: 1 + amplitude * (2 * turn / 360 degrees - 1), so 0.88
+// to 1.12 at an amplitude of 0.12, read from the instance's turn (its cosine and sine).
+float instanceTint() {
+    return 1.0 + u_instanceTint * (2.0 * fract(atan(a_instance1.y, a_instance1.x) * 0.15915494) - 1.0);
+}
+#endif
 
 // A structure's pieces falling where the board drew them (GpuDestruction): rigid bodies thrown in closed form, handed
 // to box bodies on the CPU as they touch down. A run of falling pieces (its record's mode 1) draws one piece of a kit at

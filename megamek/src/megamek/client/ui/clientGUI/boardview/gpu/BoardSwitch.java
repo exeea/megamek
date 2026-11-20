@@ -47,7 +47,33 @@ enum BoardSwitch {
     CROP_SHARE("Field plants", 0, 1, .05f, .75f, 1, 1, Applies.LIVE, null,
           "The share of a field's plants drawn, each one wider by as much."),
     HALF_RATE_WAVES("Waves at half rate", 0, 1, 1, 1, 1, 0, Applies.LIVE, null,
-          "Waves advance every other frame, and not at all while no water shows; they follow the clock.");
+          "Waves advance every other frame, and not at all while no water shows; they follow the clock."),
+    // The compact ground's rule kinds with a cost worth a choice (GroundFamilies.Rule names each one's switch).
+    GROUND_SECOND_LAYER("Second ground layer", 0, 1, 1, 0, 0, 1, Applies.PROGRAMS, null,
+          "Where two ground materials meet (turf and soil, rock and scree, dust on stone, a river bank's soil and "
+                + "gravel), both are drawn and blended by their height. Off, each spot shows its stronger material alone, "
+                + "which is faster. Switching it rebuilds the board's shaders."),
+    GROUND_TONE_PATCHES("Ground tone patches", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
+          "Broad lighter and darker patches across open ground, dry and lush areas of a meadow and ripples on sand, so "
+                + "a field reads neither flat nor tiled. Switching it rebuilds the board's shaders."),
+    GROUND_SOIL_MANTLE("Soil mantle", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
+          "Bare soil on banks and under rims where the cover ends, and the cap plates of dry crests, instead of bare "
+                + "rock. Switching it rebuilds the board's shaders."),
+    GROUND_WEAR_THROUGH("Worn ground", 0, 1, 1, 0, 1, 1, Applies.PROGRAMS, null,
+          "Level turf wears through to its soil in patches. Switching it rebuilds the board's shaders."),
+    GROUND_TURF_LIP("Turf lip", 0, 1, 1, 0, 1, 1, Applies.PROGRAMS, null,
+          "A two-level bank keeps a ragged lip of turf at its rim, broken turf on its shoulder and the root mat below "
+                + "them. Switching it rebuilds the board's shaders."),
+    GROUND_WALL_WEATHERING("Wall weathering", 0, 1, 1, 0, 1, 1, Applies.PROGRAMS, null,
+          "Cliffs weather by their height: a bleached rim, streaks running down from it and grime toward the foot. "
+                + "Switching it rebuilds the board's shaders."),
+    GROUND_POCKETS("Cover pockets", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
+          "Small pockets break the edge of grass and other cover into a fine fringe on banks and slopes, where without "
+                + "them it ends in larger patches. Switching it rebuilds the board's shaders."),
+    GROUND_TWO_SCALE_PATCHES("Two-scale patches", 0, 1, 1, 0, 0, 1, Applies.PROGRAMS, null,
+          "The ground's broad patches from two noise scales, the finer one breaking bare soil and turf into smaller "
+                + "patches on banks and level tops. Off, one scale: one texture read less a pixel. Switching it rebuilds "
+                + "the board's shaders.");
 
     /** How a change reaches the GPU. */
     enum Applies {
@@ -85,6 +111,12 @@ enum BoardSwitch {
     /** On or off, rather than a value. */
     boolean toggle() { return min == 0 && max == 1 && step == 1; }
 
-    /** Whether a change selects other programs: the switch is part of a program key (BoardSwitches#programKey). */
-    boolean keyed() { return applies == Applies.DEFINE || applies == Applies.PROGRAMS; }
+    /**
+     * Whether a change selects other programs: the switch is part of a program key (BoardSwitches#programKey). A
+     * compact-ground rule's switch only while the compact ground is on: without it no program reads the rule.
+     */
+    boolean keyed() {
+        return applies == Applies.DEFINE
+              || applies == Applies.PROGRAMS && (GroundFamilies.ON || !GroundFamilies.Rule.has(this));
+    }
 }

@@ -137,18 +137,18 @@ class GpuTerrainLodSmokeTest {
                     assertTrue(terrain.busy(), "Opening must enqueue work instead of constructing the board in this call");
                     GpuReviewFrame.settle(terrain, tactical, scene, camera);
                     var distant = terrain.tacticalSurface(at);
-                    assertEquals(TerrainLod.DISTANT, firstLod(terrain));
+                    assertEquals(TerrainLod.DISTANT, firstLod(terrain, camera));
 
                     // Only the previous tier of a chunk is cached: test reuse between the tiers a zoom passes
                     // instead of assuming all old tiers survive.
                     view(camera, 2.5f);
                     GpuReviewFrame.settle(terrain, tactical, scene, camera);
-                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
+                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain, camera));
                     var medium = terrain.tacticalSurface(at);
 
                     view(camera, .6f);
                     GpuReviewFrame.settle(terrain, tactical, scene, camera);
-                    assertEquals(TerrainLod.FULL, firstLod(terrain));
+                    assertEquals(TerrainLod.FULL, firstLod(terrain, camera));
                     assertNotSame(distant, terrain.tacticalSurface(at));
                     capture(terrain, camera, "terrain-lod-close.png");
                     var close = terrain.tacticalSurface(at);
@@ -157,18 +157,18 @@ class GpuTerrainLodSmokeTest {
 
                     view(camera, 2.5f);
                     GpuReviewFrame.settle(terrain, tactical, scene, camera);
-                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
+                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain, camera));
                     assertSame(medium, terrain.tacticalSurface(at), "Returning to the previous tier reuses its installed geometry");
 
                     // Pinning full detail at a fixed camera uses the same incremental/cached path as zooming.
                     int revision = BoardGeometry.terrainRevision();
                     TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     GpuReviewFrame.settle(terrain, tactical, scene, camera);
-                    assertEquals(TerrainLod.FULL, firstLod(terrain));
+                    assertEquals(TerrainLod.FULL, firstLod(terrain, camera));
                     assertSame(close, terrain.tacticalSurface(at));
                     TerrainLod.tune(TerrainLod.DEFAULTS);
                     GpuReviewFrame.settle(terrain, tactical, scene, camera);
-                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
+                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain, camera));
                     assertSame(medium, terrain.tacticalSurface(at));
                     assertEquals(revision, BoardGeometry.terrainRevision());
 
@@ -176,13 +176,16 @@ class GpuTerrainLodSmokeTest {
                     // must reproduce the same geometry, without pretending the old object is still cached.
                     view(camera, 30);
                     GpuReviewFrame.settle(terrain, tactical, scene, camera);
-                    assertEquals(TerrainLod.DISTANT, firstLod(terrain));
+                    assertEquals(TerrainLod.DISTANT, firstLod(terrain, camera));
                     assertNotSame(distant, terrain.tacticalSurface(at));
                     assertEquals(distant, terrain.tacticalSurface(at), "Rebuilt distant geometry remains deterministic");
 
-                    // Request the uncached COARSE tier, then edit before that CPU preparation is installed.
-                    view(camera, 8);
-                    terrain.refine(camera.camera);
+                    // Request an uncached tier, then edit before that CPU preparation is installed: COARSE, or with
+                    // the height field, whose far level is the COARSE chunk, FULL once the cached MEDIUM is back.
+                    view(camera, TerrainField.ON ? .6f : 8);
+                    for (int i = 0; i < 16 && GpuTestSupport.field(terrain, "detailJob") == null; i++) {
+                        terrain.refine(camera.camera);
+                    }
                     assertTrue(GpuTestSupport.field(terrain, "detailJob") != null);
                     List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
                     BoardScene.Tile before = scene.tile(at);
@@ -339,8 +342,15 @@ class GpuTerrainLodSmokeTest {
         } finally { field.dispose(); }
     }
 
-    private static TerrainLod firstLod(GpuTerrain terrain) throws Exception {
-        return (TerrainLod) GpuTestSupport.field(((List<?>) GpuTestSupport.field(terrain, "chunks")).getFirst(), "lod");
+    /**
+     * The level a frame draws the first chunk at. The height field builds no chunk at the far level: its COARSE chunk
+     * carries the far ground too, and each frame picks one of the two (GpuTerrain#fieldWeights).
+     */
+    private static TerrainLod firstLod(GpuTerrain terrain, BoardCamera camera) throws Exception {
+        terrain.renderShadows(camera.camera, List.of());
+        terrain.render(camera.camera);
+        Object chunk = ((List<?>) GpuTestSupport.field(terrain, "chunks")).getFirst();
+        return (boolean) GpuTestSupport.field(chunk, "far") ? TerrainLod.DISTANT : (TerrainLod) GpuTestSupport.field(chunk, "lod");
     }
 
     private static ModelInstance propAt(GpuTerrain terrain, Coords at) throws Exception {

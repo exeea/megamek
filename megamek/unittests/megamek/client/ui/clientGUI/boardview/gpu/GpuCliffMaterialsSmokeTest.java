@@ -307,9 +307,16 @@ class GpuCliffMaterialsSmokeTest {
         var assets = new GpuAssets();
         var quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
+        // The reads every ground program holds, then the old path's fungal and cliff reads.
         String materials = GpuShaderSource.read("terrain-materials.glsl");
         int start = materials.indexOf("vec4 materialTexel(");
-        String sampling = materials.substring(start, materials.indexOf("#ifdef volcanicFlag", start));
+        String sampling = materials.substring(start, materials.indexOf("// Direct sunlight on flattened relief", start));
+        String old = GpuShaderSource.read("old-ground-material.glsl");
+        start = old.indexOf("vec4 fungusTexel(");
+        sampling += old.substring(start, old.indexOf("#ifdef volcanicFlag", start));
+        // The projection the reads take (enlargedShare reads it): its type, before them.
+        start = materials.indexOf("struct MaterialProjection {");
+        sampling = materials.substring(start, materials.indexOf("};", start) + 2) + "\n" + sampling;
         // The translated and fungal reads' heights (the terrain's parallax) sample through terrain-projection.glsl's.
         String projection = GpuShaderSource.read("terrain-projection.glsl");
         sampling = projection.substring(projection.indexOf("float heightTexel("), projection.indexOf("// planar's height"))

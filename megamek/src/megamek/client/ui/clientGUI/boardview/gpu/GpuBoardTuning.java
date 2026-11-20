@@ -1267,7 +1267,9 @@ final class GpuBoardTuning {
         for (BoardSwitch s : BoardSwitch.values()) {
             String name = "tuning-" + s.name().toLowerCase(Locale.ROOT).replace('_', '-');
             if (s.toggle()) {
-                CheckBox box = checkbox(skin, s.label, name);
+                // A compact-ground rule keeps its box off the page while the compact ground is off: it still holds the value.
+                CheckBox box = GroundFamilies.Rule.has(s) && !GroundFamilies.ON ? newCheckbox(skin, s.label, name)
+                      : checkbox(skin, s.label, name);
                 box.addListener(new TextTooltip(s.help, skin, "menu"));
                 box.addListener(new ChangeListener() {
                     @Override

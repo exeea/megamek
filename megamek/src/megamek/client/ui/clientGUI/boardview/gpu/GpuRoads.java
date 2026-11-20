@@ -141,24 +141,31 @@ final class GpuRoads {
         }
     }
 
-    /** Borrowed chunk-atlas region, retained per tile range so an edit can relocate unchanged road vertices. */
+    /**
+     * A coat's mask: its place in the board's mask array (GpuRoadMaskAtlas), retained per tile range so an edit can
+     * relocate unchanged road vertices. The texture it carries only names the array (GpuRoadMaskAtlas#array); the
+     * U offset holds the layer in its integer part.
+     */
     static final class Mask extends TextureAttribute {
         static final long TYPE = register("roadMask");
         static { TextureAttribute.Mask |= TYPE; }
         final MaskData data;
 
-        Mask(TextureRegion region, MaskData data) {
-            super(TYPE, region);
+        Mask(GpuRoadMaskAtlas.Place place, MaskData data) {
+            super(TYPE, place.texture());
+            offsetU = place.u();
+            offsetV = place.v();
+            scaleU = place.width();
+            scaleV = place.height();
             this.data = data;
         }
 
-        Mask withRegion(TextureRegion region) { return new Mask(region, data); }
+        Mask withPlace(GpuRoadMaskAtlas.Place place) { return new Mask(place, data); }
 
         @Override
         public Mask copy() {
-            var copy = new Mask(new TextureRegion(textureDescription.texture), data);
+            var copy = new Mask(new GpuRoadMaskAtlas.Place(textureDescription.texture, offsetU, offsetV, scaleU, scaleV), data);
             copy.textureDescription.set(textureDescription);
-            copy.offsetU = offsetU; copy.offsetV = offsetV; copy.scaleU = scaleU; copy.scaleV = scaleV;
             return copy;
         }
     }
@@ -1290,6 +1297,11 @@ final class GpuRoads {
             vertex = Arrays.copyOf(vertex, vertex.length + 5);
             vertex[vertex.length - 1] = 1;
         }
+        if (surface.fieldDrape != null) {
+            // A slab's side on a height-field hex keeps its place: its points stand at no ground sample (FieldDrape).
+            vertex = Arrays.copyOf(vertex, vertex.length + FieldDrape.FLOATS);
+            surface.fieldDrape.parent(Float.NaN, Float.NaN, Float.NaN, vertex, vertex.length - FieldDrape.FLOATS);
+        }
         return mesh.vertex(vertex);
     }
 
@@ -1331,6 +1343,11 @@ final class GpuRoads {
                 vertex[shape + 3] = lift;
                 vertex[shape + 4] = surface.fixedTessellation(ground.position) ? 1 : 0;
             }
+        }
+        if (surface.fieldDrape != null) {
+            // On a height-field hex the coat moves with the ground it lies on (FieldDrape).
+            vertex = Arrays.copyOf(vertex, vertex.length + FieldDrape.FLOATS);
+            surface.fieldDrape.parent(p.x, p.y, z - lift, vertex, vertex.length - FieldDrape.FLOATS);
         }
         return mesh.vertex(vertex);
     }

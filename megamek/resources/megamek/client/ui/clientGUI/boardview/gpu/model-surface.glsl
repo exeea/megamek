@@ -3,6 +3,7 @@
 #ifdef modelSurfaceFlag
 uniform float u_modelPaintMask; // Albedo alpha selects paint rather than opacity, in lit and unlit views.
 uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
+uniform vec2 u_modelEmissionView; // the emission's fall with the view: scale, offset; 0 none (GpuModelMaterial)
 uniform vec3 u_buildingPaint; // Placement colour on explicitly paintable building surfaces; white elsewhere.
 in vec2 v_modelUV;
 uniform float u_modelPremultiplied; // Premultiplied alpha is also used by unlit material previews.
@@ -205,6 +206,7 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     }
     // Godot's emission: the map times its tint, plus the constant glow.
     emission = emission * u_modelEmission + u_modelGlow;
+    if (u_modelEmissionView.x > 0.0) emission *= clamp(u_modelEmissionView.x * (dot(geometric, view) - u_modelEmissionView.y), 0.0, 1.0);
 #endif
     // Apply light controls after combining glTF emission and the shared material's glow.
     if (u_modelLight.x > 0.0) { emission *= u_modelLight.y; }

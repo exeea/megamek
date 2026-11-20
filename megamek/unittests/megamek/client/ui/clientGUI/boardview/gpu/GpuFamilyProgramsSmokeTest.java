@@ -130,6 +130,9 @@ class GpuFamilyProgramsSmokeTest {
         // Grass, dirt and cooled lava meet: plain, ordinary-blend and mixed volcanic family programs, under the cap.
         board.setHex(new Coords(4, 4), new Hex(0, "", "dirt"));
         board.setHex(new Coords(5, 4), new Hex(0, "magma:1", ""));
+        // Dirt away from the lava too: with the compact ground a chunk's hexes share one palette, and the one above is
+        // volcanic. This one gives the load its ordinary blend in either path, as the painted hex below needs.
+        board.setHex(new Coords(12, 12), new Hex(0, "", "dirt"));
         Coords painted = new Coords(10, 10);
         StringBuilder report = new StringBuilder();
         try (var fixture = GpuBoardFixture.create(board)) {
@@ -234,7 +237,7 @@ class GpuFamilyProgramsSmokeTest {
                     // Toggle AA while a family link is pending; day/night alone must keep the configuration.
                     boolean night = false;
                     long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);
-                    while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
+                    while (terrain.refine(camera.camera) | terrain.busy() || terrain.familiesPending()) {
                         if (!night && terrain.familyPrograms().building()) {
                             terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, !antialiasing));
                             frame.configure(NIGHT);
@@ -254,7 +257,7 @@ class GpuFamilyProgramsSmokeTest {
                     terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, antialiasing));
                     frame.configure(BoardAtmosphere.DEFAULTS);
                     frame.prepare(terrain, camera, scene);
-                    while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
+                    while (terrain.refine(camera.camera) | terrain.busy() || terrain.familiesPending()) {
                         assertTrue(System.nanoTime() < deadline, "The day must settle");
                         Thread.sleep(5);
                     }
@@ -283,7 +286,7 @@ class GpuFamilyProgramsSmokeTest {
                             frame.configure(settings);
                             frame.prepare(terrain, camera, scene);
                             while (terrain.refine(camera.camera) | terrain.busy()
-                                  || terrain.familyPrograms().pending() > 0 && terrain.familyPrograms().building()) {
+                                  || terrain.familiesPending() && terrain.familyPrograms().building()) {
                                 assertTrue(System.nanoTime() < deadline, "Edits and changes must settle");
                                 Thread.sleep(5);
                             }
@@ -419,7 +422,7 @@ class GpuFamilyProgramsSmokeTest {
                     frame.prepare(terrain, camera, scene);
                     // The day's programs are in the provider: taking them back links nothing.
                     long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(1);
-                    while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
+                    while (terrain.refine(camera.camera) | terrain.busy() || terrain.familiesPending()) {
                         assertTrue(System.nanoTime() < deadline, "The day's family programs must come back");
                         Thread.sleep(5);
                     }
@@ -624,10 +627,13 @@ class GpuFamilyProgramsSmokeTest {
             public void create() {
                 GpuProgramCache previous = GpuGlsl.programCache;
                 String property = System.getProperty(GpuFamilyPrograms.PROPERTY);
+                int failures = GpuFamilyPrograms.failures();
                 try {
                     PIXEL_FAILURES.clear();
                     body.run();
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    // A family program that fails to build falls back to the generic one, so its frame is still right.
+                    assertEquals(failures, GpuFamilyPrograms.failures(), "Family programs that failed to build");
                     assertTrue(PIXEL_FAILURES.isEmpty(), "Pixels: " + PIXEL_FAILURES);
                 } catch (Throwable error) {
                     failure.set(error);
@@ -824,7 +830,7 @@ class GpuFamilyProgramsSmokeTest {
         terrain.animate(.5f, List.of());
         long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);
         // The loading stage, not busy(), waits for a load's family programs: so does this.
-        while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
+        while (terrain.refine(camera.camera) | terrain.busy() || terrain.familiesPending()) {
             assertTrue(System.nanoTime() < deadline, () -> "Terrain must settle: " + terrain.buildDetails());
             Thread.sleep(5);
         }
@@ -856,7 +862,7 @@ class GpuFamilyProgramsSmokeTest {
                       gcMillis() - collected));
             }
             assertTrue(System.nanoTime() < deadline, "Family programs must finish");
-        } while (terrain.familyPrograms().pending() > 0);
+        } while (terrain.familiesPending());
         report.append(String.format(Locale.ROOT, "%s: %d frames in %.1f s while family programs built%n", name, frames,
               (System.nanoTime() - start) / 1e9)).append(slow);
         return longest;

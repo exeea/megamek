@@ -550,9 +550,9 @@ class GpuBoardPerformanceSmokeTest {
                         if (phase == warmupFrames) {
                             if (Boolean.getBoolean("megamek.gpu.performanceAssertPlainGround")) {
                                 // A source diagnostic may erase only channels proven absent from every sculpt layer.
-                                var plain = GpuTerrain.class.getDeclaredMethod("plainSculptFinish");
+                                var plain = GpuTerrain.class.getDeclaredMethod("plainSculptFinish", int.class);
                                 plain.setAccessible(true);
-                                assertEquals(true, plain.invoke(terrain(this)), "Expected non-emissive dielectric sculpt materials");
+                                assertEquals(true, plain.invoke(terrain(this), -1), "Expected non-emissive dielectric sculpt materials");
                             }
                             if (fixedAtmosphere) {
                                 assertEquals(measuredAtmosphere, GpuBoardTestUi.tuning(this).atmosphere());

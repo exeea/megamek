@@ -149,8 +149,33 @@ final class GpuGroundMap implements Disposable {
         String fragment = ground ? GpuShaderSource.replaceOnce(GpuShaderSource.read("ground-map.frag"),
               "// ground-map-functions", GpuShaderSource.read("terrain-hexes.glsl")
                     + GpuShaderSource.read("terrain-biome-mask.glsl"), "ground map") : GpuShaderSource.read("ground-map-cover.frag");
+        String vertex = GpuShaderSource.read("ground-map.vert");
+        // With the height field's switch off the program is today's, to the byte.
+        if (ground && TerrainField.ON) {
+            vertex = fieldVertex(vertex);
+            fragment = fieldFragment(fragment);
+        }
         return GpuGlsl.compile(ground ? "GPU ground map" : "GPU ground map cover", ground ? "#define groundFlag\n" : "",
-              GpuShaderSource.read("ground-map.vert"), fragment);
+              vertex, fragment);
+    }
+
+    /**
+     * A height field's ground (TerrainField), only with its switch on. A hex with cover weights carries them in its own
+     * attribute (TerrainField#COVER_LAYOUT): u_fieldCover 1 for its draw. A field part (u_field 1) whose vertex colour's
+     * alpha is below a quarter lies under water (GpuTerrain#waterColor): nothing grows there.
+     */
+    private static String fieldVertex(String source) {
+        source = GpuShaderSource.replaceOnce(source, "out vec4 v_weights;", "out vec4 v_weights;\nin vec4 a_fieldCover;\n"
+              + "uniform float u_fieldCover;\nuniform float u_field;\nin vec4 a_color;\nout float v_wet;", "ground map");
+        return GpuShaderSource.replaceOnce(source, "v_weights = a_coverWeights;",
+              "v_weights = u_fieldCover > .5 ? a_fieldCover : a_coverWeights;\n"
+                    + "    v_wet = u_field > .5 && a_color.a < .25 ? 1.0 : 0.0;", "ground map");
+    }
+
+    private static String fieldFragment(String source) {
+        source = GpuShaderSource.replaceOnce(source, "in vec4 v_weights;", "in vec4 v_weights;\nin float v_wet;", "ground map");
+        return GpuShaderSource.replaceOnce(source, "cover.x * smoothstep(.90, .94, up));",
+              "cover.x * smoothstep(.90, .94, up)) * (1.0 - v_wet);", "ground map");
     }
 
     /** The cover's shares, then the ground's height as depth: what the blades' vertex stage samples. */
@@ -330,8 +355,16 @@ final class GpuGroundMap implements Disposable {
         if (weights >= 0) { Gdx.gl.glVertexAttrib4f(weights, 1, 0, 0, 0); }
         int[] families = { uniform(ground, "u_grass"), uniform(ground, "u_earth"), uniform(ground, "u_snow") };
         int world = uniform(ground, "u_worldTrans");
+        // Only a height field's program has these (fieldVertex).
+        int fieldCover = TerrainField.ON ? uniform(ground, "u_fieldCover") : -1;
+        int field = TerrainField.ON ? uniform(ground, "u_field") : -1;
         try {
             for (Renderable part : draws.ground) {
+                if (TerrainField.ON) {
+                    boolean fielded = TerrainField.isField(part.material);
+                    ground.setUniformf(fieldCover, fielded && part.material.has(GpuSurfaceBlend.TYPE) ? 1 : 0);
+                    ground.setUniformf(field, fielded ? 1 : 0);
+                }
                 for (int kind = 0; kind < families.length; kind++) {
                     float[] slots = slots(part.material, kind == 0 ? GRASS : kind == 1 ? EARTH : SNOW);
                     ground.setUniformf(families[kind], slots[0], slots[1], slots[2], slots[3]);
@@ -348,6 +381,8 @@ final class GpuGroundMap implements Disposable {
         covers.bind();
         covers.setUniformMatrix(uniform(covers, "u_projViewTrans"), projection);
         covers.setUniformi(uniform(covers, "u_maskTexture"), 0);
+        // A road's mask lies in the board's mask array (GpuRoadMaskAtlas), on its own unit.
+        covers.setUniformi(uniform(covers, "u_roadMasks"), 1);
         int mask = uniform(covers, "u_mask"), maskUv = uniform(covers, "u_maskUV"), opacity = uniform(covers, "u_opacity");
         int lift = uniform(covers, "u_lift"), world = uniform(covers, "u_worldTrans");
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
@@ -356,7 +391,10 @@ final class GpuGroundMap implements Disposable {
         for (Renderable part : draws.roads) {
             // A road is its mask's alpha; a coat without one covers whole.
             var region = part.material.get(TextureAttribute.class, GpuRoads.Mask.TYPE);
-            if (region != null) { region.textureDescription.texture.bind(); }
+            if (region != null) {
+                GpuRoadMaskAtlas.array(region.textureDescription.texture).bind(1);
+                Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+            }
             covers.setUniformi(mask, region == null ? 0 : 2);
             draw(covers, world, part);
         }

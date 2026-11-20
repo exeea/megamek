@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.GL20;
@@ -67,6 +68,12 @@ final class GpuFamilyPrograms {
     static final int FRESH = 4;
     /** The share in force: the shader warm-up's process (GpuShaderWarmup), whose links no frame waits for, lifts it. */
     static int fresh = FRESH;
+    /**
+     * Family programs that failed to build in this process. A failure is a fault of the shader text, not a state a
+     * board may be in: the generic program hides it from the picture, and the count of links after loading can't see
+     * it (the failed link started behind the loading stage and isn't tried again), so the guards read this.
+     */
+    private static final AtomicInteger FAILURES = new AtomicInteger();
 
     /**
      * Marks a material drawn by its family program. It is part of the material's mask, so the comparisons that already
@@ -324,7 +331,8 @@ final class GpuFamilyPrograms {
         } catch (RuntimeException failure) {
             // Its draws keep the generic program, and a broken variant is not tried again in this configuration.
             variant.failed = current;
-            LOGGER.warn(failure, "Terrain family program {} failed; its draws keep the generic program",
+            FAILURES.incrementAndGet();
+            LOGGER.error(failure, "Terrain family program {} failed; its draws keep the generic program",
                   Arrays.toString(variant.families));
         } finally {
             freshLinks += preparation.freshLinks() - started;
@@ -410,6 +418,8 @@ final class GpuFamilyPrograms {
 
     /** Distinct variants installed chunks asked for, built or not. */
     int requested() { return variants.size(); }
+
+    static int failures() { return FAILURES.get(); }
 
     void dispose() {
         variants.values().forEach(Variant::release);

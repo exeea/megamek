@@ -216,9 +216,45 @@ class BoardRoadConcreteTest {
         assertTrue(marked, "A road continuing across concrete retains markings near the shared border");
     }
 
+    /**
+     * A fitted corner does not stand in the course of a way that does not run on this pavement (a road, a rail or a
+     * bridge deck beside or below it): there it goes back on its hex, and its run stays as fitted. A way that runs on
+     * the pavement moves with it. Checks the moved corners of {@code paved} against the ways beside it, each course
+     * the widest its exits allow; returns how many it examined.
+     */
+    static int fittedCornersKeepOutOfWaysBeside(BoardScene scene, Coords paved) {
+        var tile = scene.tile(paved);
+        var beside = new ArrayList<BoardRoad>();
+        for (int direction = 0; direction < 6; direction++) {
+            var source = scene.neighbor(tile, direction);
+            if (source == null || !BoardRoad.carriageway(source)) { continue; }
+            boolean own = source.surface() == BoardScene.Surface.CONCRETE && !source.liquid().present()
+                  && source.groundLevel() == tile.groundLevel();
+            if (!own) { beside.add(BoardRoad.clearance(source.coords(), source.wayExits())); }
+        }
+        var concrete = BoardConcrete.of(scene);
+        int examined = 0;
+        for (int k = 0; k < 6 && !beside.isEmpty(); k++) {
+            var shift = concrete.corners(paved).get(k);
+            if (shift.x() == 0 && shift.y() == 0) { continue; }
+            Vector3 fitted = concrete.corner(paved, k);
+            assertTrue(BoardRoad.distance(beside, fitted.x, fitted.y) >= BoardRoad.SHOULDER,
+                  "A fitted corner keeps out of the way beside its pavement: " + paved.getBoardNum() + " corner " + k);
+            examined++;
+        }
+        return examined;
+    }
+
     @Test
     void parkDistrictThroughRoadsAndRoundaboutsStayPaintedAcrossFittedConcrete() throws Exception {
         var scene = BoardScenes.installedScene("Map Pack City/City Districts/16x17 Park District.board");
+        int examined = 0;
+        for (var tile : scene.tiles()) {
+            if (tile.surface() == BoardScene.Surface.CONCRETE && !tile.liquid().present()) {
+                examined += fittedCornersKeepOutOfWaysBeside(scene, tile.coords());
+            }
+        }
+        assertTrue(examined > 30, "Exercise fitted concrete corners beside roads: " + examined);
         record Crossing(Coords road, Coords concrete) { }
         for (var crossing : List.of(
               new Crossing(new Coords(13, 7), new Coords(14, 7)),
@@ -235,9 +271,10 @@ class BoardRoadConcreteTest {
                 var surface = new BoardSurface(scene, receiver, lod);
                 var painted = road(scene, crossing.road(), lod);
                 var bounds = course.footprint(0).getBounds2D();
-                int checked = 0;
                 float scale = BoardGeometry.hexScale();
-                // Fitted concrete can move well outside its nominal hex; sample the actual road footprint.
+                // Fitted concrete can move well outside its nominal hex; sample the actual road footprint. No fitted
+                // corner stands in this road's course any more, so there may be no asphalt across fitted concrete to
+                // sample.
                 for (int x = (int) Math.floor(bounds.getMinX()); x <= Math.ceil(bounds.getMaxX()); x++) {
                     for (int y = (int) Math.floor(bounds.getMinY()); y <= Math.ceil(bounds.getMaxY()); y++) {
                         if (BoardScenes.maskAlpha(painted.mask(), x, y) < .99f) { continue; }
@@ -246,10 +283,8 @@ class BoardRoadConcreteTest {
                         if (!Float.isFinite(BoardSurface.sampleHeight(surface.groundFaces(), px, py, Float.NaN))) { continue; }
                         assertTrue(painted.covers(px, py), "Concrete must not hide asphalt at "
                               + crossing + " " + lod + ": " + px + "," + py);
-                        checked++;
                     }
                 }
-                assertTrue(checked > 10, "Exercise actual asphalt crossing the fitted concrete edge: " + crossing);
             }
         }
     }

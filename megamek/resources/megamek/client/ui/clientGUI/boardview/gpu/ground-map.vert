@@ -23,6 +23,10 @@ uniform vec4 u_maskUV;
 // World units it is raised by: paint and water lie clear of their ground, an object's footprint is lowered onto it.
 uniform float u_lift;
 out vec2 v_maskUV;
+// A road mask's layer in the board's mask array (GpuRoadMaskAtlas), carried in its region's U offset.
+flat out float v_maskLayer;
+// Where in its mask a road's point lies: outside 0..1 the coat draws nothing (terrain-road.frag), nor does its cover.
+out vec2 v_roadMaskUV;
 #endif
 
 void main() {
@@ -33,7 +37,10 @@ void main() {
     v_weights = a_coverWeights;
 #else
     world.z += u_lift;
-    v_maskUV = u_mask == 2 ? a_roadMaskRegion.xy + a_roadMaskUV * a_roadMaskRegion.zw : u_maskUV.xy + a_texCoord0 * u_maskUV.zw;
+    v_maskLayer = u_mask == 2 ? floor(a_roadMaskRegion.x) : 0.0;
+    v_roadMaskUV = a_roadMaskUV;
+    v_maskUV = u_mask == 2 ? vec2(a_roadMaskRegion.x - v_maskLayer, a_roadMaskRegion.y) + a_roadMaskUV * a_roadMaskRegion.zw
+          : u_maskUV.xy + a_texCoord0 * u_maskUV.zw;
 #endif
     gl_Position = u_projViewTrans * world;
 }

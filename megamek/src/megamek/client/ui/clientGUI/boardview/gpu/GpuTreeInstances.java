@@ -185,7 +185,9 @@ final class GpuTreeInstances {
         int at = lod * 2 + (fades ? 1 : 0);
         if (known[at] == null) {
             List<Renderable> result = new ArrayList<>();
-            forEachPart(models.apply(name, lod).nodes, part -> {
+            // A level without a model (a scatter plant's last, TreeLod#SCATTER) draws nothing.
+            Model model = models.apply(name, lod);
+            forEachPart(model == null ? new com.badlogic.gdx.utils.Array<>() : model.nodes, part -> {
                 if (fades && !GpuCutoutFade.fades(part.material)) { return; }
                 Renderable renderable = new Renderable();
                 renderable.meshPart.set(part.meshPart);
@@ -215,6 +217,7 @@ final class GpuTreeInstances {
     void speciesParts(String species, BiConsumer<Material, VertexAttributes> action) {
         for (int level = 0; level < TreeLod.LEVELS; level++) {
             Model model = models.apply(species, level);
+            if (model == null) { continue; }
             VertexAttributes layout = model.meshes.first().getVertexAttributes();
             forEachPart(model.nodes, part -> action.accept(part.material, layout));
         }
@@ -307,7 +310,8 @@ final class GpuTreeInstances {
          * A tree that changes level dissolves from one into the other over {@code duration} seconds of the clock
          * ({@code now}, positive): it draws at both, which keep complementary pixels (terrain-foliage.frag), and holds
          * the level it takes until the dissolve ends. Returns when the last dissolve ends, 0 if none: a call from then
-         * on drops the levels they left. With {@code duration} 0 trees switch at once, and dissolves end.
+         * on drops the levels they left. With {@code duration} 0 trees switch at once, and dissolves end; so they do
+         * across a cut from the last scale ({@link TreeLod#cut}).
          */
         float detail(float pixelsPerUnit, float now, float duration) {
             // The same scale with every species split and nothing dissolving changes nothing: a still perspective view
@@ -315,6 +319,7 @@ final class GpuTreeInstances {
             boolean unchanged = forced == splitForced && pixelsPerUnit == this.pixelsPerUnit && dissolves.isEmpty()
                   && levels.size() == trees.size();
             splitForced = forced;
+            if (TreeLod.cut(this.pixelsPerUnit, pixelsPerUnit)) { duration = 0; }
             this.pixelsPerUnit = pixelsPerUnit;
             this.now = now;
             this.duration = duration;
@@ -347,7 +352,8 @@ final class GpuTreeInstances {
             if (own.length < sizes.size) { own = new int[sizes.size]; }
             for (int i = 0, was = 0; i < sizes.size; i++) {
                 while (previous != null && was < TreeLod.LEVELS - 1 && i >= previous[was + 1]) { was++; }
-                own[i] = forced >= 0 ? forced : holds(dissolve, i) ? was : TreeLod.level(sizes.get(i) * pixelsPerUnit, was);
+                own[i] = forced >= 0 ? forced : holds(dissolve, i) ? was
+                      : TreeLod.level(TreeLod.pixels(species), sizes.get(i) * pixelsPerUnit, was);
             }
             // A larger tree never takes a coarser level than a smaller one: the others give way to the trees that hold.
             for (int i = 0, floor = 0; dissolve != null && i < sizes.size; i++) {
@@ -548,7 +554,7 @@ final class GpuTreeInstances {
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
               "fallBegin();\n#ifdef impostorFlag\nvec4 pos = vec4(impostorPosition(a_position), 1.0);\n#else\n"
                     + "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#endif\n"
-                    + "#ifdef levelDissolveFlag\nv_levelDissolve = instanceDissolve();\n#endif\n");
+                    + "#ifdef levelDissolveFlag\nv_levelDissolve = instanceDissolve();\nv_instanceTint = instanceTint();\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
         source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
         // An impostor's quad stands where it shows, at the depth of its plant's front (tree-instances.glsl).
@@ -590,6 +596,9 @@ final class GpuTreeInstances {
                 DepthShader.Config chosen = instanced ? trees : plain;
                 // A tree impostor's quad turns toward the light and shows its frames (impostor-sample.glsl).
                 boolean impostor = instanced && GpuTerrain.impostor(renderable.material);
+                // Field meshes never share a program with the rest: GpuShaderProvider reuses one for any draw it
+                // accepts, and the shadow pass's field programs are GpuTerrain#fieldDepth's, which morph.
+                boolean field = TerrainField.isField(renderable.material);
                 String vertex = instanced ? trees.vertexShader : plainVertex;
                 DepthShader result = new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
                       DepthShader.createPrefix(renderable, chosen) + (impostor ? "#define impostorFlag\n" : ""),
@@ -597,7 +606,8 @@ final class GpuTreeInstances {
                     @Override
                     public boolean canRender(Renderable other) {
                         return instanced(other) == instanced
-                              && (instanced && GpuTerrain.impostor(other.material)) == impostor && super.canRender(other);
+                              && (instanced && GpuTerrain.impostor(other.material)) == impostor
+                              && TerrainField.isField(other.material) == field && super.canRender(other);
                     }
                 };
                 GpuShadowLight.register(result);

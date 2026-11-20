@@ -52,8 +52,6 @@ final class GpuTextures<K> implements Disposable {
     private int slotCount;
     private long packedArea, liveArea;
     private boolean retainReplaced;
-    /** Its other owners (#share): each disposes it, and the last one's dispose frees it. */
-    private int sharers;
     private record Pages(TextureAtlas color, PixmapPacker colorPacker) implements Disposable {
         @Override
         public void dispose() {
@@ -63,9 +61,6 @@ final class GpuTextures<K> implements Disposable {
     }
     private final List<Pages> retired = new ArrayList<>();
     private TextureAtlas publishedColor;
-    /** The images {@link #prepack} packed and their slots' names, until the update that uploads them. */
-    private Map<K, BoardScene.Pixels> prepacked;
-    private Map<BoardScene.Pixels, String> prepackedNames;
 
     /** What a new atlas's pages must hold: its images' area with their margins, and the largest image each way. */
     private record Extent(long area, int width, int height) {
@@ -83,21 +78,6 @@ final class GpuTextures<K> implements Disposable {
                   Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
         }
     }
-
-    /**
-     * Packs a new atlas's first images into its pages, which draws nothing and so may run on any thread: a city chunk's
-     * road masks are a fifth of a second of blits. The update with this same map then only uploads the pages; any other
-     * update packs as if this had not run. Whoever never updates it disposes it.
-     */
-    GpuTextures<K> prepack(Map<K, BoardScene.Pixels> images) {
-        packer = Extent.of(new HashSet<>(images.values())).packer();
-        prepackedNames = packed(images);
-        prepacked = images;
-        return this;
-    }
-
-    /** The images of {@link #prepack}, for the update that takes them; null without any. */
-    Map<K, BoardScene.Pixels> prepacked() { return prepacked; }
 
     /** Packs the images no slot holds yet, each once, in the map's order: each one's slot name. */
     private Map<BoardScene.Pixels, String> packed(Map<K, BoardScene.Pixels> images) {
@@ -158,9 +138,6 @@ final class GpuTextures<K> implements Disposable {
 
     /** Keys whose UVs or texture pages changed; unchanged meshes can keep their existing atlas references. */
     Set<K> updateRegions(Map<K, BoardScene.Pixels> images) {
-        // Other images than those packed ahead: as a new atlas.
-        boolean taken = prepacked != null && prepacked == images;
-        if (prepacked != null && !taken) { dispose(); }
         if (images.isEmpty()) {
             Set<K> changed = Set.copyOf(entries.keySet());
             replacePages();
@@ -223,13 +200,11 @@ final class GpuTextures<K> implements Disposable {
               || extent.width() + 3 * ATLAS_BLEED > packer.getPageWidth()
               || extent.height() + 3 * ATLAS_BLEED > packer.getPageHeight()
               || packedArea + addedArea > Math.max(2 * area, (long) packer.getPageWidth() * packer.getPageHeight());
-        if (repack && !taken) {
+        if (repack) {
             replacePages();
             packer = extent.packer();
         }
-        Map<BoardScene.Pixels, String> names = taken ? prepackedNames : packed(images);
-        prepacked = null;
-        prepackedNames = null;
+        Map<BoardScene.Pixels, String> names = packed(images);
         if (!names.isEmpty()) {
             atlas = atlas(packer, atlas, names.values());
             names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name)));
@@ -434,21 +409,8 @@ final class GpuTextures<K> implements Disposable {
         return entries.get(key).region;
     }
 
-    /** Whether every one of these keys has its slot already: nothing to pack or upload for them. */
-    boolean holds(Set<K> keys) { return atlas != null && entries.keySet().containsAll(keys); }
-
-    /** This atlas for one more owner, which disposes it as every owner does. */
-    GpuTextures<K> share() {
-        sharers++;
-        return this;
-    }
-
     @Override
     public void dispose() {
-        if (sharers > 0) {
-            sharers--;
-            return;
-        }
         publishedColor = null;
         releaseRetiredPages();
         if (atlas != null) {
@@ -465,7 +427,5 @@ final class GpuTextures<K> implements Disposable {
         slotCount = 0;
         packedArea = 0;
         liveArea = 0;
-        prepacked = null;
-        prepackedNames = null;
     }
 }

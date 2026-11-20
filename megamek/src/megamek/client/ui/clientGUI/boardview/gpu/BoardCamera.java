@@ -25,9 +25,10 @@ import megamek.logging.MMLogger;
 final class BoardCamera {
     private static final MMLogger LOGGER = MMLogger.create(BoardCamera.class);
     static final float ISOMETRIC_TILT = 54.73561f;
-    // Manual zoom limits: smaller values zoom in, larger values zoom out.
+    // Manual zoom limits: smaller values zoom in, larger values zoom out. The height field draws whole boards far out
+    // (TerrainLod's HEXFAN), so it zooms out further.
     private static final float MIN_ZOOM = 0.05f;
-    private static final float MAX_ZOOM = 20f;
+    private static final float MAX_ZOOM = TerrainField.ON ? 50f : 20f;
     static final float ENTRANCE_SECONDS = 1.2f;
     private static final float ENTRANCE_ZOOM = 1.35f;
     static final float MAX_TILT = 80;

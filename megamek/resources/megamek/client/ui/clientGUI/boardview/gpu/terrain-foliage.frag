@@ -55,6 +55,9 @@ coverageIn float v_alphaTest;
 #endif
 #endif
 uniform float u_foliage; // 0 solid, 1 canopy, 2 snow, 3 fungal tissue
+#ifdef levelDissolveFlag
+flat in float v_instanceTint;
+#endif
 uniform float u_metre; // world units per metre
 uniform float u_foliageProxy; // Exact authored branch-card roles, not all thin tissue.
 // 1 for a mirror image drawn as it is, whose reversed winding turns its visible faces into back faces (GpuTerrain);
@@ -89,11 +92,14 @@ void main() {
     vec2 du, dv;
     vec3 frameView;
     vec2 uv = impostorUV(du, dv, frameView);
-#else
+#elif defined(diffuseTextureFlag)
     vec2 uv = v_diffuseUV;
-#ifdef normalTextureFlag
-    vec2 du = dFdx(v_diffuseUV), dv = dFdy(v_diffuseUV);
+#else
+    // Untextured foliage (a scatter bush's vertex colours) has no coordinate to read.
+    vec2 uv = vec2(0.0);
 #endif
+#if !defined(impostorFlag) && defined(normalTextureFlag)
+    vec2 du = dFdx(v_diffuseUV), dv = dFdy(v_diffuseUV);
 #endif
     surfaceVariance = normalVariance(dFdx(baseNormal), dFdy(baseNormal));
     vec4 diffuse = vec4(1.0);
@@ -137,6 +143,10 @@ void main() {
 #endif
 #ifdef diffuseColorFlag
     diffuse *= u_diffuseColor;
+#endif
+#ifdef levelDissolveFlag
+    // A stand's plant in its own shade (tree-instances.glsl's instanceTint): a scatter bush's by its turn, 1 for a tree.
+    diffuse.rgb *= v_instanceTint;
 #endif
 #ifdef blendedFlag
     float opacity = diffuse.a * v_opacity;

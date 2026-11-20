@@ -120,26 +120,44 @@ class TerrainLodTest {
         } finally { BoardRelief.tune(previous); }
     }
 
+    /** Height-field water's texels are the field's values at each texel's place (FieldWater), whatever the detail. */
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void waterFieldDoesNotIntroduceASeamBetweenDetailLevels(boolean rough) {
         var scene = waterScene(new Coords(7, 3), rough);
+        FieldBoard board = FieldBoard.of(scene, BoardRelief.tuning().stepOutline());
         Map<Coords, BoardSurface> left = new HashMap<>(), right = new HashMap<>();
-        for (var tile : scene.tiles()) {
-            (tile.coords().getX() < 8 ? left : right).put(tile.coords(),
-                  new BoardSurface(scene, tile, tile.coords().getX() < 8 ? TerrainLod.DISTANT : TerrainLod.FULL));
+        for (TerrainLod lod : List.of(TerrainLod.DISTANT, TerrainLod.FULL)) {
+            var field = new ChunkField(board, lod, BoardGeometry.floor(scene));
+            for (var tile : scene.tiles()) {
+                if (tile.coords().getX() < 8 != (lod == TerrainLod.DISTANT)) { continue; }
+                var block = field.block(tile.coords());
+                var surface = new BoardSurface(scene, tile, lod, block);
+                if (tile.liquid().present()) { FieldWater.fill(scene, surface, board, block); }
+                (lod == TerrainLod.DISTANT ? left : right).put(tile.coords(), surface);
+            }
         }
-        var a = GpuWaterShader.Field.prepare(scene, Map.of(), left);
-        var b = GpuWaterShader.Field.prepare(scene, Map.of(), right);
+        var a = GpuWaterShader.Field.prepare(scene, Map.of(), left, false, board);
+        var b = GpuWaterShader.Field.prepare(scene, Map.of(), right, false, board);
         assertEquals(a.spacing(), b.spacing());
         int compared = 0;
-        for (int y = Math.max(a.firstY(), b.firstY()); y < Math.min(a.firstY() + a.height(), b.firstY() + b.height()); y++) {
-            for (int x = Math.max(a.firstX(), b.firstX()); x < Math.min(a.firstX() + a.width(), b.firstX() + b.width()); x++) {
+        int fromX = Math.max(a.firstX(), b.firstX()), fromY = Math.max(a.firstY(), b.firstY());
+        int toX = Math.min(a.firstX() + a.width(), b.firstX() + b.width()), toY = Math.min(a.firstY() + a.height(), b.firstY() + b.height());
+        // The texels the field gives (its water and the banks beside it), with a ring for the depth blur's neighbours;
+        // elsewhere (dry ground away from the water, where no water is drawn) texels keep today's per-surface values.
+        int span = toX - fromX + 2;
+        float[] given = FieldWater.texels(board, scene, a.spacing(), fromX - 1, fromY - 1, span, new float[span * (toY - fromY + 2)]);
+        for (int y = fromY; y < toY; y++) {
+            for (int x = fromX; x < toX; x++) {
+                boolean field = true;
+                for (int n = 0; n < 9; n++) {
+                    field &= !Float.isNaN(given[(y - fromY + n / 3) * span + x - fromX + n % 3]);
+                }
+                if (!field) { continue; }
                 for (int channel = 0; channel < 4; channel++) {
                     int ai = ((y - a.firstY()) * a.width() + x - a.firstX()) * 4 + channel;
                     int bi = ((y - b.firstY()) * b.width() + x - b.firstX()) * 4 + channel;
-                    assertEquals(Byte.toUnsignedInt(a.pixels()[ai]), Byte.toUnsignedInt(b.pixels()[bi]), 1,
-                          "Shared water-field sample " + x + "," + y + " channel " + channel);
+                    assertEquals(a.pixels()[ai], b.pixels()[bi], "Shared water-field sample " + x + "," + y + " channel " + channel);
                     compared++;
                 }
             }

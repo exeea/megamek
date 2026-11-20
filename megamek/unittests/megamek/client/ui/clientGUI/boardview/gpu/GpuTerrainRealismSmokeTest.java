@@ -791,18 +791,18 @@ class GpuTerrainRealismSmokeTest {
                         "return vec3(0.0);"))));
         }
         if (all || diagnostics.contains("materials")) {
-            String materials = GpuShaderSource.readDisk("terrain-materials.glsl");
+            String materials = GpuShaderSource.readDisk("old-ground-material.glsl");
             String prepared = "TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, vec3 world, vec3 face,";
             String evaluator = materials.contains(prepared) ? prepared
                   : "TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,";
             result.add(new Variant("diagnostic-no-material-maps", null, Map.of(
-                  "terrain-materials.glsl", functionBody(materials, evaluator,
+                  "old-ground-material.glsl", functionBody(materials, evaluator,
                         "return TerrainMaterial(vec3(.2), face, 1.0, .5, Finish(.85, 0.0, 0.0, vec3(0.0)), 0.0, 1.0);"),
                   "terrain-magma.glsl", functionBody(GpuShaderSource.readDisk("terrain-magma.glsl"),
-                        "vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy)", """
-                              if (map == MAGMA_COLOR) return vec4(.2, .2, .2, 1.0);
-                              if (map == MAGMA_NORMAL) return vec4(128.0 / 255.0, 128.0 / 255.0, 1.0, 1.0);
-                              if (map == MAGMA_SURFACE) return vec4(.5, .85, 1.0, 0.0);
+                        "vec4 magmaTexel(float layer, vec2 uv, vec2 dx, vec2 dy)", """
+                              if (layer == u_magmaLayers.x) return vec4(.2, .2, .2, 1.0);
+                              if (layer == MAGMA_NORMAL) return vec4(128.0 / 255.0, 128.0 / 255.0, 1.0, 1.0);
+                              if (layer == MAGMA_SURFACE) return vec4(.5, .85, 1.0, 0.0);
                               return vec4(0.0, .5, .5, 0.0);
                               """))));
             report.append("No-material-maps bypasses naturalMaterialFor evaluation and replaces all magmaTexel ")
@@ -856,8 +856,8 @@ class GpuTerrainRealismSmokeTest {
     private static void materialDiagnostics(List<Variant> result, List<String> diagnostics, StringBuilder report) {
         boolean detail = diagnostics.contains("materialDetail");
         if (detail || diagnostics.contains("ordinaryMaterial")) {
-            materialProbe(result, "ordinary-material", Map.of("terrain-materials.glsl",
-                  functionBody(GpuShaderSource.readDisk("terrain-materials.glsl"),
+            materialProbe(result, "ordinary-material", Map.of("old-ground-material.glsl",
+                  functionBody(GpuShaderSource.readDisk("old-ground-material.glsl"),
                         "TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, vec3 world, vec3 face,",
                         "return TerrainMaterial(vec3(.2), face, 1.0, .5, Finish(.92, 0.0, 0.0, vec3(0.0)), 0.0, 1.0);")));
             report.append("Ordinary-material bypasses the full ordinary evaluator, retaining volcanic evaluation. ")
@@ -865,16 +865,16 @@ class GpuTerrainRealismSmokeTest {
                   .append("this is a family-work ablation, not isolated texture bandwidth.\n");
         }
         if (detail || diagnostics.contains("ordinaryNormals")) {
-            materialProbe(result, "ordinary-normals", Map.of("terrain-materials.glsl",
-                  functionBody(GpuShaderSource.readDisk("terrain-materials.glsl"),
+            materialProbe(result, "ordinary-normals", Map.of("old-ground-material.glsl",
+                  functionBody(GpuShaderSource.readDisk("old-ground-material.glsl"),
                         "vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face,",
                         "return vec4(face, 1.0);")));
             report.append("Ordinary-normals removes ordinary normal/AO reads and reconstruction; ")
                   .append("color/height and material coverage remain, normal-dependent lighting changes.\n");
         }
         if (detail || diagnostics.contains("ordinaryColors")) {
-            materialProbe(result, "ordinary-colors", Map.of("terrain-materials.glsl",
-                  functionBody(GpuShaderSource.readDisk("terrain-materials.glsl"),
+            materialProbe(result, "ordinary-colors", Map.of("old-ground-material.glsl",
+                  functionBody(GpuShaderSource.readDisk("old-ground-material.glsl"),
                         "vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection p,",
                         "return amount < .0001 ? vec4(0.0) : vec4(.2, .2, .2, .5);")));
             report.append("Ordinary-colors removes color/height sampling and pigment treatment. ")
@@ -908,8 +908,8 @@ class GpuTerrainRealismSmokeTest {
                   .append("It removes the second phase and plate contact; the visible combined pattern changes.\n");
         }
         if (detail || diagnostics.contains("contactNoise")) {
-            materialProbe(result, "contact-noise", Map.of("terrain-materials.glsl",
-                  functionBody(GpuShaderSource.readDisk("terrain-materials.glsl"),
+            materialProbe(result, "contact-noise", Map.of("old-ground-material.glsl",
+                  functionBody(GpuShaderSource.readDisk("old-ground-material.glsl"),
                         "float coverPatch(vec3 world, float familyId)", "return .5;")));
             report.append("Contact-noise replaces two contact-field reads per evaluated palette slot with .5. ")
                   .append("Raw coverage/material evaluations remain; final height-competition weights change.\n");

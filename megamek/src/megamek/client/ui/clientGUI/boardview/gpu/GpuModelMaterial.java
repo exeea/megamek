@@ -26,6 +26,7 @@ final class GpuModelMaterial extends Attribute {
     final float metallic;
     final float scatter;
     final Texture map;
+    /** The emission map's linear tint (RGB), then, where its board material has one, its fall with the view (scale, offset). */
     final float[] tint;
     final float[] glow;
     /** A board material's .tres gave it; otherwise the GLB's own glTF material did. */
@@ -162,6 +163,15 @@ final class GpuModelMaterial extends Attribute {
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var surface = attributes.get(GpuModelMaterial.class, TYPE);
                 target.set(id, surface.tint[0], surface.tint[1], surface.tint[2]);
+            }
+        });
+        // The emission's fall with the view, clamp(scale (N.V - offset), 0, 1) (model-surface.glsl): a far atlas's lit slits
+        // (GpuMaterialMaps#modelFinish); 0, 0 for every other material, whose emission it leaves as it is.
+        shader.register("u_modelEmissionView", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                float[] tint = attributes.get(GpuModelMaterial.class, TYPE).tint;
+                target.set(id, tint.length > 4 ? tint[3] : 0f, tint.length > 4 ? tint[4] : 0f);
             }
         });
         shader.register("u_modelRelief", new BaseShader.LocalSetter() {

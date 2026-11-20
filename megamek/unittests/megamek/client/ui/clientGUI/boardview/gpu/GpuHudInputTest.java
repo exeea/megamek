@@ -24,6 +24,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
@@ -126,7 +127,7 @@ class GpuHudInputTest {
         Gdx.files = mock(Files.class);
         // The HUD skin reads its enemy icon from the classpath.
         when(Gdx.files.classpath(anyString())).thenAnswer(call -> new Lwjgl3Files().classpath(call.getArgument(0)));
-        Gdx.graphics = mock(Graphics.class);
+        Gdx.graphics = mock(Graphics.class, withSettings().stubOnly());
         Gdx.gl = mock(GL20.class);
         AtomicInteger textures = new AtomicInteger();
         when(Gdx.gl.glGenTexture()).thenAnswer(call -> textures.incrementAndGet());

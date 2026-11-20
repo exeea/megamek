@@ -256,8 +256,19 @@ class GpuNaturalBridgeSmokeTest {
     private static int sample(BoardCamera camera, Vector3 point) {
         var screen = camera.camera.project(new Vector3(point));
         var pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
-        try { return pixels.getPixel(Math.round(screen.x), Math.round(screen.y)); }
-        finally { pixels.dispose(); }
+        // The mean of the 41 x 41 pixels round the point: one pixel can be a dark speck of rock or a road's repair patch.
+        try {
+            long r = 0, g = 0, b = 0;
+            for (int dx = -20; dx <= 20; dx++) {
+                for (int dy = -20; dy <= 20; dy++) {
+                    int pixel = pixels.getPixel(Math.round(screen.x) + dx, Math.round(screen.y) + dy);
+                    r += pixel >>> 24 & 255;
+                    g += pixel >>> 16 & 255;
+                    b += pixel >>> 8 & 255;
+                }
+            }
+            return (int) (r / 1681) << 24 | (int) (g / 1681) << 16 | (int) (b / 1681) << 8 | 255;
+        } finally { pixels.dispose(); }
     }
 
     private static float difference(int a, int b) {

@@ -46,7 +46,7 @@ final class BoardRoadBank {
     /** How far from a poured or wet hex natural ground fades into its bank, in tile pixels. */
     private static final float FADE = 12;
     /** How far, in hexes, a grade's reserved ground and bank can reach. */
-    private static final int REACH = 3;
+    static final int REACH = 3;
 
     /** A grade shaping the ground, how far its bank reaches from its outline, and the box that reach spans. */
     private record Bank(BoardRoadGrade grade, int index, float fill, float reach, float minX, float minY, float maxX,
@@ -151,6 +151,14 @@ final class BoardRoadBank {
 
     /** Whether any carriageway's ground or bank reaches this hex's surroundings. */
     boolean active() { return !grades.isEmpty(); }
+
+    /** Whether a carriageway reserves the ground at a point. */
+    boolean reserved(float x, float y) {
+        for (var grade : grades) {
+            if (grade.contains(x, y)) { return true; }
+        }
+        return false;
+    }
 
     /**
      * The surface of the carriageway at a point: the highest reserving it, else the nearest's own grade continued; NaN

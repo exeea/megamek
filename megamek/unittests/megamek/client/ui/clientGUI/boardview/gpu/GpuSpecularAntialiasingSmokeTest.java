@@ -337,7 +337,7 @@ class GpuSpecularAntialiasingSmokeTest {
             terrain.refine(camera.camera);
             frame.render(terrain, camera, scene);
             assertTrue(System.nanoTime() < deadline, "Family programs must finish");
-        } while (terrain.familyPrograms().pending() > 0);
+        } while (terrain.familiesPending());
     }
 
     /** Waits until the terrain has installed its detail for the camera and compiled its material programs. */

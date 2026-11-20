@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -36,17 +37,23 @@ final class GpuTerrainBatch implements RenderableSorter {
     private static final Renderable EMPTY = new Renderable();
     private final GpuOpaqueSorter original;
     private final Predicate<Material> terrain;
+    private final Consumer<Material> rebind;
     private final Map<Material, Integer> materialIds = new IdentityHashMap<>();
     private final Map<Attributes, Integer> materialValues = new HashMap<>();
     private final Array<Renderable> ordered = new Array<>();
     private final List<Group> groups = new ArrayList<>();
     private boolean enabled = true;
 
-    GpuTerrainBatch(Predicate<Material> terrain) { this(terrain, Function.identity()); }
+    GpuTerrainBatch(Predicate<Material> terrain) { this(terrain, Function.identity(), material -> { }); }
 
-    /** {@code group} names the shader whose draws a shader's draws sort among (GpuOpaqueSorter). */
-    GpuTerrainBatch(Predicate<Material> terrain, Function<Shader, Shader> group) {
+    /**
+     * {@code group} names the shader whose draws a shader's draws sort among (GpuOpaqueSorter); {@code rebind} binds
+     * what a borrowed part's own material needs that its group's state does not hold: a height-field chunk's morph
+     * record (TerrainField), as its program would.
+     */
+    GpuTerrainBatch(Predicate<Material> terrain, Function<Shader, Shader> group, Consumer<Material> rebind) {
         this.terrain = terrain;
+        this.rebind = rebind;
         original = new GpuOpaqueSorter(group);
     }
 
@@ -81,6 +88,7 @@ final class GpuTerrainBatch implements RenderableSorter {
                 if (usedGroups == groups.size()) { groups.add(new Group()); }
                 Group group = groups.get(usedGroups++);
                 group.shader = (DefaultShader) implementation;
+                group.rebind = rebind;
                 group.combined.set(parts.get(from));
                 group.combined.shader = group;
                 ordered.add(group.combined);
@@ -122,6 +130,7 @@ final class GpuTerrainBatch implements RenderableSorter {
 
     private static final class Group implements Shader {
         DefaultShader shader;
+        Consumer<Material> rebind;
         final Renderable combined = new Renderable();
         final Array<Renderable> parts = new Array<>();
         final IntArray materials = new IntArray();
@@ -156,6 +165,8 @@ final class GpuTerrainBatch implements RenderableSorter {
                 Renderable next = parts.get(i);
                 if (materials.get(bound) == materials.get(i) && details.get(bound).equals(details.get(i))
                       && parts.get(bound).environment == next.environment) {
+                    // Another chunk's ground binds its own morph record; the rest of the state is the group's.
+                    if (next.material != parts.get(i - 1).material) { rebind.accept(next.material); }
                     GpuTessellation.render(next.meshPart, shader.program);
                     borrowed = true;
                 } else {

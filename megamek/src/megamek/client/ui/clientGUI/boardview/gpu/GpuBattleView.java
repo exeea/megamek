@@ -903,8 +903,11 @@ class GpuBattleView extends ApplicationAdapter {
             var upcoming = !source.isEditor() && terrain.ready(scene) ? playback.preparingTerrain() : null;
             terrain.update(upcoming == null ? scene : upcoming, boardCamera.camera, upcoming == null);
         }
+        // A changed light or switch shows the loading stage below first: the terrain asks for its programs from the next
+        // frame on, behind it, and the stage's warm-up follows however fast they link.
+        boolean staging = GpuGlsl.presenting() && !terrain.ready(scene);
         // Keep draining preparation, but do not build another terrain level for the shader probe's temporary camera.
-        boolean detailChanged = terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera);
+        boolean detailChanged = !staging && terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera);
         settings.set(terrain.settings());
         tuning.terrainProgress(terrain.buildProgress());
         if (!terrain.ready(scene)) {

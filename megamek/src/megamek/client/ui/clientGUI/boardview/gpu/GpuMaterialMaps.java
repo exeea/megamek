@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -176,7 +177,9 @@ final class GpuMaterialMaps {
      * A board material's finish for a draw of its own (a model's, a road's, a tile's), as Godot's StandardMaterial3D
      * reads it: roughness, metallic and subsurface scattering factors over the finish map ({@link Layout#METALLIC_ROUGHNESS},
      * which carries the factors itself, so they are 1 where it exists), the emission map's tint and constant glow
-     * ({@link #emission}; without emission of its own, a tint of 1 and no glow leave a model's glTF emission as it is),
+     * ({@link #emission}; without emission of its own, a tint of 1 and no glow leave a model's glTF emission as it is; its
+     * {@code metadata/mmEmissionView} "scale offset", a far atlas's lit slits, follows the tint's RGB: the emission falls
+     * with the view, {@link GpuModelMaterial}'s u_modelEmissionView),
      * and the heightmap's parallax: its depth along U and V in UV units (Godot's heightmap_scale / 100, negative where
      * Godot flips the tangent or binormal) and the deep parallax's layer range, 0 to 0 for a single step.
      */
@@ -198,8 +201,16 @@ final class GpuMaterialMaps {
         // Godot's own range for the deep parallax's layers.
         int minimum = Math.clamp(material.integer("heightmap_min_layers", 8), 1, 64);
         int maximum = Math.clamp(material.integer("heightmap_max_layers", 32), 1, 64);
+        float[] tint = glows ? emission.tint() : new float[] { 1, 1, 1 };
+        String view = material.text("metadata/mmEmissionView");
+        if (glows && view != null) {
+            String[] pair = view.trim().split(" ");
+            tint = Arrays.copyOf(tint, 5);
+            tint[3] = Float.parseFloat(pair[0]);
+            tint[4] = Float.parseFloat(pair[1]);
+        }
         return new ModelFinish(mapped ? 1 : material.roughness(), mapped ? 1 : material.metallic(), mapped ? 1 : scatter, map,
-              glows ? emission.tint() : new float[] { 1, 1, 1 }, glows ? emission.glow() : new float[3], emission.map(),
+              tint, glows ? emission.glow() : new float[3], emission.map(),
               heightmap, material.flag("heightmap_flip_tangent", false) ? -depth : depth,
               material.flag("heightmap_flip_binormal", false) ? -depth : depth,
               deep ? minimum : 0, deep ? maximum : 0);

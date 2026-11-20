@@ -224,7 +224,8 @@ final class GpuShaderSource {
             functions += read("terrain-concrete.glsl");
             functions += "\n#ifdef volcanicFlag\n" + magma(false) + "\n#endif\n";
             functions += read("terrain-materials.glsl");
-            functions += read("ground-material.glsl");
+            // The ground's path: one file or the other, never both.
+            functions += read(GroundFamilies.ON ? "ground-material.glsl" : "old-ground-material.glsl");
             functions += read("scar-material.glsl");
             functions += read("terrain-damage.glsl");
             functions += read("terrain-tundra-sward.glsl");

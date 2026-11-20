@@ -575,7 +575,7 @@ final class GpuWaterShader extends Attribute {
 
         static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
               Map<Coords, BoardSurface> surfaces) {
-            return prepare(scene, currents, surfaces, false);
+            return prepare(scene, currents, surfaces, false, null);
         }
 
         /** Stitch the existing world-aligned fields. Padding overlaps use the sample furthest inside its source. */
@@ -608,8 +608,9 @@ final class GpuWaterShader extends Attribute {
             return new Prepared(width, height, spacing, x, y, pixels, null);
         }
 
+        /** {@code field}: the height field whose water hexes take their texels from it ({@link FieldWater}), or null. */
         static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
-              Map<Coords, BoardSurface> surfaces, boolean molten) {
+              Map<Coords, BoardSurface> surfaces, boolean molten, FieldBoard field) {
             Pools pools = new Pools(scene, currents, surfaces, molten);
             float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
             float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
@@ -622,6 +623,13 @@ final class GpuWaterShader extends Attribute {
                 maxY = Math.max(maxY, pool.maxY);
             }
             if (minX > maxX) { return null; }
+            if (field != null) {
+                // The water layer reaches over the banks beside field water (WaterLayer).
+                minX -= WaterLayer.reach();
+                minY -= WaterLayer.reach();
+                maxX += WaterLayer.reach();
+                maxY += WaterLayer.reach();
+            }
             float spacing = BoardGeometry.height() / 16;
             int firstX = (int) Math.floor(minX / spacing) - 1, firstY = (int) Math.floor(minY / spacing) - 1;
             int width = (int) Math.ceil(maxX / spacing) - firstX + 2;
@@ -645,6 +653,18 @@ final class GpuWaterShader extends Attribute {
                 }
             }
             float[] depth = depths(pools, owners, span, firstX - 1, firstY - 1, spacing);
+            if (field != null) {
+                // On field water and its banks, bank distance and depth are the field's at each texel (FieldWater).
+                float[] shore = FieldWater.texels(field, scene, spacing, firstX - 1, firstY - 1, span, depth);
+                for (int row = 0; row < height; row++) {
+                    for (int column = 0; column < width; column++) {
+                        float distance = shore[(row + 1) * span + column + 1];
+                        if (!Float.isNaN(distance)) {
+                            buffer.put((row * width + column) * 4, unit(0.5f + 0.5f * distance / SHORE_RANGE));
+                        }
+                    }
+                }
+            }
             // A 1-2-1 tent softens underwater steps into the few metres a real column blurs them over.
             for (int row = 0; row < height; row++) {
                 for (int column = 0; column < width; column++) {

@@ -13,7 +13,10 @@ import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 
-/** Cosmetic scatter placement and the independently editable LOD0 meshes in scatter/*.glb. */
+/**
+ * Cosmetic scatter placement and the independently editable LOD0 meshes in scatter/*.glb; a bush's far levels are its
+ * own file, scatter/bush-N-levels.glb (scatter_lods.py), which the scatter stand draws.
+ */
 final class BoardScatter {
     /** 0 disables scatter, 1 is the baseline, 3 triples each biome's placement chance. */
     static final float DENSITY_MULTIPLIER = 3.0f;
@@ -64,13 +67,27 @@ final class BoardScatter {
     }
 
     static BoardShape bush(BoardScene.Surface surface, int variant) {
-        return shape("bush-" + ((surface == BoardScene.Surface.GRASS || surface == BoardScene.Surface.TROPICAL ? BUSHES / 2 : 0)
-              + Math.floorMod(variant, BUSHES / 2)));
+        return shape(bushName(surface, variant));
+    }
+
+    private static String bushName(BoardScene.Surface surface, int variant) {
+        return "bush-" + ((surface == BoardScene.Surface.GRASS || surface == BoardScene.Surface.TROPICAL ? BUSHES / 2 : 0)
+              + Math.floorMod(variant, BUSHES / 2));
     }
 
     /** The small scatter plant is its biome's first bush (the former plant meshes were byte-identical copies). */
     static BoardShape plant(BoardScene.Surface surface) {
         return bush(surface, 0);
+    }
+
+    /** A bush's levels file, which the scatter stand draws (GpuTerrain#scatterPlant). */
+    static String bushAsset(BoardScene.Surface surface, int variant) {
+        return "scatter/" + bushName(surface, variant) + "-levels";
+    }
+
+    /** The small scatter plant's file: its biome's first bush. */
+    static String plantAsset(BoardScene.Surface surface) {
+        return bushAsset(surface, 0);
     }
 
     /** Authored tissue identity shared by field shrubs and captured bushes; unknown roles remain opaque. */

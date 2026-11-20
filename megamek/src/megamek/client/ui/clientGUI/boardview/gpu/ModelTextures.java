@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
@@ -31,6 +32,14 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 /** Models borrow textures from their library's cache; each cache alone owns their disposal. */
 final class ModelTextures {
     private ModelTextures() { }
+
+    /**
+     * A building kit's far atlas map ({@code structures/buildings/<kit>-far_<map>.png}, the kit README's "Far level"): it
+     * draws facades the iso camera sees at a slant, which without anisotropic filtering take a mip level softer than the
+     * near level's own edges at the switch.
+     */
+    private static final Pattern FAR_ATLAS =
+          Pattern.compile(".*[\\\\/]structures[\\\\/]buildings[\\\\/][^\\\\/]+-far_[a-z]+\\.png");
 
     /**
      * An image as one glTF role reads it: its cache key, whether its RGB is sRGB, whether its alpha is a paint mask
@@ -101,6 +110,9 @@ final class ModelTextures {
                 }, true, false);
                 texture.setFilter(filter(read.image().minFilter()), filter(read.image().magFilter()));
                 texture.setWrap(wrap(read.image().wrapS()), wrap(read.image().wrapT()));
+                if (read.image().file() != null && FAR_ATLAS.matcher(read.image().file()).matches()) {
+                    texture.setAnisotropicFilter(8);
+                }
                 return texture;
             });
         };

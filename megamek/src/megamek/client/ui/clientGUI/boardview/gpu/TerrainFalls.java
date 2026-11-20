@@ -968,7 +968,7 @@ final class TerrainFalls {
      * A bridge's span about to fall: its cut, made on the cutter threads from its chunk as the fall was named (#span),
      * the masks its road coats sample, which its pieces own once it falls, and whether it falls into water.
      */
-    private record Span(java.util.concurrent.CompletableFuture<MeepleShatter.Cut> cut, GpuTextures<BoardScene.Pixels> masks,
+    private record Span(java.util.concurrent.CompletableFuture<MeepleShatter.Cut> cut, GpuRoadMaskAtlas.Use masks,
           boolean water) {
         void dispose() {
             cut.cancel(false);
@@ -1065,9 +1065,9 @@ final class TerrainFalls {
             ModelInstance drawn = GpuTerrain.finest(prop, SPAN_TRIANGLES);
             for (Node node : drawn.nodes) { addSources(node, drawn, frame, copies, sources); }
         }
-        // A road's coats on the deck, in the chunk's overlay layer, sample masks that go with the chunk: the span keeps
-        // copies of them (coatSource), and their meshes until the cut has read them.
-        GpuTextures<BoardScene.Pixels> masks = null;
+        // A road's coats on the deck, in the chunk's overlay layer, sample masks the chunk holds in the board's array:
+        // the span holds them there too (coatSource), and their meshes until the cut has read them.
+        GpuRoadMaskAtlas.Use masks = null;
         List<Mesh> coatMeshes = new ArrayList<>();
         Array<Renderable> solid = GpuTerrainDepth.snapshot(chunk.ground.opaque), overlays = GpuTerrainDepth.snapshot(chunk.ground.overlays);
         Map<TileRange, Material> coats = new LinkedHashMap<>();
@@ -1087,13 +1087,13 @@ final class TerrainFalls {
             }
         }
         if (!coats.isEmpty()) {
-            masks = new GpuTextures<>();
+
             Map<BoardScene.Pixels, BoardScene.Pixels> pixels = new HashMap<>();
             for (TileRange range : coats.keySet()) {
                 var data = range.material().get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE).data.pixels();
                 pixels.put(data, data);
             }
-            masks.update(pixels);
+            masks = terrain.roadMasks().use(pixels.keySet());
             Map<List<Object>, Material> coatMaterials = new HashMap<>();
             // The paint the deck carried falls with it: none on the ground under it, on its standing landings and
             // ramps, or on a bank its apron reaches.
@@ -1257,22 +1257,22 @@ final class TerrainFalls {
      * one for each such material and page ({@code materials}). It still blends over the deck: the pieces draw it after
      * themselves (GpuDestruction#overlays).
      */
-    private static MeepleShatter.Source coatSource(TileRange range, Material drawn, GpuTextures<BoardScene.Pixels> masks,
+    private static MeepleShatter.Source coatSource(TileRange range, Material drawn, GpuRoadMaskAtlas.Use masks,
           Matrix4 frame, Map<List<Object>, Material> materials, List<Mesh> owned, Predicate<Vector3[]> carried) {
         var mask = range.material().get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
-        var region = masks.region(mask.data.pixels());
+        var place = masks.place(mask.data.pixels());
         var points = new com.badlogic.gdx.utils.FloatArray();
         var indices = kept(points, copied(range, points), range.mesh().getVertexAttributes(), carried);
         if (indices.isEmpty()) { return null; }
         float[] vertices = points.toArray();
         var attributes = range.mesh().getVertexAttributes();
-        GpuRoads.relocate(vertices, new GpuRoads.Mask(region, mask.data), attributes);
+        GpuRoads.relocate(vertices, new GpuRoads.Mask(place, mask.data), attributes);
         var copy = new Mesh(Mesh.VertexDataType.VertexArray, false, vertices.length / (attributes.vertexSize / Float.BYTES),
               indices.size, attributes);
         copy.setVertices(vertices);
         copy.setIndices(indices.toArray());
         owned.add(copy);
-        Texture page = region.getTexture();
+        Texture page = place.texture();
         Texture chunkPage = mask.textureDescription.texture;
         Material material = materials.computeIfAbsent(List.of(drawn, page), key -> {
             var moved = new Material(drawn);

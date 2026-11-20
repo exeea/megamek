@@ -5,12 +5,17 @@ package megamek.client.ui.clientGUI.boardview.gpu;
  * Screen-pixel budgets for the shared orthographic board, independent of orbit and camera distance: the one rule every
  * board model takes its mesh level by ({@link #level(float[], float, int)}), with two sets of thresholds. Trees in a
  * stand have four levels by their own diameter: the near mesh, two simpler meshes and, below the last threshold, the
- * impostor. Every other prop (buildings, scenery, placed objects) and the effect volumes have three by their larger
- * side ({@link #prop}).
+ * impostor; scatter plants have three meshes and below the last threshold none ({@link #SCATTER}). Every other prop
+ * (buildings, scenery, placed objects) and the effect volumes have three by their larger side ({@link #prop}).
  */
 final class TreeLod {
     private static final float[] PIXELS = { 80, 48, 24 };
     static final float[] PROPS = { 80, 24 };
+    /**
+     * A scatter plant's levels by its own diameter (scatter_lods.py keeps each far level's coverage at its threshold):
+     * below the last it draws nothing, into which it dissolves as a tree does into its impostor.
+     */
+    static final float[] SCATTER = { 20, 8, 2 };
     /**
      * The longest side, in world units, that counts against {@link #PROPS}: five hexes. A giant's parts are small against a
      * hex, not against its whole side, so without this the 1,100-unit HPG would keep all its triangles down to 6 pixels a hex.
@@ -36,6 +41,15 @@ final class TreeLod {
 
     private TreeLod() { }
 
+    /**
+     * Whether a change of scale (pixels a world unit) is a cut: further in one step than the widest gap between two
+     * neighbouring tree levels (48 to 24 pixels). A cut is a new view, with no picture to dissolve from, so levels
+     * switch at once (GpuTreeInstances.Stand#detail); a wheel's notches and a gliding zoom stay under it.
+     */
+    static boolean cut(float from, float to) {
+        return from > 0 && to > 0 && Math.max(from / to, to / from) > PIXELS[1] / PIXELS[2];
+    }
+
     /** A conservative projected bounding diameter, measured in framebuffer pixels. */
     static int level(float pixels, int previous) {
         return level(PIXELS, pixels, previous);
@@ -51,6 +65,11 @@ final class TreeLod {
             level--;
         }
         return level;
+    }
+
+    /** The thresholds a stand's species takes: a scatter plant's (its file under {@code scatter/}) or a tree's. */
+    static float[] pixels(String species) {
+        return species.startsWith("scatter/") ? SCATTER : PIXELS;
     }
 
     /** The level of a building or placed object with this larger side, in world units, at this scale. */

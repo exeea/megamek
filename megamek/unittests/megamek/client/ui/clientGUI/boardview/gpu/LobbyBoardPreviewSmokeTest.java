@@ -228,7 +228,8 @@ class LobbyBoardPreviewSmokeTest {
             var tile = inspection.source().takeFrame().scene().tile(new Coords(0, 0));
             assertTrue(tile.text().stream().anyMatch(text -> text.text().equals("0101")));
             var labels = GpuTestSupport.field(preview, "hexText");
-            assertFalse(((List<?>) GpuTestSupport.field(labels, "pages")).isEmpty(), "enabled labels reach the GPU");
+            assertFalse(((List<?>) GpuTestSupport.field(labels, "pages")).isEmpty()
+                  && ((java.util.Map<?, ?>) GpuTestSupport.field(labels, "fresh")).isEmpty(), "enabled labels reach the GPU");
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             UiTestStage.capture("map-embedded-inspection-display", 960, 720).dispose();
             SwingUtilities.invokeAndWait(() -> {

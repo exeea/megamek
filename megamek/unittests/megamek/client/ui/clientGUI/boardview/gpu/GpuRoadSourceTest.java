@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import java.awt.BasicStroke;
 import java.awt.geom.Area;
@@ -26,20 +25,24 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttributes;
-import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class GpuRoadSourceTest {
+    @BeforeAll
+    static void natives() { GdxNativesLoader.load(); }
+
     @Test
     void roadEndCoversTheTerrainRimBeyondItsHex() {
         var scene = GpuRailTessellationSmokeTest.scene(true);
@@ -84,8 +87,6 @@ class GpuRoadSourceTest {
         var source = scene.tile(new Coords(3, 3));
         var road = BoardRoad.of(scene, source);
         var texture = mock(Texture.class);
-        when(texture.getWidth()).thenReturn(16);
-        when(texture.getHeight()).thenReturn(16);
         float scale = BoardGeometry.hexScale(), half = 15;
         var origin = BoardGeometry.center(source.coords(), 0);
         for (int direction = 0; direction < 6; direction++) {
@@ -110,7 +111,7 @@ class GpuRoadSourceTest {
             var data = GpuRoads.mask(road, patch);
             var shifted = new GpuRoads.MaskData(data.pixels(), data.x() + (origin.x - centre.x) / scale,
                   data.y() + (origin.y - centre.y) / scale, data.width(), data.height());
-            var mask = new GpuRoads.Mask(new TextureRegion(texture), shifted);
+            var mask = new GpuRoads.Mask(new GpuRoadMaskAtlas.Place(texture, 0, 0, 1, 1), shifted);
             var hex = new Path2D.Float();
             for (int corner = 0; corner < 6; corner++) {
                 var point = BoardGeometry.corner(receiving.coords(), 0, corner);
@@ -165,8 +166,6 @@ class GpuRoadSourceTest {
     void tessellatedRoadsUseTheirSupportingControlTriangles() throws Exception {
         var scene = BoardScenes.installedScene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
         var texture = mock(Texture.class);
-        when(texture.getWidth()).thenReturn(16);
-        when(texture.getHeight()).thenReturn(16);
         int checked = 0;
         for (var at : List.of(new Coords(0, 6), new Coords(1, 6), new Coords(0, 7))) {
             var tile = scene.tile(at);
@@ -183,7 +182,7 @@ class GpuRoadSourceTest {
                     sources.put(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, lift),
                           new Vector3(face.b()).add(0, 0, lift), new Vector3(face.c()).add(0, 0, lift), -1), face);
                 }
-                var mask = new GpuRoads.Mask(new TextureRegion(texture), GpuRoads.mask(road, patch));
+                var mask = new GpuRoads.Mask(new GpuRoadMaskAtlas.Place(texture, 0, 0, 1, 1), GpuRoads.mask(road, patch));
                 var mesh = new MeshBuilder();
                 mesh.begin(GpuRoads.TESSELLATED_VERTICES, GL20.GL_TRIANGLES);
                 GpuRoads.write(() -> mesh, triangles, patch, mask, surface, tile.coords(), false, 0, 1, true, null);
@@ -212,7 +211,7 @@ class GpuRoadSourceTest {
                     checked++;
                 }
                 float[] original = vertices.clone();
-                var relocated = new GpuRoads.Mask(new TextureRegion(texture, 4, 4, 8, 8), mask.data);
+                var relocated = new GpuRoads.Mask(new GpuRoadMaskAtlas.Place(texture, .25f, .25f, .5f, .5f), mask.data);
                 GpuRoads.relocate(vertices, relocated, GpuRoads.TESSELLATED_VERTICES);
                 int region = GpuRoads.VERTICES.vertexSize / Float.BYTES - 4;
                 float[] placement = { relocated.offsetU, relocated.offsetV, relocated.scaleU, relocated.scaleV };
@@ -232,8 +231,6 @@ class GpuRoadSourceTest {
     @Test
     void tessellatedRoadsFollowTheGroundsSplitTriangles() throws Exception {
         var texture = mock(Texture.class);
-        when(texture.getWidth()).thenReturn(16);
-        when(texture.getHeight()).thenReturn(16);
         int pieces = 0;
         for (String board : List.of("unofficial/Drewbacca/16x17 Fire And Ice 2.board",
               "AGoAC Maps/16x17 Grassland 2 (Low Bridges).board")) {
@@ -301,7 +298,7 @@ class GpuRoadSourceTest {
                 parts.removeAll(whole);
                 var road = BoardRoad.of(scene, tile);
                 for (var patch : GpuRoads.patches(tile, road)) {
-                    var mask = new GpuRoads.Mask(new TextureRegion(texture), GpuRoads.mask(road, patch));
+                    var mask = new GpuRoads.Mask(new GpuRoadMaskAtlas.Place(texture, 0, 0, 1, 1), GpuRoads.mask(road, patch));
                     var mesh = new MeshBuilder();
                     mesh.begin(GpuRoads.TESSELLATED_VERTICES, GL20.GL_TRIANGLES);
                     GpuRoads.write(() -> mesh, GpuRoads.drape(tile, surface, patch), patch, mask, surface, tile.coords(), false, 0, 1,

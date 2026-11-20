@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import java.awt.geom.Area;
 import java.awt.geom.Rectangle2D;
@@ -25,7 +24,6 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttributes;
-import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Vector2;
@@ -528,9 +526,7 @@ class BoardRoadTest {
     @Test
     void repeatedRoadsShareMaterialsWithoutSharingWorldCoordinates() {
         Texture texture = mock(Texture.class);
-        when(texture.getWidth()).thenReturn(512);
-        when(texture.getHeight()).thenReturn(512);
-        var region = new TextureRegion(texture, 16, 32, 128, 96);
+        var region = new GpuRoadMaskAtlas.Place(texture, 16 / 512f, 32 / 512f, 128 / 512f, 96 / 512f);
         var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
         var road = BoardRoad.of(scene, scene.tile(BoardScenes.CENTER));
         var patch = GpuRoads.patches(scene.tile(BoardScenes.CENTER), road).stream()
@@ -543,7 +539,8 @@ class BoardRoadTest {
         assertEquals(first, new Material("surface", new GpuRoads.Mask(region, data)), "Repeated roads share one material batch");
         assertEquals(first, new Material(first), "Chunk rebuilds preserve the atlas region and mask coordinates");
         assertEquals(first.hashCode(), new Material(first).hashCode());
-        var moved = new Material("surface", new GpuRoads.Mask(new TextureRegion(texture, 160, 200, 128, 96), data));
+        var moved = new Material("surface",
+              new GpuRoads.Mask(new GpuRoadMaskAtlas.Place(texture, 160 / 512f, 200 / 512f, 128 / 512f, 96 / 512f), data));
         assertNotEquals(first, moved, "Edit metadata retains each mask's placement");
         assertEquals(GpuRoads.batchMaterial(first), GpuRoads.batchMaterial(moved), "Regions on one page share a draw");
         assertEquals(GpuRoads.batchMaterial(first).hashCode(), GpuRoads.batchMaterial(moved).hashCode());
@@ -577,8 +574,6 @@ class BoardRoadTest {
     @Test
     void allCoatsOnAMaskPageShareOneDrawAndCarryTheirOwnAppearanceInTheirVertices() {
         Texture page = mock(Texture.class);
-        when(page.getWidth()).thenReturn(512);
-        when(page.getHeight()).thenReturn(512);
         var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
         var road = BoardRoad.of(scene, scene.tile(BoardScenes.CENTER));
         var maps = new GpuAssets.MaterialArrays(mock(TextureArray.class), mock(TextureArray.class));
@@ -587,7 +582,7 @@ class BoardRoadTest {
         var patches = GpuRoads.patches(scene.tile(BoardScenes.CENTER), road);
         List<Material> batches = new ArrayList<>();
         for (int i = 0; i < patches.size(); i++) {
-            var mask = new GpuRoads.Mask(new TextureRegion(page, 64 * i, 0, 64, 64), GpuRoads.mask(road, patches.get(i)));
+            var mask = new GpuRoads.Mask(new GpuRoadMaskAtlas.Place(page, i / 8f, 0, 1 / 8f, 1 / 8f), GpuRoads.mask(road, patches.get(i)));
             batches.add(GpuRoads.batchMaterial(new Material("surface", coats, GpuRoads.attribute(patches.get(i)), mask)));
         }
         assertTrue(patches.stream().map(GpuRoads::attribute).distinct().count() > 2, "A paved road has several distinct coats");

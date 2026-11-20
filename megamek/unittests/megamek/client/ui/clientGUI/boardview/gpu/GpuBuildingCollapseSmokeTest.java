@@ -4,8 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.withSettings;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -97,7 +99,9 @@ class GpuBuildingCollapseSmokeTest {
 
                 @Override
                 public void create() {
-                    fixedGraphics = spy(Gdx.graphics);
+                    // Stub-only: the frame loop calls Gdx.graphics all the time, and a recording spy keeps every call.
+                    fixedGraphics = mock(Gdx.graphics.getClass(),
+                          withSettings().spiedInstance(Gdx.graphics).defaultAnswer(CALLS_REAL_METHODS).stubOnly());
                     doReturn(FRAME).when(fixedGraphics).getDeltaTime();
                     Gdx.graphics = fixedGraphics;
                     super.create();

@@ -26,7 +26,12 @@ final class GpuTerrainDepth implements RenderableProvider {
     final RenderableProvider shadows = (renderables, pool) -> gather(renderables, true);
 
     GpuTerrainDepth(List<ModelInstance> instances) {
-        for (Renderable next : snapshot(instances)) {
+        this(snapshot(instances));
+    }
+
+    /** Over these parts, in this order (a chunk's ground with its far level's instead, GpuTerrain#fieldWeights). */
+    GpuTerrainDepth(Array<Renderable> parts) {
+        for (Renderable next : parts) {
             Renderable previous = ranges.isEmpty() ? null : ranges.peek();
             if (previous != null && mergeable(previous) && mergeable(next)
                   && previous.meshPart.mesh == next.meshPart.mesh

@@ -117,7 +117,8 @@ class GpuHexTextSmokeTest {
                     int missing = missing(expected, actual);
                     assertTrue(missing <= total * .01, "Own relief must not cut through lettering in "
                           + (isometric ? "isometric" : "top") + ": " + missing + "/" + total);
-                    // Negative control: the previous flat depth test must fail on exactly the same rocks and glyphs.
+                    // Negative control: a label plane without the rocks' envelope (the relief's own headroom only) must be
+                    // cut by exactly the same rocks and glyphs.
                     labels.update(scene(false, false), font, outline, terrain::roofBounds);
                     frame(terrain, atmosphere, camera, scene, null);
                     labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
@@ -187,7 +188,7 @@ class GpuHexTextSmokeTest {
                     camera.center(BoardGeometry.center(LABELED, 0));
                     for (boolean outlined : List.of(false, true)) {
                         labels.update(scene, font, outline, c -> null, false, false, outlined);
-                        List<Object> uploaded = pages(labels);
+                        List<Object> uploaded = laidOut(labels, batch, camera, atmosphere.depthTexture(), BOTTOM);
                         for (int source = 0; source < 3; source++) {
                             float[] rgb = source == 0 ? new float[] { .003f, .003f, .003f }
                                   : source == 1 ? new float[] { .214f, .214f, .214f }
@@ -230,7 +231,7 @@ class GpuHexTextSmokeTest {
             camera.camera.zoom = .20f;
             camera.center(BoardGeometry.center(LABELED, 0));
             labels.update(scene, font, outline, c -> null, false, false, false);
-            List<Object> uploaded = pages(labels);
+            List<Object> uploaded = laidOut(labels, batch, camera, atmosphere.depthTexture(), BOTTOM);
             boolean sawWhite = false, sawBlack = false;
             float[] twilight = { .06f, .06f, .06f };
             for (int ev = -2; ev <= 2; ev++) {
@@ -284,7 +285,7 @@ class GpuHexTextSmokeTest {
             for (boolean sameHex : List.of(true, false)) {
                 BoardScene splitScene = sameHex ? scene : contrastScene(0xff000000, true);
                 labels.update(splitScene, font, outline, c -> null, false, false, false);
-                List<Object> splitPages = pages(labels);
+                List<Object> splitPages = laidOut(labels, batch, camera, atmosphere.depthTexture(), BOTTOM);
                 contrastFrame(terrain, atmosphere, camera, splitScene, split, 0);
                 Pixmap background = pixels();
                 labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
@@ -324,6 +325,7 @@ class GpuHexTextSmokeTest {
             // Colored labels AND their rings must remain pixel-identical with the new scene binding enabled.
             BoardScene colored = contrastScene(0xffff00ff);
             labels.update(colored, font, outline, c -> null, false, false, true);
+            laidOut(labels, batch, camera, atmosphere.depthTexture(), BOTTOM);
             for (float value : new float[] { .003f, .214f }) {
                 float[] rgb = { value, value, value };
                 contrastFrame(terrain, atmosphere, camera, colored, rgb, 0);
@@ -378,7 +380,8 @@ class GpuHexTextSmokeTest {
                 finally { tactical.dispose(); tacticalBound.dispose(); }
             }
             labels.update(scene, font, outline, c -> null, true, false, true);
-            assertFalse(pages(labels).isEmpty(), "Tactical coordinate control must contain real neutral glyphs");
+            assertFalse(laidOut(labels, batch, camera, atmosphere.depthTexture(), BOTTOM).isEmpty(),
+                  "Tactical coordinate control must contain real neutral glyphs");
             contrastFrame(terrain, atmosphere, camera, scene, twilight, -2);
             labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
             Pixmap tacticalText = pixels();
@@ -400,7 +403,7 @@ class GpuHexTextSmokeTest {
         camera.setIsometric(false);
         camera.camera.zoom = .20f;
         labels.update(scene, font, outline, c -> null, false, false, false);
-        List<Object> uploaded = pages(labels);
+        List<Object> uploaded = laidOut(labels, batch, camera, atmosphere.depthTexture(), BOTTOM);
         atmosphere.configure(new BoardAtmosphere.Settings(12, 0, 0, 1.5f, 0, 0));
         float gain = atmosphere.exposure();
         float[] split = { .030f / gain, .030f / gain, .030f / gain, .036f / gain, .036f / gain, .036f / gain };
@@ -506,6 +509,7 @@ class GpuHexTextSmokeTest {
         }
         BoardScene relabeled = contrastScene(0xff000000);
         labels.update(relabeled, font, outline, c -> null, false, false, false);
+        laidOut(labels, batch, camera, atmosphere.depthTexture(), BOTTOM);
         assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, relabeled,
               new float[] { near, near, near }, 1) < 10, "A new tile snapshot with unchanged owners retains history");
         assertSame(points, field(atmosphere, "contrastPoints"));
@@ -645,6 +649,8 @@ class GpuHexTextSmokeTest {
             for (String resource : List.of("contrastRead", "contrastWrite", "contrastPoints", "contrastShader")) {
                 assertNull(field(disabled, resource), "Zero threshold allocates no adaptive resource: " + resource);
             }
+            laidOut(labels, batch, camera, disabled.depthTexture(), BOTTOM);
+            contrastFrame(terrain, disabled, camera, scene, dark, 0);
             labels.render(batch, camera, disabled.depthTexture(), null, BOTTOM);
             grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE);
             Pixmap authored = pixels();
@@ -759,14 +765,18 @@ class GpuHexTextSmokeTest {
             BoardScene scene = textScene(24, "ABAB");
             assertEquals(1, font.getRegions().size);
             labels.update(scene, font, font, coords -> null);
+            camera.fit(scene);
+            List<Object> whole = laidOut(labels, batch, camera, depth, 0);
             assertEquals(2, font.getRegions().size, "Later chunks introduce another incremental font atlas page");
-            assertEquals(1, pages(labels).size(), "Alternating atlas textures must share the same ordered batch");
+            assertEquals(1, whole.size(), "Alternating atlas textures must share the same ordered batch");
             List<LegacyChunk> legacy = legacy(scene, font, true);
             assertVertices(labels, legacy, font);
             // Client Settings > Hex label outline off: the text alone, one run of glyphs instead of outline then text.
             labels.update(scene, font, font, coords -> null, false, false, false);
+            laidOut(labels, batch, camera, depth, 0);
             assertVertices(labels, legacy(scene, font, false), font);
             labels.update(scene, font, font, coords -> null);
+            laidOut(labels, batch, camera, depth, 0);
             assertVertices(labels, legacy, font);
             ShaderProgram previous = batch.getShader();
             camera.fit(scene);
@@ -789,11 +799,12 @@ class GpuHexTextSmokeTest {
             assertTrue(visible > 0 && visible < legacy.size(), "The close view must contain culled chunk ranges");
             parity(labels, legacy, batch, camera, depth);
 
-            // More than 65,535 glyph instances still use only the shared quad's six unsigned-short indices.
+            // A board of more glyphs than a mesh holds fills several meshes, each one instanced draw of the shared quad.
             BoardScene large = textScene(72, "AAAAAAAA");
             labels.update(large, font, font, coords -> null);
-            List<Object> pages = pages(labels);
-            assertEquals(1, pages.size(), "Glyph count no longer fragments draws at the 16-bit vertex limit");
+            camera.fit(large);
+            List<Object> pages = laidOut(labels, batch, camera, depth, 0);
+            assertEquals(3, pages.size(), "The board's 82,944 glyphs fill three meshes of 32,768");
             assertVertices(labels, legacy(large, font, true), font);
             labels.update(large, font, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
             assertSame(pages.getFirst(), pages(labels).getFirst());
@@ -803,7 +814,7 @@ class GpuHexTextSmokeTest {
                 ScreenUtils.clear(.1f, .2f, .3f, 1, true);
                 profiler.reset();
                 labels.render(batch, camera, depth, 0);
-                assertEquals(1, profiler.getDrawCalls(), "All visible glyphs share one instanced draw");
+                assertEquals(3, profiler.getDrawCalls(), "All visible glyphs draw with one instanced draw a mesh");
                 camera.center(new com.badlogic.gdx.math.Vector3(-10000, 10000, 0));
                 profiler.reset();
                 labels.render(batch, camera, depth, 0);
@@ -813,6 +824,7 @@ class GpuHexTextSmokeTest {
             BoardScene varied = textScene(24, "AAAA", true);
             labels.update(varied, font, font, coords -> null);
             camera.fit(varied);
+            laidOut(labels, batch, camera, depth, 0);
             assertVertices(labels, legacy(varied, font, true), font);
             parity(labels, legacy(varied, font, true), batch, camera, depth);
             profiler.enable();
@@ -852,12 +864,12 @@ class GpuHexTextSmokeTest {
         try {
             BoardScene scene = textScene(16, "ABCDEFGHIJ");
             labels.update(scene, font, font, coords -> null);
-            assertTrue(pages(labels).size() > 1, "This fixture must cross the sampler budget");
-            assertVertices(labels, legacy(scene, font, true), font);
             BoardCamera camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             camera.setIsometric(false);
             camera.fit(scene);
+            assertTrue(laidOut(labels, batch, camera, depth, 0).size() > 1, "This fixture must cross the sampler budget");
+            assertVertices(labels, legacy(scene, font, true), font);
             parity(labels, legacy(scene, font, true), batch, camera, depth);
         } finally {
             labels.dispose(); font.dispose(); depth.dispose();
@@ -945,7 +957,8 @@ class GpuHexTextSmokeTest {
      * outlines (drawn with {@code font} as the outline font too) when {@code outlined}, then every chunk's text.
      */
     private static List<LegacyChunk> legacy(BoardScene scene, BitmapFont font, boolean outlined) {
-        Map<Coords, LegacyChunk> chunks = new HashMap<>(), outlines = new HashMap<>();
+        java.util.Comparator<Coords> cells = java.util.Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY);
+        Map<Coords, LegacyChunk> chunks = new java.util.TreeMap<>(cells), outlines = new java.util.TreeMap<>(cells);
         float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
         var color = new com.badlogic.gdx.graphics.Color(font.getColor());
         try {
@@ -1037,6 +1050,26 @@ class GpuHexTextSmokeTest {
         Pixmap pixels = new Pixmap(16, 16, Pixmap.Format.RGBA8888);
         try { pixels.setColor(rgba); pixels.fill(); return new Texture(pixels); }
         finally { pixels.dispose(); }
+    }
+
+    /**
+     * The labels' layout follows the view within each frame's budget (GpuHexText#build): draws as a live view does
+     * until every chunk in view is laid out and merged and two draws in a row leave the merged meshes as they are;
+     * gives those meshes.
+     */
+    private static List<Object> laidOut(GpuHexText labels, SpriteBatch batch, BoardCamera camera, Texture depth,
+          int bottom) {
+        List<Object> last = null;
+        for (int draw = 0; draw < 5000; draw++) {
+            labels.render(batch, camera, depth, null, bottom);
+            List<Object> now = pages(labels);
+            Map<?, ?> own = field(labels, "fresh");
+            Set<?> dead = field(labels, "dead");
+            Object laying = field(labels, "laying");
+            if (now.equals(last) && own.isEmpty() && dead.isEmpty() && laying == null) { return now; }
+            last = now;
+        }
+        throw new AssertionError("The labels' layout never came to rest");
     }
 
     private static List<Object> pages(GpuHexText labels) {
@@ -1268,9 +1301,11 @@ class GpuHexTextSmokeTest {
               ? List.of(new BoardHexText("HEIGHT " + height, 40, font, 0xffff00ff, false, height))
               : List.of(new BoardHexText("0404", 10, font, 0xffff00ff, true, 0),
                     new BoardHexText("LEVEL2", 60, font, 0xffff00ff, false, 0));
+        // Rocks a level tall, well above the hex's own relief headroom (BoardRelief#headroom, 10 units), each standing
+        // between the isometric camera and a label: only the rocks' share of the envelope keeps those labels whole.
         List<BoardScene.Feature> rocks = List.of(
-              new BoardScene.Feature("scatter-rock", 0, 21, 0, 6, .6f, 0, BoardScene.FeatureKind.SCATTER),
-              new BoardScene.Feature("scatter-rock", 0, -18, 0, 6, .6f, 0, BoardScene.FeatureKind.SCATTER));
+              new BoardScene.Feature("scatter-rock", 0, 9, 0, 6, 1, 0, BoardScene.FeatureKind.SCATTER),
+              new BoardScene.Feature("scatter-rock", 0, -30, 0, 6, 1, 0, BoardScene.FeatureKind.SCATTER));
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {

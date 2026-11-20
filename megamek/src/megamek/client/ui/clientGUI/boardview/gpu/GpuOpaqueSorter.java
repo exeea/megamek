@@ -68,6 +68,8 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
             if (roadA) {
                 int layer = Float.compare(GpuRoads.layer(left.material), GpuRoads.layer(right.material));
                 if (layer != 0) { return layer; }
+                // Coats of one layer in one mesh blend in index order, as the one merged draw of their chunk does.
+                if (left.meshPart.mesh == right.meshPart.mesh) { return Integer.compare(left.meshPart.offset, right.meshPart.offset); }
             }
             // A lake slab's margin floats over the open water beside it: blend the ice after that water.
             boolean iceA = GpuIceShader.floating(left.material), iceB = GpuIceShader.floating(right.material);

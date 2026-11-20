@@ -16,7 +16,8 @@ uniform sampler2D u_normalTexture;
 #endif
 uniform float u_groundResponse;
 #ifdef roadMaskFlag
-uniform sampler2D u_roadMask;
+// The board's road masks, a layer each page (GpuRoadMaskAtlas); a coat's region holds its layer in its U offset.
+uniform sampler2DArray u_roadMask;
 flat in vec4 v_roadMaskRegion;
 in vec2 v_roadMaskUV;
 #endif
@@ -608,7 +609,9 @@ void main() {
     bool roadHidden = false;
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
-    roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
+    float maskLayer = floor(v_roadMaskRegion.x);
+    roadColor = texture(u_roadMask, vec3(vec2(v_roadMaskRegion.x - maskLayer, v_roadMaskRegion.y) + maskUV * v_roadMaskRegion.zw,
+          maskLayer));
     roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0))) || roadColor.a < .002;
 #if __VERSION__ >= 450
     // A quad wholly off its mask draws nothing: it stops before the material. Fine derivatives make it the quad's

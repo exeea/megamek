@@ -1134,6 +1134,14 @@ final class BayKit {
         return (zs[b] - zs[a]) / (cs[b] - cs[a]);
     }
 
+    /** A rib's long side reaches this many of its heights out along the roof at its foot (about 27 degrees). */
+    private static final double RIB_SPREAD = 2;
+
+    private static double[] normalized(double[] v) {
+        double length = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        return new double[] { v[0] / length, v[1] / length, v[2] / length };
+    }
+
     /** The ribs across one facet's part of a vault (between its lines k and k + 1): each a top and the sides that show. */
     private static void ribs(GeneratedMesh result, Vault vault, Barrel barrel, List<double[]> facet, double base, double[] cs, double[] zs,
           int k) {
@@ -1160,13 +1168,23 @@ final class BayKit {
                 double[] a = top[i], b = top[(i + 1) % top.length];
                 double la = barrel.along(a[0], a[1]), lb = barrel.along(b[0], b[1]), ca = barrel.across(a[0], a[1]), cb = barrel.across(b[0], b[1]);
                 // Its sides along the roof, and its end over an eave; where the facet's own edge cuts it, it goes on.
+                boolean side = Math.abs(la - from) < 1e-6 && Math.abs(lb - from) < 1e-6
+                      || Math.abs(la - to) < 1e-6 && Math.abs(lb - to) < 1e-6;
                 double[] out = Math.abs(la - from) < 1e-6 && Math.abs(lb - from) < 1e-6 ? new double[] { -axis[0], -axis[1], 0 }
                       : Math.abs(la - to) < 1e-6 && Math.abs(lb - to) < 1e-6 ? new double[] { axis[0], axis[1], 0 }
                       : k == 0 && Math.abs(ca - cs[0]) < 1e-6 && Math.abs(cb - cs[0]) < 1e-6 ? new double[] { -right[0], -right[1], 0 }
                       : k == cs.length - 2 && Math.abs(ca - cs[k + 1]) < 1e-6 && Math.abs(cb - cs[k + 1]) < 1e-6 ? new double[] { right[0], right[1], 0 }
                       : null;
                 if (out != null) {
-                    face(result, trim, .8, out, new double[][] { { a[0], a[1], a[2] - vault.ribHeight() }, { b[0], b[1], b[2] - vault.ribHeight() }, b, a });
+                    // A long side slopes out to the sheeting (RIB_SPREAD heights along the roof): an upright one a pixel
+                    // high faces away from the light and reads as a row of dark dashes at a far zoom. An end over an
+                    // eave stands upright.
+                    double spread = side ? RIB_SPREAD * vault.ribHeight() : 0;
+                    double[] foot = { out[0] * spread, out[1] * spread };
+                    double[] lean = side ? normalized(new double[] { out[0], out[1], RIB_SPREAD }) : out;
+                    face(result, trim, side ? 1 : .8, lean, new double[][] {
+                          { a[0] + foot[0], a[1] + foot[1], a[2] - vault.ribHeight() },
+                          { b[0] + foot[0], b[1] + foot[1], b[2] - vault.ribHeight() }, b, a });
                 }
             }
         }

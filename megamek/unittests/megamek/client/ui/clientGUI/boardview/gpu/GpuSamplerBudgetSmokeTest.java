@@ -142,6 +142,9 @@ class GpuSamplerBudgetSmokeTest {
         for (var program : combined) {
             for (String sampler : List.of("u_terrainLayers", "u_terrainData", "u_fullSizeColor", "u_fullSizeData",
                   "u_environmentLut")) {
+                // Cheaper shading (mediumQualityFlag: the Low and Medium presets) lights with the environment's analytic
+                // forms (environment-lighting.glsl): its programs read no environment table.
+                if (sampler.equals("u_environmentLut") && program.getKey().contains("mediumQualityFlag")) { continue; }
                 assertTrue(program.getKey().contains(sampler), "Combined program must sample " + sampler + ": " + program);
             }
         }
