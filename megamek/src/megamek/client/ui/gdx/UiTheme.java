@@ -182,6 +182,8 @@ public final class UiTheme implements Disposable {
           Map.entry("locate", 0xE55C), Map.entry("play", 0xE037), Map.entry("pause", 0xE034),
           Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("progress", 0xE9D0), Map.entry("error", 0xE000), Map.entry("walk", 0xF87D),
           Map.entry("chevron-left", 0xE5CB), Map.entry("chevron-right", 0xE5CC), Map.entry("expand", 0xF1CE), Map.entry("grip", 0xE945),
+          // push_pin: keeps a folding panel open
+          Map.entry("pin", 0xF10D),
           // unfold_more and unfold_less: a tree's Expand all and Collapse all, as the Client Settings sidebar draws them.
           Map.entry("unfold-more", 0xE5D7), Map.entry("unfold-less", 0xE5D6), Map.entry("tag", 0xE9EF),
           Map.entry("layers", 0xE53B), Map.entry("replay", 0xE042), Map.entry("rewind", 0xE020),
@@ -205,8 +207,12 @@ public final class UiTheme implements Disposable {
           Map.entry("more-vert", 0xE5D4), Map.entry("add", 0xE145), Map.entry("check-circle", 0xE86C),
           Map.entry("radio-unchecked", 0xE836), Map.entry("hourglass", 0xE88B), Map.entry("bot", 0xF06C),
           Map.entry("palette", 0xE40A), Map.entry("build", 0xE869),
+          // login: a unit that walks on from its board edge instead of deploying
+          Map.entry("walk-on", 0xEA77),
           // The lobby's unit cards: hub (a C3 network) and delete
           Map.entry("hub", 0xE9F4), Map.entry("delete", 0xE872),
+          // The advanced search's saved searches: bookmark, save and edit (rename)
+          Map.entry("bookmark", 0xE866), Map.entry("save", 0xE161), Map.entry("edit", 0xE3C9),
           // The lobby's top bar: gavel, Game options (the rules of the game)
           Map.entry("gavel", 0xE90E),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,
@@ -225,7 +231,11 @@ public final class UiTheme implements Disposable {
           // The settings rail: flight (the aerospace rules), volume_up (Audio), restart_alt (a page's reset),
           // desktop_windows (Display), keyboard (Controls) and sports_esports (Gameplay)
           Map.entry("flight", 0xE539), Map.entry("volume", 0xE050), Map.entry("restart", 0xF053),
-          Map.entry("display", 0xE30C), Map.entry("keyboard", 0xE312), Map.entry("gameplay", 0xEA28));
+          Map.entry("display", 0xE30C), Map.entry("keyboard", 0xE312), Map.entry("gameplay", 0xEA28),
+          // A formation's troubles in MekHQ's order of battle: dangerous (out of action), person_off (short of crew),
+          // bedtime (fatigued), inventory_2 (mothballed) and rocket_launch (in transit)
+          Map.entry("dangerous", 0xE99A), Map.entry("person-off", 0xE510), Map.entry("bedtime", 0xEF44),
+          Map.entry("inventory", 0xE1A1), Map.entry("rocket", 0xEB9B));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.
@@ -1574,6 +1584,11 @@ public final class UiTheme implements Disposable {
     public static final String TOKEN_SPLIT = "token-split";
     /** The Button style of a card that opens something ({@code UiPictureCard}): its edge in border.strong on hover. */
     public static final String TOKEN_PICTURE_CARD = "token-picture-card";
+    /**
+     * The Button style of a card picked from a set ({@code UiTraitCard}): the picture card's faces, and while checked
+     * the selected.background wash under a selection.width selected.primary edge.
+     */
+    public static final String TOKEN_CHOICE_CARD = "token-choice-card";
 
     /**
      * Token v0 styles for hud-v3's own lists, trees, grids and splits (docs/design-system/tokens.md, Lists and trees,
@@ -1656,6 +1671,19 @@ public final class UiTheme implements Disposable {
         pictureCard.down = pictureCard.over;
         pictureCard.disabled = pictureCard.up;
         skin.add(TOKEN_PICTURE_CARD, pictureCard);
+        // A card picked from a set (a selectable panel): the selection's wash under a selection-wide edge in its color
+        Button.ButtonStyle choiceCard = new Button.ButtonStyle(pictureCard);
+        choiceCard.checked = box("token-card-chosen", token(ColorMath.over(tokens.color("selected.background", mode),
+              tokens.color("surface.panel", mode))), selectedEdge, tokens.size().get("selection.width"),
+              tokens.radius().get("md"), null, 0, 0, 0);
+        choiceCard.checkedOver = choiceCard.checked;
+        choiceCard.checkedDown = choiceCard.checked;
+        skin.add(TOKEN_CHOICE_CARD, choiceCard);
+        // The focus rings of a card and of a section's header row, focus.gap outside the card and inside the row
+        float focusWidth = tokens.size().get("focus.width");
+        Color ring = token(tokens.color("focus.ring", mode));
+        box("token-card-focus", Color.CLEAR, ring, focusWidth, tokens.radius().get("md") + focusWidth, null, 0, 0, 0);
+        box("token-row-focus", Color.CLEAR, ring, focusWidth, radius, null, 0, 0, 0);
 
         float band = md;
         float active = tokens.size().get("selection.width");
