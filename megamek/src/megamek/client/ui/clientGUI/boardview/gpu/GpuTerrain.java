@@ -4082,9 +4082,14 @@ final class GpuTerrain implements Disposable {
                 if (candidate < 0) { break; }
                 rebuild.started.add(candidate);
                 int x = candidate / rows * CHUNK_SIZE, y = candidate % rows * CHUNK_SIZE;
-                TerrainLod lod = rebuild.request.columns() ? TerrainLod.FULL : initialDetail(snapshot, x, y, camera,
-                      rebuild.request.settings().switches().get(BoardSwitch.DETAIL_SCALE));
-                startChunk(candidate, rebuild.plan.all() ? null : chunks.get(candidate), lod, snapshot, rebuild.request.settings(), rebuild.plan.floor(),
+                Chunk installed = rebuild.plan.all() ? null : chunks.get(candidate);
+                // With the field a local edit keeps its chunk's detail, which the field's camera targets chose (refine):
+                // only at that detail can the chunk keep the hexes the edit leaves alone (startChunk's reuse).
+                TerrainLod lod = rebuild.request.columns() ? TerrainLod.FULL
+                      : TerrainField.ON && installed != null && installed.lod != null ? installed.lod
+                      : initialDetail(snapshot, x, y, camera,
+                            rebuild.request.settings().switches().get(BoardSwitch.DETAIL_SCALE));
+                startChunk(candidate, installed, lod, snapshot, rebuild.request.settings(), rebuild.plan.floor(),
                       rebuild.plan.currents(), true, rebuild.plan.field());
             }
         }
