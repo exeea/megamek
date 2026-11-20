@@ -4144,7 +4144,7 @@ final class GpuTerrain implements Disposable {
         Set<Coords> objectChanges = onlyObjects ? Set.copyOf(rebuild.plan.changedTiles()) : Set.of();
         DetailJob job = new DetailJob(generation, index, source, buildLod, scene, settings, bottom, rebuilding, columns,
               CompletableFuture.supplyAsync(() -> settings.call(
-                    () -> withKits(scene, x, y, onlyObjects ? prepareObjects(scene, source, x, y, bottom, buildLod, paint,
+                    () -> encodeMasks(withKits(scene, x, y, onlyObjects ? prepareObjects(scene, source, x, y, bottom, buildLod, paint,
                           objectChanges, () -> checkBuild(generation, stale), settings, plants)
                           : columns ? prepareColumns(scene, x, y, bottom, buildLod, flow, settings, reuse, paintSurfaces, paint,
                           () -> checkBuild(generation, stale), progress, roadMaskData)
@@ -4152,10 +4152,16 @@ final class GpuTerrain implements Disposable {
                           () -> checkBuild(generation, stale), plants)
                           : prepare(scene, x, y, bottom, buildLod, flow, settings, reuse, waterShapes,
                           () -> checkBuild(generation, stale), progress, roadMaskData, paint, paintSurfaces, plants,
-                          keptPlants, field))), detailWorker),
+                          keptPlants, field)))), detailWorker),
               null, null, progress, stale);
         // The job in a render-thread stage keeps it; this one waits its turn (advanceBuild).
         if (detailJob == null) { detailJob = job; } else { pending.add(job); }
+    }
+
+    /** {@code prepared}, once its road masks the board's array does not hold are encoded, on its worker. */
+    private Prepared encodeMasks(Prepared prepared) {
+        roadMaskAtlas.prepare(Prepared.roadMasks(prepared.roads()).keySet());
+        return prepared;
     }
 
     /** {@code prepared}, once the kits of the buildings its chunk draws anew are read ({@link GpuBuilding#readKits}). */
@@ -5004,7 +5010,7 @@ final class GpuTerrain implements Disposable {
             road.clipPaint(patch.shape());
             // An Area caches its bounds when first asked: settled here, before other workers read it.
             patch.shape().getBounds2D();
-            // Distant wear fields need fewer samples; paint and closer levels retain their original density.
+            // The paved wear field needs fewer samples (GpuRoads#maskDensity); paint and the coats' edges keep theirs.
             int density = columns ? 4 : GpuRoads.maskDensity(patch, lod);
             coats.add(new RoadCoat(patch, density, GpuRoads.maskKey(road, patch, density)));
         }

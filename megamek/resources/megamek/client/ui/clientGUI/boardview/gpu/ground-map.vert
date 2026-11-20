@@ -39,7 +39,8 @@ void main() {
     world.z += u_lift;
     v_maskLayer = u_mask == 2 ? floor(a_roadMaskRegion.x) : 0.0;
     v_roadMaskUV = a_roadMaskUV;
-    v_maskUV = u_mask == 2 ? vec2(a_roadMaskRegion.x - v_maskLayer, a_roadMaskRegion.y) + a_roadMaskUV * a_roadMaskRegion.zw
+    // A road mask's place carries its tint in the integer parts (GpuRoadMaskAtlas.Place).
+    v_maskUV = u_mask == 2 ? vec2(a_roadMaskRegion.x - v_maskLayer, fract(a_roadMaskRegion.y)) + a_roadMaskUV * fract(a_roadMaskRegion.zw)
           : u_maskUV.xy + a_texCoord0 * u_maskUV.zw;
 #endif
     gl_Position = u_projViewTrans * world;

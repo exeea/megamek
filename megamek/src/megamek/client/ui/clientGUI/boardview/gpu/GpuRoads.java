@@ -1035,11 +1035,17 @@ final class GpuRoads {
         return mask(patch, (x, y, scratch) -> color(road, patch, x, y, scratch), density);
     }
 
-    /** Only the broad paved wear field can become coarse. Thin paint and markings retain their original coverage. */
+    /**
+     * Texels a tile unit of a coat's mask: 4 (8.9 cm), but the broad paved wear field, a smooth field, takes
+     * {@link #WEAR_DENSITY}, and 1 at the coarse and distant levels. Paint, markings and the coats' edges keep 4.
+     */
     static int maskDensity(Patch patch, TerrainLod lod) {
-        return (lod == TerrainLod.COARSE || lod == TerrainLod.DISTANT)
-              && asphalt(patch) && patch.fade() != null && patch.fade().wheels() ? 1 : 4;
+        if (!(asphalt(patch) && patch.fade() != null && patch.fade().wheels())) { return 4; }
+        return lod == TerrainLod.COARSE || lod == TerrainLod.DISTANT ? 1 : WEAR_DENSITY;
     }
+
+    /** The paved wear field's mask density at full and medium detail: 2, as the user saw no difference from 4 (memory step 2). */
+    private static final int WEAR_DENSITY = 2;
 
     /**
      * The mask texels this carrier can display. A neighbour's shared mask can change outside these triangles without

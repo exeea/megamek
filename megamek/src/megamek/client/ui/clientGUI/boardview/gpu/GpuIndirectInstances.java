@@ -132,7 +132,7 @@ final class GpuIndirectInstances implements Disposable {
      * else the 4.1 way (macOS, or {@link #GL41}): the same pools, lists and passes, a pass's runs uploaded from the
      * instances kept in memory (GpuBufferStore) and each command drawn alone, without culling.
      */
-    private static boolean fullContext() {
+    static boolean fullContext() {
         return !GL41 && GL.getCapabilities().OpenGL43;
     }
 

@@ -54,11 +54,12 @@ final class GpuHexText implements Disposable {
     /** Eight borrowed font pages, plus depth, unit depth and contrast, fit the GL 3.3 minimum of sixteen units. */
     private static final int TEXTURES = 8;
     /**
-     * The smallest text a player reads: a label's font size on screen, in pixels (the legacy board's smallest font,
-     * about 5 px of capital height). Smaller, a label is neither laid out nor drawn ({@link #readable}), at every
+     * The smallest text a player reads: a label's font size on screen, in pixels. The 10-unit labels read at 40 px a hex
+     * (6.4 px; the user, 2026-11-20), and so does the smallest line a hex fits (6.87 units, 4.4 px): every label is drawn
+     * there, none at 20 px a hex (3.2 px). Smaller, a label is neither laid out nor drawn ({@link #readable}), at every
      * preset.
      */
-    static final float MIN_TEXT_PIXELS = 7;
+    static final float MIN_TEXT_PIXELS = 4.3f;
     /** The time a frame of a live view spends laying out the labels of chunks that came into view ({@link #build}). */
     private static final long BUILD_NANOS = 2_000_000;
 

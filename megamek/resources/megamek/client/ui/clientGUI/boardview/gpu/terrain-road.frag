@@ -609,9 +609,23 @@ void main() {
     bool roadHidden = false;
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
+    // The mask's place (GpuRoadMaskAtlas.Place): its layer, and its cell's corner and size, with a tint (1 + red, green,
+    // blue) in their integer parts, or none where its colour is data.
     float maskLayer = floor(v_roadMaskRegion.x);
-    roadColor = texture(u_roadMask, vec3(vec2(v_roadMaskRegion.x - maskLayer, v_roadMaskRegion.y) + maskUV * v_roadMaskRegion.zw,
-          maskLayer));
+    vec3 maskTint = floor(v_roadMaskRegion.yzw);
+    vec4 maskCell = vec4(v_roadMaskRegion.x - maskLayer, v_roadMaskRegion.yzw - maskTint);
+    vec2 maskAt = maskCell.xy + maskUV * maskCell.zw;
+    roadColor.a = texture(u_roadMask, vec3(maskAt, maskLayer)).r;
+    if (maskTint.x > .5) {
+        roadColor.rgb = vec3(maskTint.x - 1.0, maskTint.yz) / 255.0;
+    } else {
+        // Red, green and blue lie a cell right of, under, and right of and under the coverage: its texels and their
+        // doubled edge, to whole 4-texel blocks.
+        vec2 cell = 4.0 * ceil((maskCell.zw * 2048.0 + 2.0) / 4.0) / 2048.0;
+        roadColor.rgb = vec3(texture(u_roadMask, vec3(maskAt + vec2(cell.x, 0.0), maskLayer)).r,
+              texture(u_roadMask, vec3(maskAt + vec2(0.0, cell.y), maskLayer)).r,
+              texture(u_roadMask, vec3(maskAt + cell, maskLayer)).r);
+    }
     roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0))) || roadColor.a < .002;
 #if __VERSION__ >= 450
     // A quad wholly off its mask draws nothing: it stops before the material. Fine derivatives make it the quad's

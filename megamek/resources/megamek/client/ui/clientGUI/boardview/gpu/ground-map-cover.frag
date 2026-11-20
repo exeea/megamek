@@ -5,7 +5,7 @@
 // a decal's soft edge thins the cover as it is drawn.
 uniform int u_mask;
 uniform sampler2D u_maskTexture;
-// A road's mask (u_mask 2) lies in the board's mask array (GpuRoadMaskAtlas).
+// A road's mask (u_mask 2) lies in the board's mask array (GpuRoadMaskAtlas): its coverage in one BC4 channel.
 uniform sampler2DArray u_roadMasks;
 uniform float u_opacity;
 in vec2 v_maskUV;
@@ -16,7 +16,7 @@ layout(location = 0) out vec4 fragColor;
 void main() {
     // A road covers only inside its mask, as its coat draws (terrain-road.frag): past it lie other masks.
     bool outside = any(lessThan(v_roadMaskUV, vec2(0.0))) || any(greaterThan(v_roadMaskUV, vec2(1.0)));
-    float mask = u_mask == 0 ? 1.0 : u_mask == 2 ? (outside ? 0.0 : texture(u_roadMasks, vec3(v_maskUV, v_maskLayer)).a)
+    float mask = u_mask == 0 ? 1.0 : u_mask == 2 ? (outside ? 0.0 : texture(u_roadMasks, vec3(v_maskUV, v_maskLayer)).r)
           : texture(u_maskTexture, v_maskUV).a;
     fragColor = vec4(0.0, 0.0, 0.0, u_opacity * mask);
 }
