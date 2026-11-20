@@ -390,6 +390,29 @@ final class FieldBoard {
               || (walls[v.getX()][v.getY()] & 1 << (JOINED + edgeIndex(v, u))) != 0);
     }
 
+    /**
+     * Hex h's ground z at (x, y) under its falls' crests: along each edge h falls over, from hex corner to hex corner
+     * (an end whose next edge is no fall eased over its last tenth), the ground within 4 m behind the edge (eased out
+     * to 6 m) lies at least 0.3 m under h's water: today's curtain and its level lip hang from the straight hex edge,
+     * and no bank, apron or rim tongue stands into them.
+     */
+    private float crestUnder(Coords h, float x, float y, float z) {
+        for (int e = 0; e < 6; e++) {
+            if (!falls(h, h.translated(BoardGeometry.edgeDirection(e)))) { continue; }
+            float ax = cornerX(h, e), ay = cornerY(h, e), ex = cornerX(h, e + 1) - ax, ey = cornerY(h, e + 1) - ay;
+            float len = (float) Math.hypot(ex, ey), nx = -ey / len, ny = ex / len;
+            if ((centerX(h) - ax) * nx + (centerY(h) - ay) * ny < 0) { nx = -nx; ny = -ny; }
+            float behind = (x - ax) * nx + (y - ay) * ny, t = ((x - ax) * ex + (y - ay) * ey) / (len * len);
+            if (behind > 6 * metre || t < 0 || t > 1) { continue; }
+            boolean before = falls(h, h.translated(BoardGeometry.edgeDirection(Math.floorMod(e - 1, 6))));
+            boolean after = falls(h, h.translated(BoardGeometry.edgeDirection((e + 1) % 6)));
+            float ends = (before ? 1 : BoardRelief.smooth(t / .1f)) * (after ? 1 : BoardRelief.smooth((1 - t) / .1f));
+            float cap = shore.water(h, x, y) - .3f * metre;
+            if (z > cap) { z -= (z - cap) * ends * (1 - BoardRelief.smooth((behind - 4 * metre) / (2 * metre))); }
+        }
+        return z;
+    }
+
     /** Whether u pours into its neighbour v over a fall (FieldWater#fallsInto): the crest is u's rim row there. */
     boolean falls(Coords u, Coords v) {
         return inside(u) && inside(v) && (walls[u.getX()][u.getY()] & 1 << (FALL + edgeIndex(u, v))) != 0;
@@ -630,9 +653,16 @@ final class FieldBoard {
      * The move of a rim sample at (x, y) onto level k's contour, set back into the upper side by the recess and today's
      * rock relief at the rim (between {@code upper} and {@code lower}),
      * capped, and kept off the centres of the hexes {@code around} (upper ones by the keep, lower ones by the keep and
-     * the talus's reach). The sample lies on hex {@code at}'s edge e, at t from its first corner.
+     * the talus's reach). The sample lies on hex {@code at}'s edge e, at t from its first corner. A sample at a fall
+     * (one between any two of the hexes round it: the fall edge's samples and both its end corners) is not moved:
+     * today's curtain and pool edge hang from the straight hex edge, and its banks stand at the hex corners.
      */
     private float[] rimMove(int k, float x, float y, Coords[] around, Coords upper, Coords lower, Coords at, int e, float t) {
+        for (Coords a : around) {
+            for (Coords c : around) {
+                if (!a.equals(c) && falls(a, c)) { return new float[] { 0, 0, 0 }; }
+            }
+        }
         float[] o = new float[3];
         float px = x, py = y;
         for (int it = 0; it < 12; it++) {
@@ -1053,7 +1083,7 @@ final class FieldBoard {
                 else if (d[i] <= cliffTo[j] + TIE) { cliffTo[j] = Math.min(cliffTo[j], d[i]); drops[j] = Math.max(drops[j], s.high() - s.low()); }
             }
         }
-        float wall = 0, sill = 0, shelf = 0, run = shore.run();
+        float wall = 0, sill = 0, shelf = 0, run = shore.run(), eased = 0;
         for (int k = lowest + 1; k <= highest; k++) {
             float nearest = nearestTo[k - lowest - 1], bankD = bankTo[k - lowest - 1], cliffD = cliffTo[k - lowest - 1];
             // The nearest bank a step between joined waters: its foot keeps no shelf (the bed is today's, FieldShore).
@@ -1076,13 +1106,19 @@ final class FieldBoard {
             // so two hexes' segment lists, which differ only beyond it, give their shared samples one height.
             float base = bankD == Float.POSITIVE_INFINITY ? 1 : Math.min(1, bankD / taper) * bankD / (bankD + cliffD + 1e-6f);
             float weight = cliffD == Float.POSITIVE_INFINITY ? 0 : (base + (1 - base) * far(bankD)) * (1 - far(cliffD));
-            float share = 0, footShelf = 0;
+            float share = 0, footShelf = 0, easedStep = 0;
             boolean step = false;
             if (weight > 0) {
                 float a = Math.min(.3f, talusReach / (drop * levelZ))
                       * (.7f + .6f * BoardRelief.noise(x / talusNoise - 3.3f, y / talusNoise + 6.6f));
                 // Today's apron (BoardRelief#transition): twice the room wide, steepest under the face.
                 float talus = in || s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(s / (2 * room)));
+                // Round a ground portal the face stands flat (BoardTunnel#relief) and, as today's, keeps no apron.
+                if (talus > 0) {
+                    float keep = relief(h, x, y, z);
+                    easedStep = weight * talus * (1 - keep);
+                    talus *= keep;
+                }
                 share = weight * (in ? 1 : talus);
                 step = !in && s < 2 * room;
             }
@@ -1100,6 +1136,7 @@ final class FieldBoard {
                       : 1 - BoardRelief.smooth(Math.max(0, s - 2 * room) / run));
                 if (!in) {
                     share *= 1 - wet;
+                    easedStep *= 1 - wet;
                     wall = Math.max(wall, wet * weight);
                 }
             }
@@ -1121,8 +1158,12 @@ final class FieldBoard {
                 role = 1;
                 if (Math.abs(s) < band) { band = Math.abs(s); rock = weight; }
             }
+            eased += easedStep;
             z += share * levelZ;
         }
+        // The ground as it stood with the apron the portal eased (zt), carried through the layers below beside z: the
+        // roads layer cuts z no deeper than it cut that.
+        float zt = z + eased * levelZ;
         // Layer 2, shore and beds (FieldShore), before the roads; ground the shore lowers is bank and bed, no step's face.
         float bed = shore.bed(x, y, wall, Math.max(sill, shelf));
         // Land keeps above the water where no water plane reaches over it (WaterLayer#dip): no dry hollow below the
@@ -1130,11 +1171,13 @@ final class FieldBoard {
         Coords at = bed > 0 ? GpuStarShells.hexAt(x, y) : null;
         if (at != null && inside(at) && !WaterLayer.water(this, at)) { bed = Math.min(bed, WaterLayer.dip(this, at, x, y, z)); }
         z -= bed;
+        zt -= bed;
         if (bed > 0) { role = 0; }
         // Layer 3, the scree a ground tunnel's mouth is set in (FieldStamps#scree), before the roads: talus, shaded
         // as a cliff's apron is, at its foot (the ground material's debris).
         float scree = FieldStamps.scree(mouths(h), x, y);
         boolean talus = scree > z;
+        zt = Math.max(zt, scree);
         if (talus) {
             z = scree;
             role = 1;
@@ -1142,6 +1185,7 @@ final class FieldBoard {
         }
         // Between a mouth's wings and in front of its face the ground stays at the opening's floor.
         float approach = FieldStamps.approach(mouths(h), packed(h), x, y);
+        zt = Math.min(zt, approach);
         if (approach < z) {
             z = approach;
             role = 0;
@@ -1198,8 +1242,15 @@ final class FieldBoard {
                 z = seam;
                 role = 0;
             }
+            // Beside water the eased ground keeps the roads' cut as it is.
+            zt = z;
         }
-        out[0] = roads.height(h, x, y, z);
+        // A road's bank cuts the eased ground no deeper than it cut the apron's (BoardRoadBank leaves ground above a road's
+        // reach): earth the road did not reach before stays, retained by the portal's wing.
+        z = crestUnder(h, x, y, z);
+        float ground = roads.height(h, x, y, z);
+        if (zt > z && ground < z) { ground = Math.max(ground, Math.min(z, roads.height(h, x, y, zt))); }
+        out[0] = ground;
         // Reserved ground is its road's surface: a top, as today's is (BoardRoadCut#mesh).
         boolean road = roads.reserved(h, x, y);
         out[1] = road ? 0 : role;

@@ -4114,6 +4114,16 @@ final class BoardRelief {
         for (int i = from; i < destination.size(); i++) { shedFamilies.put(destination.get(i), family); }
     }
 
+    /**
+     * The height field's fall rocks: today's blocks on each lip this hex pours over and on its shoulders
+     * ({@link #fallRocks}), on today's crests ({@code falls} its fall edges), standing on the field's ground. The
+     * boulders at a fall's foot are not placed.
+     */
+    void fieldFallRocks(List<BoardSurface.Face> destination, Vector3[] crests, int falls) {
+        Vector3 anchor = new Vector3(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()), 0);
+        fallRocks(destination, anchor, crests, falls, 0);
+    }
+
     /** The height field's rim and talus rocks ({@link #fieldGround}): as {@link #rocks}. */
     void fieldRocks(List<BoardSurface.Face> destination, Vector3 anchor) {
         rocks(destination, anchor);

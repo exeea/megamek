@@ -38,11 +38,27 @@ final class FieldWater {
             if (next == null || tile.joins(next, BoardGeometry.edgeDirection(e))) { mouths |= 1 << e; }
             if (next == null) { cut(surface, block, e, board.shore, h); }
         }
-        falls(scene, surface, block);
+        // The hex's falls are today's (BoardSurface#fieldFalls): along each, the line is today's crest and the water
+        // today's pool, pulled back from the crest for the sheet's lip: pool, lip and sheet meet as they do today.
+        BoardSurface today = falls(scene, tile) ? surface.fieldFalls() : null;
+        Vector3[] pool = line.clone();
+        float[][] lips = new float[6][];
+        for (BoardSurface.Side fall : today == null ? List.<BoardSurface.Side>of() : today.waterfalls) {
+            int e = fall.edge();
+            boolean pulled = today.water.size() == line.length;
+            lips[e] = new float[2 * (n + 1)];
+            for (int i = 0; i <= n; i++) {
+                int index = (e * n + i) % line.length;
+                line[index] = today.crest(fall).point(i / (float) n);
+                pool[index] = pulled ? new Vector3(today.water.get(index)) : line[index];
+                lips[e][2 * i] = pool[index].x;
+                lips[e][2 * i + 1] = pool[index].y;
+            }
+        }
         surface.fieldWater(line, mouths);
         surface.outline.addAll(List.of(line));
-        surface.water.addAll(List.of(line));
-        float[] plane = surface(board, h);
+        surface.water.addAll(List.of(pool));
+        float[] plane = surface(board, h, lips);
         for (int i = 0; i < plane.length; i += 9) {
             surface.waterFaces.add(new BoardSurface.Face(new Vector3(plane[i], plane[i + 1], plane[i + 2]),
                   new Vector3(plane[i + 3], plane[i + 4], plane[i + 5]), new Vector3(plane[i + 6], plane[i + 7], plane[i + 8]),
@@ -59,8 +75,11 @@ final class FieldWater {
      * level, or on a descending stream split GRADED_SPLITS times and laid on today's graded water (FieldShore#water),
      * one function, so it is the same at every detail and its points on an edge alike from either hex.
      */
-    static float[] surface(FieldBoard board, Coords h) {
-        float[] plane = WaterLayer.plane(board, h);
+    static float[] surface(FieldBoard board, Coords h) { return surface(board, h, new float[6][]); }
+
+    /** That surface, its plane ending on the pulled-back pool edge {@code lips[e]} (x, y a point) of each fall edge e. */
+    private static float[] surface(FieldBoard board, Coords h, float[][] lips) {
+        float[] plane = lipped(board, h, WaterLayer.plane(board, h), lips);
         boolean graded = board.shore.graded(h);
         for (int s = 0; graded && s < GRADED_SPLITS; s++) { plane = split(plane); }
         float[] out = new float[plane.length / 2 * 3];
@@ -70,6 +89,44 @@ final class FieldWater {
             out[o + 2] = board.shore.water(h, plane[i], plane[i + 1]);
         }
         return out;
+    }
+
+    /**
+     * The plane (x, y a corner) with its fan to each fall edge's rim replaced by a fan to that fall's pulled-back pool
+     * edge, closed to the rim's two ends: the pool ends exactly where the sheet's lip starts, as today's does.
+     */
+    private static float[] lipped(FieldBoard board, Coords h, float[] plane, float[][] lips) {
+        float cx = board.centerX(h), cy = board.centerY(h), sx = 0, sy = 0;
+        float[] out = new float[plane.length + 6 * 6 * (BoardSurface.SHORE_SEGMENTS + 2)];
+        int o = 0, spokes = 0;
+        for (int i = 0; i < plane.length; i += 6) {
+            // The fan's triangles start at the centre, FULL of them an edge, in the edges' order (WaterLayer#plane).
+            boolean spoke = plane[i] == cx && plane[i + 1] == cy;
+            int e = spoke ? spokes / FieldBoard.FULL : -1, j = spoke ? spokes % FieldBoard.FULL : -1;
+            if (spoke) { spokes++; }
+            if (e < 0 || e > 5 || lips[e] == null) {
+                System.arraycopy(plane, i, out, o, 6);
+                o += 6;
+                continue;
+            }
+            if (j == 0) {
+                sx = plane[i + 2];
+                sy = plane[i + 3];
+            }
+            if (j < FieldBoard.FULL - 1) { continue; }
+            float[] lip = lips[e];
+            float px = sx, py = sy;
+            for (int k = 0; k <= lip.length; k += 2) {
+                float qx = k < lip.length ? lip[k] : plane[i + 4], qy = k < lip.length ? lip[k + 1] : plane[i + 5];
+                // (a lip's end may lie on the rim's, or just past it: only triangles that turn as the plane's do)
+                if ((px - cx) * (qy - cy) - (py - cy) * (qx - cx) > 0) {
+                    for (float v : new float[] { cx, cy, px, py, qx, qy }) { out[o++] = v; }
+                }
+                px = qx;
+                py = qy;
+            }
+        }
+        return Arrays.copyOf(out, o);
     }
 
     /** Triangles (x, y a corner) each split in four at its edges' middles, turning as they did. */
@@ -104,39 +161,13 @@ final class FieldWater {
         return best;
     }
 
-    /**
-     * The falls of field water hex {@code surface.tile}: over each open mouth into water more than two levels lower, as
-     * river's are. Two that meet at their shared corner run on into each other there, as today's prow does: one point,
-     * one tangent, the corner's bisector.
-     */
-    private static void falls(BoardScene scene, BoardSurface surface, ChunkField.Block block) {
-        BoardScene.Tile tile = surface.tile;
-        float[][] paths = new float[6][];
-        BoardScene.Tile[] below = new BoardScene.Tile[6];
+    /** Whether field water hex {@code tile} pours over a fall on any of its edges (#fallsInto). */
+    private static boolean falls(BoardScene scene, BoardScene.Tile tile) {
         for (int e = 0; e < 6; e++) {
-            BoardScene.Tile next = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(e)));
-            if (fallsInto(tile, next, BoardGeometry.edgeDirection(e))) {
-                paths[e] = path(surface, block, e);
-                below[e] = next;
-            }
+            int direction = BoardGeometry.edgeDirection(e);
+            if (fallsInto(tile, scene.tile(tile.coords().translated(direction)), direction)) { return true; }
         }
-        boolean[] joined = new boolean[6];
-        for (int e = 0; e < 6; e++) {
-            float[] a = paths[e], b = paths[(e + 1) % 6];
-            joined[e] = a != null && b != null && a[a.length - 3] == b[0] && a[a.length - 2] == b[1];
-        }
-        for (int e = 0; e < 6; e++) {
-            float[] path = paths[e];
-            if (path == null) { continue; }
-            int o = path.length, previous = (e + 5) % 6;
-            float water = path[2];
-            Vector3 a = new Vector3(path[0], path[1], water), b = new Vector3(path[o - 3], path[o - 2], water);
-            Vector3 start = joined[previous] ? corner(paths[previous], path) : new Vector3(path[3] - path[0], path[4] - path[1], 0).nor();
-            Vector3 end = joined[e] ? corner(path, paths[(e + 1) % 6])
-                  : new Vector3(path[o - 3] - path[o - 6], path[o - 2] - path[o - 5], 0).nor();
-            surface.fieldFall(e, new BoardSurface.Crest(a, b, start, end, new Vector3(a), new Vector3(start.y, -start.x, 0), 0,
-                  water, path), BoardGeometry.surfaceZ(below[e]), joined[previous], joined[e]);
-        }
+        return false;
     }
 
     /**
@@ -146,49 +177,6 @@ final class FieldWater {
     static boolean fallsInto(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         return next != null && tile.joins(next, direction) && tile.elevation() > next.elevation()
               && !BoardSurface.waterSlope(tile, next);
-    }
-
-    /** The tangent two joined crests share at their corner: the mean of the arriving and the leaving piece. */
-    private static Vector3 corner(float[] arriving, float[] leaving) {
-        int o = arriving.length;
-        return new Vector3(arriving[o - 3] - arriving[o - 6], arriving[o - 2] - arriving[o - 5], 0).nor()
-              .add(new Vector3(leaving[3] - leaving[0], leaving[4] - leaving[1], 0).nor()).nor();
-    }
-
-    /**
-     * The crest's path over edge e: the block's row along e (the points the wall's rows hang from) at the pool's water,
-     * where the rim lies under it, cut where the rim rises out of it toward a bank; null where none of it does.
-     */
-    private static float[] path(BoardSurface surface, ChunkField.Block block, int e) {
-        float[][] row = block.row(e);
-        FieldSupport ground = new FieldSupport(block);
-        float water = BoardGeometry.waterZ(surface.tile);
-        int n = row.length;
-        float[] over = new float[n];
-        for (int j = 0; j < n; j++) { over[j] = water - ground.height(row[j][0], row[j][1]); }
-        int first = 0, last = n - 1;
-        while (first < n && over[first] <= 0) { first++; }
-        while (last >= 0 && over[last] <= 0) { last--; }
-        if (last <= first) { return null; }
-        float[] path = new float[3 * (last - first + 3)];
-        int o = 0;
-        if (first > 0) { o = crossing(path, o, row[first - 1], row[first], over[first - 1], over[first], water); }
-        for (int j = first; j <= last; j++) {
-            path[o++] = row[j][0];
-            path[o++] = row[j][1];
-            path[o++] = water;
-        }
-        if (last < n - 1) { o = crossing(path, o, row[last + 1], row[last], over[last + 1], over[last], water); }
-        return Arrays.copyOf(path, o);
-    }
-
-    /** Where the rim crosses the water between a row's sample out of it and one under it, written at o; the next o. */
-    private static int crossing(float[] path, int o, float[] dry, float[] wet, float overDry, float overWet, float water) {
-        float t = overWet / (overWet - overDry);
-        path[o] = wet[0] + (dry[0] - wet[0]) * t;
-        path[o + 1] = wet[1] + (dry[1] - wet[1]) * t;
-        path[o + 2] = water;
-        return o + 3;
     }
 
     /** The water's cut face along edge e, which the board's edge cuts through: from the block's ground up to the water. */

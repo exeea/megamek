@@ -714,7 +714,8 @@ final class ChunkField {
                       && rimZ < b.shore.water(h, hx, hy);
                 for (int q = 0; q < levels; q++) {
                     float d = fallCorner
-                          ? -FALL_RECESS * b.metre * BoardRelief.smooth((rim - base - q * b.levelZ) / (1.5f * b.metre))
+                          ? -FALL_RECESS * b.metre * BoardRelief.smooth(
+                                (Math.min(rim, rimZ) - FALL_FACE * b.metre - base - q * b.levelZ) / (1.5f * b.metre))
                           : BoardRelief.wallRelief(cx, cy, base + q * b.levelZ, base, rim, landform, rock) - atRim;
                     column[q * 2] = dx / len * d;
                     column[q * 2 + 1] = dy / len * d;
@@ -787,9 +788,11 @@ final class ChunkField {
                     float d = BoardRelief.wallRelief(px, py, zr, foot, top, Math.max(landform, top - base), columnFamily) - rimPush;
                     // The rim never stands behind its row, where the ground ends.
                     if (r == rows - 1) { d = Math.max(0, d); }
-                    // Under a fall's crest the water wore the face smooth and back: behind the crest's row, eased in
-                    // over the rim's first 1.5 m, so the curtain thrown out from the crest never meets the rock.
-                    if (fall) { d = -FALL_RECESS * b.metre * BoardRelief.smooth((top - zr) / (1.5f * b.metre)); }
+                    // Under a fall's crest the water wore the face smooth and back: behind the crest's row from FALL_FACE
+                    // below the rim, eased in over 1.5 m; its top stands on the hex edge today's curtain hangs from.
+                    if (fall) {
+                        d = -FALL_RECESS * b.metre * BoardRelief.smooth((top - FALL_FACE * b.metre - zr) / (1.5f * b.metre));
+                    }
                     out[0] += onx * d * rest * ease;
                     out[1] += ony * d * rest * ease;
                 }
@@ -803,6 +806,9 @@ final class ChunkField {
 
         /** How far a fall's face stands behind its crest, metres. */
         private static final float FALL_RECESS = .8f;
+
+        /** How far below the rim a fall's face starts to stand back, metres: its top stands on today's hex edge. */
+        private static final float FALL_FACE = 2;
 
         private float[] trim(float[] values) { return java.util.Arrays.copyOf(values, size); }
 

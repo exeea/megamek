@@ -296,21 +296,12 @@ final class BoardSurface {
      * below where two pools' falls meet around it. A fall that runs on over several edges so curves round them without
      * a corner, and the curve never passes inside its hex: it only ever bows out over the pool it falls into, whose hex
      * it stays in. {@code corner} and {@code outward} are the edge's start and outward normal; {@code jut} how far a
-     * free-standing fall's lip may jut out unevenly over the pool below, in world units. {@code path}, a height-field
-     * fall's (FieldWater): the points of the wall row it pours over, x, y and z each, which the crest follows by length
-     * instead; null for today's.
+     * free-standing fall's lip may jut out unevenly over the pool below, in world units.
      */
     record Crest(Vector3 a, Vector3 b, Vector3 startTangent, Vector3 endTangent, Vector3 corner, Vector3 outward,
-          float jut, float level, float[] path) {
-        /** Today's crest: the curve from {@code a} to {@code b}. */
-        Crest(Vector3 a, Vector3 b, Vector3 startTangent, Vector3 endTangent, Vector3 corner, Vector3 outward, float jut,
-              float level) {
-            this(a, b, startTangent, endTangent, corner, outward, jut, level, null);
-        }
-
+          float jut, float level) {
         /** The point at {@code s}, from 0 at {@code a} to 1 at {@code b}. */
         Vector3 point(float s) {
-            if (path != null) { return along(s); }
             if (s <= 0) { return new Vector3(a); }
             if (s >= 1) { return new Vector3(b); }
             float chord = chord(), s2 = s * s, s3 = s2 * s;
@@ -331,18 +322,6 @@ final class BoardSurface {
 
         /** The unit direction of the crest at {@code s}, from {@code a} toward {@code b}. */
         Vector3 tangent(float s) {
-            if (path != null) {
-                // Across a vertex of the path the direction turns over half a piece either side, so the sheet's
-                // columns never cross; along a piece's middle it is the piece's own; at its ends it eases into the end
-                // tangents, which a joined fall shares.
-                float half = .5f / (path.length / 3 - 1);
-                Vector3 t = along(Math.min(1, s + half)).sub(along(Math.max(0, s - half)));
-                t.z = 0;
-                t.nor();
-                if (s < half) { t.lerp(startTangent, 1 - s / half); }
-                if (s > 1 - half) { t.lerp(endTangent, 1 - (1 - s) / half); }
-                return t.nor();
-            }
             if (s <= 0) { return new Vector3(startTangent); }
             if (s >= 1) { return new Vector3(endTangent); }
             float chord = chord(), s2 = s * s;
@@ -360,29 +339,6 @@ final class BoardSurface {
 
         private float chord() {
             return (float) Math.hypot(b.x - a.x, b.y - a.y);
-        }
-
-        /** A path crest's point at {@code s} of its length. */
-        private Vector3 along(float s) {
-            int n = path.length / 3;
-            float total = 0;
-            for (int i = 1; i < n; i++) { total += piece(i); }
-            float rest = Math.clamp(s, 0, 1) * total;
-            for (int i = 1; i < n; i++) {
-                float length = piece(i);
-                if (rest <= length || i == n - 1) {
-                    int o = 3 * (i - 1);
-                    return new Vector3(path[o], path[o + 1], path[o + 2])
-                          .lerp(new Vector3(path[o + 3], path[o + 4], path[o + 5]), length == 0 ? 0 : Math.clamp(rest / length, 0, 1));
-                }
-                rest -= length;
-            }
-            return new Vector3(a);
-        }
-
-        /** The plan length of a path's piece i, from point i - 1 to point i. */
-        private float piece(int i) {
-            return (float) Math.hypot(path[3 * i] - path[3 * i - 3], path[3 * i + 1] - path[3 * i - 2]);
         }
     }
 
@@ -743,14 +699,24 @@ final class BoardSurface {
     }
 
     /**
-     * A height-field water hex's fall over {@code edge} (FieldWater) onto water {@code bottom} high: its crest, and
-     * whether each end runs on into the next fall's sheet, which today's fall renderers draw.
+     * Gives this height-field water hex the falls it has without the field (FieldWater): each crest and its ends'
+     * joins are that surface's, so today's fall renderers draw today's fall. Returns that surface: its water is the
+     * pool pulled back from each crest, where the sheet's lip starts.
      */
-    void fieldFall(int edge, Crest crest, float bottom, boolean joinsA, boolean joinsB) {
-        crests[edge] = crest;
-        joinA[edge] = joinsA ? new Vector3(crest.startTangent().y, -crest.startTangent().x, 0) : null;
-        joinB[edge] = joinsB ? new Vector3(crest.endTangent().y, -crest.endTangent().x, 0) : null;
-        waterfalls.add(new Side(new Vector3(crest.a()), new Vector3(crest.b()), bottom, bottom, edge));
+    BoardSurface fieldFalls() {
+        BoardSurface today = new BoardSurface(scene, tile, lod);
+        for (Side fall : today.waterfalls) {
+            int edge = fall.edge();
+            crests[edge] = today.crests[edge];
+            joinA[edge] = today.joinA[edge];
+            joinB[edge] = today.joinB[edge];
+            waterfalls.add(fall);
+        }
+        // Today's blocks on each lip and its shoulders, on today's crests (cliffs' BoardRelief#fieldFallRocks).
+        int lips = 0;
+        for (Side fall : today.waterfalls) { lips |= 1 << fall.edge(); }
+        if (lips != 0 && today.crestLine != null) { relief.fieldFallRocks(faces, today.crestLine, lips); }
+        return today;
     }
 
     /** A height-field water hex whose water descends (FieldWater): its graded water, read from its water faces. */
@@ -2222,8 +2188,6 @@ final class BoardSurface {
 
     /** At a free bank the lip narrows to its anchor, so pulling it back cannot cross the adjoining shoreline. */
     float lipWidth(int edge, float s, float width) {
-        // A height-field fall starts on its crest: the field's water plane ends there (FieldWater).
-        if (crests[edge].path() != null) { return 0; }
         if (joinA[edge] == null && joinB[edge] == null) {
             width = Math.min(width, .15f * crests[edge].chord());
         }

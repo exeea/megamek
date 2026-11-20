@@ -47,11 +47,11 @@ class GpuGroundPickSmokeTest {
           { 6570.8f, -6593.0f, 5804.9f }, { 6574.0f, -6593.6f, 5801.1f } };
 
     /**
-     * The hex under each of those pixels: 1211's cliff (its wall; 1311 the portal's wing), and with the height field
-     * three of them on the talus apron at the cliff's foot in 1312, whose ground it is.
+     * The hex under each of those pixels: 1211's cliff (its wall; 1311 the portal's wing). The height field keeps no
+     * talus apron round the portal either; its ninth pixel sees 1312's ground at the corner beside the wing.
      */
     private static final String[] PARK_TODAY = { "1211", "1211", "1211", "1211", "1211", "1211", "1211", "1211", "1311", "1311" };
-    private static final String[] PARK_FIELD = { "1211", "1211", "1312", "1312", "1312", "1211", "1211", "1211", "1311", "1311" };
+    private static final String[] PARK_FIELD = { "1211", "1211", "1211", "1211", "1211", "1211", "1211", "1211", "1312", "1311" };
 
     @Test
     void parkDistrictPortalPixelsPickTheHexUnderThePointer() throws Exception {
