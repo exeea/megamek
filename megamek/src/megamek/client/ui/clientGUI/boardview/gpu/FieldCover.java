@@ -104,7 +104,7 @@ final class FieldCover {
             ground(v, x[v], y[v], z[v]);
             if (stepTop != null) { scree(v, role[v], rock[v], foot[v], stepTop[v]); }
             // A stream hex's bank slope takes the gorge's rock (cliffs, 2026-11-20; the user's choice).
-            if (stepTop != null) { gorge(v, role[v], stepTop[v], x[v], y[v]); }
+            if (stepTop != null) { gorge(v, role[v], stepTop[v]); }
         }
     }
 
@@ -132,51 +132,24 @@ final class FieldCover {
     }
 
     /**
-     * A step-face sample under a stream hex (a water hex with no fall: FieldBoard#bankSlope's slope) takes the rock of
-     * the gorge (BoardRelief#gorgeFamily: the family of the stream hex's highest dry neighbour of another family),
-     * whole; a ground sample takes it only at the slope's foot beside a water neighbour.
+     * A step-face sample under a stream hex (a water hex with no fall: FieldBoard#bankSlope's slope, and the gorge's
+     * side down to today's waterline, on the stream hex's own strip and the pool's bank too) takes the rock of the
+     * gorge (BoardRelief#gorgeFamily: the family of the stream hex's highest dry neighbour of another family), whole,
+     * and so does a ground sample FieldBoard#height marked beside that waterline (FieldBoard#gorgeGround): no other
+     * cover stands between that rock and the water.
      */
-    private void gorge(int v, float role, int top, float x, float y) {
-        Coords upper = FieldBoard.unpacked(top);
-        if (role > 1.5f || upper == null || water) { return; }
+    private void gorge(int v, float role, int top) {
+        boolean ground = top < -1;
+        Coords upper = FieldBoard.unpacked(ground ? FieldBoard.gorgeGround(top) : top);
+        if (upper == null || (ground ? role >= .5f : role < .5f || role > 1.5f)) { return; }
         BoardScene.Tile stream = scene.tile(upper);
         if (!FieldBoard.streamHex(scene, stream)) { return; }
         int family = BoardRelief.gorgeFamily(scene, stream, own);
-        // Whole on the slope's step faces; on flat ground only at the slope's foot within 3 m of a water neighbour's
-        // edge (no grass at the water). A partial share on level ground draws as hard polygons: none is given.
-        float metre = BoardRelief.metres(1), share = role >= .5f ? 1 : 0;
-        if (share == 0) {
-            float from = edgeDistance(upper, x, y);
-            if (from < FieldBoard.bankFoot(x, y) + 2 * metre) {
-                for (int e = 0; e < 6; e++) {
-                    Coords next = coords.translated(BoardGeometry.edgeDirection(e));
-                    BoardScene.Tile t = scene.tile(next);
-                    if (t != null && t.liquid().present() && !next.equals(upper)) {
-                        share = Math.max(share, 1 - BoardRelief.smooth(edgeDistance(next, x, y) / (3 * metre)));
-                    }
-                }
-            }
-        }
-        if (family == own) { share = 0; }
-        if (share <= TRACE) { return; }
+        if (family == own) { return; }
         int o = v * STRIDE;
-        for (int f = 0; f < BoardSurfaceBlend.FAMILIES; f++) { raw[o + f] *= 1 - share; }
-        raw[o + family] += share;
+        for (int f = 0; f < BoardSurfaceBlend.FAMILIES; f++) { raw[o + f] = 0; }
+        raw[o + family] = 1;
         scree = true;
-    }
-
-    /** The distance from (x, y) to this hex's edge shared with its neighbour {@code next}; infinite if it is none. */
-    private float edgeDistance(Coords next, float x, float y) {
-        for (int e = 0; e < 6; e++) {
-            if (!coords.translated(BoardGeometry.edgeDirection(e)).equals(next)) { continue; }
-            float ax = megamek.common.board.HexTile.cornerX(coords, e, BoardGeometry.width());
-            float ay = megamek.common.board.HexTile.cornerY(coords, e, BoardGeometry.height());
-            float ex = megamek.common.board.HexTile.cornerX(coords, (e + 1) % 6, BoardGeometry.width()) - ax;
-            float ey = megamek.common.board.HexTile.cornerY(coords, (e + 1) % 6, BoardGeometry.height()) - ay;
-            float t = Math.clamp(((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey), 0, 1);
-            return (float) Math.hypot(x - ax - ex * t, y - ay - ey * t);
-        }
-        return Float.POSITIVE_INFINITY;
     }
 
     /** Whether lattice samples a and c carry one and the same cover alone and equal cut values: a level triangle

@@ -445,6 +445,60 @@ final class FieldBoard {
         return inside(u) && inside(v) && (walls[u.getX()][u.getY()] & 1 << (STREAM + edgeIndex(u, v))) != 0;
     }
 
+    /**
+     * The stream hexes with a step ({@link #stream}) among the hex at (x, y) and its neighbours, which hold every such
+     * step within a hex side of the point whichever hex asks: per stream hex the distance of its nearest step in
+     * world units and the hex ({@link #packed}), the nearest last; null where there is none.
+     */
+    private float[] streamsNear(Coords here, float x, float y) {
+        float[] found = null;
+        int count = 0;
+        for (int n = -1; n < 6; n++) {
+            Coords c = n < 0 ? here : here.translated(BoardGeometry.edgeDirection(n));
+            if (!inside(c)) { continue; }
+            int steps = walls[c.getX()][c.getY()] >>> STREAM & 63;
+            if (steps == 0) { continue; }
+            float best = Float.POSITIVE_INFINITY;
+            for (int e = 0; e < 6; e++) {
+                if ((steps & 1 << e) == 0) { continue; }
+                float ax = cornerX(c, e), ay = cornerY(c, e), ex = cornerX(c, e + 1) - ax, ey = cornerY(c, e + 1) - ay;
+                float t = Math.clamp(((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey), 0, 1);
+                best = Math.min(best, (float) Math.hypot(x - ax - ex * t, y - ay - ey * t));
+            }
+            if (found == null) { found = new float[14]; }
+            // Kept in falling order of distance: the one #height marks last is the nearest.
+            int at = count;
+            for (; at > 0 && found[at - 2] < best; at -= 2) {
+                found[at] = found[at - 2];
+                found[at + 1] = found[at - 1];
+            }
+            found[at] = best;
+            found[at + 1] = packed(c);
+            count += 2;
+        }
+        return found == null ? null : Arrays.copyOf(found, count);
+    }
+
+    /**
+     * The highest water plane that reaches over (x, y), a point of hex {@code here} (WaterLayer#plane: a water hex's
+     * own, and over land the planes of the water beside it whose bank it is); negative infinity where none does.
+     */
+    private float planeOver(Coords here, float x, float y) {
+        if (WaterLayer.water(this, here)) { return shore.water(here, x, y); }
+        float plane = Float.NEGATIVE_INFINITY;
+        for (int e = 0; inside(here) && e < 6; e++) {
+            Coords c = here.translated(BoardGeometry.edgeDirection(e));
+            if (WaterLayer.water(this, c) && WaterLayer.bank(this, c, here)) { plane = Math.max(plane, shore.water(c, x, y)); }
+        }
+        return plane;
+    }
+
+    /**
+     * A ground sample's step top ({@link #height}'s eighth value) that marks level land beside the waterline of
+     * stream hex {@code packed}'s gorge: below -1, so every reader that takes a negative top for none still does.
+     */
+    static int gorgeGround(int packed) { return -2 - packed; }
+
     /** Whether the hex {@link #packed} gave is a stream hex with such a step. */
     private boolean streamTop(int packed) {
         return packed >= 0 && (walls[packed / 4096][packed % 4096] >>> STREAM & 63) != 0;
@@ -1343,6 +1397,52 @@ final class FieldBoard {
             // Beside water the eased ground keeps the roads' cut as it is.
             zt = z;
         }
+        // A stream hex's gorge ends on today's waterline (FieldShore#waterline): within its bank slopes' reach of a
+        // stream step, the ground at or below that stream hex's level stands no higher than the gorge's side, which
+        // rises from the water's height on the line (level on the line itself, steepening over 1.5 m to a slope of 42
+        // to 54 degrees by noise), keeps above every water plane that reaches over the point, and meets the ground
+        // above in a rounded shoulder: the stream hex's own strip beside its chute, and the lower hexes beside the
+        // pool. Ground less than half a metre above the water keeps its bank; what stands above the stream hex's level
+        // (a higher neighbour's cliff, its talus) keeps its height over that side. Ground the side lowers is a step's
+        // face under the stream hex, and level land within 3 m of the line below the slope's foot is marked for its
+        // rock (#gorgeGround): the gorge's rock down to the water (FieldCover#gorge). The point alone decides, so
+        // hexes sharing a sample give it one height.
+        float[] streams = streamsNear(here, x, y);
+        float[] line = streams == null ? null : new float[6];
+        float reach = bankFoot(x, y) + 2 * metre, cut = 0, plane = Float.NaN;
+        for (int i = 0; streams != null && i < streams.length; i += 2) {
+            float within = 1 - BoardRelief.smooth((streams[i] - reach) / (3 * metre));
+            if (within <= 0) { continue; }
+            if (line[4] == 0 && line[5] == 0 && !shore.waterline(x, y, line)) { break; }
+            if (line[0] >= 2 * metre) { break; }
+            if (Float.isNaN(plane)) { plane = planeOver(here, x, y); }
+            boolean land = line[0] < 0;
+            float from = Math.max(0, -line[0]), blend = 1.5f * metre;
+            float slope = .9f + .5f * BoardRelief.noise(x / (8 * metre) + 3.7f, y / (8 * metre) - 5.2f);
+            // Small ledges on the side, none at the line. Just inside the line (the polygon's, where the shore's
+            // grid still reads land) the side is the water's height, as on the line.
+            float ledge = (BoardRelief.noise(x / (2.5f * metre) + 4.4f, y / (2.5f * metre) - 9.2f) - .5f) * .8f * metre
+                  * BoardRelief.smooth(from / (2 * blend));
+            float side = Math.max(line[3] + slope * (from < blend ? from * from / (2 * blend) : from - blend / 2) + ledge,
+                  plane + (.05f + .2f * BoardRelief.smooth(from / blend)) * metre);
+            // The stream hex's own ground and what lies below it; the shoulder's rounding, none on the line itself
+            // (flat ground at the water's height stays).
+            int top = (int) streams[i + 1];
+            float level = level(unpacked(top)) * levelZ, under = Math.min(z, level), radius = Math.min(metre, .5f * from);
+            float round = radius <= 0 ? 0 : Math.max(radius - Math.abs(under - side), 0) / radius;
+            float deep = BoardRelief.smooth((under - line[3] - .5f * metre) / metre) * (1 - BoardRelief.smooth(line[0] / metre - 1));
+            float lower = within * deep * Math.max(0, under - Math.min(under, side) + round * round * radius / 4);
+            cut = Math.max(cut, lower);
+            if (within > .5f && lower > .15f * metre) {
+                role = 1;
+                rock = 1;
+                nearTop = top;
+            } else if (role < .5f && land && from < 3 * metre && streams[i] < reach && z <= level - metre) {
+                nearTop = gorgeGround(top);
+            }
+        }
+        z -= cut;
+        zt -= cut;
         // A road's bank cuts the eased ground no deeper than it cut the apron's (BoardRoadBank leaves ground above a road's
         // reach): earth the road did not reach before stays, retained by the portal's wing.
         z = crestUnder(h, x, y, z);
