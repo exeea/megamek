@@ -7302,8 +7302,6 @@ final class GpuTerrain implements Disposable {
               && (face.finish() == BoardSurface.Finish.OUTCROP || face.finish() == BoardSurface.Finish.DRESSING)).toList());
         // A plate's quay extensions, as today's builder makes them (BoardSurface#quay): the lattice stops at its outline.
         if (FieldPlates.takes(scene, tile)) { features.addAll(surface.quay()); }
-        // A stream hex's wet cliff edges: today's wall faces, where the field builds no wall (BoardSurface#streamWalls).
-        features.addAll(surface.streamWalls());
         for (var group : byFamily(surface, features).entrySet()) {
             solid.addTriangles(sculptMaterial(group.getKey()),
                   triangles -> sculptedFaces(triangles, surface, group.getValue(), Float.NaN, scene, surfaces));

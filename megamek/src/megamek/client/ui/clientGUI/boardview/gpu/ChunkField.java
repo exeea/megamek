@@ -932,7 +932,7 @@ final class ChunkField {
             // A plate over its neighbour casts a wall in the board cut's form: two rows, straight (FieldPlates).
             boolean cast = !outside && b.plate(h);
             wall &= !cast;
-            // A stream hex's wet cliff edge has today's wall (BoardSurface#streamWalls): the field builds none.
+            // A stream hex's step has no wall: the lower hex's ground rises to its rim (FieldBoard#bankSlope).
             if (wall && b.stream(h, g)) { return; }
             // The step's height for its landforms (BoardRelief#drop): its levels, at least three for a wall, not the face
             // left above the talus; the rock's prominence and jointing follow it.
@@ -1136,7 +1136,8 @@ final class ChunkField {
             if (level && (cover == null || cover.plain(a))) {
                 levelTops = add(levelTops, levelTopCount, a, second, third);
                 levelTopCount += 3;
-            } else if (!level && role[a] + role[c1] + role[c2] >= 2) {
+            // A triangle with any step sample is a step face: a bank's top row is all face, none alternating.
+            } else if (!level && role[a] + role[c1] + role[c2] >= 1) {
                 faces = add(faces, faceCount, a, second, third);
                 faceCount += 3;
             } else {

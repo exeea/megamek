@@ -103,6 +103,8 @@ final class FieldCover {
         for (int v = 0; v < lattice; v++) {
             ground(v, x[v], y[v], z[v]);
             if (stepTop != null) { scree(v, role[v], rock[v], foot[v], stepTop[v]); }
+            // A stream hex's bank slope takes the gorge's rock (cliffs, 2026-11-20; the user's choice).
+            if (stepTop != null) { gorge(v, role[v], foot[v], stepTop[v]); }
         }
     }
 
@@ -122,6 +124,25 @@ final class FieldCover {
         int family = cliff == null ? own : BoardSurfaceBlend.family(cliff);
         float reach = foot / BoardRelief.metres(2 * BoardRelief.TRANSITION);
         float share = family == own || reach >= 1 ? 0 : rock * (1 - (float) Math.sqrt(reach));
+        if (share <= TRACE) { return; }
+        int o = v * STRIDE;
+        for (int f = 0; f < BoardSurfaceBlend.FAMILIES; f++) { raw[o + f] *= 1 - share; }
+        raw[o + family] += share;
+        scree = true;
+    }
+
+    /**
+     * A step-face sample under a stream hex (a water hex with no fall: FieldBoard#bankSlope's slope) takes the rock of
+     * the gorge (BoardRelief#gorgeFamily: the family of the stream hex's highest dry neighbour of another family),
+     * whole over the slope, eased out between 6 and 8 m from the shared edge into the hex's own cover.
+     */
+    private void gorge(int v, float role, float foot, int top) {
+        Coords upper = FieldBoard.unpacked(top);
+        if (role < .5f || role > 1.5f || upper == null) { return; }
+        BoardScene.Tile stream = scene.tile(upper);
+        if (!FieldBoard.streamHex(scene, stream)) { return; }
+        int family = BoardRelief.gorgeFamily(scene, stream, own);
+        float share = family == own ? 0 : 1 - BoardRelief.smooth((foot / BoardRelief.metres(1) - 6) / 2);
         if (share <= TRACE) { return; }
         int o = v * STRIDE;
         for (int f = 0; f < BoardSurfaceBlend.FAMILIES; f++) { raw[o + f] *= 1 - share; }

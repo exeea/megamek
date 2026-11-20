@@ -4125,12 +4125,65 @@ final class BoardRelief {
     }
 
     /**
-     * The height field's rim and talus rocks ({@link #fieldGround}): as {@link #rocks}. A stream hex gets none here:
-     * its rocks are today's rock faces (BoardSurface#fieldFaces).
+     * The height field's rim and talus rocks ({@link #fieldGround}): as {@link #rocks}. A stream hex gets none (they
+     * would stand in its chute); the hex below one gets its bank's scree ({@link #bankScree}).
      */
     void fieldRocks(List<BoardSurface.Face> destination, Vector3 anchor) {
         if (!FieldBoard.streamHex(scene, tile)) { rocks(destination, anchor); }
+        bankScree(destination, anchor);
         screeRocks(destination, anchor);
+    }
+
+    /**
+     * The rock of a stream hex's gorge: the family of its highest dry neighbour of another family than {@code own}, in
+     * BoardSurfaceBlend#family's encoding; {@code own} where it has none (FieldCover#gorge, #bankScree).
+     */
+    static int gorgeFamily(BoardScene scene, BoardScene.Tile stream, int own) {
+        int family = own, level = Integer.MIN_VALUE;
+        for (int e = 0; e < 6; e++) {
+            BoardScene.Tile t = scene.tile(stream.coords().translated(BoardGeometry.edgeDirection(e)));
+            if (t == null || t.liquid().present() || BoardSurfaceBlend.family(t) == own || t.elevation() <= level) { continue; }
+            level = t.elevation();
+            family = BoardSurfaceBlend.family(t);
+        }
+        return family;
+    }
+
+    /**
+     * Loose rock at the foot of a stream hex's bank slope (FieldBoard#bankSlope) on this lower, dry hex: four to six
+     * pieces an edge, of the gorge's rock ({@link #gorgeFamily}), 4.5 to 8.5 m out from the shared edge, most of them
+     * small, standing on the field's ground; none on the unit anchor.
+     */
+    private void bankScree(List<BoardSurface.Face> destination, Vector3 anchor) {
+        if (!detail.formations() || fieldGround == null || tile.liquid().present()) { return; }
+        float m = metres(1);
+        for (int e = 0; e < 6; e++) {
+            int direction = BoardGeometry.edgeDirection(e);
+            BoardScene.Tile upper = scene.tile(tile.coords().translated(direction));
+            if (upper == null || !FieldBoard.streamHex(scene, upper) || !FieldBoard.streamStep(upper, tile, (direction + 3) % 6)) { continue; }
+            int index = gorgeFamily(scene, upper, BoardSurfaceBlend.family(tile));
+            BoardScene.Surface family = BoardScene.Surface.values()[Math.min(index, BoardScene.Surface.values().length - 1)];
+            float ax = megamek.common.board.HexTile.cornerX(tile.coords(), e, BoardGeometry.width());
+            float ay = megamek.common.board.HexTile.cornerY(tile.coords(), e, BoardGeometry.height());
+            float bx = megamek.common.board.HexTile.cornerX(tile.coords(), (e + 1) % 6, BoardGeometry.width());
+            float by = megamek.common.board.HexTile.cornerY(tile.coords(), (e + 1) % 6, BoardGeometry.height());
+            float length = (float) Math.hypot(bx - ax, by - ay), ix = (by - ay) / length, iy = -(bx - ax) / length;
+            if ((anchor.x - ax) * ix + (anchor.y - ay) * iy < 0) { ix = -ix; iy = -iy; }
+            Random random = new Random(tile.coords().hashCode() * 1_000_003L + e * 31 + 59);
+            int count = 4 + random.nextInt(3), from = destination.size();
+            for (int i = 0; i < count; i++) {
+                float along = .12f + .76f * random.nextFloat(), out = m * (4.5f + 4 * random.nextFloat()), r = random.nextFloat();
+                float size = m * (.5f + 1.3f * r * r), width = size * (.6f + .4f * random.nextFloat());
+                float height = size * (.45f + .5f * random.nextFloat());
+                float x = ax + (bx - ax) * along + ix * out, y = ay + (by - ay) * along + iy * out;
+                float ground = fieldGround.height(x, y);
+                if (Float.isNaN(ground) || Math.hypot(x - anchor.x, y - anchor.y) - size < BoardGeometry.width() * .2f) { continue; }
+                BoardShape rock = BoardRocks.rock(family, random.nextInt(64), detail);
+                place(destination, rock, new Vector3(x, y, ground - height * .3f), random.nextFloat() * 6.2832f,
+                      size * (1 + .5f * random.nextFloat()), width, height / rock.height(), Kind.ROCK, e, false);
+            }
+            shed(destination, from, family);
+        }
     }
 
     /** The scree's rocks per tunnel: along the cap's back, under the cliff, stones, blocks at the toe (#screeRocks). */

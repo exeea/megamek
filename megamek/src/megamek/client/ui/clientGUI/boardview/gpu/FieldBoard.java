@@ -93,7 +93,7 @@ final class FieldBoard {
     /** Bits 19-24, edge e pours over a fall into its neighbour (FieldWater#fallsInto). */
     private static final int FALL = 19;
 
-    /** Bits 25 to 30: a stream hex's wet cliff edge, whose wall is today's ({@link #stream}). */
+    /** Bits 25 to 30: a stream hex's step, whose bank is the lower hex's slope ({@link #stream}). */
     private static final int STREAM = 25;
     /** Level water: the hexes its operator shapes and the bed below their waterline. */
     final FieldShore shore;
@@ -106,7 +106,6 @@ final class FieldBoard {
     private FieldBoard(BoardScene scene, BoardRelief.StepOutline outline, FieldBoard previous, java.util.Set<Coords> changed,
           int rings, BoardConcrete concrete) {
         this.outline = outline;
-        streamScene = scene;
         roads = new FieldRoads(scene);
         this.concrete = concrete;
         shore = new FieldShore(scene);
@@ -266,7 +265,7 @@ final class FieldBoard {
             if (next != null && levelShore(t, next)) { walls[x][y] |= 1 << (LEVEL_SHORE + e); }
             if (joined) { walls[x][y] |= 1 << (JOINED + e); }
             if (FieldWater.fallsInto(t, next, BoardGeometry.edgeDirection(e))) { walls[x][y] |= 1 << (FALL + e); }
-            // A water hex with no fall, over a lower hex it is not joined to: its wall there is today's (#stream).
+            // A water hex with no fall, over a lower hex it is not joined to: its bank is the lower hex's slope (#stream).
             if (bed >= 0 && !joined && streamHex(scene, t) && streamStep(t, next, BoardGeometry.edgeDirection(e))) {
                 walls[x][y] |= 1 << (STREAM + e);
             }
@@ -439,8 +438,8 @@ final class FieldBoard {
 
     /**
      * Whether the step from u down to v is a stream hex's own: a water hex the shore holds, with no fall, over a lower
-     * hex it is not joined to. Its wall is today's (BoardSurface#streamWalls): the field builds none there, moves no
-     * rim sample and raises no apron under it.
+     * hex it is not joined to. It has no wall: the lower hex's ground rises to the rim as the bank's slope
+     * ({@link #bankSlope}), and the field moves no rim sample there.
      */
     boolean stream(Coords u, Coords v) {
         return inside(u) && inside(v) && (walls[u.getX()][u.getY()] & 1 << (STREAM + edgeIndex(u, v))) != 0;
@@ -451,64 +450,21 @@ final class FieldBoard {
         return packed >= 0 && (walls[packed / 4096][packed % 4096] >>> STREAM & 63) != 0;
     }
 
-    /** The scene the board was read from ({@link #todayTop}). */
-    private final BoardScene streamScene;
-
-    /** Today's ground faces (bed, top, shore, bank) of each stream hex asked for ({@link #todayTop}). */
-    private final Map<Coords, List<BoardSurface.Face>> todayTops = new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** Today's top height of stream hex h over (x, y): the highest of its ground faces there; NaN where none. */
-    private float todayTop(Coords h, float x, float y) {
-        List<BoardSurface.Face> faces = todayTops.computeIfAbsent(h, c -> new BoardSurface(streamScene, streamScene.tile(c),
-              TerrainLod.FULL).faces.stream()
-              .filter(f -> f.finish() == BoardSurface.Finish.TOP || f.finish() == BoardSurface.Finish.BED
-                    || f.finish() == BoardSurface.Finish.SHORE || f.finish() == BoardSurface.Finish.BANK).toList());
-        float best = Float.NaN;
-        for (BoardSurface.Face f : faces) {
-            float q = (f.b().y - f.c().y) * (f.a().x - f.c().x) + (f.c().x - f.b().x) * (f.a().y - f.c().y);
-            if (Math.abs(q) < 1e-9f) { continue; }
-            float wa = ((f.b().y - f.c().y) * (x - f.c().x) + (f.c().x - f.b().x) * (y - f.c().y)) / q;
-            float wb = ((f.c().y - f.a().y) * (x - f.c().x) + (f.a().x - f.c().x) * (y - f.c().y)) / q;
-            float wc = 1 - wa - wb;
-            if (wa < -1e-4f || wb < -1e-4f || wc < -1e-4f) { continue; }
-            float top = wa * f.a().z + wb * f.b().z + wc * f.c().z;
-            if (Float.isNaN(best) || top > best) { best = top; }
-        }
-        return best;
+    /**
+     * The share of a stream hex's step the lower hex's ground keeps at distance s from the shared edge, at (x, y): whole
+     * within 2 cm of the edge (both hexes give the edge samples one height), then an eroded slope, concave (steep under
+     * the rim, flattening to its foot), its section by noise and small ledges; nothing beyond {@link #bankReach}.
+     */
+    private float bankSlope(float s, float x, float y) {
+        float t = Math.clamp((s - .02f * metre) / bankReach(x, y), 0, 1);
+        float power = 1.4f + .8f * BoardRelief.noise(x / (9 * metre) - 2.3f, y / (9 * metre) + 7.1f);
+        float ledge = (BoardRelief.noise(x / (2.5f * metre) + 4.4f, y / (2.5f * metre) - 9.2f) - .5f) * .5f * t * (1 - t);
+        return Math.clamp((float) Math.pow(1 - t, power) + ledge, 0, 1);
     }
 
-    /**
-     * Stream hex h's ground z at (x, y) near its stream edges: within 3 m of one (its ends included, eased in from
-     * there) today's top height of the hex, read up to 3 m toward the centre where today's outline is pulled in, so
-     * the rim stands where today's wall top stands. Within 2 m of an edge without a wall (a bank, level ground, joined
-     * water) it stays the field's own, which the hex across computes for the same samples.
-     */
-    private float streamRim(Coords h, float x, float y, float z) {
-        int bits = walls[h.getX()][h.getY()] >>> STREAM & 63;
-        if (bits == 0) { return z; }
-        float weight = 0, shared = Float.POSITIVE_INFINITY;
-        for (int e = 0; e < 6; e++) {
-            float ax = cornerX(h, e), ay = cornerY(h, e), ex = cornerX(h, e + 1) - ax, ey = cornerY(h, e + 1) - ay;
-            float len = (float) Math.hypot(ex, ey), nx = -ey / len, ny = ex / len;
-            if ((centerX(h) - ax) * nx + (centerY(h) - ay) * ny < 0) { nx = -nx; ny = -ny; }
-            float behind = (x - ax) * nx + (y - ay) * ny, t = ((x - ax) * ex + (y - ay) * ey) / (len * len);
-            if ((bits & 1 << e) == 0) {
-                Coords g = h.translated(BoardGeometry.edgeDirection(e));
-                if (inside(g) && !cliff(h, g)) { shared = Math.min(shared, Math.max(0, behind)); }
-                continue;
-            }
-            float tc = Math.clamp(t, 0, 1), dx = x - ax - ex * tc, dy = y - ay - ey * tc;
-            weight = Math.max(weight, 1 - BoardRelief.smooth((float) Math.hypot(dx, dy) / (3 * metre)));
-        }
-        weight *= BoardRelief.smooth(shared / (2 * metre));
-        if (weight <= 0) { return z; }
-        float cx = centerX(h) - x, cy = centerY(h) - y, cl = (float) Math.hypot(cx, cy);
-        float top = Float.NaN;
-        for (float in : new float[] { .02f, .5f, 1, 2, 3 }) {
-            if (cl < 1e-6f || !Float.isNaN(top)) { break; }
-            top = todayTop(h, x + cx / cl * in * metre, y + cy / cl * in * metre);
-        }
-        return Float.isNaN(top) ? z : z + (top - z) * weight;
+    /** How far a stream hex's bank slope reaches from the shared edge at (x, y): 0.75 to 1.1 of twice the transition. */
+    private float bankReach(float x, float y) {
+        return 2 * room * (.75f + .35f * BoardRelief.noise(x / (7 * metre) + 1.9f, y / (7 * metre) - 3.6f));
     }
 
     /** Whether u pours into its neighbour v over a fall (FieldWater#fallsInto): the crest is u's rim row there. */
@@ -754,7 +710,7 @@ final class FieldBoard {
      * the talus's reach). The sample lies on hex {@code at}'s edge e, at t from its first corner. A sample at a fall
      * (one between any two of the hexes round it: the fall edge's samples and both its end corners) is not moved:
      * today's curtain and pool edge hang from the straight hex edge, and its banks stand at the hex corners. Nor is
-     * one at a stream hex's wet cliff edge ({@link #stream}): today's wall stands on the hex edge there.
+     * one at a stream hex's step ({@link #stream}): its bank's top stands on the hex edge.
      */
     private float[] rimMove(int k, float x, float y, Coords[] around, Coords upper, Coords lower, Coords at, int e, float t) {
         for (Coords a : around) {
@@ -1170,7 +1126,7 @@ final class FieldBoard {
         Arrays.fill(joinedTo, Float.POSITIVE_INFINITY);
         Arrays.fill(cliffTo, Float.POSITIVE_INFINITY);
         Arrays.fill(drops, 3);
-        // Per level set, the nearest cliff whose upper hex is a stream hex: its wall and foot are today's (#stream).
+        // Per level set, the nearest step of a stream hex: the lower hex's ground there is its bank slope (#stream).
         float[] streamTo = new float[span];
         Arrays.fill(streamTo, Float.POSITIVE_INFINITY);
         for (int i = 0; i < d.length; i++) {
@@ -1192,7 +1148,7 @@ final class FieldBoard {
             // The nearest bank a step between joined waters: its foot keeps no shelf (the bed is today's, FieldShore).
             boolean joinedBank = joinedTo[k - lowest - 1] <= bankD + TIE;
             int drop = drops[k - lowest - 1];
-            // Under a stream hex's step the lower hex is flat to today's foot: no apron, no step face.
+            // Under a stream hex's step the lower hex's ground is the bank's slope, whole at the shared edge.
             boolean streamStep = streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY && streamTo[k - lowest - 1] <= cliffD + TIE;
             boolean in = own >= k;
             if (nearest == Float.POSITIVE_INFINITY) { z += in ? levelZ : 0; continue; }
@@ -1217,7 +1173,8 @@ final class FieldBoard {
                 float a = Math.min(.3f, talusReach / (drop * levelZ))
                       * (.7f + .6f * BoardRelief.noise(x / talusNoise - 3.3f, y / talusNoise + 6.6f));
                 // Today's apron (BoardRelief#transition): twice the room wide, steepest under the face.
-                float talus = in || streamStep || s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(s / (2 * room)));
+                float talus = in ? 0 : streamStep ? bankSlope(s, x, y)
+                      : s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(s / (2 * room)));
                 // Round a ground portal the face stands flat (BoardTunnel#relief) and, as today's, keeps no apron.
                 if (talus > 0) {
                     float keep = relief(h, x, y, z);
@@ -1225,7 +1182,7 @@ final class FieldBoard {
                     talus *= keep;
                 }
                 share = weight * (in ? 1 : talus);
-                step = !in && !streamStep && s < 2 * room;
+                step = !in && s < (streamStep ? bankReach(x, y) : 2 * room);
             }
             // Shore and beds: where its foot stands in water a cliff carries no talus and its wall runs down to the
             // bed; a pool above a cliff keeps a sill along the rim (FieldShore#bed).
@@ -1247,6 +1204,11 @@ final class FieldBoard {
             }
             if (weight < 1) {
                 float sb = s + bankMix * (smoothDistance(shares, k, x, y, centres, count) - s);
+                // Beside a stream hex's step a bank's band stands a transition's width further out (its top on the
+                // outline, as the stream bank's): the two bank lines join in plan. Not a bank between joined waters.
+                if (!joinedBank && streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
+                    sb -= room * (1 - far((float) Math.sqrt(streamTo[k - lowest - 1])));
+                }
                 share += (1 - weight) * bank(sb, x, y);
                 // Faded out as the step's weight is (far), so two hexes' step lists give a shared sample one height.
                 footShelf += (joinedBank ? 0 : 1) * (1 - weight) * (1 - far(bankD))
@@ -1352,7 +1314,6 @@ final class FieldBoard {
         }
         // A road's bank cuts the eased ground no deeper than it cut the apron's (BoardRoadBank leaves ground above a road's
         // reach): earth the road did not reach before stays, retained by the portal's wing.
-        z = streamRim(h, x, y, z);
         z = crestUnder(h, x, y, z);
         float ground = roads.height(h, x, y, z);
         if (zt > z && ground < z) { ground = Math.max(ground, Math.min(z, roads.height(h, x, y, zt))); }
