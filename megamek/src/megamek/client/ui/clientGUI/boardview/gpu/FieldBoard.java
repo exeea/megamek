@@ -452,19 +452,43 @@ final class FieldBoard {
 
     /**
      * The share of a stream hex's step the lower hex's ground keeps at distance s from the shared edge, at (x, y): whole
-     * within 2 cm of the edge (both hexes give the edge samples one height), then an eroded slope, concave (steep under
-     * the rim, flattening to its foot), its section by noise and small ledges; nothing beyond {@link #bankReach}.
+     * on a shelf at the rim's height ({@link #bankShelf}; both hexes give the edge samples one height), then a straight
+     * slope with a rounded shoulder and toe ({@link #straight}); nothing beyond {@link #bankFoot}.
      */
     private float bankSlope(float s, float x, float y) {
-        float t = Math.clamp((s - .02f * metre) / bankReach(x, y), 0, 1);
-        float power = 1.4f + .8f * BoardRelief.noise(x / (9 * metre) - 2.3f, y / (9 * metre) + 7.1f);
-        float ledge = (BoardRelief.noise(x / (2.5f * metre) + 4.4f, y / (2.5f * metre) - 9.2f) - .5f) * .5f * t * (1 - t);
-        return Math.clamp((float) Math.pow(1 - t, power) + ledge, 0, 1);
+        // A shelf at the rim's height (the slope's top line wanders in plan), then the field's bank profile down to a
+        // foot that does not wander with it: a rounded shoulder, steepest mid-slope, as the bank beside.
+        float shelf = bankShelf(x, y);
+        float u = (Math.max(0, s - .02f * metre) - shelf) / (bankFoot(x, y) - shelf);
+        if (u <= 0 || u >= 1) { return u <= 0 ? 1 : 0; }
+        // A straight slope with a rounded shoulder and toe (0.15 of its run each): no steeper band mid-slope, so a
+        // bank that faces away from the sun shades evenly.
+        float e = .15f, m = 1 / (1 - e);
+        float fall = u < e ? m * u * u / (2 * e) : u > 1 - e ? 1 - m * (1 - u) * (1 - u) / (2 * e) : m * (u - e / 2);
+        return 1 - fall;
     }
 
-    /** How far a stream hex's bank slope reaches from the shared edge at (x, y): 0.75 to 1.1 of twice the transition. */
-    private float bankReach(float x, float y) {
-        return 2 * room * (.75f + .35f * BoardRelief.noise(x / (7 * metre) + 1.9f, y / (7 * metre) - 3.6f));
+    /** A straight slope's share at u of its run (1 at its top, 0 at its foot), its shoulder and toe rounded over 0.15. */
+    private static float straight(float u) {
+        if (u <= 0 || u >= 1) { return u <= 0 ? 1 : 0; }
+        float e = .15f, m = 1 / (1 - e);
+        return 1 - (u < e ? m * u * u / (2 * e) : u > 1 - e ? 1 - m * (1 - u) * (1 - u) / (2 * e) : m * (u - e / 2));
+    }
+
+    /** Where a stream hex's bank slope ends, from the shared edge at (x, y): its reach and half its shelf. */
+    static float bankFoot(float x, float y) { return bankReach(x, y) + .5f * bankShelf(x, y); }
+
+    /** How far the top of a stream hex's bank slope stands out from the shared edge at (x, y): 0 to 2 m by noise. */
+    static float bankShelf(float x, float y) {
+        float m = BoardRelief.metres(1);
+        return Math.min(2 * m, 4 * m * Math.abs(BoardRelief.noise(x / (10 * m) + 6.3f, y / (10 * m) - 1.8f)
+              - BoardRelief.noise(x / (10 * m) - 17.1f, y / (10 * m) + 9.4f)));
+    }
+
+    /** The run of a stream hex's bank slope at (x, y): 1.2 to 1.32 of twice the transition (9.6 to 10.6 m). */
+    static float bankReach(float x, float y) {
+        float m = BoardRelief.metres(1);
+        return 2 * BoardRelief.metres(BoardRelief.TRANSITION) * (1.2f + .12f * BoardRelief.noise(x / (10 * m) + 1.9f, y / (10 * m) - 3.6f));
     }
 
     /** Whether u pours into its neighbour v over a fall (FieldWater#fallsInto): the crest is u's rim row there. */
@@ -1182,7 +1206,7 @@ final class FieldBoard {
                     talus *= keep;
                 }
                 share = weight * (in ? 1 : talus);
-                step = !in && s < (streamStep ? bankReach(x, y) : 2 * room);
+                step = !in && s < (streamStep ? bankFoot(x, y) : 2 * room);
             }
             // Shore and beds: where its foot stands in water a cliff carries no talus and its wall runs down to the
             // bed; a pool above a cliff keeps a sill along the rim (FieldShore#bed).
@@ -1209,7 +1233,14 @@ final class FieldBoard {
                 if (!joinedBank && streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
                     sb -= room * (1 - far((float) Math.sqrt(streamTo[k - lowest - 1])));
                 }
-                share += (1 - weight) * bank(sb, x, y);
+                float banked = bank(sb, x, y);
+                // Beside a stream hex's step the bank takes the stream bank's straight profile over a band a quarter wider
+                // (whole within 6 m of the step, eased out to 12 m): the two banks turn their corner as one even slope.
+                if (!joinedBank && streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
+                    float beside = 1 - far((float) Math.sqrt(streamTo[k - lowest - 1]));
+                    banked += (straight((sb + room) / (2 * room * (1 + .25f * beside))) - banked) * beside;
+                }
+                share += (1 - weight) * banked;
                 // Faded out as the step's weight is (far), so two hexes' step lists give a shared sample one height.
                 footShelf += (joinedBank ? 0 : 1) * (1 - weight) * (1 - far(bankD))
                       * (in ? 1 - BoardRelief.smooth(Math.max(0, -sb - .95f * room) / room)

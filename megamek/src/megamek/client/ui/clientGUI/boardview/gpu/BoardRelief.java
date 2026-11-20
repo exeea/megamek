@@ -4150,9 +4150,9 @@ final class BoardRelief {
     }
 
     /**
-     * Loose rock at the foot of a stream hex's bank slope (FieldBoard#bankSlope) on this lower, dry hex: four to six
-     * pieces an edge, of the gorge's rock ({@link #gorgeFamily}), 4.5 to 8.5 m out from the shared edge, most of them
-     * small, standing on the field's ground; none on the unit anchor.
+     * Loose rock at the foot of a stream hex's bank slope (FieldBoard#bankSlope) on this lower, dry hex: ten to
+     * fourteen pieces an edge, of the gorge's rock ({@link #gorgeFamily}), along the slope's foot (FieldBoard#bankFoot),
+     * most of them small, standing on the field's ground; none on the unit anchor.
      */
     private void bankScree(List<BoardSurface.Face> destination, Vector3 anchor) {
         if (!detail.formations() || fieldGround == null || tile.liquid().present()) { return; }
@@ -4170,14 +4170,17 @@ final class BoardRelief {
             float length = (float) Math.hypot(bx - ax, by - ay), ix = (by - ay) / length, iy = -(bx - ax) / length;
             if ((anchor.x - ax) * ix + (anchor.y - ay) * iy < 0) { ix = -ix; iy = -iy; }
             Random random = new Random(tile.coords().hashCode() * 1_000_003L + e * 31 + 59);
-            int count = 4 + random.nextInt(3), from = destination.size();
+            int count = 10 + random.nextInt(5), from = destination.size();
             for (int i = 0; i < count; i++) {
-                float along = .12f + .76f * random.nextFloat(), out = m * (4.5f + 4 * random.nextFloat()), r = random.nextFloat();
-                float size = m * (.5f + 1.3f * r * r), width = size * (.6f + .4f * random.nextFloat());
+                float along = .1f + .8f * random.nextFloat(), r = random.nextFloat();
+                float size = m * (.3f + 1.0f * r * r), width = size * (.6f + .4f * random.nextFloat());
                 float height = size * (.45f + .5f * random.nextFloat());
-                float x = ax + (bx - ax) * along + ix * out, y = ay + (by - ay) * along + iy * out;
+                // Along the slope's foot: 0.85 to 1.1 of its reach out from the edge.
+                float ex = ax + (bx - ax) * along, ey = ay + (by - ay) * along;
+                float out = FieldBoard.bankFoot(ex, ey) * (.85f + .25f * random.nextFloat());
+                float x = ex + ix * out, y = ey + iy * out;
                 float ground = fieldGround.height(x, y);
-                if (Float.isNaN(ground) || Math.hypot(x - anchor.x, y - anchor.y) - size < BoardGeometry.width() * .2f) { continue; }
+                if (Float.isNaN(ground) || Math.hypot(x - anchor.x, y - anchor.y) - size < BoardGeometry.width() * .08f) { continue; }
                 BoardShape rock = BoardRocks.rock(family, random.nextInt(64), detail);
                 place(destination, rock, new Vector3(x, y, ground - height * .3f), random.nextFloat() * 6.2832f,
                       size * (1 + .5f * random.nextFloat()), width, height / rock.height(), Kind.ROCK, e, false);
