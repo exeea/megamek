@@ -89,6 +89,8 @@ final class FieldShore {
     private final Map<Coords, Bed> beds = new ConcurrentHashMap<>();
     /** Today's surface (BoardSurface) of each descending (graded) water hex whose ring was asked for: its graded water. */
     private final Map<Coords, BoardSurface> grades = new ConcurrentHashMap<>();
+    /** Each of those surfaces' water faces as a height lookup (#water). */
+    private final Map<Coords, GpuBiomeVegetation.Support> gradedFaces = new ConcurrentHashMap<>();
     private final Map<Coords, Line> lines = new ConcurrentHashMap<>();
     /**
      * Each shaped water hex's edges to water the operator does not shape at its surface (#seam): x0, y0, x1, y1 and
@@ -306,7 +308,34 @@ final class FieldShore {
               && (at.equals(h) || BoardSurface.waterSlope(scene.tile(h), there))) { h = at; }
         ring(h);
         BoardSurface graded = grades.get(h);
-        return graded == null ? BoardGeometry.waterZ(scene.tile(h)) : graded.waterHeight(x, y);
+        if (graded == null) { return BoardGeometry.waterZ(scene.tile(h)); }
+        // Inside today's mesh, its height. Beyond it (the field's plane reaches past it, over the bank) the waterline's
+        // height carried outward as one continuous surface (#nearest). BoardSurface#waterHeight carries the nearest
+        // shore point's height there, for a bank's wetness, which steps by metres on a bank's nose (two flaps in the plane).
+        float drawn = gradedFaces.computeIfAbsent(h, c -> new GpuBiomeVegetation.Support(graded.waterFaces)).height(x, y);
+        return Float.isFinite(drawn) ? drawn : nearest(graded.outline, x, y);
+    }
+
+    /**
+     * The closed line's height carried to (x, y) beside it: each piece's nearest point, weighted by the inverse fourth
+     * power of its distance, so on the line it is the line's own height and off it one continuous surface. The nearest
+     * point alone steps wherever two stretches of different heights are equally near (the bank's nose inside a mouth's
+     * corner, where the waterline bends round and drops 4 m).
+     */
+    private static float nearest(List<Vector3> line, float x, float y) {
+        double sum = 0, weights = 0;
+        for (int i = 0; i < line.size(); i++) {
+            Vector3 a = line.get(i), b = line.get((i + 1) % line.size());
+            float dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy;
+            float t = length == 0 ? 0 : Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / length, 0, 1);
+            float ex = x - a.x - t * dx, ey = y - a.y - t * dy, distance = ex * ex + ey * ey;
+            float height = a.z + (b.z - a.z) * t;
+            if (distance < 1e-12f) { return height; }
+            double weight = 1 / ((double) distance * distance);
+            sum += weight * height;
+            weights += weight;
+        }
+        return (float) (sum / weights);
     }
 
     /** Whether water hex h's surface descends (today's graded water), which the field's plane then follows. */
@@ -403,6 +432,62 @@ final class FieldShore {
         }
         ring(h);
         return beds.get(h).index();
+    }
+
+    /**
+     * Today's waterline beside (x, y), for ground that ends on it (cliffs' FieldBoard#height, FieldCover): the nearest
+     * point of the banks, the stretches of the waterlines that face land, of the water hexes within two hexes of the
+     * point. Into {@code out}: [0] the distance to that point in world units, positive inside the water (#distance's
+     * sign, exact here, not the grid's); [1], [2] the point's x and y; [3] the water's height there (#water of the hex
+     * whose bank it is: a descending stream's graded surface, else the hex's level), which is the height the ground
+     * has on the line; [4], [5] the line's unit normal there, pointing into the water. Returns false, {@code out}
+     * untouched, where no bank lies within REACH tile pixels (#distance's clamp).
+     */
+    boolean waterline(float x, float y, float[] out) {
+        float across = width * .75f, best = REACH * scale, mouth = Float.POSITIVE_INFINITY, px = 0, py = 0, nx = 0, ny = 0;
+        best *= best;
+        boolean inside = false;
+        Coords owner = null;
+        int near = Math.round((x - width / 2) / across);
+        for (int c = Math.max(0, near - 2); c <= Math.min(cols - 1, near + 2); c++) {
+            float odd = (c & 1) * height / 2 + height / 2;
+            int row = Math.round((-y - odd) / height);
+            for (int r = Math.max(0, row - 2); r <= Math.min(rows - 1, row + 2); r++) {
+                Coords h = new Coords(c, r);
+                Line line = line(h);
+                if (line.ring().length == 0) { continue; }
+                inside |= contains(line.ring(), x, y);
+                mouth = Math.min(mouth, nearest(line.mouths(), x, y));
+                float[] banks = line.banks();
+                float cx = c * across + width / 2, cy = -(r * height + odd);
+                for (int k = 0; k < banks.length; k += 4) {
+                    float ax = banks[k], ay = banks[k + 1], ex = banks[k + 2] - ax, ey = banks[k + 3] - ay;
+                    float len = ex * ex + ey * ey, t = len == 0 ? 0 : Math.clamp(((x - ax) * ex + (y - ay) * ey) / len, 0, 1);
+                    float qx = ax + t * ex, qy = ay + t * ey, d = (x - qx) * (x - qx) + (y - qy) * (y - qy);
+                    if (d >= best) { continue; }
+                    best = d;
+                    px = qx;
+                    py = qy;
+                    owner = h;
+                    // The piece's normal on its hex's side: into the water.
+                    float l = Math.max((float) Math.sqrt(len), 1e-6f), ux = -ey / l, uy = ex / l;
+                    boolean inward = (cx - qx) * ux + (cy - qy) * uy > 0;
+                    nx = inward ? ux : -ux;
+                    ny = inward ? uy : -uy;
+                }
+            }
+        }
+        if (owner == null) { return false; }
+        Coords at = GpuStarShells.hexAt(x, y);
+        boolean off = at.getX() < 0 || at.getY() < 0 || at.getX() >= cols || at.getY() >= rows;
+        float distance = (float) Math.sqrt(best);
+        out[0] = inside || mouth < (off ? step : .5f * scale) ? distance : -distance;
+        out[1] = px;
+        out[2] = py;
+        out[3] = water(owner, px, py);
+        out[4] = nx;
+        out[5] = ny;
+        return true;
     }
 
     /** A bank's width, in world units: how far a bed falls from its rim or from the foot of a step. */
