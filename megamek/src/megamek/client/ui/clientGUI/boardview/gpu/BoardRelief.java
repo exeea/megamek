@@ -4124,9 +4124,12 @@ final class BoardRelief {
         fallRocks(destination, anchor, crests, falls, 0);
     }
 
-    /** The height field's rim and talus rocks ({@link #fieldGround}): as {@link #rocks}. */
+    /**
+     * The height field's rim and talus rocks ({@link #fieldGround}): as {@link #rocks}. A stream hex gets none here:
+     * its rocks are today's rock faces (BoardSurface#fieldFaces).
+     */
     void fieldRocks(List<BoardSurface.Face> destination, Vector3 anchor) {
-        rocks(destination, anchor);
+        if (!FieldBoard.streamHex(scene, tile)) { rocks(destination, anchor); }
         screeRocks(destination, anchor);
     }
 

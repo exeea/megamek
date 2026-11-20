@@ -28,13 +28,20 @@ final class FieldPlates {
         return false;
     }
 
-    /** A plate's sample, or natural ground on its outline at its level: level at {@code z}, no step near. */
+    /** Metres: a drop or a rise this far off shades nothing, so a sample with none near has it (ChunkField.Block#rimMetres). */
+    private static final float NONE_NEAR = 99;
+
+    /**
+     * A plate's sample, or natural ground on its outline at its level: level at {@code z}, no step near. "None near" is
+     * the farthest a sample's shading reads (ChunkField.Block#rimMetres), a number: a sample cut in between two of them
+     * (FieldClip, a tunnel's portal on a paved hex) takes their share of it, and of infinity there is none.
+     */
     static void level(float z, int level, float[] out) {
         out[0] = z;
         out[1] = 0;
         out[2] = 0;
-        out[3] = Float.POSITIVE_INFINITY;
-        out[4] = Float.POSITIVE_INFINITY;
+        out[3] = BoardRelief.metres(NONE_NEAR);
+        out[4] = out[3];
         out[5] = 0;
         out[6] = level;
     }

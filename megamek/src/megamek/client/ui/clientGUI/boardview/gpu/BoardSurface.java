@@ -689,6 +689,18 @@ final class BoardSurface {
         for (int e = 0; e < 6; e++) { rows[e] = block.row(e); }
         relief.fieldGround(rows, new FieldSupport(block)::height);
         relief.fieldRocks(faces, center);
+        // A stream hex's rocks are today's rock faces of the hex, with their shading (cliffs).
+        if (FieldBoard.streamHex(scene, tile)) {
+            BoardSurface today = new BoardSurface(scene, tile, lod);
+            for (Face f : today.faces) {
+                if (f.finish() != Finish.OUTCROP) { continue; }
+                for (Vector3 v : List.of(f.a(), f.b(), f.c())) {
+                    BoardRelief.Shade shade = today.relief.shade(v);
+                    if (shade != null) { relief.fieldShade(v, shade); }
+                }
+                faces.add(f);
+            }
+        }
     }
 
     /** A height-field water hex's waterline, round its hex, and the edges its water runs on through (FieldWater). */
@@ -715,7 +727,9 @@ final class BoardSurface {
         // Today's blocks on each lip and its shoulders, on today's crests (cliffs' BoardRelief#fieldFallRocks).
         int lips = 0;
         for (Side fall : today.waterfalls) { lips |= 1 << fall.edge(); }
-        if (lips != 0 && today.crestLine != null) { relief.fieldFallRocks(faces, today.crestLine, lips); }
+        if (lips != 0 && today.crestLine != null && !FieldBoard.streamHex(scene, tile)) {
+            relief.fieldFallRocks(faces, today.crestLine, lips);
+        }
         return today;
     }
 
@@ -3672,6 +3686,97 @@ final class BoardSurface {
         return result;
     }
 
+    /**
+     * Today's wall faces (BoardRelief#walls of this hex's surface without the field) on the edges where this
+     * height-field water hex stands over a lower hex on a step of its own (FieldBoard#stream), their shading copied
+     * into this surface's relief, and a lid along each such edge (#streamLid). Made once; empty off the field and
+     * for any other hex. For #walls and for the draw (GpuTerrain#fieldGround).
+     */
+    List<Face> streamWalls() {
+        if (streamWalls != null) { return streamWalls; }
+        streamWalls = List.of();
+        if (fieldWalls == null) { return streamWalls; }
+        int edges = 0;
+        for (int e = 0; e < 6; e++) {
+            int direction = BoardGeometry.edgeDirection(e);
+            if (FieldBoard.streamStep(tile, scene.tile(tile.coords().translated(direction)), direction)) { edges |= 1 << e; }
+        }
+        if (edges == 0 || !FieldBoard.streamHex(scene, tile)) { return streamWalls; }
+        BoardSurface today = new BoardSurface(scene, tile, lod);
+        List<Face> result = new ArrayList<>();
+        for (Face f : today.walls(scene, BoardGeometry.floor(scene))) {
+            if (f.landEdge() < 0 || (edges & 1 << f.landEdge()) == 0) { continue; }
+            for (Vector3 v : List.of(f.a(), f.b(), f.c())) {
+                BoardRelief.Shade shade = today.relief.shade(v);
+                if (shade != null) { relief.fieldShade(v, shade); }
+            }
+            result.add(f);
+        }
+        for (int e = 0; e < 6; e++) {
+            if ((edges & 1 << e) != 0) { streamLid(today, result, e); }
+        }
+        streamWalls = result;
+        return result;
+    }
+
+    /** {@link #streamWalls()}, once made. */
+    private List<Face> streamWalls;
+
+    /**
+     * The lid of stream edge e: level triangles between today's wall top row there (a wall sample with no other of
+     * its edge more than 0.3 m above it within 2 m along the edge, in order along the edge) and the straight hex
+     * edge the field's rim stands on, wherever the top row lies outside that edge (today's outline is rounded near
+     * the corners); at the wall top's height and with its shading.
+     */
+    private void streamLid(BoardSurface today, List<Face> result, int e) {
+        Coords at = tile.coords();
+        float ax = megamek.common.board.HexTile.cornerX(at, e, BoardGeometry.width());
+        float ay = megamek.common.board.HexTile.cornerY(at, e, BoardGeometry.height());
+        float ex = megamek.common.board.HexTile.cornerX(at, (e + 1) % 6, BoardGeometry.width()) - ax;
+        float ey = megamek.common.board.HexTile.cornerY(at, (e + 1) % 6, BoardGeometry.height()) - ay;
+        float len = (float) Math.hypot(ex, ey), ox = ey / len, oy = -ex / len, metre = BoardRelief.metres(1);
+        float cx = megamek.common.board.HexTile.centerX(at, BoardGeometry.width());
+        float cy = megamek.common.board.HexTile.centerY(at, BoardGeometry.height());
+        if ((cx - ax) * ox + (cy - ay) * oy > 0) { ox = -ox; oy = -oy; }
+        java.util.TreeMap<Float, Vector3> tops = new java.util.TreeMap<>();
+        List<Face> wall = result.stream().filter(f -> f.landEdge() == e).toList();
+        for (Face f : wall) {
+            for (Vector3 v : List.of(f.a(), f.b(), f.c())) {
+                boolean under = false;
+                for (Face other : wall) {
+                    for (Vector3 u : List.of(other.a(), other.b(), other.c())) {
+                        under |= u.z > v.z + .3f * metre && Math.abs((u.x - v.x) * ex + (u.y - v.y) * ey) / len < 2 * metre;
+                    }
+                }
+                if (under || today.relief.shade(v) == null) { continue; }
+                tops.putIfAbsent(Math.round(((v.x - ax) * ex + (v.y - ay) * ey) / (len * len) * 2000) / 2000f, v);
+            }
+        }
+        Vector3 before = null, beforeOn = null;
+        for (var entry : tops.entrySet()) {
+            Vector3 p = entry.getValue();
+            float t = Math.clamp(entry.getKey(), 0, 1);
+            Vector3 on = new Vector3(ax + ex * t, ay + ey * t, p.z);
+            relief.fieldShade(on, today.relief.shade(p));
+            if (before != null) {
+                float outA = (before.x - ax) * ox + (before.y - ay) * oy, outB = (p.x - ax) * ox + (p.y - ay) * oy;
+                if (Math.max(outA, outB) > .02f * metre) {
+                    lidFace(result, beforeOn, before, p, e);
+                    lidFace(result, beforeOn, p, on, e);
+                }
+            }
+            before = p;
+            beforeOn = on;
+        }
+    }
+
+    /** One lid triangle of a stream edge, wound to face up; none without area. */
+    private static void lidFace(List<Face> result, Vector3 a, Vector3 b, Vector3 c, int e) {
+        float cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        if (Math.abs(cross) < 1e-9f) { return; }
+        result.add(cross > 0 ? new Face(a, b, c, Finish.WALL, e) : new Face(a, c, b, Finish.WALL, e));
+    }
+
     /** Neighbours must have completed construction; only their immutable edge topography is borrowed. */
     List<Face> walls(BoardScene scene, float floor, Map<Coords, BoardSurface> neighbors) {
         if (wallFaces == null || wallFloor != floor) {
@@ -3680,6 +3785,8 @@ final class BoardSurface {
             } else if (fieldWalls != null) {
                 // The height field's step faces and walls, its cut down to the floor where the board ends included.
                 wallFaces = new ArrayList<>(fieldWalls);
+                // A stream hex's wet cliff edges: today's wall faces (cliffs).
+                wallFaces.addAll(streamWalls());
             } else { wallFaces = reserveWalls(relief.walls(sides(scene, floor, neighbors), neighbors), floor); }
             if (canal) { wallFaces = openRamps(wallFaces); }
             wallFaces.addAll(retainingWalls);

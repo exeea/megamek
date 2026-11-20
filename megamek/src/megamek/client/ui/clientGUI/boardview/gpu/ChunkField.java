@@ -932,6 +932,8 @@ final class ChunkField {
             // A plate over its neighbour casts a wall in the board cut's form: two rows, straight (FieldPlates).
             boolean cast = !outside && b.plate(h);
             wall &= !cast;
+            // A stream hex's wet cliff edge has today's wall (BoardSurface#streamWalls): the field builds none.
+            if (wall && b.stream(h, g)) { return; }
             // The step's height for its landforms (BoardRelief#drop): its levels, at least three for a wall, not the face
             // left above the talus; the rock's prominence and jointing follow it.
             float landform = outside ? own * b.levelZ - chunk.floor
