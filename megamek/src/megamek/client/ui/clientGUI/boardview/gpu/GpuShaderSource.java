@@ -120,6 +120,7 @@ final class GpuShaderSource {
             case "SPACE_SKY" -> "space-sky.glsl";
             case "HEAT_RADIANCE" -> "heat-radiance.glsl";
             case "OCEAN_FINISH" -> "ocean-finish.glsl";
+            case "ROAD_TRACK" -> "road-track.glsl";
             case "terrain-ground-color-functions" -> "terrain-ground-color.glsl";
             case "water-uniforms" -> "water-uniforms.glsl";
             case "water-wave-functions" -> "water-wave.glsl";

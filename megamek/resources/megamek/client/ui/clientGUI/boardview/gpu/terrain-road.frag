@@ -423,13 +423,11 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
 //   beyond it, and a hint of washboard and potholes in the wheel paths. B is where across the whole road the point lies
 //   (BoardRoad#track: 0 on a centre line, 1 at the footprint's edge); RG's length falls to a half across a junction's hub
 //   (BoardRoad#trackHub).
-const float TRACK_HALF = 5.96;  // HexTile.ROAD_HALF_WIDTH plus BoardRoad.SHOULDER in metres: gravel's B range
+// Its sizes, and where its stone or soil lies, are the ground map's too (ground-map-cover.frag): grass stands where
+// the coat shows ground.
+// ROAD_TRACK
 const float TRACK_WHEEL = 1.08; // BoardRoad.WHEEL_OFFSET in metres: the wheel tracks' centres, where joins carry their ruts
-const float GRAVEL_EDGE = 3.4;  // a gravel road's graded edge (BoardRoad.GRAVEL_EDGE)
-const float GRAVEL_STRAY = .5;  // and how far beyond it stray stones run into the grass
-const float RUT_OFFSET = .9;    // BoardRoad.RUT_OFFSET in metres: a dirt track's ruts either side of its course
-const float RUT_RANGE = 2.9;    // BoardRoad.RUT_OFFSET + RUT_REACH in metres: dirt's B range
-const float RUT_HALF = .3;      // a rut's half width
+const float GRAVEL_STRAY = .5;  // how far beyond a gravel road's graded edge stray stones run into the grass
 // The dirt maps hold the photographed soil at the old grey-brown maps' brightness (other dirt patches keep theirs):
 // a track's own ground is the photograph's.
 const float DIRT_LIGHT = 1.85;
@@ -523,8 +521,8 @@ float looseTrack(vec2 m, float pixel, vec2 heading, float across, float hub, flo
     float kept = max(min(firm, tongues), stones);
     // Past the firm edge the stone thins out into the grass over most of a metre, as a dirt track's soil does
     // (dirtTrack): in patches between ever fewer tufts, under a film of grit nearest the road. The blades thin out there
-    // too (BoardRoad#grass). Where the road ends, so does its fringe.
-    float gaps = smoothstep(-.8, 0.0, min(-outside, ends - 1.0));
+    // too (ground-map-cover.frag). Where the road ends, so does its fringe.
+    float gaps = trackFringe(-outside, ends);
     float between = .6 * gaps - (.6 * tuft.b + .4 * wearNoise(m, 6.0, .71, pixel).b);
     float open = clamp(between / max(.04, 1.5 * fwidth(between)) + .5, 0.0, 1.0);
     alpha = built ? coverage : max(clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0), max(open, .18 * gaps * gaps));
@@ -543,20 +541,17 @@ float dirtTrack(vec2 m, float pixel, vec2 heading, float rut, float coverage, bo
     float broad = wearNoise(m, 400.0, .57, pixel).r;
     // Grass and crumbs nibble at a rut's edges, at the size of a tuft and of the soil's own clods.
     float off = abs(rut) + (slow.g - .5) * .1 + (tuft.b - .5) * .14 + (grain - .5) * .08;
-    float pressed = 1.0 - smoothstep(RUT_HALF - .08, RUT_HALF + .02, off);
+    float pressed = rutPressed(off);
     // Loose soil outside the ruts, in a ragged band; inside them the crown's bare patches, most beside the ruts.
-    float band = rut - RUT_HALF - .2 - .5 * clump.r - (tuft.g - .5) * .25 - (grain - .5) * .1;
-    float crown = -rut - RUT_HALF;
-    float bare = .55 * clump.g + .3 * tuft.r + .15 * grain - .62 - 1.1 * crown;
-    float soil = rut > 0.0 ? -band : bare;
+    float soil = dirtSoil(rut, clump.rg, tuft.rg, grain);
     float kept = max(soil, pressed - .5);
     // Where it wears out (its end, or its ruts' run-on over a paved road's landing) it crumbles at the soil's own grain.
     float ends = 2.0 * coverage - (.5 * slow.b + .3 * clump.r + .2 * tuft.g) - (grain - .5) * 1.4 * (1.0 - coverage);
     kept = min(kept, ends - .5);
     // Past that edge the soil thins out into the grass over most of a metre: bare between ever fewer tufts, under a
-    // film of dust nearest the track. The blades thin out there too (BoardRoad#grass). Where the coat ends, RUT_REACH
+    // film of dust nearest the track. The blades thin out there too (ground-map-cover.frag). Where the coat ends, RUT_REACH
     // past the ruts (BoardRoad#rutReach), the soil field lies below -.8, and where the track ends so does its end term.
-    float gaps = smoothstep(-.8, 0.0, min(soil, ends - 1.0));
+    float gaps = trackFringe(soil, ends);
     float between = .6 * gaps - (.6 * tuft.b + .4 * wearNoise(m, 6.0, .71, pixel).b);
     float open = clamp(between / max(.04, 1.5 * fwidth(between)) + .5, 0.0, 1.0);
     alpha = built ? coverage : max(clamp(kept / max(.03, 1.5 * fwidth(kept)) + .5, 0.0, 1.0), max(open, .18 * gaps * gaps));
