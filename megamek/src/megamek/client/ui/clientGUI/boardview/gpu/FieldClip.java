@@ -340,7 +340,11 @@ final class FieldClip {
         return size++;
     }
 
-    private static float lerp(float a, float b, float t) { return a + (b - a) * t; }
+    /**
+     * Between an edge's two values. Equal ends give that value, so two samples with no step near (FieldBoard#height's
+     * rim and foot at infinity) give infinity, not infinity less infinity; any other ends give what they gave.
+     */
+    private static float lerp(float a, float b, float t) { return a == b ? a : a + (b - a) * t; }
 
     /** The new block: the original samples keep their indices (the lattice's are addressed by place), new unused ones go. */
     private ChunkField.Block block(int[] levelTops, int[] ground, int[] faces, int[] walls) {
