@@ -276,7 +276,7 @@ class GpuLivePlaybackSmokeTest {
             GpuBoardTestUi.<SelectBox<UnitDisplayMode>>tuning(live.view, "tuning-unit-display")
                   .setSelected(UnitDisplayMode.MODELS);
             live.zoom(new Coords(5, 3), hexPixels);
-            float growth = UnitScreenScale.factor(live.hudView().hexPixels());
+            float growth = UnitScreenScale.factor(live.hexPixels());
             assertEquals(hexPixels < UnitScreenScale.threshold ? 2 : 1, growth, .001f);
             GpuBoardSource.Frame base = live.frame.get();
             BoardScene scene = base.scene();
@@ -299,7 +299,7 @@ class GpuLivePlaybackSmokeTest {
             List<Float> feet = new ArrayList<>();
             List<Float> travel = new ArrayList<>();
             while (play.playback.movement() != null) {
-                assertEquals(growth, UnitScreenScale.factor(live.hudView().hexPixels()), .001f, "The zoom stays");
+                assertEquals(growth, UnitScreenScale.factor(live.hexPixels()), .001f, "The zoom stays");
                 ModelInstance model = live.model(ATLAS);
                 Vector3 foot = model.getNode("LL-foot").globalTransform.getTranslation(new Vector3());
                 Vector3 hips = model.getNode("pelvis").globalTransform.getTranslation(new Vector3());

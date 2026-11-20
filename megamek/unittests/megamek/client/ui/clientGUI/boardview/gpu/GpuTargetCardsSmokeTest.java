@@ -479,7 +479,7 @@ class GpuTargetCardsSmokeTest {
                   new Rectangle(1100, 520, 60, 110));
             Map<Integer, Vector2> heads = new HashMap<>();
             units.forEach((id, rect) -> heads.put(id, new Vector2(rect.x + rect.width / 2, rect.y + rect.height)));
-            GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE, 118,
+            GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE,
                   Map.of(building, new Vector2(500, 500)));
             layer.update(hud, firing(fire), view, List.of());
             hud.draw();
@@ -513,7 +513,7 @@ class GpuTargetCardsSmokeTest {
             units.forEach((id, rect) -> heads.put(id, new Vector2(rect.x + rect.width / 2, rect.y + rect.height)));
             // The BattleMaster's head only: its card sits 26 above the area below the head.
             heads.put(BATTLEMASTER, new Vector2(500, 500));
-            GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE, 118);
+            GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE);
             layer.update(hud, firing(shot05()), view, List.of());
             hud.draw();
             Map<TargetKey, Rectangle> placed = layer.cards.placed();
@@ -535,7 +535,7 @@ class GpuTargetCardsSmokeTest {
 
             heads.remove(BATTLEMASTER);
             layer.update(hud, firing(shot05()), new GpuHud.HudView(false, false, units, heads, Map.of(), null,
-                  Entity.NONE, 118), List.of());
+                  Entity.NONE), List.of());
             assertFalse(layer.card(BATTLEMASTER).isVisible(), "a target behind the camera has no card");
             assertEquals(List.of(TargetKey.unit(TIMBER_WOLF)), List.copyOf(layer.cards.placed().keySet()));
 
@@ -652,7 +652,7 @@ class GpuTargetCardsSmokeTest {
     private static GpuHud.HudView view(Map<Integer, Rectangle> units) {
         Map<Integer, Vector2> heads = new HashMap<>();
         units.forEach((id, rect) -> heads.put(id, new Vector2(rect.x + rect.width / 2, rect.y + rect.height)));
-        return new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE, 118);
+        return new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE);
     }
 
     // ------------------------------------------------------------------ drawing and checks
@@ -665,7 +665,7 @@ class GpuTargetCardsSmokeTest {
           Layer layer, GpuBoardSource.Frame frame, List<Rectangle> panels) {
         boolean tactical = board.tactical();
         layer.state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
-        overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0),
+        overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE),
               preferences(), layer.state);
         GpuFireOrders.Snapshot fire = frame.panels().fire();
         board.basesStatus = frame.status();

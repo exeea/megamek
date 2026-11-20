@@ -23,8 +23,8 @@ import com.badlogic.gdx.utils.FloatArray;
  * marks it passes and settles into the destination, where the ghost surges and a ring ripples out; after a rest it
  * leaves again. GpuBoardOverlay hands it the route while it builds its meshes, and draws it after them every frame: a
  * few dozen soft glowing quads of one small mesh, which add light and tint what lies under them, depth-tested in 3D
- * without writing depth, flat on top in the Tactical View. It decides no rule. GL thread only; it owns its mesh and
- * its glow texture.
+ * without writing depth, on top in the Tactical View, which sees the same pulse from above. It decides no rule. GL
+ * thread only; it owns its mesh and its glow texture.
  */
 final class GpuRoutePulse implements Disposable {
     /** Whether the plotted route pulses; the Tuning panel switches it while the board runs. */
@@ -40,9 +40,8 @@ final class GpuRoutePulse implements Disposable {
     /** After the head lands: the ghost's surge, then the rest before the next pulse leaves the unit, in seconds. */
     static final float SURGE = .9f;
     static final float REST = .6f;
-    /** The head's glow radius: in hex radii in 3D, in prototype pixels in the Tactical View. */
+    /** The head's glow radius, in hex radii. */
     static final float HEAD_SIZE = .42f;
-    static final float FLAT_HEAD_SIZE = 15;
     /** How far behind the head the route's marks stay lit, in hexes. */
     static final float TRAIL = 2.5f;
     /** The 3D ghost's glow added at the surge's peak, and the share of its transparency the peak takes away. */
@@ -72,11 +71,9 @@ final class GpuRoutePulse implements Disposable {
     private static final float MOTE_SIZE = .05f;
     private static final float MOTE_RISE = .55f;
     private static final float MOTE_DRIFT = .2f;
-    /** The streak of light right behind the head: its length and half width in hex radii, or prototype pixels. */
+    /** The streak of light right behind the head: its length and half width in hex radii. */
     private static final float STREAK = 1.1f;
     private static final float STREAK_WIDTH = .1f;
-    private static final float FLAT_STREAK = 34;
-    private static final float FLAT_STREAK_WIDTH = 3.5f;
     /** The second, fainter ripple: its delay in seconds and its share of the first's strength. */
     private static final float ECHO = .14f;
     private static final float ECHO_STRENGTH = .35f;
@@ -108,7 +105,6 @@ final class GpuRoutePulse implements Disposable {
     private Object key;
     private boolean active;
     private boolean wasActive;
-    private boolean tactical;
     /** The hex radius in world units. */
     private float radius;
     private int hexes;
@@ -130,10 +126,9 @@ final class GpuRoutePulse implements Disposable {
     private float push;
 
     /** A new build of the overlay: no route until {@link #arrive} names one. */
-    void begin(boolean tactical, float radius) {
+    void begin(float radius) {
         wasActive = active;
         active = false;
-        this.tactical = tactical;
         this.radius = radius;
         samples.clear();
         marks.clear();
@@ -274,9 +269,7 @@ final class GpuRoutePulse implements Disposable {
         if (mesh == null) {
             create();
         }
-        if (!tactical) {
-            face(camera);
-        }
+        face(camera);
         float strength = Math.min(intensity, 2);
         float travel = travel();
         float length = length();
@@ -342,7 +335,7 @@ final class GpuRoutePulse implements Disposable {
                 flat(x, y, z, 1.6f * half, core);
             }
             float seed = random(i);
-            if (!tactical && behind > 0 && seed < .5f) {
+            if (behind > 0 && seed < .5f) {
                 // Its own rise and drift, from the mark's place in the route: quick at first, then floating.
                 float age = behind / trail;
                 float risen = 1 - (1 - age) * (1 - age) * (1 - age);
@@ -364,8 +357,8 @@ final class GpuRoutePulse implements Disposable {
 
     /** The streak right behind the head, a comet's tail: brightest and widest at it, narrowing to nothing behind. */
     private void streak(float distance, float strength) {
-        float length = tactical ? FLAT_STREAK * GpuBoardOverlay.PIXEL : STREAK;
-        float half = (tactical ? FLAT_STREAK_WIDTH * GpuBoardOverlay.PIXEL : STREAK_WIDTH) * radius;
+        float length = STREAK;
+        float half = STREAK_WIDTH * radius;
         float from = distance - length;
         float[] sample = samples.items;
         int count = samples.size / SAMPLE;
@@ -393,20 +386,12 @@ final class GpuRoutePulse implements Disposable {
     }
 
     /**
-     * The head at the located point: in 3D a pool of its light on the ground below it and glows facing the camera,
-     * from a wide, faint bloom to a bright core in the segment's colour; flat glows in the Tactical View.
+     * The head at the located point: a pool of its light on the ground below it and glows facing the camera, from a
+     * wide, faint bloom to a bright core in the segment's colour.
      * {@code grow} widens it as it lands.
      */
     private void head(float strength, float grow) {
         if (strength <= 0) {
-            return;
-        }
-        if (tactical) {
-            float size = FLAT_HEAD_SIZE * GpuBoardOverlay.PIXEL * radius * grow;
-            flat(point.x, point.y, point.z, 2.2f * size, glow(pointColour, .4f * strength, .12f * strength));
-            flat(point.x, point.y, point.z, size, glow(pointColour, .8f * strength, .4f * strength));
-            flat(point.x, point.y, point.z, .42f * size, glow(pointColour, strength, .75f * strength));
-            flat(point.x, point.y, point.z, .2f * size, glow(pointColour, strength, .9f * strength));
             return;
         }
         float size = HEAD_SIZE * radius * grow;
@@ -454,8 +439,8 @@ final class GpuRoutePulse implements Disposable {
         float left = 1 - progress;
         float at = RING_START + (RING_RADIUS - RING_START) * (1 - left * left * left);
         float fade = strength * (1 - progress * progress * (3 - 2 * progress));
-        float edge = tactical ? 3 * GpuBoardOverlay.PIXEL : .05f;
-        float wake = (tactical ? 4 : 6) * edge * (.5f + progress);
+        float edge = .05f;
+        float wake = 6 * edge * (.5f + progress);
         hexBand(at - wake, at, glow(last, .65f * fade, .4f * fade), 0, .5f);
         hexBand(at, at + 2 * edge, glow(last, .7f * fade, .35f * fade), .5f, 1);
         hexBand(at - edge, at, glow(last, fade, .85f * fade), .5f, .5f);
@@ -485,7 +470,7 @@ final class GpuRoutePulse implements Disposable {
 
     /** How far the destination's marks lie over its surface: under the route's marks in 3D. */
     private float lift() {
-        return tactical ? 0 : .03f * radius;
+        return .03f * radius;
     }
 
     /** The route's point {@code distance} hex radii along it: into point, pointGround and pointColour. */

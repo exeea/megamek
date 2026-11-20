@@ -101,7 +101,7 @@ class GpuUtilityMinimapSmokeTest {
                   "", null, reports, status, GpuHudFixtures.panels(move, GpuFireOrders.Snapshot.EMPTY,
                         GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
             GpuHud.Inputs inputs = new GpuHud.Inputs(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(),
-                  Map.of(), null, Entity.NONE, 0), null, preferences, GpuHud.Metrics.of(width, height), List.of());
+                  Map.of(), null, Entity.NONE), null, preferences, GpuHud.Metrics.of(width, height), List.of());
             utilities.update(inputs);
             hint.update(inputs);
             minimap.update(inputs);

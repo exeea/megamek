@@ -64,12 +64,14 @@ final class GpuBoardLabels implements GpuHud.Component {
     private static final float EDGE = 8;
     /** overlay.js refreshHudRects: the HUD rectangles labels keep clear of are 6 units larger on every side. */
     private static final float HUD_MARGIN = 6;
-    /** .pinno: a 20-unit disc 22 units above its hex, 700 11 Roboto, shadow 0 2px 6px rgba(0, 0, 0, .5). */
+    /**
+     * .pinno: a 20-unit disc, 700 11 Roboto, shadow 0 2px 6px rgba(0, 0, 0, .5), centred on the route's own point at its
+     * waypoint in both views ({@link #routePoint}): the line runs through it and it covers the line.
+     */
     private static final float PIN_SIZE = 20;
-    private static final float PIN_RISE = 22;
+    /** The Tactical View's waypoint badges (circle, number and shadow) are half as large again: the user, 2026-11-20. */
+    private static final float TACTICAL_PIN_SCALE = 1.5f;
     private static final float PIN_TEXT = 11;
-    /** flat.js: the Tactical View's waypoint number, max(10, .26 of the hex radius). */
-    private static final float FLAT_PIN_TEXT = 10;
     /** Guides: 1.8 (open row 2.6) wide, dash 7 7 flowing 14 units every 1.1 s; a two-way pair sits 3 apart. */
     private static final float GUIDE_WIDTH = 1.8f;
     private static final float GUIDE_OPEN_WIDTH = 2.6f;
@@ -355,8 +357,8 @@ final class GpuBoardLabels implements GpuHud.Component {
             pinActors.add(new Pin(pinActors.size() + 1));
         }
         for (int index = 0; index < pinActors.size(); index++) {
-            Vector2 hex = index < shown.size() ? plannedPoint(scene, shown.get(index), view) : null;
-            pinActors.get(index).place(hex, view);
+            pinActors.get(index).place(index < shown.size() ? routePoint(scene, shown.get(index)) : null,
+                  view.tactical() ? TACTICAL_PIN_SCALE : 1);
         }
     }
 
@@ -679,6 +681,19 @@ final class GpuBoardLabels implements GpuHud.Component {
               : screen(BoardGeometry.center(step.coords(), step.level()));
     }
 
+    /**
+     * The route's own point at a pinned waypoint, as GpuBoardOverlay draws the route: its hex's centre at its floor (the
+     * hex's surface, water included, for a step on the ground), {@link GpuBoardOverlay#ROUTE_LIFT} over it. Null off
+     * this board, without a camera or behind it.
+     */
+    private Vector2 routePoint(BoardScene scene, GpuMovePlan.Step step) {
+        BoardScene.Tile tile = scene.tile(step.coords());
+        if (tile == null || step.boardId() != scene.boardId()) { return null; }
+        Vector3 point = BoardGeometry.center(step.coords(), step.level());
+        if (step.level() == tile.elevation()) { point.z = BoardGeometry.surfaceZ(tile); }
+        return screen(point.add(0, 0, GpuBoardOverlay.ROUTE_LIFT * BoardGeometry.WIDTH / 2));
+    }
+
     /** A hex's visible surface, water included, in this component's units; null without a camera or behind it. */
     private Vector2 hex(BoardScene scene, Coords coords) {
         BoardScene.Tile tile = scene == null ? null : scene.tile(coords);
@@ -918,8 +933,11 @@ final class GpuBoardLabels implements GpuHud.Component {
         }
     }
 
-    /** One waypoint's number: a disc 22 units over its hex, and in the Tactical View also the number on its disc. */
+    /** One waypoint's number: a disc centred on the route at its waypoint, {@code scale} times its size. */
     private final class Pin {
+        private final Label label;
+        private final float labelScale;
+        private float scale;
         private final Group badge = new Group() {
             @Override
             public void draw(Batch batch, float parentAlpha) {
@@ -927,47 +945,43 @@ final class GpuBoardLabels implements GpuHud.Component {
                 // The soft shadow 2 below, then the disc.
                 for (float spread : new float[] { 6, 3 }) {
                     batch.setColor(0, 0, 0, .18f * parentAlpha);
-                    batch.draw(disc, getX() - spread / 2, getY() - 2 - spread / 2, PIN_SIZE + spread,
-                          PIN_SIZE + spread);
+                    batch.draw(disc, getX() - spread * scale / 2, getY() - (2 + spread / 2) * scale,
+                          getWidth() + spread * scale, getHeight() + spread * scale);
                 }
                 batch.setColor(PIN_FILL.r, PIN_FILL.g, PIN_FILL.b, parentAlpha);
-                batch.draw(disc, getX(), getY(), PIN_SIZE, PIN_SIZE);
+                batch.draw(disc, getX(), getY(), getWidth(), getHeight());
                 batch.setColor(previous);
                 super.draw(batch, parentAlpha);
             }
         };
-        private final Label flat;
-        private final float flatScale;
 
         Pin(int number) {
             badge.setName("pin-" + number);
             badge.setTransform(false);
-            badge.setSize(PIN_SIZE, PIN_SIZE);
-            Label label = ui.label(String.valueOf(number), "hud-medium", PIN_TEXT, PIN_INK);
-            label.pack();
-            label.setPosition(Math.round((PIN_SIZE - label.getWidth()) / 2),
-                  Math.round((PIN_SIZE - label.getHeight()) / 2));
+            label = ui.label(String.valueOf(number), "hud-medium", PIN_TEXT, PIN_INK);
+            labelScale = label.getFontScaleX();
             badge.addActor(label);
-            flat = ui.label(String.valueOf(number), "hud-medium", FLAT_PIN_TEXT, PIN_INK);
-            flat.setName("pin-flat-" + number);
-            flatScale = flat.getFontScaleX() / FLAT_PIN_TEXT;
             pins.addActor(badge);
-            pins.addActor(flat);
+            resize(1);
         }
 
-        void place(Vector2 hex, GpuHud.HudView view) {
-            badge.setVisible(hex != null);
-            flat.setVisible(hex != null && view.tactical());
-            if (hex == null) {
-                return;
+        void place(Vector2 point, float scale) {
+            badge.setVisible(point != null);
+            if (point != null) {
+                if (scale != this.scale) { resize(scale); }
+                badge.setPosition(Math.round(point.x - badge.getWidth() / 2),
+                      Math.round(point.y - badge.getHeight() / 2));
             }
-            badge.setPosition(Math.round(hex.x - PIN_SIZE / 2), Math.round(hex.y + PIN_RISE - PIN_SIZE / 2));
-            if (view.tactical()) {
-                // flat.js: the number on the hex's own disc, max(10, .26 of the hex radius); hexPixels is its width.
-                flat.setFontScale(flatScale * Math.max(FLAT_PIN_TEXT, .13f * view.hexPixels()));
-                flat.pack();
-                flat.setPosition(Math.round(hex.x - flat.getWidth() / 2), Math.round(hex.y - flat.getHeight() / 2));
-            }
+        }
+
+        /** The circle, its number and its shadow at {@code scale} times their size. */
+        private void resize(float scale) {
+            this.scale = scale;
+            badge.setSize(PIN_SIZE * scale, PIN_SIZE * scale);
+            label.setFontScale(labelScale * scale);
+            label.pack();
+            label.setPosition(Math.round((badge.getWidth() - label.getWidth()) / 2),
+                  Math.round((badge.getHeight() - label.getHeight()) / 2));
         }
     }
 

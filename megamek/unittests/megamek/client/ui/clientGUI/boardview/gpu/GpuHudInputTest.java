@@ -625,7 +625,7 @@ class GpuHudInputTest {
         GpuUnitRecord.Snapshot damaged = record(GpuHudFixtures.FIRST);
         hud.update(GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0, before),
               GpuHudFixtures.panels(record)), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
-        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE);
 
         GpuBattleStatus.Snapshot newer = GpuHudFixtures.status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0, after);
         hud.update(GpuHudFixtures.frame(newer, GpuHudFixtures.panels(damaged)), playing, null, GpuHudFixtures.preferences());
@@ -680,7 +680,7 @@ class GpuHudInputTest {
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
               RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY, own);
         update(report, panels, null);
-        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE);
         hud.update(GpuHudFixtures.frame(report, panels), playing, null, GpuHudFixtures.preferences());
         hud.select(SECOND);
         hud.update(GpuHudFixtures.frame(report, panels), playing, null, GpuHudFixtures.preferences());
@@ -710,7 +710,7 @@ class GpuHudInputTest {
               List.of(from, new BoardScene.Waypoint(new Coords(5, 6), 0, 0)), EntityMovementType.MOVE_WALK, 0, 4,
               mover)), mock(BoardScene.class), GpuReportLog.Snapshot.EMPTY, ignored -> false);
         assertTrue(hud.state.history.running());
-        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE);
         hud.update(GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, false),
               GpuHudFixtures.unit(FOE, ENEMY, false, false)), GpuHudData.EMPTY), playing, null, GpuHudFixtures.preferences());
 

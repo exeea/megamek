@@ -110,15 +110,14 @@ final class GpuHud implements GpuBoardHud {
     /**
      * The board view's facts of one frame, by unit id: the view mode and whether the playback still animates; each
      * drawn unit's screen rectangle and label anchor (head) in stage units, y up, left out while its head lies behind
-     * the camera; each drawn unit's animated board position in world units; the hovered hex and unit; a hex's
-     * width on the screen, corner to corner, in stage units; the height of the ring the view draws on a building
+     * the camera; each drawn unit's animated board position in world units; the hovered hex and unit; the height of the ring the view draws on a building
      * floor under the pointer, NaN while the pointer is on the hovered hex's ground (GpuBattleView.hoverTop); and the
      * anchor of each fire target that is no unit, its hex's centre, as a unit's head is its anchor.
      */
     record HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
           Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
-          float hexPixels, Map<TargetKey, Vector2> targetHeads) {
-        static final HudView EMPTY = new HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+          Map<TargetKey, Vector2> targetHeads) {
+        static final HudView EMPTY = new HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE);
 
         HudView {
             unitRects = Map.copyOf(unitRects);
@@ -129,10 +128,8 @@ final class GpuHud implements GpuBoardHud {
 
         /** The facts while every fire target is a unit. */
         HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
-              Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
-              float hexPixels) {
-            this(tactical, playbackBusy, unitRects, unitHeads, unitPositions, hovered, hoveredUnit, hexPixels,
-                  Map.of());
+              Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit) {
+            this(tactical, playbackBusy, unitRects, unitHeads, unitPositions, hovered, hoveredUnit, Map.of());
         }
 
         /** A fire target's anchor: a unit's head, else its hex's; null where the view draws neither. */

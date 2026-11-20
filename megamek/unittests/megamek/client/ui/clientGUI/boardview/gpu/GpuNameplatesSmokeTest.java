@@ -104,7 +104,7 @@ class GpuNameplatesSmokeTest {
               Map<Integer, Vector2> heads, boolean tactical, int hovered) {
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
             nameplates.update(new GpuHud.Inputs(GpuHudFixtures.frame(status, panels),
-                  new GpuHud.HudView(tactical, false, Map.of(), heads, Map.of(), null, hovered, 0), null,
+                  new GpuHud.HudView(tactical, false, Map.of(), heads, Map.of(), null, hovered), null,
                   preferences, GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
         }
 
@@ -526,7 +526,7 @@ class GpuNameplatesSmokeTest {
                       GamePhase.MOVEMENT, false, TIMBER_WOLF, roster), panels(GpuFireOrders.Snapshot.EMPTY,
                       GpuPhysicalOptions.Snapshot.EMPTY));
                 GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(), grid(roster), Map.of(), null,
-                      Entity.NONE, 0);
+                      Entity.NONE);
                 GpuBoardSource.UiPreferences preferences = GpuHudFixtures.preferences();
                 Group root = hud.stage.getRoot();
                 Map<Integer, List<String>> pips = pips(roster);

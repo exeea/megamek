@@ -166,7 +166,7 @@ class GpuTacticalOverlaysTest {
         hud.state.overview = false;
 
         List<String> hint = GpuHintLine.items(new GpuHud.Inputs(frame(GamePhase.MOVEMENT, viewMenu()),
-              new GpuHud.HudView(true, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0), null,
+              new GpuHud.HudView(true, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE), null,
               preferences(Overlays.DEFAULTS, true), GpuHud.Metrics.of(1920, 1080), List.of()));
         int key = hint.indexOf("H");
         assertTrue(key >= 0 && hint.get(key + 1).equals("Overlays"), "the hint line names H Overlays: " + hint);
@@ -267,8 +267,7 @@ class GpuTacticalOverlaysTest {
     private void update(int width, int height, boolean tactical, GamePhase phase,
           GpuBoardSource.UiPreferences preferences, List<BoardScene.Command> global) {
         hud.resize(width, height, 1);
-        GpuHud.HudView view = new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE,
-              0);
+        GpuHud.HudView view = new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE);
         hud.update(frame(phase, global), view, null, preferences);
         hud.update(frame(phase, global), view, null, preferences);
     }

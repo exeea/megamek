@@ -1765,7 +1765,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
         });
         return new GpuHud.HudView(boardCamera.tactical(), playbackBusy(), rects, heads, positions, hovered,
-              pointedUnit(), hexPixels, targets);
+              pointedUnit(), targets);
     }
 
     /**
