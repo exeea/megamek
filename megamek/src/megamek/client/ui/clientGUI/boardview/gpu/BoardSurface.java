@@ -3169,6 +3169,18 @@ final class BoardSurface {
         return false;
     }
 
+    /**
+     * The precast walls where this hex's natural ground, with these walls, still stands over a road's edge
+     * (BoardRoadCut#containmentWalls): the same rule over today's ground and over the height field's.
+     */
+    private void contain(BoardRoadCut cut, List<Face> walls) {
+        containmentWalls.clear();
+        if (!natural() || !BoardRelief.tuning().containmentWalls()) { return; }
+        List<Face> ground = new ArrayList<>(groundFaces());
+        ground.addAll(walls);
+        cut.containmentWalls(ground, reservedRoad, relief, containmentWalls);
+    }
+
     /** Slopes ease into the roads around, as the top does, and give way to the carriageways that reserve their ground. */
     private List<Face> reserveWalls(List<Face> walls, float floor) {
         // A water hex's walls stand past its cell, on ground the roads' banks ease. Built here, as a water hex restored
@@ -3183,12 +3195,7 @@ final class BoardSurface {
         List<Face> result = new ArrayList<>(cut.clip(walls, relief, cutFaces(curtains), cutFaces(pouredWalls),
               roadAround(), field, natural(), false));
         result.addAll(curtains);
-        containmentWalls.clear();
-        if (natural() && BoardRelief.tuning().containmentWalls()) {
-            List<Face> ground = new ArrayList<>(groundFaces());
-            ground.addAll(result);
-            cut.containmentWalls(ground, reservedRoad, relief, containmentWalls);
-        }
+        contain(cut, result);
         return result;
     }
 
@@ -3680,6 +3687,12 @@ final class BoardSurface {
             } else if (fieldWalls != null) {
                 // The height field's step faces and walls, its cut down to the floor where the board ends included.
                 wallFaces = new ArrayList<>(fieldWalls);
+                // Today's precast walls beside the roads cut into its slopes, where its own ground stands over them.
+                var grades = grades(false);
+                if (!grades.isEmpty()) {
+                    contain(new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), center.z, grades,
+                          boardEdges(scene, tile)), wallFaces);
+                }
             } else { wallFaces = reserveWalls(relief.walls(sides(scene, floor, neighbors), neighbors), floor); }
             if (canal) { wallFaces = openRamps(wallFaces); }
             wallFaces.addAll(retainingWalls);
