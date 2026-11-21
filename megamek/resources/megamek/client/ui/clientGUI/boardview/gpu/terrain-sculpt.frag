@@ -344,6 +344,7 @@ void main() {
     terrainView = -viewDirection();
 #ifdef GROUND_FACE_SLOPE
     if (ground) groundFaceSlope = geometric.z;
+    if (cliff && !panel && abs(kind * 255.0 - 138.0) < .5) groundBareLedge = 1.0;
 #endif
 #endif
     // A scar patch's draw shades only where its image covers the receiver (scar-material.glsl).

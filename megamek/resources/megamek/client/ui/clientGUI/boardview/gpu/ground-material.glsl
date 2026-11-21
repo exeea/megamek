@@ -103,6 +103,9 @@ float groundSpread(vec4 texel) { return .5 * (1.0 - min(length(texel.rgb * 2.0 -
 // ground of a hex's own mesh); 1 elsewhere, which leaves the shading normal to decide.
 #define GROUND_FACE_SLOPE
 float groundFaceSlope = 1.0;
+// 1 on a bare ledge, a step face its maker marks as rock lying level (the cliff byte 138, GpuTerrain#shadeColor), where
+// the same includer reads the mark; 0 elsewhere.
+float groundBareLedge = 0.0;
 
 // How much of a read lies on the plane: by the face's slope alone, so a step face reads the side it faces and the
 // plane only where it lies back, with no seam where the rocky test changes its mind (z .6). An earth bank's shading
@@ -367,14 +370,18 @@ GroundSurface groundSurface(GroundPixel px, int family, vec3 fields) {
         if (floorShare > 0.0) cover = mix(cover, 1.0, .5 * floorShare * smoothstep(.82, .97, up));
     }
 #endif
+    // A bare ledge of whole rock (a fall's dry rim, which cliffs' FieldBoard marks) shows the cliff's rock seen from
+    // above, not the cover its slope would give.
+    float bareRock = px.role * groundBareLedge * smoothstep(.8, .95, rock);
     // Level bedrock of the shared cliff shows the rock tops' map: its joints stand upright.
-    if (px.role < .5 && abs(layers.w - groundFlatRock.x) < .5) {
+    if ((px.role < .5 || bareRock > .5) && abs(layers.w - groundFlatRock.x) < .5) {
         layers.w = groundFlatRock.y;
         tiles.w = groundFlatRock.z;
     }
     vec4 roles = vec4(cover, clamp(mantle, 0.0, 1.0 - cover), deposit, 0.0);
     roles.xy *= 1.0 - deposit;
     roles.w = max(0.0, 1.0 - roles.x - roles.y - roles.z);
+    roles = mix(roles, vec4(0.0, 0.0, 0.0, 1.0), bareRock);
     // Concrete carried onto another surface is loose aggregate, never a second paved slab (as cliffMaterial).
     if (family == 4) roles = vec4(0.0, 0.0, 1.0, 0.0);
     float bedRock = rock * (1.0 - smoothstep(.2, .8, up)) * smoothstep(.05, 2.2, px.aboveFoot);
