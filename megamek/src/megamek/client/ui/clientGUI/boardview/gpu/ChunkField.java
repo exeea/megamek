@@ -666,12 +666,16 @@ final class ChunkField {
             final int rows;
             final int[] samples;
             final float[] tops, feet;
-            /** Today's relief at each lattice sample's rim, which the rim row carries there (FieldBoard#rimMove). */
-            final float[] rimRelief;
+            /**
+             * Today's relief each lattice sample's rim carries and the share of its move the fades left it, as the
+             * field's row says (FieldBoard#rimMove, #canonicalEdge); a sample the field does not move: the relief at
+             * its place, whole.
+             */
+            final float[] rimRelief, rimShare;
             /** The columns of the edge's two corners (#cornerColumn); null where the relief fades out instead. */
             final float[][] corners = new float[2][];
             /** The current column's place on the row, its top and foot, its rim's relief, its corners' shares. */
-            float px, py, top, bottom, rimPush, first, second;
+            float px, py, top, bottom, rimPush, share, first, second;
             /** The current column's relief family (a pool's step: BoardRelief#poolStepFamily). */
             int columnFamily;
             /** The lower hex is shaped water (FieldShore): the wall's foot is the bed and the relief counts from it,
@@ -687,16 +691,30 @@ final class ChunkField {
                 this.rows = rows;
                 this.family = b.family(h);
                 rimRelief = new float[samples.length];
+                rimShare = new float[samples.length];
+                java.util.Arrays.fill(rimShare, 1);
                 if (!wall) { return; }
+                float[][] moves = b.edgeMove(h, e);
+                int every = FieldBoard.FULL / (samples.length - 1);
                 for (int j = 0; j < samples.length; j++) {
+                    float[] move = moves[j * every];
+                    if (!Float.isNaN(move[2])) {
+                        rimShare[j] = move[3];
+                        // A rim below its level (a wall's end coming down to its corner) keeps the relief at its own
+                        // place and height: the field's is the level's, and the difference would stand out as a lip.
+                        if (Math.abs(tops[j] - own * b.levelZ) < .01f * b.metre) {
+                            rimRelief[j] = move[2];
+                            continue;
+                        }
+                    }
                     rimRelief[j] = BoardRelief.wallRelief(x[samples[j]], y[samples[j]], tops[j], base, tops[j],
                           Math.max(landform, tops[j] - base), family);
                 }
                 Coords g = h.translated(BoardGeometry.edgeDirection(e));
                 if (own > b.level(g)) {
-                    corners[0] = cornerColumn(e, g, h.translated(BoardGeometry.edgeDirection((e + 5) % 6)), tops[0]);
+                    corners[0] = cornerColumn(e, g, h.translated(BoardGeometry.edgeDirection((e + 5) % 6)), tops[0], moves[0]);
                     corners[1] = cornerColumn(e + 1, g, h.translated(BoardGeometry.edgeDirection((e + 1) % 6)),
-                          tops[tops.length - 1]);
+                          tops[tops.length - 1], moves[FieldBoard.FULL]);
                 }
             }
 
@@ -707,7 +725,7 @@ final class ChunkField {
              * comes from that one hex, so both walls through the corner, from either upper hex, compute one column.
              * Null where a third level meets them or a hex is not the field's.
              */
-            private float[] cornerColumn(int k, Coords g, Coords o, float rimZ) {
+            private float[] cornerColumn(int k, Coords g, Coords o, float rimZ, float[] move) {
                 if (!b.taken(g) || !b.taken(o)) { return null; }
                 boolean above = b.level(o) == b.level(g);
                 if (above ? !b.cliff(h, o) : b.level(o) != own || !b.cliff(o, g)) { return null; }
@@ -721,7 +739,11 @@ final class ChunkField {
                 boolean ours = above || h.getX() < o.getX() || h.getX() == o.getX() && h.getY() < o.getY();
                 int rock = b.family(ours ? h : o);
                 float rim = own * b.levelZ;
-                float atRim = BoardRelief.wallRelief(cx, cy, rim, base, rim, landform, rock);
+                // A corner the field moved: relative to the relief its move carries, by the share left of it, as the
+                // walls' own columns beside it (the same values from either wall: the corner's move is one).
+                boolean carried = !Float.isNaN(move[2]);
+                float atRim = carried ? move[2] : BoardRelief.wallRelief(cx, cy, rim, base, rim, landform, rock);
+                float left = carried ? move[3] : 1;
                 int levels = (rows - 1) / ROWS_A_LEVEL;
                 float[] column = new float[(levels + 1) * 2];
                 // Where a wall through the corner is a fall and the rim
@@ -733,7 +755,7 @@ final class ChunkField {
                     float d = fallCorner
                           ? -FALL_RECESS * b.metre * BoardRelief.smooth(
                                 (Math.min(rim, rimZ) - FALL_FACE * b.metre - base - q * b.levelZ) / (1.5f * b.metre))
-                          : BoardRelief.wallRelief(cx, cy, base + q * b.levelZ, base, rim, landform, rock) - atRim;
+                          : (BoardRelief.wallRelief(cx, cy, base + q * b.levelZ, base, rim, landform, rock) - atRim) * left;
                     column[q * 2] = dx / len * d;
                     column[q * 2 + 1] = dy / len * d;
                 }
@@ -772,6 +794,7 @@ final class ChunkField {
                 // The rim row carries the relief at its lattice samples and runs straight between them: rows below
                 // move by the relief relative to that line.
                 rimPush = rimRelief[a] + (rimRelief[d] - rimRelief[a]) * f;
+                share = rimShare[a] + (rimShare[d] - rimShare[a]) * f;
                 // Toward a corner the wall takes the corner's column, as today's (over .3 of the edge); toward a
                 // corner without one its relief fades out.
                 float along = c / (float) columns;
@@ -810,8 +833,8 @@ final class ChunkField {
                     if (fall) {
                         d = -FALL_RECESS * b.metre * BoardRelief.smooth((top - FALL_FACE * b.metre - zr) / (1.5f * b.metre));
                     }
-                    out[0] += onx * d * rest * ease;
-                    out[1] += ony * d * rest * ease;
+                    out[0] += onx * d * share * rest * ease;
+                    out[1] += ony * d * share * rest * ease;
                 }
                 addCorner(corners[0], r, zr, first, out);
                 addCorner(corners[1], r, zr, second, out);

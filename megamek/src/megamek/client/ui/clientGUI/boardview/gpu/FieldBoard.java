@@ -898,7 +898,7 @@ final class FieldBoard {
     private float[] rimMove(int k, float x, float y, Coords[] around, Coords upper, Coords lower, Coords at, int e, float t) {
         for (Coords a : around) {
             for (Coords c : around) {
-                if (!a.equals(c) && (falls(a, c) || stream(a, c) && level(a) >= k)) { return new float[] { 0, 0, 0 }; }
+                if (!a.equals(c) && (falls(a, c) || stream(a, c) && level(a) >= k)) { return new float[] { 0, 0, Float.NaN, 1 }; }
             }
         }
         float[] o = new float[3];
@@ -914,13 +914,19 @@ final class FieldBoard {
         contour(k, px, py, cliffRadius, o);
         float top = level(upper) * levelZ, bottom = level(lower) * levelZ;
         float drop = Math.max(level(upper) - level(lower), 3) * levelZ;
-        float r = recess - BoardRelief.wallRelief(px, py, top, bottom, top, drop, family(upper));
+        // The relief the rim carries: today's at the rim, averaged along the wall over a lattice step either way (the
+        // lattice cannot carry its finer changes: the rim would zigzag); the wall's rows below carry them whole.
+        float along = edge / FULL, share = 1;
+        float relief = .5f * BoardRelief.wallRelief(px, py, top, bottom, top, drop, family(upper))
+              + .25f * BoardRelief.wallRelief(px - o[2] * along, py + o[1] * along, top, bottom, top, drop, family(upper))
+              + .25f * BoardRelief.wallRelief(px + o[2] * along, py - o[1] * along, top, bottom, top, drop, family(upper));
+        float r = recess - relief;
         float dx = px - x - r * o[1], dy = py - y - r * o[2];
         // The roads' term: the rim recedes from the carriageways beside it by today's BoardRelief#roadPush.
         float[] push = roads.push(at, e, t, x + dx, y + dy);
         if (push != null) { dx += push[0]; dy += push[1]; }
         float len = (float) Math.hypot(dx, dy);
-        if (len > maxMove) { dx *= maxMove / len; dy *= maxMove / len; }
+        if (len > maxMove) { dx *= maxMove / len; dy *= maxMove / len; share = maxMove / len; }
         for (Coords c : around) {
             float clear = level(c) >= k ? keep : keep + room;
             float ox = x + dx - centerX(c), oy = y + dy - centerY(c);
@@ -930,7 +936,9 @@ final class FieldBoard {
                 dy += oy / r0 * (clear - r0);
             }
         }
-        return new float[] { dx, dy, 0 };
+        // With the relief the move carries and the share of it the cap left: the wall below hangs its rows from that
+        // (ChunkField.Wall), so nothing of the relief is left over at a sample.
+        return new float[] { dx, dy, relief, share };
     }
 
     /** Whether a neighbour in direction d comes after the hex (a larger column, or the same column and a larger row). */
@@ -1015,12 +1023,12 @@ final class FieldBoard {
             if (!all || !consistent || side == null || level(upperHex) == level(lowerHex) || wallEnd(t) != null) {
                 result[2] = 1;
             } else {
-                result = rimMove(k0, cornerX(h, k), cornerY(h, k), t, upperHex, lowerHex, h, k, 0);
+                float[] move = rimMove(k0, cornerX(h, k), cornerY(h, k), t, upperHex, lowerHex, h, k, 0);
                 // Round a ground portal the corner stays put, as the row beside it does (#canonicalEdge).
                 float foot = Math.min(level(t[0]), Math.min(level(t[1]), level(t[2]))) * levelZ, share = 1;
                 for (Coords c : t) { share = Math.min(share, relief(c, cornerX(h, k), cornerY(h, k), foot)); }
-                result[0] *= share;
-                result[1] *= share;
+                // Not held (the third value); then the relief the move carries and the share left of it (#rimMove).
+                result = new float[] { move[0] * share, move[1] * share, 0, move[2], move[3] * share };
             }
         }
         return result;
@@ -1065,7 +1073,13 @@ final class FieldBoard {
         for (int j = 0; j <= FULL; j++) {
             float t = j / (float) FULL;
             float mx = ca[0] + (cb[0] - ca[0]) * t, my = ca[1] + (cb[1] - ca[1]) * t;
-            if (j == 0 || j == FULL || !wall) { points[j] = new float[] { mx, my }; continue; }
+            if (j == 0 || j == FULL || !wall) {
+                // A wall's corner the field moved says what its move carries, as the row's samples do (#corner).
+                float[] corner = j == 0 ? ca : cb;
+                boolean carries = wall && (j == 0 || j == FULL) && corner.length > 3;
+                points[j] = new float[] { mx, my, carries ? corner[3] : Float.NaN, carries ? corner[4] : 1 };
+                continue;
+            }
             float[] d = rimMove(middle(u, v), ax + (bx - ax) * t, ay + (by - ay) * t, around,
                   level(u) > level(v) ? u : v, level(u) > level(v) ? v : u, u, e, t);
             // The move fades out toward a held corner.
@@ -1076,7 +1090,8 @@ final class FieldBoard {
             // Round a ground portal the wall's row stays on the edge, as today's foot does (BoardTunnel#relief).
             float x = ax + (bx - ax) * t, y = ay + (by - ay) * t, foot = Math.min(level(u), level(v)) * levelZ;
             w *= Math.min(relief(u, x, y, foot), relief(v, x, y, foot));
-            points[j] = new float[] { mx + (d[0] - mx) * w, my + (d[1] - my) * w };
+            // With the relief the rim carries there and the share of the move the fades left (#rimMove).
+            points[j] = new float[] { mx + (d[0] - mx) * w, my + (d[1] - my) * w, d[2], d[3] * w };
         }
         // A wall's rim flattens toward its corners' line until neither hex's lattice folds on it.
         for (int left = FULL; wall && left > 0 && !(unfolded(u, e, points, false)
@@ -1086,6 +1101,7 @@ final class FieldBoard {
                 float mx = ca[0] + (cb[0] - ca[0]) * t, my = ca[1] + (cb[1] - ca[1]) * t;
                 points[j][0] = mx + (points[j][0] - mx) * (left - 1) / left;
                 points[j][1] = my + (points[j][1] - my) * (left - 1) / left;
+                points[j][3] *= (left - 1f) / left;
             }
         }
         return points;
@@ -1370,8 +1386,10 @@ final class FieldBoard {
                 float a = Math.min(.3f, talusReach / (drop * levelZ))
                       * (.7f + .6f * BoardRelief.noise(x / talusNoise - 3.3f, y / talusNoise + 6.6f));
                 // Today's apron (BoardRelief#transition): twice the room wide, steepest under the face.
+                // Level within a centimetre of the wall's row: the square root there turns a last-digit difference of a
+                // shared corner's place into a centimetre of height between two hexes.
                 float talus = in ? 0 : streamStep ? bankSlope(s, x, y)
-                      : s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(s / (2 * room)));
+                      : s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(Math.max(0, s - .01f * metre) / (2 * room)));
                 // Beside a stream hex's step, under a wall that stands nearer: the bank's slope by its own distance to
                 // that step runs on under the wall (the higher of it and the wall's apron), so no scarp parts the two.
                 float streamD = streamTo[k - lowest - 1] == Float.POSITIVE_INFINITY ? Float.POSITIVE_INFINITY
