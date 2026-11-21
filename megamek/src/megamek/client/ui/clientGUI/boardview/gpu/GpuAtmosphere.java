@@ -192,9 +192,13 @@ final class GpuAtmosphere implements Disposable {
     private BoardAtmosphere.Lighting tacticalLighting;
     /** Derived together with the rendered light; the space backdrop uses the same camera coupling. */
     private boolean cameraRelativeLight;
-    /** One CPU image per current atmosphere; unrelated exposure/weather/camera changes reuse it. */
-    private BoardLightingSky.Source generatedSkySource;
-    private GpuLightingEnvironment generatedSky;
+    /**
+     * The CPU images of the atmospheres generated last, newest first: unrelated exposure/weather/camera changes, and
+     * switching between the board's sky and the Tactical View's clear air, reuse them.
+     */
+    private final java.util.ArrayDeque<java.util.Map.Entry<BoardLightingSky.Source, GpuLightingEnvironment>> generatedSkies =
+          new java.util.ArrayDeque<>();
+    private static final int GENERATED_SKIES = 3;
     private BoardAtmosphere.SkyPalette backdrop;
     /** Render-owned derived backdrop, rescanned only when the immutable terrain snapshot changes. */
     private List<BoardScene.Tile> backdropTiles;
@@ -393,11 +397,7 @@ final class GpuAtmosphere implements Disposable {
 
     private void updateLight(Camera camera, boolean tactical, boolean freeFlight) {
         // Exposure belongs to the canonical source; moving the displayed sun must not pump its meter.
-        if (tactical && tacticalLighting == null) {
-            tacticalLighting = BoardAtmosphere.TACTICAL.withEnvironment(
-                  GpuLightingEnvironment.generated(BoardLightingSky.generate(BoardAtmosphere.TACTICAL.skySource())));
-        }
-        exposureLighting = tactical ? tacticalLighting : worldLighting;
+        exposureLighting = tactical ? tacticalLighting() : worldLighting;
         cameraRelativeLight = options.fixedSun() && !freeFlight && !tactical;
         lighting = tune(cameraRelativeLight ? exposureLighting.relativeTo(camera) : exposureLighting);
     }
@@ -406,13 +406,41 @@ final class GpuAtmosphere implements Disposable {
         return base.tuned(options.shadowStrength(), options.ambientShare(), options.skyContribution(), options.environmentImage());
     }
 
-    private BoardAtmosphere.Lighting generateSky(BoardAtmosphere.Lighting base) {
-        if (!base.skySource().same(generatedSkySource)) {
-            // Build the complete replacement before publishing it; no old atlas/new ambient mixture.
-            generatedSky = GpuLightingEnvironment.generated(BoardLightingSky.generate(base.skySource()));
-            generatedSkySource = base.skySource();
+    private BoardAtmosphere.Lighting tacticalLighting() {
+        if (tacticalLighting == null) {
+            tacticalLighting = BoardAtmosphere.TACTICAL.withEnvironment(
+                  GpuLightingEnvironment.generated(BoardLightingSky.generate(BoardAtmosphere.TACTICAL.skySource())));
         }
-        return base.withEnvironment(generatedSky);
+        return tacticalLighting;
+    }
+
+    /**
+     * Makes the Tactical View's clear air and its own light before the view is first entered (the battle view calls it
+     * behind the loading stage), so that switching views filters no sky on the render thread.
+     */
+    void prepareTactical() {
+        tacticalLighting();
+        generateSky(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS, options.moonShadowContrast(), options.taintStrength()));
+    }
+
+    private BoardAtmosphere.Lighting generateSky(BoardAtmosphere.Lighting base) {
+        java.util.Map.Entry<BoardLightingSky.Source, GpuLightingEnvironment> generated = null;
+        for (var entry : generatedSkies) {
+            if (entry.getKey().same(base.skySource())) {
+                generated = entry;
+                break;
+            }
+        }
+        if (generated != null) {
+            generatedSkies.remove(generated);
+        } else {
+            // Build the complete replacement before publishing it; no old atlas/new ambient mixture.
+            generated = java.util.Map.entry(base.skySource(),
+                  GpuLightingEnvironment.generated(BoardLightingSky.generate(base.skySource())));
+            if (generatedSkies.size() == GENERATED_SKIES) { generatedSkies.removeLast(); }
+        }
+        generatedSkies.addFirst(generated);
+        return base.withEnvironment(generated.getValue());
     }
 
     void setOptions(Options options) {

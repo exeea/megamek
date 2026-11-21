@@ -136,6 +136,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** The editor's tiles in the frame last taken: a change of them that brings no events shows at once (renderFrame). */
     private List<BoardScene.Tile> editorTiles;
     private boolean tilesChangedThisFrame;
+    /** Whether the atmosphere made the Tactical View's clear air and light (behind the loading stage, once). */
+    private boolean tacticalAirPrepared;
     private final GpuStarShells starShells = new GpuStarShells();
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
@@ -893,6 +895,10 @@ class GpuBattleView extends ApplicationAdapter {
         // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather.
         atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
+        if (!tacticalAirPrepared) {
+            atmosphere.prepareTactical();
+            tacticalAirPrepared = true;
+        }
         tuning.displaySettings().apply(terrain, atmosphere, ambientOcclusion,
               Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), boardCamera.tactical());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
