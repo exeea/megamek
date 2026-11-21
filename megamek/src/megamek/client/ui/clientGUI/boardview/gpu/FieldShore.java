@@ -356,13 +356,17 @@ final class FieldShore {
     }
 
     /**
-     * The ground at (x, y), {@code z} high: in a shallow (depth 0) hex of level water, a descending stream's hex at
+     * The ground at (x, y), {@code z} high (in a dry hex inside a water neighbour's line: that water's): in a
+     * shallow (depth 0) hex of level water, a descending stream's hex at
      * any depth, or a pool a fall pours into (its plunge scour), today's own bed where it has one there (BoardSurface's mesh inside today's waterline, sampled: its
      * rims, rings, bars and plateau, under its graded water), right up to the line, so a pass a few metres wide keeps
      * today's depth and a stream runs down as today's; else z.
      */
     float shallows(float x, float y, float z) {
-        GpuBiomeVegetation.Support bed = bed(GpuStarShells.hexAt(x, y));
+        Coords h = GpuStarShells.hexAt(x, y);
+        // A dry hex's ground inside a water neighbour's line is that water's bed, as today's bed reaches there.
+        Coords held = bed(h) == null ? holder(h, x, y) : null;
+        GpuBiomeVegetation.Support bed = bed(held != null ? held : h);
         float today = bed == null ? Float.NaN : bed.height(x, y);
         return Float.isNaN(today) ? z : today;
     }
@@ -426,6 +430,15 @@ final class FieldShore {
     }
 
     /** Today's bed of water hex h the field shapes where it samples it (#beds), indexed; null for any other hex. */
+    /** The water neighbour of dry hex h whose bed the field samples and whose today's line holds (x, y), or null. */
+    private Coords holder(Coords h, float x, float y) {
+        for (int d = 0; d < 6; d++) {
+            Coords next = h.translated(d);
+            if (bed(next) != null && contains(ring(next), x, y)) { return next; }
+        }
+        return null;
+    }
+
     private GpuBiomeVegetation.Support bed(Coords h) {
         if (h.getX() < 0 || h.getY() < 0 || h.getX() >= cols || h.getY() >= rows || column(h.getX()).depth[h.getY()] == 0) {
             return null;

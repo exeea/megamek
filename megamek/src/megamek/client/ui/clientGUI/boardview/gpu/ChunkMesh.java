@@ -46,7 +46,7 @@ final class ChunkMesh {
         Writer direct = new Writer(block, water, shore, wet, palette);
         Writer tops = new Writer(block, own ? water : null, shore, null, palette);
         direct.triangles(block.ground(), false);
-        direct.triangles(block.faces(), true);
+        direct.bank(block.faces());
         direct.triangles(block.walls(), true);
         // Level tops under water carry it too, so they stay off the cached tops' materials.
         (own ? direct : tops).triangles(block.levelTops(), false);
@@ -102,7 +102,7 @@ final class ChunkMesh {
         final FieldShore shore;
         /** Which samples carry the water: null for all (a water hex's own ground). */
         final boolean[] wet;
-        final int[] cover, face;
+        final int[] cover, face, drown;
         /** The draw's entry of each of the hex's own entries; null without cover weights. */
         final int[] slots;
         /** Which of the draw's entries are a wall's foot share, a bit each (a_fieldCoverCut's second byte). */
@@ -131,19 +131,43 @@ final class ChunkMesh {
             vertices = new float[floats * 64];
             cover = new int[block.size()];
             face = new int[block.size()];
+            drown = new int[block.size()];
             Arrays.fill(cover, -1);
             Arrays.fill(face, -1);
+            Arrays.fill(drown, -1);
         }
 
         void triangles(int[] list, boolean faces) {
             for (int i = 0; i < list.length; i++) {
                 if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
-                indices[indexCount++] = (short) vertex(list[i], faces);
+                indices[indexCount++] = (short) vertex(list[i], faces, false);
             }
         }
 
-        private int vertex(int v, boolean faces) {
-            int[] written = faces ? face : cover;
+        /**
+         * The step faces' triangles (the bank's slope): faces, but a triangle any sample of which lies under the water
+         * this block carries (inside today's waterline, below its surface) is written as the block's wet ground is, so
+         * a bank's slope under the water looks as the bed beside it does, as today's submerged bank does.
+         */
+        void bank(int[] list) {
+            float[] x = block.x(), y = block.y(), z = block.z();
+            for (int i = 0; i + 2 < list.length; i += 3) {
+                boolean drowned = false;
+                for (int k = 0; water != null && k < 3; k++) {
+                    int v = list[i + k];
+                    float surface = shore == null ? BoardGeometry.waterZ(water)
+                          : shore.water(water.coords(), x[v], y[v]);
+                    drowned |= z[v] < surface && (shore == null || shore.distance(x[v], y[v]) > 0);
+                }
+                for (int k = 0; k < 3; k++) {
+                    if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
+                    indices[indexCount++] = (short) vertex(list[i + k], !drowned, drowned);
+                }
+            }
+        }
+
+        private int vertex(int v, boolean faces, boolean drowned) {
+            int[] written = faces ? face : drowned ? drown : cover;
             if (written[v] >= 0) { return written[v]; }
             if ((count + 1) * floats > vertices.length) { vertices = Arrays.copyOf(vertices, vertices.length * 2); }
             int o = count * floats;
@@ -156,7 +180,7 @@ final class ChunkMesh {
                       block.projection()[v]);
                 u = block.faceRim()[v];
                 w = block.faceFoot()[v];
-            } else if (water != null && (wet == null || wet[v])) {
+            } else if (water != null && (drowned || wet == null || wet[v])) {
                 // A water hex's ground carries its water as today's wet ground does (GpuTerrain#sculptVertex).
                 vertices[o + 3] = GpuTerrain.waterColor(block.occlusion(v), shore == null ? BoardGeometry.waterZ(water)
                       : shore.water(water.coords(), block.x()[v], block.y()[v]),
