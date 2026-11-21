@@ -793,7 +793,7 @@ final class FieldBoard {
     private float[] rimMove(int k, float x, float y, Coords[] around, Coords upper, Coords lower, Coords at, int e, float t) {
         for (Coords a : around) {
             for (Coords c : around) {
-                if (!a.equals(c) && (falls(a, c) || stream(a, c))) { return new float[] { 0, 0, 0 }; }
+                if (!a.equals(c) && (falls(a, c) || stream(a, c) && level(a) >= k)) { return new float[] { 0, 0, 0 }; }
             }
         }
         float[] o = new float[3];
@@ -881,6 +881,13 @@ final class FieldBoard {
         int[][] pairs = { { 0, 1 }, { 0, 2 }, { 1, 2 } };
         for (int[] p : pairs) {
             if (!cliff(t[p[0]], t[p[1]])) { continue; }
+            // A stream hex's step has no wall (its bank is a slope): under a third hex that stands above both and
+            // walls to both, the corner is that hex's wall's, which turns it as one row.
+            Coords third = t[3 - p[0] - p[1]];
+            if ((stream(t[p[0]], t[p[1]]) || stream(t[p[1]], t[p[0]])) && inside(third)
+                  && level(third) > Math.max(level(t[p[0]]), level(t[p[1]])) && cliff(third, t[p[0]]) && cliff(third, t[p[1]])) {
+                continue;
+            }
             any = true;
             if (!wall(t[p[0]], t[p[1]])) { consistent = false; continue; }
             int km = middle(t[p[0]], t[p[1]]);
