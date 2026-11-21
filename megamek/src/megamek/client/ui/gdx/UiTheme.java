@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureData;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.NinePatch;
@@ -38,7 +39,9 @@ import com.badlogic.gdx.scenes.scene2d.utils.BaseDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.GdxRuntimeException;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
@@ -282,8 +285,7 @@ public final class UiTheme implements Disposable {
     // The hud-* fonts share glyph pages instead of allocating a 1024x1024 page each.
     private final PixmapPacker hudGlyphs = new PixmapPacker(1024, 1024, Pixmap.Format.RGBA8888,
           GLYPH_PADDING + 2 * GLYPH_PAD, false, new PixmapPacker.GuillotineStrategy());
-    private final PixmapPacker worldGlyphs = new PixmapPacker(1024, 1024, Pixmap.Format.RGBA8888,
-          WORLD_GLYPH_PADDING, false, new PixmapPacker.GuillotineStrategy());
+    private final PixmapPacker worldGlyphs = new CoveragePacker(WORLD_GLYPH_PADDING);
     // The first face of the FALLBACK_FONTS chain; every font of this theme draws the characters it lacks from it.
     private final Generator fallback;
 
@@ -2412,6 +2414,89 @@ public final class UiTheme implements Disposable {
             }
             return super.createGlyph(c, data, parameter, stroker, baseLine, packer);
         }
+    }
+
+    /**
+     * Glyph pages of one channel: the glyphs are white, so a page keeps only their coverage, as Alpha pixmaps on the CPU
+     * and GL_R8 textures on the GPU, a quarter of RGBA's size. A swizzle reads them as (1, 1, 1, coverage), what the RGBA
+     * pages gave, so every shader that samples them stays as it is. libGDX would upload an Alpha pixmap as GL_ALPHA, which
+     * a core profile refuses: each page gets its texture here, before libGDX makes one, and every later upload of the page
+     * (an incremental glyph) goes through the same data.
+     */
+    private static final class CoveragePacker extends PixmapPacker {
+        /** Page#texture is package-private in libGDX; a page made by this packer is given its texture through it. */
+        private static final java.lang.reflect.Field TEXTURE;
+
+        static {
+            try {
+                TEXTURE = Page.class.getDeclaredField("texture");
+                TEXTURE.setAccessible(true);
+            } catch (NoSuchFieldException failure) {
+                throw new ExceptionInInitializerError(failure);
+            }
+        }
+
+        CoveragePacker(int padding) {
+            super(1024, 1024, Pixmap.Format.Alpha, padding, false, new GuillotineStrategy());
+        }
+
+        /**
+         * Never straight to the texture: libGDX would send a glyph packed after its page went up as GL_ALPHA, which a
+         * core profile refuses, so the glyph would stay blank. Its page is marked dirty instead and goes up whole, with
+         * its mipmaps, at the font's next layout ({@link #updateTextureRegions}).
+         */
+        @Override
+        public void setPackToTexture(boolean packToTexture) { }
+
+        @Override
+        public synchronized void updateTextureRegions(Array<TextureRegion> regions, Texture.TextureFilter minFilter,
+              Texture.TextureFilter magFilter, boolean useMipMaps) {
+            for (Page page : getPages()) {
+                if (page.getTexture() != null) { continue; }
+                Pixmap pixels = page.getPixmap();
+                Texture texture = new Texture(new Coverage(pixels, useMipMaps)) {
+                    @Override
+                    public void dispose() {
+                        super.dispose();
+                        pixels.dispose();
+                    }
+                };
+                texture.setFilter(minFilter, magFilter);
+                try {
+                    TEXTURE.set(page, texture);
+                } catch (IllegalAccessException failure) {
+                    throw new GdxRuntimeException(failure);
+                }
+            }
+            super.updateTextureRegions(regions, minFilter, magFilter, useMipMaps);
+        }
+    }
+
+    /** A page's coverage uploaded as GL_R8 (RGB read as one, alpha as the coverage), with its mipmaps when asked. */
+    private record Coverage(Pixmap pixels, boolean useMipMaps) implements TextureData {
+        private static final int SWIZZLE_R = 0x8E42, SWIZZLE_G = 0x8E43, SWIZZLE_B = 0x8E44, SWIZZLE_A = 0x8E45;
+
+        @Override
+        public void consumeCustomData(int target) {
+            Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
+            Gdx.gl.glTexImage2D(target, 0, GL30.GL_R8, pixels.getWidth(), pixels.getHeight(), 0, GL30.GL_RED,
+                  GL20.GL_UNSIGNED_BYTE, pixels.getPixels());
+            Gdx.gl.glTexParameteri(target, SWIZZLE_R, GL20.GL_ONE);
+            Gdx.gl.glTexParameteri(target, SWIZZLE_G, GL20.GL_ONE);
+            Gdx.gl.glTexParameteri(target, SWIZZLE_B, GL20.GL_ONE);
+            Gdx.gl.glTexParameteri(target, SWIZZLE_A, GL30.GL_RED);
+            if (useMipMaps) { Gdx.gl.glGenerateMipmap(target); }
+        }
+
+        @Override public TextureDataType getType() { return TextureDataType.Custom; }
+        @Override public boolean isPrepared() { return true; }
+        @Override public void prepare() { }
+        @Override public Pixmap consumePixmap() { throw new GdxRuntimeException("A coverage page uploads itself"); }
+        @Override public boolean disposePixmap() { return false; }
+        @Override public int getWidth() { return pixels.getWidth(); }
+        @Override public int getHeight() { return pixels.getHeight(); }
+        @Override public Pixmap.Format getFormat() { return Pixmap.Format.Alpha; }
+        @Override public boolean isManaged() { return true; }
     }
 
     /**
