@@ -4788,8 +4788,21 @@ final class BoardRelief {
         if (self.liquid() && kind == Kind.ROCK) {
             // A lip's nominal level and a pool's waterline are not foundations. Extend the closed rock down into
             // the actual bank/bed across its footprint, keeping its visible summit where it was placed.
+            // Only the faces under the rock's footprint, with twice the height query's tolerance: any other returns no
+            // height for a point of it by its own bounds (FieldSupport#height).
+            float footprint = 0;
+            for (BoardShape.Polygon polygon : rock.polygons()) {
+                for (Vector3 point : polygon.points()) {
+                    footprint = Math.max(footprint, (float) Math.hypot(point.x * sx, point.y * sy));
+                }
+            }
+            float margin = footprint + .002f * BoardGeometry.hexScale(), bx = base.x, by = base.y;
             List<BoardSurface.Face> ground = destination.stream().filter(face -> face.finish() != BoardSurface.Finish.OUTCROP
-                  && face.finish() != BoardSurface.Finish.DRESSING && face.finish() != BoardSurface.Finish.ICE).toList();
+                  && face.finish() != BoardSurface.Finish.DRESSING && face.finish() != BoardSurface.Finish.ICE
+                  && Math.max(face.a().x, Math.max(face.b().x, face.c().x)) >= bx - margin
+                  && Math.min(face.a().x, Math.min(face.b().x, face.c().x)) <= bx + margin
+                  && Math.max(face.a().y, Math.max(face.b().y, face.c().y)) >= by - margin
+                  && Math.min(face.a().y, Math.min(face.b().y, face.c().y)) <= by + margin).toList();
             float foundation = Float.POSITIVE_INFINITY;
             // Flat-shaded polygons repeat their shared corners. Their support height only needs sampling once.
             Set<Vector3> sampled = new HashSet<>();

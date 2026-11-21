@@ -561,8 +561,8 @@ final class FieldBoard {
     private float bankSlope(float s, float x, float y) {
         // A shelf at the rim's height (the slope's top line wanders in plan), then the field's bank profile down to a
         // foot that does not wander with it: a rounded shoulder, steepest mid-slope, as the bank beside.
-        float shelf = bankShelf(x, y);
-        float u = (Math.max(0, s - .02f * metre) - shelf) / (bankFoot(x, y) - shelf);
+        float shelf = bankShelf(x, y, metre);
+        float u = (Math.max(0, s - .02f * metre) - shelf) / (bankFoot(x, y, metre, room) - shelf);
         if (u <= 0 || u >= 1) { return u <= 0 ? 1 : 0; }
         // A straight slope with a rounded shoulder and toe (0.15 of its run each): no steeper band mid-slope, so a
         // bank that faces away from the sun shades evenly.
@@ -579,19 +579,24 @@ final class FieldBoard {
     }
 
     /** Where a stream hex's bank slope ends, from the shared edge at (x, y): its reach and half its shelf. */
-    static float bankFoot(float x, float y) { return bankReach(x, y) + .5f * bankShelf(x, y); }
+    static float bankFoot(float x, float y) {
+        return bankFoot(x, y, BoardRelief.metres(1), BoardRelief.metres(BoardRelief.TRANSITION));
+    }
+
+    /** {@link #bankFoot} with the metre and the transition's width its caller holds (no settings read a call). */
+    private static float bankFoot(float x, float y, float m, float room) {
+        return bankReach(x, y, m, room) + .5f * bankShelf(x, y, m);
+    }
 
     /** How far the top of a stream hex's bank slope stands out from the shared edge at (x, y): 0 to 2 m by noise. */
-    static float bankShelf(float x, float y) {
-        float m = BoardRelief.metres(1);
+    private static float bankShelf(float x, float y, float m) {
         return Math.min(2 * m, 4 * m * Math.abs(BoardRelief.noise(x / (10 * m) + 6.3f, y / (10 * m) - 1.8f)
               - BoardRelief.noise(x / (10 * m) - 17.1f, y / (10 * m) + 9.4f)));
     }
 
     /** The run of a stream hex's bank slope at (x, y): 1.2 to 1.32 of twice the transition (9.6 to 10.6 m). */
-    static float bankReach(float x, float y) {
-        float m = BoardRelief.metres(1);
-        return 2 * BoardRelief.metres(BoardRelief.TRANSITION) * (1.2f + .12f * BoardRelief.noise(x / (10 * m) + 1.9f, y / (10 * m) - 3.6f));
+    private static float bankReach(float x, float y, float m, float room) {
+        return 2 * room * (1.2f + .12f * BoardRelief.noise(x / (10 * m) + 1.9f, y / (10 * m) - 3.6f));
     }
 
     /** Whether u pours into its neighbour v over a fall (FieldWater#fallsInto): the crest is u's rim row there. */
@@ -617,7 +622,7 @@ final class FieldBoard {
      * whose block holds the point gives it one value.
      */
     private float wallDistance(float x, float y) {
-        Coords at = GpuStarShells.hexAt(x, y);
+        Coords at = hexAt(x, y);
         float best = Float.POSITIVE_INFINITY;
         for (int d = -1; d < 6; d++) {
             Coords u = d < 0 ? at : at.translated(d);
@@ -720,6 +725,27 @@ final class FieldBoard {
 
     float centerY(Coords h) { return HexTile.centerY(h, height); }
 
+    /** The hex a point lies in: GpuStarShells#hexAt's arithmetic on this board's hex size (no settings read a call). */
+    private Coords hexAt(float x, float y) {
+        int column = (int) Math.floor(x / (width * .75f));
+        int row = (int) Math.floor(-y / height);
+        Coords best = null;
+        float nearest = Float.MAX_VALUE;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                Coords candidate = new Coords(column + dx, row + dy);
+                float offsetX = x - centerX(candidate);
+                float offsetY = y - centerY(candidate);
+                float distance = offsetX * offsetX + offsetY * offsetY;
+                if (distance < nearest) {
+                    nearest = distance;
+                    best = candidate;
+                }
+            }
+        }
+        return best;
+    }
+
     /** Whether the step between u and v is a wall by BoardRelief's rule (BoardRelief#levels). */
     boolean cliff(Coords u, Coords v) {
         return inside(u) && inside(v) && ((walls[u.getX()][u.getY()] & 1 << edgeIndex(u, v)) != 0
@@ -736,6 +762,13 @@ final class FieldBoard {
 
     /** The edge index of {@code from}'s edge toward its neighbour {@code to}. */
     static int edgeIndex(Coords from, Coords to) {
+        // A neighbour's direction from the two hexes' columns and rows; Coords#direction takes an arc tangent.
+        for (int direction = 0; direction < 6; direction++) {
+            if (Coords.xInDir(from.getX(), from.getY(), direction) == to.getX()
+                  && Coords.yInDir(from.getX(), from.getY(), direction) == to.getY()) {
+                return Math.floorMod(1 - direction, 6);
+            }
+        }
         int d = from.direction(to), e = 0;
         while (BoardGeometry.edgeDirection(e) != d) { e++; }
         return e;
@@ -1320,7 +1353,7 @@ final class FieldBoard {
                 // that step runs on under the wall (the higher of it and the wall's apron), so no scarp parts the two.
                 float streamD = streamTo[k - lowest - 1] == Float.POSITIVE_INFINITY ? Float.POSITIVE_INFINITY
                       : (float) Math.sqrt(streamTo[k - lowest - 1]);
-                if (!in && !streamStep && streamD < bankFoot(x, y)) { talus = Math.max(talus, bankSlope(streamD, x, y)); }
+                if (!in && !streamStep && streamD < bankFoot(x, y, metre, room)) { talus = Math.max(talus, bankSlope(streamD, x, y)); }
                 // Round a ground portal the face stands flat (BoardTunnel#relief) and, as today's, keeps no apron.
                 if (talus > 0) {
                     float keep = relief(h, x, y, z);
@@ -1328,7 +1361,7 @@ final class FieldBoard {
                     talus *= keep;
                 }
                 share = weight * (in ? 1 : talus);
-                step = !in && (s < (streamStep ? bankFoot(x, y) : 2 * room) || streamD < bankFoot(x, y));
+                step = !in && (s < (streamStep ? bankFoot(x, y, metre, room) : 2 * room) || streamD < bankFoot(x, y, metre, room));
             }
             // Shore and beds: where its foot stands in water a cliff carries no talus and its wall runs down to the
             // bed; a pool above a cliff keeps a sill along the rim (FieldShore#bed).
@@ -1388,7 +1421,7 @@ final class FieldBoard {
         float bed = shore.bed(x, y, wall, Math.max(sill, shelf));
         // Land keeps above the water where no water plane reaches over it (WaterLayer#dip): no dry hollow below the
         // line. The hex at the point decides, so a point every hex shares gets one height.
-        Coords at = bed > 0 ? GpuStarShells.hexAt(x, y) : null;
+        Coords at = bed > 0 ? hexAt(x, y) : null;
         if (at != null && inside(at) && !WaterLayer.water(this, at)) { bed = Math.min(bed, WaterLayer.dip(this, at, x, y, z)); }
         z -= bed;
         zt -= bed;
@@ -1420,7 +1453,7 @@ final class FieldBoard {
         // stands across a wall from it, the reads take that neighbour's water at its edge's nearest point, so the step
         // stands at the row; the test and the read are the point's own, so hexes sharing a point read one water.
         float wx = x, wy = y;
-        Coords here = GpuStarShells.hexAt(x, y);
+        Coords here = hexAt(x, y);
         int edge = -1;
         if (!here.equals(h)) {
             float best = Float.POSITIVE_INFINITY;
@@ -1483,7 +1516,7 @@ final class FieldBoard {
         }
         float[] streams = streamsNear(here, x, y);
         float[] line = streams == null ? null : new float[6];
-        float reach = bankFoot(x, y) + 2 * metre, cut = 0, plane = Float.NaN;
+        float reach = bankFoot(x, y, metre, room) + 2 * metre, cut = 0, plane = Float.NaN;
         for (int i = 0; streams != null && i < streams.length; i += 2) {
             float within = 1 - BoardRelief.smooth((streams[i] - reach) / (3 * metre));
             if (within <= 0) { continue; }

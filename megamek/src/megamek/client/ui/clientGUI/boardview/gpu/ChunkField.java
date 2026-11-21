@@ -24,7 +24,7 @@ final class ChunkField {
     final BoardScene scene;
     final TerrainLod lod;
     final float floor;
-    private final Map<Coords, Block> blocks = new ConcurrentHashMap<>();
+    private final Map<Coords, Holder> blocks = new ConcurrentHashMap<>();
     /** The banks' level-set grids, one per chunk of {@link TerrainLod#CHUNK_SIZE} hexes. */
     private final Map<Coords, FieldBoard.Shares> shares = new ConcurrentHashMap<>();
     /** The detail this one morphs to, whose blocks' portal cuts its own follow (FieldStamps); null for the coarsest. */
@@ -67,7 +67,24 @@ final class ChunkField {
     }
 
     /** The hex's block, evaluated once on the first ask; null where the field does not take the hex. */
-    Block block(Coords h) { return board.taken(h) ? blocks.computeIfAbsent(h, this::build) : null; }
+    Block block(Coords h) { return board.taken(h) ? blocks.computeIfAbsent(h, key -> new Holder()).get(h) : null; }
+
+    /**
+     * A hex's block, built once under its own lock. The map's lock is held only while the holder is added: a build
+     * inside computeIfAbsent kept the map's bin for its whole length, and threads asking for other hexes waited.
+     */
+    private final class Holder {
+        private Block block;
+        private boolean built;
+
+        synchronized Block get(Coords h) {
+            if (!built) {
+                block = build(h);
+                built = true;
+            }
+            return block;
+        }
+    }
 
     private Block build(Coords h) {
         Block built = new Builder(this, h).run();
