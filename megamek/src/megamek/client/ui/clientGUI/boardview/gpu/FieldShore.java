@@ -387,7 +387,7 @@ final class FieldShore {
         float mouth = opening[1], away = edgeDistance(h, e, x, y);
         out[0] = drop;
         out[1] = down ? -away : away;
-        out[4] = depth >= 2 ? mouth : depth == 1 ? Math.min(mouth, Math.max(.5f * mouth, STREAM / 2 * m)) : Math.min(RIVULET / 2 * m, mouth);
+        out[4] = flowing(depth, 2 * mouth) / 2;
         out[5] = depth == 0 ? THREAD * m : Float.POSITIVE_INFINITY;
         out[6] = depth >= 2 ? Float.POSITIVE_INFINITY : (depth == 1 ? SHALLOW : FILM) * m;
         float across = (x - ux) * fy - (y - uy) * fx - opening[0];
@@ -432,6 +432,21 @@ final class FieldShore {
             float edgeHalf = BoardGeometry.width() / 4;
             return least > most ? new float[] { 0, edgeHalf } : new float[] { (least + most) / 2, Math.min((most - least) / 2, edgeHalf) };
         });
+    }
+
+    /**
+     * How wide the water flows out of a hex of water depth {@code depth} over a mouth or a crest {@code whole} wide
+     * (world units): the one rule of descending streams and falls. Depth 0 a small stream RIVULET wide, depth 1 half
+     * the whole and at least STREAM, depth 2 and more the whole; never more than the whole.
+     */
+    static float flowing(int depth, float whole) {
+        float m = BoardRelief.metres(1);
+        return depth >= 2 ? whole : Math.min(whole, depth == 1 ? Math.max(.5f * whole, STREAM * m) : RIVULET * m);
+    }
+
+    /** (PROPOSAL h5) How wide a FALL pours out of a hex of water depth: #flowing, but from depth 1 seven tenths of its crest and at least 8 m. */
+    static float pouring(int depth, float whole) {
+        return depth == 1 ? Math.min(whole, Math.max(.7f * whole, 8 * BoardRelief.metres(1))) : flowing(depth, whole);
     }
 
     /**

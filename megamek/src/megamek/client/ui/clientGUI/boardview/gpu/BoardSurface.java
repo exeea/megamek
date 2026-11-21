@@ -461,6 +461,8 @@ final class BoardSurface {
     private final Vector3[] joinB = new Vector3[6];
     /** Per falling edge, the crest its water pours over; null elsewhere. */
     private final Crest[] crests = new Crest[6];
+    /** A height-field hex's falls: the stretch of today's crest each pours over (#fieldFalls). */
+    private final float[][] fallStretch = new float[6][];
     /**
      * The bed's outer ring, along the waterline and out along the crests: the top of the walls that stand under falls.
      */
@@ -699,24 +701,133 @@ final class BoardSurface {
     }
 
     /**
-     * Gives this height-field water hex the falls it has without the field (FieldWater): each crest and its ends'
-     * joins are that surface's, so today's fall renderers draw today's fall. Returns that surface: its water is the
-     * pool pulled back from each crest, where the sheet's lip starts.
+     * Gives this height-field water hex the falls it has without the field (FieldWater), as much of each as its water
+     * depth lets flow (FieldShore#flowing, the descending stream's rule): a run of crests joined round a corner pours
+     * over its middle stretch, the whole of it from depth 2. A whole crest and its ends' joins are that surface's; a
+     * shorter one is the same curve between two of its points, its cut ends free. So today's fall renderers draw
+     * today's fall, narrower for less water. Returns that surface: its water is the pool pulled back from each crest,
+     * where a whole sheet's lip starts (#fieldLip gives a shorter one's).
      */
     BoardSurface fieldFalls() {
         BoardSurface today = new BoardSurface(scene, tile, lod);
-        for (Side fall : today.waterfalls) {
-            int edge = fall.edge();
-            crests[edge] = today.crests[edge];
-            joinA[edge] = today.joinA[edge];
-            joinB[edge] = today.joinB[edge];
-            waterfalls.add(fall);
-        }
+        pour(today, pourStretches(today));
         // Today's blocks on each lip and its shoulders, on today's crests (cliffs' BoardRelief#fieldFallRocks).
         int lips = 0;
         for (Side fall : today.waterfalls) { lips |= 1 << fall.edge(); }
         if (lips != 0 && today.crestLine != null) { relief.fieldFallRocks(faces, today.crestLine, lips); }
         return today;
+    }
+
+    /**
+     * Trims this surface's own falls, today's whole ones, to the stretch the hex's water depth lets pour, as
+     * #fieldFalls gives a height-field hex: for a field water hex whose field surface is not at hand (the water
+     * field's pools beyond a chunk), so its falls land and churn where the field's do.
+     */
+    void pourByDepth() { pour(this, pourStretches(this)); }
+
+    /**
+     * The stretch each fall edge of hex {@code tile} pours over (#pourStretches, measured along today's crest curve), for
+     * the height field before any field surface exists (FieldBoard#height): per edge e {from, to} in t along the straight
+     * hex edge from corner e to corner e + 1, the poured crest's two ends projected on it; {0, 1} where all of it pours,
+     * null where nothing pours or no fall stands. Builds today's surface of the hex once.
+     */
+    static float[][] pourEdges(BoardScene scene, BoardScene.Tile tile) {
+        BoardSurface today = new BoardSurface(scene, tile, TerrainLod.FULL);
+        float[][] stretch = pourStretches(today), edges = new float[6][];
+        for (Side fall : today.waterfalls) {
+            int e = fall.edge();
+            float[] s = stretch[e];
+            if (s == null) { continue; }
+            if (s[0] == 0 && s[1] == 1) {
+                edges[e] = new float[] { 0, 1 };
+                continue;
+            }
+            Vector3 a = BoardGeometry.corner(tile.coords(), 0, e), b = BoardGeometry.corner(tile.coords(), 0, (e + 1) % 6);
+            float t0 = Math.clamp(along(a, b, today.crests[e].point(s[0])), 0, 1);
+            float t1 = Math.clamp(along(a, b, today.crests[e].point(s[1])), 0, 1);
+            edges[e] = new float[] { Math.min(t0, t1), Math.max(t0, t1) };
+        }
+        return edges;
+    }
+
+    /**
+     * The stretch of each of {@code today}'s fall crests the hex's water depth lets pour (FieldShore#pouring), as
+     * {from, to} of the crest's length; null where none pours. A run of crests joined round a corner pours over its
+     * middle stretch.
+     */
+    private static float[][] pourStretches(BoardSurface today) {
+        float[][] stretch = new float[6][];
+        boolean[] done = new boolean[6];
+        for (int start = 0; start < 12; start++) {
+            int first = start % 6;
+            // A run starts at a crest whose start no fall of this hex runs into (the second round takes a closed ring).
+            if (done[first] || today.crests[first] == null
+                  || start < 6 && today.joinA[first] != null && today.crests[(first + 5) % 6] != null) { continue; }
+            int count = 1;
+            while (count < 6 && today.crests[(first + count) % 6] != null && today.joinA[(first + count) % 6] != null
+                  && !done[(first + count) % 6]) { count++; }
+            float[] lengths = new float[count];
+            float total = 0;
+            for (int k = 0; k < count; k++) {
+                Crest crest = today.crests[(first + k) % 6];
+                Vector3 previous = crest.point(0);
+                for (int i = 1; i <= 8; i++) {
+                    Vector3 next = crest.point(i / 8f);
+                    lengths[k] += (float) Math.hypot(next.x - previous.x, next.y - previous.y);
+                    previous = next;
+                }
+                total += lengths[k];
+            }
+            float trim = (total - FieldShore.pouring(Math.max(0, today.tile.waterDepth()), total)) / 2, before = 0;
+            for (int k = 0; k < count; k++) {
+                int edge = (first + k) % 6;
+                done[edge] = true;
+                float from = Math.clamp((trim - before) / lengths[k], 0, 1), to = Math.clamp((total - trim - before) / lengths[k], 0, 1);
+                before += lengths[k];
+                if (to > from) { stretch[edge] = new float[] { from, to }; }
+            }
+        }
+        return stretch;
+    }
+
+    /**
+     * This surface's falls: {@code today}'s (this surface itself for #pourByDepth), each over its stretch: a whole
+     * crest and its ends' joins as today's, a shorter one the same curve between two of its points, its cut ends free.
+     */
+    private void pour(BoardSurface today, float[][] stretch) {
+        List<Side> whole = List.copyOf(today.waterfalls);
+        if (today == this) { waterfalls.clear(); }
+        for (Side fall : whole) {
+            int edge = fall.edge();
+            if (stretch[edge] == null) {
+                if (today == this) { crests[edge] = null; joinA[edge] = null; joinB[edge] = null; }
+                continue;
+            }
+            float from = stretch[edge][0], to = stretch[edge][1];
+            fallStretch[edge] = stretch[edge];
+            Crest crest = today.crests[edge];
+            if (from == 0 && to == 1) {
+                crests[edge] = crest;
+                joinA[edge] = today.joinA[edge];
+                joinB[edge] = today.joinB[edge];
+                waterfalls.add(fall);
+                continue;
+            }
+            Vector3 a = crest.point(from), b = crest.point(to);
+            crests[edge] = new Crest(a, b, crest.tangent(from), crest.tangent(to), crest.corner(), crest.outward(), 0, crest.level());
+            joinA[edge] = from == 0 ? today.joinA[edge] : null;
+            joinB[edge] = to == 1 ? today.joinB[edge] : null;
+            waterfalls.add(new Side(new Vector3(a), new Vector3(b), fall.lowA(), fall.lowB(), edge));
+        }
+    }
+
+    /** The stretch of today's crest over an edge that this field hex's fall pours over (#fieldFalls): from, to of its length; null for none. */
+    float[] fieldStretch(int edge) { return fallStretch[edge]; }
+
+    /** Where the sheet of this field hex's fall starts at s of its crest: the pool's edge there (GpuWaterfall#grid's first row). */
+    Vector3 fieldLip(Side fall, float s) {
+        Crest crest = crests[fall.edge()];
+        return crest.point(s).mulAdd(crest.normal(s), -lipWidth(fall.edge(), s, fallLip(crest.level(), fall.lowA())));
     }
 
     /** A height-field water hex whose water descends (FieldWater): its graded water, read from its water faces. */

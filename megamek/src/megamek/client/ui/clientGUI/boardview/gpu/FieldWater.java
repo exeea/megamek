@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -17,6 +18,20 @@ import megamek.common.board.Coords;
  */
 final class FieldWater {
     private FieldWater() { }
+
+    /**
+     * A fall edge's dry rim, in metres: where its crest does not pour (the hex's depth lets less than the whole crest
+     * flow, BoardSurface#fieldStretch), the water ends this far inside today's crest line; the strip between is the
+     * ground's, rock standing above the water.
+     */
+    private static final float DRY_RIM = .8f;
+
+    /** Crest point {@code crest} of hex h moved DRY_RIM toward the hex's centre in plan. */
+    private static Vector3 rimmed(Vector3 crest, Coords h) {
+        float dx = BoardGeometry.centerX(h) - crest.x, dy = BoardGeometry.centerY(h) - crest.y;
+        float lip = BoardRelief.metres(DRY_RIM) / Math.max((float) Math.hypot(dx, dy), 1e-6f);
+        return new Vector3(crest.x + dx * lip, crest.y + dy * lip, crest.z);
+    }
 
     /**
      * Gives the surface of field water hex {@code surface.tile} its water: the plane, the outline at the water's
@@ -46,13 +61,33 @@ final class FieldWater {
         for (BoardSurface.Side fall : today == null ? List.<BoardSurface.Side>of() : today.waterfalls) {
             int e = fall.edge();
             boolean pulled = today.water.size() == line.length;
-            lips[e] = new float[2 * (n + 1)];
+            // The stretch of today's crest the hex's depth lets flow (BoardSurface#fieldFalls): the pool is pulled back
+            // from the crest only there; beside it the water reaches today's crest line and nothing pours.
+            float[] stretch = surface.fieldStretch(e);
+            boolean whole = stretch != null && stretch[0] == 0 && stretch[1] == 1;
+            List<Vector3> edge = new ArrayList<>();
+            boolean poured = false;
             for (int i = 0; i <= n; i++) {
                 int index = (e * n + i) % line.length;
-                line[index] = today.crest(fall).point(i / (float) n);
-                pool[index] = pulled ? new Vector3(today.water.get(index)) : line[index];
-                lips[e][2 * i] = pool[index].x;
-                lips[e][2 * i + 1] = pool[index].y;
+                float s = i / (float) n;
+                line[index] = today.crest(fall).point(s);
+                boolean flows = stretch != null && s >= stretch[0] && s <= stretch[1];
+                // Where the crest does not pour the water ends inside the crest line, against the dry rim's rock.
+                Vector3 dry = whole ? line[index] : rimmed(line[index], h);
+                pool[index] = pulled && flows ? new Vector3(today.water.get(index)) : dry;
+                if (whole) {
+                    edge.add(pool[index]);
+                } else if (stretch == null || s < stretch[0] || s > stretch[1]) {
+                    // (the shorter sheet's own first row comes once, between the dry stretches' points)
+                    if (stretch != null && s > stretch[1] && !poured) { poured = sheetEdge(surface, e, edge); }
+                    edge.add(dry);
+                }
+            }
+            if (!whole && stretch != null && !poured) { sheetEdge(surface, e, edge); }
+            lips[e] = new float[2 * edge.size()];
+            for (int i = 0; i < edge.size(); i++) {
+                lips[e][2 * i] = edge.get(i).x;
+                lips[e][2 * i + 1] = edge.get(i).y;
             }
         }
         surface.fieldWater(line, mouths);
@@ -99,7 +134,8 @@ final class FieldWater {
      */
     private static float[] lipped(FieldBoard board, Coords h, float[] plane, float[][] lips) {
         float cx = board.centerX(h), cy = board.centerY(h), sx = 0, sy = 0;
-        float[] out = new float[plane.length + 6 * 6 * (BoardSurface.SHORE_SEGMENTS + 2)];
+        // (a fall edge's fan may gain its crest's dry points and its sheet's first row)
+        float[] out = new float[plane.length + 6 * 6 * (2 * BoardSurface.SHORE_SEGMENTS + 4)];
         int o = 0, spokes = 0;
         for (int i = 0; i < plane.length; i += 6) {
             // The fan's triangles start at the centre, FULL of them an edge, in the edges' order (WaterLayer#plane).
@@ -129,6 +165,15 @@ final class FieldWater {
             }
         }
         return Arrays.copyOf(out, o);
+    }
+
+    /** Adds the first row of the sheet over edge e of a field hex's surface (its fall's crest pulled back, as GpuWaterfall#grid starts it); true. */
+    private static boolean sheetEdge(BoardSurface surface, int e, List<Vector3> edge) {
+        for (BoardSurface.Side fall : surface.waterfalls) {
+            if (fall.edge() != e) { continue; }
+            for (int k = 0; k <= BoardSurface.SHORE_SEGMENTS; k++) { edge.add(surface.fieldLip(fall, k / (float) BoardSurface.SHORE_SEGMENTS)); }
+        }
+        return true;
     }
 
     /** How often a descending stream's plane is refined where its surface bends, and how far (metres) an edge's middle may lie off the surface. */

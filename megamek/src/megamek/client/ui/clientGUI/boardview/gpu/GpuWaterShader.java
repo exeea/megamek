@@ -613,6 +613,7 @@ final class GpuWaterShader extends Attribute {
               Map<Coords, BoardSurface> surfaces, boolean molten, FieldBoard field) {
             Pools pools = new Pools(scene, currents, surfaces, molten);
             pools.shore = field == null ? null : field.shore;
+            pools.board = field;
             float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
             float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
             for (BoardSurface surface : surfaces.values()) {
@@ -769,6 +770,8 @@ final class GpuWaterShader extends Attribute {
         private final Vector2 acceleration = new Vector2();
         /** The height field's shore, whose descending streams have no agitation on their films (FieldShore#film); null without the field. */
         private FieldShore shore;
+        /** The height field, whose water hexes' falls pour by their depth (BoardSurface#pourByDepth); null without it. */
+        private FieldBoard board;
 
         Pools(BoardScene scene, Map<Coords, BoardFlow.Current> currents, Map<Coords, BoardSurface> surfaces) {
             this(scene, currents, surfaces, false);
@@ -787,7 +790,11 @@ final class GpuWaterShader extends Attribute {
             Pool pool = null;
             if (tile != null && tile.liquid().present() && tile.liquid().molten() == molten) {
                 BoardSurface surface = surfaces.get(coords);
-                if (surface == null) { surface = new BoardSurface(scene, tile); }
+                if (surface == null) {
+                    surface = new BoardSurface(scene, tile);
+                    // (the height field) beyond the chunk a field water hex's falls pour as its field surface's do
+                    if (board != null && WaterLayer.water(board, coords)) { surface.pourByDepth(); }
+                }
                 // Only actual liquid openings participate in a frozen tile; the remaining slab stays a bank.
                 if (!tile.frozen() || !surface.waterFaces.isEmpty()) {
                     pool = new Pool(surface, currents.getOrDefault(coords, BoardFlow.Current.STILL));
