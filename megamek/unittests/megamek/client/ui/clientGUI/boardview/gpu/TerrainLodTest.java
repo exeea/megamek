@@ -146,7 +146,8 @@ class TerrainLodTest {
         // The texels the field gives (its water and the banks beside it), with a ring for the depth blur's neighbours;
         // elsewhere (dry ground away from the water, where no water is drawn) texels keep today's per-surface values.
         int span = toX - fromX + 2;
-        float[] given = FieldWater.texels(board, scene, a.spacing(), fromX - 1, fromY - 1, span, new float[span * (toY - fromY + 2)]);
+        int rows = toY - fromY + 2;
+        float[] given = FieldWater.texels(board, scene, a.spacing(), fromX - 1, fromY - 1, span, new float[span * rows], new float[span * rows]);
         for (int y = fromY; y < toY; y++) {
             for (int x = fromX; x < toX; x++) {
                 boolean field = true;
