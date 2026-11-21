@@ -1260,6 +1260,11 @@ final class FieldBoard {
                 // Today's apron (BoardRelief#transition): twice the room wide, steepest under the face.
                 float talus = in ? 0 : streamStep ? bankSlope(s, x, y)
                       : s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(s / (2 * room)));
+                // Beside a stream hex's step, under a wall that stands nearer: the bank's slope by its own distance to
+                // that step runs on under the wall (the higher of it and the wall's apron), so no scarp parts the two.
+                float streamD = streamTo[k - lowest - 1] == Float.POSITIVE_INFINITY ? Float.POSITIVE_INFINITY
+                      : (float) Math.sqrt(streamTo[k - lowest - 1]);
+                if (!in && !streamStep && streamD < bankFoot(x, y)) { talus = Math.max(talus, bankSlope(streamD, x, y)); }
                 // Round a ground portal the face stands flat (BoardTunnel#relief) and, as today's, keeps no apron.
                 if (talus > 0) {
                     float keep = relief(h, x, y, z);
@@ -1267,7 +1272,7 @@ final class FieldBoard {
                     talus *= keep;
                 }
                 share = weight * (in ? 1 : talus);
-                step = !in && s < (streamStep ? bankFoot(x, y) : 2 * room);
+                step = !in && (s < (streamStep ? bankFoot(x, y) : 2 * room) || streamD < bankFoot(x, y));
             }
             // Shore and beds: where its foot stands in water a cliff carries no talus and its wall runs down to the
             // bed; a pool above a cliff keeps a sill along the rim (FieldShore#bed).
