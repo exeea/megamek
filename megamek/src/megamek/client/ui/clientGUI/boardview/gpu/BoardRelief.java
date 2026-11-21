@@ -4803,7 +4803,7 @@ final class BoardRelief {
                   && Math.min(face.a().x, Math.min(face.b().x, face.c().x)) <= bx + margin
                   && Math.max(face.a().y, Math.max(face.b().y, face.c().y)) >= by - margin
                   && Math.min(face.a().y, Math.min(face.b().y, face.c().y)) <= by + margin).toList();
-            float foundation = Float.POSITIVE_INFINITY;
+            float foundation = Float.POSITIVE_INFINITY, highest = Float.NEGATIVE_INFINITY;
             // Flat-shaded polygons repeat their shared corners. Their support height only needs sampling once.
             Set<Vector3> sampled = new HashSet<>();
             for (BoardShape.Polygon polygon : rock.polygons()) {
@@ -4812,11 +4812,24 @@ final class BoardRelief {
                     float x = base.x + c * point.x * sx - s * point.y * sy;
                     float y = base.y + s * point.x * sx + c * point.y * sy;
                     float groundZ = BoardSurface.sampleHeight(ground, x, y, Float.NaN);
-                    if (Float.isFinite(groundZ)) { foundation = Math.min(foundation, groundZ - height * .3f); }
+                    if (Float.isFinite(groundZ)) {
+                        foundation = Math.min(foundation, groundZ - height * .3f);
+                        highest = Math.max(highest, groundZ);
+                    }
                 }
             }
             if (!Float.isFinite(foundation)) { return; }
             foundation = Math.min(base.z, foundation);
+            // On the field a rock over a drop (a pool's side beside a fall's shoulder, a steep bank) would be
+            // stretched down the whole drop, a post: past its own height it stands on its upper footing instead.
+            if (TerrainField.ON && base.z - foundation > height) {
+                // Only where its centre stands on that footing, above the water; over the drop or the water it is
+                // left out.
+                float centre = BoardSurface.sampleHeight(ground, base.x, base.y, Float.NaN);
+                if (!(centre >= highest - height * .3f) || centre < BoardGeometry.waterZ(tile)) { return; }
+                base = new Vector3(base.x, base.y, Math.min(base.z, highest));
+                foundation = Math.min(base.z, highest - height * .3f);
+            }
             height += base.z - foundation;
             base = new Vector3(base.x, base.y, foundation);
             sz = height / rock.height();
