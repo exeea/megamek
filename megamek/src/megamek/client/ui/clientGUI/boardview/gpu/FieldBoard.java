@@ -499,6 +499,55 @@ final class FieldBoard {
      */
     static int gorgeGround(int packed) { return -2 - packed; }
 
+    /**
+     * A corner where one wall ends against banks: one cliff among the pairs of its three hexes {@code t}, the third
+     * hex's level strictly between that wall's two; a stream hex's step under a third hex that stands above both and
+     * has a cliff to both does not count ({@link #corner}). The indices in t of the wall's upper hex and of the hex
+     * between; null for any other corner.
+     */
+    private int[] wallEnd(Coords[] t) {
+        int cliffs = 0, upper = -1, third = -1;
+        for (int a = 0; a < 3; a++) {
+            int c = (a + 1) % 3, o = 3 - a - c;
+            if (!cliff(t[a], t[c])) { continue; }
+            if ((stream(t[a], t[c]) || stream(t[c], t[a])) && inside(t[o]) && level(t[o]) > Math.max(level(t[a]), level(t[c]))
+                  && cliff(t[o], t[a]) && cliff(t[o], t[c])) {
+                continue;
+            }
+            cliffs++;
+            upper = level(t[a]) > level(t[c]) ? a : c;
+            third = o;
+        }
+        if (cliffs != 1 || !inside(t[third])) { return null; }
+        int lower = 3 - upper - third;
+        return level(t[lower]) < level(t[third]) && level(t[third]) < level(t[upper]) ? new int[] { upper, third } : null;
+    }
+
+    /**
+     * How high the ground may stand at (x, y), a point of hex {@code here}, beside a corner of it where a wall ends
+     * against banks ({@link #wallEnd}; #corner holds it and the wall's row fades out to it over half the edge): the
+     * corner's own height at the corner, rising to the wall's upper level over that half edge, so
+     * the wall's top comes down with its row and none of the fading wall stands above the rim it ends against.
+     * Positive infinity elsewhere. The point alone decides (a corner within half an edge of it is its own hex's).
+     */
+    private float wallEndCap(Coords h, List<Segment> segments, Shares shares, Coords here, float x, float y) {
+        float reach = .5f * edge;
+        for (int k = 0; inside(here) && k < 6; k++) {
+            float dx = x - cornerX(here, k), dy = y - cornerY(here, k), d2 = dx * dx + dy * dy;
+            if (d2 >= reach * reach) { continue; }
+            Coords[] t = { here, here.translated(BoardGeometry.edgeDirection((k + 5) % 6)), here.translated(BoardGeometry.edgeDirection(k)) };
+            int[] end = wallEnd(t);
+            if (end == null) { return Float.POSITIVE_INFINITY; }
+            // From the corner's own height (the ground at the wall's foot never stands under the cap by more than it
+            // rises to the corner), asked without this cap.
+            float[] corner = new float[8];
+            height(h, segments, shares, cornerX(here, k), cornerY(here, k), corner, false);
+            float low = corner[0], high = level(t[end[0]]) * levelZ;
+            return high <= low ? Float.POSITIVE_INFINITY : low + (high - low) * BoardRelief.smooth((float) Math.sqrt(d2) / reach);
+        }
+        return Float.POSITIVE_INFINITY;
+    }
+
     /** Whether the hex {@link #packed} gave is a stream hex with such a step. */
     private boolean streamTop(int packed) {
         return packed >= 0 && (walls[packed / 4096][packed % 4096] >>> STREAM & 63) != 0;
@@ -905,7 +954,9 @@ final class FieldBoard {
         if (any) {
             // A cliff between two hexes at one level (deep water beside land: BoardRelief#levels counts the depth) has no
             // rise to move a rim by (#rimMove would divide by zero): the corner is held, as an inconsistent one.
-            if (!all || !consistent || side == null || level(upperHex) == level(lowerHex)) {
+            // A wall that ends here against banks (#wallEnd): the corner is held too, so the wall's row fades out to the
+            // hex corner, as today's wall does at its end.
+            if (!all || !consistent || side == null || level(upperHex) == level(lowerHex) || wallEnd(t) != null) {
                 result[2] = 1;
             } else {
                 result = rimMove(k0, cornerX(h, k), cornerY(h, k), t, upperHex, lowerHex, h, k, 0);
@@ -1154,6 +1205,11 @@ final class FieldBoard {
      * its lowest level.
      */
     void height(Coords h, List<Segment> segments, Shares shares, float x, float y, float[] out) {
+        height(h, segments, shares, x, y, out, true);
+    }
+
+    /** {@link #height}; {@code ends} false leaves out the cap beside a wall's end (#wallEndCap asks so for the corner's own height). */
+    private void height(Coords h, List<Segment> segments, Shares shares, float x, float y, float[] out, boolean ends) {
         int own = level(h), lowest = own, highest = own;
         // A plate is level, and so is natural ground on a plate's fitted outline at its level (FieldPlates).
         if (plate(h) || onPlate(h, x, y)) {
@@ -1419,6 +1475,12 @@ final class FieldBoard {
         // face under the stream hex, and level land within 3 m of the line below the slope's foot is marked for its
         // rock (#gorgeGround): the gorge's rock down to the water (FieldCover#gorge). The point alone decides, so
         // hexes sharing a sample give it one height.
+        // Beside a corner where a wall ends against banks the ground comes down with the wall's fading row (#wallEndCap).
+        float ending = ends ? wallEndCap(h, segments, shares, here, x, y) : Float.POSITIVE_INFINITY;
+        if (z > ending) {
+            zt -= z - ending;
+            z = ending;
+        }
         float[] streams = streamsNear(here, x, y);
         float[] line = streams == null ? null : new float[6];
         float reach = bankFoot(x, y) + 2 * metre, cut = 0, plane = Float.NaN;
