@@ -67,12 +67,12 @@ final class FieldWater {
         if (board.shore.graded(h)) { surface.fieldGrade(); }
     }
 
-    /** How often a descending stream's plane is split in four, so it follows today's graded water (its rings). */
-    private static final int GRADED_SPLITS = 2;
+    /** The rings a descending stream's plane has between its outline and its centre, so it can follow its surface. */
+    private static final int GRADED_RINGS = 8;
 
     /**
      * Field water hex h's surface as triangles, x, y and z a corner: the water layer's plane ({@link WaterLayer#plane}),
-     * level, or on a descending stream split GRADED_SPLITS times and laid on today's graded water (FieldShore#water),
+     * level, or on a descending stream in rings (#ringed), refined where it bends (#refined), on its surface (FieldShore#water),
      * one function, so it is the same at every detail and its points on an edge alike from either hex.
      */
     static float[] surface(FieldBoard board, Coords h) { return surface(board, h, new float[6][]); }
@@ -81,7 +81,9 @@ final class FieldWater {
     private static float[] surface(FieldBoard board, Coords h, float[][] lips) {
         float[] plane = lipped(board, h, WaterLayer.plane(board, h), lips);
         boolean graded = board.shore.graded(h);
-        for (int s = 0; graded && s < GRADED_SPLITS; s++) { plane = split(plane); }
+        if (graded) { plane = ringed(board, h, plane); }
+        // A descending stream's surface bends along its flow: the plane is refined where it does (#refined).
+        for (int s = 0; graded && s < BEND_PASSES; s++) { plane = refined(board, h, plane); }
         float[] out = new float[plane.length / 2 * 3];
         for (int i = 0, o = 0; i < plane.length; i += 2, o += 3) {
             out[o] = plane[i];
@@ -129,21 +131,77 @@ final class FieldWater {
         return Arrays.copyOf(out, o);
     }
 
-    /** Triangles (x, y a corner) each split in four at its edges' middles, turning as they did. */
-    private static float[] split(float[] t) {
+    /** How often a descending stream's plane is refined where its surface bends, and how far (metres) an edge's middle may lie off the surface. */
+    private static final int BEND_PASSES = 3;
+    private static final float BEND = .025f;
+
+    /**
+     * Triangles (x, y a corner) of water hex h, each edge whose middle lies more than BEND off the water's surface
+     * (FieldShore#water) halved there, turning as they did. An edge is judged by its two ends alone, so both triangles
+     * at it, of this hex's plane or the next's, halve it alike and the mesh stays closed.
+     */
+    private static float[] refined(FieldBoard board, Coords h, float[] t) {
+        float limit = BEND * BoardRelief.metres(1);
         float[] out = new float[t.length * 4];
         int o = 0;
+        float[] q = new float[12];
         for (int i = 0; i < t.length; i += 6) {
-            float ax = t[i], ay = t[i + 1], bx = t[i + 2], by = t[i + 3], cx = t[i + 4], cy = t[i + 5];
-            float abx = (ax + bx) / 2, aby = (ay + by) / 2, bcx = (bx + cx) / 2, bcy = (by + cy) / 2;
-            float cax = (cx + ax) / 2, cay = (cy + ay) / 2;
-            for (float[] q : new float[][] { { ax, ay, abx, aby, cax, cay }, { abx, aby, bx, by, bcx, bcy },
-                  { cax, cay, bcx, bcy, cx, cy }, { abx, aby, bcx, bcy, cax, cay } }) {
-                System.arraycopy(q, 0, out, o, 6);
-                o += 6;
+            System.arraycopy(t, i, q, 0, 6);
+            int bent = 0;
+            for (int k = 0; k < 3; k++) {
+                float ax = q[2 * k], ay = q[2 * k + 1], bx = q[2 * ((k + 1) % 3)], by = q[2 * ((k + 1) % 3) + 1];
+                float mx = (ax + bx) / 2, my = (ay + by) / 2;
+                q[6 + 2 * k] = mx;
+                q[7 + 2 * k] = my;
+                float off = board.shore.water(h, mx, my) - (board.shore.water(h, ax, ay) + board.shore.water(h, bx, by)) / 2;
+                if (Math.abs(off) > limit) { bent |= 1 << k; }
+            }
+            // Corners 0, 1, 2 and the middles 3 (of 0-1), 4 (of 1-2), 5 (of 2-0).
+            int[] pieces = switch (bent) {
+                case 0 -> new int[] { 0, 1, 2 };
+                case 1 -> new int[] { 0, 3, 2, 3, 1, 2 };
+                case 2 -> new int[] { 0, 1, 4, 0, 4, 2 };
+                case 4 -> new int[] { 0, 1, 5, 5, 1, 2 };
+                case 3 -> new int[] { 3, 1, 4, 0, 3, 4, 0, 4, 2 };
+                case 6 -> new int[] { 5, 4, 2, 0, 1, 4, 0, 4, 5 };
+                case 5 -> new int[] { 0, 3, 5, 3, 1, 2, 3, 2, 5 };
+                default -> new int[] { 0, 3, 5, 3, 1, 4, 5, 4, 2, 3, 4, 5 };
+            };
+            for (int corner : pieces) {
+                out[o++] = q[2 * corner];
+                out[o++] = q[2 * corner + 1];
             }
         }
-        return out;
+        return Arrays.copyOf(out, o);
+    }
+
+    /**
+     * The plane (x, y a corner) of water hex h with each triangle of its fan (from the centre to two points of the
+     * outline) cut into GRADED_RINGS rings toward the centre: quads of about the outline's spacing, turning as they did.
+     */
+    private static float[] ringed(FieldBoard board, Coords h, float[] plane) {
+        float cx = board.centerX(h), cy = board.centerY(h);
+        float[] out = new float[plane.length * 2 * GRADED_RINGS];
+        int o = 0;
+        for (int i = 0; i < plane.length; i += 6) {
+            if (plane[i] != cx || plane[i + 1] != cy) {
+                System.arraycopy(plane, i, out, o, 6);
+                o += 6;
+                continue;
+            }
+            float px = plane[i + 2], py = plane[i + 3], qx = plane[i + 4], qy = plane[i + 5];
+            for (int k = 0; k < GRADED_RINGS; k++) {
+                float f = k / (float) GRADED_RINGS, g = (k + 1f) / GRADED_RINGS;
+                float ax = px + (cx - px) * f, ay = py + (cy - py) * f, bx = qx + (cx - qx) * f, by = qy + (cy - qy) * f;
+                if (k == GRADED_RINGS - 1) {
+                    for (float v : new float[] { ax, ay, bx, by, cx, cy }) { out[o++] = v; }
+                    continue;
+                }
+                float ex = px + (cx - px) * g, ey = py + (cy - py) * g, fx = qx + (cx - qx) * g, fy = qy + (cy - qy) * g;
+                for (float v : new float[] { ax, ay, bx, by, fx, fy, ax, ay, fx, fy, ex, ey }) { out[o++] = v; }
+            }
+        }
+        return Arrays.copyOf(out, o);
     }
 
     /**
@@ -211,8 +269,11 @@ final class FieldWater {
      * in levels, written over {@code depth}; NaN and untouched elsewhere. Texels lie row by row, {@code span} to a row,
      * the first one's centre at (firstX + .5, firstY + .5) * spacing. Each value is the field's at the texel's centre
      * ({@link FieldBoard#height}, {@link FieldShore#field}), whatever detail its hex is drawn at.
+     * {@code film}: how much of a descending stream's formed stretch, its film and thread, lies at each texel
+     * (FieldShore#formed), filled here.
      */
-    static float[] texels(FieldBoard board, BoardScene scene, float spacing, int firstX, int firstY, int span, float[] depth) {
+    static float[] texels(FieldBoard board, BoardScene scene, float spacing, int firstX, int firstY, int span, float[] depth,
+          float[] film) {
         float[] shore = new float[depth.length];
         Arrays.fill(shore, Float.NaN);
         int rows = depth.length / span;
@@ -234,6 +295,7 @@ final class FieldWater {
                 below = (water - out[0]) / BoardGeometry.level();
             }
             float distance = board.shore.distance(x, y) * BoardGeometry.hexScale() / BoardGeometry.width();
+            film[i] = below > 0 ? board.shore.formed(x, y) : 0;
             depth[i] = below;
             shore[i] = below > 0 ? Math.max(least, distance) : Math.min(-least, distance);
         }

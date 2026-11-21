@@ -89,8 +89,6 @@ final class FieldShore {
     private final Map<Coords, Bed> beds = new ConcurrentHashMap<>();
     /** Today's surface (BoardSurface) of each descending (graded) water hex whose ring was asked for: its graded water. */
     private final Map<Coords, BoardSurface> grades = new ConcurrentHashMap<>();
-    /** Each of those surfaces' water faces as a height lookup (#water). */
-    private final Map<Coords, GpuBiomeVegetation.Support> gradedFaces = new ConcurrentHashMap<>();
     private final Map<Coords, Line> lines = new ConcurrentHashMap<>();
     /**
      * Each shaped water hex's edges to water the operator does not shape at its surface (#seam): x0, y0, x1, y1 and
@@ -266,7 +264,7 @@ final class FieldShore {
 
     /**
      * The water's surface at (x, y), a point inside today's waterline: its hex's water, or where the line runs into a
-     * dry hex the highest water beside it; NaN where none.
+     * dry hex the water whose line holds the point, else the highest beside it; NaN where none.
      */
     float surface(float x, float y) { return surface(x, y, true); }
 
@@ -277,7 +275,9 @@ final class FieldShore {
         if (tile != null && tile.liquid().present() && !tile.liquid().molten()) {
             return graded ? water(at, x, y) : BoardGeometry.waterZ(tile);
         }
-        float top = Float.NaN;
+        // A dry hex between two levels of water takes the water whose line holds the point (a pool's line beside a
+        // stream's upper hex), else the highest beside it.
+        float top = Float.NaN, held = Float.NaN;
         for (int d = 0; d < 6; d++) {
             Coords next = at.translated(d);
             BoardScene.Tile water = next.getX() < 0 || next.getY() < 0 || next.getX() >= cols || next.getY() >= rows ? null
@@ -285,9 +285,10 @@ final class FieldShore {
             if (water != null && water.liquid().present() && !water.liquid().molten()) {
                 float z = graded ? water(next, x, y) : BoardGeometry.waterZ(water);
                 top = Float.isNaN(top) ? z : Math.max(top, z);
+                if (contains(ring(next), x, y)) { held = Float.isNaN(held) ? z : Math.max(held, z); }
             }
         }
-        return top;
+        return Float.isNaN(held) ? top : held;
     }
 
     /**
@@ -307,35 +308,186 @@ final class FieldShore {
         if (there != null && there.liquid().present() && !there.liquid().molten()
               && (at.equals(h) || BoardSurface.waterSlope(scene.tile(h), there))) { h = at; }
         ring(h);
-        BoardSurface graded = grades.get(h);
-        if (graded == null) { return BoardGeometry.waterZ(scene.tile(h)); }
-        // Inside today's mesh, its height. Beyond it (the field's plane reaches past it, over the bank) the waterline's
-        // height carried outward as one continuous surface (#nearest). BoardSurface#waterHeight carries the nearest
-        // shore point's height there, for a bank's wetness, which steps by metres on a bank's nose (two flaps in the plane).
-        float drawn = gradedFaces.computeIfAbsent(h, c -> new GpuBiomeVegetation.Support(graded.waterFaces)).height(x, y);
-        return Float.isFinite(drawn) ? drawn : nearest(graded.outline, x, y);
+        return grades.containsKey(h) ? descending(h, x, y) : BoardGeometry.waterZ(scene.tile(h));
     }
 
     /**
-     * The closed line's height carried to (x, y) beside it: each piece's nearest point, weighted by the inverse fourth
-     * power of its distance, so on the line it is the line's own height and off it one continuous surface. The nearest
-     * point alone steps wherever two stretches of different heights are equally near (the bank's nose inside a mouth's
-     * corner, where the waterline bends round and drops 4 m).
+     * A descent's run: its water begins to fall RUN_MARGIN short of the upper hex's centre line (so at a hex's inradius
+     * less RUN_MARGIN above the mouth) and has fallen RUN_OUT past the mouth, in metres: most of the drop lies between
+     * the upper hex's banks, and the tongue runs out soon in the pool.
      */
-    private static float nearest(List<Vector3> line, float x, float y) {
-        double sum = 0, weights = 0;
-        for (int i = 0; i < line.size(); i++) {
-            Vector3 a = line.get(i), b = line.get((i + 1) % line.size());
-            float dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy;
-            float t = length == 0 ? 0 : Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / length, 0, 1);
-            float ex = x - a.x - t * dx, ey = y - a.y - t * dy, distance = ex * ex + ey * ey;
-            float height = a.z + (b.z - a.z) * t;
-            if (distance < 1e-12f) { return height; }
-            double weight = 1 / ((double) distance * distance);
-            sum += weight * height;
-            weights += weight;
+    private static final float RUN_MARGIN = 2, RUN_OUT = 5;
+    /**
+     * A descent's stream by the water depth of the hex that releases it. From depth 0 a small stream: a thread RIVULET
+     * wide and THREAD deep down the middle, beside it a film FILM deep that the bed's rock shows through. From
+     * depth 1 half today's mouth, at least STREAM wide, at today's depth, the film beside it SHALLOW deep. From depth 2
+     * and more today's mouth and depth. The thread's sides ease over SOFT; the stream takes its form over NARROW metres
+     * where the descent starts and gives it up over PLUME where it runs out into the pool. The thread lies SCOUR deeper
+     * from where the stream has fallen a good part of its drop (the water shader shows foam by the column's depth),
+     * from depth 1 a mouth's end has no film where the step runs on into the next hex's mouth (#descent). All in metres.
+     */
+    private static final float RIVULET = 3.5f, THREAD = .6f, FILM = .08f, SCOUR = 2.2f, STREAM = 6, SHALLOW = .4f, SOFT = 1, NARROW = 4, PLUME = 3;
+
+    /** Each descent's mouth today across the flow, its middle and half its width in world units, by upper hex and direction. */
+    private final Map<Long, float[]> mouths = new ConcurrentHashMap<>();
+
+    /** How far above its mouth a descent begins to fall, and how far past it it has fallen, in world units. */
+    private static float runAbove() { return BoardGeometry.height() / 2 - RUN_MARGIN * BoardRelief.metres(1); }
+
+    private static float runPast() { return RUN_OUT * BoardRelief.metres(1); }
+
+    /**
+     * How much of its drop a descent has fallen {@code past} its mouth (world units, negative above it): none where
+     * it begins, a smooth step, all of it where it has run out.
+     */
+    private static float fallen(float past) { return BoardRelief.smooth((past + runAbove()) / (runAbove() + runPast())); }
+
+    /** How much of its stream's form a descent has {@code past} its mouth: none where it begins to fall and in the pool, all between. */
+    private static float narrowed(float past) {
+        float m = BoardRelief.metres(1);
+        return BoardRelief.smooth((past + runAbove()) / (NARROW * m)) * (1 - BoardRelief.smooth((past - runPast() + PLUME * m) / (PLUME * m)));
+    }
+
+    /** Hex h's neighbour over its edge e where the two are one descending stream at different levels (BoardSurface#waterSlope), else null. */
+    private BoardScene.Tile descends(BoardScene.Tile tile, Coords h, int e) {
+        Coords n = h.translated(BoardGeometry.edgeDirection(e));
+        BoardScene.Tile next = n.getX() < 0 || n.getY() < 0 || n.getX() >= cols || n.getY() >= rows ? null : scene.tile(n);
+        return next == null || !next.liquid().present() || next.liquid().molten() || !BoardSurface.waterSlope(tile, next)
+              || BoardGeometry.waterZ(next) == BoardGeometry.waterZ(tile) ? null : next;
+    }
+
+    /** How far (x, y) lies from hex h's edge e, in world units. */
+    private static float edgeDistance(Coords h, int e, float x, float y) {
+        Vector3 a = BoardGeometry.corner(h, 0, e), b = BoardGeometry.corner(h, 0, (e + 1) % 6);
+        float ex = b.x - a.x, ey = b.y - a.y, t = Math.clamp(((x - a.x) * ex + (y - a.y) * ey) / (ex * ex + ey * ey), 0, 1);
+        return (float) Math.hypot(x - a.x - t * ex, y - a.y - t * ey);
+    }
+
+    /**
+     * The descent over hex h's edge e at (x, y), into {@code out}: [0] how far h stands above the neighbour (negative:
+     * the neighbour is the upper hex), [1] how far the point lies past the mouth, the edge (world units; above it, on
+     * the upper hex's side, negative: h's own side decides, wherever the point lies), [4] half the thread's width, [5]
+     * the thread's depth, [6] the film's depth beside it (both infinite from depth 2: today's bed), all by the
+     * releasing hex's water depth, [7] across the flow from the middle of today's mouth, where the thread runs.
+     * False where the two are not one descending stream.
+     */
+    private boolean descent(BoardScene.Tile tile, Coords h, int e, float x, float y, float[] out) {
+        BoardScene.Tile next = descends(tile, h, e);
+        if (next == null) { return false; }
+        Coords n = next.coords();
+        float drop = BoardGeometry.waterZ(tile) - BoardGeometry.waterZ(next);
+        boolean down = drop > 0;
+        float hx = BoardGeometry.centerX(h), hy = BoardGeometry.centerY(h), nx = BoardGeometry.centerX(n), ny = BoardGeometry.centerY(n);
+        float ux = down ? hx : nx, uy = down ? hy : ny, fx = down ? nx - hx : hx - nx, fy = down ? ny - hy : hy - ny;
+        float length = (float) Math.hypot(fx, fy), m = BoardRelief.metres(1);
+        fx /= length;
+        fy /= length;
+        int depth = Math.max(0, (down ? tile : next).waterDepth());
+        float[] opening = mouth(down ? h : n, down ? e : (e + 3) % 6, ux, uy, fx, fy, length);
+        float mouth = opening[1], away = edgeDistance(h, e, x, y);
+        out[0] = drop;
+        out[1] = down ? -away : away;
+        out[4] = depth >= 2 ? mouth : depth == 1 ? Math.min(mouth, Math.max(.5f * mouth, STREAM / 2 * m)) : Math.min(RIVULET / 2 * m, mouth);
+        out[5] = depth == 0 ? THREAD * m : Float.POSITIVE_INFINITY;
+        out[6] = depth >= 2 ? Float.POSITIVE_INFINITY : (depth == 1 ? SHALLOW : FILM) * m;
+        float across = (x - ux) * fy - (y - uy) * fx - opening[0];
+        // From depth 1 the stream fills a mouth's end where the step runs on: where the upper hex pours into the third
+        // hex at that corner too, or the third hex pours into the lower one (a river several hexes wide stepped down).
+        for (int k = 0; depth >= 1 && k < 2; k++) {
+            Coords third = h.translated(BoardGeometry.edgeDirection((e + (k == 0 ? 5 : 1)) % 6));
+            if (!pours(down ? h : n, third) && !pours(third, down ? n : h)) { continue; }
+            Vector3 end = BoardGeometry.corner(h, 0, (e + k) % 6);
+            if (((end.x - ux) * fy - (end.y - uy) * fx - opening[0]) * across > 0) { across = 0; }
         }
-        return (float) (sum / weights);
+        out[7] = across;
+        return true;
+    }
+
+    /** Whether water hex a pours into its neighbour b: the two are one descending stream (BoardSurface#waterSlope), a the upper. */
+    private boolean pours(Coords a, Coords b) {
+        if (Math.min(a.getX(), b.getX()) < 0 || Math.min(a.getY(), b.getY()) < 0 || Math.max(a.getX(), b.getX()) >= cols
+              || Math.max(a.getY(), b.getY()) >= rows) {
+            return false;
+        }
+        BoardScene.Tile from = scene.tile(a), to = scene.tile(b);
+        return from.liquid().present() && !from.liquid().molten() && to.liquid().present() && !to.liquid().molten()
+              && BoardSurface.waterSlope(from, to) && BoardGeometry.waterZ(from) > BoardGeometry.waterZ(to);
+    }
+
+    /**
+     * Today's mouth of the upper hex toward the lower one, across the flow: where its open stretches near the shared
+     * edge lie from the flow's axis, as their middle and half their width (at most half the edge).
+     */
+    private float[] mouth(Coords upper, int edge, float ux, float uy, float fx, float fy, float length) {
+        return mouths.computeIfAbsent((long) FieldBoard.packed(upper) << 3 | edge, key -> {
+            float[] open = line(upper).mouths();
+            float least = Float.POSITIVE_INFINITY, most = Float.NEGATIVE_INFINITY, m = BoardRelief.metres(1);
+            for (int k = 0; k < open.length; k += 2) {
+                float along = (open[k] - ux) * fx + (open[k + 1] - uy) * fy, across = (open[k] - ux) * fy - (open[k + 1] - uy) * fx;
+                if (Math.abs(along - length / 2) < 4 * m) {
+                    least = Math.min(least, across);
+                    most = Math.max(most, across);
+                }
+            }
+            float edgeHalf = BoardGeometry.width() / 4;
+            return least > most ? new float[] { 0, edgeHalf } : new float[] { (least + most) / 2, Math.min((most - least) / 2, edgeHalf) };
+        });
+    }
+
+    /**
+     * A descending stream's surface at (x, y), of graded water hex h: its level, lowered where it pours into lower
+     * joined water and raised where higher joined water pours into it (BoardSurface#waterSlope). A descent's height is
+     * a function of the distance from its MOUTH, the hex edges the water runs down over, all the edges toward one
+     * level as one mouth: above the mouth the water has fallen #fallen of the drop at that distance, below it the
+     * rest stands above the lower level; both are the same on the mouth, so the stream is one smooth surface from the
+     * upper water to the lower pool, with nothing at the hexes' edge, and beside the mouth's ends it rounds off as it
+     * does along the flow (no side stands in open water). Today's (BoardSurface#slopingSurface) is a fan of ramps to
+     * each hex's centre, folded along its radii. How much water runs down is the bed's doing (#shallows, #descent).
+     */
+    private float descending(Coords h, float x, float y) {
+        BoardScene.Tile tile = scene.tile(h);
+        float level = BoardGeometry.waterZ(tile), fall = 0, rise = 0;
+        float[] other = new float[6], away = new float[6];
+        for (int e = 0; e < 6; e++) {
+            BoardScene.Tile next = descends(tile, h, e);
+            other[e] = next == null ? Float.NaN : BoardGeometry.waterZ(next);
+            away[e] = next == null ? 0 : edgeDistance(h, e, x, y);
+        }
+        for (int e = 0; e < 6; e++) {
+            if (Float.isNaN(other[e])) { continue; }
+            // The mouth toward this level: every edge of h whose neighbour stands at it.
+            float mouth = away[e];
+            for (int k = 0; k < 6; k++) { if (other[k] == other[e]) { mouth = Math.min(mouth, away[k]); } }
+            if (other[e] < level) {
+                fall = Math.max(fall, (level - other[e]) * fallen(-mouth));
+            } else {
+                rise = Math.max(rise, (other[e] - level) * (1 - fallen(mouth)));
+            }
+        }
+        return level - fall + rise;
+    }
+
+    /**
+     * How much of a descent's film (the thin water beside its thread, which the bed's rock shows through) lies at
+     * (x, y), 0 to 1: the water field keeps the film's own depth there and no agitation (GpuWaterShader), and the
+     * ground's cover is wet rock of the gorge, not the bed's gravel.
+     */
+    float film(float x, float y) { return form(x, y, true); }
+
+    /** How much of a descent's formed stretch (its film and its thread) lies at (x, y), 0 to 1: there the water field keeps each texel's own depth. */
+    float formed(float x, float y) { return form(x, y, false); }
+
+    private float form(float x, float y, boolean film) {
+        Coords h = GpuStarShells.hexAt(x, y);
+        BoardScene.Tile tile = h == null || h.getX() < 0 || h.getY() < 0 || h.getX() >= cols || h.getY() >= rows ? null : scene.tile(h);
+        if (tile == null || !tile.liquid().present() || tile.liquid().molten() || !graded(h)) { return 0; }
+        float form = 0, m = BoardRelief.metres(1);
+        float[] at = new float[8];
+        for (int d = 0; d < 6; d++) {
+            if (!descent(tile, h, d, x, y, at) || Float.isInfinite(at[6])) { continue; }
+            form = Math.max(form, narrowed(at[1]) * (film ? BoardRelief.smooth((Math.abs(at[7]) - at[4]) / (SOFT * m)) : 1));
+        }
+        return form;
     }
 
     /** Whether water hex h's surface descends (today's graded water), which the field's plane then follows. */
@@ -366,9 +518,47 @@ final class FieldShore {
         Coords h = GpuStarShells.hexAt(x, y);
         // A dry hex's ground inside a water neighbour's line is that water's bed, as today's bed reaches there.
         Coords held = bed(h) == null ? holder(h, x, y) : null;
-        GpuBiomeVegetation.Support bed = bed(held != null ? held : h);
+        if (held != null) { h = held; }
+        GpuBiomeVegetation.Support bed = bed(h);
         float today = bed == null ? Float.NaN : bed.height(x, y);
-        return Float.isNaN(today) ? z : today;
+        // Beside today's bed of a descending stream (its rim, the line's bulge into a dry hex) the field's own bank
+        // hangs from the stream's surface there, not from the hex's level: no step to today's bed under the stream.
+        if (Float.isNaN(today)) { return z - drawdown(h, x, y); }
+        BoardSurface graded = grades.get(h);
+        if (graded == null) { return today; }
+        // Under a descending stream today's bed keeps its depth below the field's surface there (#descending). Along a
+        // descent the water is the releasing hex's (#descent): the bed lies close under the surface, a film its rock
+        // shows through, and deeper along the middle, where the stream runs.
+        float water = water(h, x, y), floor = today + water - graded.waterHeight(x, y), m = BoardRelief.metres(1);
+        BoardScene.Tile tile = scene.tile(h);
+        // Where descents meet, a thread's water wins over another's film, in any order: each counts by how much of its
+        // form it has there. (A thread may lie deeper than today's bed: the water shader shows water and foam by the
+        // column's depth.)
+        float deep = water - floor, films = 0, film = 0, most = 0, threads = 0, thread = 0, stream = 0;
+        float[] at = new float[8];
+        for (int d = 0; d < 6; d++) {
+            if (!descent(tile, h, d, x, y, at)) { continue; }
+            float narrow = narrowed(at[1]), middle = narrow * (1 - BoardRelief.smooth((Math.abs(at[7]) - at[4]) / (SOFT * m)));
+            threads += middle;
+            thread += middle * (Float.isInfinite(at[5]) ? deep : at[5] + SCOUR * m * BoardRelief.smooth((fallen(at[1]) - .12f) / .28f));
+            stream = Math.max(stream, middle);
+            if (!Float.isInfinite(at[6])) {
+                films += narrow;
+                film += narrow * Math.min(deep, at[6]);
+                most = Math.max(most, narrow);
+            }
+        }
+        if (films > 0) { floor -= (film / films - deep) * Math.max(most - stream, 0); }
+        if (threads > 0) { floor -= (thread / threads - deep) * stream; }
+        return floor;
+    }
+
+    /** How far a descending stream's surface lies under its water's level at (x, y), in hex h or beside dry h; 0 off such water. */
+    private float drawdown(Coords h, float x, float y) {
+        boolean descends = graded(h);
+        for (int d = 0; d < 6 && !descends; d++) { descends = graded(h.translated(d)); }
+        float down = descends ? surface(x, y, false) - surface(x, y, true) : 0;
+        return down > 0 ? down : 0;
     }
 
     /**
