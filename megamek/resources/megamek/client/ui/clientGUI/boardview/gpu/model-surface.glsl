@@ -90,6 +90,8 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
 #ifdef normalTextureFlag
             if (u_normalMaps > .5) {
                 vec3 mapped = textureGrad(u_normalTexture, v_modelUV + modelShift, ux, uy).xyz * 2.0 - 1.0;
+                // A two-channel (BC5) normal map reads blue 0: z from x and y (GpuTextureCompression).
+                mapped.z = mapped.z < -.99 ? sqrt(max(0.0, 1.0 - dot(mapped.xy, mapped.xy))) : mapped.z;
                 normal = normalize(mat3(tangent, bitangent, normal) * mapped);
             }
 #endif

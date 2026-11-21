@@ -342,14 +342,16 @@ class GpuColorTextureSmokeTest {
                                   .textureDescription.texture;
                             Texture numerical = model.materials.first().get(GpuModelMaterial.class, GpuModelMaterial.TYPE).map;
                             double coverage = alpha ? 64.0 / 255 : 1;
+                            // BC1 and BC3 keep 5 or 6 bits per endpoint (GpuTextureCompression): within two levels there.
+                            double tolerance = color.getTextureData() instanceof GpuTextureCompression.Data ? 2.0 / 255 : .001;
                             for (int upload = 0; upload < 2; upload++) {
                                 assertTrue(GpuColorTexture.isColor(color));
                                 assertFalse(GpuColorTexture.isColor(numerical));
                                 for (int mip = 0; mip < 2; mip++) {
                                     assertPixel(sample.read(color, .5f, .5f, 0, mip), .21586050, .21586050, .21586050,
-                                          coverage, .001, name + " color luminance and coverage");
+                                          coverage, tolerance, name + " color luminance and coverage");
                                     assertPixel(sample.read(numerical, .5f, .5f, 0, mip), 128.0 / 255, 128.0 / 255, 128.0 / 255,
-                                          coverage, .001, name + " numerical luminance and coverage");
+                                          coverage, tolerance, name + " numerical luminance and coverage");
                                 }
                                 if (upload == 0) {
                                     assertTrue(color.isManaged());

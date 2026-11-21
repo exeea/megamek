@@ -200,6 +200,8 @@ void main() {
             vec3 perpendicular = cross(face, tangent);
             bitangent = dot(perpendicular, bitangent) < 0.0 ? -perpendicular : perpendicular;
             vec3 detail = (textureGrad(u_normalTexture, v_diffuseUV, du, dv).rgb * 255.0 - 128.0) / 127.0;
+            // A two-channel (BC5) normal map reads blue 0: z from x and y (GpuTextureCompression).
+            detail.z = detail.z < -.99 ? sqrt(max(0.0, 1.0 - dot(detail.xy, detail.xy))) : detail.z;
             face = normalize(tangent * detail.x + bitangent * detail.y + face * detail.z);
         }
     }
