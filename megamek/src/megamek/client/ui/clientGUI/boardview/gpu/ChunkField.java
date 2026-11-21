@@ -1024,6 +1024,16 @@ final class ChunkField {
                     // its foot morphs with the lower hex's ground, its top with the plate's.
                     tall = Math.abs(top - bottom) > .01f * m || (full || medium) && c % 2 == 1
                           && Math.abs(tops[c - 1] + tops[c + 1] - feet[c - 1] - feet[c + 1]) > .02f * m;
+                } else if (!tall && !outside && (full || medium)) {
+                    // So does any wall's or bank's column with no height where the coarser wall (on every second
+                    // lattice sample) has height at its place: a wall's end brought down with its corner can leave a
+                    // column between two of the coarser wall's samples that has none. Its top then stands no lower
+                    // than its foot (they are within a centimetre).
+                    float s = c / (float) split;
+                    int a = Math.min(2 * (int) (s / 2), n - 2), d = a + 2;
+                    float t = (s - a) / 2;
+                    tall = tops[a] + (tops[d] - tops[a]) * t - feet[a] - (feet[d] - feet[a]) * t > .01f * m;
+                    if (tall) { top = w.top = Math.max(top, bottom); }
                 }
                 if (tall) {
                     int[] rows = columns[c] = new int[(finest - 1) / stride + 1];
