@@ -342,6 +342,9 @@ void main() {
 #ifdef lightingFlag
     vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
     terrainView = -viewDirection();
+#ifdef GROUND_FACE_SLOPE
+    if (ground) groundFaceSlope = geometric.z;
+#endif
 #endif
     // A scar patch's draw shades only where its image covers the receiver (scar-material.glsl).
     if (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }

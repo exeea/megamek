@@ -99,9 +99,17 @@ vec3 compactFields(vec3 world) {
 
 float groundSpread(vec4 texel) { return .5 * (1.0 - min(length(texel.rgb * 2.0 - 1.0), 1.0)); }
 
+// The drawn triangle's own up component where the includer gives it (GROUND_FACE_SLOPE: the lit sculpt program, on
+// ground of a hex's own mesh); 1 elsewhere, which leaves the shading normal to decide.
+#define GROUND_FACE_SLOPE
+float groundFaceSlope = 1.0;
+
 // How much of a read lies on the plane: by the face's slope alone, so a step face reads the side it faces and the
-// plane only where it lies back, with no seam where the rocky test changes its mind (z .6).
-float groundLying(GroundPixel px) { return smoothstep(.6, .8, px.face.z); }
+// plane only where it lies back, with no seam where the rocky test changes its mind (z .6). An earth bank's shading
+// normal turns to the ground's at its rim and foot (ChunkField, as BoardRelief#canonicalWall): there the triangle's
+// own slope decides once it is steeper than about 50 degrees, or the plane's read would stretch down the face (2.6
+// times at 67 degrees).
+float groundLying(GroundPixel px) { return smoothstep(.6, .8, min(px.face.z, groundFaceSlope + .15)); }
 
 // One role's colour/height and normal/AO, cavity in data.a. Tops read the plane. Step faces read the side they face,
 // both sides only where the face turns between them, and the plane too where they lie back; between a top and a face
