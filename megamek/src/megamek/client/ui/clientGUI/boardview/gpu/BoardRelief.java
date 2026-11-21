@@ -4797,7 +4797,8 @@ final class BoardRelief {
                 }
             }
             float margin = footprint + .002f * BoardGeometry.hexScale(), bx = base.x, by = base.y;
-            List<BoardSurface.Face> ground = destination.stream().filter(face -> face.finish() != BoardSurface.Finish.OUTCROP
+            // On the field its drawn ground (#fieldGround), step faces too: a fall's dry rim is one.
+            List<BoardSurface.Face> ground = fieldGround != null ? List.of() : destination.stream().filter(face -> face.finish() != BoardSurface.Finish.OUTCROP
                   && face.finish() != BoardSurface.Finish.DRESSING && face.finish() != BoardSurface.Finish.ICE
                   && Math.max(face.a().x, Math.max(face.b().x, face.c().x)) >= bx - margin
                   && Math.min(face.a().x, Math.min(face.b().x, face.c().x)) <= bx + margin
@@ -4811,7 +4812,7 @@ final class BoardRelief {
                     if (!sampled.add(point)) { continue; }
                     float x = base.x + c * point.x * sx - s * point.y * sy;
                     float y = base.y + s * point.x * sx + c * point.y * sy;
-                    float groundZ = BoardSurface.sampleHeight(ground, x, y, Float.NaN);
+                    float groundZ = fieldGround != null ? fieldGround.height(x, y) : BoardSurface.sampleHeight(ground, x, y, Float.NaN);
                     if (Float.isFinite(groundZ)) {
                         foundation = Math.min(foundation, groundZ - height * .3f);
                         highest = Math.max(highest, groundZ);
@@ -4825,7 +4826,7 @@ final class BoardRelief {
             if (TerrainField.ON && base.z - foundation > height) {
                 // Only where its centre stands on that footing, above the water; over the drop or the water it is
                 // left out.
-                float centre = BoardSurface.sampleHeight(ground, base.x, base.y, Float.NaN);
+                float centre = fieldGround != null ? fieldGround.height(base.x, base.y) : BoardSurface.sampleHeight(ground, base.x, base.y, Float.NaN);
                 if (!(centre >= highest - height * .3f) || centre < BoardGeometry.waterZ(tile)) { return; }
                 base = new Vector3(base.x, base.y, Math.min(base.z, highest));
                 foundation = Math.min(base.z, highest - height * .3f);

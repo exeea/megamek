@@ -52,6 +52,8 @@ final class FieldBoard {
      * alone with the previous revision, so an edit copies only the columns it reaches.
      */
     private final int[][] level, family, walls;
+    /** Per water hex that falls, the stretch of each fall edge that pours (BoardSurface#pourEdges); null for others. */
+    private final float[][][][] pours;
     private final boolean[][] taken;
     /** Per board column, by row: the ground the hex's scenery digs away (BoardGroundCut#footprint); null for none. */
     private final float[][][] cuts;
@@ -139,6 +141,7 @@ final class FieldBoard {
             level = new int[cols][rows];
             family = new int[cols][rows];
             walls = new int[cols][rows];
+            pours = new float[cols][rows][][];
             taken = new boolean[cols][rows];
             cuts = new float[cols][rows][];
             portals = new float[cols][rows][][];
@@ -155,6 +158,7 @@ final class FieldBoard {
             level = previous.level.clone();
             family = previous.family.clone();
             walls = previous.walls.clone();
+            pours = previous.pours.clone();
             taken = previous.taken.clone();
             cuts = previous.cuts.clone();
             portals = previous.portals.clone();
@@ -175,6 +179,7 @@ final class FieldBoard {
                 level[x] = level[x].clone();
                 family[x] = family[x].clone();
                 walls[x] = walls[x].clone();
+                pours[x] = pours[x].clone();
                 taken[x] = taken[x].clone();
                 cuts[x] = cuts[x].clone();
                 portals[x] = portals[x].clone();
@@ -253,6 +258,12 @@ final class FieldBoard {
               .map(tunnel -> tunnel.footprint(false)).toArray(float[][]::new);
         if (openings[x][y].length == 0) { openings[x][y] = null; }
         walls[x][y] = 0;
+        // A water hex that falls: the stretch each fall edge pours over, water's rule (#dry).
+        pours[x][y] = null;
+        for (int e = 0; liquid && pours[x][y] == null && e < 6; e++) {
+            BoardScene.Tile next = scene.tile(at.translated(BoardGeometry.edgeDirection(e)));
+            if (next != null && FieldWater.fallsInto(t, next, BoardGeometry.edgeDirection(e))) { pours[x][y] = BoardSurface.pourEdges(scene, t); }
+        }
         for (int e = 0; e < 6; e++) {
             BoardScene.Tile next = scene.tile(at.translated(BoardGeometry.edgeDirection(e)));
             // Two waters the shore holds whose beds meet under them: at one surface, or a stream running down between
@@ -401,9 +412,11 @@ final class FieldBoard {
      * Hex h's ground z at (x, y) under its falls' crests: along each edge h falls over, from hex corner to hex corner
      * (an end whose next edge is no fall eased over its last tenth), the ground within 4 m behind the edge (eased out
      * to 6 m) lies at least 0.3 m under h's water: today's curtain and its level lip hang from the straight hex edge,
-     * and no bank, apron or rim tongue stands into them.
+     * and no bank, apron or rim tongue stands into them. Where the edge does not pour (#dry) a rim of rock stands
+     * instead: 0.5 m over the water out to 1.9 m behind the edge, then falling a metre a metre; {@code out[1]} is
+     * set to 1 where (x, y) is that rim's rock over the water (#height draws it as the hex's rock), else left.
      */
-    private float crestUnder(Coords h, float x, float y, float z) {
+    private float crestUnder(Coords h, float x, float y, float z, float[] out) {
         for (int e = 0; e < 6; e++) {
             if (!falls(h, h.translated(BoardGeometry.edgeDirection(e)))) { continue; }
             float ax = cornerX(h, e), ay = cornerY(h, e), ex = cornerX(h, e + 1) - ax, ey = cornerY(h, e + 1) - ay;
@@ -414,10 +427,33 @@ final class FieldBoard {
             boolean before = falls(h, h.translated(BoardGeometry.edgeDirection(Math.floorMod(e - 1, 6))));
             boolean after = falls(h, h.translated(BoardGeometry.edgeDirection((e + 1) % 6)));
             float ends = (before ? 1 : BoardRelief.smooth(t / .1f)) * (after ? 1 : BoardRelief.smooth((1 - t) / .1f));
-            float cap = shore.water(h, x, y) - .3f * metre;
+            float water = shore.water(h, x, y), cap = water - .3f * metre;
             if (z > cap) { z -= (z - cap) * ends * (1 - BoardRelief.smooth((behind - 4 * metre) / (2 * metre))); }
+            // Where the edge does not pour, a dry rim of rock: a level top 0.5 m over the water one lattice step
+            // wide, its inner face falling a metre a metre (the pool's sheet ends inside it: FieldWater).
+            float dry = dry(h, e, t);
+            if (dry > 0) {
+                z += Math.max(0, water + .5f * metre - Math.max(0, behind - 1.9f * metre) - z) * dry;
+                if (dry > .5f && z >= water - .1f * metre) { out[1] = 1; }
+            }
         }
         return z;
+    }
+
+    /**
+     * How far fall edge e of hex h is dry at share t of its length, 0 to 1: outside the stretch water's rule lets
+     * pour (BoardSurface#pourEdges: {from, to} along the straight edge; null, nothing pours), eased out over half a
+     * metre inside it; a stretch reaching a corner (a run turning round it) leaves no rim there.
+     */
+    private float dry(Coords h, int e, float t) {
+        float[][] pour = pours[h.getX()][h.getY()];
+        if (pour == null) { return 0; }
+        float[] s = pour[e];
+        if (s == null) { return 1; }
+        if (s[0] <= .001f && s[1] >= .999f) { return 0; }
+        float along = t * edge, from = s[0] <= .001f ? Float.NEGATIVE_INFINITY : s[0] * edge;
+        float to = s[1] >= .999f ? Float.POSITIVE_INFINITY : s[1] * edge;
+        return 1 - BoardRelief.smooth(Math.min(along - from, to - along) / (.5f * metre));
     }
 
     /** A water hex that pours over no fall: one with a fall keeps the falls' form on every edge. */
@@ -1611,7 +1647,16 @@ final class FieldBoard {
         zt -= cut;
         // A road's bank cuts the eased ground no deeper than it cut the apron's (BoardRoadBank leaves ground above a road's
         // reach): earth the road did not reach before stays, retained by the portal's wing.
-        z = crestUnder(h, x, y, z);
+        out[1] = 0;
+        z = crestUnder(h, x, y, z, out);
+        // A fall's dry rim is the falling hex's rock (#crestUnder).
+        if (out[1] > 0) {
+            role = 1;
+            rock = 1;
+            nearTop = packed(h);
+            // Marked for the mesh (ChunkMesh: a step face's samples use no step count).
+            nearLevels = -1;
+        }
         float ground = roads.height(h, x, y, z);
         if (zt > z && ground < z) { ground = Math.max(ground, Math.min(z, roads.height(h, x, y, zt))); }
         out[0] = ground;

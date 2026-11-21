@@ -208,6 +208,14 @@ final class ChunkMesh {
             } else if (faces) {
                 vertices[o + 3] = GpuTerrain.packedShade(BoardRelief.Kind.CLIFF, block.faceOcclusion(v), block.rock()[v], block.bed(v),
                       block.projection()[v]);
+                // A level ledge of whole rock over a water hex's water (a fall's dry rim, FieldBoard#crestUnder): the
+                // cliff byte 138, ground shading's bare ledge, read as rock on the plane.
+                if (block.steps()[v] < 0 && block.nz()[v] > .85f) {
+                    com.badlogic.gdx.graphics.Color ledge = GpuTerrain.shadeColor(BoardRelief.Kind.CLIFF, block.faceOcclusion(v),
+                          block.rock()[v], block.bed(v), Float.NaN);
+                    ledge.b = 138 / 255f;
+                    vertices[o + 3] = ledge.toFloatBits();
+                }
                 u = block.faceRim()[v];
                 w = block.faceFoot()[v];
             } else if (water != null && (drowned || wet == null || wet[v])) {
