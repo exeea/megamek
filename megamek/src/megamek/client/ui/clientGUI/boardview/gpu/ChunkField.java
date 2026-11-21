@@ -88,7 +88,7 @@ final class ChunkField {
 
     private Block build(Coords h) {
         Block built = new Builder(this, h).run();
-        Block stamped = FieldStamps.apply(board, built, coarser == null ? null : () -> coarser.block(h));
+        Block stamped = FieldStamps.apply(board, built, coarser == null ? null : () -> coarser.block(h), this::shares);
         // A clip moves and adds samples: their covers are asked again.
         return stamped == built || scene == null ? stamped : stamped.covered(FieldCover.of(scene, stamped, segments(lod)));
     }

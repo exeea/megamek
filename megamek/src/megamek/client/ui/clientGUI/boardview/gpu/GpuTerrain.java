@@ -4915,6 +4915,7 @@ final class GpuTerrain implements Disposable {
     private static BoardSurface fieldSurface(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, ChunkField.Block block,
           FieldBoard fieldBoard) {
         BoardSurface surface = new BoardSurface(scene, tile, lod, block);
+        surface.contained(fieldBoard.wallFaces(tile.coords()));
         if (tile.liquid().present()) { FieldWater.fill(scene, surface, fieldBoard, block); }
         return surface;
     }

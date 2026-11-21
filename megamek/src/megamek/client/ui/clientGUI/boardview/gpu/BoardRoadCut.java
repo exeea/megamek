@@ -881,6 +881,12 @@ final class BoardRoadCut {
     static final float PANEL = 2.5f;
 
     /**
+     * One panel of a containment wall: its place (its back's two ends x, y; the unit way its face looks x, y; its
+     * thickness; the road's height at the two ends) and its faces.
+     */
+    record Panel(float[] place, List<BoardSurface.Face> faces) { }
+
+    /**
      * Precast containment walls where this hex's natural {@code ground} still stands over a road's edge along the walled
      * runs of the slopes beside it (BoardRelief#walled), and a panel on past either end, over the slope's fall to the road
      * there: straight panels just inside the edge, each from below the road to a capped top in half-metre steps, a metre
@@ -889,6 +895,15 @@ final class BoardRoadCut {
      */
     void containmentWalls(List<BoardSurface.Face> ground, List<BoardSurface.Face> road, BoardRelief relief,
           List<BoardSurface.Face> into) {
+        containmentWalls((x, y) -> BoardSurface.sampleHeight(ground, x, y, Float.NaN), road, relief, into, null);
+    }
+
+    /**
+     * As above over any ground: the height field asks with its own height (FieldRoads#walls). {@code places}, where
+     * given, takes each panel.
+     */
+    void containmentWalls(BoardRelief.Ground ground, List<BoardSurface.Face> road, BoardRelief relief,
+          List<BoardSurface.Face> into, List<Panel> places) {
         float m = BoardRelief.metres(1), probe = .1f * BoardGeometry.hexScale();
         Area region = region();
         PathIterator path = region.getPathIterator(null, .02f * BoardGeometry.hexScale());
@@ -927,12 +942,12 @@ final class BoardRoadCut {
                               ? Float.NaN : roadHeight(road, x + nx * probe, y + ny * probe,
                                     grade.height(x + nx * probe, y + ny * probe));
                         float cut = Float.isNaN(bed) || relief.walled(x, y) < .5f ? Float.NaN
-                              : Math.min(BoardSurface.sampleHeight(ground, x - nx * probe, y - ny * probe, Float.NaN) - bed,
+                              : Math.min(ground.height(x - nx * probe, y - ny * probe) - bed,
                                     BoardRoadBank.WALL * BoardGeometry.level());
                         samples.add(new float[] { x, y, nx, ny, bed, cut >= WALL_CUT * m ? cut : Float.NaN });
                     }
                 }
-                walls(samples, into);
+                walls(samples, into, places);
             }
             path.next();
         }
@@ -942,7 +957,7 @@ final class BoardRoadCut {
      * Containment walls along a closed outline's samples {x, y, nx, ny, road, cut}: over each run of retained samples,
      * and a panel on past either end along the same road's edge while it keeps its heading.
      */
-    private static void walls(List<float[]> samples, List<BoardSurface.Face> into) {
+    private static void walls(List<float[]> samples, List<BoardSurface.Face> into, List<Panel> places) {
         int n = samples.size();
         float reach = PANEL * BoardRelief.metres(1);
         boolean[] retained = new boolean[n], wall = new boolean[n];
@@ -970,15 +985,15 @@ final class BoardRoadCut {
             if (wall[i]) {
                 run.add(retained[i] ? sample : new float[] { sample[0], sample[1], sample[2], sample[3], sample[4], 0 });
             } else {
-                panels(run, into);
+                panels(run, into, places);
                 run.clear();
             }
         }
-        panels(run, into);
+        panels(run, into, places);
     }
 
     /** Panels along a run of outline samples {x, y, nx, ny, road, cut}; see {@link #containmentWalls}. */
-    private static void panels(List<float[]> run, List<BoardSurface.Face> into) {
+    private static void panels(List<float[]> run, List<BoardSurface.Face> into, List<Panel> places) {
         float m = BoardRelief.metres(1), width = PANEL * m, joint = .05f * m, thick = .2f * m, step = .5f * m;
         float cap = .25f * m, lip = .08f * m, footing = .3f * m, gap = .05f * m;
         float[] along = new float[run.size()];
@@ -1024,11 +1039,27 @@ final class BoardRoadCut {
             Vector3 backA = new Vector3(a[0] + fx * bow, a[1] + fy * bow, 0), backB = new Vector3(b[0] + fx * bow, b[1] + fy * bow, 0);
             Vector3 frontA = new Vector3(backA).add(fx * thick, fy * thick, 0);
             Vector3 frontB = new Vector3(backB).add(fx * thick, fy * thick, 0);
+            int first = into.size();
             box(into, frontA, frontB, backA, backB, low - footing, top, fx, fy);
             // The cap overhangs the panel's face a little.
             box(into, new Vector3(frontA).add(fx * lip, fy * lip, 0), new Vector3(frontB).add(fx * lip, fy * lip, 0),
                   backA, backB, top, top + cap, fx, fy);
+            if (places != null) {
+                places.add(new Panel(new float[] { backA.x, backA.y, backB.x, backB.y, fx, fy, thick,
+                      road(run, along, from), road(run, along, to) }, List.copyOf(into.subList(first, into.size()))));
+            }
         }
+    }
+
+    /** A run's road height at a distance along it. */
+    private static float road(List<float[]> run, float[] along, float distance) {
+        for (int i = 1; i < run.size(); i++) {
+            if (distance <= along[i] || i == run.size() - 1) {
+                float u = Math.clamp((distance - along[i - 1]) / Math.max(1e-6f, along[i] - along[i - 1]), 0, 1);
+                return run.get(i - 1)[4] + (run.get(i)[4] - run.get(i - 1)[4]) * u;
+            }
+        }
+        return run.getFirst()[4];
     }
 
     /** The position at a distance along a run of outline samples with the given cumulative lengths. */

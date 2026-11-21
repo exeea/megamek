@@ -708,6 +708,29 @@ final class FieldBoard {
         return false;
     }
 
+    /**
+     * The containment walls beside the roads round hex h, over h's own ground (FieldRoads#walls); {@code shares} gives
+     * a hex's chunk's grid (ChunkField#shares). None for a hex the field does not take.
+     */
+    List<float[]> walls(Coords h, java.util.function.Function<Coords, Shares> shares) {
+        if (!taken(h)) { return List.of(); }
+        return roads.walls(h, at -> {
+            if (!taken(at)) { return null; }
+            List<Segment> segments = segments(at);
+            Shares share = shares.apply(at);
+            float[] out = new float[8];
+            // Its own ground only, as today's rule asks the hex's own faces: none past its edge.
+            return (x, y) -> {
+                if (!BoardGeometry.contains(at, x, y)) { return Float.NaN; }
+                height(at, segments, share, x, y, out);
+                return out[0];
+            };
+        }).places();
+    }
+
+    /** The panels hex h's block was cut along (#walls), to draw. */
+    List<BoardSurface.Face> wallFaces(Coords h) { return roads.wallFaces(h); }
+
     /** The carriageway's surface at (x, y) as hex h sees it (FieldRoads#bed); NaN without a road in reach. */
     float bed(Coords h, float x, float y) { return roads.bed(h, x, y); }
 

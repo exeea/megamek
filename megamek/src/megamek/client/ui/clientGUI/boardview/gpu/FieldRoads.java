@@ -1,11 +1,15 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import megamek.common.board.Coords;
 
@@ -29,6 +33,17 @@ final class FieldRoads {
 
     private final BoardScene scene;
     private final Map<Coords, Hex> hexes = new ConcurrentHashMap<>();
+    /**
+     * A hex's containment walls: each panel's place (BoardRoadCut.Panel#place, then the field's height just behind its
+     * back's two ends, NaN off the field) and the panels' faces.
+     */
+    record Walls(List<float[]> places, List<BoardSurface.Face> faces) {
+        static final Walls NONE = new Walls(List.of(), List.of());
+    }
+
+    /** Every panel today's rule gives a hex (#found), and the hex's own of them (#walls), each on the first ask. */
+    private final Map<Coords, List<BoardRoadCut.Panel>> found = new ConcurrentHashMap<>();
+    private final Map<Coords, Walls> walls = new ConcurrentHashMap<>();
     /** The hexes whose banks are kept, eldest first, and how many. */
     private final Queue<Coords> kept = new ConcurrentLinkedQueue<>();
     private final AtomicInteger count = new AtomicInteger();
@@ -108,6 +123,78 @@ final class FieldRoads {
             if (grade != null && grade.contains(x, y)) { return grade.height(x, y); }
         }
         return Float.NaN;
+    }
+
+    /**
+     * The containment walls beside the roads round hex h as today's rule places them (BoardRoadCut#containmentWalls),
+     * over a hex's own height ({@code ground}; null for a hex without one). The rule runs a wall a panel on past its
+     * end, into the next hex too: where that hex has a panel of its own beside it, the panel is that hex's, so a wall
+     * through a hex border is not built twice. The same at every detail.
+     */
+    Walls walls(Coords h, Function<Coords, BoardRelief.Ground> ground) {
+        return walls.computeIfAbsent(h, at -> {
+            Walls kept = new Walls(new ArrayList<>(), new ArrayList<>());
+            for (BoardRoadCut.Panel panel : found(at, ground)) {
+                float[] p = panel.place();
+                float x = (p[0] + p[2]) / 2, y = (p[1] + p[3]) / 2;
+                if (!BoardGeometry.contains(at, x, y) && claimed(at, x, y, ground)) { continue; }
+                float[] place = Arrays.copyOf(p, 11);
+                place[9] = behind(at, p[0], p[1], p[4], p[5], ground);
+                place[10] = behind(at, p[2], p[3], p[4], p[5], ground);
+                kept.places().add(place);
+                kept.faces().addAll(panel.faces());
+            }
+            return kept.places().isEmpty() ? Walls.NONE : kept;
+        });
+    }
+
+    /**
+     * The field's height 10 cm behind a panel's back at (x, y), the panel facing (fx, fy): asked of the hex the point
+     * lies in, hex h or a neighbour, so every hex cut along the panel gets the same; NaN where none has ground.
+     */
+    private static float behind(Coords h, float x, float y, float fx, float fy,
+          Function<Coords, BoardRelief.Ground> ground) {
+        float back = BoardRelief.metres(.1f), px = x - fx * back, py = y - fy * back;
+        for (int d = -1; d < 6; d++) {
+            Coords in = d < 0 ? h : h.translated(d);
+            BoardRelief.Ground own = BoardGeometry.contains(in, px, py) ? ground.apply(in) : null;
+            if (own != null) { return own.height(px, py); }
+        }
+        return Float.NaN;
+    }
+
+    /** Every panel today's rule gives hex h over its own height. */
+    private List<BoardRoadCut.Panel> found(Coords h, Function<Coords, BoardRelief.Ground> ground) {
+        BoardRelief relief = hex(h).relief();
+        if (relief == null) { return List.of(); }
+        return found.computeIfAbsent(h, at -> {
+            BoardRelief.Ground own = ground.apply(at);
+            BoardRoadCut cut = own == null ? null : BoardSurface.containmentCut(scene, scene.tile(at));
+            if (cut == null) { return List.of(); }
+            List<BoardRoadCut.Panel> panels = new ArrayList<>();
+            cut.containmentWalls(own, List.of(), relief, new ArrayList<>(), panels);
+            return panels;
+        });
+    }
+
+    /** Whether the neighbour of hex h that (x, y) lies in has a panel in itself within a panel's width of the point. */
+    private boolean claimed(Coords h, float x, float y, Function<Coords, BoardRelief.Ground> ground) {
+        float near = BoardRelief.metres(BoardRoadCut.PANEL);
+        for (int d = 0; d < 6; d++) {
+            Coords next = h.translated(d);
+            if (!BoardGeometry.contains(next, x, y)) { continue; }
+            for (BoardRoadCut.Panel other : found(next, ground)) {
+                float[] q = other.place();
+                float qx = (q[0] + q[2]) / 2, qy = (q[1] + q[3]) / 2;
+                if (BoardGeometry.contains(next, qx, qy) && Math.hypot(qx - x, qy - y) < near) { return true; }
+            }
+        }
+        return false;
+    }
+
+    /** The panels hex h's block was cut along (#walls), to draw: none for a hex whose block is not built. */
+    List<BoardSurface.Face> wallFaces(Coords h) {
+        return walls.getOrDefault(h, Walls.NONE).faces();
     }
 
     /** The carriageway's surface at (x, y) as hex h sees it (BoardRoadBank#bed); NaN without a road in reach. */

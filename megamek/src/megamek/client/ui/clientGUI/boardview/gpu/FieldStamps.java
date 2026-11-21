@@ -3,6 +3,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
+
+import com.badlogic.gdx.math.Vector3;
+
+import megamek.common.board.Coords;
 
 /**
  * What is stamped into a height-field hex's block after it is built ({@link ChunkField#block}): a road hex's ground
@@ -16,7 +21,7 @@ final class FieldStamps {
 
     /** {@code coarser}: the same hex's block at the detail this one morphs to, stamped; null for the coarsest. */
     static ChunkField.Block apply(FieldBoard board, ChunkField.Block block,
-          java.util.function.Supplier<ChunkField.Block> coarser) {
+          java.util.function.Supplier<ChunkField.Block> coarser, Function<Coords, FieldBoard.Shares> shares) {
         List<float[]> own = footprints(board.openings(block.coords()));
         List<float[]> below = footprints(board.entries(block.coords()));
         if (!own.isEmpty() || !below.isEmpty()) {
@@ -34,6 +39,7 @@ final class FieldStamps {
             block = wings(block, mouths);
             mound(block, mouths, lower);
         }
+        block = contained(board, block, shares, coarser == null ? null : coarser.get());
         float[][] portals = board.portals(block.coords());
         float[] cut = board.cuts(block.coords());
         if (portals == null && cut == null) { return block; }
@@ -121,16 +127,29 @@ final class FieldStamps {
                 bounds[3] = Math.max(bounds[3], x[v]);
                 bounds[4] = Math.max(bounds[4], y[v]);
             }
-            if (moved && coarser != null) { reparent(block, coarser, f); }
+            float margin = 12 * f[6];
+            if (moved && coarser != null) {
+                reparent(block, coarser, (px, py, pz) -> reach(f, px, py, pz, margin, false),
+                      (px, py, pz) -> reach(f, px, py, pz, margin, true), null);
+            }
         }
     }
 
-    /** The parents of a block's samples in a mouth's mound reach: the nearest point of the coarser block's own there. */
-    private static void reparent(ChunkField.Block block, ChunkField.Block coarser, float[] f) {
+    /** Whether a point lies in a stamp's reach. */
+    private interface Reach {
+        boolean holds(float x, float y, float z);
+    }
+
+    /**
+     * The parents of a block's samples {@code in} a stamp's reach: the nearest point of the coarser block's own
+     * triangles there, those with a corner in the reach grown by a coarser triangle ({@code wide}). With {@code rim}
+     * (the hex's corners, x and y) a sample on the hex's border takes the nearest point of the coarser block's border
+     * there, which the next hex's coarser block has too: the two hexes sharing the sample give it one parent.
+     */
+    private static void reparent(ChunkField.Block block, ChunkField.Block coarser, Reach in, Reach wide, float[] rim) {
         float[] cx = coarser.x(), cy = coarser.y(), cz = coarser.z();
-        float margin = 12 * f[6];
         boolean[] near = new boolean[coarser.size()];
-        for (int v = 0; v < near.length; v++) { near[v] = reach(f, cx[v], cy[v], cz[v], margin, true); }
+        for (int v = 0; v < near.length; v++) { near[v] = wide.holds(cx[v], cy[v], cz[v]); }
         int[] candidates = new int[64];
         int count = 0;
         for (int[] list : new int[][] { coarser.levelTops(), coarser.ground(), coarser.faces(), coarser.walls() }) {
@@ -146,11 +165,18 @@ final class FieldStamps {
         for (int v = 0; v < block.size(); v++) {
             int p = v * 6;
             // Above, behind and beside the pull too, as far as a coarser triangle that a moved corner bends reaches.
-            if (Float.isNaN(parents[p]) || !reach(f, x[v], y[v], z[v], margin, false)) { continue; }
+            if (Float.isNaN(parents[p]) || !in.holds(x[v], y[v], z[v])) { continue; }
             float nearest = Float.MAX_VALUE, bx = 0, by = 0, bz = 0, bu = 0, bv = 0;
-            int a = -1, b = -1, c = -1;
-            for (int t = 0; t < count; t += 3) {
-                int i = candidates[t], j = candidates[t + 1], k = candidates[t + 2];
+            int a = -1, b = -1, c = -1, edge = -1;
+            for (int e = 0; rim != null && edge < 0 && e < 6; e++) {
+                if (on(rim, e, x[v], y[v])) { edge = e; }
+            }
+            // Each candidate triangle, or for a sample on the border each of its sides along that border (a triangle
+            // with two corners alike).
+            for (int t = 0; t < count * (edge < 0 ? 1 : 3); t += 3) {
+                int s = edge < 0 ? 0 : t / count, at0 = edge < 0 ? t : t % count;
+                int i = candidates[at0 + s], j = candidates[at0 + (s + 1) % 3], k = edge < 0 ? candidates[at0 + 2] : j;
+                if (edge >= 0 && !(on(rim, edge, cx[i], cy[i]) && on(rim, edge, cx[j], cy[j]))) { continue; }
                 closest(x[v], y[v], z[v], cx[i], cy[i], cz[i], cx[j], cy[j], cz[j], cx[k], cy[k], cz[k], at);
                 float d = (at[0] - x[v]) * (at[0] - x[v]) + (at[1] - y[v]) * (at[1] - y[v]) + (at[2] - z[v]) * (at[2] - z[v]);
                 if (d < nearest) {
@@ -170,6 +196,14 @@ final class FieldStamps {
             float length = (float) Math.sqrt(mx * mx + my * my + mz * mz);
             if (length > 0) { parents[p + 3] = mx / length; parents[p + 4] = my / length; parents[p + 5] = mz / length; }
         }
+    }
+
+    /** Whether (x, y) lies on edge e of a hex's border ({@code rim}: its corners' x and y), within a centimetre. */
+    private static boolean on(float[] rim, int e, float x, float y) {
+        float ax = rim[2 * e], ay = rim[2 * e + 1], ex = rim[(2 * e + 2) % 12] - ax, ey = rim[(2 * e + 3) % 12] - ay;
+        float length = (float) Math.hypot(ex, ey), tolerance = BoardRelief.metres(.01f);
+        float along = ((x - ax) * ex + (y - ay) * ey) / length, off = Math.abs((x - ax) * ey - (y - ay) * ex) / length;
+        return off <= tolerance && along >= -tolerance && along <= length + tolerance;
     }
 
     /**
@@ -321,6 +355,98 @@ final class FieldStamps {
             }
         }
         return block;
+    }
+
+    /**
+     * The ground at the containment walls beside the roads (FieldBoard#walls: today's panels over the field's own
+     * ground): cut along each panel's back and front (FieldClip#cutLines), this hex's panels and its neighbours', so
+     * the hexes sharing an edge cut it alike. The cut's points come to the soil's line on the panel's back (straight
+     * between the field's heights behind its two ends, FieldRoads.Walls) and to the road on its front, each its own
+     * parent: the soil ends at the wall, and the step down to the road stands inside the panel. Every other sample
+     * within a coarser cell of a panel takes as its parent the nearest point of the coarser detail's own block (cut
+     * alike; {@code coarser}, null for the coarsest), so the morph ends on the coarser ground beside the wall.
+     */
+    private static ChunkField.Block contained(FieldBoard board, ChunkField.Block block,
+          Function<Coords, FieldBoard.Shares> shares, ChunkField.Block coarser) {
+        List<float[]> panels = new ArrayList<>();
+        for (int d = -1; d < 6; d++) {
+            panels.addAll(board.walls(d < 0 ? block.coords() : block.coords().translated(d), shares));
+        }
+        if (panels.isEmpty()) { return block; }
+        // A cut runs on through the joint between two panels.
+        float joint = BoardRelief.metres(.03f), on = BoardRelief.metres(.02f);
+        Coords h = block.coords();
+        List<float[]> lines = new ArrayList<>();
+        for (float[] p : panels) {
+            lines.add(side(p, 0, joint));
+            lines.add(side(p, p[6], joint));
+        }
+        int before = block.size();
+        block = FieldClip.cutLines(block, lines);
+        boolean[] wall = new boolean[block.size()];
+        for (int v : block.walls()) { wall[v] = true; }
+        float[] x = block.x(), y = block.y(), z = block.z(), parents = block.parents();
+        for (int v = before; v < block.size(); v++) {
+            if (wall[v]) { continue; }
+            // Where two panels meet or overlap, every hex takes the same one's line: the first by its place.
+            float[] first = null;
+            float to = Float.NaN;
+            for (float[] p : panels) {
+                float ex = p[2] - p[0], ey = p[3] - p[1], length2 = ex * ex + ey * ey;
+                float length = (float) Math.sqrt(length2), t = ((x[v] - p[0]) * ex + (y[v] - p[1]) * ey) / length2;
+                if (t * length < -joint - on || (t - 1) * length > joint + on) { continue; }
+                float off = (x[v] - p[0]) * p[4] + (y[v] - p[1]) * p[5], u = Math.clamp(t, 0, 1);
+                boolean back = Math.abs(off) <= on;
+                if (!back && Math.abs(off - p[6]) > on) { continue; }
+                if (first != null && (p[0] > first[0] || p[0] == first[0] && p[1] >= first[1])) { continue; }
+                first = p;
+                to = back ? p[9] + (p[10] - p[9]) * u : p[7] + (p[8] - p[7]) * u;
+            }
+            if (first == null) { continue; }
+            if (Float.isFinite(to)) { z[v] = to; }
+            block.bounds()[2] = Math.min(block.bounds()[2], z[v]);
+            block.bounds()[5] = Math.max(block.bounds()[5], z[v]);
+            // Its own parent: every detail cuts along the same panels and gives the point the same height.
+            parents[v * 6] = Float.NaN;
+        }
+        if (coarser != null) {
+            // A coarser triangle the cut passes through reaches a coarser cell from it.
+            int rings = (int) Math.round((Math.sqrt(12.0 * (coarser.lattice() - 1) + 9) - 3) / 6);
+            float cell = board.width / 2 / Math.max(1, rings);
+            float[] rim = new float[12];
+            for (int e = 0; e < 6; e++) {
+                Vector3 corner = BoardGeometry.corner(h, 0, e);
+                rim[2 * e] = corner.x;
+                rim[2 * e + 1] = corner.y;
+            }
+            reparent(block, coarser, (px, py, pz) -> beside(panels, px, py, cell),
+                  (px, py, pz) -> beside(panels, px, py, 2 * cell), rim);
+        }
+        return block;
+    }
+
+    /** Whether (x, y) lies within {@code reach} of a containment wall's panel, in plan. */
+    private static boolean beside(List<float[]> panels, float x, float y, float reach) {
+        for (float[] p : panels) {
+            float ex = p[2] - p[0], ey = p[3] - p[1];
+            float t = Math.clamp(((x - p[0]) * ex + (y - p[1]) * ey) / (ex * ex + ey * ey), 0, 1);
+            float dx = p[0] + ex * t - x, dy = p[1] + ey * t - y;
+            if (dx * dx + dy * dy <= reach * reach) { return true; }
+        }
+        return false;
+    }
+
+    /**
+     * One side of a containment wall's panel (FieldRoads#walls), {@code in} from its back towards its face, as
+     * FieldClip#cutLines' line: its vertical plane, then two planes bounding its stretch, {@code reach} past its ends.
+     */
+    private static float[] side(float[] p, float in, float reach) {
+        float ex = p[2] - p[0], ey = p[3] - p[1], length = (float) Math.hypot(ex, ey);
+        ex /= length;
+        ey /= length;
+        float ax = p[0] + p[4] * in, ay = p[1] + p[5] * in;
+        return new float[] { p[4], p[5], 0, ax, ay, 0, -ex, -ey, 0, ax - ex * reach, ay - ey * reach, 0,
+              ex, ey, 0, ax + ex * (length + reach), ay + ey * (length + reach), 0 };
     }
 
     /** How far behind the opening the wing walls start (mm-data road_tunnel.py), and the width a cut point lies in. */
