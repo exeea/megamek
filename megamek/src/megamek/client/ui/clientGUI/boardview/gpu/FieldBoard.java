@@ -1235,6 +1235,22 @@ final class FieldBoard {
     }
 
     /** The bank's profile at signed distance s from its outline (negative inside): today's slope transition. */
+    /**
+     * How much deeper the upper half of level set j's bank runs, 1 to 1.75: 1.75 where the level below shares its
+     * nearest bank step (within a metre, eased out over a metre) and none above does, so the top of a stack of
+     * banks on one outline (a two-level bank) rounds its shoulder over two lattice steps more, as today's does,
+     * instead of curving twice as sharply as a one-level bank's within the lattice's step. {@code bankTo}: per level
+     * set the squared distance to its nearest bank step (positive infinity for none).
+     */
+    private float stackTop(float[] bankTo, int j, int span) {
+        if (j == 0 || bankTo[j] == Float.POSITIVE_INFINITY || bankTo[j - 1] == Float.POSITIVE_INFINITY) { return 1; }
+        float d = (float) Math.sqrt(bankTo[j]);
+        float below = 1 - BoardRelief.smooth(Math.abs((float) Math.sqrt(bankTo[j - 1]) - d) / metre);
+        float above = j + 1 < span && bankTo[j + 1] != Float.POSITIVE_INFINITY
+              ? 1 - BoardRelief.smooth(Math.abs((float) Math.sqrt(bankTo[j + 1]) - d) / metre) : 0;
+        return 1 + .75f * below * (1 - above);
+    }
+
     private float bank(float s, float x, float y) {
         float u = Math.clamp(s / room, -1, 1);
         float k = .25f + .35f * BoardRelief.noise(x / shoulder + 11.7f, y / shoulder - 5.2f);
@@ -1429,6 +1445,8 @@ final class FieldBoard {
                 if (!joinedBank && streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
                     sb -= room * (1 - far((float) Math.sqrt(streamTo[k - lowest - 1])));
                 }
+                // The top level of banks stacked on one outline rounds its upper shoulder over a deeper band (#stackTop).
+                if (sb < 0) { sb /= stackTop(bankTo, k - lowest - 1, span); }
                 float banked = bank(sb, x, y);
                 // Beside a stream hex's step the bank takes the stream bank's straight profile over a band a quarter wider
                 // (whole within 6 m of the step, eased out to 12 m): the two banks turn their corner as one even slope.
