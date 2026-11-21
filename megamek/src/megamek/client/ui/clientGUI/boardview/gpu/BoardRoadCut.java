@@ -707,6 +707,8 @@ final class BoardRoadCut {
             if (same != null) {
                 // Every later copy then finds the same point in its own cell.
                 welded.putIfAbsent(weld, same);
+                // A point first cut in an unshaded face (a water bed) takes its shading from the first shaded one.
+                if (relief.shade(same) == null) { relief.interpolateShade(a, b, c, 1 - s - t, s, t, same); }
                 return same;
             }
             relief.interpolateShade(a, b, c, 1 - s - t, s, t, v);
