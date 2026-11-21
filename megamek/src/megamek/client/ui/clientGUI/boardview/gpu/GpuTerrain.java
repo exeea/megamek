@@ -7322,6 +7322,9 @@ final class GpuTerrain implements Disposable {
                     : tile.liquid().present() ? sculptMaterial(FieldShore.ground(scene, tile, surface.relief.family()))
                     : sculptMaterial(BoardSurfaceBlend.family(tile)),
               TerrainField.key(tile.coords().getX(), tile.coords().getY()));
+        // Land ice is a coat over its ground, and dry land beside it draws their shared border, as today's sculpted
+        // ground does (GpuIceShader#ground).
+        if (!tile.liquid().present()) { material = GpuIceShader.ground(material, scene, tile); }
         Material level = dividesTops(material) ? GpuFamilyPrograms.flat(material) : material;
         layer.addArrays(material, mesh.direct(), mesh.directIndices(), mesh.floats());
         layer.addArrays(mesh.palette() == null && GpuMaterialCache.cacheable(material)
