@@ -219,6 +219,23 @@ final class FieldWater {
         return best;
     }
 
+    /**
+     * Per edge e of field hex h the open water across it that the field does not take (today's code draws it: a canal
+     * beside a quay's plate), or null; null for none at all. A field wall under it takes its optics (ChunkMesh#of), as
+     * today's walls under water do (GpuWaterCover#coveredFace).
+     */
+    static BoardScene.Tile[] untakenWater(BoardScene scene, FieldBoard board, Coords h) {
+        BoardScene.Tile[] water = null;
+        for (int e = 0; e < 6; e++) {
+            Coords next = h.translated(BoardGeometry.edgeDirection(e));
+            BoardScene.Tile open = board.inside(next) && !board.taken(next) ? GpuTerrain.openWater(scene.tile(next)) : null;
+            if (open == null) { continue; }
+            if (water == null) { water = new BoardScene.Tile[6]; }
+            water[e] = open;
+        }
+        return water;
+    }
+
     /** Whether field water hex {@code tile} pours over a fall on any of its edges (#fallsInto). */
     private static boolean falls(BoardScene scene, BoardScene.Tile tile) {
         for (int e = 0; e < 6; e++) {

@@ -4848,9 +4848,10 @@ final class GpuTerrain implements Disposable {
             ChunkField.Block block = field == null ? null : field.block(tile.coords());
             if (block != null) {
                 BoardScene.Tile water = tile.liquid().present() ? tile : FieldWater.beside(scene, fieldBoard, tile.coords());
-                fieldMeshes.put(tile.coords(), ChunkMesh.of(block, water, fieldBoard.shore, palettes.get(tile.coords())));
+                BoardScene.Tile[] untaken = FieldWater.untakenWater(scene, fieldBoard, tile.coords());
+                fieldMeshes.put(tile.coords(), ChunkMesh.of(block, water, fieldBoard.shore, palettes.get(tile.coords()), untaken));
                 ChunkField.Block far = farField == null ? null : farField.block(tile.coords());
-                if (far != null) { farMeshes.put(tile.coords(), ChunkMesh.of(far, water, fieldBoard.shore, farPalettes.get(tile.coords()))); }
+                if (far != null) { farMeshes.put(tile.coords(), ChunkMesh.of(far, water, fieldBoard.shore, farPalettes.get(tile.coords()), untaken)); }
             } else if (surface.relief.sculpted()) {
                 sculpts.put(surface.tile.coords(), prepareSculpt(scene, surface.tile, surface, floor, lod, surfaces));
             } else {

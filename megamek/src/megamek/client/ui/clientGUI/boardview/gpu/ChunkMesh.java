@@ -31,13 +31,14 @@ final class ChunkMesh {
      * land block's low ground lies under (FieldWater#beside), else null. {@code palette}: the covers of the block's
      * draw ({@link FieldCover#draws}); null where the block has no cover.
      */
-    static Hex of(ChunkField.Block block, BoardScene.Tile water, int[] palette) { return of(block, water, null, palette); }
+    static Hex of(ChunkField.Block block, BoardScene.Tile water, int[] palette) { return of(block, water, null, palette, null); }
 
     /**
      * {@link #of(ChunkField.Block, BoardScene.Tile, int[])}, the water's height at each sample from {@code shore}
-     * (FieldShore#water: a descending stream's graded surface); its level where shore is null.
+     * (FieldShore#water: a descending stream's graded surface); its level where shore is null. {@code untaken}: per edge
+     * the open water across it that the field does not take (FieldWater#untakenWater), or null: a wall under it is wet.
      */
-    static Hex of(ChunkField.Block block, BoardScene.Tile water, FieldShore shore, int[] palette) {
+    static Hex of(ChunkField.Block block, BoardScene.Tile water, FieldShore shore, int[] palette, BoardScene.Tile[] untaken) {
         // A water hex's ground carries its water everywhere; land beside it only where it lies under the water.
         boolean own = water != null && water.coords().equals(block.coords());
         // Up to the hex's level: the bench and the bank's wet strip above the water (terrain-sculpt.frag's river bank).
@@ -47,7 +48,7 @@ final class ChunkMesh {
         Writer tops = new Writer(block, own ? water : null, shore, null, palette);
         direct.triangles(block.ground(), false);
         direct.bank(block.faces());
-        direct.triangles(block.walls(), true);
+        direct.walls(block.walls(), untaken);
         // Level tops under water carry it too, so they stay off the cached tops' materials.
         (own ? direct : tops).triangles(block.levelTops(), false);
         return new Hex(direct.vertices(), direct.indices(), tops.vertices(), tops.indices(), block.bounds(), palette);
@@ -102,7 +103,7 @@ final class ChunkMesh {
         final FieldShore shore;
         /** Which samples carry the water: null for all (a water hex's own ground). */
         final boolean[] wet;
-        final int[] cover, face, drown;
+        final int[] cover, face, drown, soak;
         /** The draw's entry of each of the hex's own entries; null without cover weights. */
         final int[] slots;
         /** Which of the draw's entries are a wall's foot share, a bit each (a_fieldCoverCut's second byte). */
@@ -132,15 +133,17 @@ final class ChunkMesh {
             cover = new int[block.size()];
             face = new int[block.size()];
             drown = new int[block.size()];
+            soak = new int[block.size()];
             Arrays.fill(cover, -1);
             Arrays.fill(face, -1);
             Arrays.fill(drown, -1);
+            Arrays.fill(soak, -1);
         }
 
         void triangles(int[] list, boolean faces) {
             for (int i = 0; i < list.length; i++) {
                 if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
-                indices[indexCount++] = (short) vertex(list[i], faces, false);
+                indices[indexCount++] = (short) vertex(list[i], faces, false, null);
             }
         }
 
@@ -161,13 +164,33 @@ final class ChunkMesh {
                 }
                 for (int k = 0; k < 3; k++) {
                     if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
-                    indices[indexCount++] = (short) vertex(list[i + k], !drowned, drowned);
+                    indices[indexCount++] = (short) vertex(list[i + k], !drowned, drowned, null);
                 }
             }
         }
 
-        private int vertex(int v, boolean faces, boolean drowned) {
-            int[] written = faces ? face : drowned ? drown : cover;
+        /**
+         * The walls' triangles: faces, but where a wall stands under open water the field does not take (a canal beside a
+         * quay's plate: {@code untaken}, per edge), a triangle any sample of which lies below that water's surface is
+         * written with its optics as wet rock, as today's walls under water are (GpuWaterCover#coveredFace).
+         */
+        void walls(int[] list, BoardScene.Tile[] untaken) {
+            float[] z = block.z();
+            for (int i = 0; i + 2 < list.length; i += 3) {
+                BoardScene.Tile under = untaken == null ? null : untaken[block.edge(list, i)];
+                if (under != null) {
+                    float surface = BoardGeometry.waterZ(under);
+                    if (z[list[i]] >= surface && z[list[i + 1]] >= surface && z[list[i + 2]] >= surface) { under = null; }
+                }
+                for (int k = 0; k < 3; k++) {
+                    if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
+                    indices[indexCount++] = (short) vertex(list[i + k], true, false, under);
+                }
+            }
+        }
+
+        private int vertex(int v, boolean faces, boolean drowned, BoardScene.Tile soaked) {
+            int[] written = faces ? soaked != null ? soak : face : drowned ? drown : cover;
             if (written[v] >= 0) { return written[v]; }
             if ((count + 1) * floats > vertices.length) { vertices = Arrays.copyOf(vertices, vertices.length * 2); }
             int o = count * floats;
@@ -175,7 +198,14 @@ final class ChunkMesh {
             vertices[o + 1] = block.y()[v];
             vertices[o + 2] = block.z()[v];
             float u, w;
-            if (faces) {
+            if (faces && soaked != null) {
+                // Under the water: water-tagged as today's covered quay wall is (GpuWaterCover#coveredFace's ground
+                // branch: the water's level and palette in the colour, foot and rim in the shore's order).
+                vertices[o + 3] = GpuTerrain.waterColor(block.faceOcclusion(v), BoardGeometry.waterZ(soaked),
+                      GpuTerrain.shoreTint(GpuWaterShader.palette(soaked.liquid()), 0)).toFloatBits();
+                u = block.faceFoot()[v];
+                w = GpuTerrain.shoreRim(block.faceRim()[v], soaked);
+            } else if (faces) {
                 vertices[o + 3] = GpuTerrain.packedShade(BoardRelief.Kind.CLIFF, block.faceOcclusion(v), block.rock()[v], block.bed(v),
                       block.projection()[v]);
                 u = block.faceRim()[v];
