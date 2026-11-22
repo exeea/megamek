@@ -442,14 +442,16 @@ final class FieldBoard {
 
     /**
      * Hex h's ground z at (x, y) behind a pool's wall that is no fall ({@link #poolWall}): #crestUnder's dry rim
-     * measured from the wall's moved rim (#edgeMove), a level top 0.5 m over the pool's water out to 1.9 m behind it,
-     * then falling a metre a metre, eased out over the edge's last tenth toward an end whose next edge is neither such
+     * measured from the wall's moved rim (#edgeMove), a level top 0.5 m over the pool's water out to the pool's own
+     * shore line (FieldShore#waterline; at least 1 m and at most 6 m behind the rim), then falling a metre a metre,
+     * eased out over the edge's last tenth toward an end whose next edge is neither such
      * a wall nor a fall. It only raises, on the pool's side of the rim, the pool's own ground or ground no wall parts
      * from it, so samples shared across a bank get one height; {@code out[1]} is set to 1 where it raises the pool's
      * own ground (#height draws it as the pool's rock).
      */
     private float poolRim(Coords h, float x, float y, float z, float[] out) {
         Coords here = hexAt(x, y);
+        float[] line = { Float.NaN, 0, 0, 0, 0, 0 };
         for (int n = -1; n < 6 && inside(here); n++) {
             Coords p = n < 0 ? here : here.translated(BoardGeometry.edgeDirection(n));
             if (!inside(p) || !WaterLayer.water(this, p) || !p.equals(h) && cliff(h, p)) { continue; }
@@ -471,15 +473,33 @@ final class FieldBoard {
                     if (d2 < best) { best = d2; side = (x - qx) * nx + (y - qy) * ny; }
                 }
                 float behind = (float) Math.sqrt(best);
-                if (side < -.01f * metre || behind > 2.5f * metre) { continue; }
+                if (side < -.01f * metre || behind > 6.6f * metre) { continue; }
                 Coords before = p.translated(BoardGeometry.edgeDirection(Math.floorMod(e - 1, 6)));
                 Coords after = p.translated(BoardGeometry.edgeDirection((e + 1) % 6));
                 float ends = (poolWall(p, Math.floorMod(e - 1, 6)) || falls(p, before) ? 1 : BoardRelief.smooth(t / .1f))
                       * (poolWall(p, (e + 1) % 6) || falls(p, after) ? 1 : BoardRelief.smooth((1 - t) / .1f));
-                float target = shore.water(p, x, y) + .5f * metre - Math.max(0, behind - 1.9f * metre);
+                // The rim's top runs out to the pool's own shore line (FieldShore#waterline), at least 1 m and at
+                // most 6 m behind the moved rim, its inner face falling a metre a metre into the water there.
+                if (Float.isNaN(line[0])) { line[0] = shore.waterline(x, y, line) ? line[0] : Float.POSITIVE_INFINITY; }
+                float past = Math.max(Math.min(line[0], behind - metre), behind - 6 * metre);
+                // Where it meets a fall edge's dry rim (#crestUnder) the two inner faces join in a rounded inner
+                // corner, not a sharp one: a smooth minimum of their distances past the tops' ends, over 1.5 m.
+                for (int f = -1; f <= 1; f += 2) {
+                    int fe = Math.floorMod(e + f, 6);
+                    if (!falls(p, p.translated(BoardGeometry.edgeDirection(fe)))) { continue; }
+                    float fx = cornerX(p, fe), fy = cornerY(p, fe), gx = cornerX(p, fe + 1) - fx, gy = cornerY(p, fe + 1) - fy;
+                    float gl = (float) Math.hypot(gx, gy), mx = -gy / gl, my = gx / gl;
+                    if ((centerX(p) - fx) * mx + (centerY(p) - fy) * my < 0) { mx = -mx; my = -my; }
+                    float ft = Math.clamp(((x - fx) * gx + (y - fy) * gy) / (gl * gl), 0, 1);
+                    float fb = (x - fx) * mx + (y - fy) * my;
+                    if (fb < 0 || dry(p, fe, ft) < .999f) { continue; }
+                    float pf = fb - 1.9f * metre, k = 1.5f * metre, round = Math.max(k - Math.abs(past - pf), 0) / k;
+                    past = Math.min(past, pf) - round * round * k / 4;
+                }
+                float water = shore.water(p, x, y), target = water + .5f * metre - Math.max(0, past);
                 if (z < target) {
                     z += (target - z) * ends;
-                    if (p.equals(h) && ends > .5f) { out[1] = 1; }
+                    if (p.equals(h) && ends > .5f && z >= water - .1f * metre) { out[1] = 1; }
                 }
             }
         }
@@ -1180,6 +1200,8 @@ final class FieldBoard {
         Coords[] around = { u, v };
         float[][] points = new float[FULL + 1][];
         float fade = .5f * edge;
+        Coords upper = level(u) > level(v) ? u : v;
+        boolean pool = wall && poolWall(upper, edgeIndex(upper, upper == u ? v : u));
         for (int j = 0; j <= FULL; j++) {
             float t = j / (float) FULL;
             float mx = ca[0] + (cb[0] - ca[0]) * t, my = ca[1] + (cb[1] - ca[1]) * t;
@@ -1194,8 +1216,10 @@ final class FieldBoard {
                   level(u) > level(v) ? u : v, level(u) > level(v) ? v : u, u, e, t);
             // The move fades out toward a held corner.
             float w = 1;
-            if (ca[2] > 0) { w = Math.min(w, t * edge / fade); }
-            if (cb[2] > 0) { w = Math.min(w, (1 - t) * edge / fade); }
+            // Behind a pool's wall that is no fall (#poolWall) a corner a fall keeps on the hex corner (#rimMove: its
+            // move carries no relief) is faded toward as well: the pool's rim comes back to it, no jog.
+            if (ca[2] > 0 || pool && ca.length > 3 && Float.isNaN(ca[3])) { w = Math.min(w, t * edge / fade); }
+            if (cb[2] > 0 || pool && cb.length > 3 && Float.isNaN(cb[3])) { w = Math.min(w, (1 - t) * edge / fade); }
             w = w * w * (3 - 2 * w);
             // Round a ground portal the wall's row stays on the edge, as today's foot does (BoardTunnel#relief).
             float x = ax + (bx - ax) * t, y = ay + (by - ay) * t, foot = Math.min(level(u), level(v)) * levelZ;
