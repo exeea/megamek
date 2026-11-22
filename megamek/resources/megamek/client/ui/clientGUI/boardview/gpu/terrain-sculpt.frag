@@ -866,7 +866,8 @@ void main() {
     // Biome peat/mud already contains its wet pigment. Rain only darkens the remaining unsaturated share;
     // the existing film/pool response above still receives the full rain amount.
     albedo = wetAlbedo(albedo, max(groundAbsorption(wet * (1.0 - saturated), response), shoreAbsorption));
-    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
+    // The grid lies on the ground's tops and slopes: a vertical face (a plate's cast wall) shows no hex edge crossing it.
+    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic) * smoothstep(.15, .35, face.z));
     albedo *= transmission;
     albedo = materialReflectance(albedo);
     // Grade the completed bounded pigment: later weathering or a reflectance bound must not flatten the lift.
