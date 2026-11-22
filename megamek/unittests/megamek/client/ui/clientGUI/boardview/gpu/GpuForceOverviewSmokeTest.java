@@ -7,6 +7,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuHudFixtures.CONTACT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -57,7 +58,7 @@ import org.junit.jupiter.api.Test;
 class GpuForceOverviewSmokeTest {
     private static final GpuBattleStatus.Snapshot MOCK = GpuHudFixtures.status();
     /** The client's key bindings, as the HUD receives them. */
-    private static final GpuBoardSource.UiPreferences PREFERENCES = GpuBoardSource.UiPreferences.capture();
+    private static final GpuBoardSource.UiPreferences PREFERENCES = GpuHudFixtures.preferences();
     private static final int WARHAMMER = 2;
     private static final int MARAUDER = 3;
     private static final int PANTHER = 4;
@@ -388,10 +389,16 @@ class GpuForceOverviewSmokeTest {
                       GpuHudTestStage.bounds(overview),
                       "left and right gap, top 90, bottom 70");
                 // What it covers is hidden (the prototype blurs it, shot 12).
-                for (String covered : List.of("unit-card", "command-dock", "hint-line", "forces-panel", "minimap",
-                      "contacts-panel")) {
+                for (String covered : List.of("unit-card", "hint-line", "forces-panel", "minimap", "contacts-panel")) {
                     assertFalse(shown(root.findActor(covered)), covered + " is hidden while it is open");
                 }
+                // The dock stays below it as the chat footer, in its chat form: no header and no unit commands.
+                Actor dock = root.findActor("command-dock");
+                assertTrue(shown(dock), "The dock stays as the chat footer");
+                assertNull(root.findActor("dock-title"), "in its chat form, without its header");
+                Rectangle dockBounds = GpuHudTestStage.bounds(dock);
+                assertTrue(dockBounds.y + dockBounds.height <= GpuHudTestStage.bounds(overview).y,
+                      () -> "below the overview: " + dockBounds);
                 assertTrue(press(hud, KeyCommandBind.FORCE_DISPLAY, Input.Keys.F));
                 show(hud, frame, overview);
                 assertFalse(shown(overview), "the force display's key closes it");

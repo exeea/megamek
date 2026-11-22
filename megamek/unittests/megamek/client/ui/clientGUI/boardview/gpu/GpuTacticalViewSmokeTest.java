@@ -738,7 +738,9 @@ class GpuTacticalViewSmokeTest {
         try (var audit = new GpuDrawCallAudit(view)) {
             view.render();
             drawn = audit.totals();
-            decks = audit.draws("opaque", Attribute.getAttributeType("boardBridgeDeck"));
+            // The chunks' own opaque draws or, once the board settled, the terrain pages' that merge them.
+            long deck = Attribute.getAttributeType("boardBridgeDeck");
+            decks = audit.draws("opaque", deck) + audit.draws("terrain-paged", deck);
         }
         for (String source : List.of("grass", "scatter")) {
             assertEquals(0, drawn.getOrDefault(source, 0), "The Tactical View draws no " + source + ": " + drawn);
@@ -940,17 +942,16 @@ class GpuTacticalViewSmokeTest {
     }
 
     /**
-     * The Tactical View's Overlays panel on the mock-up battle in the firing phase, with the game's View menu (b11
-     * overlay panel; the user's placement of 2026-10-10). Its View rows find the menu's items, Unit Links among them,
-     * and each row drives its overlay: Status badges off keeps the VTOL's elevation pill and drops the Atlas's heat
-     * pip, bars and conditions; Rear arcs off clears the hovered Bulldog's amber; Links off (the View menu's item, run
-     * by the row) removes the spotting link; Level shading lightens the level-3 plateau and leaves level 0; H collapses
-     * the panel. Captures the panel beside the minimap and, with the minimap closed, at the right edge, as the firing
-     * phase has no fire preview and so no contacts panel, at 1920 x 1080 and 1280 x 800, and a player's choice with
-     * the panel collapsed (the overlay-panel mock's frames A, C and B).
+     * The Tactical View's Overlays popover on the mock-up battle in the firing phase, with the game's View menu (b11
+     * overlay panel): the top bar's Overlays button opens it. Its View rows find the menu's items, Unit Links among
+     * them, and each row drives its overlay: Status badges off keeps the VTOL's elevation pill and drops the Atlas's
+     * heat pip, bars and conditions; Rear arcs off clears the hovered Bulldog's amber; Links off (the View menu's item,
+     * run by the row) removes the spotting link; Level shading lightens the level-3 plateau and leaves level 0; H
+     * closes it and opens it again. It hangs one gap below its button, with the minimap open and closed. Captures it at
+     * 1920 x 1080 and 1280 x 800, and a player's choice with it closed (the overlay-panel mock's frames A, C and B).
      */
     @Test
-    void theOverlaysPanelDrivesItsOverlaysAndStandsBesideTheRightColumn() throws Exception {
+    void theOverlaysPopoverDrivesItsOverlaysAndHangsBelowItsButton() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
         float originalScale = preferences.getBoardUiScale();
@@ -1010,7 +1011,10 @@ class GpuTacticalViewSmokeTest {
         view.boardCamera.fit((BoardScene) field(view, "scene"));
         render(view);
         hover(view, fixture, BULLDOG);
-        assertTrue(GpuBoardTestUi.shown(actor("tactical-overlays")), "The Tactical View shows the Overlays panel");
+        assertFalse(GpuBoardTestUi.shown(actor("tactical-overlays")), "The Overlays popover waits for its button");
+        GpuBoardTestUi.click("utility-overlays");
+        render(view);
+        assertTrue(GpuBoardTestUi.shown(actor("tactical-overlays")), "The Overlays button opens its popover");
         for (String row : List.of("links", "envelope", "losShading", "sensorRanges", "coordinates", "types",
               "distanceRings")) {
             assertEquals(Touchable.enabled, actor("overlay-" + row).getTouchable(), row + " finds its View menu item");
@@ -1019,21 +1023,20 @@ class GpuTacticalViewSmokeTest {
         if (width == 1920) {
             drive(view, fixture);
         }
-        // Beside the minimap's top; at the right edge once it closes, as the contacts show only with a fire preview.
-        assertBeside("minimap");
+        // Below its button over the right column, with the minimap and once it closes.
+        assertBelowItsButton();
         capture("tactical-overlays-" + width + "-minimap.png");
         SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMinimapEnabled(false));
         await(view, fixture, () -> !fixture.source.uiPreferences().minimapEnabled(), "The minimap closes");
         render(view);
-        assertFalse(GpuBoardTestUi.shown(actor("contacts-panel")), "No contacts panel without a fire preview");
-        var panel = stageBounds(actor("tactical-overlays"));
-        assertEquals(GpuBoardTestUi.stage().getWidth() - GpuBoardHud.GAP, panel.x + panel.width, .5f,
-              "At the right edge without a right-hand panel");
-        capture("tactical-overlays-" + width + "-right-edge.png");
+        // The contacts panel (on by default) stands in the right column; the popover lies over it in the same place.
+        assertTrue(GpuBoardTestUi.shown(actor("contacts-panel")), "The contacts panel in the right column");
+        assertBelowItsButton();
+        capture("tactical-overlays-" + width + "-no-minimap.png");
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
     }
 
-    /** Each Tactical View row drives its overlay; then a player's choice with the panel collapsed, and the defaults. */
+    /** Each Tactical View row drives its overlay; then a player's choice with the popover closed, and the defaults. */
     private static void drive(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
         var bases = (GpuUnitBases) field(view, "unitBases");
         var scene = (BoardScene) field(view, "scene");
@@ -1087,9 +1090,8 @@ class GpuTacticalViewSmokeTest {
         GpuBoardTestUi.click("overlay-coordinates");
         await(view, fixture, () -> !GUIPreferences.getInstance().getCoordsEnabled(), "The row runs View > Coordinates");
         GpuBoardTestUi.press(KeyCommandBind.TACTICAL_OVERLAYS);
-        await(view, fixture, () -> !fixture.source.uiPreferences().overlays().panelOpen(), "H collapses the panel");
-        assertFalse(expanded(), "Collapsed: the header only");
-        assertBeside("minimap");
+        render(view);
+        assertFalse(GpuBoardTestUi.shown(actor("tactical-overlays")), "H closes the popover");
         capture("tactical-overlays-1920-choice.png");
 
         GUIPreferences preferences = GUIPreferences.getInstance();
@@ -1097,7 +1099,9 @@ class GpuTacticalViewSmokeTest {
               preferences.getDefaultBoolean(key))));
         await(view, fixture, () -> fixture.source.uiPreferences().overlays().equals(
               BoardSource.UiPreferences.Overlays.DEFAULTS), "The defaults return");
-        assertTrue(expanded(), "Expanded again");
+        GpuBoardTestUi.press(KeyCommandBind.TACTICAL_OVERLAYS);
+        render(view);
+        assertTrue(expanded(), "H opens it again with its rows");
     }
 
     /** Clicks a row of the Overlays panel and waits until the board's published preferences show its change. */
@@ -1120,13 +1124,14 @@ class GpuTacticalViewSmokeTest {
         render(view);
     }
 
-    /** The Overlays panel stands left of the right column's panel {@code name}, level with its top. */
-    private static void assertBeside(String name) {
-        assertTrue(GpuBoardTestUi.shown(actor(name)), name + " is shown");
+    /** The open Overlays popover hangs one gap below its button, its right edge at the button's, inside the window. */
+    private static void assertBelowItsButton() {
+        assertTrue(GpuBoardTestUi.shown(actor("tactical-overlays")), "The Overlays popover is open");
         var panel = stageBounds(actor("tactical-overlays"));
-        var column = stageBounds(actor(name));
-        assertEquals(column.y + column.height, panel.y + panel.height, .5f, "Level with the top of " + name);
-        assertEquals(column.x - GpuBoardHud.GAP, panel.x + panel.width, .5f, "Left of " + name);
+        var button = stageBounds(actor("utility-overlays"));
+        assertEquals(button.y - GpuUtilityBar.GAP, panel.y + panel.height, .5f, "One gap below its button");
+        assertEquals(Math.min(button.x + button.width, GpuBoardTestUi.stage().getWidth() - GpuUtilityBar.GAP),
+              panel.x + panel.width, .5f, "Its right edge at the button's, inside the window");
     }
 
     private static Actor actor(String name) {
