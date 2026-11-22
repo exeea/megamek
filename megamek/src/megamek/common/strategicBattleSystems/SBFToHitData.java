@@ -34,10 +34,12 @@
 package megamek.common.strategicBattleSystems;
 
 import java.util.List;
+import java.util.Optional;
 
 import megamek.common.TargetRollModifier;
 import megamek.common.actions.sbf.SBFAttackAction;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
+import megamek.common.alphaStrike.ASRange;
 import megamek.common.game.InGameObject;
 import megamek.common.rolls.TargetRoll;
 
@@ -79,16 +81,34 @@ public class SBFToHitData extends TargetRoll {
             toHit.addModifier(new TargetRollModifier(TargetRoll.IMPOSSIBLE, "not on the same board"));
             return false;
         }
-        int range = attackingFormation.getPosition().coords().distance(target.getPosition().coords());
-        if (range > 2) {
+        Optional<ASRange> range = standardAttackRange(attackingFormation, target);
+        if (range.isEmpty()) {
             toHit.addModifier(new TargetRollModifier(TargetRoll.IMPOSSIBLE, "out of range"));
             return false;
-        } else if (range == 2) {
+        } else if (range.get() == ASRange.EXTREME) {
             toHit.addModifier(new TargetRollModifier(3, "extreme range"));
-        } else if (range == 1) {
-            toHit.addModifier(new TargetRollModifier(3, "long range"));
+        } else {
+            toHit.addModifier(new TargetRollModifier(2, "long range"));
         }
         return true;
+    }
+
+    /**
+     * Returns the range of a standard attack between the two Formations (IO:BF p.169-170): Long Range in the same or
+     * an adjacent hex, Extreme Range two hexes away; empty when the target is farther, on another board or either has
+     * no position. In the same hex an opposed Maneuver Roll would choose the range; it is not implemented, and Long
+     * Range is the rule's result when it is not made.
+     */
+    public static Optional<ASRange> standardAttackRange(SBFFormation attacker, SBFFormation target) {
+        if ((attacker.getPosition() == null) || (target.getPosition() == null)
+              || !attacker.getPosition().isSameBoardAs(target.getPosition())) {
+            return Optional.empty();
+        }
+        return switch (attacker.getPosition().coords().distance(target.getPosition().coords())) {
+            case 0, 1 -> Optional.of(ASRange.LONG);
+            case 2 -> Optional.of(ASRange.EXTREME);
+            default -> Optional.empty();
+        };
     }
 
     private static void processTMM(SBFToHitData toHit, SBFGame game, SBFStandardUnitAttack attack) {
@@ -117,7 +137,7 @@ public class SBFToHitData extends TargetRoll {
             toHit.addModifier(attacker.getJumpUsedThisTurn(), "attacker JUMP");
         }
         if (target.getJumpUsedThisTurn() > 0) {
-            toHit.addModifier(attacker.getJumpUsedThisTurn(), "target JUMP");
+            toHit.addModifier(target.getJumpUsedThisTurn(), "target JUMP");
         }
     }
 

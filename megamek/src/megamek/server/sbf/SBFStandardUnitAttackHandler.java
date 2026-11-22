@@ -38,6 +38,7 @@ import static megamek.client.ui.clientGUI.tooltip.SBFInGameObjectTooltip.ownerCo
 import java.util.List;
 
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
+import megamek.common.alphaStrike.ASRange;
 import megamek.common.compute.Compute;
 import megamek.common.rolls.Roll;
 import megamek.common.strategicBattleSystems.SBFFormation;
@@ -93,7 +94,7 @@ public class SBFStandardUnitAttackHandler extends AbstractSBFActionHandler {
                     addReport(new SBFPublicReportEntry(2012));
                 } else {
                     addReport(new SBFPublicReportEntry(2013));
-                    int damage = attackingUnit.getCurrentDamage().getDamage(attack.getRange()).damage;
+                    int damage = standardAttackDamage(attackingUnit, attacker, target);
                     if (damage > 0) {
                         int newArmor = targetUnit.getCurrentArmor() - damage;
                         addReport(new SBFPublicReportEntry(3100).add(damage).add(damage));
@@ -115,5 +116,15 @@ public class SBFStandardUnitAttackHandler extends AbstractSBFActionHandler {
             }
         }
         setFinished();
+    }
+
+    /**
+     * Returns the damage of a successful standard attack (IO:BF p.170): the Unit's attack value for the range; Extreme
+     * Range damage is equal to Long Range -1. The range follows from the Formations' positions.
+     */
+    private static int standardAttackDamage(SBFUnit attackingUnit, SBFFormation attacker, SBFFormation target) {
+        int longRangeDamage = attackingUnit.getCurrentDamage().getDamage(ASRange.LONG).damage;
+        ASRange range = SBFToHitData.standardAttackRange(attacker, target).orElse(ASRange.LONG);
+        return (range == ASRange.EXTREME) ? Math.max(0, longRangeDamage - 1) : longRangeDamage;
     }
 }
