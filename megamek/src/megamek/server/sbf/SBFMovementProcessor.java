@@ -47,6 +47,7 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
 
         formation.setPosition(movePath.getLastPosition());
         formation.setJumpUsedThisTurn(movePath.getJumpUsed());
+        formation.setSprintedThisTurn(movePath.getMpUsed() > formation.getMovement());
         formation.setDone(true);
         gameManager.sendUnitUpdate(formation);
         gameManager.endCurrentTurn(formation);

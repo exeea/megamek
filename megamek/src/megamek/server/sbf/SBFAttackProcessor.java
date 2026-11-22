@@ -59,6 +59,9 @@ record SBFAttackProcessor(SBFGameManager gameManager) implements SBFGameManagerH
         if (!game().getPhase().isFiring()) {
             logger.error("Server got attacks packet in wrong phase!");
             return false;
+        } else if (formation.hasSprintedThisTurn()) {
+            logger.error("Sprinted formation cannot attack!");
+            return false;
         } else if (formation.isDone()) {
             logger.error("Formation already done!");
             return false;
