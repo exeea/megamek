@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import java.awt.event.InputEvent;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Graphics;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.util.KeyCommandBind;
@@ -83,10 +84,14 @@ class GpuBattleViewTest {
      */
     @Test
     void altEnterSwitchesFullscreenWithoutReachingTheHudOrTheGame() {
-        var keys = new GpuBattleView(null).fullscreenKey;
         Input original = Gdx.input;
+        Graphics graphics = Gdx.graphics;
+        // The test sets libGDX's input and graphics: an ended application of an earlier test may have left its
+        // graphics there, whose closed window the switch itself would act on.
         Gdx.input = mock(Input.class);
+        Gdx.graphics = mock(Graphics.class);
         try {
+            var keys = new GpuBattleView(null).fullscreenKey;
             assertFalse(keys.keyDown(Input.Keys.ENTER), "A plain Enter goes on to the HUD and the game");
             assertFalse(keys.keyTyped('\n'));
             assertFalse(keys.keyUp(Input.Keys.ENTER));
@@ -107,6 +112,7 @@ class GpuBattleViewTest {
             assertFalse(keys.keyUp(Input.Keys.ENTER));
         } finally {
             Gdx.input = original;
+            Gdx.graphics = graphics;
         }
     }
 
