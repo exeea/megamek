@@ -441,6 +441,58 @@ final class FieldBoard {
     }
 
     /**
+     * Hex h's ground z at (x, y) behind a pool's wall that is no fall ({@link #poolWall}): #crestUnder's dry rim
+     * measured from the wall's moved rim (#edgeMove), a level top 0.5 m over the pool's water out to 1.9 m behind it,
+     * then falling a metre a metre, eased out over the edge's last tenth toward an end whose next edge is neither such
+     * a wall nor a fall. It only raises, on the pool's side of the rim, the pool's own ground or ground no wall parts
+     * from it, so samples shared across a bank get one height; {@code out[1]} is set to 1 where it raises the pool's
+     * own ground (#height draws it as the pool's rock).
+     */
+    private float poolRim(Coords h, float x, float y, float z, float[] out) {
+        Coords here = hexAt(x, y);
+        for (int n = -1; n < 6 && inside(here); n++) {
+            Coords p = n < 0 ? here : here.translated(BoardGeometry.edgeDirection(n));
+            if (!inside(p) || !WaterLayer.water(this, p) || !p.equals(h) && cliff(h, p)) { continue; }
+            for (int e = 0; e < 6; e++) {
+                if (!poolWall(p, e)) { continue; }
+                float ax = cornerX(p, e), ay = cornerY(p, e), ex = cornerX(p, e + 1) - ax, ey = cornerY(p, e + 1) - ay;
+                float len = (float) Math.hypot(ex, ey), nx = -ey / len, ny = ex / len;
+                if ((centerX(p) - ax) * nx + (centerY(p) - ay) * ny < 0) { nx = -nx; ny = -ny; }
+                float t = ((x - ax) * ex + (y - ay) * ey) / (len * len);
+                if (t < 0 || t > 1 || (x - ax) * nx + (y - ay) * ny > 9 * metre) { continue; }
+                // The nearest point of the moved rim, and which side of it the point lies.
+                float[][] m = edgeMove(p, e);
+                float best = Float.POSITIVE_INFINITY, side = 0;
+                for (int j = 0; j < FULL; j++) {
+                    float px0 = ax + ex * j / FULL + m[j][0], py0 = ay + ey * j / FULL + m[j][1];
+                    float sx = ex / FULL + m[j + 1][0] - m[j][0], sy = ey / FULL + m[j + 1][1] - m[j][1], s2 = sx * sx + sy * sy;
+                    float u = s2 < 1e-12f ? 0 : Math.clamp(((x - px0) * sx + (y - py0) * sy) / s2, 0, 1);
+                    float qx = px0 + sx * u, qy = py0 + sy * u, d2 = (x - qx) * (x - qx) + (y - qy) * (y - qy);
+                    if (d2 < best) { best = d2; side = (x - qx) * nx + (y - qy) * ny; }
+                }
+                float behind = (float) Math.sqrt(best);
+                if (side < -.01f * metre || behind > 2.5f * metre) { continue; }
+                Coords before = p.translated(BoardGeometry.edgeDirection(Math.floorMod(e - 1, 6)));
+                Coords after = p.translated(BoardGeometry.edgeDirection((e + 1) % 6));
+                float ends = (poolWall(p, Math.floorMod(e - 1, 6)) || falls(p, before) ? 1 : BoardRelief.smooth(t / .1f))
+                      * (poolWall(p, (e + 1) % 6) || falls(p, after) ? 1 : BoardRelief.smooth((1 - t) / .1f));
+                float target = shore.water(p, x, y) + .5f * metre - Math.max(0, behind - 1.9f * metre);
+                if (z < target) {
+                    z += (target - z) * ends;
+                    if (p.equals(h) && ends > .5f) { out[1] = 1; }
+                }
+            }
+        }
+        return z;
+    }
+
+    /** Whether pool p's edge e is a wall that is no fall: over a lower neighbour that is land, a cliff, no stream step. */
+    private boolean poolWall(Coords p, int e) {
+        Coords n = p.translated(BoardGeometry.edgeDirection(e));
+        return inside(n) && level(p) > level(n) && cliff(p, n) && !falls(p, n) && !stream(p, n) && !WaterLayer.water(this, n);
+    }
+
+    /**
      * How far fall edge e of hex h is dry at share t of its length, 0 to 1: outside the stretch water's rule lets
      * pour (BoardSurface#pourEdges: {from, to} along the straight edge; null, nothing pours), eased out over half a
      * metre inside it; a stretch reaching a corner (a run turning round it) leaves no rim there.
@@ -1649,7 +1701,8 @@ final class FieldBoard {
         // reach): earth the road did not reach before stays, retained by the portal's wing.
         out[1] = 0;
         z = crestUnder(h, x, y, z, out);
-        // A fall's dry rim is the falling hex's rock (#crestUnder).
+        z = poolRim(h, x, y, z, out);
+        // A fall's dry rim is the falling hex's rock (#crestUnder), as is a pool's rim over a wall (#poolRim).
         if (out[1] > 0) {
             role = 1;
             rock = 1;
