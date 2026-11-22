@@ -321,7 +321,8 @@ class GpuAtmosphereSmokeTest {
         atmosphere.configure(settings);
         atmosphere.updateLight(camera);
         terrain.setAtmosphere(atmosphere.lighting());
-        terrain.renderShadows(units);
+        // As the game's frame (GpuBattleView): the camera's detail levels are taken before the shadows draw.
+        terrain.renderShadows(camera.camera, units);
         atmosphere.prepareClouds(terrain, scene, delta);
         if (cloudOverride != null) {
             GpuEnvironmentLighting.required(terrain.environment()).cloudShadow = cloudOverride;
