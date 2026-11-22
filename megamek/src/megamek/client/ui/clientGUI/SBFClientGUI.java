@@ -82,6 +82,12 @@ import megamek.logging.MMLogger;
 public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
     private static final MMLogger logger = MMLogger.create(SBFClientGUI.class);
 
+    /**
+     * Development property megamek.sbf.native3d (off by default): SBF plays on the 3D board. Off, SBF plays on the
+     * Legacy 2D board as before.
+     */
+    public static final boolean NATIVE_3D = Boolean.getBoolean("megamek.sbf.native3d");
+
     public static final String CG_BOARD_VIEW = "BoardView";
     public static final String CG_CHAT_LOUNGE = "ChatLounge";
     public static final String CG_STARTING_SCENARIO = "JLabel-StartingScenario";

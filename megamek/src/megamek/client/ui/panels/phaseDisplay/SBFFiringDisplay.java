@@ -121,7 +121,7 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
         game().addGameListener(this);
         //TODO: rather have clientGUI take BVListeners and forward all events -> dont have to deal with changing
         // BoardViews
-        clientGUI.boardViews().forEach(b -> b.addBoardViewListener(this));
+        clientGUI.boardStates().forEach(b -> b.addBoardViewListener(this));
         targetDialog = new SBFTargetDialog(getClientGUI().getFrame(), game(), this);
     }
 
@@ -251,7 +251,7 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
     @Override
     public void removeAllListeners() {
         game().removeGameListener(this);
-        clientGUI.boardViews().forEach(b -> b.removeBoardViewListener(this));
+        clientGUI.boardStates().forEach(b -> b.removeBoardViewListener(this));
     }
 
     private void beginMyTurn() {

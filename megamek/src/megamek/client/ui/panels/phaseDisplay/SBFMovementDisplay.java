@@ -121,7 +121,7 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
         game().addGameListener(this);
         // TODO: rather have clientGUI take BVListeners and forward all events -> dont have to deal with changing
         //  BoardViews
-        clientGUI.boardViews().forEach(b -> b.addBoardViewListener(this));
+        clientGUI.boardStates().forEach(b -> b.addBoardViewListener(this));
     }
 
     @Override
@@ -267,7 +267,7 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
     @Override
     public void removeAllListeners() {
         game().removeGameListener(this);
-        clientGUI.boardViews().forEach(b -> b.removeBoardViewListener(this));
+        clientGUI.boardStates().forEach(b -> b.removeBoardViewListener(this));
     }
 
     private void beginMyTurn() {
