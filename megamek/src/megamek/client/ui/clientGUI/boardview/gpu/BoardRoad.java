@@ -121,6 +121,8 @@ final class BoardRoad {
     private int joined;
     /** Per joined arm d, whether the place beyond it and the one beyond arm d + 1 are joined too (#joinedCorners). */
     private int joinedCorners;
+    /** A turning place no track reaches from outside its cluster of turning places: worn evenly, no loop (#ruts). */
+    private boolean yard;
     /**
      * The turns this two-lane road closes, into its exits from the approaches that may not take them, as bit
      * {@code 6 * a + b} for sides {@code a, b} both ways round (SingleLane#closedTurns): it reserves no turn between them.
@@ -327,6 +329,7 @@ final class BoardRoad {
                     road.junction(tile.roadExits()))).meet(scene, tile);
         result.joined = joinedArms(scene, tile, exits);
         result.joinedCorners = joinedCorners(scene, tile, result.joined);
+        result.yard = turningPlace(tile) && (exits & ~result.joined) == 0;
         return result;
     }
 
@@ -481,6 +484,7 @@ final class BoardRoad {
         turning = from.turning;
         joined = from.joined;
         joinedCorners = from.joinedCorners;
+        yard = from.yard;
         inbound = from.inbound;
         closed = from.closed;
         return this;
@@ -1980,6 +1984,8 @@ final class BoardRoad {
             // the scuff wears it away (#scuff), and one loop is worn into the place; no corner of a junction.
             List<List<Point>> courses = new ArrayList<>();
             for (Point arm : borders) {
+                // Between joined places vehicles drive anywhere on the worn ground: no track of its own.
+                if (joinedArm(arm)) { continue; }
                 List<Point> stub = new ArrayList<>();
                 line(stub, beyond(arm), arm);
                 line(stub, arm, new Point(0, 0, arm.width));
@@ -2101,7 +2107,11 @@ final class BoardRoad {
         float scuff = scuff(x, y), rut = (inside < 0 ? -nearest : nearest) * (1 - scuff);
         float across = Math.clamp((rut + RUT_OFFSET) / (RUT_OFFSET + RUT_REACH), 0, 1);
         // A turning place's middle is worn to loose soil wherever its ruts lie, not only along them (#turningPlace).
-        if (turning) { across = Math.min(across, 1 - TURN_WORN * scuff / SCUFF_WEAR); }
+        if (turning) {
+            // A yard is worn evenly: no track arrives to drive a loop or ruts into it.
+            float worn = 1 - TURN_WORN * scuff / SCUFF_WEAR;
+            across = yard ? worn : Math.min(across, worn);
+        }
         return new Track(new Vector2(dx, dy).nor(), across);
     }
 
@@ -2116,6 +2126,8 @@ final class BoardRoad {
     private static final float TURN_CORE = 4f * METRE, TURN_EDGE = 7f * METRE, TURN_RAGGED = 1.5f * METRE;
     /** The radius of the loop turning vehicles wear into it (#wheels). */
     private static final float TURN_LOOP = 4.5f * METRE;
+    /** How far a yard's outline wanders in or out, and over how long a stretch (#wander). */
+    private static final float TURN_WANDER = .3f * TURN_EDGE, TURN_WANDER_SCALE = 6 * METRE;
     /** How far a turning place's most worn ground stands from the grass: loose soil, between a rut and its lip. */
     private static final float TURN_WORN = .55f;
 
@@ -2139,14 +2151,16 @@ final class BoardRoad {
      * its ruts together, fading out over a ragged edge; 0 off open junctions.
      */
     private float scuff(float x, float y) {
-        // Measured from the middle, or along an arm joining another turning place out to the border (#joinedArms).
-        float centre = (float) Math.sqrt(x * x + y * y);
+        // Measured from the middle, or along an arm joining another turning place out to the border (#joinedArms);
+        // a yard's outline and a joined arm's neck wander (#wander).
+        float wander = yard || joined != 0 ? wander(x, y) : 0;
+        float centre = (float) Math.sqrt(x * x + y * y) + (yard ? wander : 0);
         for (int d = 0; d < 6; d++) {
             if ((joined & 1 << d) == 0) { continue; }
             float[] border = joinedBorder(d);
             float t = Math.clamp((x * border[0] + y * border[1])
                   / (border[0] * border[0] + border[1] * border[1]), 0, 1);
-            centre = Math.min(centre, (float) Math.hypot(x - t * border[0], y - t * border[1]));
+            centre = Math.min(centre, (float) Math.hypot(x - t * border[0], y - t * border[1]) + wander);
             if ((joinedCorners & 1 << d) != 0 && cornerSector(d).contains(x, y)) { centre = 0; }
         }
         float core = turning ? TURN_CORE : SCUFF_CORE, edgeAt = turning ? TURN_EDGE : SCUFF_EDGE;
@@ -2201,6 +2215,27 @@ final class BoardRoad {
         return sector;
     }
 
+    /**
+     * How far a yard's outline or a joined neck's edge stands in or out at (x, y), tile px: low-frequency noise of the
+     * world position, so neighbouring hexes agree on it, some tenths of the worn middle's radius.
+     */
+    private float wander(float x, float y) {
+        float wx = (x + BoardGeometry.centerX(coords) / BoardGeometry.hexScale()) / TURN_WANDER_SCALE;
+        float wy = (y + BoardGeometry.centerY(coords) / BoardGeometry.hexScale()) / TURN_WANDER_SCALE;
+        return (2 * BoardRelief.noise(wx + 7.1f, wy - 3.4f) - 1) * TURN_WANDER;
+    }
+
+    /** Whether a border point of this turning place's arm leads to a joined place (#joinedArms). */
+    private boolean joinedArm(Point arm) {
+        for (int d = 0; d < 6; d++) {
+            if ((joined & 1 << d) == 0) { continue; }
+            float[] border = joinedBorder(d);
+            if (arm.x * border[0] + arm.y * border[1]
+                  > .99f * Math.hypot(arm.x, arm.y) * Math.hypot(border[0], border[1])) { return true; }
+        }
+        return false;
+    }
+
     /** The middle of this hex's border toward direction d, tile px from its centre. */
     private float[] joinedBorder(int d) {
         Coords next = coords.translated(d);
@@ -2213,7 +2248,8 @@ final class BoardRoad {
     Area rutReach() {
         Area result = new Area();
         if (openJunction()) {
-            float reach = turning ? TURN_EDGE + TURN_RAGGED : SCUFF_EDGE + SCUFF_RAGGED;
+            float reach = turning ? TURN_EDGE + TURN_RAGGED + (yard || joined != 0 ? TURN_WANDER : 0)
+                  : SCUFF_EDGE + SCUFF_RAGGED;
             result.add(new Area(new Ellipse2D.Float(-reach, -reach, 2 * reach, 2 * reach)));
             for (int d = 0; d < 6; d++) {
                 if ((joined & 1 << d) == 0) { continue; }
