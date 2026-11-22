@@ -821,7 +821,7 @@ final class GpuCommandDock implements GpuHud.Component {
         GpuBattleStatus.UnitStatus unit = state.presented(slot.entityId());
         head(inputs.frame().status().phase().isMovement()
               ? text("GpuBoard.hud.dock.opponentMoving", slot.playerName())
-              : text("GpuBoard.hud.phase.opponentTurn", slot.playerName()), slot.side() == GpuBattleStatus.Side.ENEMY);
+              : text("GpuBoard.hud.dock.opponentTurn", slot.playerName()), slot.side() == GpuBattleStatus.Side.ENEMY);
         span(name(unit), UiTheme.MINT);
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         foot(fire.active() && !fire.editable() ? text("GpuBoard.hud.dock.weaponAttacks",
