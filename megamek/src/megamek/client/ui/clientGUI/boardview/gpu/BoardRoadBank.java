@@ -36,7 +36,7 @@ final class BoardRoadBank {
      */
     static final float VERGE = 3;
     /** Rise per run of the steepest part of a bank. */
-    private static final float SLOPE = .75f;
+    static final float SLOPE = .75f;
     /** Height, in levels, over which a bank rounds into the ground it leaves. */
     private static final float ROUND = .35f;
     /** Height, in levels, past a road's range over which ground fades back to its own shape. */

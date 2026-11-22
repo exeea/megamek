@@ -400,7 +400,8 @@ final class FieldStamps {
                 if (!back && Math.abs(off - p[6]) > on) { continue; }
                 if (first != null && (p[0] > first[0] || p[0] == first[0] && p[1] >= first[1])) { continue; }
                 first = p;
-                to = back ? p[9] + (p[10] - p[9]) * u : p[7] + (p[8] - p[7]) * u;
+                // The back line closes at the wall's top: no soil stands over it.
+                to = back ? Math.min(p[9] + (p[10] - p[9]) * u, p[11] + (p[12] - p[11]) * u) : p[7] + (p[8] - p[7]) * u;
             }
             if (first == null) { continue; }
             if (Float.isFinite(to)) { z[v] = to; }
@@ -408,6 +409,13 @@ final class FieldStamps {
             block.bounds()[5] = Math.max(block.bounds()[5], z[v]);
             // Its own parent: every detail cuts along the same panels and gives the point the same height.
             parents[v * 6] = Float.NaN;
+        }
+        // The cut's back line and front: the soil behind the wall is earth, as the lattice's (#stepBack); a cliff keeps
+        // its face.
+        for (int v = before; v < block.size(); v++) {
+            if (!wall[v] && Float.isNaN(parents[v * 6]) && block.role()[v] < 2 && block.rock()[v] < .5f) {
+                block.rock()[v] = 0;
+            }
         }
         if (coarser != null) {
             // A coarser triangle the cut passes through reaches a coarser cell from it.
@@ -423,6 +431,81 @@ final class FieldStamps {
                   (px, py, pz) -> beside(panels, px, py, 2 * cell), rim);
         }
         return block;
+    }
+
+    /**
+     * Whether a containment wall stands within two hexes of h: only there can a sample of h's block step back
+     * (#stepBack, the panels round the hex the sample lies in).
+     */
+    static boolean nearWalls(FieldBoard board, Coords h, Function<Coords, FieldBoard.Shares> shares) {
+        for (int d = -1; d < 6; d++) {
+            Coords n = d < 0 ? h : h.translated(d);
+            for (int e = -1; e < 6; e++) {
+                if (!board.walls(e < 0 ? n : n.translated(e), shares).isEmpty()) { return true; }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A lattice sample at (x, y) beside a containment wall, from the field's {@code out} (z, role, rock), as hex h's
+     * block asks it before it merges level ground (ChunkField): the panels of the hex the point lies in and its
+     * neighbours decide, so the hexes sharing a sample give it one height. On the road's side of every wall round it,
+     * reserved ground is its road's surface (the bank leaves it as high as a step's land where that stands higher than
+     * it cuts; it is painted as road). Behind a wall the land steps back from its top at the bank's slope, as today's
+     * bank retains it (BoardRoadBank#height), fully where it stands up to half a level above the top, fading out by a
+     * level; the soil it leaves is earth, a bank's face. A cliff keeps its face.
+     */
+    static void stepBack(FieldBoard board, Function<Coords, FieldBoard.Shares> shares, Coords h, float x, float y,
+          float[] out) {
+        if (out[2] >= .5f) { return; }
+        Coords here = hexAt(h, x, y);
+        float on = BoardRelief.metres(.02f), earth = BoardRelief.metres(.1f), level = BoardGeometry.level();
+        // A point this far past a panel's end still lies behind it: the gap to the next panel of the run.
+        float run = BoardRelief.metres(1), z = out[0], lowered = z;
+        boolean any = false, behind = false;
+        for (int d = -1; d < 6; d++) {
+            for (float[] p : board.walls(d < 0 ? here : here.translated(d), shares)) {
+                any = true;
+                float ex = p[2] - p[0], ey = p[3] - p[1], length2 = ex * ex + ey * ey;
+                float length = (float) Math.sqrt(length2);
+                float t = ((x - p[0]) * ex + (y - p[1]) * ey) / length2, u = Math.clamp(t, 0, 1);
+                if ((x - p[0]) * p[4] + (y - p[1]) * p[5] > -on) { continue; }
+                behind |= t * length > -run && (t - 1) * length < run;
+                float top = p[11] + (p[12] - p[11]) * u;
+                if (!Float.isFinite(top)) { continue; }
+                float cap = top + BoardRoadBank.SLOPE * (float) Math.hypot(p[0] + ex * u - x, p[1] + ey * u - y);
+                float fade = 1 - BoardRelief.smooth((z - top - .5f * level) / (.5f * level));
+                lowered = Math.min(lowered, z + (Math.min(z, cap) - z) * fade);
+            }
+        }
+        if (!any) { return; }
+        float road = behind ? Float.NaN : board.roadSurface(here, x, y);
+        if (Float.isFinite(road) && Math.abs(z - road) > earth) {
+            out[0] = road;
+            out[1] = 0;
+            return;
+        }
+        if (z - lowered > earth) {
+            out[1] = Math.max(out[1], 1);
+            out[2] = 0;
+        }
+        out[0] = lowered;
+    }
+
+    /**
+     * The hex a point lies in, among h and its neighbours: on a border, the first by FieldBoard#packed of those holding
+     * it, so every hex sharing the point names the same one; h where none does.
+     */
+    private static Coords hexAt(Coords h, float x, float y) {
+        Coords best = null;
+        for (int d = -1; d < 6; d++) {
+            Coords c = d < 0 ? h : h.translated(d);
+            if (BoardGeometry.contains(c, x, y) && (best == null || FieldBoard.packed(c) < FieldBoard.packed(best))) {
+                best = c;
+            }
+        }
+        return best == null ? h : best;
     }
 
     /** Whether (x, y) lies within {@code reach} of a containment wall's panel, in plan. */

@@ -26,10 +26,13 @@ final class FieldRoads {
      */
     private static final int KEPT = 256;
 
-    /** A hex's bank and the relief it reads; none where no carriageway reaches its surroundings. */
-    private record Hex(BoardRoadBank bank, BoardRelief relief) { }
+    /**
+     * A hex's bank and the relief it reads, and by edge those whose step a containment wall retains (#retained); none
+     * where no carriageway reaches its surroundings.
+     */
+    private record Hex(BoardRoadBank bank, BoardRelief relief, int retained) { }
 
-    private static final Hex NONE = new Hex(null, null);
+    private static final Hex NONE = new Hex(null, null, 0);
 
     private final BoardScene scene;
     private final Map<Coords, Hex> hexes = new ConcurrentHashMap<>();
@@ -63,7 +66,7 @@ final class FieldRoads {
             relief.walled(0, 0);
             kept.add(at);
             count.incrementAndGet();
-            return new Hex(bank, relief);
+            return new Hex(bank, relief, retained(at, relief));
         });
         while (count.get() > KEPT) {
             Coords eldest = kept.poll();
@@ -94,6 +97,49 @@ final class FieldRoads {
         return relief == null ? null : relief.fieldPush(e, t, x, y);
     }
 
+    /**
+     * The edges of hex h along which a containment wall retains the step, by today's rule (BoardRelief#retains): only
+     * beside a carriageway at the edge's corners, the roads that rule takes there (BoardRelief#push), and only a step
+     * today draws as earth.
+     */
+    private int retained(Coords h, BoardRelief relief) {
+        int edges = 0;
+        BoardScene.Tile own = scene.tile(h);
+        for (int e = 0; e < 6; e++) {
+            // A step today draws as rock (BoardRelief#levels, FieldBoard's levels rule) stays rock.
+            BoardScene.Tile next = scene.tile(h.translated(BoardGeometry.edgeDirection(e)));
+            if (next == null || BoardRelief.levels(own, next) > 2.5f) { continue; }
+            for (int side = e - 1; side <= e + 1; side++) {
+                BoardScene.Tile tile = scene.tile(h.translated(BoardGeometry.edgeDirection(Math.floorMod(side, 6))));
+                if (tile != null && !tile.liquid().present() && BoardRoad.carriageway(tile)) {
+                    if (relief.retains(e)) { edges |= 1 << e; }
+                    break;
+                }
+            }
+        }
+        return edges;
+    }
+
+    /**
+     * The neighbour of hex upper nearest (x, y) by its centre, where a containment wall retains the step down to it
+     * (#retained); null elsewhere. The point alone decides: a sample on the shared edge gives the lower hex too.
+     */
+    Coords retainedBelow(Coords upper, float x, float y) {
+        int edges = hex(upper).retained();
+        if (edges == 0) { return null; }
+        int nearest = -1;
+        float best = Float.POSITIVE_INFINITY;
+        for (int e = 0; e < 6; e++) {
+            Coords n = upper.translated(BoardGeometry.edgeDirection(e));
+            float dx = x - BoardGeometry.centerX(n), dy = y - BoardGeometry.centerY(n), d = dx * dx + dy * dy;
+            if (d < best) {
+                best = d;
+                nearest = e;
+            }
+        }
+        return (edges & 1 << nearest) != 0 ? upper.translated(BoardGeometry.edgeDirection(nearest)) : null;
+    }
+
     /** Whether a carriageway reserves hex h's ground at (x, y). */
     boolean reserved(Coords h, float x, float y) {
         BoardRoadBank bank = bank(h);
@@ -117,10 +163,25 @@ final class FieldRoads {
      * where none does. A plate's road (FieldPlates), which no bank eases.
      */
     float surface(Coords h, float x, float y) {
+        return surface(h, x, y, false);
+    }
+
+    /**
+     * As {@link #surface}, of a carriageway on the ground only: no bridge's ramp, no plate's road, none under water
+     * (the roads a bank eases, BoardRoadBank).
+     */
+    float groundSurface(Coords h, float x, float y) {
+        return surface(h, x, y, true);
+    }
+
+    private float surface(Coords h, float x, float y, boolean ground) {
         for (int d = -1; d < 6; d++) {
             BoardScene.Tile tile = scene.tile(d < 0 ? h : h.translated(d));
             BoardRoadGrade grade = tile == null ? null : BoardRoadGrade.of(scene, tile, true);
-            if (grade != null && grade.contains(x, y)) { return grade.height(x, y); }
+            if (grade == null || ground && (grade.bridgeRamp() || grade.poured() || tile.liquid().present())) {
+                continue;
+            }
+            if (grade.contains(x, y)) { return grade.height(x, y); }
         }
         return Float.NaN;
     }
@@ -138,9 +199,10 @@ final class FieldRoads {
                 float[] p = panel.place();
                 float x = (p[0] + p[2]) / 2, y = (p[1] + p[3]) / 2;
                 if (!BoardGeometry.contains(at, x, y) && claimed(at, x, y, ground)) { continue; }
-                float[] place = Arrays.copyOf(p, 11);
+                float[] place = Arrays.copyOf(p, 13);
                 place[9] = behind(at, p[0], p[1], p[4], p[5], ground);
                 place[10] = behind(at, p[2], p[3], p[4], p[5], ground);
+                tops(p, panel.faces(), place);
                 kept.places().add(place);
                 kept.faces().addAll(panel.faces());
             }
@@ -161,6 +223,23 @@ final class FieldRoads {
             if (own != null) { return own.height(px, py); }
         }
         return Float.NaN;
+    }
+
+    /**
+     * The panel's top at its two ends, into place[11] and [12]: the highest of its faces' corners at each end (within
+     * 10 cm of it along the panel).
+     */
+    private static void tops(float[] p, List<BoardSurface.Face> faces, float[] place) {
+        float ex = p[2] - p[0], ey = p[3] - p[1], length2 = ex * ex + ey * ey, near = BoardRelief.metres(.1f);
+        float length = (float) Math.sqrt(length2);
+        place[11] = place[12] = Float.NEGATIVE_INFINITY;
+        for (BoardSurface.Face face : faces) {
+            for (var corner : new com.badlogic.gdx.math.Vector3[] { face.a(), face.b(), face.c() }) {
+                float along = ((corner.x - p[0]) * ex + (corner.y - p[1]) * ey) / length;
+                if (Math.abs(along) <= near) { place[11] = Math.max(place[11], corner.z); }
+                if (Math.abs(along - length) <= near) { place[12] = Math.max(place[12], corner.z); }
+            }
+        }
     }
 
     /** Every panel today's rule gives hex h over its own height. */

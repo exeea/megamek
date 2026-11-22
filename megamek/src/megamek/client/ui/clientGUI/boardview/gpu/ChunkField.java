@@ -214,6 +214,8 @@ final class ChunkField {
         int levelTopCount, groundCount, faceCount, wallCount;
         /** Whether the board cuts one of this hex's sides (a neighbour outside it): its level ground is not merged. */
         boolean cut;
+        /** Whether a containment wall stands near: the samples step back behind it (FieldStamps#stepBack). */
+        final boolean walled;
 
         Builder(ChunkField chunk, Coords h) {
             this.chunk = chunk;
@@ -235,12 +237,15 @@ final class ChunkField {
             stepTop = new int[capacity];
             java.util.Arrays.fill(stepTop, -1);
             size = lattice;
+            walled = FieldStamps.nearWalls(b, h, chunk::shares);
         }
 
         /** FieldBoard#height as hex {@code at} evaluates it, with its steps and level-set grid. */
         private void height(Coords at, float px, float py, float[] out) {
             boolean self = at.equals(h);
             b.height(at, self ? segments : b.segments(at), self ? shares : chunk.shares(at), px, py, out);
+            // Before level ground merges: a sample stepped back never lies inside a merged level top.
+            if (walled) { FieldStamps.stepBack(b, chunk::shares, at, px, py, out); }
         }
 
         /**

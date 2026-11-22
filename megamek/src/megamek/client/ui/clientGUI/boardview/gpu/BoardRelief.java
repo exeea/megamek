@@ -2291,9 +2291,9 @@ final class BoardRelief {
             if (!bayed(edge)) { continue; }
             Station previous = null;
             for (int k = 0; k <= PUSH_STATIONS; k++) {
-                Object node = k == 0 ? edge.a : k == PUSH_STATIONS ? edge.b : new Station.Node(edge, k);
+                Object node = node(edge, k);
                 Station station = station(node, edge);
-                boolean walled = station.wallable() && walled(node, edge);
+                boolean walled = retains(node, edge);
                 if (walled) {
                     float[] wall = station.wall();
                     lines.addAll(List.of(wall[0], wall[1], wall[2], wall[3]));
@@ -2308,6 +2308,26 @@ final class BoardRelief {
         float[] result = new float[lines.size()];
         for (int i = 0; i < result.length; i++) { result[i] = lines.get(i); }
         return result;
+    }
+
+    /**
+     * Whether a containment wall retains the step along this hex's edge {@code index} anywhere: a station or corner of
+     * it on a walled run, as {@link #wallLines} draws the walls (the field takes that step as a bank, FieldBoard).
+     */
+    boolean retains(int index) {
+        Edge edge = edge(index);
+        for (int k = 0; bayed(edge) && k <= PUSH_STATIONS; k++) {
+            if (retains(node(edge, k), edge)) { return true; }
+        }
+        return false;
+    }
+
+    /** Whether a station or corner keeps its toe behind a containment wall. */
+    private boolean retains(Object node, Edge edge) { return station(node, edge).wallable() && walled(node, edge); }
+
+    /** An edge's station k: its corners at 0 and {@link #PUSH_STATIONS}. */
+    private static Object node(Edge edge, int k) {
+        return k == 0 ? edge.a : k == PUSH_STATIONS ? edge.b : new Station.Node(edge, k);
     }
 
     /**

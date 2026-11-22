@@ -883,6 +883,9 @@ final class FieldBoard {
               || (walls[v.getX()][v.getY()] & 1 << edgeIndex(v, u)) != 0);
     }
 
+    /** The surface of a carriageway on the ground whose reserved ground holds (x, y) (FieldRoads#groundSurface). */
+    float roadSurface(Coords h, float x, float y) { return roads.groundSurface(h, x, y); }
+
     /** Whether a carriageway ramps across the edge between u and v (FieldRoads#ramps). */
     boolean ramp(Coords u, Coords v) {
         return (roads.ramps(u) & 1 << u.direction(v)) != 0 || (roads.ramps(v) & 1 << v.direction(u)) != 0;
@@ -1756,6 +1759,10 @@ final class FieldBoard {
             // Marked for the mesh (ChunkMesh: a step face's samples use no step count).
             nearLevels = -1;
         }
+        // A stream hex's step a containment wall retains by a road is today's earth bank (FieldRoads#retainedBelow).
+        Coords upper = rock > 0 ? unpacked(nearTop) : null;
+        Coords lower = upper == null ? null : roads.retainedBelow(upper, x, y);
+        if (lower != null && stream(upper, lower)) { rock = 0; }
         float ground = roads.height(h, x, y, z);
         if (zt > z && ground < z) { ground = Math.max(ground, Math.min(z, roads.height(h, x, y, zt))); }
         // Reserved ground is its road's surface: a top, as today's is (BoardRoadCut#mesh).
