@@ -189,14 +189,15 @@ public final class BoardSurfaceBlend {
     private static boolean blendable(BoardScene.Tile tile) {
         return tile != null && !tile.ultraSublevel() && !tile.backdrop().present()
               && (!tile.liquid().present() || tile.liquid().volcanic() && !tile.frozen())
-              && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && !tile.slab();
+              && (tile.roadExits() == 0 || BoardRoad.rendered(tile));
     }
 
     /** Uniform interiors retain the ordinary family material and incur no extra maps or vertex attributes. */
     static boolean boundary(BoardScene scene, BoardScene.Tile tile) {
         if (tile == null || tile.ultraSublevel() || tile.backdrop().present()) { return false; }
         Cover own = cover(tile);
-        // A building or lake ice blocks neighbouring cover, but cannot erase its own authored ground treatment.
+        // Lake ice blocks neighbouring cover, but cannot erase its own authored ground treatment. A building's hex
+        // blends like any other ground: what it stands on is drawn over that ground.
         if (!own.equals(solid(family(tile)))) { return true; }
         if (!blendable(tile)) { return false; }
         for (int direction = 0; direction < 6; direction++) {
