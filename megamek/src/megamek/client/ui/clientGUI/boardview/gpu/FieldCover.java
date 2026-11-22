@@ -102,7 +102,7 @@ final class FieldCover {
     void lattice(float[] x, float[] y, float[] z, float[] role, float[] rock, float[] foot, int[] stepTop, int lattice) {
         for (int v = 0; v < lattice; v++) {
             ground(v, x[v], y[v], z[v]);
-            if (stepTop != null) { scree(v, role[v], rock[v], foot[v], stepTop[v]); }
+            if (stepTop != null) { scree(v, x[v], y[v], z[v], role[v], rock[v], foot[v], stepTop[v]); }
             // A stream hex's bank slope takes the gorge's rock (cliffs, 2026-11-20; the user's choice).
             if (stepTop != null) { gorge(v, role[v], stepTop[v]); }
         }
@@ -114,7 +114,7 @@ final class FieldCover {
      * profile (FieldBoard#height: whole at the cliff's row, gone at twice the transition out) times how much of a
      * cliff the step is.
      */
-    private void scree(int v, float role, float rock, float foot, int top) {
+    private void scree(int v, float x, float y, float z, float role, float rock, float foot, int top) {
         Coords upper = FieldBoard.unpacked(top);
         // A water hex's bank face (rock 0: no wall) belongs to the hex above it as a cliff's does: its family whole at
         // the face, so the upper hex's slope reaches the water and the river's gravel keeps to the flat wet margin.
@@ -126,8 +126,10 @@ final class FieldCover {
         float share = family == own || reach >= 1 ? 0 : rock * (1 - (float) Math.sqrt(reach));
         if (share <= TRACE) { return; }
         int o = v * STRIDE;
-        for (int f = 0; f < BoardSurfaceBlend.FAMILIES; f++) { raw[o + f] *= 1 - share; }
-        raw[o + family] += share;
+        // Beside lava the fallen cover melts as the evaluator's does (BoardSurfaceBlend.Sampler#scorched): snow to its
+        // rock, turf to its soil.
+        BoardSurfaceBlend.Cover fallen = sampler.scorched(BoardSurfaceBlend.solid(family), x, y, z);
+        for (int f = 0; f < BoardSurfaceBlend.FAMILIES; f++) { raw[o + f] = raw[o + f] * (1 - share) + share * fallen.weight(f); }
         scree = true;
     }
 
@@ -341,7 +343,10 @@ final class FieldCover {
         for (; count > ENTRIES; count--) {
             int weakest = -1;
             for (int id = 0; id < IDS; id++) {
-                if (present[id] && (weakest < 0 || strength[id] < strength[weakest])) { weakest = id; }
+                // A molten bank glows beside its pool: a weaker cover goes before it.
+                if (present[id] && id != BoardSurfaceBlend.BANK && (weakest < 0 || strength[id] < strength[weakest])) {
+                    weakest = id;
+                }
             }
             present[weakest] = false;
         }

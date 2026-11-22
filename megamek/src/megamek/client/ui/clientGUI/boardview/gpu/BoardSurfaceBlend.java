@@ -376,7 +376,7 @@ public final class BoardSurfaceBlend {
          * Lava melts the snow beside it off its rock and burns turf to its soil (#melted): fully at the lava's edge, in
          * broken tongues to HEAT_METRES out, and less far up a column, which the heat reaches across less of.
          */
-        private Cover scorched(Cover cover, float x, float y, float z) {
+        Cover scorched(Cover cover, float x, float y, float z) {
             float snow = cover.snow(), turf = cover.grass() + cover.tropical();
             if (snow + turf <= 0) { return cover; }
             var at = BoardGeometry.tile(scene, x, y);
