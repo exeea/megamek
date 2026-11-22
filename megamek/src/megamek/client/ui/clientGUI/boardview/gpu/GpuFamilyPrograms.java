@@ -520,6 +520,15 @@ final class GpuFamilyPrograms {
               + families[2] + ", " + families[3] + ", " + families[4] + ")\n" + reuse;
     }
 
+    /**
+     * A material's place among its generic program's draws (GpuOpaqueSorter): its family variant, the same whether
+     * its family program or the generic one draws it; empty for a material no family program draws.
+     */
+    static String order(Material material, long sculptType) {
+        float[] families = families(material, sculptType);
+        return families == null ? "" : Arrays.toString(families) + baseAliases(material) + (isFlat(material) ? "t" : "");
+    }
+
     /** The program name's suffix, as the shader editor and the compile log show it. */
     static String name(Material material, long sculptType) {
         float[] families = constants(material, sculptType);

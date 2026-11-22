@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
@@ -19,13 +20,29 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
     private final Map<Shader, Integer> shaderOrder = new IdentityHashMap<>();
     private final Map<Shader, Integer> groupOrder = new IdentityHashMap<>();
     private final Function<Shader, Shader> group;
+    private final Function<Material, String> variant;
+    private final Map<Material, String> variants = new IdentityHashMap<>();
     private Camera view;
     private final Vector3 leftCentre = new Vector3(), rightCentre = new Vector3();
 
     GpuOpaqueSorter() { this(Function.identity()); }
 
     /** Shaders with one {@code group} sort as one shader: their draws keep their mutual order and tie winners. */
-    GpuOpaqueSorter(Function<Shader, Shader> group) { this.group = group; }
+    GpuOpaqueSorter(Function<Shader, Shader> group) { this(group, null); }
+
+    /**
+     * {@code variant} names a material's place inside its group (null: none): a group's draws sort by it before
+     * distance, so each of the group's programs draws in one run instead of binding once a draw. The name must not
+     * depend on which of the group's programs draws the material: a program swapped in then keeps the order and the
+     * depth-tie winners.
+     */
+    GpuOpaqueSorter(Function<Shader, Shader> group, Function<Material, String> variant) {
+        this.group = group;
+        this.variant = variant;
+    }
+
+    /** Materials are replaced at a terrain update: forget their names. */
+    void clear() { variants.clear(); }
 
     @Override
     public void sort(Camera camera, Array<Renderable> renderables) {
@@ -82,6 +99,11 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
         if (groupShaders && (a == null || !a.blended) && (b == null || !b.blended)) {
             int shader = Integer.compare(shaderOrder.get(left.shader), shaderOrder.get(right.shader));
             if (shader != 0) { return shader; }
+            if (variant != null && left.material != right.material) {
+                int order = variants.computeIfAbsent(left.material, variant)
+                      .compareTo(variants.computeIfAbsent(right.material, variant));
+                if (order != 0) { return order; }
+            }
         }
         return super.compare(left, right);
     }

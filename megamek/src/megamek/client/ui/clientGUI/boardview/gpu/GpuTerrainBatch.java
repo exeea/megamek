@@ -52,15 +52,21 @@ final class GpuTerrainBatch implements RenderableSorter {
      * record (TerrainField), as its program would.
      */
     GpuTerrainBatch(Predicate<Material> terrain, Function<Shader, Shader> group, Consumer<Material> rebind) {
+        this(terrain, group, rebind, null);
+    }
+
+    /** {@code variant}: a material's place inside its shader group (GpuOpaqueSorter), or null. */
+    GpuTerrainBatch(Predicate<Material> terrain, Function<Shader, Shader> group, Consumer<Material> rebind,
+          Function<Material, String> variant) {
         this.terrain = terrain;
         this.rebind = rebind;
-        original = new GpuOpaqueSorter(group);
+        original = new GpuOpaqueSorter(group, variant);
     }
 
     void setEnabled(boolean value) { enabled = value; }
 
     /** Materials are immutable between terrain updates; do not retain replaced chunks through this lookup. */
-    void clear() { materialIds.clear(); materialValues.clear(); ordered.clear(); groups.clear(); }
+    void clear() { materialIds.clear(); materialValues.clear(); ordered.clear(); groups.clear(); original.clear(); }
 
     @Override
     public void sort(Camera camera, Array<Renderable> parts) {

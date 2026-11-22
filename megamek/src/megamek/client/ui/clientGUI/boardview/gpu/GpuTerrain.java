@@ -143,7 +143,7 @@ final class GpuTerrain implements Disposable {
     private final Map<Shader, Shader> shaderGroups = new IdentityHashMap<>();
     private final GpuTerrainBatch terrainBatch = new GpuTerrainBatch(material -> material.has(Ground.TYPE)
           && !material.has(GpuLiquidShader.Frame.TYPE) && !material.has(GpuWaterShader.TYPE), this::shaderGroup,
-          material -> this.fieldMorphs.bind(material));
+          material -> this.fieldMorphs.bind(material), material -> GpuFamilyPrograms.order(material, Sculpt.TYPE));
     private final GpuTerrainPages terrainPages = new GpuTerrainPages(terrainBatch::eligible);
     /** The ground material cache's tops (GpuMaterialCache) in shared draws of their own, which switch programs. */
     private final GpuTerrainPages topPages = new GpuTerrainPages(terrainBatch::eligible);
