@@ -48,6 +48,7 @@ import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
@@ -138,6 +139,12 @@ public class SBFClient extends AbstractClient {
                     getGame().clearActions();
                     for (EntityAction action : packet.getEntityActionList(0)) {
                         getGame().addAction(action);
+                    }
+                    break;
+                case SENDING_PLANETARY_CONDITIONS:
+                    PlanetaryConditions conditions = packet.getPlanetaryConditions(0);
+                    if (conditions != null) {
+                        game.setPlanetaryConditions(conditions);
                     }
                     break;
                 default:

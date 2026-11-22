@@ -1694,7 +1694,10 @@ final class GpuBoardSource implements BoardSource {
             nextContext = new BoardScene.Context(contextCoords, contextUnitId,
                   actions.contextCommands(contextCoords, contextUnitId, tools), contextSelectionCleared);
         }
-        status = battleStatus.arcs(arcTarget(status, hover, panels));
+        if (sbf == null) {
+            // The enemy's arcs are the TW status's own (an SBF formation has no facing)
+            status = battleStatus.arcs(arcTarget(status, hover, panels));
+        }
         Entity actor = view.game.getEntity(actorId);
         boolean knownActor = actor != null && identified(actor);
         return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextTooltip, nextDetails,
