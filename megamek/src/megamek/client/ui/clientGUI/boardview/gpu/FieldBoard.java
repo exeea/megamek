@@ -868,6 +868,28 @@ final class FieldBoard {
         return (roads.ramps(u) & 1 << u.direction(v)) != 0 || (roads.ramps(v) & 1 << v.direction(u)) != 0;
     }
 
+    /**
+     * Reserved ground at (x, y) beside an edge a carriageway ramps across (#ramp), from {@code ground}: the road's
+     * surface within the step's room of the edge, eased back over as much again. The step's level set, centred on
+     * the edge, would dip under the ramp's high end (the mean of the two levels where the road stands at the higher).
+     * The point alone decides (the hex it lies in and that hex's edges), so hexes sharing a sample give it one height.
+     */
+    private float rampBand(float ground, float x, float y) {
+        Coords here = hexAt(x, y);
+        if (!inside(here)) { return ground; }
+        float near = Float.POSITIVE_INFINITY;
+        for (int e = 0; e < 6; e++) {
+            Coords g = here.translated(BoardGeometry.edgeDirection(e));
+            if (!inside(g) || level(g) == level(here) || !ramp(here, g)) { continue; }
+            near = Math.min(near, BoardRelief.distance(x, y, cornerX(here, e), cornerY(here, e), cornerX(here, e + 1),
+                  cornerY(here, e + 1)));
+        }
+        if (near >= 2 * room) { return ground; }
+        float surface = roads.surface(here, x, y);
+        return Float.isNaN(surface) ? ground
+              : BoardRelief.lerp(surface, ground, BoardRelief.smooth(Math.max(0, near - room) / room));
+    }
+
     /** A wall whose row the field moves: a cliff between two hexes it takes. */
     private boolean wall(Coords u, Coords v) { return taken(u) && taken(v) && cliff(u, v); }
 
@@ -1712,9 +1734,10 @@ final class FieldBoard {
         }
         float ground = roads.height(h, x, y, z);
         if (zt > z && ground < z) { ground = Math.max(ground, Math.min(z, roads.height(h, x, y, zt))); }
-        out[0] = ground;
         // Reserved ground is its road's surface: a top, as today's is (BoardRoadCut#mesh).
         boolean road = roads.reserved(h, x, y);
+        if (road) { ground = rampBand(ground, x, y); }
+        out[0] = ground;
         out[1] = road ? 0 : role;
         out[2] = road ? 0 : rock;
         out[3] = Math.min(rim, bankRim);
