@@ -70,6 +70,7 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
 
         if (entity == null) {
             LOGGER.error("Entity received was invalid");
+            new TWRequestResync(gameManager).turnRefused(connId, null, false);
             return;
         }
 
@@ -89,6 +90,7 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
         // is this the right phase?
         if (!getGame().getPhase().isDeployment()) {
             LOGGER.error("Server got deployment packet in wrong phase");
+            new TWRequestResync(gameManager).turnRefused(connId, entity, true);
             return;
         }
 
@@ -117,11 +119,7 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
             String msg = "server got invalid deployment packet from connection " + connId;
             msg += ", Entity: " + entity.getShortName();
             LOGGER.error(msg);
-            gameManager.send(connId, gameManager.getPacketHelper().createTurnListPacket());
-
-            if (turn != null) {
-                gameManager.send(connId, gameManager.getPacketHelper().createTurnIndexPacket(turn.playerId()));
-            }
+            new TWRequestResync(gameManager).turnRefused(connId, entity, false);
             return;
         }
 
@@ -172,11 +170,13 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
 
         if (loader == null) {
             LOGGER.error("Received bad entity for loader unload");
+            new TWRequestResync(gameManager).turnRefused(connId, null, false);
             return;
         }
 
         if (loaded == null) {
             LOGGER.error("Received bad entity for loaded unload.");
+            new TWRequestResync(gameManager).turnRefused(connId, loader, false);
             return;
         }
 
@@ -186,6 +186,7 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
                   connId;
             msg += ", Entity: " + loader.getShortName();
             LOGGER.error(msg);
+            new TWRequestResync(gameManager).turnRefused(connId, loader, true);
             return;
         }
 
@@ -199,8 +200,7 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
             String msg = "server got invalid deployment unload packet from connection " + connId;
             msg += ", Entity: " + loader.getShortName();
             LOGGER.error(msg);
-            gameManager.send(connId, gameManager.getPacketHelper().createTurnListPacket());
-            gameManager.send(connId, gameManager.getPacketHelper().createTurnIndexPacket(connId));
+            new TWRequestResync(gameManager).turnRefused(connId, loader, false);
             return;
         }
 

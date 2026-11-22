@@ -1225,6 +1225,7 @@ public class TWGameManager extends AbstractGameManager {
     public void handlePacket(int connectionId, Packet packet) {
         super.handlePacket(connectionId, packet);
         final Player player = game.getPlayer(connectionId);
+        boolean malformed = false;
         try {
             switch (packet.command()) {
                 case PRINCESS_SETTINGS:
@@ -1541,7 +1542,9 @@ public class TWGameManager extends AbstractGameManager {
             }
         } catch (InvalidPacketDataException e) {
             LOGGER.error("Invalid packet data:", e);
+            malformed = true;
         }
+        new TWRequestResync(this).requestHandled(connectionId, packet, malformed);
     }
 
     /**
@@ -4777,6 +4780,7 @@ public class TWGameManager extends AbstractGameManager {
 
         if (entity == null) {
             LOGGER.error("Received packet with invalid entity");
+            new TWRequestResync(this).turnRefused(connectionId, null, false);
             return;
         }
 
@@ -4789,6 +4793,7 @@ public class TWGameManager extends AbstractGameManager {
             // is this the right phase?
             if (!getGame().getPhase().isMovement()) {
                 LOGGER.error("Server got movement packet in wrong phase");
+                new TWRequestResync(this).turnRefused(connectionId, entity, true);
                 return;
             }
 
@@ -4804,8 +4809,7 @@ public class TWGameManager extends AbstractGameManager {
                       connectionId,
                       entity.getShortName());
                 // Without this the sender believes its turn is over while the server still waits on it
-                send(connectionId, packetHelper.createTurnListPacket());
-                send(connectionId, packetHelper.createTurnIndexPacket(connectionId));
+                new TWRequestResync(this).turnRefused(connectionId, entity, false);
                 return;
             }
 
@@ -10532,12 +10536,14 @@ public class TWGameManager extends AbstractGameManager {
 
         if (entity == null) {
             LOGGER.error("Received invalid entity from prephase packet");
+            new TWRequestResync(this).turnRefused(connectionId, null, false);
             return;
         }
 
         // is this the right phase?
         if (!getGame().getPhase().isPreFiring() && !getGame().getPhase().isPremovement()) {
             LOGGER.error("Server got Prephase packet in wrong phase {}", game.getPhase());
+            new TWRequestResync(this).turnRefused(connectionId, entity, true);
             return;
         }
 
@@ -10551,8 +10557,7 @@ public class TWGameManager extends AbstractGameManager {
                   connectionId,
                   entity.getShortName(),
                   ((turn == null) ? "null" : "invalid"));
-            send(connectionId, packetHelper.createTurnListPacket());
-            send(connectionId, packetHelper.createTurnIndexPacket((turn == null) ? Player.PLAYER_NONE : turn.playerId()));
+            new TWRequestResync(this).turnRefused(connectionId, entity, false);
             return;
         }
 
@@ -10582,6 +10587,7 @@ public class TWGameManager extends AbstractGameManager {
               !getGame().getPhase().isPreEndDeclarations() &&
               !getGame().getPhase().isInfantryVsInfantryCombat()) {
             LOGGER.error("Server got attack packet in wrong phase");
+            new TWRequestResync(this).turnRefused(connectionId, entity, true);
             return;
         }
 
@@ -10595,8 +10601,7 @@ public class TWGameManager extends AbstractGameManager {
                   connectionId,
                   ((entity == null) ? "null" : entity.getShortName()),
                   ((turn == null) ? "null" : "invalid"));
-            send(connectionId, packetHelper.createTurnListPacket());
-            send(connectionId, packetHelper.createTurnIndexPacket((turn == null) ? Player.PLAYER_NONE : turn.playerId()));
+            new TWRequestResync(this).turnRefused(connectionId, entity, false);
             return;
         }
 
