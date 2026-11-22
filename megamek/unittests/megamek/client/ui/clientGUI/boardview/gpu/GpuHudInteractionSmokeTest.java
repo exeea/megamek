@@ -122,9 +122,11 @@ class GpuHudInteractionSmokeTest {
             try {
                 GpuLiveBoardSpaceSmokeTest.run(board.source, live -> {
                     Play play = new Play(live, moving.client);
-                    // 14: the initiative report shows its card, and the dock continues (B5, B8).
+                    // 14: the initiative report shows its card, which carries its own Continue; the dock waits for
+                    // the board (B5, B8).
                     assertTrue(play.shown("initiative-card"), "The initiative card");
-                    assertEquals(upper("GpuBoard.hud.dock.continue"), play.text("dock-main"));
+                    assertEquals(upper("GpuBoard.hud.dock.continue"), play.text("initiative-continue"));
+                    assertFalse(play.shown("command-dock"), "The dock waits for the board");
                     // User item 29(c): outside the local turn an own unit clicked is the shown unit; an enemy is
                     // inspected and the own unit stays shown.
                     play.clickUnit(MARAUDER, Input.Buttons.LEFT, 0);
@@ -133,7 +135,7 @@ class GpuHudInteractionSmokeTest {
                     assertEquals(List.of(MARAUDER, TIMBER_WOLF), List.of(live.hud.state.focus(),
                           live.hud.state.inspected), "An enemy is inspected beside the shown own unit");
                     live.capture("p2-initiative.png");
-                    // 15: the DONE key is the dock's Continue: MegaMek's Done goes to the server.
+                    // 15: the DONE key continues: MegaMek's Done goes to the server.
                     play.press(KeyCommandBind.DONE);
                     verify(moving.client).sendDone(true);
 
@@ -205,10 +207,11 @@ class GpuHudInteractionSmokeTest {
                     assertEquals(PANTHER, onSwing(() -> moving.display.currentEntity().getId()),
                           "The next own turn begins with the picked unit");
 
-                    // Hold all remaining units (G15) against the server's turns: the Panther holds now (MegaMek's
-                    // Hold position), the Locust on the next own turn by itself.
-                    play.click("dock-more");
-                    play.choose(Messages.getString("GpuBoard.hud.dock.holdAll"));
+                    // Hold all remaining units (G15) against the server's turns, the dock's Hold all confirmed in its
+                    // strip: the Panther holds now (MegaMek's Hold position), the Locust on the next own turn by itself.
+                    play.click("dock-hold-all");
+                    assertTrue(play.shown("dock-confirm"), "Hold all asks first");
+                    play.click("dock-confirm-yes");
                     verify(moving.client).moveEntity(eq(PANTHER), any());
                     int holding = play.move().holdingRemaining();
                     assertTrue(holding > 0 && play.text("dock-span").equals(
@@ -330,10 +333,15 @@ class GpuHudInteractionSmokeTest {
                     int incoming = play.guides("GUIDE_IN");
                     assertTrue(outgoing > 0 && incoming > 0, "Guides both ways: " + outgoing + " / " + incoming);
                     live.capture("p2-movement-preview.png");
-                    // 56: the Incoming toggle hides the incoming guides only.
+                    // 56: the Incoming toggle hides the incoming guides only. The toggles sit in the open panel's
+                    // header, so the contacts are pinned open for them, as the player's pin keeps them.
+                    live.hud.state.contactsPinned = true;
+                    live.draw(2, .1f);
                     play.click("contacts-incoming");
                     assertEquals(List.of(outgoing, 0), List.of(play.guides("GUIDE_OUT"), play.guides("GUIDE_IN")));
                     play.click("contacts-incoming");
+                    live.hud.state.contactsPinned = false;
+                    live.draw(2, .1f);
 
                     // 60: a short right click on a hex opens its menu and leaves the plan alone (M9).
                     play.click(new Coords(15, 12), Input.Buttons.RIGHT, 0);
@@ -690,6 +698,12 @@ class GpuHudInteractionSmokeTest {
                     });
                     play.act();
                     play.act();
+                    // The units' moves play first: unit commands wait for the playback.
+                    for (int frame = 0; frame < 300 && history.running(); frame++) {
+                        live.draw(1, 1 / 30f);
+                    }
+                    assertFalse(history.running(), "The moves played");
+                    play.act();
                     for (String limb : List.of("punchLeft", "punchRight", "kickLeft", "kickRight")) {
                         assertTrue(play.shown("dock-option-" + limb), limb + " is an option");
                     }
@@ -887,6 +901,15 @@ class GpuHudInteractionSmokeTest {
                 real.answer(invocation.getArgument(0), invocation.getArgument(1));
                 return null;
             }).when(hud).answer(anyLong(), any());
+            // The unit and hex menus list MegaMek's map menu once the real source has captured it for them.
+            doAnswer(invocation -> {
+                real.inspect(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
+                return null;
+            }).when(hud).inspect(any(), anyInt(), anyBoolean());
+            doAnswer(invocation -> {
+                real.inspect((Coords) invocation.getArgument(0));
+                return null;
+            }).when(hud).inspect(any());
             GpuHudParitySmokeTest.start(live, this::asCaptured);
             System.out.println("GL renderer " + Gdx.gl.glGetString(GL20.GL_RENDERER));
         }
@@ -902,7 +925,10 @@ class GpuHudInteractionSmokeTest {
             if (publishing) {
                 GpuHudParitySmokeTest.publish(live, this::asCaptured);
             }
-            live.draw(3, .1f);
+            // The mock source returns its frame on every render; the real one hands a frame's events out once.
+            live.draw(1, .1f);
+            live.frame.set(live.frame.get().withTimeline(List.of()));
+            live.draw(2, .1f);
         }
 
         /** Presses a bind's key with its modifiers. */
@@ -960,7 +986,21 @@ class GpuHudInteractionSmokeTest {
         void clickUnit(int id, int button, int modifiers) throws Exception {
             Coords hex = live.hud.state.presented(id).position();
             live.zoom(hex, HEX);
+            // A panel at the window's centre (the initiative card) covers the unit there: the camera moves along the
+            // board's x axis, a hex further every second step, right and then left, until the unit lies beside it.
+            Vector3 center = live.camera().focus.cpy();
+            for (int step = 1; step <= 20 && covered(hex); step++) {
+                float shift = (step + 1) / 2 * BoardGeometry.WIDTH * (step % 2 == 0 ? -1 : 1);
+                live.camera().center(center.cpy().add(shift, 0, 0));
+                live.draw(3, 0);
+            }
             click(hex, button, modifiers);
+        }
+
+        /** Whether a HUD panel covers the centre of {@code hex} on the screen. */
+        private boolean covered(Coords hex) {
+            Vector3 point = live.view.screenPosition(hex);
+            return live.hud.hit(Math.round(point.x), Math.round(point.y));
         }
 
         /** A drag from window point ({@code x}, {@code y}) by ({@code dx}, {@code dy}) in six moves. */
@@ -1152,12 +1192,12 @@ class GpuHudInteractionSmokeTest {
          * Unit {@code id} is the shown unit, as the user decided for clicks outside the local turn (item 29(c)): the
          * focus and the card, its forces row selected in mint, nothing inspected.
          */
-        void assertShown(int id, String when) {
+        void assertShown(int id, String when) throws Exception {
             assertEquals(List.of(id, Entity.NONE), List.of(live.hud.state.focus(), live.hud.state.inspected),
                   when + ": the shown unit, nothing inspected");
-            UiButton row = actor("forces-unit-" + id);
-            assertTrue(row.isChecked(), when + ": its forces row is selected");
-            assertNotEquals(row.getSkin().getDrawable("row-foe"), row.getBackground(), when + ": never coral");
+            // The row's highlight 1 is the selected focus, which it draws in mint (GpuForcesPanel.ForceRow), never coral.
+            int highlight = field(actor("forces-unit-" + id), "highlight");
+            assertEquals(1, highlight, when + ": its forces row is selected in mint");
             assertEquals(UiTheme.upper(GpuUnitCard.unitName(live.hud.state.presented(id))), text("unit-card-name"),
                   when + ": the card shows it");
         }
