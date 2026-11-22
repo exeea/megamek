@@ -137,6 +137,11 @@ final class GpuMapSource implements BoardSource {
     private Map<Coords, List<BoardEditorTerrain.Badge>> badgeSnapshot = Map.of();
     private BoardTactical editorTerrain = BoardTactical.EMPTY;
     private long boardGeneration;
+    /**
+     * The shown board's presentation state (its original planting and ground), new with each board this source takes:
+     * every map scene is board 0, so a view's terrain could not tell one board of a size from the next by itself.
+     */
+    private GpuBoardState boardState;
     private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview,
           Map<Coords, List<BoardEditorTerrain.Badge>> badges, boolean authoredGesture) { }
     private volatile Publication publication;
@@ -219,6 +224,7 @@ final class GpuMapSource implements BoardSource {
             board = current;
             board.addBoardListener(boardListener);
             boardGeneration++;
+            boardState = new GpuBoardState();
             closeMeasuring();
             contextCoords = null;
             images.clear();
@@ -261,10 +267,11 @@ final class GpuMapSource implements BoardSource {
         String tooltip = inspected == null || !board.contains(inspected) ? "" : hexCard(board.getHex(inspected));
         BoardScene scene = mapScene(editorTerrain.withRuler(measurement.ruler()));
         Frame nextFrame = new Frame(scene, List.of(), contextCoords == null ? null : new BoardScene.Context(contextCoords, List.of()),
-              menuCommands(), tooltip,
+              menuCommands(), tooltip, "",
               new BoardFocus(0, null), boardGeneration, "",
               atmosphere.settings(game.getPlanetaryConditions(), board.isSpace()),
-              GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, GpuHudData.EMPTY.withLos(measurement));
+              GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, GpuHudData.EMPTY.withLos(measurement),
+              boardState);
         // An unchanged editor state keeps its instance, so the views' identity checks mean a real change.
         var previous = publication == null ? null : publication.editor();
         var state = editor == null ? null : editor.snapshot();
