@@ -60,7 +60,7 @@ enum GpuGraphicsCard {
     /**
      * The names of the two cards Optimus switches between, INTEGRATED's then DISCRETE's, when this computer has
      * exactly two and one of them is NVIDIA; empty elsewhere, and on every system other than Windows. Ask only once
-     * the board is open: the card is chosen before, and listing the cards must not take part in that choice.
+     * the first window is open: the card is chosen before, and listing the cards must not take part in that choice.
      */
     static List<String> cards() {
         List<String> names = cards;
@@ -73,11 +73,28 @@ enum GpuGraphicsCard {
      * card.
      */
     static GpuGraphicsCard preferred() {
-        String name = System.getProperty(PROPERTY, GUIPreferences.getInstance().getBoardGraphicsCard());
+        String saved = GUIPreferences.getInstance().getBoardGraphicsCard();
+        GpuGraphicsCard card = named(System.getProperty(PROPERTY, saved));
+        return card == null ? DISCRETE : card;
+    }
+
+    /** Whether this start asks which card to draw with: none is {@link #chosen} and this computer has a choice. */
+    static boolean asks() {
+        return !chosen() && !cards().isEmpty();
+    }
+
+    /** Whether a card is chosen: saved, or by the system property for this run. */
+    static boolean chosen() {
+        return System.getProperty(PROPERTY) != null
+              || named(GUIPreferences.getInstance().getBoardGraphicsCard()) != null;
+    }
+
+    /** The card {@code name} names, in any case; null for none. */
+    private static GpuGraphicsCard named(String name) {
         for (GpuGraphicsCard card : values()) {
             if (card.name().equals(name == null ? "" : name.toUpperCase(Locale.ROOT))) { return card; }
         }
-        return DISCRETE;
+        return null;
     }
 
     /** The choice in effect for this run; null before the board first opens. */

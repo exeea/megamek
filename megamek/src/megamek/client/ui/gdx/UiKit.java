@@ -644,8 +644,8 @@ public final class UiKit {
     /**
      * A dialog as {@link #dialog(String, Runnable)}; with {@code token}, the Token v0 dialog card: the token panel
      * padded xl above the header and xxl elsewhere, and a header with the title in the {@code headline} type (upper
-     * case in game mode) and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or
-     * wider.
+     * case in game mode) and a compact close button (none when {@code close} is null), xl above the body. Its owner
+     * makes it dialog.sm (420) wide or wider.
      */
     public Table dialog(String title, Runnable close, boolean token) {
         if (!token) {
@@ -653,7 +653,9 @@ public final class UiKit {
         }
         Table dialog = panel(true);
         dialog.pad(space("xl"), space("xxl"), space("xxl"), space("xxl"));
-        Table header = tokenHeader(title, null, "headline", closeButton(close, true));
+        // A dialog that wants one of its own buttons has no close button
+        Table header = close == null ? tokenHeader(title, null, "headline")
+              : tokenHeader(title, null, "headline", closeButton(close, true));
         header.padBottom(space("xl"));
         dialog.add(header).growX().row();
         return dialog;

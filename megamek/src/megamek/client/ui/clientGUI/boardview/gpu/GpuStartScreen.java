@@ -159,6 +159,10 @@ final class GpuStartScreen extends ApplicationAdapter {
     private boolean probeDialogOpened;
     /** The welcome while it shows, or null. */
     private StartWelcome welcome;
+    /** Which graphics card to draw with, asked at the first start on a computer with two; null when not asked. */
+    private StartGraphicsCardChoice cardChoice;
+    /** The menu column's left edge, as last laid out. */
+    private float menuLeft;
     /** The screen's libGDX dialogs, such as the briefing's camo, rules and conditions; null before it is made. */
     LobbyNativeDialogs dialogs;
 
@@ -317,8 +321,32 @@ final class GpuStartScreen extends ApplicationAdapter {
     /** GPU thread: the welcome MegaMek shows at start; a developer switch's run shows it only when it asks to. */
     void welcomeAtStart() {
         if (probe == null || probe.page() == null) {
-            showWelcome();
+            if (cardChoice != null && cardChoice.isOpen()) {
+                // The card comes first; the welcome follows an answer that keeps this run
+                cardChoice.then(this::showWelcome);
+            } else {
+                showWelcome();
+            }
         }
+    }
+
+    /**
+     * GPU thread: asks which graphics card to draw with when this start has to ({@link GpuGraphicsCard#asks}); a
+     * developer switch's run with a page doesn't, as with the welcome.
+     */
+    private void askGraphicsCard() {
+        if ((probe != null && probe.page() != null) || !GpuGraphicsCard.asks()) {
+            return;
+        }
+        String program = content.title();
+        cardChoice = new StartGraphicsCardChoice(kit, program, GpuGraphicsCard.cards(), GpuGraphicsCard.applied(),
+              () -> menuLeft, card -> {
+                  if (!GpuRelaunch.afterQuit(window::quit)) {
+                      GpuStartWindow.notice(program,
+                            Messages.getString("StartGraphicsCard.restartFailed", program, card));
+                  }
+              });
+        cardChoice.show(stage, motion);
     }
 
     /**
@@ -1001,6 +1029,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         float menuWidth = Math.max(260, w * 0.2f);
         float columnWidth = wide(page) ? Math.max(WIDE_COLUMN, w * 0.28f) : menuWidth;
         float left = w - margin - columnWidth;
+        menuLeft = left;
         float top = Math.max(32, h * 0.07f);
         double t = introTime();
         double logoIn = motion ? StartTimeline.ease((t - StartTimeline.MENU_START) / 0.5) : 1;
@@ -1381,6 +1410,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             // The settled screen has only slow motes: 30 frames a second is plenty
             settledRate = true;
             Gdx.graphics.setForegroundFPS(30);
+            askGraphicsCard();
             window.settled();
         }
     }

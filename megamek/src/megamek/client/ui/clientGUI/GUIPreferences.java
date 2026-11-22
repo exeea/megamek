@@ -935,7 +935,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(FIRING_SOLUTIONS, true);
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
-        store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "DISCRETE");
         store.setDefault(BOARD_QUALITY, "MEDIUM");
         store.setDefault(BOARD_QUALITY_SWITCHES, "");
         store.setDefault(BOARD_ANTI_ALIASING, "OFF");
@@ -1977,7 +1976,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getFloat(GUI_SCALE);
     }
 
-    /** The graphics card the 3D board asks for on computers with two: INTEGRATED or DISCRETE. */
+    /**
+     * The graphics card the 3D board asks for on computers with two: INTEGRATED or DISCRETE; empty until one is chosen
+     * (no default, so a choice of DISCRETE is stored too).
+     */
     public String getBoardGraphicsCard() {
         return store.getString(BOARD_VIEW_3D_GRAPHICS_CARD);
     }
