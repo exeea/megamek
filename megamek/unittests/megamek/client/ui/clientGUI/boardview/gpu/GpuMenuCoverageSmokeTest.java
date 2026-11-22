@@ -284,11 +284,11 @@ class GpuMenuCoverageSmokeTest {
      * The menu bar's items the Menu leaves out, by action command: loading, which only the lobby does; what the HUD
      * shows or does itself (the unit display, minimap, log, players, forces overview, conditions, key help, camera,
      * hex and field-of-view overlays, the ruler); the Game Master's request, which the Commands page holds; and the
-     * Swing window, cache, board image and nag commands.
+     * Swing window, cache and nag commands.
      */
     private static final Set<String> LEFT_OUT = Set.of(ClientGUI.FILE_GAME_LOAD, ClientGUI.FILE_GAME_QUICK_LOAD,
           ClientGUI.GAME_REQUEST_GAME_MASTER, ClientGUI.GAME_GIVE_UP_GAME_MASTER, ClientGUI.FILE_REFRESH_CACHE,
-          ClientGUI.FILE_REBUILD_CACHE, ClientGUI.BOARD_SAVE_AS_IMAGE, ClientGUI.BOARD_SAVE_AS_IMAGE_UNITS,
+          ClientGUI.FILE_REBUILD_CACHE,
           ClientGUI.VIEW_UNIT_DISPLAY, ClientGUI.VIEW_MINI_MAP, ClientGUI.VIEW_ROUND_REPORT,
           ClientGUI.VIEW_PLAYER_LIST, ClientGUI.VIEW_ROUNDS_IN_AIR, ClientGUI.VIEW_FORCE_DISPLAY,
           ClientGUI.VIEW_KEYBINDS_OVERLAY, ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY,

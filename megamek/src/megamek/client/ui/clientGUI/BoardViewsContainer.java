@@ -70,7 +70,6 @@ public class BoardViewsContainer {
 
     private final AbstractClientGUI clientGUI;
     private Integer selectedBoardId;
-    private boolean legacy2DEnabled = true;
     private boolean updatingTabs;
 
     /**
@@ -104,13 +103,11 @@ public class BoardViewsContainer {
             boardViewsContainer.removeAll();
             mapTabPane.removeAll();
             shownBoardViews.clear();
-            if (legacy2DEnabled) {
-                if (clientGUI.boardViews.size() > 1) {
-                    arrangeMultipleBoardViews();
-                    showBoardView(selectedBoardId);
-                } else if (clientGUI.boardViews.size() == 1) {
-                    arrangeSingleBoardView();
-                }
+            if (clientGUI.boardViews.size() > 1) {
+                arrangeMultipleBoardViews();
+                showBoardView(selectedBoardId);
+            } else if (clientGUI.boardViews.size() == 1) {
+                arrangeSingleBoardView();
             }
         } finally {
             updatingTabs = false;
@@ -118,14 +115,6 @@ public class BoardViewsContainer {
         updateBoardViewKeyStatus();
         boardViewsContainer.validate();
         boardViewsContainer.repaint();
-    }
-
-    /** The native board needs selection, but never needs to construct the legacy map components. */
-    public void setLegacy2DEnabled(boolean enabled) {
-        if (legacy2DEnabled != enabled) {
-            legacy2DEnabled = enabled;
-            updateMapTabs();
-        }
     }
 
     private void arrangeMultipleBoardViews() {
@@ -148,20 +137,27 @@ public class BoardViewsContainer {
     }
 
     private String getBoardViewTabTooltip(int boardId) {
-        IGame game = clientGUI.getClient().getGame();
-        String tooltip = String.format("<HTML>%s (Board #%d)", game.getBoard(boardId).getBoardName(), boardId);
-        Optional<Board> enclosingBoard = game.getEnclosingBoard(boardId);
-        if (enclosingBoard.isPresent()) {
-            tooltip += "<BR>Located at %s in %s".formatted(enclosingBoard.get()
-                  .embeddedBoardPosition(boardId)
-                  .getBoardNum(), enclosingBoard.get().getBoardName());
-        }
-        return tooltip;
+        return "<HTML>" + boardDetail(clientGUI.getClient().getGame(), boardId).replace("\n", "<BR>");
     }
 
     /**
-     * Returns the selected board independently of the visualization. Legacy 2D tabs reflect this selection only when
-     * enabled; native startup and navigation do not depend on a Swing component being constructed or painted.
+     * A board's name and number and, for a board embedded in another, where it lies there: the map tab's tooltip and
+     * the 3D board's Maps menu detail.
+     */
+    public static String boardDetail(IGame game, int boardId) {
+        String detail = String.format("%s (Board #%d)", game.getBoard(boardId).getBoardName(), boardId);
+        Optional<Board> enclosingBoard = game.getEnclosingBoard(boardId);
+        if (enclosingBoard.isPresent()) {
+            detail += "\nLocated at %s in %s".formatted(enclosingBoard.get()
+                  .embeddedBoardPosition(boardId)
+                  .getBoardNum(), enclosingBoard.get().getBoardName());
+        }
+        return detail;
+    }
+
+    /**
+     * Returns the selected board independently of the visualization. The map tabs of an SBF game's board views reflect
+     * this selection; the 3D board's startup and navigation do not depend on a Swing component being constructed.
      *
      * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.BoardView}, if any
      */
@@ -185,7 +181,7 @@ public class BoardViewsContainer {
         }
         selectedBoardId = boardId;
         updateBoardViewKeyStatus();
-        if (legacy2DEnabled && mapTabPane.getTabCount() > 1) {
+        if (mapTabPane.getTabCount() > 1) {
             String componentName = String.valueOf(boardId);
             for (int i = 0; i < mapTabPane.getTabCount(); i++) {
                 if (componentName.equals(mapTabPane.getComponentAt(i).getName())) {
@@ -219,10 +215,6 @@ public class BoardViewsContainer {
                 updateBoardViewKeyStatus();
             }
         }
-    }
-
-    public boolean isLegacy2DEnabled() {
-        return legacy2DEnabled;
     }
 
     private void updateSelection() {

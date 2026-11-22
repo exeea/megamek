@@ -16,7 +16,6 @@ import java.awt.BorderLayout;
 import java.awt.Window;
 import java.io.File;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +40,6 @@ import megamek.client.ui.clientGUI.CommandBarPanel;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
@@ -50,7 +48,6 @@ import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.dialogs.forceDisplay.ForceDisplayDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
-import megamek.client.ui.dialogs.minimap.MinimapDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.common.Player;
@@ -66,10 +63,9 @@ import org.junit.jupiter.api.Test;
  * The Swing cut (I3) in a scripted battle over the real native window. Through every phase, with each auxiliary
  * window's preference switched on and the client's phase rules run, no Swing window of the client shows over the
  * battle window: the HUD stands for the minimap, the players, the rounds in the air, the force display, the bot
- * commands, the Unit Display and the report. A Ctrl measurement shows MegaMek's ruler, which line of sight stays.
+ * commands, the Unit Display and the report; a Ctrl measurement shows in the HUD's ruler panel, not in a Swing window.
  * A Swing dialog outside the allowlist is not raised. With the default
- * preferences the minimap keeps the player's choice through the report phases. Back on the Legacy 2D board every window
- * shows again as its preference says.
+ * preferences the minimap keeps the player's choice through the report phases.
  */
 @Tag("on-demand")
 class GpuSwingCutSmokeTest {
@@ -97,11 +93,11 @@ class GpuSwingCutSmokeTest {
           GUIPreferences.BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE);
 
     /** The client's windows, real Swing dialogs owned by its Swing frame. */
-    private record Client2d(JFrame frame, CommonMenuBar menus, MinimapDialog minimap, PlayerListDialog players,
+    private record Client2d(JFrame frame, CommonMenuBar menus, PlayerListDialog players,
           RoundsInAirDialog rounds, ForceDisplayDialog forces, BotCommandsDialog bots, UnitDisplayDialog unit,
-          MiniReportDisplayDialog report, RulerDialog ruler) {
+          MiniReportDisplayDialog report) {
         List<Window> windows() {
-            return List.of(minimap, players, rounds, forces, bots, unit, report, ruler);
+            return List.of(players, rounds, forces, bots, unit, report);
         }
     }
 
@@ -112,7 +108,7 @@ class GpuSwingCutSmokeTest {
     }
 
     @Test
-    void aScriptedBattleShowsNoSwingWindowOverTheNativeWindowAndTheLegacy2DBoardGetsThemBack() throws Exception {
+    void aScriptedBattleShowsNoSwingWindowOverTheNativeWindow() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         Map<String, String> saved = new LinkedHashMap<>();
         for (String key : Stream.of(WINDOWS, SHOWN, List.of(GUIPreferences.BOT_COMMANDS_LOCATION)).flatMap(List::stream).toList()) {
@@ -133,8 +129,7 @@ class GpuSwingCutSmokeTest {
                 await(() -> onSwing(() -> GpuBoardWindow.drawsDialogsFor(gui)));
                 await(() -> onGl(() -> frames() > 5));
 
-                // Default preferences: the minimap stays on through the report phases (the Legacy 2D board's phase rule
-                // would hide it there).
+                // The minimap stays on through the report phases, whatever the old auto-display preferences say.
                 onSwing(() -> {
                     preferences.setValue(GUIPreferences.MINI_MAP_AUTO_DISPLAY_REPORT_PHASE, GUIPreferences.HIDE);
                     preferences.setValue(GUIPreferences.MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE, GUIPreferences.SHOW);
@@ -149,7 +144,7 @@ class GpuSwingCutSmokeTest {
                           phase + ": the HUD's minimap shows");
                 }
 
-                // Every window wanted in every phase, and a measurement: only the native window and the ruler.
+                // Every window wanted in every phase, and a measurement: only the native window.
                 onSwing(() -> {
                     SHOWN.forEach(key -> preferences.setValue(key, GUIPreferences.SHOW));
                     return null;
@@ -168,8 +163,8 @@ class GpuSwingCutSmokeTest {
                         return null;
                     });
                     settle();
-                    assertEquals(List.of(client.ruler()), shown(client),
-                          phase + ": no Swing window over the native window but the measurement's ruler");
+                    assertEquals(List.of(), shown(client),
+                          phase + ": no Swing window over the native window, a measurement included");
                     if (phase == GamePhase.MOVEMENT) {
                         onGl(() -> {
                             File directory = new File(System.getProperty("megamek.gpu.screenshots",
@@ -196,16 +191,6 @@ class GpuSwingCutSmokeTest {
                     return null;
                 });
 
-                // Back on the Legacy 2D board each window shows as its preference says.
-                onSwing(() -> {
-                    GpuBoardWindow.showLegacy2D(gui);
-                    return null;
-                });
-                await(() -> onSwing(() -> client.frame().isVisible() && !GpuBoardWindow.isActiveFor(gui)));
-                for (Window window : List.of(client.minimap(), client.players(), client.rounds(), client.forces(),
-                      client.bots(), client.unit(), client.report())) {
-                    assertTrue(onSwing(window::isShowing), window.getClass().getSimpleName() + " shows again");
-                }
             } finally {
                 onSwing(() -> {
                     preferences.removePreferenceChangeListener(gui);
@@ -256,7 +241,7 @@ class GpuSwingCutSmokeTest {
      */
     private static ClientGUI client(GpuBoardFixture fixture) throws Exception {
         fixture.source.close();
-        Set<String> real = Set.of("refreshAuxiliaryWindows", "setMapVisible", "setPlayerListVisible", "showPlayerList",
+        Set<String> real = Set.of("refreshAuxiliaryWindows", "setPlayerListVisible", "showPlayerList",
               "setRoundsInAirVisible", "setForceDisplayVisible", "setBotCommandsLocation", "setUnitDisplayVisible",
               "maybeShowUnitDisplay", "maybeShowForceDisplay", "preferenceChange", "closeRuler");
         ClientGUI gui = mock(ClientGUI.class, invocation -> real.contains(invocation.getMethod().getName())
@@ -267,7 +252,6 @@ class GpuSwingCutSmokeTest {
         when(gui.getClient()).thenReturn(client);
         when(gui.getMainPanel()).thenReturn(new JPanel());
         BoardViewsContainer container = mock(BoardViewsContainer.class);
-        when(container.isLegacy2DEnabled()).thenAnswer(invocation -> !GpuBoardWindow.isActiveFor(gui));
         set(AbstractClientGUI.class, gui, "boardViewsContainer", container);
         fixture.view.close();
         fixture.view = new BoardClientState(fixture.game, null, gui, 0, null);
@@ -285,7 +269,7 @@ class GpuSwingCutSmokeTest {
 
     /**
      * The client's real windows over its Swing frame, as ClientGUI builds them; the Unit Display and the report
-     * observe a Legacy 2D board's request on their dialogs (this client has no Swing split panes).
+     * observe a request outside the native window on their dialogs (this client has no Swing split panes).
      */
     private static Client2d windows(ClientGUI gui, GpuBoardFixture fixture) {
         JFrame frame = new JFrame("MegaMek - Swing cut test");
@@ -294,11 +278,6 @@ class GpuSwingCutSmokeTest {
         frame.setJMenuBar(menus);
         when(gui.getFrame()).thenReturn(frame);
         when(gui.getMenuBar()).thenReturn(menus);
-        MinimapDialog minimap = new MinimapDialog(frame);
-        minimap.add(new JPanel());
-        minimap.setSize(240, 200);
-        set(AbstractClientGUI.class, gui, "miniMaps", new HashMap<>(Map.of(0, minimap)));
-        when(gui.getMiniMapDialog()).thenReturn(minimap);
         PlayerListDialog players = new PlayerListDialog(frame, gui.getClient(), false);
         when(gui.getPlayerListDialog()).thenReturn(players);
         RoundsInAirDialog rounds = new RoundsInAirDialog(frame, gui.getClient());
@@ -322,16 +301,15 @@ class GpuSwingCutSmokeTest {
         MiniReportDisplayDialog report = new MiniReportDisplayDialog(frame, gui);
         when(gui.getMiniReportDisplayDialog()).thenReturn(report);
         when(gui.getMiniReportDisplay()).thenReturn(mock(MiniReportDisplayPanel.class));
-        doAnswer(invocation -> legacy2DOrReal(gui, invocation, unit)).when(gui).setUnitDisplayLocation(anyBoolean());
-        doAnswer(invocation -> legacy2DOrReal(gui, invocation, report)).when(gui).setMiniReportLocation(anyBoolean());
-        RulerDialog ruler = new RulerDialog(frame, fixture.view, fixture.game);
-        set(ClientGUI.class, gui, "rulers", new HashMap<>(Map.of(0, ruler)));
+        doAnswer(invocation -> placementOrDialog(gui, invocation, unit)).when(gui).setUnitDisplayLocation(anyBoolean());
+        doAnswer(invocation -> placementOrDialog(gui, invocation, report)).when(gui)
+              .setMiniReportLocation(anyBoolean());
         frame.setVisible(true);
-        return new Client2d(frame, menus, minimap, players, rounds, forces, bots, unit, report, ruler);
+        return new Client2d(frame, menus, players, rounds, forces, bots, unit, report);
     }
 
-    /** ClientGUI's own placement over the native window; on the Legacy 2D board the request shows on the dialog. */
-    private static Object legacy2DOrReal(ClientGUI gui, org.mockito.invocation.InvocationOnMock invocation,
+    /** ClientGUI's own placement over the native window; without it the request shows on the dialog. */
+    private static Object placementOrDialog(ClientGUI gui, org.mockito.invocation.InvocationOnMock invocation,
           JDialog dialog) throws Throwable {
         if (GpuBoardWindow.isActiveFor(gui)) {
             return invocation.callRealMethod();

@@ -797,7 +797,6 @@ public final class GpuBoardWindow {
             }
         }
         if (gui != null) {
-            gui.setLegacy2DViewEnabled(false);
             gui.refreshAuxiliaryWindows();
         }
         // A source captured during native startup must publish the now-measured tools inset before camera fitting.
@@ -1114,7 +1113,7 @@ public final class GpuBoardWindow {
             // The lobby that opened this preview or editor shows again
             LOGGER.debug("The lobby shows again");
         } else if (restoreOwner && swingWindow != null) {
-            showOwner(gui, swingWindow);
+            showOwner(swingWindow);
         }
         if (failure != null) {
             reportFailure(failure);
@@ -1149,19 +1148,6 @@ public final class GpuBoardWindow {
         dialogOnTop.clear();
     }
 
-    /** Return to the existing client without disconnecting or changing the game. */
-    public static synchronized void showLegacy2D(ClientGUI gui) {
-        if (!SwingUtilities.isEventDispatchThread()) {
-            SwingUtilities.invokeLater(() -> showLegacy2D(gui));
-            return;
-        }
-        if (active != null && active.gui == gui) {
-            active.close(true);
-        } else if (gui.getFrame() != null) {
-            showOwner(gui, gui.getFrame());
-        }
-    }
-
     /** EDT: whether a board or an editor holds the window, which a map preview or the UI library may not replace. */
     static synchronized boolean isRunning() {
         return active != null && !active.preview && !active.closing;
@@ -1171,7 +1157,7 @@ public final class GpuBoardWindow {
     static synchronized boolean isShowingAny() {
         return active != null && !active.closing;
     }
-    /** Includes preparation: Legacy 2D panels must not open while the native window is starting. */
+    /** Whether this client's 3D board window is open, including while it starts. */
     public static synchronized boolean isActiveFor(ClientGUI gui) {
         return active != null && active.gui == gui;
     }
@@ -1657,14 +1643,11 @@ public final class GpuBoardWindow {
         return window == null || window.gui != gui || !(window.source instanceof GpuBoardSource game) ? null : game;
     }
 
-    /** The Swing window this window was opened from shows again: an editor's owner, or a client's Legacy 2D frame. */
-    private static void showOwner(ClientGUI gui, Window window) {
+    /** The Swing window an editor was opened from shows again when the editor closes. */
+    private static void showOwner(Window window) {
         // An editor opened from the start screen returns to it rather than to its hidden owner frame
-        if (gui == null && GpuStartWindow.reopenFor(window)) {
+        if (GpuStartWindow.reopenFor(window)) {
             return;
-        }
-        if (gui != null) {
-            gui.setLegacy2DViewEnabled(!gui.getClient().getGame().getPhase().isLounge());
         }
         if (window instanceof Frame frame && (frame.getExtendedState() & Frame.ICONIFIED) != 0) {
             frame.setExtendedState(frame.getExtendedState() & ~Frame.ICONIFIED);
@@ -1672,9 +1655,6 @@ public final class GpuBoardWindow {
         window.setVisible(true);
         window.toFront();
         window.requestFocus();
-        if (gui != null) {
-            gui.refreshAuxiliaryWindows();
-        }
     }
 
     static Lwjgl3ApplicationConfiguration configuration(boolean visible) {

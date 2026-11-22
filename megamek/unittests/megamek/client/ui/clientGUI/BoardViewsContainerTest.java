@@ -25,6 +25,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
+import megamek.client.bot.BotClient;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
@@ -33,22 +34,33 @@ import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardViewsContainerTest {
-    @Test
-    void aGameShowsTheGpuBoard() throws Exception {
+    /** A player's game and a bot's (Start > Connect as a bot) both show the 3D board. */
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void aGameShowsTheGpuBoard(boolean bot) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             try (var gpu = mockStatic(GpuBoardWindow.class)) {
                 ClientGUI gui = mock(ClientGUI.class);
-                Client client = mock(Client.class);
+                Client client = bot ? mock(BotClient.class) : mock(Client.class);
                 Game game = new Game();
                 game.setPhase(GamePhase.STARTING_SCENARIO);
                 when(gui.getClient()).thenReturn(client);
                 when(client.getGame()).thenReturn(game);
+                try {
+                    // showDefaultBoard reads the client's game through its field
+                    Field field = ClientGUI.class.getDeclaredField("client");
+                    field.setAccessible(true);
+                    field.set(gui, client);
+                } catch (ReflectiveOperationException failure) {
+                    throw new AssertionError(failure);
+                }
                 doCallRealMethod().when(gui).showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
                 gui.showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
                 gpu.verify(() -> GpuBoardWindow.open(eq(gui), any()));
-                verify(gui, never()).setLegacy2DViewEnabled(true);
             }
         });
     }
@@ -133,7 +145,7 @@ class BoardViewsContainerTest {
     }
 
     @Test
-    void nativeSelectionNeedsNoLegacy2DComponentsAndSurvivesSwitchingViews() throws Exception {
+    void selectionNeedsNoBoardViewsAndFollowsTheMapTabs() throws Exception {
         ClientGUI gui = mock(ClientGUI.class);
         var views = AbstractClientGUI.class.getDeclaredField("boardViews");
         views.setAccessible(true);
@@ -153,7 +165,6 @@ class BoardViewsContainerTest {
         when(second.getComponent()).thenReturn(new JPanel());
         SwingUtilities.invokeAndWait(() -> {
             BoardViewsContainer container = new BoardViewsContainer(gui);
-            container.setLegacy2DEnabled(false);
             assertTrue(container.getCurrentBoardView().isEmpty());
             gui.boardStates.put(0, mock(BoardClientState.class));
             gui.boardStates.put(1, mock(BoardClientState.class));
@@ -169,13 +180,10 @@ class BoardViewsContainerTest {
 
             gui.boardViews.put(0, first);
             gui.boardViews.put(1, second);
-            container.setLegacy2DEnabled(true);
+            container.updateMapTabs();
             JTabbedPane tabs = (JTabbedPane) ((JPanel) container.getPanel()).getComponent(0);
             assertSame(second.getComponent(), tabs.getSelectedComponent());
             tabs.setSelectedComponent(first.getComponent());
-            assertSame(first, container.getCurrentBoardView().orElseThrow());
-            container.setLegacy2DEnabled(false);
-            assertEquals(0, ((JPanel) container.getPanel()).getComponentCount());
             assertSame(first, container.getCurrentBoardView().orElseThrow());
 
             gui.boardViews.remove(0);

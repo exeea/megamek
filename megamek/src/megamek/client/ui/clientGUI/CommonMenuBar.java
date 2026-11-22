@@ -135,8 +135,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JMenuItem fileUnitsSave = new JMenuItem(getString("CommonMenuBar.fileUnitsSave"));
     // The Board menu
     private final JMenuItem boardSaveAs = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAs"));
-    private final JMenuItem boardSaveAsImage = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAsImage"));
-    private final JMenuItem boardSaveAsImageUnits = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAsImageUnits"));
 
     // The View menu
     private final JCheckBoxMenuItem viewMinimap = new JCheckBoxMenuItem(getString("CommonMenuBar.viewMinimap"));
@@ -285,10 +283,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(boardSaveAs, menu, BOARD_SAVE_AS);
         menu.addSeparator();
 
-        initMenuItem(boardSaveAsImage, menu, BOARD_SAVE_AS_IMAGE);
-        boardSaveAsImage.setToolTipText(Messages.getString("CommonMenuBar.fileBoardSaveAsImage.tooltip"));
-        initMenuItem(boardSaveAsImageUnits, menu, BOARD_SAVE_AS_IMAGE_UNITS);
-        boardSaveAsImageUnits.setToolTipText(Messages.getString("CommonMenuBar.fileBoardSaveAsImageUnits.tooltip"));
 
         // Create the view menu.
         menu = new JMenu(Messages.getString("CommonMenuBar.ViewMenu"));
@@ -548,14 +542,12 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         gameAllHotLoadOn.setVisible(isLobby && hotLoadAvailable);
         gameAllHotLoadOff.setVisible(isLobby && hotLoadAvailable);
         boardSaveAs.setEnabled(isInGame); // TODO: should work in the lobby
-        boardSaveAsImage.setEnabled(isInGame); // TODO: should work in the lobby
         // reinforcing a player during a game is a gamemaster's job and lives on the Game Master menu; the same
         // dialog outside a game is how anybody builds an army, so the lobby keeps it
         fileUnitsReinforce.setEnabled(isInGame && isNotVictory && localPlayerHoldsGameMasterRole);
         fileUnitsReinforceRAT.setEnabled(isNotVictory
               && (isLobby || (isInGame && localPlayerHoldsGameMasterRole)));
         fileUnitsSave.setEnabled(isLobby || (isInGame && canSave));
-        boardSaveAsImageUnits.setEnabled(isInGame);
         gamePlayerList.setEnabled(isInGame);
         gameRoundsInAir.setEnabled(isInGame);
         viewLabels.setEnabled(isInGameBoardView);

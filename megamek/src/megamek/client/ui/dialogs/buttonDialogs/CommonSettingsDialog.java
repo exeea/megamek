@@ -3470,11 +3470,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         if (tileSetChoice.getSelectedIndex() >= 0) {
             String tileSetFileName = tileSets.get(tileSetChoice.getSelectedIndex());
-            if (!CLIENT_PREFERENCES.getMapTileset().equals(tileSetFileName)
-                  && (clientgui != null)
-                  && (clientgui.getBoardView() != null)) {
-                clientgui.getBoardView().clearShadowMap();
-            }
             CLIENT_PREFERENCES.setMapTileset(tileSetFileName);
         }
 

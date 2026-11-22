@@ -31,6 +31,7 @@ import javax.swing.Timer;
 import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardViewsContainer;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
@@ -1602,13 +1603,20 @@ final class GpuBoardSource implements BoardSource {
         List<BoardScene.Command> nextGlobal = new ArrayList<>(actions.globalCommands());
         if (view.getClientgui() != null) {
             var gui = view.getClientgui();
-            List<BoardScene.Command> boards = gui.boardStates().stream().map(boardView -> new BoardScene.Command(
-                  "Map " + boardView.getBoardId(), true, () -> SwingUtilities.invokeLater(() -> {
-                      if (acceptsInput()) {
-                          gui.showBoardView(boardView.getBoardId());
-                          refresh();
-                      }
-                  }))).toList();
+            // Each map by its board's name, with its number and, for an embedded board, where it lies (as the map tabs)
+            List<BoardScene.Command> boards = gui.boardStates().stream().map(boardView -> {
+                int boardId = boardView.getBoardId();
+                String name = gui.getClient().getGame().getBoard(boardId).getBoardName();
+                return new BoardScene.Command("Map " + boardId,
+                      name == null || name.isBlank() ? "Map " + boardId : name,
+                      BoardViewsContainer.boardDetail(gui.getClient().getGame(), boardId), true, false, List.of(),
+                      () -> SwingUtilities.invokeLater(() -> {
+                          if (acceptsInput()) {
+                              gui.showBoardView(boardId);
+                              refresh();
+                          }
+                      }));
+            }).toList();
             nextGlobal.add(new BoardScene.Command("boards", "Maps", "", true, false, boards, () -> { }));
         }
         HoverPoint pointer = hoverPoint;

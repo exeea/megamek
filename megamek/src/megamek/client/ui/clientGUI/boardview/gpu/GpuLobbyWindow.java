@@ -374,12 +374,9 @@ public final class GpuLobbyWindow {
 
     /**
      * Any thread: shows {@code gui}'s lobby in the native window, replacing the scene there, or brings it to the front
-     * when it already shows. Nothing for a bot's client, which has no screen.
+     * when it already shows.
      */
     public static void open(ClientGUI gui) {
-        if (gui.getClient() instanceof BotClient) {
-            return;
-        }
         if (!SwingUtilities.isEventDispatchThread()) {
             pending = gui;
             SwingUtilities.invokeLater(() -> open(gui));

@@ -75,6 +75,7 @@ class ClientGUIBoardLifecycleTest {
                 assertSame(gui.getTilesetManager(), first.getTilesetManager());
                 assertTrue(gui.boardViews().isEmpty());
                 int listeners = game.getGameListeners().size();
+                int callbacks = session.closeListeners().size();
                 for (int i = 0; i < 3; i++) {
                     Board oldBoard = game.getBoard();
                     BoardClientState oldState = gui.getBoardState();
@@ -82,7 +83,8 @@ class ClientGUIBoardLifecycleTest {
                     assertTrue(oldState.isClosed());
                     assertNotSame(oldState, gui.getBoardState());
                     assertEquals(listeners, game.getGameListeners().size(), "Replacing a map must detach old listeners");
-                    assertEquals(1, session.closeListeners().size(), "The old minimap must release its client callback");
+                    assertEquals(callbacks, session.closeListeners().size(),
+                          "Replacing a map must release its client callbacks");
                     assertEquals(List.of(), boardListeners(oldBoard), "Replaced maps must release every subscription");
                     long revision = oldState.getRevision();
                     oldBoard.setHex(new Coords(1, 1), oldBoard.getHex(1, 1).duplicate());
@@ -201,32 +203,6 @@ class ClientGUIBoardLifecycleTest {
                 return null;
             });
         }
-    }
-
-    @Test
-    void switchingRenderersKeepsTheSameStateAndSelection() throws Exception {
-        onClient(() -> {
-            try (var display = mockConstruction(UnitDisplayPanel.class);
-                  var sound = mockConstruction(SoundManager.class);
-                  var session = Session.create()) {
-                session.game().receiveBoard(0, Board.createEmptyBoard(8, 8));
-                ClientGUI gui = session.gui();
-                BoardClientState state = gui.getBoardState();
-                Coords selected = new Coords(3, 4);
-                state.select(selected);
-                for (int i = 0; i < 2; i++) {
-                    gui.setLegacy2DViewEnabled(true);
-                    assertSame(state, gui.getBoardView().getClientState());
-                    assertEquals(selected, state.getSelected());
-                    gui.setLegacy2DViewEnabled(false);
-                    assertSame(state, gui.getBoardState());
-                    assertFalse(state.isClosed());
-                    assertTrue(gui.boardViews().isEmpty());
-                    assertEquals(selected, state.getSelected());
-                }
-            }
-            return null;
-        });
     }
 
     /**
