@@ -46,6 +46,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.SBFClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.dialogs.phaseDisplay.SBFJumpChoiceDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.KeyCommandBind;
@@ -241,6 +242,17 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
         // TODO SBF RULES Can you use JUMP if you remain in the hex?
         if (formation.getJumpMove() > 0) {
             List<Integer> choices = Stream.iterate(0, n -> n + 1).limit(formation.getJumpMove() + 1).toList();
+            if (SBFClientGUI.NATIVE_3D) {
+                // The 3D board asks natively; the Swing dialog would open over the board window
+                Integer chosen = clientGUI.askChoice(Messages.getString("SBFTargetDialog.title"),
+                      "Choose the JUMP points to use:", choices.stream()
+                            .map(n -> new DialogRow((n > 0) ? Integer.toString(n) : "None", "", null, true)).toList());
+                if (chosen == null) {
+                    return DialogResult.CANCELLED;
+                }
+                plannedMovement.setJumpUsed(choices.get(chosen));
+                return DialogResult.CONFIRMED;
+            }
             SBFJumpChoiceDialog jumpChoiceDialog = new SBFJumpChoiceDialog(clientGUI.getFrame(), choices);
             jumpChoiceDialog.setLocationRelativeTo(clientGUI.getFrame());
             jumpChoiceDialog.pack();

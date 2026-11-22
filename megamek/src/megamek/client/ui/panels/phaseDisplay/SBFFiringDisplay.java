@@ -47,6 +47,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.SBFClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.dialogs.phaseDisplay.SBFTargetDialog;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
@@ -54,6 +55,7 @@ import megamek.common.actions.EntityAction;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
 import megamek.common.alphaStrike.ASRange;
 import megamek.common.board.BoardLocation;
+import megamek.common.compute.Compute;
 import megamek.common.event.GameTurnChangeEvent;
 import megamek.common.game.InGameObject;
 import megamek.common.rolls.TargetRoll;
@@ -286,16 +288,16 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
               && (firingUnit >= 0)
               && (actingFormation().get().getUnits().size() > firingUnit)
               && actingFormation().get().isEligibleForPhase(game().getPhase())
-              && !unitHasPlannedFire()
+              && !unitHasPlannedFire(firingUnit)
               && (selectedTarget != null)
               && !SBFToHitData.compileToHit(game(), new SBFStandardUnitAttack(actingFormation().get().getId(),
                     firingUnit, selectedTarget.getId(), ASRange.LONG)).cannotSucceed();
     }
 
-    private boolean unitHasPlannedFire() {
+    private boolean unitHasPlannedFire(int unit) {
         return plannedActions.stream()
               .filter(a -> a instanceof SBFStandardUnitAttack)
-              .anyMatch(a -> ((SBFStandardUnitAttack) a).getUnitNumber() == firingUnit);
+              .anyMatch(a -> ((SBFStandardUnitAttack) a).getUnitNumber() == unit);
     }
 
     @Override
@@ -330,6 +332,36 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
             setTarget(null);
         }
         updateTargetingData();
+        if (SBFClientGUI.NATIVE_3D && (selectedTarget != null)) {
+            askFiringUnit();
+        }
+    }
+
+    /**
+     * 3D board: asks which unit of the acting formation fires at the target, each unit's row with its to-hit (the
+     * Legacy 2D target dialog's unit list and to-hit in one choice), and plans that unit's attack as Fire Unit does.
+     */
+    private void askFiringUnit() {
+        if (actingFormation().isEmpty()) {
+            return;
+        }
+        SBFFormation attacker = actingFormation().get();
+        List<DialogRow> rows = new ArrayList<>();
+        for (int unit = 0; unit < attacker.getUnits().size(); unit++) {
+            SBFToHitData toHit = SBFToHitData.compileToHit(game(),
+                  new SBFStandardUnitAttack(attacker.getId(), unit, selectedTarget.getId(), ASRange.LONG));
+            String chance = toHit.cannotSucceed() ? toHit.getDesc()
+                  : String.format("%s (%2.0f%%): %s", toHit.getValueAsString(), Compute.oddsAbove(toHit.getValue()),
+                  toHit.getDesc());
+            rows.add(new DialogRow(attacker.getUnits().get(unit).getName(), chance, null,
+                  !toHit.cannotSucceed() && !unitHasPlannedFire(unit)));
+        }
+        Integer chosen = clientGUI.askChoice("Fire at " + selectedTarget.generalName(),
+              attacker.getName() + ": which unit fires?", rows);
+        if (chosen != null) {
+            firingUnit = chosen;
+            fire();
+        }
     }
 
     /**
@@ -352,6 +384,10 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
                 toHitData = SBFToHitData.compileToHit(game(),
                       new SBFStandardUnitAttack(attacker.getId(), firingUnit, selectedTarget.getId(), ASRange.LONG));
             }
+        }
+        if (SBFClientGUI.NATIVE_3D) {
+            // The 3D board asks natively (askFiringUnit); the Swing dialog would open over the board window
+            return;
         }
         showTargetDialog();
         targetDialog.setContent(game().getFormation(currentFormation).orElse(null), selectedTarget, toHitData);

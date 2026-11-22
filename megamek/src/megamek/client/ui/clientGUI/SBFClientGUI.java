@@ -60,6 +60,10 @@ import megamek.client.ui.clientGUI.boardview.spriteHandler.MovePathSpriteHandler
 import megamek.client.ui.clientGUI.boardview.spriteHandler.MovementEnvelopeSpriteHandler;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.sbf.SBFFormationSpriteHandler;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.clientGUI.boardview.toolTip.SBFBoardViewTooltip;
 import megamek.client.ui.panels.ReceivingGameDataPanel;
 import megamek.client.ui.panels.StartingScenarioPanel;
@@ -515,6 +519,24 @@ public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
 
     public void clearMovementEnvelope() {
         movementEnvelopeHandler.clear();
+    }
+
+    /**
+     * EDT, with {@link #NATIVE_3D}: asks for one of {@code rows} in the 3D board window and waits for the answer, as a
+     * modal dialog does. The first enabled row is highlighted.
+     *
+     * @return the chosen row; null when cancelled or when no board window asks it
+     */
+    public @Nullable Integer askChoice(String title, String message, List<DialogRow> rows) {
+        List<Integer> first = java.util.stream.IntStream.range(0, rows.size()).filter(row -> rows.get(row).enabled())
+              .limit(1).boxed().toList();
+        DialogRequest request = new DialogRequest(0, DialogKind.CHOICE, title, message, false,
+              List.of(Messages.getString("Okay"), Messages.getString("Cancel")), 0, 1, rows, first, "", false,
+              null, null,
+              null, List.of());
+        DialogAnswer answer = GpuBoardWindow.route(this, request);
+        return (answer == null) || (answer.button() != 0) || answer.selected().isEmpty() ? null
+              : answer.selected().getFirst();
     }
 
     public void showMovePath(@Nullable SBFMovePath movePath) {

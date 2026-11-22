@@ -1208,6 +1208,10 @@ public final class GpuBoardWindow {
      * thread never waits on the EDT. Package-private: the client's chokepoints use {@link #route}.
      */
     static DialogAnswer ask(ClientGUI gui, DialogRequest request) {
+        return ask((AbstractClientGUI) gui, request);
+    }
+
+    private static DialogAnswer ask(AbstractClientGUI gui, DialogRequest request) {
         GpuBoardWindow window = active;
         if (!SwingUtilities.isEventDispatchThread() || window == null || window.gui != gui || !window.asksPrompts()
               || Thread.holdsLock(GpuBoardWindow.class)) {
@@ -1236,6 +1240,12 @@ public final class GpuBoardWindow {
         if (gui.isDead()) {
             return DialogAnswer.cancelled(request);
         }
+        awaitStartup(gui);
+        return drawsDialogsFor(gui) ? ask(gui, request) : null;
+    }
+
+    /** {@link #route} for a client GUI that is no {@link ClientGUI} (an SBF game): its board window asks natively. */
+    public static DialogAnswer route(AbstractClientGUI gui, DialogRequest request) {
         awaitStartup(gui);
         return drawsDialogsFor(gui) ? ask(gui, request) : null;
     }
@@ -1320,7 +1330,7 @@ public final class GpuBoardWindow {
      * would be a modal dialog the board never draws; it could outlive the game and leave the start screen blocked.
      * Returns at once off the EDT, while the caller holds this class's monitor, or when no such window starts.
      */
-    private static void awaitStartup(ClientGUI gui) {
+    private static void awaitStartup(AbstractClientGUI gui) {
         if (!SwingUtilities.isEventDispatchThread() || Thread.holdsLock(GpuBoardWindow.class) || !startingFor(gui)) {
             return;
         }
@@ -1340,7 +1350,7 @@ public final class GpuBoardWindow {
     }
 
     /** Any thread, no monitor: whether this client's native window is open but does not ask its prompts yet. */
-    private static boolean startingFor(ClientGUI gui) {
+    private static boolean startingFor(AbstractClientGUI gui) {
         GpuBoardWindow window = active;
         return window != null && window.gui == gui && !window.closing && !window.asksPrompts();
     }
@@ -1351,6 +1361,10 @@ public final class GpuBoardWindow {
      * dialog stays as before. Auxiliary windows use {@link #isActiveFor} instead, so they stay hidden during startup.
      */
     public static boolean drawsDialogsFor(ClientGUI gui) {
+        return drawsDialogsFor((AbstractClientGUI) gui);
+    }
+
+    private static boolean drawsDialogsFor(AbstractClientGUI gui) {
         GpuBoardWindow window = active;
         return window != null && window.gui == gui && window.presented;
     }
