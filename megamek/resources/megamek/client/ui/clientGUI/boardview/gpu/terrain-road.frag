@@ -252,6 +252,33 @@ vec4 wearHash(vec2 cell) {
     return fract((p.xxyz + p.yzzw) * p.zywx);
 }
 
+// Board hexes in the wear frame (metres east and south; HexTile#centerX, #centerY): 30 m corner to corner (BoardRelief
+// #metres), HexTile.HEIGHT over MODEL_WIDTH of that tall, columns 22.5 m apart, the odd ones half a hex lower.
+const float HEX_TALL = 30.0 * 72.0 / 83.125;
+
+// The board hex border nearest p: its outward unit normal (xy) and how far inside it p lies (z).
+vec3 hexBorder(vec2 p) {
+    float column = floor((p.x - 15.0) / 22.5);
+    vec2 q = vec2(1e9);
+    for (int i = 0; i < 2; i++) {
+        float c = column + float(i), lower = mod(c, 2.0) * .5;
+        vec2 centre = vec2(c * 22.5 + 15.0, (floor(p.y / HEX_TALL - lower) + lower + .5) * HEX_TALL);
+        if (dot(p - centre, p - centre) < dot(q, q)) q = p - centre;
+    }
+    // The north and south sides, then the four slanted ones, from the corners (15, 0) and (7.5, HEX_TALL / 2).
+    vec2 slant = normalize(vec2(HEX_TALL * .5, 7.5));
+    float level = HEX_TALL * .5 - abs(q.y), side = 15.0 * slant.x - dot(abs(q), slant);
+    return level < side ? vec3(0.0, sign(q.y), level) : vec3(slant * sign(q), side);
+}
+
+// How far a long feature across the road, centred r before the fragment and w to either side of its centre line, lies
+// along the fragment's nearest hex border (hexBorder): 1 within a metre of it and within about 15 degrees, gone by
+// half a metre more and 25 degrees. There it would read as the board's seam between two hexes: it is not drawn.
+float seamed(vec2 r, vec2 heading, vec3 border, float w) {
+    return smoothstep(.9, .97, abs(dot(heading, border.xy)))
+          * (1.0 - smoothstep(1.0, 1.5, abs(border.z + dot(r, border.xy)) - w));
+}
+
 // A line of half width w at distance d, averaged over a pixel: a line thinner than the pixel fades rather than aliases.
 float wearLine(float d, float w, float pixel) {
     float drawn = max(w, pixel * .5);
@@ -334,6 +361,7 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
     // Features of 8 m cells, each in its own frame along the traffic: thermal cracks across the road, sealed or open;
     // repairs, utility trenches, potholes, skid marks and oil stains.
     vec2 g = floor(m / 8.0);
+    vec3 border = hexBorder(m);
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             vec2 cell = g + vec2(x, y);
@@ -345,7 +373,7 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
                 if (abs(v) > 7.0 || pixel > .35) continue;
                 float d = u + (wearNoise(m, 1.9, h.w, pixel).r - .5) * .4;
                 float line = wearLine(d, k.x < .45 ? .045 : .008 + .012 * decay, pixel)
-                      * smoothstep(7.0, 5.5, abs(v) + k.y * 3.0) * marks;
+                      * smoothstep(7.0, 5.5, abs(v) + k.y * 3.0) * marks * (1.0 - seamed(r, heading, border, .2));
                 if (k.x < .45) sealant = max(sealant, line); else crack = max(crack, line);
             } else if (kind < .7) {
                 continue;
@@ -355,9 +383,11 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
                 vec2 extent = kind < .75 ? vec2(.7 + 2.2 * k.y, .6 + 1.6 * k.z) : vec2(.3 + .25 * k.y, 7.0);
                 float inside = min(extent.x - abs(u), extent.y - abs(v));
                 if (inside < -.05) continue;
-                float area = clamp(inside / pixel + .5, 0.0, 1.0);
+                // A trench along a hex border is not dug (seamed).
+                float keep = kind < .75 ? 1.0 : 1.0 - seamed(r, heading, border, extent.x);
+                float area = clamp(inside / pixel + .5, 0.0, 1.0) * keep;
                 if (kind > .75 && k.w < .5) cut = max(cut, area); else fresh = max(fresh, area);
-                seam = max(seam, wearLine(inside, .025, pixel));
+                seam = max(seam, wearLine(inside, .025, pixel) * keep);
             } else if (kind < .78 + .1 * decay) {
                 float radius = .25 + .55 * k.y;
                 float d = length(r) + (wearNoise(m, .6, h.w, pixel).r - .5) * .3 * radius;
