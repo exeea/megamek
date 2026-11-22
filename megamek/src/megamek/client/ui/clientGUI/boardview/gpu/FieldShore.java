@@ -615,15 +615,37 @@ final class FieldShore {
         return total == 0 ? z : BoardRelief.lerp(z, sum / total, weight);
     }
 
+    /**
+     * Whether {@code next} is water the operator does not shape at the surface of the water it shapes in hex a: their
+     * edge is a seam, along which the field's bed meets today's (#seam), no step (FieldBoard#add).
+     */
+    boolean seamed(Coords a, BoardScene.Tile next) {
+        return family(a) >= 0 && next != null && next.liquid().present() && !next.liquid().molten() && !next.frozen()
+              && family(next.coords()) < 0
+              && Math.abs(BoardGeometry.waterZ(next) - BoardGeometry.waterZ(scene.tile(a))) <= .001f * scale;
+    }
+
+    /**
+     * Whether hex c holds water the operator does not shape at the surface of shaped water beside it (#seamed): ground
+     * reaching into it from that water's hexes is bed, as across the seam, no land kept above the water.
+     */
+    boolean seamWater(Coords c) {
+        BoardScene.Tile t = scene.tile(c);
+        if (t == null || !t.liquid().present()) { return false; }
+        for (int d = 0; d < 6; d++) {
+            Coords n = c.translated(d);
+            if (n.getX() >= 0 && n.getY() >= 0 && n.getX() < cols && n.getY() < rows && seamed(n, t)) { return true; }
+        }
+        return false;
+    }
+
     /** Shaped water hex a's edges to unshaped water at its surface (#seams). */
     private float[] seamEdges(Coords a) {
-        float surface = BoardGeometry.waterZ(scene.tile(a));
         float[] edges = new float[0];
         for (int e = 0; e < 6; e++) {
             Coords g = a.translated(BoardGeometry.edgeDirection(e));
             BoardScene.Tile next = g.getX() < 0 || g.getY() < 0 || g.getX() >= cols || g.getY() >= rows ? null : scene.tile(g);
-            if (next == null || !next.liquid().present() || next.liquid().molten() || next.frozen() || family(g) >= 0
-                  || Math.abs(BoardGeometry.waterZ(next) - surface) > .001f * scale) { continue; }
+            if (!seamed(a, next)) { continue; }
             Vector3 c0 = BoardGeometry.corner(a, 0, e), c1 = BoardGeometry.corner(a, 0, (e + 1) % 6);
             edges = Arrays.copyOf(edges, edges.length + 6);
             System.arraycopy(new float[] { c0.x, c0.y, c1.x, c1.y, g.getX(), g.getY() }, 0, edges, edges.length - 6, 6);

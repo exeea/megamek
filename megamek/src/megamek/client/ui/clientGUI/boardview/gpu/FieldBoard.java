@@ -88,7 +88,10 @@ final class FieldBoard {
     private final BoardConcrete concrete;
     /** A hex's bit in {@link #walls} beside its edges' six: the field takes it as a plate (FieldPlates). */
     private static final int PLATE = 1 << 6;
-    /** walls' bit LEVEL_SHORE + e: edge e parts natural land from water the shore does not shape at the land's level (#add). */
+    /**
+     * walls' bit LEVEL_SHORE + e: edge e parts natural land from water the shore does not shape at the land's level, or
+     * water the shore shapes from water it does not shape at the same surface (FieldShore#seamed): no step (#add).
+     */
     private static final int LEVEL_SHORE = 7;
     /** walls' bit JOINED + e: edge e joins two waters the shore holds whose beds meet under them (#hex, #add). */
     private static final int JOINED = 13;
@@ -273,7 +276,9 @@ final class FieldBoard {
             if (next != null && BoardRelief.levels(t, next) > 2.5f && !joined) { walls[x][y] |= 1 << e; }
             // A pool above lower ground or water ends in a rock step (falls, raised water: b and c).
             if (next != null && bed >= 0 && next.groundLevel() < t.groundLevel() && !joined) { walls[x][y] |= 1 << e; }
-            if (next != null && levelShore(t, next)) { walls[x][y] |= 1 << (LEVEL_SHORE + e); }
+            if (next != null && (levelShore(t, next) || shore.seamed(at, next))) {
+                walls[x][y] |= 1 << (LEVEL_SHORE + e);
+            }
             if (joined) { walls[x][y] |= 1 << (JOINED + e); }
             if (FieldWater.fallsInto(t, next, BoardGeometry.edgeDirection(e))) { walls[x][y] |= 1 << (FALL + e); }
             // A water hex with no fall, over a lower hex it is not joined to: its bank is the lower hex's slope (#stream).
@@ -1352,6 +1357,7 @@ final class FieldBoard {
         Coords v = u.translated(BoardGeometry.edgeDirection(e));
         int lu = level(u), lv = level(v);
         // Natural land keeps its level up to water today's code draws at that level: its bank comes up to the land there.
+        // Shaped water keeps its surface up to such water at its surface: its bed meets today's (FieldShore#seam).
         if (lu == lv || levelShore(u, v)) { return; }
         int top = packed(lu > lv ? u : v);
         boolean cliff = cliff(u, v);
@@ -1616,9 +1622,12 @@ final class FieldBoard {
         // Layer 2, shore and beds (FieldShore), before the roads; ground the shore lowers is bank and bed, no step's face.
         float bed = shore.bed(x, y, wall, Math.max(sill, shelf));
         // Land keeps above the water where no water plane reaches over it (WaterLayer#dip): no dry hollow below the
-        // line. The hex at the point decides, so a point every hex shares gets one height.
+        // line. The hex at the point decides, so a point every hex shares gets one height. Water across a seam
+        // (FieldShore#seamWater) is no land.
         Coords at = bed > 0 ? hexAt(x, y) : null;
-        if (at != null && inside(at) && !WaterLayer.water(this, at)) { bed = Math.min(bed, WaterLayer.dip(this, at, x, y, z)); }
+        if (at != null && inside(at) && !WaterLayer.water(this, at) && !shore.seamWater(at)) {
+            bed = Math.min(bed, WaterLayer.dip(this, at, x, y, z));
+        }
         z -= bed;
         zt -= bed;
         if (bed > 0) { role = 0; }
