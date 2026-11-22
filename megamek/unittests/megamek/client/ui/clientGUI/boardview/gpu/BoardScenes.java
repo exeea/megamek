@@ -922,7 +922,7 @@ final class BoardScenes {
           BoardBackdrop backdrop, MinimapTerrain minimap, int roadCuts, megamek.common.board.RailRoute.Cuts railCuts) {
         return new BoardScene.Tile(coords, new BoardScene.Tile.Ground(elevation, waterDepth, frozen, roadExits,
               surface, liquid, road, biome, cliffTopExits, bare, groundCover, ultraSublevel, appearance,
-              deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, roadCuts, railCuts),
+              deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, roadCuts, railCuts, false),
               features, cover, barren, blackIce, text, tileset, tilesetScenery, fireSmoke, impassable, minimap);
     }
 }

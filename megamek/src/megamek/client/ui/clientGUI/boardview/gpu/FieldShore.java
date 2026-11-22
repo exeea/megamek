@@ -382,7 +382,9 @@ final class FieldShore {
         float length = (float) Math.hypot(fx, fy), m = BoardRelief.metres(1);
         fx /= length;
         fy /= length;
-        int depth = Math.max(0, (down ? tile : next).waterDepth());
+        // A field planted under the water (a paddy) is a pool, not a stream: its descents keep today's mouth and depth.
+        BoardScene.Tile upper = down ? tile : next;
+        int depth = upper.ground().fieldUnderWater() ? 2 : Math.max(0, upper.waterDepth());
         float[] opening = mouth(down ? h : n, down ? e : (e + 3) % 6, ux, uy, fx, fy, length);
         float mouth = opening[1], away = edgeDistance(h, e, x, y);
         out[0] = drop;

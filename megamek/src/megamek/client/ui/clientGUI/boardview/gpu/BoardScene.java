@@ -169,7 +169,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               stood.containsTerrain(Terrains.BRIDGE_ROAD) ? stood.getTerrain(Terrains.BRIDGE_ROAD).getExits() & 63 : 0,
               hex.deckMud(hex.terrainLevel(Terrains.BRIDGE_ELEV)) != null, RailRoute.groundSides(hex),
               RailRoute.corridor(hex, pixels.coords(), ways), RailRoute.corridor(stood, pixels.coords(), ways, true),
-              BoardBackdrop.capture(hex), hex.roadCuts(board), RailRoute.cuts(hex, board));
+              BoardBackdrop.capture(hex), hex.roadCuts(board), RailRoute.cuts(hex, board),
+              hex.containsTerrain(Terrains.WATER) && hex.containsTerrain(Terrains.FIELDS));
         return new Tile(pixels.coords(), ground,
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), ways, pixels.scenery(),
                     megamek.common.board.BoardTreeDistribution.NATURAL, buildingReferences, searchedWoods),
@@ -509,8 +510,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         /**
          * What shapes a hex's ground: its level and liquid, its surface and cover, its roads, rails and decks, its hex
-         * designs. Its equality is the statement of "the same ground form", so no caller lists these fields to compare
-         * them: a component added here is compared wherever grounds are ({@link #sameGeometry},
+         * designs, a field planted under its water ({@code fieldUnderWater}: a paddy, whose descents stay full). Its
+         * equality is the statement of "the same ground form", so no caller lists these fields to compare them: a
+         * component added here is compared wherever grounds are ({@link #sameGeometry},
          * {@link BoardGround#sameInputs}). What only finishes the hex stays the tile's own: detected black ice changes
          * its material and no geometry, and {@code barren} its dressing.
          */
@@ -519,7 +521,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel,
               java.util.Map<String, megamek.common.board.HexAppearance> appearance, BoardRoad.Kind deckRoad,
               int deckRoadExits, boolean deckMud, int railBed, RailRoute.Corridor corridor,
-              RailRoute.Corridor deckCorridor, BoardBackdrop backdrop, int roadCuts, RailRoute.Cuts railCuts) {
+              RailRoute.Corridor deckCorridor, BoardBackdrop backdrop, int roadCuts, RailRoute.Cuts railCuts,
+              boolean fieldUnderWater) {
             Ground {
                 appearance = java.util.Map.copyOf(appearance);
                 deckRoad = Objects.requireNonNullElse(deckRoad, BoardRoad.Kind.NONE);
@@ -533,7 +536,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                       waterDepth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, BoardRoad.Kind.NONE, Biome.NONE, 0, false,
                       BoardSurfaceBlend.solid(surface == null ? Surface.GRASS : surface), false, java.util.Map.of(),
                       BoardRoad.Kind.NONE, 0, false, 0, RailRoute.Corridor.NONE, RailRoute.Corridor.NONE,
-                      BoardBackdrop.NONE, 0, RailRoute.Cuts.NONE);
+                      BoardBackdrop.NONE, 0, RailRoute.Cuts.NONE, false);
             }
         }
 
@@ -680,7 +683,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             Ground airless = new Ground(level, weightless ? -1 : waterDepth(), iced, roadExits(), airlessSurface,
                   weightless ? BoardLiquid.NONE : liquid(), road(), Biome.NONE, cliffTopExits(), weightless,
                   BoardSurfaceBlend.solid(airlessSurface), ultraSublevel(), appearance(), deckRoad(), deckRoadExits(),
-                  false, railBed(), corridor(), deckCorridor(), backdrop(), roadCuts(), railCuts());
+                  false, railBed(), corridor(), deckCorridor(), backdrop(), roadCuts(), railCuts(),
+                  ground.fieldUnderWater());
             // What shaped the ground is airless too; a tile without history derives it from what is kept.
             Footing stood = !history() ? null : new Footing(footing.objects().stream()
                   .filter(object -> keptAirless(object, weightless)).toList(), footing.cover());
