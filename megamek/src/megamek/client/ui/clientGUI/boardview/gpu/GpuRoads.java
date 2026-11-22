@@ -757,6 +757,11 @@ final class GpuRoads {
                 patches.add(new Patch(median, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT, null));
             }
         }
+        // Past a crossing into the next hex's road of its kind, that hex's coats paint the road on (BoardRoad#onward).
+        if (paved && !deck && !slabs) {
+            Area onward = road.onward();
+            for (var patch : onward.isEmpty() ? List.<Patch>of() : patches) { patch.shape().subtract(onward); }
+        }
         // Past a dirt track's run-on the paved road is its own, but for the faint grit its wheels carry on (#coverage).
         Area meeting = road.pavedCarriageway(0);
         if (!meeting.isEmpty()) {

@@ -138,6 +138,8 @@ final class BoardRoad {
     private int squared;
     /** Sides where a loose road runs on into another's hex, whose own coat draws the track there (#meet). */
     private int tracked;
+    /** Sides where a paved road runs on into the next hex's road of its kind, whose coats paint it there (#onward). */
+    private int carried;
     /** The paved roads a loose one meets. */
     private List<BoardRoad> paved = List.of();
     /** A gravel road's courses (#courses), derived once, and which of their ends run on (#pathEnds). */
@@ -508,6 +510,7 @@ final class BoardRoad {
                 continue;
             }
             if (loose && !paved(next.road())) { tracked |= 1 << d; }
+            if (!loose && next.road() == tile.road()) { carried |= 1 << d; }
             if (paved(next.road()) == loose) {
                 meetings |= 1 << d;
                 if (loose) { roads.add(of(scene, next)); }
@@ -576,6 +579,43 @@ final class BoardRoad {
         }
         return result;
     }
+
+    /**
+     * Past each crossing into the next hex's road of its kind (#carried), square to the crossing and within its arm
+     * (#arm), from {@link #ONWARD} on: that hex's own coats paint the road on from there, measured from its own course,
+     * so the two never lay two headings and lanes over each other (#pavedWear, GpuRoads#patches). The overlap keeps the
+     * two coats' edges closed. A roundabout's shared paint keeps its own.
+     */
+    Area onward() {
+        Area result = new Area();
+        if (carried == 0 || circle != null) { return result; }
+        for (var path : paths) {
+            for (int end = 0; end < 2 && path.size() > 1; end++) {
+                Point outer = end == 0 ? path.getFirst() : path.getLast();
+                Point inner = end == 0 ? path.get(1) : path.get(path.size() - 2);
+                for (int d = 0; d < 6; d++) {
+                    Vector2 axis = border(d);
+                    float distance = axis.len();
+                    axis.nor();
+                    float from = inner.x * axis.x + inner.y * axis.y, to = outer.x * axis.x + outer.y * axis.y;
+                    // Only an end running on through this side's border.
+                    if ((carried & 1 << d) == 0 || to <= distance || from >= to) { continue; }
+                    float t = Math.max(0, (distance - from) / (to - from));
+                    float length = (float) Math.hypot(outer.x - inner.x, outer.y - inner.y);
+                    Point at = new Point(inner.x + (outer.x - inner.x) * t, inner.y + (outer.y - inner.y) * t,
+                          outer.width);
+                    Area past = new End(at, (outer.x - inner.x) / length, (outer.y - inner.y) / length)
+                          .band(ONWARD, 128, outer.width + SHOULDER + 3);
+                    past.intersect(arm(new End(at, axis.x, axis.y)));
+                    result.add(past);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** How far past a crossing a paved road's coats still reach over the next hex's (#onward): a tile pixel. */
+    private static final float ONWARD = 1;
 
     /**
      * The carriageways of the paved roads a loose one meets (#meet), widened by {@code margin}, in its tile pixels. A
@@ -1594,6 +1634,7 @@ final class BoardRoad {
         result.meetings = meetings;
         result.squared = squared;
         result.tracked = tracked;
+        result.carried = carried;
         result.paved = paved;
         return result.lanes(this);
     }
