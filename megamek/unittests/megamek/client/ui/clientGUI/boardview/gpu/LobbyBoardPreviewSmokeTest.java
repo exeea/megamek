@@ -228,6 +228,7 @@ class LobbyBoardPreviewSmokeTest {
             var tile = inspection.source().takeFrame().scene().tile(new Coords(0, 0));
             assertTrue(tile.text().stream().anyMatch(text -> text.text().equals("0101")));
             var labels = GpuTestSupport.field(preview, "hexText");
+            awaitLabels(stage, labels);
             assertFalse(((List<?>) GpuTestSupport.field(labels, "pages")).isEmpty()
                   && ((java.util.Map<?, ?>) GpuTestSupport.field(labels, "fresh")).isEmpty(), "enabled labels reach the GPU");
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -489,6 +490,23 @@ class LobbyBoardPreviewSmokeTest {
             created.set(new Inspection(game, new GpuMapSource(game, null, null)));
         });
         return created.get();
+    }
+
+    /**
+     * Draws frames as {@link #awaitImage} does until the hex labels' layout is at rest: GpuHexText lays labels out, and
+     * merges them, within a budget a frame (BUILD_NANOS, 2 ms), so the first ready frame can end with the first chunk
+     * still half laid out, as it does under load.
+     */
+    private static void awaitLabels(Stage stage, Object labels) throws InterruptedException {
+        long deadline = System.nanoTime() + 120_000_000_000L;
+        while ((GpuTestSupport.field(labels, "laying") != null || GpuTestSupport.field(labels, "merging") != null
+              || !((java.util.Map<?, ?>) GpuTestSupport.field(labels, "fresh")).isEmpty())
+              && System.nanoTime() < deadline) {
+            ScreenUtils.clear(.05f, .07f, .07f, 1, true);
+            stage.act(1 / 60f);
+            stage.draw();
+            Thread.sleep(10);
+        }
     }
 
     private static void awaitImage(Stage stage, LobbyBoardPreview preview) throws InterruptedException {
