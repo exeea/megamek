@@ -1032,6 +1032,10 @@ class GpuHudInteractionSmokeTest {
         }
 
         void click(Actor actor) throws Exception {
+            // A control below the fold of a scrolling list comes into view first, as the player scrolls to it.
+            if (GpuBoardTestUi.scrollIntoView(actor)) {
+                live.draw(1, 0);
+            }
             GpuHudParitySmokeTest.click(live, actor);
             act();
         }

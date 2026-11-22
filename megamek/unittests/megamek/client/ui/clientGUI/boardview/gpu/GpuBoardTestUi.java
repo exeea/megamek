@@ -249,18 +249,31 @@ final class GpuBoardTestUi {
             clickActor(stage().getRoot().findActor("utility-view"));
         }
         // Controls can move below the fold of a scrolling panel. Scroll them into view before real input.
-        for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
-            if (parent instanceof ScrollPane scroll) {
-                Vector2 position = actor.localToAscendantCoordinates(scroll.getWidget(), new Vector2());
-                scroll.scrollTo(position.x, position.y, actor.getWidth(), actor.getHeight(), false, true);
-                scroll.updateVisualScroll();
-                stage().draw();
-            }
+        if (scrollIntoView(actor)) {
+            stage().draw();
         }
         Vector2 point = actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2));
         stage().stageToScreenCoordinates(point);
         Gdx.input.getInputProcessor().touchDown((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
         Gdx.input.getInputProcessor().touchUp((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
+    }
+
+    /**
+     * Scrolls the scrolling panels that hold {@code actor} until it is in view, as a player scrolls to a control below
+     * the fold; true when one of them moved. A scroll pane places its widget when it is drawn next.
+     */
+    static boolean scrollIntoView(Actor actor) {
+        boolean moved = false;
+        for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof ScrollPane scroll) {
+                float x = scroll.getScrollX(), y = scroll.getScrollY();
+                Vector2 position = actor.localToAscendantCoordinates(scroll.getWidget(), new Vector2());
+                scroll.scrollTo(position.x, position.y, actor.getWidth(), actor.getHeight(), false, true);
+                scroll.updateVisualScroll();
+                moved |= x != scroll.getScrollX() || y != scroll.getScrollY();
+            }
+        }
+        return moved;
     }
 
     static long capture(File file) {
