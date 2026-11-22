@@ -100,7 +100,7 @@ vec3 compactFields(vec3 world) {
 float groundSpread(vec4 texel) { return .5 * (1.0 - min(length(texel.rgb * 2.0 - 1.0), 1.0)); }
 
 // The drawn triangle's own up component where the includer gives it (GROUND_FACE_SLOPE: the lit sculpt program, on
-// ground of a hex's own mesh); 1 elsewhere, which leaves the shading normal to decide.
+// ground and step faces of a hex's own mesh); 1 elsewhere, which leaves the shading normal to decide.
 #define GROUND_FACE_SLOPE
 float groundFaceSlope = 1.0;
 // 1 on a bare ledge, a step face its maker marks as rock lying level (the cliff byte 138, GpuTerrain#shadeColor), where
@@ -263,7 +263,9 @@ GroundSurface groundSurface(GroundPixel px, int family, vec3 fields) {
     // call's text though never the call (compactSlot), which a constant index past the table fails to compile.
     GroundFamily f = groundFamilies[min(family, GROUND_FAMILIES - 1)];
     float broad = fields.x, fine = fields.y, region = fields.z;
-    float up = clamp(px.face.z, 0.0, 1.0);
+    // The cover holds by the slope the read sees (groundLying): a face near vertical carries none, whatever its
+    // shading normal says at a rim or foot.
+    float up = clamp(min(px.face.z, groundFaceSlope + .15), 0.0, 1.0);
 #ifdef groundPocketsRule
     // Small pockets (~1.4 m), as today's cliff material reads them: they break a cover's edge into a fringe.
     float pockets = GROUND_NOISE((px.world.xy + px.world.z * vec2(.43, .27)) / 92.0 + .57).g, shift = pockets;

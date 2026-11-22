@@ -343,7 +343,9 @@ void main() {
     vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
     terrainView = -viewDirection();
 #ifdef GROUND_FACE_SLOPE
-    if (ground) groundFaceSlope = geometric.z;
+    // A step face too: the field draws a steep step as stretched triangles between level samples, whose shading
+    // normal can say level where the face stands near vertical.
+    if (ground || cliff) groundFaceSlope = geometric.z;
     if (cliff && !panel && abs(kind * 255.0 - 138.0) < .5) groundBareLedge = 1.0;
 #endif
 #endif
