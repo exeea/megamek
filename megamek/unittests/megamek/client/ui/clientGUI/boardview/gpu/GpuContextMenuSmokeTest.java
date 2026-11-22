@@ -279,7 +279,8 @@ class GpuContextMenuSmokeTest {
             verify(menu.moves).planTo(HEX, 0, false);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
             click(hud, menu.item("Center camera here"));
-            verify(menu.source).command(any());
+            // The source centres the camera on that hex (it posts the move to the EDT itself, c323ecc6c8).
+            verify(menu.source).centerOnHex(HEX);
 
             menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.JUMP)));
             menu.menu.open(HEX, Entity.NONE, 700, 600);
