@@ -286,7 +286,10 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
               && (firingUnit >= 0)
               && (actingFormation().get().getUnits().size() > firingUnit)
               && actingFormation().get().isEligibleForPhase(game().getPhase())
-              && !unitHasPlannedFire();
+              && !unitHasPlannedFire()
+              && (selectedTarget != null)
+              && !SBFToHitData.compileToHit(game(), new SBFStandardUnitAttack(actingFormation().get().getId(),
+                    firingUnit, selectedTarget.getId(), ASRange.LONG)).cannotSucceed();
     }
 
     private boolean unitHasPlannedFire() {

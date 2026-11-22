@@ -44,8 +44,8 @@ import static org.mockito.Mockito.when;
 
 import megamek.common.Hex;
 import megamek.common.Player;
-import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.options.SBFRuleOptions;
@@ -58,7 +58,7 @@ import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Tests what the server does with a submitted SBF move: the movement limit and Sprinting (IO:BF p.199). */
+/** Tests validation and authoritative mutation of SBF movement submissions. */
 class SBFMovementProcessorTest {
 
     private final BoardLocation start = BoardLocation.of(new Coords(1, 1), 0);
@@ -95,15 +95,84 @@ class SBFMovementProcessorTest {
     }
 
     @Test
+    void validMovementUpdatesFormationAndEndsTurn() {
+        BoardLocation destination = BoardLocation.of(new Coords(2, 1), 0);
+        SBFMovePath movePath = new SBFMovePath(formation.getId(), start, game);
+        movePath.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), start, destination));
+        movePath.setJumpUsed(2);
+
+        assertTrue(processor.processMovement(movePath, formation));
+        assertEquals(destination, formation.getPosition());
+        assertEquals(2, formation.getJumpUsedThisTurn());
+        assertTrue(formation.isDone());
+        verify(gameManager).sendUnitUpdate(formation);
+        verify(gameManager).endCurrentTurn(formation);
+    }
+
+    @Test
+    void wrongPhaseRejectsWithoutMutation() {
+        game.setPhase(GamePhase.FIRING);
+
+        assertRejected(new SBFMovePath(formation.getId(), start, game));
+    }
+
+    @Test
+    void forgedStartCannotTeleportFormation() {
+        BoardLocation forgedStart = BoardLocation.of(new Coords(7, 7), 0);
+        BoardLocation destination = BoardLocation.of(new Coords(8, 7), 0);
+        SBFMovePath movePath = new SBFMovePath(formation.getId(), forgedStart, game);
+        movePath.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), forgedStart, destination));
+
+        assertRejected(movePath);
+    }
+
+    @Test
+    void discontinuousRouteRejectsWithoutMutation() {
+        BoardLocation first = BoardLocation.of(new Coords(2, 1), 0);
+        BoardLocation forgedSecondStart = BoardLocation.of(new Coords(7, 7), 0);
+        BoardLocation second = BoardLocation.of(new Coords(8, 7), 0);
+        SBFMovePath movePath = new SBFMovePath(formation.getId(), start, game);
+        movePath.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), start, first));
+        movePath.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), forgedSecondStart, second));
+
+        assertRejected(movePath);
+    }
+
+    @Test
+    void excessiveJumpUseRejectsWithoutMutation() {
+        SBFMovePath movePath = new SBFMovePath(formation.getId(), start, game);
+        movePath.setJumpUsed(formation.getJumpMove() + 1);
+
+        assertRejected(movePath);
+    }
+
+    @Test
+    void negativeJumpUseRejectsWithoutMutation() {
+        SBFMovePath movePath = new SBFMovePath(formation.getId(), start, game);
+        movePath.setJumpUsed(-1);
+
+        assertRejected(movePath);
+    }
+
+    @Test
+    void completedFormationRejectsWithoutMutation() {
+        formation.setDone(true);
+
+        assertFalse(processor.processMovement(new SBFMovePath(formation.getId(), start, game), formation));
+        assertTrue(formation.isDone());
+        assertEquals(start, formation.getPosition());
+        verify(gameManager, never()).sendUnitUpdate(any());
+        verify(gameManager, never()).endCurrentTurn(any());
+    }
+
+    @Test
     void movementBeyondNormalLimitRejects() {
         assertRejected(pathWithSteps(formation.getMovement() + 1));
     }
 
     @Test
     void movementAtNormalLimitDoesNotCountAsSprinting() {
-        processor.processMovement(pathWithSteps(formation.getMovement()), formation);
-
-        assertTrue(formation.isDone());
+        assertTrue(processor.processMovement(pathWithSteps(formation.getMovement()), formation));
         assertFalse(formation.hasSprintedThisTurn());
     }
 
@@ -111,8 +180,7 @@ class SBFMovementProcessorTest {
     void sprintingRoundsOneAndAHalfMovementUp() {
         game.getOptions().getOption(SBFRuleOptions.MOVE_SPRINT).setValue(true);
 
-        processor.processMovement(pathWithSteps(5), formation);
-
+        assertTrue(processor.processMovement(pathWithSteps(5), formation));
         assertTrue(formation.isDone());
         assertTrue(formation.hasSprintedThisTurn());
         formation.setDone(false);
@@ -139,8 +207,7 @@ class SBFMovementProcessorTest {
     }
 
     private void assertRejected(SBFMovePath movePath) {
-        processor.processMovement(movePath, formation);
-
+        assertFalse(processor.processMovement(movePath, formation));
         assertFalse(formation.isDone());
         assertEquals(start, formation.getPosition());
         verify(gameManager, never()).sendUnitUpdate(any());

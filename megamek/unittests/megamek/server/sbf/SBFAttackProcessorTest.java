@@ -5,36 +5,15 @@
  *
  * MegaMek is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License (GPL),
- * version 3 or (at your option) any later version,
+ * version 3 of the License, or (at your option) any later version,
  * as published by the Free Software Foundation.
- *
- * MegaMek is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * A copy of the GPL should have been included with this project;
- * if not, see <https://www.gnu.org/licenses/>.
- *
- * NOTICE: The MegaMek organization is a non-profit group of volunteers
- * creating free software for the BattleTech community.
- *
- * MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
- * of The Topps Company, Inc. All Rights Reserved.
- *
- * Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
- * InMediaRes Productions, LLC.
- *
- * MechWarrior Copyright Microsoft Corporation. MegaMek was created under
- * Microsoft's "Game Content Usage Rules"
- * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
- * affiliated with Microsoft.
  */
 
 package megamek.server.sbf;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -45,19 +24,23 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 
 import megamek.common.Player;
+import megamek.common.actions.EntityAction;
+import megamek.common.actions.sbf.SBFAttackAction;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
 import megamek.common.alphaStrike.ASRange;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFToHitData;
 import megamek.common.strategicBattleSystems.SBFUnit;
+import megamek.common.strategicBattleSystems.SBFVisibilityStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Tests what the server does with submitted SBF attacks: Sprinting (IO:BF p.199). */
+/** Tests validation and authoritative mutation of SBF attack submissions. */
 class SBFAttackProcessorTest {
 
     private static final int OWNER_ID = 1;
@@ -88,16 +71,38 @@ class SBFAttackProcessorTest {
     }
 
     @Test
+    void validAttackIsRebuiltWithAuthoritativeRangeAndEndsTurn() {
+        SBFStandardUnitAttack submitted = attack(0, target, ASRange.SHORT);
+
+        assertTrue(processor.processAttacks(List.of(submitted), formation));
+
+        SBFStandardUnitAttack published = (SBFStandardUnitAttack) game.getActionsVector().getFirst();
+        assertNotSame(submitted, published);
+        assertEquals(ASRange.LONG, published.getRange());
+        assertTrue(formation.isDone());
+        verify(gameManager).sendUnitUpdate(formation);
+        verify(gameManager).sendPendingActions();
+        verify(gameManager).endCurrentTurn(formation);
+    }
+
+    @Test
+    void emptySubmissionEndsFiringTurnWithoutActions() {
+        assertTrue(processor.processAttacks(List.of(), formation));
+        assertTrue(game.getActionsVector().isEmpty());
+        assertTrue(formation.isDone());
+    }
+
+    @Test
+    void wrongPhaseRejectsWithoutMutation() {
+        game.setPhase(GamePhase.TARGETING);
+        assertRejected(List.of(attack(0, target, ASRange.LONG)));
+    }
+
+    @Test
     void sprintedFormationCannotAttack() {
         formation.setSprintedThisTurn(true);
 
-        processor.processAttacks(List.of(attack(0, target, ASRange.LONG)), formation);
-
-        assertTrue(game.getActionsVector().isEmpty());
-        assertFalse(formation.isDone());
-        verify(gameManager, never()).sendUnitUpdate(any());
-        verify(gameManager, never()).sendPendingActions();
-        verify(gameManager, never()).endCurrentTurn(any());
+        assertRejected(List.of(attack(0, target, ASRange.LONG)));
     }
 
     @Test
@@ -110,6 +115,93 @@ class SBFAttackProcessorTest {
         SBFToHitData sprintedTargetToHit = SBFToHitData.compileToHit(game, submitted);
         assertEquals(normalTargetNumber - 1, sprintedTargetToHit.getValue());
         assertTrue(sprintedTargetToHit.getDesc().contains("target sprinted"));
+    }
+
+    @Test
+    void duplicateUnitInSubmissionRejectsAtomically() {
+        assertRejected(List.of(attack(0, target, ASRange.LONG), attack(0, target, ASRange.LONG)));
+    }
+
+    @Test
+    void duplicateUnitAgainstPendingAttackRejects() {
+        SBFStandardUnitAttack existing = attack(0, target, ASRange.LONG);
+        game.addAction(existing);
+
+        assertFalse(processor.processAttacks(List.of(attack(0, target, ASRange.LONG)), formation));
+        assertEquals(List.of(existing), game.getActionsVector());
+        assertFalse(formation.isDone());
+        verifyNoPublication();
+    }
+
+    @Test
+    void differentUnitsMayAttackSameTarget() {
+        assertTrue(processor.processAttacks(List.of(attack(0, target, ASRange.LONG),
+              attack(1, target, ASRange.LONG)), formation));
+        assertEquals(2, game.getActionsVector().size());
+    }
+
+    @Test
+    void friendlyTargetRejects() {
+        target.setOwnerId(OWNER_ID);
+        assertRejected(List.of(attack(0, target, ASRange.LONG)));
+    }
+
+    @Test
+    void hiddenTargetRejectsWithReconEnabled() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        game.visibilityHelper().setVisibility(OWNER_ID, TARGET_ID, SBFVisibilityStatus.PARTIAL_SCAN);
+        assertRejected(List.of(attack(0, target, ASRange.LONG)));
+    }
+
+    @Test
+    void visibleTargetSucceedsWithReconEnabled() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        game.visibilityHelper().setVisible(OWNER_ID, TARGET_ID);
+        assertTrue(processor.processAttacks(List.of(attack(0, target, ASRange.LONG)), formation));
+    }
+
+    @Test
+    void sameHexAttackIsRebuiltAtLongRange() {
+        target.setPosition(formation.getPosition());
+
+        assertTrue(processor.processAttacks(List.of(attack(0, target, ASRange.SHORT)), formation));
+
+        assertEquals(ASRange.LONG, ((SBFStandardUnitAttack) game.getActionsVector().getFirst()).getRange());
+    }
+
+    @Test
+    void attackTwoHexesAwayIsRebuiltAtExtremeRange() {
+        target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
+
+        assertTrue(processor.processAttacks(List.of(attack(0, target, ASRange.LONG)), formation));
+
+        assertEquals(ASRange.EXTREME, ((SBFStandardUnitAttack) game.getActionsVector().getFirst()).getRange());
+    }
+
+    @Test
+    void thirdTargetRejects() {
+        formation.addUnit(new SBFUnit());
+        SBFFormation second = formation(21, ENEMY_ID, new Coords(1, 2), 1);
+        SBFFormation third = formation(22, ENEMY_ID, new Coords(2, 2), 1);
+        game.addUnit(second);
+        game.addUnit(third);
+
+        assertRejected(List.of(attack(0, target, ASRange.LONG), attack(1, second, ASRange.LONG),
+              attack(2, third, ASRange.LONG)));
+    }
+
+    @Test
+    void outOfRangeTargetRejects() {
+        target.setPosition(BoardLocation.of(new Coords(5, 1), 0));
+        assertRejected(List.of(attack(0, target, ASRange.LONG)));
+    }
+
+    @Test
+    void unsupportedAttackTypeRejects() {
+        SBFAttackAction unsupported = mock(SBFAttackAction.class);
+        when(unsupported.getEntityId()).thenReturn(FORMATION_ID);
+        when(unsupported.getTargetId()).thenReturn(TARGET_ID);
+        assertRejected(List.of(unsupported));
     }
 
     private SBFFormation formation(int id, int ownerId, Coords coords, int unitCount) {
@@ -125,5 +217,18 @@ class SBFAttackProcessorTest {
 
     private SBFStandardUnitAttack attack(int unitNumber, SBFFormation attackTarget, ASRange range) {
         return new SBFStandardUnitAttack(FORMATION_ID, unitNumber, attackTarget.getId(), range);
+    }
+
+    private void assertRejected(List<EntityAction> actions) {
+        assertFalse(processor.processAttacks(actions, formation));
+        assertTrue(game.getActionsVector().isEmpty());
+        assertFalse(formation.isDone());
+        verifyNoPublication();
+    }
+
+    private void verifyNoPublication() {
+        verify(gameManager, never()).sendUnitUpdate(any());
+        verify(gameManager, never()).sendPendingActions();
+        verify(gameManager, never()).endCurrentTurn(any());
     }
 }
