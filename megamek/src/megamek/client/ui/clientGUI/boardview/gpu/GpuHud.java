@@ -1075,9 +1075,9 @@ final class GpuHud implements GpuBoardHud {
         } else if (binds.contains(KeyCommandBind.DONE) && picking(inputs)) {
             source.players().endPick(true);
         } else if (binds.contains(KeyCommandBind.DONE)) {
-            if (!locked) {
-                dock.main();
-            }
+            // The dock's main action, as its form has it: none in the chat form of a locked turn; in a report the
+            // playback's skip, which a running playback (a locked turn) still offers.
+            dock.main();
         } else if (binds.contains(KeyCommandBind.NEXT_UNIT) || binds.contains(KeyCommandBind.PREV_UNIT)) {
             if (inputs.view().playbackBusy()) { return true; }
             // MegaMek's next or previous unit becomes the selected one, also when it is the current unit again.
