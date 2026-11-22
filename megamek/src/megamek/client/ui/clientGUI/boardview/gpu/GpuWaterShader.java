@@ -64,6 +64,8 @@ final class GpuWaterShader extends Attribute {
     record Impact(Vector3 from, Vector3 to, float radius) { }
     /** Most landing stretches one pool churns with; the shader's arrays hold this many. */
     static final int MAX_IMPACTS = 12;
+    /** Farthest a boil reaches from its landing, in radii: 2.4 past a band of 0.7 behind the curtain. */
+    static final float BOIL_REACH = 3.1f;
 
     private final int palette;
     final Mode mode;
@@ -114,8 +116,8 @@ final class GpuWaterShader extends Attribute {
                     Vector3 from = GpuWaterfall.landing(upper, fall, start);
                     for (int k = 1; k <= 2; k++) {
                         Vector3 to = GpuWaterfall.landing(upper, fall, start + (end - start) * k / 2f);
-                        // The boil reaches out a little over twice its radius, and behind the curtain to the wall.
-                        if (distance(middle, from, to) < BoardGeometry.width() * .6f + 2.2f * radius) {
+                        // The boil reaches 2.4 radii past a band of 0.7 radius behind the curtain.
+                        if (distance(middle, from, to) < BoardGeometry.width() * .6f + BOIL_REACH * radius) {
                             hits.add(new Impact(from, to, radius));
                         }
                         from = to;

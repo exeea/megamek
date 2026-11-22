@@ -623,9 +623,9 @@ class BoardWaterfallTest {
                 Vector3 a = BoardGeometry.corner(entry.getKey(), 0, edge);
                 Vector3 b = BoardGeometry.corner(entry.getKey(), 0, edge + 1);
                 for (GpuWaterShader.Impact impact : entry.getValue()) {
-                    // The shader's boil reaches at most 2.1 radii from its landing, and behind a curtain a further
-                    // 0.085 hex widths; one that can reach the shared edge churns both sides of it, so no seam shows.
-                    float reach = 2.1f * impact.radius() + .085f * BoardGeometry.WIDTH, nearest = Float.MAX_VALUE;
+                    // The shader's boil reaches at most GpuWaterShader.BOIL_REACH radii from its landing; one that can
+                    // reach the shared edge churns both sides of it, so no seam shows.
+                    float reach = GpuWaterShader.BOIL_REACH * impact.radius(), nearest = Float.MAX_VALUE;
                     for (int k = 0; k <= 20; k++) {
                         Vector3 point = new Vector3(a).lerp(b, k / 20f);
                         nearest = Math.min(nearest, BoardScenes.distance(point, impact.from(), impact.to()));
