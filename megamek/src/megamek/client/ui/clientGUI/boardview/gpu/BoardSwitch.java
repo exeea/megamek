@@ -59,12 +59,12 @@ enum BoardSwitch {
     GROUND_SOIL_MANTLE("Soil mantle", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
           "Bare soil on banks and under rims where the cover ends, and the cap plates of dry crests, instead of bare "
                 + "rock. Switching it rebuilds the board's shaders."),
-    GROUND_WEAR_THROUGH("Worn ground", 0, 1, 1, 0, 1, 1, Applies.PROGRAMS, null,
+    GROUND_WEAR_THROUGH("Worn ground", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
           "Level turf wears through to its soil in patches. Switching it rebuilds the board's shaders."),
-    GROUND_TURF_LIP("Turf lip", 0, 1, 1, 0, 1, 1, Applies.PROGRAMS, null,
+    GROUND_TURF_LIP("Turf lip", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
           "A two-level bank keeps a ragged lip of turf at its rim, broken turf on its shoulder and the root mat below "
                 + "them. Switching it rebuilds the board's shaders."),
-    GROUND_WALL_WEATHERING("Wall weathering", 0, 1, 1, 0, 1, 1, Applies.PROGRAMS, null,
+    GROUND_WALL_WEATHERING("Wall weathering", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
           "Cliffs weather by their height: a bleached rim, streaks running down from it and grime toward the foot. "
                 + "Switching it rebuilds the board's shaders."),
     GROUND_POCKETS("Cover pockets", 0, 1, 1, 1, 1, 1, Applies.PROGRAMS, null,
