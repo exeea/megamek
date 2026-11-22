@@ -247,7 +247,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_MINI_MAP = "viewMinimap";
     public static final String VIEW_UNIT_OVERVIEW = "viewUnitOverview";
     public static final String VIEW_ZOOM_IN = "viewZoomIn";
-    public static final String VIEW_LEGACY_2D = "viewLegacy2D";
     public static final String VIEW_GRAPHICS_CLASSIC = "viewGraphicsClassic";
     public static final String VIEW_GRAPHICS_ENHANCED = "viewGraphicsEnhanced";
     public static final String VIEW_ZOOM_OUT = "viewZoomOut";

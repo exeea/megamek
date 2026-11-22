@@ -133,12 +133,12 @@ class BoardEditorSessionTest {
     }
 
     /**
-     * The 2D Preview's BoardView follows the document only through the board and game events it listens to in a game, so
+     * A board listener follows the document only through the board and game events, as in a game, so
      * every kind of edit announces each hex it changes, after its last change and on the thread that edits (the EDT): a
      * paint stroke, a sculpt, an Edit-panel value, an object, Undo and Redo, an erase, the commit conversion of a typed
      * Fluff value with its lane road, and a replaced document (New, Open).
      */
-    @Test void everyEditAnnouncesTheHexesItChangesAsTheBoardViewListensForThem() throws Exception {
+    @Test void everyEditAnnouncesTheHexesItChangesToBoardListeners() throws Exception {
         Path file = directory.resolve("announced.board2");
         var task = new java.util.concurrent.FutureTask<Void>(() -> {
             var session = session();

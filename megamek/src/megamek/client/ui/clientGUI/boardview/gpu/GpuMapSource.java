@@ -13,9 +13,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import javax.swing.JFileChooser;
 import javax.swing.JFrame;
-import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -72,7 +70,6 @@ final class GpuMapSource implements BoardSource {
     private final BoardEditorSession editor;
     private final GpuEditorFiles editorFiles;
     private final Runnable requestClose;
-    private final Runnable requestLegacy2D;
     private final Runnable requestEditor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
@@ -179,12 +176,7 @@ final class GpuMapSource implements BoardSource {
         this(game, owner, editor, requestClose, null);
     }
 
-    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestLegacy2D) {
-        this(game, owner, editor, requestClose, requestLegacy2D, null);
-    }
-
-    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestLegacy2D,
-          Runnable requestEditor) {
+    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestEditor) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         if (editor != null && editor.game() != game) { throw new IllegalArgumentException("The editor owns its Game"); }
         this.game = game;
@@ -192,7 +184,6 @@ final class GpuMapSource implements BoardSource {
         this.editor = editor;
         editorFiles = editor == null ? null : new GpuEditorFiles(editor);
         this.requestClose = requestClose;
-        this.requestLegacy2D = requestLegacy2D;
         this.requestEditor = requestEditor;
         atmosphere = new GpuAtmosphereControls(game::getBoard, game::getPlanetaryConditions, () -> closed);
         if (editor != null) { trace = GpuTraceOverlay.Settings.capture(); }
@@ -304,10 +295,6 @@ final class GpuMapSource implements BoardSource {
         if (editor == null && requestEditor != null) {
             commands.add(menuCommand("boardEdit3D", "BoardEditor.edit3D", requestEditor));
         }
-        if (editor != null && requestLegacy2D != null) {
-            // The editor opens its live Legacy 2D Preview beside itself; a preview switches through View > Renderer.
-            commands.add(menuCommand("boardPreview2D", "BoardEditor.preview2D", requestLegacy2D));
-        }
         if (editor != null) {
             long generation = boardGeneration;
             for (var action : List.of(BoardEditorSession.Action.OPEN, BoardEditorSession.Action.SAVE,
@@ -359,18 +346,11 @@ final class GpuMapSource implements BoardSource {
     }
 
     /**
-     * View > Renderer, as CommonMenuBar's Renderer submenu, with this window's 3D graphics checked: a preview's Legacy
-     * 2D closes it and shows its board in a Legacy 2D window; the editor draws only in 3D, so there it is unavailable
-     * (its Legacy 2D Preview opens beside it); the lobby's preview has no Legacy 2D. Classic and Enhanced apply at once.
+     * View > Renderer, as CommonMenuBar's Renderer submenu, with this window's 3D graphics checked. Classic and Enhanced
+     * apply at once.
      */
     private BoardScene.Command renderer(GUIPreferences gui) {
         List<BoardScene.Command> choices = new ArrayList<>();
-        if (editor == null && requestLegacy2D != null) {
-            choices.add(viewCommand(ClientGUI.VIEW_LEGACY_2D, null, false, requestLegacy2D));
-        } else if (editor != null) {
-            choices.add(new BoardScene.Command(ClientGUI.VIEW_LEGACY_2D, Messages.getString("CommonMenuBar.viewLegacy2D"),
-                  Messages.getString("BoardEditor.noLegacy2D"), false, false, false, List.of(), () -> { }, "", false));
-        }
         BoardGraphics graphics = gui.getBoardGraphics();
         choices.add(viewCommand(ClientGUI.VIEW_GRAPHICS_CLASSIC, null, graphics == BoardGraphics.CLASSIC,
               () -> gui.setBoardGraphics(BoardGraphics.CLASSIC)));
@@ -543,28 +523,11 @@ final class GpuMapSource implements BoardSource {
               (name == null || name.isBlank() ? "board" : name) + suffix + ".jpg");
     }
 
-    /** The Legacy 2D preview's print JPEG, chosen in Swing's chooser over its Swing window; null when cancelled. */
-    static Path choosePrintFile(Window owner, File directory, String name, String suffix) {
-        SystemFileDialog.Request request = printRequest(directory, name, suffix);
-        JFileChooser chooser = new JFileChooser(directory);
-        chooser.setDialogTitle(request.title());
-        chooser.setFileFilter(request.filter());
-        chooser.setAccessory(new JLabel(Messages.getString("GpuBoard.print.scale")));
-        chooser.setSelectedFile(new File(directory, request.name()));
-        if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) { return null; }
-        return SystemFileDialog.withExtension(chooser.getSelectedFile(), request.filter()).toPath();
-    }
-
     private void printFailed(Exception failure) {
         if (!notice.show(Messages.getString("ClientGUI.errorSavingFile"), printFailure(failure), true)) {
-            printFailed(owner, failure);
+            JOptionPane.showMessageDialog(owner, printFailure(failure), Messages.getString("ClientGUI.errorSavingFile"),
+                  JOptionPane.ERROR_MESSAGE);
         }
-    }
-
-    /** The Legacy 2D preview's print failure, in a Swing message box over its Swing window. */
-    static void printFailed(Window owner, Exception failure) {
-        JOptionPane.showMessageDialog(owner, printFailure(failure), Messages.getString("ClientGUI.errorSavingFile"),
-              JOptionPane.ERROR_MESSAGE);
     }
 
     private static String printFailure(Exception failure) {

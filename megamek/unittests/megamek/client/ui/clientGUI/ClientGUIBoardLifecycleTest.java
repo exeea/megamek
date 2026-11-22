@@ -41,6 +41,7 @@ import megamek.common.enums.GamePhase;
 import megamek.common.event.GameListener;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.server.ServerBoardHelper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -144,7 +145,7 @@ class ClientGUIBoardLifecycleTest {
                 Window frame = gui.getFrame();
                 var gpu = mockStatic(GpuBoardWindow.class);
                 resources.push(gpu);
-                gpu.when(() -> GpuBoardWindow.openLobbyPreview(any(Window.class), any(Board.class), any()))
+                gpu.when(() -> GpuBoardWindow.openPreview(any(Window.class), any(Board.class), any(PlanetaryConditions.class)))
                       .thenAnswer(call -> {
                           assertSame(frame, call.getArgument(0), "The 3D preview belongs to the lobby");
                           shown3D.set(call.getArgument(1));

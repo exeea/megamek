@@ -633,7 +633,7 @@ class GpuTuningPanelSmokeTest {
             BoardEditorSession editor = editing ? new BoardEditorSession() : null;
             Game game = editor == null ? new Game() : editor.game();
             game.setBoard(Board.createEmptyBoard(9, 9));
-            return new GpuMapSource(game, null, editor, () -> { }, () -> { });
+            return new GpuMapSource(game, null, editor, () -> { });
         });
         SwingUtilities.invokeAndWait(setup);
         GpuMapSource source = setup.get();

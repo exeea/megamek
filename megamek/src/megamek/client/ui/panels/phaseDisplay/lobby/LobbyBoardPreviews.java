@@ -37,7 +37,7 @@ public final class LobbyBoardPreviews {
     public static void preview3D(ClientGUI clientGUI) {
         Board board = lobbyBoard(clientGUI);
         PREVIEWED.put(clientGUI, board);
-        GpuBoardWindow.openLobbyPreview(clientGUI.getFrame(), board,
+        GpuBoardWindow.openPreview(clientGUI.getFrame(), board,
               clientGUI.getClient().getGame().getPlanetaryConditions());
     }
 

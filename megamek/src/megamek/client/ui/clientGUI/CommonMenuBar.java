@@ -153,7 +153,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
      * The game board's graphics: Classic or Enhanced ({@link #rendererMenu}). It is enabled in every state: outside a
      * game's board (the lobby) a choice is saved for the next one.
      */
-    private final JMenu viewRenderer = rendererMenu(this, false);
+    private final JMenu viewRenderer = rendererMenu(this);
     private final JMenuItem viewZoomOut = new JMenuItem(getString("CommonMenuBar.viewZoomOut"));
     private final JMenuItem viewZoomReset = new JMenuItem(getString("CommonMenuBar.viewZoomReset"));
     private final JMenuItem viewZoomOverviewToggle = new JMenuItem(getString("CommonMenuBar.viewZoomOverviewToggle"));
@@ -736,17 +736,14 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     }
 
     /**
-     * A Renderer submenu: Legacy 2D when {@code legacy2D} is set, then Classic and Enhanced, as one radio group whose
-     * items carry the action commands {@link ClientGUI#VIEW_LEGACY_2D}, {@link ClientGUI#VIEW_GRAPHICS_CLASSIC} and
-     * {@link ClientGUI#VIEW_GRAPHICS_ENHANCED}; {@code listener} runs a choice and {@link #selectRenderer} checks one.
-     * The game's menu bar uses it without Legacy 2D, which only a map preview still offers.
+     * The Renderer submenu: Classic and Enhanced, as one radio group whose items carry the action commands
+     * {@link ClientGUI#VIEW_GRAPHICS_CLASSIC} and {@link ClientGUI#VIEW_GRAPHICS_ENHANCED}; {@code listener} runs a
+     * choice and {@link #selectRenderer} checks one.
      */
-    public static JMenu rendererMenu(ActionListener listener, boolean legacy2D) {
+    private static JMenu rendererMenu(ActionListener listener) {
         JMenu renderer = new JMenu(getString("CommonMenuBar.viewRenderer"));
         ButtonGroup group = new ButtonGroup();
-        List<String> commands = legacy2D ? List.of(VIEW_LEGACY_2D, VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED)
-              : List.of(VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED);
-        for (String command : commands) {
+        for (String command : List.of(VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED)) {
             JRadioButtonMenuItem item = new JRadioButtonMenuItem(getString("CommonMenuBar." + command));
             item.setActionCommand(command);
             item.addActionListener(listener);
@@ -757,7 +754,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     }
 
     /** Checks the item of a {@link #rendererMenu} whose action command is {@code command}. */
-    public static void selectRenderer(JMenu renderer, String command) {
+    private static void selectRenderer(JMenu renderer, String command) {
         for (Component item : renderer.getMenuComponents()) {
             if (item instanceof JRadioButtonMenuItem choice && command.equals(choice.getActionCommand())) {
                 choice.setSelected(true);

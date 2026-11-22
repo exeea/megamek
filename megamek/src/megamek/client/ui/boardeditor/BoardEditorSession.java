@@ -62,7 +62,7 @@ import megamek.common.util.BoardUtilities;
 import megamek.utilities.BoardClassifier;
 import megamek.utilities.BoardsTagger;
 
-/** Standalone editor authority, owned by the EDT. No BoardView, Swing editor panel or client is created. */
+/** Standalone editor authority, owned by the EDT. No Swing editor panel or client is created. */
 public final class BoardEditorSession {
     /** In toolbar, menu and key order: shape the ground, paint it, then clean up. */
     public enum Tool { SELECT, SCULPT, PAINT, ERASE }
@@ -720,9 +720,8 @@ public final class BoardEditorSession {
      * file name, so a legacy board gets its scenery as objects, every untyped bridge gets its type, and a converted board
      * is never decoded again. The board is then native: every editor document is a .board2 document, where road level 2
      * is the Alley finish. It holds no token the conversion took ({@link BoardSceneryLayouts#withoutTakenTokens}) and its
-     * roads hold their connections as stored ones, so the document is exactly what its saved .board2 holds, and its 2D
-     * Preview shows what a 2D player of that file sees. The art without a 3D version among the dropped tokens is kept
-     * for the editor's window to tell ({@link #takeDroppedArt}).
+     * roads hold their connections as stored ones, so the document is exactly what its saved .board2 holds. The art
+     * without a 3D version among the dropped tokens is kept for the editor's window to tell ({@link #takeDroppedArt}).
      */
     private void replace(Board board, Path path) {
         List<HexIssue> converted = BoardSceneryLayouts.convert(board);
@@ -755,7 +754,7 @@ public final class BoardEditorSession {
 
     /**
      * Makes {@code board} the game's board: for Open and New ({@link #replace}), a resize and its undo and redo. The views
-     * follow {@code game.setBoard} as for any new board (the 3D views and the 2D Preview); the selection and any stroke
+     * follow {@code game.setBoard} as for any new board; the selection and any stroke
      * are reset and every hex is validated.
      */
     private void install(Board board) {
