@@ -482,7 +482,8 @@ final class GpuRoads {
         List<Float> past = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f));
         if (columns) { return ends == 0 ? road : road.extended(past, ends); }
         for (int d = 0; d < 6; d++) {
-            if ((tile.roadCuts() & 1 << d) == 0 && (tile.roadExits() & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
+            int drawn = BoardRoad.roadExits(scene, tile);
+            if ((tile.roadCuts() & 1 << d) == 0 && (drawn & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
                 ends |= 1 << d;
                 past.set(d, BoardRelief.metres(CRUMBLE) / BoardGeometry.hexScale());
             }
