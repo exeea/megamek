@@ -3155,6 +3155,11 @@ final class BoardSurface {
     private static BoardRoadCut roadCut(BoardScene scene, BoardScene.Tile tile) {
         if (!BoardRoad.groundShown(tile) || tile.ultraSublevel() || tile.backdrop().present()) { return null; }
         var grades = grades(scene, tile, false, true);
+        if (tile.liquid().present()) {
+            // A water hex takes road ground only from the roads that run into it: a carriageway beside it reaching
+            // over its shore (a straightened quay's corner moved under a road) stays the land's, cut at the shore.
+            grades.removeIf(grade -> grade.tile() != tile && !runsInto(grade.tile(), tile));
+        }
         if (grades.isEmpty()) { return null; }
         boolean level = !tile.liquid().present() && grades.stream().noneMatch(grade -> grade.graded()
               || grade.tile().floor() != tile.floor());
@@ -3165,6 +3170,14 @@ final class BoardSurface {
         if (level) { return null; }
         return new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), BoardRoadGrade.ground(tile) * BoardGeometry.level(),
               grades, boardEdges(scene, tile));
+    }
+
+    /** Whether a hex's road leaves it toward a neighbouring hex. */
+    private static boolean runsInto(BoardScene.Tile from, BoardScene.Tile to) {
+        for (int d = 0; d < 6; d++) {
+            if (from.coords().translated(d).equals(to.coords())) { return (from.wayExits() & 1 << d) != 0; }
+        }
+        return false;
     }
 
     /**

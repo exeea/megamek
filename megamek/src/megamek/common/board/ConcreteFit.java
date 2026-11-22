@@ -72,6 +72,17 @@ public final class ConcreteFit {
         }
     }
 
+    /**
+     * The carriageways a straightened quay keeps off: how far a point on the board plane lies inside one's reserved
+     * ground (its course with its shoulder), zero or less outside; and the farthest a quay run moves toward the water,
+     * as one straight line, to keep off it ({@link #clearWays}).
+     */
+    public interface Ways {
+        float depth(float x, float y);
+
+        float shift();
+    }
+
     private final int width, height;
     private final List<Cell> cells;
     private final float scale, hexWidth, hexHeight;
@@ -90,6 +101,8 @@ public final class ConcreteFit {
     private final Map<Coords, List<Point>> standing;
     /** Lattice corners ({@link #cornerKey}) that keep their place: where the fit would put them, something stands in the way. */
     private final Set<Long> held;
+    /** The carriageways straightened quays keep off; null where none are given ({@link #clearWays}). */
+    private final Ways ways;
     /** The largest turn, in degrees, at a quay corner that #straighten takes out: a bend larger than this stays. */
     private static final float RUN_ON = 35;
     /** Moved lattice corners by {@link #slot}; null where a corner keeps its place. */
@@ -112,7 +125,13 @@ public final class ConcreteFit {
      */
     public ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere, Set<Coords> pinned,
           Map<Coords, List<Point>> standing, Set<Long> held) {
-        this(width, height, cells, scale, everywhere, pinned, null, null, null, standing, held);
+        this(width, height, cells, scale, everywhere, pinned, standing, held, null);
+    }
+
+    /** As above, with the carriageways a straightened quay keeps off ({@code ways}, {@link #clearWays}). */
+    public ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere, Set<Coords> pinned,
+          Map<Coords, List<Point>> standing, Set<Long> held, Ways ways) {
+        this(width, height, cells, scale, everywhere, pinned, null, null, null, standing, held, ways);
     }
 
     /** The key of corner k of a hex's outline: the lattice corner its three hexes share ({@link #shift}). */
@@ -126,13 +145,16 @@ public final class ConcreteFit {
     private ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere,
           Set<Coords> pinned, Integer plateau, ConcreteFit previous, int[] hands) {
         this(width, height, cells, scale, everywhere, pinned, plateau, previous, hands,
-              previous != null ? previous.standing : Map.of(), previous != null ? previous.held : Set.of());
+              previous != null ? previous.standing : Map.of(), previous != null ? previous.held : Set.of(),
+              previous != null ? previous.ways : null);
     }
 
     private ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere, Set<Coords> pinned,
-          Integer plateau, ConcreteFit previous, int[] hands, Map<Coords, List<Point>> standing, Set<Long> held) {
+          Integer plateau, ConcreteFit previous, int[] hands, Map<Coords, List<Point>> standing, Set<Long> held,
+          Ways ways) {
         this.standing = Map.copyOf(standing);
         this.held = Set.copyOf(held);
+        this.ways = ways;
         this.hands = hands;
         this.width = width;
         this.height = height;
@@ -559,7 +581,10 @@ public final class ConcreteFit {
         simplify(corners, null);
         Set<Corner> continued = continueSides(corners.values());
         if (!continued.isEmpty()) { simplify(corners, continued); }
-        if (plateau == null && hands == null) { straighten(corners); }
+        if (plateau == null && hands == null) {
+            straighten(corners);
+            clearWays(corners);
+        }
         Set<Coords> fitted = new HashSet<>();
         corners.forEach((key, corner) -> {
             float dx = corner.point.x - corner.original.x, dy = corner.point.y - corner.original.y;
@@ -1120,6 +1145,80 @@ public final class ConcreteFit {
             }
             if (!moved) { return; }
         }
+    }
+
+    /**
+     * Moves each straight quay run whose line reaches into a carriageway's reserved ground ({@link #ways}) toward the
+     * water, as one straight line, just far enough to keep off it: where that is no farther than ways.shift(), none
+     * of its corners is fixed or already moved by another run, and each stays within maxMove of its place. A run that
+     * would need more stays as straightened; the caller holds its corners in the way, and the run bends there.
+     */
+    private void clearWays(Map<Long, Corner> corners) {
+        if (ways == null) { return; }
+        float sample = hexWidth / 120, step = hexWidth / 300, slack = hexWidth / 600;
+        Set<Corner> moved = new HashSet<>();
+        for (Corner start : corners.values()) {
+            if (start.next == null || !joint(start)) { continue; }
+            List<Corner> run = new ArrayList<>(List.of(start));
+            for (Corner corner = start.next; corner != null; corner = corner.next) {
+                run.add(corner);
+                if (corner == start || joint(corner)) { break; }
+            }
+            Point first = run.get(0).point, along = run.get(run.size() - 1).point.sub(first);
+            if (along.len2() < 1e-6f * scale * scale) { continue; }
+            Cell water = null;
+            boolean quay = true;
+            for (int i = 0; i + 1 < run.size(); i++) {
+                Cell side = outsideOf(run.get(i), run.get(i + 1));
+                quay &= side != null && side.liquid();
+                if (water == null) { water = side; }
+            }
+            if (!quay) { continue; }
+            Point normal = new Point(-along.y, along.x).nor();
+            if (center(water.coords()).sub(first).dot(normal) < 0) { normal = normal.scl(-1); }
+            float needed = 0;
+            for (int i = 0; i + 1 < run.size(); i++) {
+                Point a = run.get(i).point, b = run.get(i + 1).point;
+                int count = Math.max(1, (int) Math.ceil(a.dst(b) / sample));
+                for (int j = 0; j <= count; j++) {
+                    Point p = a.lerp(b, j / (float) count);
+                    if (ways.depth(p.x, p.y) <= slack) { continue; }
+                    float t = 0;
+                    while (t <= ways.shift() && ways.depth(p.x + normal.x * t, p.y + normal.y * t) > 0) { t += step; }
+                    needed = Math.max(needed, t);
+                }
+            }
+            if (needed == 0 || needed > ways.shift()) { continue; }
+            Point offset = normal.scl(needed + slack);
+            if (run.stream().anyMatch(corner -> fixed(corner) || moved.contains(corner)
+                  || corner.point.add(offset).dst(corner.original) > maxMove)) { continue; }
+            for (Corner corner : run) {
+                corner.point = corner.point.add(offset);
+                moved.add(corner);
+            }
+        }
+    }
+
+    /** Where a straight run of the outline ends: a chain's end, a fixed corner, or a turn of more than a degree. */
+    private boolean joint(Corner corner) {
+        if (corner.previous == null || corner.next == null || fixed(corner)) { return true; }
+        Point u = corner.point.sub(corner.previous.point), v = corner.next.point.sub(corner.point);
+        double turn = Math.toDegrees(Math.abs(Math.atan2(u.x * v.y - u.y * v.x, u.x * v.x + u.y * v.y)));
+        return turn > 1;
+    }
+
+    /** A corner #straighten leaves where it is (besides a chain's ends). */
+    private boolean fixed(Corner corner) {
+        return corner.border || held.contains(key(corner.original))
+              || corner.tiles.stream().anyMatch(this::fixedFootprint);
+    }
+
+    /** The ground across the outline's side from a to b: the hex both corners share that lies outside the pavement. */
+    private Cell outsideOf(Corner a, Corner b) {
+        for (Cell tile : a.tiles) {
+            if (b.tiles.contains(tile) && outside(tile)) { return tile; }
+        }
+        return null;
     }
 
     /**

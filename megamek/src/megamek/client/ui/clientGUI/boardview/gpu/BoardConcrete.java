@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -137,15 +138,20 @@ final class BoardConcrete {
         // and the fit repeats with it held (the held corners only grow, as the pinned hexes do). The same for a side
         // whose quay extension a way keeps a structure from having (#unpaved).
         Set<Long> held = new HashSet<>();
-        ConcreteFit next = fit(scene, cells, pins, standing, held);
+        // A straightened quay keeps off a carriageway and its shoulder: the fit moves a run toward the water to
+        // clear one (ConcreteFit#clearWays); where it would have to move farther, its corners in the way are held
+        // (#quaySides).
+        ConcreteFit.Ways keepOff = quayWays(scene);
+        ConcreteFit next = fit(scene, cells, pins, standing, held, keepOff);
         while (true) {
             Set<Coords> reached = reached(scene, next, pins);
             Set<Long> ways = inWays(scene, next, held);
             ways.addAll(unpaved(scene, next));
+            ways.addAll(quaySides(scene, next, keepOff, held));
             if (reached.isEmpty() && ways.isEmpty()) { break; }
             pins.addAll(reached);
             held.addAll(ways);
-            next = fit(scene, cells, pins, standing, held);
+            next = fit(scene, cells, pins, standing, held, keepOff);
         }
         fit = next;
         List<Cut> inside = new ArrayList<>();
@@ -406,8 +412,92 @@ final class BoardConcrete {
     List<Cut> cuts() { return cuts; }
 
     private static ConcreteFit fit(BoardScene scene, List<ConcreteFit.Cell> cells, Set<Coords> pins,
-          Map<Coords, List<ConcreteFit.Point>> standing, Set<Long> held) {
-        return new ConcreteFit(scene.width(), scene.height(), cells, BoardGeometry.hexScale(), true, pins, standing, held);
+          Map<Coords, List<ConcreteFit.Point>> standing, Set<Long> held, ConcreteFit.Ways keepOff) {
+        return new ConcreteFit(scene.width(), scene.height(), cells, BoardGeometry.hexScale(), true, pins, standing,
+              held, keepOff);
+    }
+
+    /**
+     * The farthest, in metres, a straight quay run moves toward the water, as one line, to keep off a carriageway's
+     * reserved ground (ConcreteFit#clearWays); a run that would need more bends at the way instead (#quaySides).
+     */
+    static final float QUAY_SHIFT = 3;
+
+    /**
+     * The ground a straightened quay keeps off: the courses of the carriageways on dry hexes, each the widest its exits
+     * allow (#ways) with its shoulder, without the arms that run into water (a bridge's or a ramp's mouth meets the
+     * water by design). From the board alone, as #ways: a road's drawn course reads the fitted pavement.
+     */
+    private static ConcreteFit.Ways quayWays(BoardScene scene) {
+        float cell = BoardGeometry.width(), scale = BoardGeometry.hexScale(), shift = BoardRelief.metres(QUAY_SHIFT);
+        Map<Long, List<BoardRoad>> buckets = new HashMap<>();
+        for (BoardScene.Tile tile : scene.tiles()) {
+            if (tile.liquid().present() || !BoardRoad.carriageway(tile)) { continue; }
+            int exits = tile.wayExits();
+            for (int d = 0; d < 6; d++) {
+                BoardScene.Tile next = scene.neighbor(tile, d);
+                if (next != null && next.liquid().present()) { exits &= ~(1 << d); }
+            }
+            if (exits == 0) { continue; }
+            long key = bucket(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()), cell);
+            buckets.computeIfAbsent(key, at -> new ArrayList<>()).add(BoardRoad.clearance(tile.coords(), exits));
+        }
+        return new ConcreteFit.Ways() {
+            @Override
+            public float depth(float x, float y) {
+                List<BoardRoad> near = new ArrayList<>();
+                long bx = (long) Math.floor(x / cell), by = (long) Math.floor(y / cell);
+                for (long i = -1; i <= 1; i++) {
+                    for (long j = -1; j <= 1; j++) {
+                        List<BoardRoad> roads = buckets.get((bx + i) << 32 ^ (by + j) & 0xffffffffL);
+                        if (roads != null) { near.addAll(roads); }
+                    }
+                }
+                return near.isEmpty() ? -1 : (BoardRoad.SHOULDER - BoardRoad.distance(near, x, y)) * scale;
+            }
+
+            @Override
+            public float shift() { return shift; }
+        };
+    }
+
+    private static long bucket(float x, float y, float cell) {
+        return (long) Math.floor(x / cell) << 32 ^ (long) Math.floor(y / cell) & 0xffffffffL;
+    }
+
+    /**
+     * The moved corners of the quay sides (a paved hex's sides onto water) this fit left in a carriageway's reserved
+     * ground (#quayWays): runs the fit could not move clear. In the next fit each goes back on its hex, and the run
+     * bends there.
+     */
+    private static Set<Long> quaySides(BoardScene scene, ConcreteFit fit, ConcreteFit.Ways keepOff, Set<Long> held) {
+        Set<Long> result = new HashSet<>();
+        float sample = BoardRelief.metres(.25f), slack = BoardRelief.metres(.05f);
+        for (BoardScene.Tile tile : scene.tiles()) {
+            if (tile.surface() != BoardScene.Surface.CONCRETE || tile.liquid().present()) { continue; }
+            List<ConcreteFit.Shift> shifts = fit.corners(tile.coords());
+            for (int e = 0; e < 6; e++) {
+                BoardScene.Tile water = scene.neighbor(tile, BoardGeometry.edgeDirection(e));
+                int k = e, l = (e + 1) % 6;
+                ConcreteFit.Shift sk = shifts.get(k), sl = shifts.get(l);
+                boolean still = sk.equals(ConcreteFit.Shift.ZERO) && sl.equals(ConcreteFit.Shift.ZERO);
+                if (water == null || !water.liquid().present() || still) { continue; }
+                Vector3 a = BoardGeometry.corner(tile.coords(), 0, k), b = BoardGeometry.corner(tile.coords(), 0, l);
+                float ax = a.x + sk.x(), ay = a.y + sk.y(), bx = b.x + sl.x(), by = b.y + sl.y();
+                int count = Math.max(1, (int) Math.ceil(Math.hypot(bx - ax, by - ay) / sample));
+                boolean in = false;
+                for (int j = 0; j <= count && !in; j++) {
+                    in = keepOff.depth(ax + (bx - ax) * j / count, ay + (by - ay) * j / count) > slack;
+                }
+                for (int corner : new int[] { k, l }) {
+                    long key = fit.cornerKey(tile.coords(), corner);
+                    if (in && !shifts.get(corner).equals(ConcreteFit.Shift.ZERO) && !held.contains(key)) {
+                        result.add(key);
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     /**
