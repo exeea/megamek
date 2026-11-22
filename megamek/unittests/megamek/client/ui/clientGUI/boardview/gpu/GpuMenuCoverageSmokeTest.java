@@ -146,6 +146,13 @@ class GpuMenuCoverageSmokeTest {
                   "clear", CANCEL_KEY));
         }
         try (Display deployment = new Display(GamePhase.DEPLOYMENT, DeploymentDisplay::new)) {
+            // A deployment turn as MegaMek begins one: the local unit still to deploy, selected (the fixture's unit
+            // stands deployed, and with nothing to deploy MegaMek offers no deployment command).
+            onSwing(() -> {
+                deployment.board.entity.setDeployed(false);
+                ((DeploymentDisplay) deployment.display).selectEntity(deployment.board.entity.getId());
+                return null;
+            });
             assertReachable("deployment", deployment.board.source, Map.of("clear", CANCEL_KEY));
         }
         // The log and the Menu stand for MegaMek's report and player list toggles.
@@ -157,21 +164,23 @@ class GpuMenuCoverageSmokeTest {
             }
         }
         try (Display initiative = new Display(GamePhase.INITIATIVE_REPORT, ReportDisplay::new)) {
-            // MegaMek offers the reroll to a player with a tactical genius; the dock shows it as its second button.
+            // MegaMek offers the reroll to a player with a tactical genius. The initiative card carries it beside its
+            // Continue, the phase's Done, while the dock waits for the board.
             onSwing(() -> {
                 ((ReportDisplay) initiative.display).setRerollInitiativeEnabled(true);
                 return null;
             });
             Map<String, String> standIns = new LinkedHashMap<>(reports);
-            standIns.put("reportRerollInitiative", "dock-secondary");
+            standIns.put("reportRerollInitiative", "initiative-reroll");
+            standIns.put(GpuBoardActions.DONE_ID, "initiative-continue");
             assertReachable(GamePhase.INITIATIVE_REPORT.toString(), initiative.board.source, standIns);
         }
     }
 
     /**
-     * Shows the source's settled frame in a real HUD and checks each of the phase display's commands: the phase
-     * display's Done and Skip are the dock's main and second buttons, any other command a button of the dock's row,
-     * an entry of its More, or the control {@code standIns} names for it (by its actor's name), which must show.
+     * Shows the source's settled frame in a real HUD and checks each of the phase display's commands: the control
+     * {@code standIns} names for it (by its actor's name), which must show; else the phase display's Done and Skip
+     * are the dock's main and second buttons, any other command a button of the dock's row or an entry of its More.
      */
     private static void assertReachable(String phase, GpuBoardSource source, Map<String, String> standIns)
           throws Exception {
@@ -198,12 +207,12 @@ class GpuMenuCoverageSmokeTest {
                 for (BoardScene.Command command : frame.scene().commands()) {
                     String id = command.id();
                     String standIn = standIns.get(id);
-                    boolean reachable = id.equals(info.doneId()) ? shown(hud, "dock-main")
+                    boolean reachable = standIn != null ? CANCEL_KEY.equals(standIn) || WITH_A_CLUB.equals(standIn)
+                          || shown(hud, standIn)
+                          : id.equals(info.doneId()) ? shown(hud, "dock-main")
                           : id.equals(info.skipId()) ? shown(hud, "dock-secondary") || shown(hud, "dock-main")
                           : shown(hud, "dock-command-" + id) || shown(hud, "dock-option-" + id)
-                                || inMore.contains(id) || inMore.contains("dock.option." + id)
-                                || CANCEL_KEY.equals(standIn) || WITH_A_CLUB.equals(standIn)
-                                || standIn != null && shown(hud, standIn);
+                                || inMore.contains(id) || inMore.contains("dock.option." + id);
                     if (!reachable) {
                         missing.add(id + (standIn == null ? "" : " (" + standIn + ")"));
                     }
