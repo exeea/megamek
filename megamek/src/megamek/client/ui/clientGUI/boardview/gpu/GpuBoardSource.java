@@ -32,9 +32,12 @@ import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.BoardViewsContainer;
+import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
+import megamek.client.ui.clientGUI.MegaMekGUI;
+import megamek.client.ui.clientGUI.SBFClientGUI;
 import megamek.client.ui.clientGUI.UnitOwnerColors;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -179,6 +182,10 @@ final class GpuBoardSource implements BoardSource {
     private long collapseHeldSince;
     private final Timer timer;
     private final GameListenerAdapter gameListener;
+    /** An SBF game's formations, status and reports; null for a Total Warfare game. */
+    private final @Nullable GpuSbfCapture sbf;
+    /** The SBF client GUI whose keys this board forwards; null for a Total Warfare game. */
+    private final @Nullable SBFClientGUI sbfGui;
     private final BoardListenerAdapter boardListener;
     private final IPreferenceChangeListener preferenceListener = event -> {
         if (ClientPreferences.MAP_TILESET.equals(event.getName())) {
@@ -359,6 +366,14 @@ final class GpuBoardSource implements BoardSource {
     }
 
     public GpuBoardSource(BoardClientState view, Supplier<JComponent> phasePanel) {
+        this(view, phasePanel, null);
+    }
+
+    /** The board of an SBF game when {@code sbfGui} is given: its formations stand in for the game's units. */
+    public GpuBoardSource(BoardClientState view, Supplier<JComponent> phasePanel, @Nullable SBFClientGUI sbfGui) {
+        this.sbfGui = sbfGui;
+        sbf = sbfGui == null ? null : new GpuSbfCapture(sbfGui.getClient().getGame(),
+              () -> sbfGui.getClient().getLocalPlayerNumber());
         requireSwingThread();
         this.view = view;
         this.phasePanel = phasePanel;
@@ -1557,6 +1572,9 @@ final class GpuBoardSource implements BoardSource {
                 }
             }
         }
+        if (sbf != null) {
+            units.addAll(sbf.units(view.getBoardId()));
+        }
         if (GpuUnitModels.ENABLED && GUIPreferences.getInstance().getShowWrecks()) {
             // BoardClientState already owns which removed units leave wrecks, including infantry/CVEP exceptions.
             var live = units.stream().map(BoardScene.Unit::id).collect(Collectors.toSet());
@@ -1594,7 +1612,8 @@ final class GpuBoardSource implements BoardSource {
         MovePath path = panel instanceof MovementDisplay movement ? movement.getPlannedMovement() : null;
         int actorId = actions.actorId();
         GameTurn activeTurn = activeTurn();
-        GpuBattleStatus.Snapshot status = battleStatus.capture(view.game, view.getLocalPlayer(), activeTurn,
+        GpuBattleStatus.Snapshot status = sbf != null ? sbf.status(actorId)
+              : battleStatus.capture(view.game, view.getLocalPlayer(), activeTurn,
               actorId, this::visible, this::identified,
               entity -> unitImage(entity, -1, !identified(entity), usedImages));
         unitImages.keySet().retainAll(usedImages.keySet());
@@ -1642,7 +1661,7 @@ final class GpuBoardSource implements BoardSource {
               view.electronicWarfare(), designations(), starShells());
         captureWorkGhosts(board, units);
         // The report log before the chat, whose round lines read it with the status (plan O6).
-        GpuReportLog.Snapshot log = captureReports();
+        GpuReportLog.Snapshot log = sbf != null ? sbf.reports() : captureReports();
         chat.roundLines(status, log);
         // The other HUD panels, in this order. The fire preview follows the own focus unit, else the acting unit; the
         // fire orders show its draft read-only on another player's turn.
@@ -1679,7 +1698,8 @@ final class GpuBoardSource implements BoardSource {
         Entity actor = view.game.getEntity(actorId);
         boolean knownActor = actor != null && identified(actor);
         return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextTooltip, nextDetails,
-              view.getCenterRequest(), boardGeneration, knownActor ? actor.getShortName() : "",
+              view.getCenterRequest(), boardGeneration,
+              sbf != null ? sbf.name(actorId) : knownActor ? actor.getShortName() : "",
               atmosphereFor(view.game.getPlanetaryConditions(), board.isSpace()), log, status, panels, view.getGpuBoardState());
     }
 
@@ -1979,7 +1999,8 @@ final class GpuBoardSource implements BoardSource {
     void selectUnit(int id) {
         SwingUtilities.invokeLater(() -> {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;
-            if (entity != null && identified(entity)) {
+            boolean formation = acceptsInput() && sbf != null && !sbf.name(id).isEmpty();
+            if (formation || entity != null && identified(entity)) {
                 view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, id));
                 requestedCenter();
                 refresh();
@@ -2510,11 +2531,13 @@ final class GpuBoardSource implements BoardSource {
 
     public void key(int keyCode, boolean down, int modifiers) {
         SwingUtilities.invokeLater(() -> {
-            if (acceptsInput() && view.getClientgui() != null && !view.getClientgui().shouldIgnoreHotKeys()) {
-                KeyEvent event = new KeyEvent(view.getClientgui().getFrame(),
+            AbstractClientGUI owner = view.getClientgui() != null ? view.getClientgui() : sbfGui;
+            if (acceptsInput() && owner != null && !owner.shouldIgnoreHotKeys()) {
+                KeyEvent event = new KeyEvent(owner.getFrame(),
                       down ? KeyEvent.KEY_PRESSED : KeyEvent.KEY_RELEASED, System.currentTimeMillis(), modifiers,
                       keyCode, KeyEvent.CHAR_UNDEFINED);
-                var controller = view.getClientgui().controller;
+                var controller = view.getClientgui() != null ? view.getClientgui().controller
+                      : MegaMekGUI.getKeyDispatcher();
                 boolean handled = controller != null && controller.dispatchKeyEvent(event);
                 // The HUD's chat field takes the typed text; a key no binding handled may be a menu accelerator.
                 if (down && !handled) {
@@ -2530,6 +2553,8 @@ final class GpuBoardSource implements BoardSource {
             var gui = view.getClientgui();
             if (gui != null && gui.controller != null) {
                 gui.controller.stopAllRepeating();
+            } else if (sbfGui != null && MegaMekGUI.getKeyDispatcher() != null) {
+                MegaMekGUI.getKeyDispatcher().stopAllRepeating();
             }
         });
     }
@@ -2599,6 +2624,9 @@ final class GpuBoardSource implements BoardSource {
     public GpuAtmosphereControls atmosphere() { return atmosphere; }
 
     public boolean isGameplay() { return true; }
+
+    /** Whether this is an SBF game's board, whose every left click is MegaMek's board click on its hex. */
+    boolean strategic() { return sbf != null; }
 
     @Override
     public List<BoardScene.Unit> reserveUnits() { return reserve; }

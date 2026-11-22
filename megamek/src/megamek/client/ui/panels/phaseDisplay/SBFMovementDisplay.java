@@ -133,7 +133,8 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
         }
     }
 
-    private void selectFormation(@Nullable SBFFormation formation) {
+    @Override
+    protected void selectFormation(@Nullable SBFFormation formation) {
         if (formation == null) {
             currentFormation = SBFFormation.NONE;
             clientGUI.clearMovementEnvelope();

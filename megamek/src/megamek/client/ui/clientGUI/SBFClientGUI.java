@@ -51,6 +51,7 @@ import javax.swing.SwingUtilities;
 import jakarta.annotation.Nullable;
 import megamek.client.SBFClient;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
@@ -58,6 +59,7 @@ import megamek.client.ui.clientGUI.boardview.spriteHandler.BoardViewSpriteHandle
 import megamek.client.ui.clientGUI.boardview.spriteHandler.MovePathSpriteHandler;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.MovementEnvelopeSpriteHandler;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.sbf.SBFFormationSpriteHandler;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.toolTip.SBFBoardViewTooltip;
 import megamek.client.ui.panels.ReceivingGameDataPanel;
 import megamek.client.ui.panels.StartingScenarioPanel;
@@ -159,6 +161,8 @@ public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
     private final GameListener gameListener = new SBFClientGUIGameListener(this);
     protected final CommonMenuBar menuBar = CommonMenuBar.getMenuBarForGame();
     private BoardView bv;
+    /** Whether the 3D board window was opened ({@link #NATIVE_3D}). */
+    private boolean boardWindowOpened;
     private SBFFormationSpriteHandler formationSpriteHandler;
     private MovementEnvelopeSpriteHandler movementEnvelopeHandler;
     private MovePathSpriteHandler movePathSpriteHandler;
@@ -209,13 +213,18 @@ public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
             client.getGame().addGameListener(gameListener);
             bvGame.setBoard(bvGame.getBoard(0));
 
-            bv = new BoardView(bvGame, MegaMekGUI.getKeyDispatcher(), null, 0);
-            bv.setTooltipProvider(new SBFBoardViewTooltip(client.getGame(), bv));
-            boardViews.put(0, bv);
-            boardStates.put(0, bv.getClientState());
-            bv.addOverlay(new KeyBindingsOverlay(bv.getClientState()));
-            bv.addOverlay(new PlanetaryConditionsOverlay(bv.getClientState()));
-            bv.getPanel().setPreferredSize(clientGuiPanel.getSize());
+            if (NATIVE_3D) {
+                // The 3D board window draws this state; it opens with the game's first phase (openBoardWindow)
+                boardStates.put(0, new BoardClientState(bvGame, MegaMekGUI.getKeyDispatcher(), null, 0, null));
+            } else {
+                bv = new BoardView(bvGame, MegaMekGUI.getKeyDispatcher(), null, 0);
+                bv.setTooltipProvider(new SBFBoardViewTooltip(client.getGame(), bv));
+                boardViews.put(0, bv);
+                boardStates.put(0, bv.getClientState());
+                bv.addOverlay(new KeyBindingsOverlay(bv.getClientState()));
+                bv.addOverlay(new PlanetaryConditionsOverlay(bv.getClientState()));
+                bv.getPanel().setPreferredSize(clientGuiPanel.getSize());
+            }
             boardViewsContainer.setName(CG_BOARD_VIEW);
             boardViewsContainer.updateMapTabs();
             initializeSpriteHandlers();
@@ -249,9 +258,13 @@ public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
 
     private void initializeSpriteHandlers() {
         movementEnvelopeHandler = new MovementEnvelopeSpriteHandler(this, client.getGame());
-        formationSpriteHandler = new SBFFormationSpriteHandler(this, client);
         movePathSpriteHandler = new MovePathSpriteHandler(this);
-        spriteHandlers.addAll(List.of(formationSpriteHandler, movementEnvelopeHandler, movePathSpriteHandler));
+        spriteHandlers.addAll(List.of(movementEnvelopeHandler, movePathSpriteHandler));
+        if (!NATIVE_3D) {
+            // The 3D board shows the formations as its unit tokens
+            formationSpriteHandler = new SBFFormationSpriteHandler(this, client);
+            spriteHandlers.add(formationSpriteHandler);
+        }
         spriteHandlers.forEach(BoardViewSpriteHandler::initialize);
     }
 
@@ -290,6 +303,7 @@ public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
             return;
         }
         client.getGame().removeGameListener(gameListener);
+        GpuBoardWindow.closeFor(this);
         super.die();
     }
 
@@ -333,6 +347,18 @@ public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
         }
 
         clientGuiPanel.validate();
+        openBoardWindow();
+    }
+
+    /** With {@link #NATIVE_3D}: opens the 3D board window once, when the game is past the lounge and has its board. */
+    void openBoardWindow() {
+        GamePhase phase = client.getGame().getPhase();
+        if (NATIVE_3D && !boardWindowOpened && !phase.isUnknown() && !phase.isLounge()
+              && (bvGame.getBoard(0).getWidth() > 0)) {
+            boardWindowOpened = true;
+            bvGame.setPlanetaryConditions(client.getGame().getPlanetaryConditions());
+            GpuBoardWindow.open(this, getBoardState(0), () -> curPanel);
+        }
     }
 
     private void showReportPanel() {
@@ -456,13 +482,22 @@ public class SBFClientGUI extends AbstractClientGUI implements ActionListener {
     }
 
     protected void updateFormationSprites() {
-        formationSpriteHandler.update();
+        if (formationSpriteHandler != null) {
+            formationSpriteHandler.update();
+        }
     }
 
     public void selectForAction(@Nullable SBFFormation formation) {
-        formationSpriteHandler.setSelectedFormation(formation);
+        if (formationSpriteHandler != null) {
+            formationSpriteHandler.setSelectedFormation(formation);
+        }
         if (GUIP.getAutoCenter() && (formation != null) && (formation.getPosition() != null)) {
-            bv.centerOnHex(formation.getPosition().coords());
+            BoardClientState state = getBoardState(formation.getPosition().boardId());
+            if (bv != null) {
+                bv.centerOnHex(formation.getPosition().coords());
+            } else if (state != null) {
+                state.centerOnHex(formation.getPosition().coords());
+            }
         }
     }
 

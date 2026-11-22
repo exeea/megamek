@@ -58,6 +58,7 @@ import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.SBFClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
@@ -202,7 +203,7 @@ public final class GpuBoardWindow {
     private static final int DROPPED_ART_LINES = 12;
     /** EDT: the boards whose dropped artwork was told ({@link #tellDroppedArt}), so each board is told once. */
     private static final Set<Board> DROPPED_ART_TOLD = Collections.newSetFromMap(new WeakHashMap<>());
-    private final ClientGUI gui;
+    private final AbstractClientGUI gui;
     private final BoardClientState initialView;
     private final Supplier<JComponent> panel;
     private final Timer startupTimer;
@@ -303,7 +304,8 @@ public final class GpuBoardWindow {
         this(gui, view, panel, null, null, null);
     }
 
-    private GpuBoardWindow(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel, Window previewOwner,
+    private GpuBoardWindow(AbstractClientGUI gui, BoardClientState view, Supplier<JComponent> panel,
+          Window previewOwner,
           BoardEditorSession editor, Game mapGame) {
         this.gui = gui;
         this.editor = editor;
@@ -528,7 +530,8 @@ public final class GpuBoardWindow {
     }
 
 
-    private static void open(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel) {
+    /** The board window of a client GUI that is no {@link ClientGUI} (an SBF game), on its board state. */
+    public static synchronized void open(AbstractClientGUI gui, BoardClientState view, Supplier<JComponent> panel) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU board on the Swing event thread");
         }
@@ -561,7 +564,7 @@ public final class GpuBoardWindow {
             }
             return;
         }
-        start(new GpuBoardWindow(gui, view, panel));
+        start(new GpuBoardWindow(gui, view, panel, null, null, null));
     }
 
     private static void start(GpuBoardWindow window) {
@@ -569,8 +572,7 @@ public final class GpuBoardWindow {
         // the board ends and nothing else takes its place
         try {
             active = window;
-            ClientGUI gui = window.gui;
-            if (gui != null) {
+            if (window.gui instanceof ClientGUI gui) {
                 gui.setMiniReportLocation(false);
             }
             Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
@@ -796,8 +798,8 @@ public final class GpuBoardWindow {
                 }
             }
         }
-        if (gui != null) {
-            gui.refreshAuxiliaryWindows();
+        if (gui instanceof ClientGUI client) {
+            client.refreshAuxiliaryWindows();
         }
         // A source captured during native startup must publish the now-measured tools inset before camera fitting.
         if (editor != null && source != null) { source.refresh(); }
@@ -823,7 +825,7 @@ public final class GpuBoardWindow {
         if (mapGame != null && plantsAhead == null) { plantsAhead = BoardTiles.searchAhead(mapGame.getBoard()); }
         if (plantsAhead != null && !plantsAhead.isDone()) { return; }
         try {
-            source = mapGame == null ? new GpuBoardSource(view, panel)
+            source = mapGame == null ? new GpuBoardSource(view, panel, gui instanceof SBFClientGUI sbf ? sbf : null)
                   : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit,
                         preview ? this::requestEditor : null);
             if (source instanceof GpuMapSource map) {
@@ -1245,7 +1247,7 @@ public final class GpuBoardWindow {
      */
     static @Nullable Integer showError(String title, String text, List<String> buttons) {
         GpuBoardWindow window = active;
-        ClientGUI client = window == null ? null : window.gui;
+        ClientGUI client = window == null || !(window.gui instanceof ClientGUI shown) ? null : shown;
         if (client == null || client.isDead()) {
             return null;
         }
@@ -1479,7 +1481,7 @@ public final class GpuBoardWindow {
      */
     public static boolean showBugReport(@Nullable Client client) {
         GpuBoardWindow window = active;
-        ClientGUI gui = window == null ? null : window.gui;
+        ClientGUI gui = window == null || !(window.gui instanceof ClientGUI shown) ? null : shown;
         if (client == null || gui == null || gui.getClient() != client) {
             return false;
         }
@@ -1743,6 +1745,11 @@ public final class GpuBoardWindow {
     }
 
     public static synchronized void closeFor(ClientGUI gui) {
+        closeFor((AbstractClientGUI) gui);
+    }
+
+    /** Closes the board window of a client GUI that is no {@link ClientGUI} (an SBF game). */
+    public static synchronized void closeFor(AbstractClientGUI gui) {
         if (active != null && active.gui == gui) {
             active.close(false);
         }

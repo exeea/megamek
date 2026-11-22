@@ -30,6 +30,7 @@ import megamek.client.ui.panels.phaseDisplay.AbstractPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
+import megamek.client.ui.panels.phaseDisplay.SBFActionPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.StatusBarPhaseDisplay;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.OffBoardDirection;
@@ -161,6 +162,9 @@ final class GpuBoardActions {
     }
 
     int actorId() {
+        if (panel.get() instanceof SBFActionPhaseDisplay sbf) {
+            return sbf.actingFormationId();
+        }
         Entity actor = panel.get() instanceof ActionPhaseDisplay action ? action.currentEntity()
               : panel.get() instanceof DeploymentDisplay deployment ? deployment.currentEntity() : view.getSelectedEntity();
         return actor == null ? Entity.NONE : actor.getId();

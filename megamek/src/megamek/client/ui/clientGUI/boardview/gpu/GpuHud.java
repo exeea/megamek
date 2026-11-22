@@ -1251,6 +1251,9 @@ final class GpuHud implements GpuBoardHud {
             if (unit != null) {
                 select(unit.id());
             }
+        } else if (source.strategic()) {
+            // SBF: a left click is MegaMek's board click on the hex, a formation's too, as on the Legacy 2D board
+            source.click(coords, false, modifiers);
         } else if (planning(inputs)) {
             if (shift) {
                 source.moves().faceToward(coords, inputs.frame().scene().boardId());

@@ -39,6 +39,7 @@ import java.util.Optional;
 import javax.swing.AbstractAction;
 
 import jakarta.annotation.Nullable;
+import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.SBFClientGUI;
 import megamek.client.ui.util.KeyCommandBind;
@@ -48,6 +49,8 @@ import megamek.client.ui.widget.MegaMekButton;
 import megamek.client.ui.widget.SkinSpecification;
 import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFFormationTurn;
+import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.units.Entity;
 
 public abstract class SBFActionPhaseDisplay extends StatusBarPhaseDisplay {
@@ -191,5 +194,26 @@ public abstract class SBFActionPhaseDisplay extends StatusBarPhaseDisplay {
      */
     protected final Optional<SBFFormation> actingFormation() {
         return clientGUI.getClient().getGame().getFormation(currentFormation);
+    }
+
+    /** The id of the formation selected for action, or {@link SBFFormation#NONE}: the 3D board's acting unit. */
+    public int actingFormationId() {
+        return currentFormation;
+    }
+
+    /** Selects {@code formation} for action, or none for null. */
+    protected abstract void selectFormation(@Nullable SBFFormation formation);
+
+    /**
+     * A unit chosen on the 3D board (a forces panel row, a unit menu): an own formation that may act in the local turn
+     * is selected for action, as the next-unit command selects one.
+     */
+    @Override
+    public void unitSelected(BoardViewEvent event) {
+        SBFGame game = clientGUI.getClient().getGame();
+        if (!isIgnoringEvents() && isMyTurn() && (game.getTurn() instanceof SBFFormationTurn turn)) {
+            game.getFormation(event.getEntityId()).filter(formation -> turn.isValidEntity(formation, game))
+                  .ifPresent(this::selectFormation);
+        }
     }
 }

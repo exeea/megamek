@@ -134,7 +134,8 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
         }
     }
 
-    private void selectFormation(@Nullable SBFFormation formation) {
+    @Override
+    protected void selectFormation(@Nullable SBFFormation formation) {
         if (formation == null) {
             currentFormation = SBFFormation.NONE;
             firingUnit = BTObject.NONE;
