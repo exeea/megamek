@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
@@ -44,6 +45,7 @@ import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
@@ -656,6 +658,9 @@ class GpuBoardWindowSmokeTest {
         BoardFile.save(Board.createEmptyBoard(8, 8), file);
         byte[] saved = Files.readAllBytes(file);
         Coords at = new Coords(3, 4);
+        // The editor opens a file preview's source sheet and copies only a generated map (BoardEditorSession#open):
+        // the displayed change at the hex below reaches it only from a generated map.
+        int opened = replaceFile ? 3 : BoardFile.read(file).getHex(at).getLevel();
         var client = mock(ClientGUI.class);
         var lobby = client;
         doAnswer(call -> {
@@ -706,7 +711,7 @@ class GpuBoardWindowSmokeTest {
             gameField.setAccessible(true);
             Board shown = GpuTestSupport.onSwing(() -> {
                 Board board = ((megamek.common.game.Game) gameField.get(preview)).getBoard();
-                // The handoff must copy the displayed state, even when it differs from the file on disk.
+                // A displayed state the file lacks (as a finished preview closes outer building exits).
                 board.setHex(at, new Hex(3));
                 preview.refresh();
                 return board;
@@ -735,7 +740,8 @@ class GpuBoardWindowSmokeTest {
                 assertNotSame(shown, editor.board(), "The editor owns a separate document");
                 assertEquals(shown.getWidth(), editor.board().getWidth());
                 assertEquals(shown.getHeight(), editor.board().getHeight());
-                assertEquals(3, editor.board().getHex(at).getLevel());
+                assertEquals(opened, editor.board().getHex(at).getLevel(), replaceFile
+                      ? "A generated map is copied as displayed" : "A file preview opens the file's sheet");
                 assertEquals(replaceFile ? null : file, editor.path(),
                       "Only the currently displayed file supplies the editor's save path");
                 assertEquals(replaceFile, editor.dirty(), "Generated maps have never been saved");
@@ -745,7 +751,7 @@ class GpuBoardWindowSmokeTest {
 
             input(() -> editorWheel(at, true, true, -1));
             GpuTestSupport.onSwing(() -> {
-                assertEquals(4, editor.board().getHex(at).getLevel(), "Native input edits the opened map");
+                assertEquals(opened + 1, editor.board().getHex(at).getLevel(), "Native input edits the opened map");
                 assertEquals(3, shown.getHex(at).getLevel(), "Editing must not mutate the preview's board");
                 assertTrue(editor.dirty());
                 return null;
@@ -765,7 +771,7 @@ class GpuBoardWindowSmokeTest {
             await(() -> GpuTestSupport.onSwing(launcher::isShowing));
             if (saveBeforeClose) {
                 verify(lobby).boardEditorClosed(savedFile, replaceFile);
-                assertEquals(4, BoardFile.read(savedFile).getHex(at).getLevel());
+                assertEquals(opened + 1, BoardFile.read(savedFile).getHex(at).getLevel());
             } else {
                 verify(lobby, never()).boardEditorClosed(any(), anyBoolean());
             }
@@ -1246,6 +1252,14 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> {
                     preferences.setValue(GUIPreferences.ADVANCED_NO_SAVE_NAG, false);
                     doCallRealMethod().when(gui).handleExit();
+                    // The exit asks Save First? in the native battle window and leaves through exitWithoutAsking
+                    // (97c3b7ad24): those chokepoints run their real code; askSaveFirst is protected.
+                    doCallRealMethod().when(gui).exitWithoutAsking();
+                    doCallRealMethod().when(gui).confirm(any(), any(), anyInt(), anyInt());
+                    doCallRealMethod().when(gui).askNative(any(), any(), anyInt(), any(), any(), anyBoolean());
+                    var askSaveFirst = ClientGUI.class.getDeclaredMethod("askSaveFirst");
+                    askSaveFirst.setAccessible(true);
+                    askSaveFirst.invoke(doCallRealMethod().when(gui));
                     doAnswer(invocation -> {
                         quit.incrementAndGet();
                         GpuBoardWindow.closeFor(gui);
@@ -1264,15 +1278,13 @@ class GpuBoardWindowSmokeTest {
                         callback.invoke(window);
                         return null;
                     });
-                    await(() -> GpuTestSupport.onSwing(() -> savePrompt(ui.frame()) != null));
-                    GpuTestSupport.onSwing(() -> {
-                        JOptionPane prompt = savePrompt(ui.frame());
-                        assertEquals(Messages.getString("ClientGUI.gameSaveDialogMessage"), prompt.getMessage());
-                        assertTrue(GpuBoardWindow.raisedOverBoard(
-                              (java.awt.Dialog) SwingUtilities.getWindowAncestor(prompt)));
-                        prompt.setValue(response);
-                        return null;
-                    });
+                    // The question shows in this native window: its source publishes it; the answer is its button.
+                    GpuBoardSource source = (GpuBoardSource) previewSource();
+                    GpuBoardWindow.DialogRequest asked = GpuDialogFixture.awaitDialog(source,
+                          Messages.getString("ClientGUI.gameSaveDialogMessage"));
+                    assertEquals(Messages.getString("ClientGUI.gameSaveFirst"), asked.title());
+                    source.answer(asked.id(),
+                          new GpuBoardWindow.DialogAnswer(response, List.of(), null, false, List.of()));
                     GpuTestSupport.onSwing(() -> null);
                     if (response != JOptionPane.NO_OPTION) {
                         assertEquals(0, quit.get(), "Cancelling or failing to save must keep the game open");
@@ -1413,12 +1425,13 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> { ui.view().centerOnHex(position); return null; });
                 await(() -> onGl(() -> unitIsCentered(fixture)));
                 assertTrue(GpuTestSupport.onSwing(() -> ui.frame().isDisplayable()), "Switching must preserve the original client");
-                // The Swing window is hidden, so an allowed client dialog, here the bug report, must be raised above
-                // the native window.
+                // The Swing window is hidden, so an allowed client dialog must be raised above the native window: a
+                // file chooser (user item 21), the one Swing surface the battle keeps since its message boxes went
+                // native (ad0fdcab88).
                 JDialog probe = GpuTestSupport.onSwing(() -> {
-                    JDialog dialog = new JOptionPane("GPU dialog probe").createDialog(ui.frame(),
-                          new megamek.client.ui.BugReportMessages().get("title"));
-                    dialog.setModal(false);
+                    JDialog dialog = new JDialog(ui.frame(), "GPU dialog probe");
+                    dialog.getContentPane().add(new JFileChooser());
+                    dialog.pack();
                     dialog.setVisible(true);
                     return dialog;
                 });
