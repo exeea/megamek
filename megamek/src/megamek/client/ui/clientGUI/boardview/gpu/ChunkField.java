@@ -1004,6 +1004,18 @@ final class ChunkField {
                 }
             }
             if (chunk.lod == TerrainLod.DISTANT && n == 2 && !keeps(e)) { feet[1] = (feet[0] + feet[2]) / 2; }
+            if (cast) {
+                // A plate stands on its fitted outline (FieldPlates), which the concrete fit can straighten across
+                // several hexes: its cast wall is lit by the line its row runs along, not by its hex edge's direction.
+                float rx = x[samples[n]] - x[samples[0]], ry = y[samples[n]] - y[samples[0]];
+                float rl = (float) Math.hypot(rx, ry);
+                if (rl > .01f * m) {
+                    float side = ry * onx - rx * ony < 0 ? -1 : 1;
+                    onx = side * ry / rl;
+                    ony = -side * rx / rl;
+                    frame = (float) Math.atan2(ony, onx);
+                }
+            }
             Wall w = new Wall(e, outside || cast, wall, landform, otherZ, onx, ony, samples, tops, feet, finest);
             w.wet = other != null && b.shore.family(g) >= 0;
             w.fall = !outside && b.falls(h, g);
