@@ -146,6 +146,9 @@ class GpuSpecularAntialiasingSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 800);
+        // The family programs a switch rebuilds are checked on every GPU, whatever its default (GpuGlsl#integrated).
+        String families = System.getProperty(GpuFamilyPrograms.PROPERTY);
+        System.setProperty(GpuFamilyPrograms.PROPERTY, "true");
         try {
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override
@@ -205,7 +208,9 @@ class GpuSpecularAntialiasingSmokeTest {
                 }
             }, config);
         } finally {
-            // The switches are the terrain's own: nothing to restore.
+            // The switches are the terrain's own; the family programs' property is put back.
+            if (families == null) { System.clearProperty(GpuFamilyPrograms.PROPERTY); }
+            else { System.setProperty(GpuFamilyPrograms.PROPERTY, families); }
         }
         System.out.print("Specular anti-aliasing switches on the calibration board\n" + report);
         if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing switch\n" + report, failure.get()); }

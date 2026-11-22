@@ -45,7 +45,11 @@ import megamek.logging.MMLogger;
  */
 final class GpuFamilyPrograms {
     private static final MMLogger LOGGER = MMLogger.create(GpuFamilyPrograms.class);
-    /** {@code -Dmegamek.gpu.familyPrograms=false} draws every terrain surface with its generic program. */
+    /**
+     * Family programs draw by default on integrated GPUs only ({@link GpuGlsl#integrated()}); on discrete ones their
+     * links cost more load time and play hitches than they save (docs/gpu-shaders.md).
+     * {@code -Dmegamek.gpu.familyPrograms=true|false} decides instead.
+     */
     static final String PROPERTY = "megamek.gpu.familyPrograms";
     /**
      * Family programs a terrain builds for each lighting configuration, and twice that in all; libGDX frees them with
@@ -176,7 +180,7 @@ final class GpuFamilyPrograms {
      * Renderers that borrow another terrain's assets (previews, prints) pass {@code wanted} false: generic only.
      */
     GpuFamilyPrograms(boolean wanted, long sculptType, Function<Material, Object> variantOf) {
-        enabled = wanted && Boolean.parseBoolean(System.getProperty(PROPERTY, "true"));
+        enabled = wanted && Boolean.parseBoolean(System.getProperty(PROPERTY, Boolean.toString(GpuGlsl.integrated())));
         this.sculptType = sculptType;
         this.variantOf = variantOf;
     }

@@ -105,6 +105,8 @@ final class GpuGlsl {
     static GpuLinkHelper linkHelper;
     /** Whether Intel's own shader cache is full ({@link GpuProgramCache#INTEL_CACHE}): read once the context exists. */
     private static boolean intelCacheFull;
+    /** Whether the context's GPU is an integrated one ({@link #integrated(String, String)}): read once it exists. */
+    private static boolean integrated;
     /** Whether a board view shows its board rather than its loading stage (GpuBattleView). */
     private static volatile boolean presenting;
     /** Programs compiled from source while a board showed that held the render thread: none should. */
@@ -911,6 +913,7 @@ final class GpuGlsl {
         }
         String vendor = GL11.glGetString(GL11.GL_VENDOR);
         boolean intel = vendor != null && vendor.toLowerCase(Locale.ROOT).contains("intel");
+        integrated = integrated(vendor, renderer);
         // Before any loading stage: one small folder's listing, about a millisecond.
         intelCacheFull = SharedLibraryLoader.os == Os.Windows && intel
               && GpuProgramCache.full(GpuProgramCache.INTEL_CACHE, GpuProgramCache.INTEL_CACHE_CAP);
@@ -924,6 +927,7 @@ final class GpuGlsl {
         use(glsl);
         warmup = true;
         renderer = GL11.glGetString(GL11.GL_RENDERER);
+        integrated = integrated(GL11.glGetString(GL11.GL_VENDOR), renderer);
         programCache = GpuProgramCache.open(cacheDirectory, false);
         linkHelper = null;
     }
@@ -933,6 +937,24 @@ final class GpuGlsl {
 
     /** Whether Intel's own shader cache has filled up; false on other drivers and systems. */
     static boolean intelCacheFull() { return intelCacheFull; }
+
+    /** Whether the board's GPU is an integrated one; false before {@link #detect()}. */
+    static boolean integrated() { return integrated; }
+
+    /**
+     * Whether a GPU shares the system's memory, from its GL_VENDOR and GL_RENDERER (GL has no query for it): Intel's
+     * but its discrete Arc A- and B-series (a model number after "Arc"), Apple's, and AMD's APU graphics ("Radeon
+     * Graphics", "Radeon 780M", "Radeon Vega 8 Graphics"); NVIDIA's and the rest not. The Steam Deck's APU ("AMD
+     * Custom GPU") counts as discrete: the user's choice (2026-11-22).
+     */
+    static boolean integrated(String vendor, String renderer) {
+        String v = vendor == null ? "" : vendor.toLowerCase(Locale.ROOT);
+        String r = renderer == null ? "" : renderer.toLowerCase(Locale.ROOT);
+        if (v.contains("intel") || r.contains("intel")) { return !r.matches(".*\\barc(\\(tm\\))? [ab]\\d.*"); }
+        if (v.startsWith("apple")) { return true; }
+        if (r.contains("custom gpu")) { return false; }
+        return r.matches(".*radeon(\\(tm\\))? (graphics|\\d{3}m\\b|vega \\d+ graphics).*");
+    }
 
     /** The GLSL version for an OpenGL context version: the same version, capped, never below {@link #MINIMUM}. */
     static int select(int major, int minor, int cap) {
