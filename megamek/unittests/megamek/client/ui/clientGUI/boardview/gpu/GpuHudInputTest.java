@@ -289,15 +289,15 @@ class GpuHudInputTest {
         }
         update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
         verify(record).setSheetOpen(true);
-        assertTrue(press(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK));
-        assertFalse(hud.state.recordOpen, "Ctrl+D toggles the sheet");
+        assertTrue(press(Input.Keys.I, KeyEvent.VK_I, CTRL_DOWN_MASK));
+        assertFalse(hud.state.recordOpen, "Ctrl+I toggles the sheet");
         update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
         verify(record).setSheetOpen(false);
         hud.state.overview = true;
-        assertTrue(press(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK));
+        assertTrue(press(Input.Keys.I, KeyEvent.VK_I, CTRL_DOWN_MASK));
         assertTrue(hud.state.recordOpen && !hud.state.overview, "over the overview it closes it and shows the sheet");
         update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
-        assertTrue(press(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK));
+        assertTrue(press(Input.Keys.I, KeyEvent.VK_I, CTRL_DOWN_MASK));
         assertFalse(hud.state.recordOpen);
         assertEquals(GpuHudState.SheetTab.EXTRAS, hud.state.sheetTab, "the tab stays for the next opening");
     }
@@ -307,8 +307,8 @@ class GpuHudInputTest {
         // An aerospace or vector route is MegaMek's own (plan A.7 G20): its keys and CANCEL reach the phase display.
         update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)),
               GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        for (Key key : List.of(new Key(Input.Keys.A, KeyEvent.VK_A, SHIFT_DOWN_MASK),
-              new Key(Input.Keys.D, KeyEvent.VK_D, SHIFT_DOWN_MASK),
+        for (Key key : List.of(new Key(Input.Keys.A, KeyEvent.VK_A, CTRL_DOWN_MASK),
+              new Key(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK),
               new Key(Input.Keys.BACKSPACE, KeyEvent.VK_BACK_SPACE, 0),
               new Key(Input.Keys.FORWARD_DEL, KeyEvent.VK_DELETE, 0), new Key(Input.Keys.NUM_1, KeyEvent.VK_1, 0),
               new Key(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE, 0))) {

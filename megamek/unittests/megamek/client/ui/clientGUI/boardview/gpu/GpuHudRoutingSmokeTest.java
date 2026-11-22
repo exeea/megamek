@@ -819,9 +819,10 @@ class GpuHudRoutingSmokeTest {
                 routing.view.render();
                 assertEquals(FOE_ID, state.inspected, scenario + ": an enemy is inspected");
                 assertFalse(shown(routing.find("dock-title")), scenario + ": and the selection stays cleared");
-                assertEquals(Handler.CAMERA, routing.press(key(keys, KeyCommandBind.TURN_LEFT)),
+                assertEquals(Handler.CAMERA,
+                      routing.press(new Key(Input.Keys.A, KeyEvent.VK_A, InputEvent.SHIFT_DOWN_MASK, Set.of())),
                       scenario + ": Shift+A pans even with no unit selected");
-                for (KeyCommandBind bind : List.of(KeyCommandBind.DONE,
+                for (KeyCommandBind bind : List.of(KeyCommandBind.DONE, KeyCommandBind.TURN_LEFT,
                       KeyCommandBind.UNDO_LAST_STEP, KeyCommandBind.FIRE, KeyCommandBind.NEXT_TARGET,
                       KeyCommandBind.PHYS_PUNCH, KeyCommandBind.CENTER_ON_SELECTED)) {
                     assertEquals(Handler.HUD, routing.press(key(keys, bind)), scenario + ": " + bind);

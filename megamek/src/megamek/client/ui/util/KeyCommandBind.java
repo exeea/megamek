@@ -64,13 +64,13 @@ public enum KeyCommandBind {
     // Move one hex backward (back up)
     MOVE_STEP_BACKWARD("moveStepBackward", VK_S, SHIFT_DOWN_MASK),
     // Change facing one hex side to the left
-    TURN_LEFT("turnLeft", VK_A, SHIFT_DOWN_MASK),
+    TURN_LEFT("turnLeft", VK_A, CTRL_DOWN_MASK),
     // Change facing one hex side to the right
-    TURN_RIGHT("turnRight", VK_D, SHIFT_DOWN_MASK),
+    TURN_RIGHT("turnRight", VK_D, CTRL_DOWN_MASK),
     // Change facing one hex side to the left
-    TWIST_LEFT("twistLeft", VK_A, SHIFT_DOWN_MASK),
+    TWIST_LEFT("twistLeft", VK_A, CTRL_DOWN_MASK),
     // Change facing one hex side to the right
-    TWIST_RIGHT("twistRight", VK_D, SHIFT_DOWN_MASK),
+    TWIST_RIGHT("twistRight", VK_D, CTRL_DOWN_MASK),
     // Fire the currently selected weapon
     FIRE("fire", VK_F),
     NEXT_WEAPON("nextWeapon", VK_DOWN),
@@ -141,7 +141,7 @@ public enum KeyCommandBind {
     HEX_COORDS(true, "toggleHexCoords", VK_G, CTRL_DOWN_MASK),
     MINIMAP(true, "toggleMinimap", VK_M, CTRL_DOWN_MASK),
     LOS_SETTING(true, "viewLosSetting", VK_L),
-    UNIT_DISPLAY(true, "toggleUnitDisplay", VK_D, CTRL_DOWN_MASK),
+    UNIT_DISPLAY(true, "toggleUnitDisplay", VK_I, CTRL_DOWN_MASK),
     UNIT_OVERVIEW(true, "toggleUnitOverview", VK_U, CTRL_DOWN_MASK),
     KEY_BINDS(true, "toggleKeybinds", VK_K, CTRL_DOWN_MASK),
     PLANETARY_CONDITIONS(true, "togglePlanetaryConditions", VK_P, CTRL_DOWN_MASK),

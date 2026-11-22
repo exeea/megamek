@@ -31,6 +31,7 @@ import static org.mockito.Mockito.when;
 
 import java.awt.Rectangle;
 import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -798,8 +799,9 @@ class GpuHudInteractionSmokeTest {
 
     /**
      * Lead decision D1 with the real targeting display: in the own TARGETING turn a board click is MegaMek's own tool
-     * (an artillery weapon targets the clicked hex), Backspace, Delete and Shift+A go to MegaMek's keys, and Esc is
-     * withheld, as it would clear the declared attacks.
+     * (an artillery weapon targets the clicked hex), Backspace, Delete and the twists (Ctrl+A, Ctrl+D) go to MegaMek's
+     * keys, Shift+A stays the camera's fast pan and twists nothing, and Esc is withheld, as it would clear the declared
+     * attacks.
      */
     @Test
     void theTargetingPhaseKeepsMegaMeksTool() throws Exception {
@@ -815,10 +817,18 @@ class GpuHudInteractionSmokeTest {
                     assertInstanceOf(HexTarget.class, target, "The Long Tom targets the clicked hex");
                     assertEquals(hex, target.getPosition());
                     for (KeyCommandBind bind : List.of(KeyCommandBind.UNDO_LAST_STEP, KeyCommandBind.CLEAR_ORDERS,
-                          KeyCommandBind.TWIST_LEFT)) {
+                          KeyCommandBind.TWIST_LEFT, KeyCommandBind.TWIST_RIGHT)) {
                         play.press(bind);
                         verify(live.source).key(bind.key, true, bind.modifiers);
                     }
+                    assertEquals(List.of(KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK, KeyEvent.VK_D, InputEvent.CTRL_DOWN_MASK),
+                          List.of(KeyCommandBind.TWIST_LEFT.key, KeyCommandBind.TWIST_LEFT.modifiers,
+                                KeyCommandBind.TWIST_RIGHT.key, KeyCommandBind.TWIST_RIGHT.modifiers), "The twists on Ctrl+A/D");
+                    // Shift+A is the camera's fast pan: it moves the camera and reaches neither the HUD nor MegaMek.
+                    Vector3 focus = live.camera().focus.cpy();
+                    GpuBoardTestUi.withModifiers(InputEvent.SHIFT_DOWN_MASK, () -> play.hold(Input.Keys.A, .5f));
+                    assertFalse(focus.epsilonEquals(live.camera().focus, .01f), "Shift+A pans");
+                    verify(live.source, never()).key(eq(KeyEvent.VK_A), anyBoolean(), eq(InputEvent.SHIFT_DOWN_MASK));
                     play.press(KeyCommandBind.CANCEL);
                     verify(live.source, never()).key(eq(KeyCommandBind.CANCEL.key), anyBoolean(), anyInt());
                 });
