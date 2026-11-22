@@ -1207,7 +1207,22 @@ final class BoardRoad {
                 Point finish = to;
                 if (Math.abs(cross) > 1e-4f) {
                     float s = (dx * out.y - dy * out.x) / cross, u = (dx * in.y - dy * in.x) / cross;
-                    if (s > 0 && u > 0) {
+                    if (s > 0 && u > 0 && Math.min(s, u) <= CORNER_ROOM * chord) {
+                        // The tangents meet at an end itself (beside a square crossing, the other a line crossing):
+                        // the turn is a corner there, which a fillet would collapse into the chord. It is rounded
+                        // within CORNER_JOIN of that end; the rest of the course runs straight along the line.
+                        float join = Math.min(CORNER_JOIN, .5f * chord), ux = dx / chord, uy = dy / chord;
+                        if (s <= u) {
+                            to = new Point(from.x + ux * join, from.y + uy * join,
+                                  from.width + (to.width - from.width) * join / chord);
+                        } else {
+                            Point start = new Point(to.x - ux * join, to.y - uy * join,
+                                  to.width + (from.width - to.width) * join / chord);
+                            line(path, from, start);
+                            from = start;
+                        }
+                        reachIn = reachOut = join / 3;
+                    } else if (s > 0 && u > 0) {
                         // A circular fillet leaves room inside a tight turn. A quadratic pulled towards the
                         // tangent intersection can bend more sharply than the road's own half-width.
                         float arm = Math.min(s, u);
@@ -1827,6 +1842,12 @@ final class BoardRoad {
     private static final float RUT_THIN = METRE, CROWN_THIN = .25f * METRE;
     /** A gravel road's graded edge either side of its course (terrain-road.frag GRAVEL_EDGE), where its grass begins. */
     private static final float GRAVEL_EDGE = 3.4f * METRE;
+
+    /**
+     * A turn whose fillet arm is at most this share of its chord is a corner at an end (#layout), rounded within
+     * CORNER_JOIN of it.
+     */
+    private static final float CORNER_ROOM = .001f, CORNER_JOIN = 3 * METRE;
 
     /** A dirt track's track, its half width about each of its courses: its ruts with their loose soil. */
     private static final float TRACK_HALF = RUT_OFFSET + RUT_REACH;
