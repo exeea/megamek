@@ -260,40 +260,66 @@ public class Server implements Runnable {
 
         @Override
         public void packetReceived(PacketReceivedEvent e) {
-            ReceivedPacket rp = new ReceivedPacket(e.getConnection().getId(), e.getPacket());
-            switch (e.getPacket().command()) {
-                case CLIENT_FEEDBACK_REQUEST:
-                    // Handled CFR packets specially
-                    gameManager.handleCfrPacket(rp);
-                    break;
-                case CLOSE_CONNECTION:
-                case CLIENT_NAME:
-                case CLIENT_VERSIONS:
-                case CHAT:
-                    // Some packets should be handled immediately
-                    handle(rp.getConnectionId(), rp.getPacket());
-                    break;
-                case PAUSE:
-                    if (pauseGate.pause()) {
-                        LOGGER.info("Pause packet received - pausing packet handling");
-                        sendServerChat("Game is paused.");
-                    }
-                    break;
-                case UNPAUSE:
-                    if (pauseGate.isPaused()) {
-                        LOGGER.info("Unpause packet received - resuming packet handling");
-                        sendServerChat("Game is resumed.");
-                    }
-                    packetQueue.addAll(pauseGate.unpause());
-                    break;
-                default:
-                    if (!pauseGate.holdIfPaused(rp)) {
-                        packetQueue.add(rp);
-                    }
-                    break;
-            }
+            receivePacket(e.getConnection().getId(), e.getPacket());
         }
     };
+
+    /**
+     * Sends a packet just received on a connection's thread to where it is handled: at once, on the packet pump, or
+     * held while the game is paused.
+     */
+    void receivePacket(int connectionId, Packet packet) {
+        ReceivedPacket rp = new ReceivedPacket(connectionId, packet);
+        switch (packet.command()) {
+            case CLIENT_FEEDBACK_REQUEST:
+                // Handled CFR packets specially
+                gameManager.handleCfrPacket(rp);
+                break;
+            case CHAT:
+                if (isCommandChat(packet)) {
+                    // Server commands change the game: they run on the packet pump, in order with the game packets
+                    // and under the server lock, and a pause does not hold them
+                    packetQueue.add(rp);
+                } else {
+                    // Plain chat is only passed on, so it is handled at once, also while paused or during a CFR wait
+                    handle(rp.getConnectionId(), rp.getPacket());
+                }
+                break;
+            case CLOSE_CONNECTION:
+            case CLIENT_NAME:
+            case CLIENT_VERSIONS:
+                // Some packets should be handled immediately
+                handle(rp.getConnectionId(), rp.getPacket());
+                break;
+            case PAUSE:
+                if (pauseGate.pause()) {
+                    LOGGER.info("Pause packet received - pausing packet handling");
+                    sendServerChat("Game is paused.");
+                }
+                break;
+            case UNPAUSE:
+                if (pauseGate.isPaused()) {
+                    LOGGER.info("Unpause packet received - resuming packet handling");
+                    sendServerChat("Game is resumed.");
+                }
+                packetQueue.addAll(pauseGate.unpause());
+                break;
+            default:
+                if (!pauseGate.holdIfPaused(rp)) {
+                    packetQueue.add(rp);
+                }
+                break;
+        }
+    }
+
+    /** @return True when the chat packet is a server command ("/reset", "/kick" ...) rather than a message */
+    private static boolean isCommandChat(Packet packet) {
+        return (packet.data().length > 0) && (packet.data()[0] instanceof String chat) && isCommand(chat);
+    }
+
+    private static boolean isCommand(String chat) {
+        return chat.startsWith("/");
+    }
 
     /**
      * @param serverAddress IP or Domain Name Of Server
@@ -1438,7 +1464,7 @@ public class Server implements Runnable {
                     break;
                 case CHAT:
                     String chat = packet.getStringValue(0);
-                    if (chat.startsWith("/")) {
+                    if (isCommand(chat)) {
                         processCommand(connId, chat);
                     } else if (packet.data().length > 1) {
                         connId = packet.getIntValue(1);
