@@ -133,8 +133,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_ECM_TACTICAL_HATCH = "BoardEcmTacticalHatch";
     /** The Tactical View outlines every E(C)CM field; off, only the 3D view's mid-edge ticks (its Overlays panel). */
     public static final String BOARD_ECM_TACTICAL_FIELDS = "BoardEcmTacticalFields";
-    /** The 3D board's Tactical View Overlays panel is expanded. */
-    public static final String TACTICAL_OVERLAYS_OPEN = "TacticalOverlaysOpen";
     /** The Tactical View's unit bases show their status badges; rings, notches, elevation and wreck cross stay. */
     public static final String TACTICAL_STATUS_BADGES = "TacticalStatusBadges";
     /** The Tactical View shades the hovered or targeted enemy's rear and side arcs. */
@@ -774,7 +772,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_ECM_TRANSPARENCY, 0x80);
         store.setDefault(BOARD_ECM_TACTICAL_HATCH, true);
         store.setDefault(BOARD_ECM_TACTICAL_FIELDS, true);
-        store.setDefault(TACTICAL_OVERLAYS_OPEN, true);
         store.setDefault(TACTICAL_STATUS_BADGES, true);
         store.setDefault(TACTICAL_REAR_ARCS, true);
         store.setDefault(TACTICAL_LEVEL_SHADING, false);
@@ -3705,14 +3702,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void toggleEcmTacticalFields() {
         store.setValue(BOARD_ECM_TACTICAL_FIELDS, !getEcmTacticalFields());
-    }
-
-    public boolean getTacticalOverlaysOpen() {
-        return store.getBoolean(TACTICAL_OVERLAYS_OPEN);
-    }
-
-    public void toggleTacticalOverlaysOpen() {
-        store.setValue(TACTICAL_OVERLAYS_OPEN, !getTacticalOverlaysOpen());
     }
 
     public boolean getTacticalStatusBadges() {

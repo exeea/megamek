@@ -113,9 +113,8 @@ class GpuTacticalViewSmokeTest {
      * The client settings the Overlays panel shows, and the View menu's coordinates and hex types, which the overlay
      * test sets.
      */
-    private static final List<String> OVERLAY_SETTINGS = List.of(GUIPreferences.TACTICAL_OVERLAYS_OPEN,
-          GUIPreferences.TACTICAL_STATUS_BADGES, GUIPreferences.TACTICAL_REAR_ARCS,
-          GUIPreferences.BOARD_ECM_TACTICAL_FIELDS, GUIPreferences.BOARD_ECM_TACTICAL_HATCH,
+    private static final List<String> OVERLAY_SETTINGS = List.of(GUIPreferences.TACTICAL_STATUS_BADGES,
+          GUIPreferences.TACTICAL_REAR_ARCS, GUIPreferences.BOARD_ECM_TACTICAL_FIELDS, GUIPreferences.BOARD_ECM_TACTICAL_HATCH,
           GUIPreferences.TACTICAL_LEVEL_SHADING, GUIPreferences.SHOW_UNIT_LINKS, GUIPreferences.SHOW_COORDS,
           GUIPreferences.SHOW_HEX_TYPES, GUIPreferences.MINI_MAP_ENABLED, GUIPreferences.GPU_CONTACTS_ENABLED);
 
