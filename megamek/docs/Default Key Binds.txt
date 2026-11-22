@@ -47,8 +47,8 @@ Deployment Zones ----- Shift+Z
 MOVEMENT
 Step Forward ----- Shift+W
 Step Backward ----- Shift+S
-Turn Left ----- Shift+A
-Turn Right ----- Shift+D
+Turn Left ----- Ctrl+A
+Turn Right ----- Ctrl+D
 Walk Backwards ----- B
 Go Prone ----- P
 Get Up ----- U
@@ -62,8 +62,8 @@ Next Weapon ----- Down
 Previous Weapon ----- Up
 Next Weapon Mode ----- NumPad Up
 Previous Weapon Mode ----- NumPad Down
-Twist Left ----- Shift+A
-Twist Right ----- Shift+D
+Twist Left ----- Ctrl+A
+Twist Right ----- Ctrl+D
 Next Target ----- Right
 Previous Target ----- Left
 Next Valid Target ----- Shift+Right
@@ -104,7 +104,7 @@ Unit Display Extras Tab ----- F6
 
 
 OVERLAYS AND DIAGRAMS
-Toggle Unit Display ----- Ctrl+D [menu]
+Toggle Unit Display ----- Ctrl+I [menu]
 Toggle Unit Overview ----- Ctrl+U [menu]
 Toggle Force Display ----- Ctrl+F [menu]
 Toggle Minimap ----- Ctrl+M [menu]
