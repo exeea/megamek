@@ -52,8 +52,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
@@ -139,7 +139,7 @@ public class Server implements Runnable {
     }
 
     private class PacketPump implements Runnable {
-        boolean shouldStop;
+        private volatile boolean shouldStop;
 
         PacketPump() {
             shouldStop = false;
@@ -152,19 +152,17 @@ public class Server implements Runnable {
         @Override
         public void run() {
             while (!shouldStop) {
-                while (!packetQueue.isEmpty()) {
-                    ReceivedPacket rp = packetQueue.poll();
-                    synchronized (serverLock) {
-                        handle(rp.getConnectionId(), rp.getPacket());
-                    }
-                }
-
+                ReceivedPacket rp;
                 try {
-                    synchronized (packetQueue) {
-                        packetQueue.wait();
-                    }
+                    // Blocks until a packet is queued; checking isEmpty() and then waiting lost a packet that was
+                    // queued in between until the next one arrived
+                    rp = packetQueue.take();
                 } catch (InterruptedException ignored) {
-                    // If we are interrupted, just keep going, generally this happens after we are signalled to stop.
+                    // The pump is interrupted when the server stops
+                    return;
+                }
+                synchronized (serverLock) {
+                    handle(rp.getConnectionId(), rp.getPacket());
                 }
             }
         }
@@ -178,7 +176,7 @@ public class Server implements Runnable {
 
     private final Map<Integer, ConnectionHandler> connectionHandlers = new ConcurrentHashMap<>();
 
-    private final ConcurrentLinkedQueue<ReceivedPacket> packetQueue = new ConcurrentLinkedQueue<>();
+    private final LinkedBlockingQueue<ReceivedPacket> packetQueue = new LinkedBlockingQueue<>();
 
     private final boolean dedicated;
 
@@ -286,18 +284,11 @@ public class Server implements Runnable {
                         LOGGER.info("Unpause packet received - resuming packet handling");
                         sendServerChat("Game is resumed.");
                     }
-                    List<ReceivedPacket> releasedPackets = pauseGate.unpause();
-                    synchronized (packetQueue) {
-                        packetQueue.addAll(releasedPackets);
-                        packetQueue.notifyAll();
-                    }
+                    packetQueue.addAll(pauseGate.unpause());
                     break;
                 default:
                     if (!pauseGate.holdIfPaused(rp)) {
-                        synchronized (packetQueue) {
-                            packetQueue.add(rp);
-                            packetQueue.notifyAll();
-                        }
+                        packetQueue.add(rp);
                     }
                     break;
             }
