@@ -23,7 +23,6 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -45,7 +44,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import jakarta.annotation.Nullable;
@@ -3111,7 +3109,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         }
         @Override public void gamePhaseChange(GamePhaseChangeEvent gamePhaseChangeEvent) {
             onClientThread(() -> {
-                saveGameSummary(gamePhaseChangeEvent.getOldPhase());
                 refreshAttacks();
 
                 // Clear some information regardless of what phase it is
@@ -3188,24 +3185,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public boolean isTooltipSuspended() { return tooltipSuspended; }
     public void suspendTooltip() { tooltipSuspended = true; }
     public void activateTooltip() { tooltipSuspended = false; }
-
-    private void saveGameSummary(GamePhase phase) {
-        if (!GUIP.getGameSummaryBoardView() || !(phase.isDeployment() || phase.isMovement() || phase.isTargeting()
-              || phase.isFiring() || phase.isPhysical())) {
-            return;
-        }
-        File directory = new File(Configuration.gameSummaryImagesBVDir(), game.getUUIDString());
-        if (directory.exists() || directory.mkdirs()) {
-            String name = String.format("round_%03d_%03d_%s%s.png", game.getRoundCount(), phase.ordinal(), phase,
-                  boardId == 0 ? "" : "_board_" + boardId);
-            File image = new File(directory, name);
-            try {
-                ImageIO.write(getEntireBoardImage(false), "png", image);
-            } catch (Exception exception) {
-                LOGGER.error(exception, "Unable to write board image {}", image);
-            }
-        }
-    }
 
     /** Explicit printable export; uses the same labels and tactical painters without constructing a viewport. */
     public BufferedImage getEntireBoardImage(boolean ignoreUnits) {

@@ -79,7 +79,6 @@ import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
-import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.client.ui.settings.ClientSettingsForm;
@@ -737,20 +736,6 @@ public final class GpuLobbyWindow {
                         shown.pulseWarnings();
                     }
                 });
-                return;
-            }
-            Game game = gui.getClient().getGame();
-            if (readying && MinimapPanel.needsGifRecordingConsent(game)) {
-                // Asked here rather than by the Swing question the services ask; the answer readies again
-                onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.yesNo(
-                      Messages.getString("MinimapPanel.RecordGifDialog.title"),
-                      List.of(Messages.getString("MinimapPanel.RecordGifDialog.message"),
-                            Messages.getString("MinimapPanel.RecordGifDialog.warning")),
-                      Messages.getString("MinimapPanel.RecordGifDialog.remember"),
-                      (record, remember) -> SwingUtilities.invokeLater(() -> {
-                          MinimapPanel.recordGifRecordingDecision(game, record, remember);
-                          ready();
-                      }))));
                 return;
             }
             LobbyServices.of(gui).ready();

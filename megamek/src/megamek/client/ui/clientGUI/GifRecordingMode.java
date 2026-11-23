@@ -35,19 +35,18 @@ package megamek.client.ui.clientGUI;
 import jakarta.annotation.Nullable;
 
 /**
- * How the client handles recording the combat-summary GIF of the minimap. Recording costs CPU for the whole game
- * (a minimap render and a GIF frame encode per phase), so consent is established before any work is done rather
- * than asking whether to keep the file at game end.
+ * Whether the client makes the combat-summary GIF at the end of a game. During play it only keeps a small record of
+ * each phase (see {@code GameSummary}); the frames are drawn and encoded only when the GIF is made.
  */
 public enum GifRecordingMode {
 
-    /** Record every game without asking. */
+    /** Make the GIF of every game without asking whether to; the player still picks where to save it. */
     ALWAYS,
 
-    /** Ask once at the start of each game whether to record it. The default. */
+    /** Ask at the end of each game whether to make its GIF. The default. */
     ASK,
 
-    /** Never record; no frames are rendered or encoded and no dialogs are shown. */
+    /** Never make it: no record is kept and no question is asked. */
     NEVER;
 
     /**

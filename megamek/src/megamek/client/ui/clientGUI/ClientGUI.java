@@ -91,6 +91,8 @@ import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.audio.SoundType;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.CollapseWarning;
+import megamek.client.ui.clientGUI.boardview.gpu.GameSummary;
+import megamek.client.ui.clientGUI.boardview.gpu.GameSummaryGif;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.ClearRows;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
@@ -402,6 +404,8 @@ public class ClientGUI extends AbstractClientGUI
     private JFileChooser dlgSaveList;
     private JFileChooser dlgSaveGifList;
     private final Client client;
+    /** What each phase showed, for the summary GIF the player may ask for at the end of the game. */
+    private final GameSummary gameSummary = new GameSummary();
     /** Shared by the deployment and movement displays, which are rebuilt every phase. */
     private final AutomaticEjectionWarning automaticEjectionWarning = new AutomaticEjectionWarning(this);
 
@@ -3440,6 +3444,41 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
+    /**
+     * At the end of a game, the summary GIF ({@link GifRecordingMode}): unless it is never wanted, asks whether to make
+     * it (or makes it when it is always wanted), asks where to save it, then draws and writes it off the Swing thread
+     * and says where it went.
+     */
+    private void offerSummaryGif() {
+        GifRecordingMode mode = GUIP.getGifGameSummaryRecording();
+        if (mode == GifRecordingMode.NEVER) {
+            return;
+        }
+        Game game = client.getGame();
+        gameSummary.phaseEnded(game, client.getLocalPlayer(), GamePhase.VICTORY);
+        Board board = GameSummaryGif.board(gameSummary, game);
+        String title = Messages.getString("ClientGUI.SaveGifDialog.title");
+        if ((board == null) || ((mode == GifRecordingMode.ASK)
+              && !doYesNoDialog(title, Messages.getString("ClientGUI.SaveGifDialog.message")))) {
+            return;
+        }
+        File file = SummaryGifFile.choose(getFrame());
+        if (file == null) {
+            return;
+        }
+        new Thread(() -> {
+            try {
+                GameSummaryGif.write(gameSummary, board, file);
+                SwingUtilities.invokeLater(() -> doAlertDialog(title,
+                      Messages.getString("ClientGUI.SaveGifDialog.saved", file.getAbsolutePath())));
+            } catch (IOException | RuntimeException failure) {
+                logger.error(failure, "Could not write the game summary GIF {}", file);
+                SwingUtilities.invokeLater(() -> doAlertDialog(Messages.getString("ClientGUI.errorSavingFile"),
+                      String.valueOf(failure.getMessage())));
+            }
+        }, "Game summary GIF").start();
+    }
+
     protected void saveVictoryList() {
         String filename = client.getLocalPlayer().getName();
 
@@ -3820,6 +3859,9 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gamePhaseChange(GamePhaseChangeEvent e) {
+            if (GUIP.getGifGameSummaryRecording() != GifRecordingMode.NEVER) {
+                gameSummary.phaseEnded(client.getGame(), client.getLocalPlayer(), e.getOldPhase());
+            }
             for (BoardClientState bv : boardStates()) {
                 // This is a really lame place for this, but I couldn't find a
                 // better one without making massive changes (which didn't seem
@@ -3949,6 +3991,7 @@ public class ClientGUI extends AbstractClientGUI
                     saveVictoryList();
                 }
             }
+            offerSummaryGif();
 
             // save all destroyed units in a separate "salvage MUL"
             ArrayList<Entity> destroyed = new ArrayList<>();

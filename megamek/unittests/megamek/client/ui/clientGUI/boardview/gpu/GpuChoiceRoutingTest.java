@@ -41,7 +41,6 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.GifRecordingMode;
 import megamek.client.ui.clientGUI.IClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
@@ -51,7 +50,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.clientGUI.unitDisplay.UnitEquipmentActions;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.SliderDialog;
-import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.phaseDisplay.EMPMineSettingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.EcmSuiteChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.EntityChoiceDialog;
@@ -414,46 +412,6 @@ class GpuChoiceRoutingTest {
                     frame.dispose();
                     return null;
                 });
-            }
-        }
-    }
-
-    @Test
-    void gifConsentForAResumedGameIsAskedNativelyAndRemembered() throws Exception {
-        ClientGUI gui = routingClient();
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        GifRecordingMode mode = preferences.getGifGameSummaryRecording();
-        Method consent = MinimapPanel.class.getDeclaredMethod("askWhetherToRecordGif", Component.class,
-              IClientGUI.class);
-        consent.setAccessible(true);
-        Method recallOrAsk = MinimapPanel.class.getDeclaredMethod("recallOrAskRecordingDecision");
-        recallOrAsk.setAccessible(true);
-        Field decisions = MinimapPanel.class.getDeclaredField("GIF_RECORDING_DECISIONS");
-        decisions.setAccessible(true);
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            present(gui, fixture.view, fixture.source);
-            try {
-                preferences.setGifGameSummaryRecording(GifRecordingMode.ASK);
-                Asked<Object> declined = ask(fixture.source, () -> consent.invoke(null, null, gui),
-                      new DialogAnswer(1, List.of(), null, false, List.of()));
-                DialogRequest request = declined.request();
-                assertEquals(DialogKind.MESSAGE, request.kind());
-                assertEquals("Record Game Summary GIF?", request.title());
-                assertEquals(Messages.getString("MinimapPanel.RecordGifDialog.message") + "\n"
-                      + Messages.getString("MinimapPanel.RecordGifDialog.warning"), request.message());
-                assertEquals("Remember my choice (change later in Client Settings)", request.checkbox());
-                assertEquals(false, declined.result());
-                assertEquals(GifRecordingMode.ASK, preferences.getGifGameSummaryRecording(), "Not remembered");
-
-                // A game resumed without a lobby ready asks when the first summary frame is due, through its client
-                MinimapPanel panel = onSwing(() -> new MinimapPanel(null, fixture.game, fixture.view, gui, 0));
-                assertEquals(true, ask(fixture.source, () -> recallOrAsk.invoke(panel),
-                      new DialogAnswer(0, List.of(), null, true, List.of())).result());
-                assertEquals(GifRecordingMode.ALWAYS, preferences.getGifGameSummaryRecording(), "Remembered");
-            } finally {
-                ((Map<?, ?>) decisions.get(null)).remove(fixture.game.getUUIDString());
-                preferences.setGifGameSummaryRecording(mode);
-                dismiss();
             }
         }
     }

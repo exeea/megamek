@@ -16,7 +16,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.awt.AWTEvent;
-import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
@@ -52,8 +51,6 @@ import megamek.client.ui.Base64Image;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.GifRecordingMode;
-import megamek.client.ui.clientGUI.IClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
@@ -66,7 +63,6 @@ import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
-import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.phaseDisplay.AbandonUnitDialog;
 import megamek.client.ui.dialogs.phaseDisplay.AutomaticEjectionDialog;
 import megamek.client.ui.dialogs.phaseDisplay.BombPayloadDialog;
@@ -144,15 +140,9 @@ class GpuSwingDialogGateTest {
         ClientPreferences clientPreferences = PreferenceManager.getClientPreferences();
         boolean hadFlightPathNotice = clientPreferences.hasProperty("ShowFlightPathNotice");
         boolean flightPathNotice = clientPreferences.getBoolean("ShowFlightPathNotice");
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        GifRecordingMode gifRecording = preferences.getGifGameSummaryRecording();
-        Method gifConsent = MinimapPanel.class.getDeclaredMethod("askWhetherToRecordGif", Component.class,
-              IClientGUI.class);
-        gifConsent.setAccessible(true);
         Turrets turrets = Turrets.create();
         try (Gate gate = new Gate(turrets.gui, turrets.fixture)) {
             clientPreferences.setValue("ShowFlightPathNotice", true);
-            preferences.setGifGameSummaryRecording(GifRecordingMode.ASK);
             ClientGUI gui = turrets.gui;
             JFrame frame = turrets.frame;
             // D1, D3, D9: the yes/no question, the alert and the JOptionPane facade
@@ -225,12 +215,9 @@ class GpuSwingDialogGateTest {
             // D12: the turret facing picker (the aimed shot offer is the HUD's own, never a dialog)
             gate.drive("D12 TurretFacingDialog", DialogKind.CHOICE, type(TurretFacingDialog.class),
                   turrets::atlasPicker);
-            // D13: the GIF recording consent of a resumed game
-            gate.drive("D13 GIF consent", DialogKind.MESSAGE, MESSAGE_BOX, () -> gifConsent.invoke(null, null, gui));
         } finally {
             turrets.close();
             clientPreferences.setValue("ShowFlightPathNotice", !hadFlightPathNotice || flightPathNotice);
-            preferences.setGifGameSummaryRecording(gifRecording);
         }
     }
 

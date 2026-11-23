@@ -64,19 +64,18 @@ public final class GameSummaryGif {
     private GameSummaryGif() { }
 
     /**
-     * Writes {@code summary}'s GIF to {@code file} with the boards of {@code game}. False, writing nothing, when it has
-     * no frame on a board the game knows.
+     * The board {@code summary}'s GIF shows, of {@code game}'s boards as they are now: the one the most units were
+     * seen on; null when none was seen on a board of the game.
      */
-    public static boolean write(GameSummary summary, Game game, File file) throws IOException {
-        List<GameSummary.Frame> frames = summary.frames();
-        Board board = board(frames, game);
-        if (board == null) {
-            return false;
-        }
+    public static Board board(GameSummary summary, Game game) {
+        return board(summary.frames(), game);
+    }
+
+    /** Writes {@code summary}'s GIF on {@code board} ({@link #board}) to {@code file}. Any thread. */
+    public static void write(GameSummary summary, Board board, File file) throws IOException {
         try (OutputStream out = new BufferedOutputStream(new FileOutputStream(file))) {
-            write(frames, board, out);
+            write(summary.frames(), board, out);
         }
-        return true;
     }
 
     /** Encodes {@code frames} on {@code board} as an endlessly looping GIF. */
