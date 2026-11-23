@@ -4,10 +4,12 @@ package megamek.client.ui.clientGUI;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,10 +40,11 @@ class SBFClientGUIPhaseTest {
             when(client.getGame()).thenReturn(game);
             when(client.getLocalPlayer()).thenReturn(player);
             when(client.getName()).thenReturn(player.getName());
-            var controller = new MegaMekController();
+            var controller = spy(new MegaMekController());
             try (var launcher = mockStatic(MegaMekGUI.class); var window = mockStatic(GpuBoardWindow.class)) {
                 launcher.when(MegaMekGUI::getKeyDispatcher).thenReturn(controller);
                 var gui = new SBFClientGUI(client, controller);
+                controller.clientGUI = gui;
                 try {
                     gui.initialize();
                     game.setBoard(0, Board.createEmptyBoard(4, 4));
@@ -67,6 +70,8 @@ class SBFClientGUIPhaseTest {
                     gui.die();
                 }
                 verify(client).die();
+                verify(controller).removeAllActions();
+                assertNull(controller.clientGUI);
                 assertTrue(gui.boardStates().isEmpty());
             }
         });

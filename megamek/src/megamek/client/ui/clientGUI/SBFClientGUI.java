@@ -61,6 +61,7 @@ import megamek.client.ui.panels.phaseDisplay.SBFMovementDisplay;
 import megamek.client.ui.panels.phaseDisplay.SBFReportDisplay;
 import megamek.client.ui.panels.phaseDisplay.StatusBarPhaseDisplay;
 import megamek.client.ui.util.MegaMekController;
+import megamek.common.KeyBindParser;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameListener;
@@ -74,6 +75,7 @@ public class SBFClientGUI extends AbstractClientGUI {
     private static final MMLogger logger = MMLogger.create(SBFClientGUI.class);
 
     private final SBFClient client;
+    private final MegaMekController controller;
     private final Map<GamePhase, JComponent> phaseComponents = new EnumMap<>(GamePhase.class);
     private final GameListener gameListener = new SBFClientGUIGameListener(this);
     protected final CommonMenuBar menuBar = CommonMenuBar.getMenuBarForGame();
@@ -88,6 +90,7 @@ public class SBFClientGUI extends AbstractClientGUI {
     public SBFClientGUI(SBFClient client, MegaMekController megaMekController) {
         super(client);
         this.client = client;
+        controller = megaMekController;
         frame.getContentPane().setLayout(new BorderLayout());
         frame.setJMenuBar(menuBar);
         frame.setTitle(client.getName() + Messages.getString("ClientGUI.clientTitleSuffix"));
@@ -153,12 +156,19 @@ public class SBFClientGUI extends AbstractClientGUI {
         client.getGame().removeGameListener(gameListener);
         GpuBoardWindow.closeFor(this);
         phaseComponents.values().stream().distinct().filter(StatusBarPhaseDisplay.class::isInstance)
-              .map(StatusBarPhaseDisplay.class::cast).forEach(StatusBarPhaseDisplay::removeAllListeners);
+              .map(StatusBarPhaseDisplay.class::cast).forEach(display -> {
+                  display.setIgnoringEvents(true);
+                  display.stopTimer();
+                  display.removeAllListeners();
+                  GUIP.removePreferenceChangeListener(display);
+                  KeyBindParser.removePreferenceChangeListener(display);
+              });
         boardStates.values().forEach(BoardClientState::close);
         boardStates.clear();
         phaseComponents.clear();
-        if (curPanel instanceof StatusBarPhaseDisplay display) {
-            display.stopTimer();
+        if (controller != null && controller.clientGUI == this) {
+            controller.removeAllActions();
+            controller.clientGUI = null;
         }
         menuBar.die();
         client.die();
