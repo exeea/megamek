@@ -33,6 +33,7 @@
 
 package megamek.common.strategicBattleSystems;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -88,6 +89,46 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
      * Contains all units that have left the game by any means.
      */
     private final List<InGameObject> graveyard = new ArrayList<>();
+
+    /** One recorded Combat Phase hit, retained across the firing report and save/load until the End Phase. */
+    public record PendingHit(int attackerId, int targetId, int unitIndex, int damage, int criticalRoll)
+          implements Serializable { }
+
+    /** Successful standard hit awaiting allocation; a negative Unit index is an outstanding player choice. */
+    public record Allocation(int attackerId, int targetId, int chooserId, int damage, int unitIndex)
+          implements Serializable {
+        public boolean isFor(int attacker, int target) {
+            return (attackerId == attacker) && (targetId == target);
+        }
+    }
+
+    private List<Allocation> damageAllocations;
+
+    public List<Allocation> getDamageAllocations() {
+        if (damageAllocations == null) {
+            damageAllocations = new ArrayList<>();
+        }
+        return damageAllocations;
+    }
+
+    private List<PendingHit> pendingHits;
+
+    public List<PendingHit> getPendingHits() {
+        // Existing saves have no pending hits.
+        if (pendingHits == null) {
+            pendingHits = new ArrayList<>();
+        }
+        return pendingHits;
+    }
+
+    private SBFEngagementOrders engagementOrders = new SBFEngagementOrders();
+
+    public SBFEngagementOrders engagementOrders() {
+        if (engagementOrders == null) {
+            engagementOrders = new SBFEngagementOrders();
+        }
+        return engagementOrders;
+    }
 
     public SBFGame() {
         setBoard(0, new Board());
@@ -418,6 +459,10 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
         // TODO: cache when receiving units at the Client
     }
 
+    public List<SBFFormation> passengersOf(SBFFormation carrier) {
+        return getActiveFormations().stream().filter(f -> f.isCarriedBy(carrier.getId())).toList();
+    }
+
     public boolean isHostileActiveFormationAt(BoardLocation location, SBFFormation formation) {
         Player owner = getPlayer(formation.getOwnerId());
         return getActiveFormationsAt(location).stream()
@@ -550,6 +595,16 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
 
     public boolean onSameBoard(SBFFormation unit1, SBFFormation unit2) {
         return (unit1.getPosition() != null) && unit1.getPosition().isSameBoardAs(unit2.getPosition());
+    }
+
+    /** Removes a destroyed or withdrawn Formation from its force and the board, keeping the game record. */
+    @ServerOnly
+    public void removeFormationFromPlay(SBFFormation formation) {
+        if (getFormation(formation.getId()).orElse(null) == formation) {
+            getForces().removeEntityFromForces(formation);
+            forget(formation.getId());
+            graveyard.add(formation);
+        }
     }
 
     public void forget(int unitId) {

@@ -128,6 +128,10 @@ public class SBFUnit implements ASSpecialAbilityCollector, BattleForceSUAFormatt
         return movement;
     }
 
+    public int getCurrentMovement() {
+        return Math.max(0, movement - mpCrits);
+    }
+
     public void setMovement(int movement) {
         this.movement = movement;
     }
@@ -333,13 +337,17 @@ public class SBFUnit implements ASSpecialAbilityCollector, BattleForceSUAFormatt
         damageCrits++;
     }
 
-    @Deprecated(since = "0.51.0", forRemoval = true)
     public void addMovementCrit() {
         mpCrits++;
     }
 
     public int getDamageCrits() {
         return damageCrits;
+    }
+
+    /** IO:BF p. 171: the third Targeting Damage critical prevents further attacks. */
+    public boolean canFire() {
+        return targetingCrits < 3;
     }
 
     public int getTargetingCrits() {

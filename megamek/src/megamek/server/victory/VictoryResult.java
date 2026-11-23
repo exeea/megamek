@@ -71,6 +71,13 @@ public final class VictoryResult {
         }
     }
 
+    /** Awards a victory to the side represented by this player. */
+    public static VictoryResult forPlayerOrTeam(Player player) {
+        return player.getTeam() > Player.TEAM_NONE
+              ? new VictoryResult(true, Player.PLAYER_NONE, player.getTeam())
+              : new VictoryResult(true, player.getId(), Player.TEAM_NONE);
+    }
+
     public static VictoryResult noResult() {
         return new VictoryResult(false, Player.PLAYER_NONE, Player.TEAM_NONE);
     }

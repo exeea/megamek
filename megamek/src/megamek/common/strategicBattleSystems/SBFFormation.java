@@ -80,6 +80,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     private int size;
     private int tmm;
     private int movement;
+    private Integer startingMovement;
     private SBFMovementMode movementMode;
     private int jumpMove;
     private SBFMovementMode trspMovementMode;
@@ -104,6 +105,16 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     private boolean isDone = false;
     private int jumpUsedThisTurn = 0;
     private boolean sprintedThisTurn = false;
+    private Integer transportId;
+    private boolean externallyMounted;
+    private Integer dismountRound;
+    private boolean forcedWithdrawal;
+    private boolean withdrawn;
+    private boolean attackedThisTurn;
+    private boolean attackedByMekThisTurn;
+    private boolean hostileEnteredHex;
+    private int quietTurns;
+    private Integer enragedRound;
 
     public enum MoraleStatus {
         NORMAL, SHAKEN, UNSTEADY, BROKEN, ROUTED
@@ -164,6 +175,17 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     }
 
     public void setMovement(int movement) {
+        this.movement = movement;
+        startingMovement = null;
+    }
+
+    public int getStartingMovement() {
+        return startingMovement == null ? movement : startingMovement;
+    }
+
+    /** Preserves the printed Move when critical hits or casualties change the Formation's operational Move. */
+    public void setCurrentMovement(int movement) {
+        startingMovement = getStartingMovement();
         this.movement = movement;
     }
 
@@ -505,9 +527,111 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return isHidden;
     }
 
+    private List<Integer> engagedOpponents = new ArrayList<>();
+    private int mpSpentThisTurn;
+    private Integer forcedOpponent;
+    private boolean overranThisTurn;
+    private boolean wasOverrunThisTurn;
+    private boolean evadedThisTurn;
+    private boolean failedEvadeThisTurn;
+
+    public int getMpSpentThisTurn() {
+        return mpSpentThisTurn;
+    }
+
+    public void setMpSpentThisTurn(int points) {
+        mpSpentThisTurn = points;
+    }
+
+    public void resetEngagementMovement() {
+        mpSpentThisTurn = 0;
+        overranThisTurn = false;
+        wasOverrunThisTurn = false;
+        evadedThisTurn = false;
+        failedEvadeThisTurn = false;
+    }
+
+    public void setForcedOpponent(Integer opponentId) {
+        forcedOpponent = opponentId;
+    }
+
+    public void recordOverrun(boolean target) {
+        if (target) {
+            wasOverrunThisTurn = true;
+        } else {
+            overranThisTurn = true;
+        }
+    }
+
+    public boolean wasOverrunThisTurn() {
+        return wasOverrunThisTurn;
+    }
+
+    public boolean hasOverrunThisTurn() {
+        return overranThisTurn;
+    }
+
+    public void recordEvade(boolean successful) {
+        evadedThisTurn = true;
+        failedEvadeThisTurn = !successful;
+    }
+
+    public boolean canAttackAfterEngagement() {
+        return !overranThisTurn && (!evadedThisTurn || failedEvadeThisTurn);
+    }
+
+    public int getEngagementAttackModifier() {
+        return failedEvadeThisTurn ? 2 : 0;
+    }
+
+    public int getEngagementDefenseModifier() {
+        return evadedThisTurn ? 1 : 0;
+    }
+
+    public boolean canFireArtilleryAfterEngagement() {
+        return canAttackAfterEngagement() && (forcedOpponent == null) && !failedEvadeThisTurn;
+    }
+
+    /** Forced Engagement and Evade damage fractions, rounded down (IO:BF pp. 167–168). */
+    public int adjustEngagementDamageAgainst(SBFFormation target, int damage) {
+        if ((forcedOpponent != null) || failedEvadeThisTurn) {
+            damage /= 2;
+        }
+        if ((target.forcedOpponent != null) && (target.forcedOpponent == getId())) {
+            damage /= 2;
+        }
+        if (target.evadedThisTurn) {
+            damage = (3 * damage) / 4;
+        }
+        return damage;
+    }
+
+    public List<Integer> getEngagedOpponents() {
+        if (engagedOpponents == null) {
+            engagedOpponents = new ArrayList<>();
+        }
+        return List.copyOf(engagedOpponents);
+    }
+
+    public boolean isEngagedWith(int opponentId) {
+        return (engagedOpponents != null) && engagedOpponents.contains(opponentId);
+    }
+
+    public void setEngagedWith(int opponentId, boolean engage) {
+        if (engagedOpponents == null) {
+            engagedOpponents = new ArrayList<>();
+        }
+        if (engage && !isEngagedWith(opponentId)) {
+            engagedOpponents.add(opponentId);
+        } else if (!engage) {
+            engagedOpponents.remove(Integer.valueOf(opponentId));
+        }
+    }
+
     public boolean isEligibleForPhase(GamePhase phase) {
         // A sprinting Formation may not make attacks (IO:BF p.199)
-        return !isDone && !(phase.isFiring() && sprintedThisTurn) && switch (phase) {
+        return !isDone && !isEmbarked() && !(phase.isFiring() && (sprintedThisTurn || !canAttackAfterEngagement())) && switch (phase) {
+            case MOVEMENT -> isDeployed && getEngagedOpponents().isEmpty();
             case PREMOVEMENT, PRE_FIRING -> isHidden;
             default -> isDeployed;
         };
@@ -536,6 +660,106 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     public void setSprintedThisTurn(boolean sprintedThisTurn) {
         this.sprintedThisTurn = sprintedThisTurn;
+    }
+
+    /** IO:BF, Forced Withdrawal, p. 172. Each half-Formation test applies to its own damage category. */
+    public boolean isCrippled() {
+        if (units.isEmpty()) {
+            return false;
+        }
+        int half = (units.size() + 1) / 2;
+        return ((getStartingMovement() > 2) && (movement <= 1))
+              || (units.stream().filter(u -> u.getDamage().hasDamage() && !u.getCurrentDamage().hasDamage())
+                    .count() >= half)
+              || (units.stream().filter(u -> (u.getArmor() > 0) && (u.getCurrentArmor() <= u.getArmor() / 5))
+                    .count() >= half)
+              || (units.stream().filter(u -> u.getTargetingCrits() >= 2).count() >= half);
+    }
+
+    /** IO:BF, Transporting Infantry, p. 167. A carried Formation has no independent board position. */
+    public boolean isEmbarked() {
+        return transportId != null;
+    }
+
+    public boolean isCarriedBy(int carrierId) {
+        return (transportId != null) && (transportId == carrierId);
+    }
+
+    public boolean isExternallyMounted() {
+        return externallyMounted;
+    }
+
+    public void embark(int carrierId, boolean external) {
+        transportId = carrierId;
+        externallyMounted = external;
+        position = null;
+    }
+
+    public void dismount(BoardLocation location, int round) {
+        transportId = null;
+        externallyMounted = false;
+        dismountRound = round;
+        position = location;
+    }
+
+    public boolean dismountedIn(int round) {
+        return (dismountRound != null) && (dismountRound == round);
+    }
+
+    public boolean mustWithdraw() {
+        return forcedWithdrawal || isBroken() || isRouted();
+    }
+
+    public void startForcedWithdrawal() {
+        forcedWithdrawal = true;
+    }
+
+    public boolean hasWithdrawn() {
+        return withdrawn;
+    }
+
+    public void markWithdrawn() {
+        withdrawn = true;
+    }
+
+    public boolean isMoraleRestricted() {
+        return isShaken() || isBroken() || isRouted();
+    }
+
+    public void recordAttack(SBFFormation attacker) {
+        attackedThisTurn = true;
+        attackedByMekThisTurn |= attacker.isType(SBFElementType.BM);
+    }
+
+    public boolean wasAttackedByMek() {
+        return attackedByMekThisTurn;
+    }
+
+    public void recordHostileEntry() {
+        hostileEnteredHex = true;
+    }
+
+    public int updateQuietTurns() {
+        quietTurns = (attackedThisTurn || hostileEnteredHex || !isMoraleRestricted()) ? 0 : quietTurns + 1;
+        return quietTurns;
+    }
+
+    public void clearMoraleEvents() {
+        attackedThisTurn = false;
+        attackedByMekThisTurn = false;
+        hostileEnteredHex = false;
+    }
+
+    public void becomeEnraged(int round) {
+        enragedRound = round;
+    }
+
+    public boolean isEnraged() {
+        return enragedRound != null;
+    }
+
+    public boolean hasEnragedDamageBonus(int round) {
+        return (enragedRound != null) && (round > enragedRound) && (round <= enragedRound + 2);
     }
 
     public boolean isShaken() {

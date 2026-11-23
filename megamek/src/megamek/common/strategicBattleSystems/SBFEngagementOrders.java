@@ -1,0 +1,147 @@
+/*
+ * Copyright (C) 2024-2025 The MegaMek Team. All Rights Reserved.
+ *
+ * This file is part of MegaMek.
+ *
+ * MegaMek is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License (GPL),
+ * version 3 or (at your option) any later version,
+ * as published by the Free Software Foundation.
+ *
+ * MegaMek is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty
+ * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * A copy of the GPL should have been included with this project;
+ * if not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTICE: The MegaMek organization is a non-profit group of volunteers
+ * creating free software for the BattleTech community.
+ *
+ * MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+ * of The Topps Company, Inc. All Rights Reserved.
+ *
+ * Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+ * InMediaRes Productions, LLC.
+ *
+ * MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+ * Microsoft's "Game Content Usage Rules"
+ * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+ * affiliated with Microsoft.
+ */
+
+package megamek.common.strategicBattleSystems;
+
+import java.io.Serializable;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+import megamek.common.Player;
+
+/** Private orders and unresolved movement contacts, retained in SBF saves (IO:BF pp. 167, 172). */
+public class SBFEngagementOrders implements Serializable {
+    public enum Order {
+        ENGAGE, AVOID, ASK, FORCE, OVERRUN, EVADE;
+
+        public boolean seeksEngagement() {
+            return (this == ENGAGE) || (this == FORCE) || (this == ASK);
+        }
+    }
+
+    private final Map<Integer, Map<Integer, Order>> orders = new HashMap<>();
+    private int decisionWinner = Player.PLAYER_NONE;
+    private int decisionOpponent = Player.PLAYER_NONE;
+    private Boolean decision;
+    private final Set<Long> declinedPairs = new HashSet<>();
+    private int round = -1;
+    private SBFMovePath pendingMove;
+    private int contactId = Player.PLAYER_NONE;
+
+    public void order(int formationId, int opponentId, boolean engage) {
+        order(formationId, opponentId, engage ? Order.ENGAGE : Order.AVOID);
+    }
+
+    public void order(int formationId, int opponentId, Order order) {
+        orders.computeIfAbsent(formationId, unused -> new HashMap<>()).put(opponentId, order);
+    }
+
+    public Order intent(int formationId, int opponentId) {
+        Map<Integer, Order> instructions = orders.getOrDefault(formationId, Map.of());
+        return instructions.getOrDefault(opponentId, instructions.get(Player.PLAYER_NONE));
+    }
+
+    public void startRound(int currentRound) {
+        if (round != currentRound) {
+            declinedPairs.clear();
+            clearDecision();
+            clearPendingMove();
+            round = currentRound;
+        }
+    }
+
+    public boolean alreadyDeclined(int a, int b) {
+        return declinedPairs.contains(pairKey(a, b));
+    }
+
+    public void decline(int a, int b) {
+        declinedPairs.add(pairKey(a, b));
+    }
+
+    private long pairKey(int a, int b) {
+        return ((long) Math.min(a, b) << 32) | Integer.toUnsignedLong(Math.max(a, b));
+    }
+
+    public void awaitOrders(SBFMovePath path, int opponentId) {
+        pendingMove = path;
+        contactId = opponentId;
+    }
+
+    public SBFMovePath pendingMove() {
+        return pendingMove;
+    }
+
+    public int contactId() {
+        return contactId;
+    }
+
+    public void awaitWinner(int winnerId, int opponentId) {
+        decisionWinner = winnerId;
+        decisionOpponent = opponentId;
+        decision = null;
+    }
+
+    public int decisionWinner() {
+        return decisionWinner;
+    }
+
+    public boolean isWinnerPair(int a, int b) {
+        return ((decisionWinner == a) && (decisionOpponent == b))
+              || ((decisionWinner == b) && (decisionOpponent == a));
+    }
+
+    public void decide(boolean engage) {
+        decision = engage;
+    }
+
+    public Boolean takeDecision() {
+        Boolean chosen = decision;
+        if (chosen != null) {
+            clearDecision();
+        }
+        return chosen;
+    }
+
+    public void clearDecision() {
+        decisionWinner = Player.PLAYER_NONE;
+        decisionOpponent = Player.PLAYER_NONE;
+        decision = null;
+    }
+
+    public void clearPendingMove() {
+        pendingMove = null;
+        contactId = Player.PLAYER_NONE;
+    }
+}

@@ -39,6 +39,7 @@ import static megamek.common.alphaStrike.BattleForceSUA.*;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -143,10 +144,7 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
               "= " + formationSize);
         formation.setSize(formationSize);
 
-        int formationMove = (int) Math.round(units.stream().mapToDouble(SBFUnit::getMovement).average().orElse(0));
-        if (formation.isAerospace()) {
-            formationMove = (int) Math.round(units.stream().mapToDouble(SBFUnit::getMovement).min().orElse(0));
-        }
+        int formationMove = formationMovement(formation, units);
         report.addLine("Movement:",
               "Average of " + units.stream().map(u -> u.getMovement() + "").collect(joining(", ")),
               "= " + formationMove);
@@ -313,15 +311,23 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
               formation.getType().toString());
     }
 
+    /** IO:BF pp. 171, 258: recalculate MP from the surviving Units using their current movement. */
+    public static int formationMovement(SBFFormation formation, List<SBFUnit> units) {
+        var movement = units.stream().mapToInt(SBFUnit::getCurrentMovement);
+        return formation.isAerospace() ? movement.min().orElse(0) : (int) Math.round(movement.average().orElse(0));
+    }
+
+    public static SBFMovementMode formationMovementMode(List<SBFUnit> units) {
+        return units.stream().map(SBFUnit::getMovementMode)
+              .min(Comparator.comparingInt(mode -> mode.rank)).orElse(SBFMovementMode.UNKNOWN);
+    }
+
     private void setMovementMode() {
-        SBFMovementMode currentMode = SBFMovementMode.UNKNOWN;
+        SBFMovementMode currentMode = formationMovementMode(formation.getUnits());
         Set<String> unitModes = new HashSet<>();
         for (SBFUnit unit : formation.getUnits()) {
-            SBFMovementMode newMode = unit.getMovementMode();
-            unitModes.add(newMode.code.isBlank() ? "(Walk)" : newMode.code);
-            if (newMode.rank < currentMode.rank) {
-                currentMode = newMode;
-            }
+            String code = unit.getMovementMode().code;
+            unitModes.add(code.isBlank() ? "(Walk)" : code);
         }
         report.addLine("Movement Mode:",
               "Most restrictive of: " + String.join(", ", unitModes), currentMode.code);

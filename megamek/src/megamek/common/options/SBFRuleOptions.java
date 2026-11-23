@@ -41,8 +41,14 @@ public class SBFRuleOptions extends BasicGameOptions {
     /** Detection and recon rules aka "double-blind", IO BF p.195 */
     public static final String BASE_RECON = "base_recon";
 
+    /** Random allocation instead of opposed Tactics for standard attacks, IO:BF p. 171. */
+    public static final String BASE_SIMPLIFIED_DAMAGE = "base_sbf_simplified_damage";
+
     /** When using detection and recon rules, players on a team share their vision */
     public static final String BASE_TEAM_VISION = "base_team_vision";
+
+    /** Compel crippled formations to retreat, IO:BF p. 172. */
+    public static final String BASE_FORCED_WITHDRAWAL = "base_forced_withdrawal";
 
     /** Hidden formations, IO BF p.214 */
     public static final String BASE_HIDDEN = "base_hidden";
@@ -89,6 +95,8 @@ public class SBFRuleOptions extends BasicGameOptions {
         addOption(base, BASE_RECON, false);
         addOption(base, BASE_TEAM_VISION, true);
         addOption(base, BASE_ADJUST_FORMATIONS, false);
+        addOption(base, BASE_FORCED_WITHDRAWAL, false);
+        addOption(base, BASE_SIMPLIFIED_DAMAGE, false);
         addOption(base, BASE_RECON, false);
 
         IBasicOptionGroup init = addGroup("initiative");
