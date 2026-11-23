@@ -423,34 +423,41 @@ final class GpuBattleStatus {
         return own ? Side.OWN : owner == null || owner.isEnemyOf(local) ? Side.ENEMY : Side.ALLY;
     }
 
-    /**
-     * The attack actions each unit has declared this phase, one per weapon, from the game's pending actions (the list
-     * BoardView.refreshAttacks draws its arrows from). Searchlight illumination is no attack and is not counted. In
-     * the physical phase the charges, death from above attacks and rams declared while moving count too, although the
-     * board draws no arrow for them: the game keeps them in lists of their own until they resolve at the end of that
-     * phase. As in BoardView.addAttack, a handheld weapon's attack counts for the unit carrying it, and an artillery
-     * attack aimed at a hex stays secret when its owner is the local player's enemy. During the local player's firing
-     * turn the pending actions also hold the attacks FiringDisplay has queued but not yet sent.
-     */
+    /** How many attacks each unit has declared this phase, one per weapon: {@link #declared}, by attacking unit. */
     private static Map<Integer, Integer> declaredAttacks(Game game, Player local) {
+        Map<Integer, Integer> counts = new HashMap<>();
+        declared(game, local, game.getPhase().isPhysical())
+              .forEach(attack -> counts.merge(attacker(game, attack).getId(), 1, Integer::sum));
+        return counts;
+    }
+
+    /**
+     * The attack actions the units have declared in a phase, one per weapon, from the game's pending actions (the list
+     * BoardView.refreshAttacks draws its arrows from). Searchlight illumination is no attack and is left out. In a
+     * {@code physical} phase the charges, death from above attacks and rams declared while moving count too, although
+     * the board draws no arrow for them: the game keeps them in lists of their own until they resolve at the end of
+     * that phase. As in BoardView.addAttack, a handheld weapon's attack counts for the unit carrying it
+     * ({@link #attacker}, never null here), and an artillery attack aimed at a hex stays secret when its owner is the
+     * local player's enemy. During the local player's firing turn the pending actions also hold the attacks
+     * FiringDisplay has queued but not yet sent.
+     */
+    static Stream<AttackAction> declared(Game game, Player local, boolean physical) {
         Stream<EntityAction> actions = game.getActionsVector().stream();
-        if (game.getPhase().isPhysical()) {
+        if (physical) {
             actions = Stream.concat(actions, Stream.concat(game.getChargesVector().stream(),
                   game.getRamsVector().stream()));
         }
-        Map<Integer, Integer> counts = new HashMap<>();
-        actions.filter(action -> action instanceof AttackAction && !(action instanceof SearchlightAttackAction))
+        return actions.filter(action -> action instanceof AttackAction && !(action instanceof SearchlightAttackAction))
               .map(AttackAction.class::cast)
-              .forEach(attack -> {
-                  Entity weapon = game.getEntity(attack.getEntityId());
-                  Entity attacker = weapon == null ? null : weapon.getAttackingEntity();
-                  boolean secret = attack instanceof WeaponAttackAction
-                        && attack.getTargetType() == Targetable.TYPE_HEX_ARTILLERY && !friendly(weapon, local);
-                  if (attacker != null && !secret) {
-                      counts.merge(attacker.getId(), 1, Integer::sum);
-                  }
-              });
-        return counts;
+              .filter(attack -> attacker(game, attack) != null && !(attack instanceof WeaponAttackAction
+                    && attack.getTargetType() == Targetable.TYPE_HEX_ARTILLERY
+                    && !friendly(game.getEntity(attack.getEntityId()), local)));
+    }
+
+    /** The unit making {@code attack}: its weapon's attacking entity, a handheld weapon's carrier; null if unknown. */
+    static Entity attacker(Game game, AttackAction attack) {
+        Entity weapon = game.getEntity(attack.getEntityId());
+        return weapon == null ? null : weapon.getAttackingEntity();
     }
 
     /**

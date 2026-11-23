@@ -34,11 +34,6 @@
  */
 package megamek.client.ui.dialogs.minimap;
 
-import static megamek.client.ui.dialogs.minimap.MinimapUnitSymbols.FACING_ARROW;
-import static megamek.client.ui.dialogs.minimap.MinimapUnitSymbols.STD_DESTROYED;
-import static megamek.client.ui.dialogs.minimap.MinimapUnitSymbols.STRAT_BASE_RECT;
-import static megamek.client.ui.dialogs.minimap.MinimapUnitSymbols.STRAT_CX;
-import static megamek.client.ui.dialogs.minimap.MinimapUnitSymbols.STRAT_DESTROYED;
 import static megamek.client.ui.dialogs.minimap.MinimapUnitSymbols.STRAT_SYMBOL_SIZE;
 import static megamek.common.units.Terrains.*;
 
@@ -134,7 +129,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     private static final MMLogger logger = MMLogger.create(MinimapPanel.class);
 
     private static final Color[] terrainColors = new Color[Terrains.SIZE];
-    public static final int DESTROYED_UNIT_ALPHA = 64;
     private static Color HEAVY_WOODS;
     private static Color ULTRA_HEAVY_WOODS;
     private static Color BACKGROUND;
@@ -255,7 +249,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     private Image terrainBuffer;
 
     private final Map<Coords, Integer> multiUnits = new HashMap<>();
-    private static final String[] STRAT_WEIGHTS = { "L", "L", "M", "H", "A", "A" };
 
     private boolean dragging = false;
 
@@ -1543,11 +1536,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         }
     }
 
-    public static Color changeColorForDestroyedUnit(Color color, int alpha) {
-        color = color.brighter();
-        return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
-    }
-
     /** Draws the symbol for a single entity. Checks visibility in double-blind. */
     private void paintUnit(Graphics g, Entity entity, boolean removedFromGame) {
         int x = entity.getPosition().getX();
@@ -1578,10 +1566,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         // Choose player or team color depending on preferences
         Color iconColor = UnitOwnerColors.colorFor(entity.getOwner(), getLocalPlayer(), game);
 
-        if (removedFromGame) {
-            iconColor = changeColorForDestroyedUnit(iconColor.brighter(), DESTROYED_UNIT_ALPHA);
-        }
-
         // Transform for placement and scaling
         var placement = AffineTransform.getTranslateInstance(baseX, baseY);
         placement.scale(UNIT_SCALE[zoom] / 100.0d, UNIT_SCALE[zoom] / 100.0d);
@@ -1591,105 +1575,16 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         Coords p = entity.getPosition();
         int eStack = multiUnits.getOrDefault(p, 0) + 1;
         multiUnits.put(p, eStack);
-        g2.translate(20 * (eStack - 1), -20 * (eStack - 1));
+        MinimapUnitSymbols.stack(g2, eStack);
 
-        Path2D form = MinimapUnitSymbols.getForm(entity);
+        MinimapUnitSymbols.Symbol symbol = MinimapUnitSymbols.symbol(entity);
+        MinimapUnitSymbols.paint(g2, symbol, iconColor, entity.moved != EntityMovementType.MOVE_NONE,
+              removedFromGame);
 
-        Color borderColor = entity.moved != EntityMovementType.MOVE_NONE && !removedFromGame ?
-              Color.BLACK :
-              Color.WHITE;
-        if (removedFromGame) {
-            borderColor = changeColorForDestroyedUnit(borderColor.brighter(), DESTROYED_UNIT_ALPHA);
-        }
-        Color fontColor = Color.BLACK;
-        if (removedFromGame) {
-            fontColor = changeColorForDestroyedUnit(fontColor.brighter(), DESTROYED_UNIT_ALPHA);
-        }
-        float outerBorderWidth = 30f;
         float innerBorderWidth = 10f;
-        float formStrokeWidth = 20f;
-
-        if (stratOpsSymbols) {
-            // White border to set off the icon from the background
-            g2.setStroke(new BasicStroke(outerBorderWidth, BasicStroke.CAP_SQUARE, BasicStroke.JOIN_BEVEL));
-            g2.setColor(fontColor);
-            g2.draw(STRAT_BASE_RECT);
-            g2.fill(STRAT_BASE_RECT);
-
-            g.setColor(fontColor);
-
-
-            // Set a thin brush for filled areas (leave a thick brush for line symbols
-            if ((entity instanceof Mek) || (entity instanceof ProtoMek)
-                  || (entity instanceof VTOL) || (entity.isAero())) {
-                g2.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
-            } else {
-                g2.setStroke(new BasicStroke(formStrokeWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
-            }
-            // Fill the form in player color / team color
-            g.setColor(iconColor);
-            g2.fill(form);
-
-            g2.setColor(fontColor);
-            if ((entity instanceof ProtoMek) || (entity instanceof Mek) || (entity instanceof Aero)) {
-                String s = "";
-                if (entity instanceof ProtoMek) {
-                    s = "P";
-                } else if ((entity instanceof Mek) && ((Mek) entity).isIndustrial()) {
-                    s = "I";
-                } else if (entity.getWeightClass() < 6) {
-                    s = STRAT_WEIGHTS[entity.getWeightClass()];
-                }
-                if (!s.isBlank()) {
-                    int fontType = Font.BOLD;
-                    if (removedFromGame) {
-                        fontType = Font.PLAIN;
-                    }
-                    var fontContext = new FontRenderContext(null, true, true);
-                    var font = new Font(MMConstants.FONT_SANS_SERIF, fontType, 100);
-                    FontMetrics currentMetrics = getFontMetrics(font);
-                    int stringWidth = currentMetrics.stringWidth(s);
-                    GlyphVector gv = font.createGlyphVector(fontContext, s);
-                    g2.fill(gv.getOutline((int) STRAT_CX - (float) stringWidth / 2,
-                          (float) STRAT_SYMBOL_SIZE.getHeight() / 3.0f));
-                }
-            } else if (entity instanceof MekWarrior) {
-                g2.setColor(fontColor);
-                g2.fillOval(-25, -25, 50, 50);
-            }
-
-
-            // Draw the unit icon in black
-            g2.draw(form);
-
-            // Rectangle border for all units
-            g2.setColor(borderColor);
-            g2.setStroke(new BasicStroke(innerBorderWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
-            g2.draw(STRAT_BASE_RECT);
-        } else {
-            // Standard symbols
-            // White border to set off the icon from the background
-            g2.setStroke(new BasicStroke(outerBorderWidth, BasicStroke.CAP_SQUARE, BasicStroke.JOIN_ROUND));
-            g2.setColor(fontColor);
-            g2.draw(form);
-
-            // Fill the form in player color / team color
-            g2.setColor(iconColor);
-            g2.fill(form);
-
-            // Black border
-            g2.setColor(borderColor);
-            g2.setStroke(new BasicStroke(innerBorderWidth / 2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
-            g2.draw(form);
-            if (removedFromGame) {
-                g2.draw(STRAT_DESTROYED);
-                g2.fill(STRAT_DESTROYED);
-            }
-        }
-
         if (GUIP.showUnitDisplayNamesOnMinimap()) {
             // write unit ID and name to the minimap:
-            g2.setColor(fontColor);
+            g2.setColor(MinimapUnitSymbols.ink(removedFromGame));
             int fontType = Font.BOLD;
             if (removedFromGame) {
                 fontType = Font.PLAIN;
@@ -1703,16 +1598,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
                   (float) -STRAT_SYMBOL_SIZE.getHeight() / 5 * 4));
 
         }
-        // If the unit is destroyed, it gets a strike on it.
-        if (removedFromGame) {
-            g2.setColor(fontColor);
-            g2.setStroke(new BasicStroke(formStrokeWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
-            if (stratOpsSymbols) {
-                g2.draw(STRAT_DESTROYED);
-            } else {
-                g2.draw(STD_DESTROYED);
-            }
-        }
 
         g2.setStroke(new BasicStroke(innerBorderWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
 
@@ -1720,16 +1605,8 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             MinimapDamagePip.draw(g2, entity, UNIT_SCALE[zoom] / 100.0d, stratOpsSymbols);
         }
 
-        if (GUIP.getDrawFacingArrowsOnMiniMap() && !removedFromGame && !entity.isInfantry()) {
-            // draw facing arrow
-            var facing = entity.getFacing();
-            if (facing > -1) {
-                g2.setColor(fontColor);
-                g2.rotate(Math.toRadians(facing * 60));
-                g2.draw(FACING_ARROW);
-                g.setColor(iconColor);
-                g2.fill(FACING_ARROW);
-            }
+        if (GUIP.getDrawFacingArrowsOnMiniMap() && !removedFromGame) {
+            MinimapUnitSymbols.paintFacing(g2, symbol, iconColor, entity.getFacing());
         }
 
         g2.setTransform(saveTransform);

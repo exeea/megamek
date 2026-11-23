@@ -37,10 +37,18 @@ import static java.lang.Math.cos;
 import static java.lang.Math.sin;
 import static java.lang.Math.toRadians;
 
+import java.awt.BasicStroke;
+import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.font.FontRenderContext;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 
+import megamek.MMConstants;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.common.units.Aero;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.Mek;
@@ -79,6 +87,14 @@ public class MinimapUnitSymbols {
     public static final double STRAT_CX = STRAT_SYMBOL_SIZE.getWidth() / 5; // X center for two symbols
 
     private static final double PI_HALF = PI / 2;
+    private static final String[] STRAT_WEIGHTS = { "L", "L", "M", "H", "A", "A" };
+    /** A destroyed unit's colours are this opaque. */
+    private static final int DESTROYED_ALPHA = 64;
+    /** A unit's place in a hex several units share: each next one this far up and right, in symbol units. */
+    private static final int STACK_SHIFT = 20;
+    private static final float OUTER_BORDER = 30f;
+    private static final float INNER_BORDER = 10f;
+    private static final float FORM_STROKE = 20f;
 
     static {
         FACING_ARROW = new Path2D.Double();
@@ -316,5 +332,121 @@ public class MinimapUnitSymbols {
         } else {
             return stratOps ? STRAT_INFANTRY : STD_INFANTRY;
         }
+    }
+
+    /**
+     * What a unit's symbol shows, taken from the unit once: its {@link #getForm form} and whether that is a StratOps
+     * symbol (the preference when it was taken), the weight letter of a StratOps Mek, ProtoMek or aerospace unit ("P",
+     * "I", "L" to "A"; empty for none), whether its form is filled with a thin brush, whether it is a MekWarrior (a dot
+     * on a StratOps symbol), and whether it shows a facing (any unit but infantry).
+     */
+    public record Symbol(Path2D form, boolean strat, String letter, boolean thin, boolean pilot, boolean facing) { }
+
+    /** The symbol of {@code entity}. */
+    public static Symbol symbol(Entity entity) {
+        String letter = "";
+        if (entity instanceof ProtoMek) {
+            letter = "P";
+        } else if ((entity instanceof Mek mek) && mek.isIndustrial()) {
+            letter = "I";
+        } else if (((entity instanceof Mek) || (entity instanceof Aero)) && (entity.getWeightClass() < 6)) {
+            letter = STRAT_WEIGHTS[entity.getWeightClass()];
+        }
+        boolean thin = (entity instanceof Mek) || (entity instanceof ProtoMek) || (entity instanceof VTOL)
+              || entity.isAero();
+        return new Symbol(getForm(entity), GUIP.getMmSymbol(), letter, thin, entity instanceof MekWarrior,
+              !entity.isInfantry());
+    }
+
+    /** The colour of a symbol's outlines and letters: black, faded for a destroyed unit. */
+    public static Color ink(boolean destroyed) {
+        return destroyed ? faded(Color.BLACK) : Color.BLACK;
+    }
+
+    /** A destroyed unit's form of {@code colour}: brighter and mostly transparent. */
+    private static Color faded(Color colour) {
+        Color brighter = colour.brighter().brighter();
+        return new Color(brighter.getRed(), brighter.getGreen(), brighter.getBlue(), DESTROYED_ALPHA);
+    }
+
+    /** Moves {@code g} to the place of the {@code stacked}th unit (1 for the first) in a hex several units share. */
+    public static void stack(Graphics2D g, int stacked) {
+        g.translate(STACK_SHIFT * (stacked - 1), -STACK_SHIFT * (stacked - 1));
+    }
+
+    /**
+     * Draws {@code symbol} at the origin of {@code g}, in the symbols' own units (a standard symbol is 100 wide): its
+     * form filled in {@code colour}, the unit's owner's or team's, set off by a black border, with an inner border
+     * that is black when the unit has {@code moved} and white when not; a {@code destroyed} unit's symbol is faded
+     * and struck through.
+     */
+    public static void paint(Graphics2D g, Symbol symbol, Color colour, boolean moved, boolean destroyed) {
+        Color fill = destroyed ? faded(colour) : colour;
+        Color border = moved && !destroyed ? Color.BLACK : Color.WHITE;
+        if (destroyed) {
+            border = faded(border);
+        }
+        Color ink = ink(destroyed);
+        Path2D form = symbol.form();
+        if (symbol.strat()) {
+            // A black ground to set off the icon from the background
+            g.setStroke(new BasicStroke(OUTER_BORDER, BasicStroke.CAP_SQUARE, BasicStroke.JOIN_BEVEL));
+            g.setColor(ink);
+            g.draw(STRAT_BASE_RECT);
+            g.fill(STRAT_BASE_RECT);
+            // A thin brush for filled areas, a thick one for line symbols
+            g.setStroke(symbol.thin() ? new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER)
+                  : new BasicStroke(FORM_STROKE, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
+            g.setColor(fill);
+            g.fill(form);
+            g.setColor(ink);
+            if (!symbol.letter().isEmpty()) {
+                FontRenderContext context = new FontRenderContext(null, true, true);
+                Font font = new Font(MMConstants.FONT_SANS_SERIF, destroyed ? Font.PLAIN : Font.BOLD, 100);
+                double width = font.getStringBounds(symbol.letter(), context).getWidth();
+                g.fill(font.createGlyphVector(context, symbol.letter()).getOutline(
+                      (float) (STRAT_CX - width / 2), (float) STRAT_SYMBOL_SIZE.getHeight() / 3.0f));
+            } else if (symbol.pilot()) {
+                g.fillOval(-25, -25, 50, 50);
+            }
+            g.draw(form);
+            g.setColor(border);
+            g.setStroke(new BasicStroke(INNER_BORDER, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
+            g.draw(STRAT_BASE_RECT);
+        } else {
+            // A black border to set off the icon from the background
+            g.setStroke(new BasicStroke(OUTER_BORDER, BasicStroke.CAP_SQUARE, BasicStroke.JOIN_ROUND));
+            g.setColor(ink);
+            g.draw(form);
+            g.setColor(fill);
+            g.fill(form);
+            g.setColor(border);
+            g.setStroke(new BasicStroke(INNER_BORDER / 2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
+            g.draw(form);
+            if (destroyed) {
+                g.draw(STRAT_DESTROYED);
+                g.fill(STRAT_DESTROYED);
+            }
+        }
+        if (destroyed) {
+            g.setColor(ink);
+            g.setStroke(new BasicStroke(FORM_STROKE, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
+            g.draw(symbol.strat() ? STRAT_DESTROYED : STD_DESTROYED);
+        }
+    }
+
+    /** Draws the arrow of a unit that shows its {@code facing} (0 to 5; none below 0), filled in {@code colour}. */
+    public static void paintFacing(Graphics2D g, Symbol symbol, Color colour, int facing) {
+        if (!symbol.facing() || facing < 0) {
+            return;
+        }
+        AffineTransform transform = g.getTransform();
+        g.setStroke(new BasicStroke(INNER_BORDER, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
+        g.rotate(Math.toRadians(facing * 60));
+        g.setColor(Color.BLACK);
+        g.draw(FACING_ARROW);
+        g.setColor(colour);
+        g.fill(FACING_ARROW);
+        g.setTransform(transform);
     }
 }

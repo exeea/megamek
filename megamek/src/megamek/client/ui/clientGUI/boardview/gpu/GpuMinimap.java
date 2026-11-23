@@ -33,7 +33,7 @@ import megamek.common.board.Coords;
  * centre, and none changes an order.
  */
 final class GpuMinimap implements GpuHud.Component {
-    private static final Color BACKGROUND = Color.valueOf("141B1B");
+    static final Color BACKGROUND = Color.valueOf("141B1B");
     private static final Color ROUTE = Color.valueOf("D4FFF0");
     private static final Color FRUSTUM = new Color(1, 1, 1, .85f);
     private static final Color DESTROYED = Color.valueOf("555555");
