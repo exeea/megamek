@@ -177,6 +177,9 @@ public class ASElementDeserializer extends StdDeserializer<AlphaStrikeElement> {
                 element.setSquadSize((Integer) node.get(SQUAD_SIZE).numberValue());
             }
         }
+        if (node.has(ASElementSerializer.TRANSPORT_TONNAGE)) {
+            element.setTransportTonnage(node.get(ASElementSerializer.TRANSPORT_TONNAGE).asDouble());
+        }
         element.setSkill(node.has(SKILL) ? node.get(SKILL).intValue() : 4);
         ASConverter.updateCalculatedValues(element);
 

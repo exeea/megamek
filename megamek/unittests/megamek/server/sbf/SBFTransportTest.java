@@ -34,6 +34,8 @@
 package megamek.server.sbf;
 
 import static megamek.common.alphaStrike.BattleForceSUA.CAR;
+import static megamek.common.alphaStrike.BattleForceSUA.CK;
+import static megamek.common.alphaStrike.BattleForceSUA.CT;
 import static megamek.common.alphaStrike.BattleForceSUA.IT;
 import static megamek.common.alphaStrike.BattleForceSUA.MEC;
 import static megamek.common.alphaStrike.BattleForceSUA.MT;
@@ -192,6 +194,34 @@ class SBFTransportTest {
         carrier.setAirVehicleLanded(true);
         assertTrue(SBFBayTransport.unload(manager, 1, mixed, carrier, at(2, 2)));
         assertEquals(4, mixed.dismountCost(4));
+    }
+
+    @Test
+    void civilianCargoUsesActualWeightOneUnitPerTurnAndThreeTurnsToUnpack() {
+        carrier.setType(SBFElementType.LA);
+        carrier.setMovementMode(SBFMovementMode.SPHEROID);
+        var passenger = formation(24, 1, SBFElementType.BM, at(2, 2));
+        var element = new AlphaStrikeElement();
+        element.setType(ASUnitType.BM);
+        element.setTransportTonnage(10);
+        passenger.getUnits().getFirst().setElements(List.of(element));
+        carrier.getSpecialAbilities().replaceSUA(CT, 10);
+        carrier.getSpecialAbilities().replaceSUA(CK, 999);
+        assertFalse(SBFCargoTransport.load(manager, 1, passenger, 0, carrier));
+        carrier.getSpecialAbilities().replaceSUA(CK, 1000);
+        assertTrue(SBFCargoTransport.load(manager, 1, passenger, 0, carrier));
+        assertEquals(11.0, passenger.packedCargoTons());
+        assertFalse(SBFAirDrop.mayDrop(passenger));
+        assertFalse(SBFCargoTransport.unload(manager, 1, passenger, carrier, at(2, 2)));
+        game.setCurrentRound(4);
+        passenger.setDone(false);
+        assertFalse(SBFBayTransport.unload(manager, 1, passenger, carrier, at(2, 2)));
+        assertTrue(SBFCargoTransport.unload(manager, 1, passenger, carrier, at(2, 2)));
+        passenger.setDone(false);
+        assertFalse(SBFFormationTurn.isEligible(passenger, GamePhase.MOVEMENT, 6));
+        assertTrue(SBFFormationTurn.isEligible(passenger, GamePhase.MOVEMENT, 7));
+        assertFalse(SBFFormationTurn.isEligible(passenger, GamePhase.FIRING, 6));
+        assertTrue(SBFFormationTurn.isEligible(passenger, GamePhase.FIRING, 7));
     }
 
     @Test

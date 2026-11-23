@@ -156,6 +156,19 @@ public class AlphaStrikeElement implements Serializable, ASCardDisplayable, ASSp
      */
     private Quirks quirks = new Quirks();
 
+    private double transportTonnage;
+
+    /** Source weight in tons for Strategic BattleForce cargo capacity. Zero means the source did not specify it. */
+    public double getTransportTonnage() {
+        return transportTonnage;
+    }
+
+    public void setTransportTonnage(double tons) {
+        if (Double.isFinite(tons) && tons > 0) {
+            transportTonnage = tons;
+        }
+    }
+
     private boolean isDeployed = false;
     private int deployRound = 0;
 

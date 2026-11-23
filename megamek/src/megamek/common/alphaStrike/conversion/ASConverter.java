@@ -116,6 +116,7 @@ public final class ASConverter {
         // Basic info
         element.setName(entity.getShortName());
         element.setQuirks(entity.getQuirks());
+        element.setTransportTonnage(entity.getWeight());
         element.setModel(entity.getModel());
         element.setChassis(entity.getFullChassis());
         element.setMulId(entity.getMulId());
