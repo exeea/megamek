@@ -52,20 +52,20 @@ The user supplied the writer’s answers for the third printing on 23 November 2
 
 The p. 195 answer addresses total MHQ rating. The p. 207 Battlefield Intelligence question counts qualifying Units. Joshua has four Formations and two qualifying Units (MHQ6 and MHQ5). The outstanding question is whether he earns the extra network +1 in addition to his MHQ3+ headquarters bonus.
 
-### Resume checkpoint for the four rules-writer fixes
+### Verified checkpoint for the four rules-writer fixes
 
 Updated 23 November 2026. All four rules-writer corrections are implemented on the local `UI_terraincompression` branch in `C:\Projects\megamek\megamek_temp`.
 
 | Rule | Regression and independent review |
 | --- | --- |
 | Force-wide MHQ, p. 195 | `e79e29c464`. SBFAdvancedInitiativeTest covers distributed MHQ2 + MHQ2, the MHQ7 threshold, enemy exclusion and the loss of an allied Unit. Independent review signed off. |
-| Sensor Ping, p. 196 | SBFDetectionHelperTest checks each hexside and vertex on both column parities, multiple observers, a retained Ping following misses, mixed rolls, stronger contacts, recipient filtering and omission of the target counter. Independent review signed off on the implementation and requested the mixed-result assertions. |
+| Sensor Ping, p. 196 | `ef2b6e82b0`. SBFDetectionHelperTest checks each hexside and vertex on both column parities, multiple observers, a retained Ping following misses, mixed rolls, stronger contacts, recipient filtering and omission of the target counter. Independent review signed off on the implementation and both mixed-result assertions. |
 | MX/PM visual spotting, p. 197 | `9980f9b8bd`. SBFDetectionHelperTest exercises MX and PM across all four visual classes, with infantry and battle armor as controls. Independent review signed off. |
-| Storm visual classes, p. 197 | `f06cd65873`. SBFDetectionHelperTest covers light and heavy hail, lightning storms and ice storms in daylight, dusk and pitch black, including searchlight effects. Independent review signed off. |
+| Storm visual classes, p. 197 | `f06cd65873` and `fa92d5cd0a`. SBFDetectionHelperTest covers light and heavy hail, lightning storms and ice storms in daylight, dusk and pitch black, including searchlight effects. The daylight hail regression exposed an existing Weather.isAnyOf bug that compared later candidates to the first candidate. PlanetaryConditionsTest covers the shared correction, including rain, snowfall and duplicate candidates. Independent review signed off on the rules and matcher. |
 
-**Native 3D verification.** Two clients connected to a real SBF server. Northern Watch saw the point between NE and SE in its Detection Report. Eastern Watch received the reciprocal SW/NW bearing. Each client received only its own report, and neither received the enemy counter. The local capture is `work/sbf-3d/out/sbf-writer-ping-01/01-private-sensor-ping.png`.
+**Native 3D verification.** Three two-player games exercised the live server and native client. In `work/sbf-3d/out/sbf-writer-clear-01`, a Force with two MHQ2 Units received +1 initiative against +0 for the otherwise identical opponent. In clear daylight, the mixed Formation and ProtoMek Formation each spotted the other four hexes away. In `work/sbf-3d/out/sbf-writer-hail-01`, the same scenario in light hail gave each player a private Sensor Ping and withheld the enemy counter. The initiative bonus remained +1. In `work/sbf-3d/out/sbf-writer-ping-01`, Northern Watch saw the point between NE and SE in its Detection Report, while Eastern Watch received the reciprocal SW/NW bearing. Each directory contains the screenshots, capture cards and run log.
 
-**Verification in progress.** Rerun the integrated SBF and native capture unit tests plus Checkstyle after the last mixed-roll assertions. The previous 316-test result predates these fixes.
+**Automated verification.** All 309 tests in 34 suites passed, with zero skipped. The selection covered the SBF server, common strategic battle systems, native GpuSbfCaptureTest and PlanetaryConditionsTest (including nested classes). Main and test Checkstyle each reported zero violations. Run log: `.gradle/sbf-four-writer-rulings.log`.
 
 The p. 165 generic infantry interpretation and p. 207 Battlefield Intelligence density remain separate unresolved questions.
 
