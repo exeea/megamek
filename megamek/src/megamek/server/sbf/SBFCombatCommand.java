@@ -44,12 +44,14 @@ import megamek.common.actions.sbf.SBFCounterBatteryAttack;
 import megamek.common.actions.sbf.SBFDirectArtilleryAttack;
 import megamek.common.actions.sbf.SBFIndirectArtilleryAttack;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
+import megamek.common.actions.sbf.SBFTerrainAttack;
 import megamek.common.actions.sbf.SBFStandardUnitAttack.WeaponMode;
 import megamek.common.alphaStrike.ASRange;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.strategicBattleSystems.SBFArtilleryAmmo;
+import megamek.common.strategicBattleSystems.SBFMinefields;
 import megamek.server.Server;
 import megamek.server.commands.ServerCommand;
 
@@ -62,7 +64,7 @@ final class SBFCombatCommand extends ServerCommand {
               + "short|medium|long (also extreme in air); /sbfcombat sight <own ID> <opponent ID> open|block; "
               + "/sbfcombat fire <own ID> <Unit number> <contact ID>; /sbfcombat spot <spotter ID> <target ID>; /sbfcombat indirect <own ID> <Unit number> <target ID> "
               + "<spotter ID>; /sbfcombat torpedo <own ID> <Unit number> <target ID>. /sbfcombat artillery <own ID> <ART type> "
-              + "direct|indirect|homing <board ID> <column> <row> <target ID|terrain> [spotter ID]. Use /sbfcombat paint <own ID> <Unit number> <target ID> for TAG. /sbfcombat counter <own ID> <ART type> <contact number>. /sbfcombat art-load <own ID> <Unit#> <ART type> [alternate ...] in setup; /sbfcombat flak|air-defense <own ID> <ART type> <target ID>; /sbfcombat aa-hit <Flight#>. Press Done or use /sbfcombat done <own ID> after declaring fire.");
+              + "direct|indirect|homing <board ID> <column> <row> <target ID|terrain> [spotter ID] [ammunition]. Use /sbfcombat paint <own ID> <Unit number> <target ID> for TAG. /sbfcombat counter <own ID> <ART type> <contact number>. /sbfcombat art-load <own ID> <Unit#> <ART type> [alternate ...] in setup; /sbfcombat flak|air-defense <own ID> <ART type> <target ID>; /sbfcombat aa-hit <Flight#>. /sbfcombat mine-lay <own ID> <conventional|active|emp|inferno> <size> <density> [command]; /sbfcombat detonate <own ID> <board> <column> <row>. /sbfcombat clear <own ID> full|passage <entry side> <exit side> (1=N, clockwise to 6); /sbfcombat raze <own ID> <board> <column> <row>; /sbfcombat light <own ID> on|off during End. Press Done or use /sbfcombat done <own ID> after declaring fire.");
         this.manager = manager;
     }
 
@@ -80,6 +82,55 @@ final class SBFCombatCommand extends ServerCommand {
             return;
         }
         try {
+            if (args.length >= 3 && args[1].equalsIgnoreCase("clear")) {
+                var formation = manager.getGame().getFormation(Integer.parseInt(args[2])).orElse(null);
+                boolean full = args.length == 4 && args[3].equalsIgnoreCase("full");
+                boolean passage = args.length == 6 && args[3].equalsIgnoreCase("passage");
+                if (formation != null && formation.occupiesGroundHex() && (full || passage)) {
+                    int sides = full ? 0 : megamek.common.Hex.strategicPassage(Integer.parseInt(args[4]) - 1,
+                          Integer.parseInt(args[5]) - 1);
+                    if (SBFTerrainAttackHandler.declare(manager, connId, new SBFTerrainAttack(formation.getId(),
+                          formation.getPosition(), sides))) {
+                        server.sendServerChat(connId, "Clearing work declared for this turn.");
+                        return;
+                    }
+                }
+                server.sendServerChat(connId, getHelp());
+                return;
+            }
+            if (args.length == 6 && args[1].equalsIgnoreCase("raze")) {
+                var site = BoardLocation.of(new Coords(Integer.parseInt(args[4]) - 1, Integer.parseInt(args[5]) - 1), Integer.parseInt(args[3]));
+                if (SBFTerrainAttackHandler.declare(manager, connId, new SBFTerrainAttack(Integer.parseInt(args[2]), site))) {
+                    server.sendServerChat(connId, "Terrain fire declared.");
+                    return;
+                }
+            }
+            if (args.length == 4 && args[1].equalsIgnoreCase("light")) {
+                var game = manager.getGame();
+                var formation = game.getFormation(Integer.parseInt(args[2])).orElse(null);
+                if ((game.getPhase().isEnd() || game.getPhase().isEndReport()) && formation != null && formation.occupiesGroundHex()
+                      && formation.getOwnerId() == connId && formation.hasSearchlight()
+                      && (args[3].equalsIgnoreCase("on") || args[3].equalsIgnoreCase("off"))) {
+                    formation.setSearchlightsOn(args[3].equalsIgnoreCase("on"));
+                    manager.sendUnitUpdate(formation);
+                    manager.sendPendingPackets();
+                    server.sendServerChat(connId, "Searchlight order accepted.");
+                    return;
+                }
+            }
+            if ((args.length == 6 || args.length == 7 && args[6].equalsIgnoreCase("command")) && args[1].equalsIgnoreCase("mine-lay")
+                  && SBFMinefieldControl.lay(manager, connId, Integer.parseInt(args[2]), SBFMinefields.Type.valueOf(args[3].toUpperCase(Locale.ROOT)),
+                        Integer.parseInt(args[4]), Integer.parseInt(args[5]), args.length == 7)) {
+                server.sendServerChat(connId, "Minefield construction started.");
+                return;
+            }
+            if (args.length == 6 && args[1].equalsIgnoreCase("detonate")) {
+                var site = BoardLocation.of(new Coords(Integer.parseInt(args[4]) - 1, Integer.parseInt(args[5]) - 1), Integer.parseInt(args[3]));
+                if (SBFMinefieldControl.detonate(manager, connId, Integer.parseInt(args[2]), site)) {
+                    server.sendServerChat(connId, "Command minefield detonated.");
+                    return;
+                }
+            }
             if ((args.length == 3) && args[1].equalsIgnoreCase("aa-hit")
                   && SBFArtilleryAirDefense.choose(manager, connId, Integer.parseInt(args[2]) - 1)) {
                 return;
@@ -130,19 +181,32 @@ final class SBFCombatCommand extends ServerCommand {
                 server.sendServerChat(connId, "Spotter designation accepted.");
                 return;
             }
-            if (args[1].equalsIgnoreCase("artillery") && (args.length == 9 || args.length == 10)) {
+            if (args[1].equalsIgnoreCase("artillery") && (args.length >= 9 && args.length <= 11)) {
                 int attacker = Integer.parseInt(args[2]);
                 BattleForceSUA weapon = artilleryType(args[3]);
                 var aim = BoardLocation.of(new Coords(Integer.parseInt(args[6]) - 1, Integer.parseInt(args[7]) - 1),
                       Integer.parseInt(args[5]));
                 int target = args[8].equalsIgnoreCase("terrain") ? Player.PLAYER_NONE : Integer.parseInt(args[8]);
-                Integer spotter = args.length == 10 ? Integer.valueOf(args[9]) : null;
+                Integer spotter = null;
+                SBFArtilleryAmmo ammunition = null;
+                for (int i = 9; i < args.length; i++) {
+                    if (args[i].matches("[0-9]+") && spotter == null) {
+                        spotter = Integer.valueOf(args[i]);
+                    } else if (ammunition == null) {
+                        ammunition = SBFArtilleryAmmo.valueOf(args[i].toUpperCase(Locale.ROOT).replace('-', '_'));
+                    } else {
+                        throw new IllegalArgumentException("Too many artillery arguments");
+                    }
+                }
                 SBFArtilleryAttack shot = switch (args[4].toLowerCase(Locale.ROOT)) {
                     case "direct" -> new SBFDirectArtilleryAttack(attacker, target, weapon, aim, spotter);
                     case "indirect" -> new SBFIndirectArtilleryAttack(attacker, target, weapon, aim, spotter);
                     case "homing" -> spotter == null ? new SBFIndirectArtilleryAttack(attacker, target, weapon, aim, true) : null;
                     default -> null;
                 };
+                if (shot != null && ammunition != null && !args[4].equalsIgnoreCase("homing")) {
+                    shot.setAmmo(ammunition);
+                }
                 if (shot != null && SBFArtillery.declare(manager, connId, shot)) {
                     server.sendServerChat(connId, "Artillery declared. Complete the Formation's orders with Done.");
                     return;

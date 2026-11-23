@@ -423,6 +423,8 @@ public class SBFUnit implements ASSpecialAbilityCollector, BattleForceSUAFormatt
         Object suaObject = specialAbilities.getSUA(sua);
         if (sua.isAnyOf(BattleForceSUA.BHJ2, BattleForceSUA.BHJ3) && (suaObject instanceof Number rating)) {
             return sua + "-" + rating.intValue();
+        } else if (sua.isAnyOf(BattleForceSUA.SAW, BattleForceSUA.ENG) && suaObject instanceof Number rating) {
+            return sua.toString() + rating.intValue();
         } else if (!sua.isValidAbilityObject(suaObject)) {
             return "ERROR - wrong ability object (" + sua + ")";
         } else if (sua.isAnyOf(CAP, SCAP, MSL)) {
@@ -540,6 +542,17 @@ public class SBFUnit implements ASSpecialAbilityCollector, BattleForceSUAFormatt
             currentArmor = Math.min(armor, currentArmor + recovered);
         }
         return currentArmor - previous;
+    }
+
+    /** IO:BF p. 221: participating SAW or ENG ratings; an Element cannot work twice in one turn. */
+    int clearingRating(BattleForceSUA ability) {
+        if (!hasSUA(ability)) {
+            return 0;
+        }
+        if (getSUA(ability) instanceof Number rating) {
+            return Math.max(0, rating.intValue());
+        }
+        return Math.max(1, (int) getElements().stream().filter(e -> e.hasSUA(ability)).count());
     }
 
     private int harJelRating(BattleForceSUA ability) {

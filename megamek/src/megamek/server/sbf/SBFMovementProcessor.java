@@ -37,7 +37,14 @@ import java.util.List;
 import java.util.Optional;
 
 import megamek.common.board.BoardLocation;
+import megamek.common.Player;
+import megamek.common.alphaStrike.BattleForceSUA;
+import megamek.common.compute.Compute;
+import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFGame.FormationLosses;
+import megamek.common.strategicBattleSystems.SBFMovementMode;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMoveStep;
 import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
@@ -53,10 +60,18 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
      * @return true when the move was legal and executed, false when it was refused (nothing changed)
      */
     boolean processMovement(SBFMovePath submittedPath, SBFFormation formation) {
-        if (!validatePermitted(formation)) {
+        if (formation.isOnRadarMap() || formation.capitalSector() != null || !validatePermitted(formation)) {
             return false;
         }
 
+        if (formation.isAerospace()) {
+            if ((submittedPath.getJumpUsed() != 0) || !submittedPath.getSteps().isEmpty()) {
+                return false;
+            }
+            if (formation.isType(SBFElementType.AS) && formation.mustWithdraw()) {
+                return new SBFAerospace(gameManager).liftBrokenSquadron(formation);
+            }
+        }
         Optional<SBFMovePath> rebuiltPath = rebuildPath(submittedPath, formation);
         if (rebuiltPath.isEmpty() || rebuiltPath.get().isIllegal()) {
             logger.error("Illegal move path!");
@@ -74,10 +89,15 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
 
     private boolean executeMovement(SBFMovePath movePath, SBFFormation formation, boolean resuming) {
         var transport = SBFTransport.plan(game(), formation, movePath, resuming);
-        if (transport.isEmpty() || (!resuming && !SBFWithdrawal.permitsMove(game(), formation, movePath))
+        if ((!resuming && movePath.entersHullDown() && !SBFFieldFortification.canEnter(game(), formation, movePath))
+              || transport.isEmpty() || (!resuming && (movePath.boardingCarrier() != null)
+              && !SBFBayTransport.canBoard(game(), formation, movePath)) || (!resuming && !SBFWithdrawal.permitsMove(game(), formation, movePath))
               || (game().engagementOrders().pendingMove() != null)) {
             return false;
         }
+        // JUMP applies from declaration, including a free attack during movement (IO:BF p. 166).
+        formation.setJumpUsedThisTurn(movePath.getJumpUsed());
+        SBFMovePath approvedPath = movePath;
         movePath = new SBFEngagementControl(gameManager).resolveMovement(formation, movePath);
         if (movePath == null) {
             return true; // The authoritative move resumes when both owners supply their orders.
@@ -87,15 +107,33 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
             gameManager.endCurrentTurn(formation);
             return true;
         }
-        int transportCost = SBFTransport.apply(gameManager, formation, transport.get(), movePath.getSteps().size());
+        int transportCost = SBFTransport.applyThrough(gameManager, formation, approvedPath, movePath.getSteps().size());
         if (!movePath.getSteps().isEmpty()) {
             game().scenarioProgress().interruptOccupation(formation);
         }
+        if (game().usesDoubleBlind()) {
+            BoardLocation from = formation.getPosition();
+            for (SBFMoveStep step : movePath.getSteps()) {
+                gameManager.detectionHelper.enterGroundHex(formation, from, step.getDestination(), () -> Compute.d6(2));
+                from = step.getDestination();
+            }
+        }
         SBFWithdrawal.recordHostileEntries(game(), formation, movePath);
+        if (!movePath.getSteps().isEmpty() && formation.isAirVehicle()) {
+            formation.setAirVehicleLanded(false);
+        }
+        int entrance = movePath.passageEntrance();
         formation.setPosition(movePath.getLastPosition());
-        formation.setJumpUsedThisTurn(movePath.getJumpUsed());
-        formation.setMpSpentThisTurn(movePath.getMpUsed() + transportCost);
-        formation.setSprintedThisTurn(movePath.getMpUsed() + transportCost > SBFMovePath.normalMovementPoints(formation, game()));
+        formation.setPassageEntrance(entrance);
+        int hullCost = 0;
+        if (approvedPath.entersHullDown() && (approvedPath.getSteps().size() == movePath.getSteps().size())
+              && SBFFieldFortification.canEnter(game(), formation, approvedPath)) {
+            formation.setHullDown(true);
+            hullCost = SBFFieldFortification.hullCost(formation);
+        }
+        transportCost += SBFBayTransport.board(gameManager, formation, approvedPath, movePath);
+        formation.setMpSpentThisTurn(movePath.getMpUsed() + transportCost + hullCost);
+        formation.setSprintedThisTurn(formation.getMpSpentThisTurn() > SBFMovePath.normalMovementPoints(formation, game()));
         formation.setDone(true);
         if (!SBFWithdrawal.withdrawIfAtHomeEdge(gameManager, formation)) {
             gameManager.sendUnitUpdate(formation);
@@ -107,11 +145,37 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
         return true;
     }
 
+    /** Imported scenarios or old saves can begin movement with a WiGE already immobilized (IO:BF p. 166). */
+    void removeImmobileWiGEs() {
+        for (SBFFormation formation : game().getActiveFormations()) {
+            if (!formation.occupiesGroundHex()) {
+                continue;
+            }
+            var lost = formation.getUnits().stream().filter(u -> u.getMovementMode() == SBFMovementMode.WIGE
+                  && (u.getCurrentMovement() == 0)).toList();
+            if (lost.isEmpty()) {
+                if (formation.getUnits().isEmpty() && (formation.getMovementMode() == SBFMovementMode.WIGE)
+                      && (formation.getMovement() == 0)) {
+                    game().removeFormationFromPlay(formation);
+                }
+                continue;
+            }
+            lost.forEach(u -> {
+                game().scenarioProgress().recordLoss(game().getCurrentRound(), formation, u, Player.PLAYER_NONE, LossCause.CRASH);
+                u.setCurrentArmor(0);
+            });
+            game().getImmediateLosses().add(new FormationLosses(formation, true, lost.size(),
+                  lost.stream().anyMatch(u -> u.hasSUA(BattleForceSUA.LEAD)),
+                  lost.stream().anyMatch(u -> u.hasSUA(BattleForceSUA.COM)), false));
+            SBFCombatDamage.removeDestroyedUnits(gameManager, formation);
+        }
+    }
+
     private boolean validatePermitted(SBFFormation formation) {
         if (!game().getPhase().isMovement()) {
             logger.error("Server got movement packet in wrong phase!");
             return false;
-        } else if (formation.isDone() || formation.isEmbarked()) {
+        } else if (formation.isDone() || formation.isEmbarked() || formation.unpackingCargo(game().getCurrentRound())) {
             logger.error("Formation already done!");
             return false;
         }
@@ -132,7 +196,7 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
 
             List<SBFMoveStep> submittedSteps = submittedPath.getSteps();
             // One additional wholly paved hex is possible. Rebuilt terrain costs verify actual eligibility.
-            if (submittedSteps.size() > (long) SBFMovePath.maximumMovementPoints(formation, game()) + 1) {
+            if (submittedSteps.size() > (long) SBFMovePath.maximumMovementPoints(formation, game()) + SBFMovePath.roadBonus(game())) {
                 return Optional.empty();
             }
 
@@ -152,6 +216,12 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
                 return Optional.empty();
             }
             submittedPath.getTransportOrders().forEach(rebuiltPath::addTransportOrder);
+            if (submittedPath.boardingCarrier() != null) {
+                rebuiltPath.boardCarrierAtEnd(submittedPath.boardingCarrier());
+            }
+            if (submittedPath.entersHullDown()) {
+                rebuiltPath.enterHullDownAtEnd();
+            }
             rebuiltPath.setJumpUsed(jumpUsed);
             return Optional.of(rebuiltPath);
         } catch (RuntimeException exception) {

@@ -143,6 +143,9 @@ public class SBFUnitDeserializer extends StdDeserializer<SBFUnit> {
                         // Older sheets also wrote SBF-only command roles into specials. The AS parser excludes them.
                         if (special.equalsIgnoreCase("com") || special.equalsIgnoreCase("scom")) {
                             parseStatus(unit, special.toLowerCase(Locale.ROOT));
+                        } else if (special.matches("(?i)(SAW|ENG)[0-9]+")) {
+                            var ability = BattleForceSUA.valueOf(special.substring(0, 3).toUpperCase(Locale.ROOT));
+                            unit.getSpecialAbilities().replaceSUA(ability, Integer.parseInt(special.substring(3)));
                         } else {
                             ASElementDeserializer.readSpecials(unit.getSpecialAbilities(), special);
                         }

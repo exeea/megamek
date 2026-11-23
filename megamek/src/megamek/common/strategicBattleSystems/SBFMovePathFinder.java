@@ -36,10 +36,8 @@ package megamek.common.strategicBattleSystems;
 import java.io.Serializable;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 import jakarta.annotation.Nullable;
 import megamek.common.board.Board;
@@ -51,7 +49,10 @@ import megamek.common.pathfinder.DestinationMap;
 import megamek.common.pathfinder.EdgeRelaxer;
 import megamek.common.pathfinder.filters.Filter;
 
-public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMovePath, SBFMovePath> {
+public class SBFMovePathFinder extends AbstractPathFinder<SBFMovePathFinder.Arrival, SBFMovePath, SBFMovePath> {
+
+    /** The same wooded hex can lead to different next hexes depending on the passage used to enter it. */
+    record Arrival(BoardLocation location, int side) { }
 
     /**
      * @param edgeDestinationMap functional interface for retrieving destination node of an edge.
@@ -65,7 +66,8 @@ public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMove
           EdgeRelaxer<SBFMovePath, SBFMovePath> edgeRelaxer,
           AdjacencyMap<SBFMovePath> edgeAdjacencyMap,
           Comparator<SBFMovePath> edgeComparator) {
-        super(edgeDestinationMap, edgeRelaxer, edgeAdjacencyMap, edgeComparator);
+        super(path -> new Arrival(edgeDestinationMap.getDestination(path), path.passageEntrance()),
+              edgeRelaxer, edgeAdjacencyMap, edgeComparator);
     }
 
     /**
@@ -115,15 +117,12 @@ public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMove
      * Returns a map of all computed shortest paths
      */
     protected Map<BoardLocation, SBFMovePath> getAllComputedCosts(Comparator<SBFMovePath> comp) {
-        Set<BoardLocation> allDestinations = new HashSet<>(getPathCostMap().keySet());
-
         Map<BoardLocation, SBFMovePath> pathsMap = new HashMap<>();
-        for (BoardLocation coords : allDestinations) {
-            SBFMovePath path = getCost(coords, comp);
-            if (path != null) {
-                pathsMap.put(coords, path);
+        getPathCostMap().forEach((arrival, path) -> {
+            if (!path.isIllegal()) {
+                pathsMap.merge(arrival.location(), path, (a, b) -> comp.compare(a, b) <= 0 ? a : b);
             }
-        }
+        });
         return pathsMap;
     }
 
@@ -136,8 +135,8 @@ public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMove
      * @return shortest path to the hex at c coordinates or {@code null}
      */
     protected @Nullable SBFMovePath getCost(BoardLocation coords, Comparator<SBFMovePath> comp) {
-        SBFMovePath path = getCostOf(coords);
-        return ((path == null) || path.isIllegal()) ? null : path;
+        return java.util.stream.IntStream.range(-1, 6).mapToObj(side -> getCostOf(new Arrival(coords, side)))
+              .filter(path -> path != null && !path.isIllegal()).min(comp).orElse(null);
     }
 
     private static class MovePathLegalityFilter extends Filter<SBFMovePath> {

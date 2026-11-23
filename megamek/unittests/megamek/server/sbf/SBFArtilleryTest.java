@@ -455,6 +455,63 @@ class SBFArtilleryTest {
     }
 
     @Test
+    void sawThreeFullyClearsLightWoodsOnTheSixteenthCombatTurn() {
+        var site = battery.getPosition();
+        game.getHex(site).addTerrain(new Terrain(Terrains.WOODS, 1));
+        game.getHex(site).addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+        var unit = battery.getUnits().getFirst();
+        unit.getSpecialAbilities().replaceSUA(BattleForceSUA.SAW, 3);
+        battery.getSpecialAbilities().setSUA(BattleForceSUA.SAW);
+        when(manager.getPacketHelper()).thenReturn(mock(megamek.server.GameManagerPacketHelper.class));
+        for (int turn = 1; turn <= 16; turn++) {
+            game.setCurrentRound(turn);
+            game.clearActions();
+            battery.setDone(false);
+            var order = new megamek.common.actions.sbf.SBFTerrainAttack(battery.getId(), site, 0);
+            assertFalse(SBFTerrainAttackHandler.declare(manager, 2, order));
+            assertTrue(SBFTerrainAttackHandler.declare(manager, 1, order));
+            assertFalse(SBFTerrainAttackHandler.declare(manager, 1, order));
+            new SBFActionsProcessor(manager).handleActions();
+            assertEquals(turn < 16, game.getHex(site).containsTerrain(Terrains.WOODS));
+        }
+        assertTrue(game.getHex(site).containsTerrain(Terrains.ROUGH));
+        assertFalse(game.getHex(site).containsTerrain(Terrains.FOLIAGE_ELEV));
+        assertFalse(game.getHex(site).hasPavementOrRoad());
+        assertEquals(0, game.artillery().terrainDamage(site));
+    }
+
+    @Test
+    void twoTurnsOfEngThreeOpenOnlyTheChosenPassageAndPreserveJungleCover() {
+        var site = battery.getPosition();
+        game.getHex(site).addTerrain(new Terrain(Terrains.JUNGLE, 2));
+        game.getHex(site).addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+        int passage = megamek.common.Hex.strategicPassage(0, 3);
+        battery.getUnits().getFirst().getSpecialAbilities().replaceSUA(BattleForceSUA.ENG, 3);
+        assertFalse(SBFTerrainAttackHandler.declare(manager, 1,
+              new megamek.common.actions.sbf.SBFTerrainAttack(battery.getId(), site, passage)));
+        battery.getSpecialAbilities().setSUA(BattleForceSUA.ENG);
+        when(manager.getPacketHelper()).thenReturn(mock(megamek.server.GameManagerPacketHelper.class));
+        for (int turn = 1; turn <= 2; turn++) {
+            var order = new megamek.common.actions.sbf.SBFTerrainAttack(battery.getId(), site, passage);
+            assertTrue(SBFTerrainAttackHandler.declare(manager, 1, order));
+            new SBFActionsProcessor(manager).handleActions();
+            assertEquals(turn == 2, game.getHex(site).hasStrategicPassage(passage));
+            game.clearActions();
+            battery.setDone(false);
+            game.incrementCurrentRound();
+        }
+        var hex = game.getHex(site);
+        assertEquals(2, hex.terrainLevel(Terrains.JUNGLE));
+        assertEquals(2, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
+        assertFalse(hex.hasPavementOrRoad());
+        assertEquals(Set.of(passage), hex.duplicate().strategicPassages());
+        assertFalse(SBFTerrainConversion.canClear(hex, passage));
+        assertEquals(0, game.artillery().terrainDamage(site));
+        assertTrue(SBFTerrainConversion.damage(game, site, 1750));
+        assertTrue(game.getHex(site).strategicPassages().isEmpty());
+    }
+
+    @Test
     void formationCanRazeAnUnoccupiedWoodThroughNormalDeclarations() {
         var location = BoardLocation.of(new Coords(2, 2), 0);
         game.getHex(location).addTerrain(new Terrain(Terrains.WOODS, 1));

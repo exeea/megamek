@@ -37,7 +37,7 @@ import java.util.List;
 
 import megamek.client.commands.ClientCommand;
 import megamek.common.Hex;
-import megamek.common.Player;
+import megamek.common.units.Terrains;
 import megamek.common.board.BoardLocation;
 
 /**
@@ -47,6 +47,24 @@ import megamek.common.board.BoardLocation;
 public class SurfaceSBFMoveStep extends SBFMoveStep {
 
     private boolean roadBonusEligible;
+    private boolean hostileDeparture;
+    private int arrivalSide = -1;
+
+    int arrivalSide() {
+        return arrivalSide;
+    }
+
+    SurfaceSBFMoveStep fromPassage(SBFGame game, int entrance) {
+        var result = new SurfaceSBFMoveStep(formationId);
+        result.startingPoint = startingPoint;
+        result.destination = destination;
+        result.compile(game, entrance);
+        return result;
+    }
+
+    boolean hadHostileDeparture() {
+        return hostileDeparture;
+    }
 
     boolean earnsRoadBonus() {
         return roadBonusEligible;
@@ -73,6 +91,10 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
 
     @Override
     protected void compile(SBFGame game) {
+        compile(game, -1);
+    }
+
+    private void compile(SBFGame game, int entrance) {
         super.compile(game);
         if (isIllegal) {
             // A step that is already illegal from basic tests does not need any further treatment
@@ -85,8 +107,20 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
         List<SBFTerrainMovement> movers = SBFTerrainMovement.of(formation).toList();
         roadBonusEligible = SBFTerrainMovement.isPaved(from) && SBFTerrainMovement.isPaved(to);
         int direction = startingPoint.coords().direction(destination.coords());
+        int incoming = (direction + 3) % 6;
+        arrivalSide = to.hasStrategicPassageAt(incoming) ? incoming : -1;
+        boolean leavesPassage = from.hasStrategicPassageAt(entrance) && entrance != direction
+              && !from.hasStrategicPassage(Hex.strategicPassage(entrance, direction));
+        Hex entryTerrain = arrivalSide < 0 ? to : terrainAlongPassage(to);
+        Hex departureTerrain = leavesPassage ? terrainAlongPassage(from) : from;
         for (SBFTerrainMovement mover : movers) {
-            int cost = mover.cost(from, to, direction, game.usesExpandedWoods());
+            int cost = mover.cost(from, entryTerrain, direction, game);
+            if (leavesPassage && cost != SBFTerrainMovement.PROHIBITED) {
+                // Entering by a cleared side waived the vegetation cost. Pay it once if turning into the woods.
+                int wooded = mover.cost(from, from, direction, game);
+                int clear = mover.cost(from, departureTerrain, direction, game);
+                cost = wooded == SBFTerrainMovement.PROHIBITED ? wooded : cost + wooded - clear;
+            }
             if (cost == SBFTerrainMovement.PROHIBITED) {
                 isIllegal = true;
                 return;
@@ -94,17 +128,30 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
             mpUsed = Math.max(mpUsed, cost);
             roadBonusEligible &= mover.earnsRoadBonus();
         }
-        isIllegal |= movers.isEmpty();
-        final Player owner = game.getPlayer(formation.getOwnerId());
-        if (game.getActiveFormationsAt(startingPoint).stream().anyMatch(f -> game.areHostile(f, owner))) {
+        if (to.hasStrategicInferno() && !formation.isAirVehicle()) {
             mpUsed++;
         }
+        isIllegal |= movers.isEmpty();
+        hostileDeparture = game.isHostileActiveFormationAt(startingPoint, formation);
+        if (hostileDeparture) {
+            mpUsed++;
+        }
+    }
+
+    private static Hex terrainAlongPassage(Hex wooded) {
+        Hex clear = wooded.duplicate();
+        clear.removeTerrain(Terrains.WOODS);
+        clear.removeTerrain(Terrains.JUNGLE);
+        clear.removeTerrain(Terrains.FOLIAGE_ELEV);
+        return clear;
     }
 
     @Override
     public SBFMoveStep copy() {
         SurfaceSBFMoveStep step = new SurfaceSBFMoveStep(formationId);
         step.roadBonusEligible = roadBonusEligible;
+        step.hostileDeparture = hostileDeparture;
+        step.arrivalSide = arrivalSide;
         step.startingPoint = startingPoint;
         step.destination = destination;
         step.mpUsed = mpUsed;

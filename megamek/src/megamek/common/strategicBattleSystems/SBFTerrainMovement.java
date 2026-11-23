@@ -42,28 +42,42 @@ import java.util.stream.Stream;
 import megamek.common.Hex;
 import megamek.common.alphaStrike.ASSpecialAbilityCollector;
 import megamek.common.alphaStrike.ASUnitType;
+import megamek.common.alphaStrike.AlphaStrikeElement;
+import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.units.Terrains;
 
 /** Applies the SBF Movement Cost Table to each constituent's actual movement mode (IO:BF pp. 164–166). */
 record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAbilityCollector abilities,
-      boolean industrialMek) {
+      boolean industrialMek, boolean submarineSurfaced) {
     static final int PROHIBITED = -1;
 
     /** Element-backed formations retain restrictions that a single converted movement code cannot express. */
     static Stream<SBFTerrainMovement> of(SBFFormation formation) {
         if (formation.getUnits().isEmpty()) {
-            return Stream.of(new SBFTerrainMovement(formation.getType(), formation.getMovementMode(), formation, false));
+            return Stream.of(new SBFTerrainMovement(formation.getType(), formation.getMovementMode(), formation, false, formation.isSubmarineSurfaced()));
         }
         return formation.getUnits().stream()
               .filter(unit -> (unit.getArmor() == 0) || (unit.getCurrentArmor() > 0))
-              .flatMap(unit -> {
-                  if (unit.getElements().isEmpty()) {
-                      return Stream.of(new SBFTerrainMovement(unit.getType(), unit.getMovementMode(), unit, false));
-                  }
-                  return unit.getElements().stream().map(element -> new SBFTerrainMovement(
-                        SBFElementType.getUnitType(element), SBFMovementMode.modeForElement(unit, element),
-                        element, element.isType(ASUnitType.IM)));
-              });
+              .flatMap(unit -> of(formation, unit));
+    }
+
+    static Stream<SBFTerrainMovement> of(SBFFormation formation, SBFUnit unit) {
+        var fallback = new SBFTerrainMovement(unit.getType() == SBFElementType.UNKNOWN ? formation.getType() : unit.getType(),
+              unit.getMovementMode() == SBFMovementMode.UNKNOWN ? formation.getMovementMode() : unit.getMovementMode(),
+              unit, false, formation.isSubmarineSurfaced());
+        if (unit.getElements().isEmpty()) {
+            return Stream.of(fallback);
+        }
+        return unit.getElements().stream().map(element -> element.getASUnitType() == null ? fallback
+              : new SBFTerrainMovement(SBFElementType.getUnitType(element), SBFMovementMode.modeForElement(unit, element),
+              element, element.isType(ASUnitType.IM), formation.isSubmarineSurfaced()));
+    }
+
+    /** A bridge over otherwise open water does not make it a shore. */
+    static boolean isFullWater(Hex hex) {
+        return (hex != null) && (hex.terrainLevel(Terrains.WATER) > 0)
+              && !hex.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE, Terrains.ROUGH, Terrains.RUBBLE,
+                    Terrains.BUILDING, Terrains.ROAD, Terrains.PAVEMENT, Terrains.SAND, Terrains.SWAMP, Terrains.FIELDS);
     }
 
     boolean earnsRoadBonus() {
@@ -75,21 +89,23 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
         return hex.hasPavementOrRoad() || hex.containsTerrain(Terrains.BUILDING);
     }
 
-    boolean canOccupy(Hex hex, boolean expandedWoods) {
+    boolean canOccupy(Hex hex, SBFGame game) {
         if (mode == SBFMovementMode.RAIL) {
-            return railTerrainAllowed(hex) && (hex.containsTerrain(Terrains.RAIL) || hex.containsTerrain(Terrains.BRIDGE_RAIL));
+            return (game.usesAdvancedTerrain() || railTerrainAllowed(hex)) && (hex.containsTerrain(Terrains.RAIL) || hex.containsTerrain(Terrains.BRIDGE_RAIL));
         }
-        return cost(hex, hex, 0, expandedWoods) != PROHIBITED;
+        return cost(hex, hex, 0, game) != PROHIBITED;
     }
 
-    int cost(Hex from, Hex to, int direction, boolean expandedWoods) {
+    int cost(Hex from, Hex to, int direction, SBFGame game) {
+        boolean advanced = game.usesAdvancedTerrain();
+        boolean expandedWoods = game.usesExpandedWoods();
         int levels = Math.abs(to.getLevel() - from.getLevel());
-        if (mode == SBFMovementMode.VTOL) {
+        if (mode == SBFMovementMode.VTOL || (advanced && mode == SBFMovementMode.AIRSHIP)) {
             // Airborne VTOLs ignore the underlying terrain and maintain one level of clearance (IO:BF p. 166).
-            return 1 + levels;
+            return 1;
         }
         if (mode == SBFMovementMode.RAIL) {
-            if (!railTerrainAllowed(to) || !hasRailExit(from, direction) || !hasRailExit(to, (direction + 3) % 6)) {
+            if ((!advanced && !railTerrainAllowed(to)) || !hasRailExit(from, direction) || !hasRailExit(to, (direction + 3) % 6)) {
                 return PROHIBITED;
             }
         }
@@ -102,32 +118,52 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
         }
         int cost = 1 + levels * ((infantry || (type == SBFElementType.V)) && !submarine ? 2 : 1);
         int depth = to.terrainLevel(Terrains.WATER);
+        if (advanced && naval && to.containsTerrain(Terrains.ICE)) {
+            return PROHIBITED;
+        }
         if (naval) {
-            return (depth > 0) ? cost : PROHIBITED;
+            boolean needsOpenWater = (submarine && !submarineSurfaced)
+                  || abilities.hasAnySUAOf(BattleForceSUA.VLG, BattleForceSUA.SLG);
+            return (depth > 0) && (!needsOpenWater || isFullWater(to)) ? cost + (advanced && to.containsTerrain(Terrains.RAPIDS) ? 1 : 0) : PROHIBITED;
         }
         if (mode == SBFMovementMode.WIGE) {
             return cost;
         }
+        if (advanced && mode == SBFMovementMode.RAIL) {
+            return cost;
+        }
+        if (advanced && to.containsTerrain(Terrains.INDUSTRIAL)) {
+            return cost + (mek ? 1 : 0);
+        }
         if (to.containsTerrain(Terrains.BUILDING)) {
             int buildingCost = Math.clamp(to.terrainLevel(Terrains.BUILDING), 1, 4);
+            if (advanced) {
+                return cost + (infantry ? 0 : type == SBFElementType.PM ? 1 : Math.max(0, buildingCost - largeMekBonus()));
+            }
             return cost + (infantry ? Math.max(0, buildingCost - 2) : buildingCost);
         }
         if (to.hasPavementOrRoad() || (mode == SBFMovementMode.RAIL)) {
-            return cost;
+            return cost + ((mode != SBFMovementMode.RAIL && to.isStrategicRoadDamaged()) ? 1 : 0);
+        }
+        if (advanced && to.containsTerrain(Terrains.ICE)) {
+            return cost + 1;
         }
         if (depth > 0) {
+            if (advanced && to.containsTerrain(Terrains.RAPIDS)) {
+                cost++;
+            }
             if (mode == SBFMovementMode.HOVER) {
                 return cost;
             }
             if (abilities.hasSUA(AMP)) {
                 return cost + (earnsRoadBonus() ? 1 : 0);
             }
-            if ((type == SBFElementType.V) || (industrialMek && !abilities.hasSUA(SEAL))
+            if ((type == SBFElementType.V) || (industrialMek && (!advanced || depth >= 2) && !abilities.hasSUA(SEAL))
                   || (infantry && !abilities.hasSUA(UMU) && (mode != SBFMovementMode.BA_UMU))) {
                 return PROHIBITED;
             }
             // An explicitly mapped full water hex adds 2 MP for its width (Water, IO:BF p. 166).
-            return cost + 2 + (depth == 1 ? 1 : 6) + (depth >= 4 ? 1 : 0);
+            return cost + 2 + (depth == 1 ? 1 : advanced && depth >= 3 ? 8 : 6) + (!advanced && depth >= 4 ? 1 : 0);
         }
         boolean wheeledOrHover = (mode == SBFMovementMode.WHEELED) || (mode == SBFMovementMode.QUAD_WHEELED)
               || (mode == SBFMovementMode.HOVER);
@@ -142,15 +178,37 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
             if (infantry && !expandedJungle && density < 3) {
                 surcharge--;
             }
-            cost += wheeledOrHover ? 2 : surcharge;
+            cost += Math.max(0, (wheeledOrHover ? 2 : surcharge) - (advanced ? largeMekBonus() : 0));
         }
         if (to.containsTerrain(Terrains.RUBBLE)) {
-            cost++;
+            cost += advanced ? Math.max(0, (wheeledOrHover || to.terrainLevel(Terrains.RUBBLE) >= 6 ? 2 : 1) - largeMekBonus()) : 1;
         }
         if (to.containsTerrain(Terrains.ROUGH)) {
-            cost += wheeledOrHover ? 2 : 1;
+            cost += Math.max(0, (wheeledOrHover || (advanced && to.terrainLevel(Terrains.ROUGH) >= 2) ? 2 : 1) - (advanced ? largeMekBonus() : 0));
+        }
+        if (advanced) {
+            if (to.containsTerrain(Terrains.MUD)) {
+                cost++;
+            }
+            if (to.containsTerrain(Terrains.SWAMP)) {
+                cost += mek || type == SBFElementType.PM ? 1 : 2;
+            }
+            if (to.containsTerrain(Terrains.SAND) && (infantry || (mode.isWheeled() && !abilities.hasSUA(BattleForceSUA.DUN)))) {
+                cost++;
+            }
+            if (to.containsTerrain(Terrains.RAIL)) {
+                cost++;
+            }
+            if (to.terrainsPresent() == 0 && mode.isWheeled() && !abilities.hasSUA(BattleForceSUA.ORO)
+                  && abilities instanceof AlphaStrikeElement element && element.isSupportVehicle()) {
+                cost++;
+            }
         }
         return cost;
+    }
+
+    private int largeMekBonus() {
+        return type == SBFElementType.BM && !industrialMek && abilities.hasSUA(BattleForceSUA.LG) ? 1 : 0;
     }
 
     private static boolean railTerrainAllowed(Hex hex) {

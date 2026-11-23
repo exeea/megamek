@@ -159,6 +159,34 @@ class SurfaceSBFMoveStepTest {
     }
 
     @Test
+    void vtolIgnoresElevationAndStationaryWiGESpendsOneMp() {
+        setMover(SBFElementType.V, SBFMovementMode.VTOL);
+        to.setLevel(4);
+        to.addTerrain(new Terrain(Terrains.WOODS, 3));
+        assertFalse(step().isIllegal());
+        assertEquals(1, step().getMpUsed());
+        setMover(SBFElementType.V, SBFMovementMode.WIGE);
+        formation.setMovement(5);
+        assertEquals(1, new SBFMovePath(formation.getId(), start, game).getMpUsed());
+    }
+
+    @Test
+    void surfacedSubmarineCanEnterMixedWaterAndSubmergingRequiresOpenWater() {
+        setMover(SBFElementType.V, SBFMovementMode.SUBMARINE);
+        from.addTerrain(new Terrain(Terrains.WATER, 2));
+        to.addTerrain(new Terrain(Terrains.WATER, 2));
+        to.addTerrain(new Terrain(Terrains.ROUGH, 1));
+        assertTrue(step().isIllegal());
+        assertFalse(formation.canChangeSubmarineDepth(to, false));
+        assertTrue(formation.canChangeSubmarineDepth(from, false));
+        formation.setSubmarineSurfaced(true);
+        assertFalse(step().isIllegal());
+        to.removeTerrain(Terrains.ROUGH);
+        formation.setSubmarineSurfaced(false);
+        assertFalse(step().isIllegal());
+    }
+
+    @Test
     void connectedRailCannotCrossRubbleOrWoods() {
         setMover(SBFElementType.V, SBFMovementMode.RAIL);
         from.addTerrain(new Terrain(Terrains.RAIL, 1, true, 63));
@@ -169,6 +197,39 @@ class SurfaceSBFMoveStepTest {
         to.removeTerrain(Terrains.RUBBLE);
         to.addTerrain(new Terrain(Terrains.WOODS, 1));
         assertTrue(step().isIllegal());
+    }
+
+    @Test
+    void aPassageConnectsOnlyItsChosenHexsidesAndNeverEarnsARoadBonus() {
+        game.setBoard(0, Board.createEmptyBoard(6, 6));
+        var woods = BoardLocation.of(new Coords(2, 2), 0);
+        var north = woods.translated(0);
+        var south = woods.translated(3);
+        var west = woods.translated(5);
+        var trees = game.getHex(woods);
+        trees.addTerrain(new Terrain(Terrains.WOODS, 2));
+        trees.addStrategicPassage(Hex.strategicPassage(0, 3));
+        game.getOptions().getOption(SBFRuleOptions.MOVE_EXPANDED_WOODS).setValue(true);
+        setMover(SBFElementType.V, SBFMovementMode.TRACKED);
+        formation.setMovement(6);
+        formation.setPosition(north);
+        var path = new SBFMovePath(formation.getId(), north, game);
+        path.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), north, woods));
+        var turning = SBFMovePath.createMovePathShallow(path);
+        path.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), woods, south));
+        assertFalse(path.isIllegal());
+        assertEquals(2, path.getTerrainCost());
+        assertFalse(path.earnsRoadBonus());
+        turning.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), woods, west));
+        assertTrue(turning.isIllegal());
+        assertTrue(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), west, woods).isIllegal());
+
+        // A vehicle that stopped on the passage still cannot turn sideways into prohibited woods next turn.
+        formation.setPosition(woods);
+        formation.setPassageEntrance(0);
+        var nextTurn = new SBFMovePath(formation.getId(), woods, game);
+        nextTurn.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), woods, west));
+        assertTrue(nextTurn.isIllegal());
     }
 
     private void setMover(SBFElementType type, SBFMovementMode mode) {

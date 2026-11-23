@@ -56,6 +56,45 @@ public class SBFMovePath implements EntityAction, Serializable {
     public record TransportOrder(int afterSteps, int passengerId, boolean mount) implements Serializable { }
 
     private List<TransportOrder> transportOrders;
+    private Integer boardingCarrier;
+    private boolean enterHullDown;
+
+    public boolean entersHullDown() {
+        return enterHullDown;
+    }
+
+    public void enterHullDownAtEnd() {
+        enterHullDown = true;
+    }
+
+
+    public Integer boardingCarrier() {
+        return boardingCarrier;
+    }
+
+    public void boardCarrierAtEnd(int id) {
+        boardingCarrier = id;
+    }
+
+    // Terrain checks belong to the authoritative rebuilt route, including across a paused engagement.
+    private int terrainChecksCompleted;
+    private Integer stoppedByTerrainAt;
+
+    public boolean needsTerrainCheck(int step) {
+        return step >= terrainChecksCompleted;
+    }
+
+    public void completeTerrainCheck(int step, boolean stopped) {
+        terrainChecksCompleted = step + 1;
+        if (stopped) {
+            stoppedByTerrainAt = step;
+        }
+    }
+
+    public boolean stoppedByTerrainAt(int step) {
+        return stoppedByTerrainAt != null && stoppedByTerrainAt == step;
+    }
+
     private int processedTransportOrders;
     private int spentTransportMP;
     private int mpUsed;
@@ -88,7 +127,10 @@ public class SBFMovePath implements EntityAction, Serializable {
         this.formationId = formationId;
         this.startLocation = startLocation;
         this.game = game;
-        game.getFormation(formationId).ifPresent(formation -> overstacked = exceedsStackingLimit(game, formation, startLocation));
+        game.getFormation(formationId).ifPresent(formation -> {
+            overstacked = exceedsStackingLimit(game, formation, startLocation);
+            mpUsed = (formation.getMovement() > 0) && formation.usesWiGE() ? 1 : 0;
+        });
     }
 
     private SBFMovePath(SBFMovePath original) {
@@ -100,6 +142,8 @@ public class SBFMovePath implements EntityAction, Serializable {
         mpUsed = original.mpUsed;
         jumpUsed = original.jumpUsed;
         radarFlight = original.radarFlight;
+        boardingCarrier = original.boardingCarrier;
+        enterHullDown = original.enterHullDown;
         transportOrders = original.transportOrders == null ? null : new ArrayList<>(original.transportOrders);
     }
 
@@ -164,11 +208,20 @@ public class SBFMovePath implements EntityAction, Serializable {
 
     public static boolean canOccupyTerrain(SBFGame game, SBFFormation formation, BoardLocation location) {
         Hex hex = game.getHex(location);
-        return (hex != null) && SBFTerrainMovement.of(formation).allMatch(mover -> mover.canOccupy(hex, game.usesExpandedWoods()));
+        return (hex != null) && SBFTerrainMovement.of(formation).allMatch(mover -> mover.canOccupy(hex, game));
+    }
+
+    public static boolean canOccupyTerrain(SBFGame game, SBFFormation formation, SBFUnit unit, BoardLocation site) {
+        Hex hex = game.getHex(site);
+        return hex != null && SBFTerrainMovement.of(formation, unit).allMatch(mover -> mover.canOccupy(hex, game));
     }
 
     public int getMpUsed() {
         return mpUsed;
+    }
+
+    public static int roadBonus(SBFGame game) {
+        return game.usesAdvancedTerrain() ? 2 : 1;
     }
 
     /** The extra paved MP requires an entirely paved turn for every constituent (IO:BF pp. 165–166). */
@@ -195,13 +248,35 @@ public class SBFMovePath implements EntityAction, Serializable {
     public static int normalMovementPoints(SBFFormation formation, SBFGame game) {
         boolean carriesXmec = game.passengersOf(formation).stream()
               .anyMatch(rider -> rider.isExternallyMounted() && rider.hasSUA(BattleForceSUA.XMEC));
-        return Math.max(0, formation.getMovement() - formation.getReconMpSpent()
-                - (formation.dismountedIn(game.getCurrentRound()) ? 1 : 0)
-              - (carriesXmec ? 1 : 0));
+        return Math.max(0, formation.getMovement() - formation.getReconMpSpent() - (formation.slowedByInferno(game.getCurrentRound()) ? 1 : 0)
+                - formation.dismountCost(game.getCurrentRound()) - formation.reformMovementPenalty(game.getCurrentRound())
+              - (carriesXmec ? 1 : 0) - (formation.ambushedIn(game.getCurrentRound()) ? 2 : 0));
+    }
+
+    /** A newly revealed hostile Formation changes the next departure's MP, even on a route already submitted. */
+    public void refreshDeparture(int index, BoardLocation current) {
+        if (steps.get(index) instanceof SurfaceSBFMoveStep step
+              && step.hadHostileDeparture() != game.isHostileActiveFormationAt(current, game.getFormation(formationId).orElseThrow())) {
+            int entrance = passageEntranceBefore(index);
+            steps.set(index, step.fromPassage(game, entrance));
+            compile();
+        }
+    }
+
+    private int passageEntranceBefore(int index) {
+        if (index == 0) {
+            return game.getFormation(formationId).map(SBFFormation::passageEntrance).orElse(-1);
+        }
+        return steps.get(index - 1) instanceof SurfaceSBFMoveStep surface ? surface.arrivalSide() : -1;
+    }
+
+    public int passageEntrance() {
+        return passageEntranceBefore(steps.size());
     }
 
     public void addStep(SBFMoveStep step) {
-        steps.add(step);
+        int entrance = passageEntrance();
+        steps.add(entrance >= 0 && step instanceof SurfaceSBFMoveStep surface ? surface.fromPassage(game, entrance) : step);
         compile();
     }
 
@@ -234,11 +309,14 @@ public class SBFMovePath implements EntityAction, Serializable {
 
         int move = normalMovementPoints(formation, game);
         mpUsed = getTerrainCost();
+        if (steps.isEmpty() && (formation.getMovement() > 0) && formation.usesWiGE()) {
+            mpUsed = 1; // A stationary WiGE still expends 1 MP to remain airborne (IO:BF p. 166).
+        }
         if ((steps.size() == 1) && (move > 0)) {
             // Minimum Movement (IO:BF p. 164) allows one otherwise legal hex on the formation's normal Move.
             mpUsed = Math.min(mpUsed, move);
         } else if ((move > 0) && (mpUsed > move) && earnsRoadBonus()) {
-            mpUsed--;
+            mpUsed = Math.max(move, mpUsed - roadBonus(game));
         }
         routeIllegal = steps.stream().anyMatch(SBFMoveStep::isIllegal)
               || (mpUsed > maximumMovementPoints(formation, game));
@@ -262,6 +340,14 @@ public class SBFMovePath implements EntityAction, Serializable {
               .filter(SBFFormation::isDeployed)
               .filter(f -> (f.getId() != formation.getId()) && !game.areHostile(f, owner))
               .toList();
+        if (!others.isEmpty() && game.getOptions().booleanOption(megamek.common.options.SBFRuleOptions.BASE_ADJUST_FORMATIONS)) {
+            var family = game.originalFamily(formation);
+            // IO:BF p. 198. Count the declared arrivals as the single counter they will form in the End Phase.
+            if (destination.equals(formation.reunionIn(game.getCurrentRound()))) {
+                others = others.stream().filter(f -> !family.contains(f)
+                      || !destination.equals(f.reunionIn(game.getCurrentRound()))).toList();
+            }
+        }
         return exceedsStackingLimit(formation, others);
     }
 
